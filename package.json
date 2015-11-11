@@ -1,0 +1,23 @@
+{
+  "name": "react-x11",
+  "version": "0.0.1",
+  "description": "react renderer with X11 as a target",
+  "main": "test.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sidorares/react-x11"
+  },
+  "keywords": [
+    "react",
+    "renderer",
+    "x11",
+    "ui"
+  ],
+  "author": "Andrey Sidorov <sidorares@yandex.ru>",
+  "license": "MIT",
+  "dependencies": {
+    "css-layout": "0.0.2",
+    "node-jsx": "^0.13.3",
+    "ntk": "sidorares/ntk"
+  }
+}
