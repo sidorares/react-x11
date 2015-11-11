@@ -2,7 +2,8 @@
 
 WIP. Not ready yet
 
-# Other react renderers ( or libraries that moonkey patch react to be used with non-DOM targets)
+Other react renderers ( or libraries that moonkey patch react to be used with non-DOM targets):
+
  - https://github.com/ramitos/react-tvml
  - https://github.com/Yomguithereal/react-blessed
  - https://github.com/Flipboard/react-canvas
