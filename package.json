@@ -2,7 +2,11 @@
   "name": "react-x11",
   "version": "0.0.1",
   "description": "react renderer with X11 as a target",
-  "main": "test.js",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "babel ./src --out-dir ./dist",
+    "prepublish": "npm run build"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/sidorares/react-x11"
@@ -10,14 +14,20 @@
   "keywords": [
     "react",
     "renderer",
+    "desktop",
     "x11",
     "ui"
   ],
   "author": "Andrey Sidorov <sidorares@yandex.ru>",
   "license": "MIT",
   "dependencies": {
-    "css-layout": "0.0.2",
-    "node-jsx": "^0.13.3",
-    "ntk": "sidorares/ntk"
+    "css-layout": "^1.1.1",
+    "invariant": "^2.2.0",
+    "lodash": "^3.10.1",
+    "ntk": "^1.0.0",
+    "react": "^0.14.3"
+  },
+  "devDependencies": {
+    "babel": "^6.3.13"
   }
 }
