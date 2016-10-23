@@ -1,5 +1,7 @@
 # react-x11
 
+[![Join the chat at https://gitter.im/sidorares/react-x11](https://badges.gitter.im/sidorares/react-x11.svg)](https://gitter.im/sidorares/react-x11?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 WIP. Not ready yet. This is old code doing rendering by mocking React.createComponent & others so at the moment it's just jsx + css-layout, no react. I'm working on implementation which is similar to react-blessed approach.
 
 Communication with X Window server is done via [node-x11](https://github.com/sidorares/node-x11) (protocol implementation) and [ntk](https://github.com/sidorares/ntk) (canvas-like drawing api, higher level wrappers)
