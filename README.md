@@ -1,6 +1,16 @@
 # react-x11
 
-[![Join the chat at https://gitter.im/sidorares/react-x11](https://badges.gitter.im/sidorares/react-x11.svg)](https://gitter.im/sidorares/react-x11?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+todo:
+
+yoga layout example: https://github.com/jaladankisuresh/placard/blob/master/library/controllers/svgTemplatingCtrl.js
+
+fiber reconciler api: https://github.com/facebook/react/blob/ca4325e3eff16b86879188eb996ebcc9a933336a/src/renderers/shared/fiber/ReactFiberReconciler.js#L48-L104
+
+devtools integration: https://github.com/iamdustan/react-hardware/blob/master/src/devtools/setupDevtoolsFiber.js
+https://github.com/iamdustan/react-hardware/blob/master/src/fiber/ReactHardwareFiber.js#L9-L11
+https://github.com/iamdustan/react-hardware/blob/master/src/fiber/ReactHardwareFiber.js#L203-L208
+
+
 
 WIP. Not ready yet. This is old code doing rendering by mocking React.createComponent & others so at the moment it's just jsx + css-layout, no react. I'm working on implementation which is similar to react-blessed approach.
 
