@@ -22,12 +22,17 @@
   "license": "MIT",
   "dependencies": {
     "css-layout": "^1.1.1",
+    "fbjs": "^0.8.11",
     "invariant": "^2.2.0",
     "lodash": "^3.10.1",
-    "ntk": "^1.0.0",
-    "react": "^0.14.3"
+    "react": "^16.0.0-alpha.5",
+    "react-devtools-core": "^2.0.12",
+    "react-dom": "^16.0.0-alpha.5",
+    "ws": "^2.2.2",
+    "yoga-layout": "^1.2.0"
   },
   "devDependencies": {
-    "babel": "^6.3.13"
+    "babel": "^6.3.13",
+    "babel-preset-airbnb": "^2.1.1"
   }
 }
