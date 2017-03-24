@@ -174,6 +174,7 @@ function renderSubtreeIntoContainer(
   }
 }
 
+const defaultContainer = {};
 const ReactX11 = {
   render(
     element,
@@ -186,7 +187,8 @@ const ReactX11 = {
   },
 
   unmountComponentAtNode(container) {
-    const root = InstanceManager.get(container);
+    const containerKey = typeof container === 'undefined' ? defaultContainer : container;
+    const root = roots.get(containerKey);
     if (root) {
       Renderer.unmountContainer(root);
     }
@@ -199,5 +201,7 @@ if (typeof injectInternals === 'function') {
     findHostInstanceByFiber: Renderer.findHostInstance,
   });
 }
+
+const roots = new Map();
 
 module.exports = ReactX11;
