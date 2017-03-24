@@ -1,17 +1,18 @@
-var render        = require('./render.js');
-var RootComponent = require('./root_component.js');
+const ReactX11 = require('./Reconciler.js');
 
-var s1 = new Date();
-module.exports.AppRegistry = function(key, handler) {
+module.exports.render = ReactX11.render;
+
+module.exports.AppRegistry = (key, handler) => {
   // each app is launched with it's own X11 connection
   // in the future one connection might be reused
   // but at the moment: X11 connection (aka display) <-> ntk app <-> AppRegistry item
-  var ntk = require('ntk');
-  ntk.createClient(function(err, app) {
+  const ntk = require('ntk');
+  ntk.createClient((err, app) => {
     app.appRegistryKey = key;
-    var component = handler();
-    var s2 = new Date();
-    console.log('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! Creating react-x11 app', s2 - s1);
-    render(component, new RootComponent(app));
+    const element = handler();
+    app.inspect = () => {
+      return '<X11 connection />'
+    }
+    ReactX11.render(element, app, () => { console.log('AAAAA', arguments)});
   });
 };
