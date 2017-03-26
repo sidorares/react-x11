@@ -1,42 +1,42 @@
 const ReactFiberReconciler = require('react-dom/lib/ReactFiberReconciler');
 const ReactX11Component = require('./Component');
 
-const InstanceManager = {
-  get(container) {
-    return {
-      connection: container,
-      current: container
-    }
+const LOG_STEPS = true;
+const log = (a, b, c) => {
+  if (LOG_STEPS) {
+    console.log(a, b, c);
   }
-}
+};
 
-const {
-  createElement,
-  setInitialProperties,
-  // diffProperties,
-  updateProperties,
-} = ReactX11Component;
+const toJSON = (node) => {
+  if (typeof node === 'string') {
+    return node
+  }
+  const props = node.props;
+  if (typeof props.toJSON === 'function') {
+    return props.toJSON(props);
+  }
 
-const TIME_REMAINING = 4;
-const precacheFiberNode = (internalInstanceHandle, instance) => null;
-const emptyObject = {};
+  let children = null;
+  if (props.children) {
+    if (Array.isArray(props.children)) {
+      children = props.children.map(toJSON);
+    } else if (props.children) {
+      children = toJSON(props.children);
+    }
+    return Object.assign({}, props, {children});
+  } else {
+    const clone = Object.assign({}, props);
+    delete clone.children;
+    return clone;
+  }
+};
+
 
 const Renderer = ReactFiberReconciler({
-  getRootHostContext(rootContainerInstance) {
-    return rootContainerInstance;
-  },
 
-  getChildHostContext(parentHostContext, type) {
-    // Noop
-  },
-
-  prepareForCommit() {
-    // Noop
-  },
-
-  resetAfterCommit() {
-    // Noop
-  },
+  // the tree creation and updating methods. If you’re familiar with the DOM API
+  // this will look familiar
 
   createInstance(
     type,
@@ -45,26 +45,72 @@ const Renderer = ReactFiberReconciler({
     hostContext,
     internalInstanceHandle
   ) {
-    const instance  = createElement(type, props, rootContainerInstance, hostContext);
-    precacheFiberNode(internalInstanceHandle, instance);
-    return instance;
+    if (props.toJSON) {
+      return props.toJSON(props);
+    } else {
+      return toJSON({props});
+    }
   },
 
+  // this is called instead of `appendChild` when the parentInstance is first
+  // being created and mounted
+  // added in https://github.com/facebook/react/pull/8400/
   appendInitialChild(
     parentInstance,
     child
   ) {
-    console.log('appendInitialChild!', child)
+    //
+    log('appendInitialChild', child);
   },
 
+
+  appendChild(
+    parentInstance,
+    child
+  ) {
+    log('appendChild', child);
+    // const index = parentInstance.children.indexOf(child);
+    // if (index !== -1) {
+    //   parentInstance.children.splice(index, 1);
+    // }
+    // parentInstance.children.push(child);
+  },
+
+  removeChild(
+    parentInstance,
+    child
+  ) {
+    log('removeChild', child);
+    // parentInstance.removeChild(child);
+  },
+
+  insertBefore(
+    parentInstance,
+    child,
+    beforeChild
+  ) {
+    log('insertBefore');
+    // parentInstance.insertBefore(child, beforeChild);
+  },
+
+  // finalizeInitialChildren is the final HostConfig method called before
+  // flushing the root component to the host environment
+
   finalizeInitialChildren(
-    element,
+    instance,
     type,
     props,
     rootContainerInstance
   ) {
-    setInitialProperties(element, type, props, rootContainerInstance);
+    log('finalizeInitialChildren');
+    // setInitialProperties(instance, type, props, rootContainerInstance);
+    return false;
   },
+
+  // prepare update is where you compute the diff for an instance. This is done
+  // here to separate computation of the diff to the applying of the diff. Fiber
+  // can reuse this work even if it pauses or aborts rendering a subset of the
+  // tree.
 
   prepareUpdate(
     instance,
@@ -74,9 +120,9 @@ const Renderer = ReactFiberReconciler({
     rootContainerInstance,
     hostContext
   ) {
-    // TODO: diffing properties here allows the reconciler to reuse work
-    //  diffProperties(instance, type, oldProps, newProps, rootContainerInstance);
-    return emptyObject;
+    log('TODO: prepareUpdate');
+    return null;
+    // return diffProperties(instance, type, oldProps, newProps, rootContainerInstance, hostContext);
   },
 
   commitUpdate(
@@ -87,23 +133,89 @@ const Renderer = ReactFiberReconciler({
     newProps,
     internalInstanceHandle
   ) {
-    // Update the props handle so that we know which props are the ones with
-    // with current event handlers.
-    // TODO: uncomment this line : updateFiberProps(instance, newProps);
     // Apply the diff to the DOM node.
-    updateProperties(instance, updatePayload, type, oldProps, newProps, internalInstanceHandle);
+    // updateProperties(instance, updatePayload, type, oldProps, newProps);
+    log('TODO: updateProperties');
   },
+
+  // commitMount is called after initializeFinalChildren *if*
+  // `initializeFinalChildren` returns true.
+
+  commitMount(
+    instance,
+    type,
+    newProps,
+    internalInstanceHandle
+  ) {
+    log('commitMount');
+    // noop
+  },
+
+  // HostContext is an internal object or reference for any bookkeeping your
+  // renderer may need to do based on current location in the tree. In DOM this
+  // is necessary for calling the correct `document.createElement` calls based
+  // upon being in an `html`, `svg`, `mathml`, or other context of the tree.
+
+  getRootHostContext(rootContainerInstance) {
+    log('getRootHostContext');
+    return emptyObject;
+  },
+
+  getChildHostContext(parentHostContext, type) {
+    log('getChildHostContext');
+    return emptyObject;
+  },
+
+  // getPublicInstance should be the identity function in 99% of all scenarios.
+  // It was added to support the `getNodeMock` functionality for the
+  // TestRenderers.
+
+  getPublicInstance(instance) {
+    log('getPublicInstance');
+    if (instance == null) {
+      return null;
+    }
+    console.log(instance)
+    return instance != null && instance.props.toJSON(instance);
+  },
+
+  // the prepareForCommit and resetAfterCommit methods are necessary for any
+  // global side-effects you need to trigger in the host environment. In
+  // ReactDOM this does things like disable the ReactDOM events to ensure no
+  // callbacks are fired during DOM manipulations
+
+  prepareForCommit() {
+    log('prepareForCommit');
+    // noop
+  },
+
+  resetAfterCommit() {
+    log('resetAfterCommit');
+    // noop
+  },
+
+  // the following four methods are regarding TextInstances. In our example
+  // renderer we don’t have specific text nodes like the DOM does so we’ll just
+  // noop all of them.
 
   shouldSetTextContent(props) {
-    return false;
+    log('shouldSetTextContent');
+    return false
   },
 
-  resetTextContent(element) {
-    // NOOP
+  resetTextContent(instance) {
+    log('resetTextContent');
+    // noop
   },
 
-  createTextInstance(text, internalInstanceHandle) {
-    return text;
+  createTextInstance(
+    text,
+    rootContainerInstance,
+    hostContext,
+    internalInstanceHandle
+  )  {
+    log('createTextInstance');
+    return null;
   },
 
   commitTextUpdate(
@@ -111,97 +223,68 @@ const Renderer = ReactFiberReconciler({
     oldText,
     newText
   ) {
-    // Noop
+    console.log('commitTextUpdate', oldText, newText);
+    // noop
+    throw new Error('commitTextUpdate should not be called');
   },
 
-  appendChild(
-    parentInstance,
-    child
-  ) {
-    // Deprecated path for when a `container` is hit which was a hack in stack
-    // for being unable to return an array from render.
-    if (parentInstance === child) {
-      return;
-    }
-
-    console.log('TODO: appendChild')
-    // parentInstance.appendChild(child);
+  scheduleAnimationCallback() {
+    log('scheduleAnimationCallback');
   },
 
-  insertBefore(
-    parentInstance,
-    child,
-    beforeChild
-  ) {
-    // This should probably never be called in Hardware.
-    console.warn('TODO: insertBefore');
-    // parentInstance.insertBefore(child, beforeChild);
+  scheduleDeferredCallback() {
+    log('scheduleDeferredCallback');
   },
 
-  removeChild(parentInstance, child) {
-    console.warn('TODO: ReactHardwareRenderer.removeChild');
-    // parentInstance.removeChild(child);
-  },
-
-  scheduleAnimationCallback: process.nextTick,
-
-  scheduleDeferredCallback: (fn) => setTimeout(fn, TIME_REMAINING, {timeRemaining() { return TIME_REMAINING; }}),
-
-  useSyncScheduling: false,
+  useSyncScheduling: true,
 });
 
-function renderSubtreeIntoContainer(
-  parentComponent,
-  element,
-  container,
-  callback
-) {
-  const root = InstanceManager.get(container);
-  if (root) {
-    console.log('updateContainer(element, root, parentComponent, callback)', element, root, parentComponent, callback)
-    debugger
-    Renderer.updateContainer(element, root, parentComponent, callback);
-  } else {
-    InstanceManager.connect(container, (error, root) => {
-      if (error) {
-        console.log(error);
-      } else {
-        const root = Renderer.createContainer(container);
-        Renderer.updateContainer(element, root, parentComponent, callback);
-        // Renderer.mountContainer(element, root, parentComponent, callback);
-      }
-    });
-  }
-}
-
+/**
+ * Our public renderer. When someone requires your renderer, this is all they
+ * should have access to. `render` and `unmountComponentAtNode` methods should
+ * be considered required, though that isn’t strictly true.
+ */
 const defaultContainer = {};
 const ReactX11 = {
   render(
     element,
-    container,
-    callback
+    callback,
+    container
   ) {
-    console.log('renderSubtreeIntoContainer(null, element, container, callback); ===== ', null, element, container, callback)
-    debugger
-    return renderSubtreeIntoContainer(null, element, container, callback);
-  },
+    const containerKey = typeof container === 'undefined' ? defaultContainer : container;
+    let root = roots.get(containerKey);
+    if (!root) {
+      debugger
+      root = Renderer.createContainer(containerKey);
+      roots.set(container, root);
+    }
 
+    debugger
+    Renderer.updateContainer(element, root, null, callback);
+    return Renderer.getPublicRootInstance(root);
+  },
   unmountComponentAtNode(container) {
     const containerKey = typeof container === 'undefined' ? defaultContainer : container;
     const root = roots.get(containerKey);
     if (root) {
-      Renderer.unmountContainer(root);
+      Renderer.updateContainer(null, root, null, () => {
+        roots.delete(container);
+      });
     }
-  }
+  },
+  // other API methods you may support, such as `renderPortal()`
 };
 
-if (typeof injectInternals === 'function') {
-  injectInternals({
-    findFiberByHostInstance: () => null,
-    findHostInstanceByFiber: Renderer.findHostInstance,
-  });
-}
-
 const roots = new Map();
+const emptyObject = {};
 
 module.exports = ReactX11;
+
+var injectInternals = require('react-dom/lib/ReactFiberDevToolsHook').injectInternals;
+
+if (typeof injectInternals === 'function') {
+ injectInternals({
+   findFiberByHostInstance: () => null,
+   findHostInstanceByFiber: Renderer.findHostInstance
+ });
+}

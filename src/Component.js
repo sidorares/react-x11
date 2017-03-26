@@ -7,6 +7,7 @@ const ReactX11Component = {
     rootContainerElement,
     hostContext
   ) {
+    console.log('createElement')
     return Object.assign({[IO_KEY]: rootContainerElement}, props);
   },
 
