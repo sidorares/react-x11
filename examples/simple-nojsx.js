@@ -9,6 +9,15 @@ defineProperty(global, 'window', {
 });
 
 const {connectToDevTools} = require('react-devtools-core');
+connectToDevTools({
+  isAppActive() {
+  // Don't steal the DevTools from currently active app.
+  return true;
+  },
+  host: 'localhost',
+  // default port? port: ,
+  resolveRNStyle: null, // TODO maybe: require('flattenStyle')
+});
 
 const React = require('react');
 const ReactX11 = require('../src/Reconciler.js')

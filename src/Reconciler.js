@@ -45,6 +45,16 @@ const Renderer = ReactFiberReconciler({
     hostContext,
     internalInstanceHandle
   ) {
+
+    if (type === 'window') {
+      const wnd = rootContainerInstance.createWindow(props);
+      wnd.map();
+      return wnd;
+    }
+
+    //console.log('createInstance!!!', type, props, rootContainerInstance, hostContext, internalInstanceHandle)
+    //debugger
+
     if (props.toJSON) {
       return props.toJSON(props);
     } else {
@@ -60,7 +70,7 @@ const Renderer = ReactFiberReconciler({
     child
   ) {
     //
-    log('appendInitialChild', child);
+    log('appendInitialChild', child, parentInstance);
   },
 
 
@@ -68,7 +78,7 @@ const Renderer = ReactFiberReconciler({
     parentInstance,
     child
   ) {
-    log('appendChild', child);
+    log('appendChild', child, parentInstance);
     // const index = parentInstance.children.indexOf(child);
     // if (index !== -1) {
     //   parentInstance.children.splice(index, 1);
@@ -120,6 +130,9 @@ const Renderer = ReactFiberReconciler({
     rootContainerInstance,
     hostContext
   ) {
+    if (type === 'window') {
+      
+    }
     log('TODO: prepareUpdate');
     return null;
     // return diffProperties(instance, type, oldProps, newProps, rootContainerInstance, hostContext);
@@ -135,7 +148,7 @@ const Renderer = ReactFiberReconciler({
   ) {
     // Apply the diff to the DOM node.
     // updateProperties(instance, updatePayload, type, oldProps, newProps);
-    log('TODO: updateProperties');
+    log('TODO: commitUpdate');
   },
 
   // commitMount is called after initializeFinalChildren *if*
@@ -175,7 +188,7 @@ const Renderer = ReactFiberReconciler({
     if (instance == null) {
       return null;
     }
-    console.log(instance)
+    console.log('===== ', instance)
     return instance != null && instance.props.toJSON(instance);
   },
 
@@ -185,7 +198,7 @@ const Renderer = ReactFiberReconciler({
   // callbacks are fired during DOM manipulations
 
   prepareForCommit() {
-    log('prepareForCommit');
+    log('prepareForCommit', arguments);
     // noop
   },
 
@@ -199,7 +212,7 @@ const Renderer = ReactFiberReconciler({
   // noop all of them.
 
   shouldSetTextContent(props) {
-    log('shouldSetTextContent');
+    log('shouldSetTextContent', props);
     return false
   },
 
@@ -251,15 +264,21 @@ const ReactX11 = {
     callback,
     container
   ) {
+    if (!container) {
+      const ntk = require('ntk')
+      ntk.createClient((err, app) => {
+        ReactX11.render(element, callback, app);
+      })
+      return;
+    }
+
     const containerKey = typeof container === 'undefined' ? defaultContainer : container;
     let root = roots.get(containerKey);
     if (!root) {
-      debugger
       root = Renderer.createContainer(containerKey);
       roots.set(container, root);
     }
 
-    debugger
     Renderer.updateContainer(element, root, null, callback);
     return Renderer.getPublicRootInstance(root);
   },
@@ -283,8 +302,9 @@ module.exports = ReactX11;
 var injectInternals = require('react-dom/lib/ReactFiberDevToolsHook').injectInternals;
 
 if (typeof injectInternals === 'function') {
- injectInternals({
-   findFiberByHostInstance: () => null,
-   findHostInstanceByFiber: Renderer.findHostInstance
- });
-}
+  console.log('injectInternals!!!')
+  injectInternals({
+    findFiberByHostInstance: () => null,
+    findHostInstanceByFiber: Renderer.findHostInstance
+  });
+}``
