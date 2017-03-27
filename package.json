@@ -3,8 +3,7 @@
   "version": "0.0.1",
   "description": "react renderer with X11 as a target",
   "main": "./dist/index.js",
-  "scripts": {
-  },
+  "scripts": {},
   "repository": {
     "type": "git",
     "url": "https://github.com/sidorares/react-x11"
@@ -23,6 +22,7 @@
     "fbjs": "^0.8.11",
     "invariant": "^2.2.0",
     "lodash": "^3.10.1",
+    "ntk": "^2.0.0",
     "react": "^16.0.0-alpha.5",
     "react-devtools-core": "^2.0.12",
     "react-dom": "^16.0.0-alpha.5",

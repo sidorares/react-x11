@@ -8,31 +8,6 @@ const log = (a, b, c) => {
   }
 };
 
-const toJSON = (node) => {
-  if (typeof node === 'string') {
-    return node
-  }
-  const props = node.props;
-  if (typeof props.toJSON === 'function') {
-    return props.toJSON(props);
-  }
-
-  let children = null;
-  if (props.children) {
-    if (Array.isArray(props.children)) {
-      children = props.children.map(toJSON);
-    } else if (props.children) {
-      children = toJSON(props.children);
-    }
-    return Object.assign({}, props, {children});
-  } else {
-    const clone = Object.assign({}, props);
-    delete clone.children;
-    return clone;
-  }
-};
-
-
 const Renderer = ReactFiberReconciler({
 
   // the tree creation and updating methods. If you’re familiar with the DOM API
@@ -46,19 +21,16 @@ const Renderer = ReactFiberReconciler({
     internalInstanceHandle
   ) {
 
+    console.log('====  hostContext', hostContext)
     if (type === 'window') {
       const wnd = rootContainerInstance.createWindow(props);
       wnd.map();
       return wnd;
-    }
-
-    //console.log('createInstance!!!', type, props, rootContainerInstance, hostContext, internalInstanceHandle)
-    //debugger
-
-    if (props.toJSON) {
-      return props.toJSON(props);
     } else {
-      return toJSON({props});
+      return {
+        type,
+        props
+      }
     }
   },
 
@@ -70,15 +42,20 @@ const Renderer = ReactFiberReconciler({
     child
   ) {
     //
-    log('appendInitialChild', child, parentInstance);
+    log('appendInitialChild');
+    child.reparentTo(parentInstance, child.x, child.y);
+    child.map();
   },
-
 
   appendChild(
     parentInstance,
     child
   ) {
-    log('appendChild', child, parentInstance);
+    log('appendChild') //, child, parentInstance);
+    if (child.id && parentInstance.id) {
+      child.reparentTo(parentInstance, child.x, child.y);
+      child.map();
+    }
     // const index = parentInstance.children.indexOf(child);
     // if (index !== -1) {
     //   parentInstance.children.splice(index, 1);
@@ -114,7 +91,8 @@ const Renderer = ReactFiberReconciler({
   ) {
     log('finalizeInitialChildren');
     // setInitialProperties(instance, type, props, rootContainerInstance);
-    return false;
+    //return false;
+    return true;
   },
 
   // prepare update is where you compute the diff for an instance. This is done
@@ -130,12 +108,10 @@ const Renderer = ReactFiberReconciler({
     rootContainerInstance,
     hostContext
   ) {
-    if (type === 'window') {
-      
-    }
     log('TODO: prepareUpdate');
-    return null;
-    // return diffProperties(instance, type, oldProps, newProps, rootContainerInstance, hostContext);
+    //return null;
+    //return diffProperties(instance, type, oldProps, newProps, rootContainerInstance, hostContext);
+    return newProps;
   },
 
   commitUpdate(
@@ -146,6 +122,15 @@ const Renderer = ReactFiberReconciler({
     newProps,
     internalInstanceHandle
   ) {
+    if (type === 'window') {
+      if (newProps.title) {
+        instance.setTitle(newProps.title)
+      } else {
+        instance.setTitle('')
+      }
+      instance.resize(newProps.width, newProps.height)
+    }
+
     // Apply the diff to the DOM node.
     // updateProperties(instance, updatePayload, type, oldProps, newProps);
     log('TODO: commitUpdate');
@@ -171,12 +156,17 @@ const Renderer = ReactFiberReconciler({
 
   getRootHostContext(rootContainerInstance) {
     log('getRootHostContext');
-    return emptyObject;
+    return {
+      rootWindowId: rootContainerInstance.X.display.screen[0].root
+    };
   },
 
-  getChildHostContext(parentHostContext, type) {
-    log('getChildHostContext');
-    return emptyObject;
+  getChildHostContext(parentHostContext, type, rootContainerInstance, a, b, c) {
+    log('getChildHostContext', type);
+    return {
+      parent: parentHostContext,
+      type
+    };
   },
 
   // getPublicInstance should be the identity function in 99% of all scenarios.
@@ -185,11 +175,7 @@ const Renderer = ReactFiberReconciler({
 
   getPublicInstance(instance) {
     log('getPublicInstance');
-    if (instance == null) {
-      return null;
-    }
-    console.log('===== ', instance)
-    return instance != null && instance.props.toJSON(instance);
+    return instance;
   },
 
   // the prepareForCommit and resetAfterCommit methods are necessary for any
@@ -211,9 +197,12 @@ const Renderer = ReactFiberReconciler({
   // renderer we don’t have specific text nodes like the DOM does so we’ll just
   // noop all of them.
 
-  shouldSetTextContent(props) {
-    log('shouldSetTextContent', props);
-    return false
+  shouldSetTextContent(props, a, b, c, d) {
+    log('shouldSetTextContent', props, a, b, c, d);
+    if (typeof props.schildren === 'string') {
+      return true;
+    }
+    return false;
   },
 
   resetTextContent(instance) {
@@ -228,7 +217,7 @@ const Renderer = ReactFiberReconciler({
     internalInstanceHandle
   )  {
     log('createTextInstance');
-    return null;
+    return text;
   },
 
   commitTextUpdate(
@@ -302,7 +291,6 @@ module.exports = ReactX11;
 var injectInternals = require('react-dom/lib/ReactFiberDevToolsHook').injectInternals;
 
 if (typeof injectInternals === 'function') {
-  console.log('injectInternals!!!')
   injectInternals({
     findFiberByHostInstance: () => null,
     findHostInstanceByFiber: Renderer.findHostInstance
