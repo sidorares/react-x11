@@ -1,7 +1,7 @@
 const ReactFiberReconciler = require('react-dom/lib/ReactFiberReconciler');
 const ReactX11Component = require('./Component');
 
-const LOG_STEPS = true;
+const LOG_STEPS = false;//true;
 const log = (a, b, c) => {
   if (LOG_STEPS) {
     console.log(a, b, c);
@@ -21,10 +21,12 @@ const Renderer = ReactFiberReconciler({
     internalInstanceHandle
   ) {
 
-    console.log('====  hostContext', hostContext)
+    console.log('createInstance! ====', type)
     if (type === 'window') {
+
       const wnd = rootContainerInstance.createWindow(props);
       wnd.map();
+      console.log('CREATED', wnd.id, props.name)
       return wnd;
     } else {
       return {
@@ -43,18 +45,29 @@ const Renderer = ReactFiberReconciler({
   ) {
     //
     log('appendInitialChild');
-    child.reparentTo(parentInstance, child.x, child.y);
-    child.map();
+    //console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id)
+    //setTimeout(() => {
+      console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id)
+      if (child.reparentTo) {
+        child.reparentTo(parentInstance, 0, 0);//child.x, child.y);
+      } else {
+        parentInstance.__children = [child]
+      }
+      //parentInstance.reparentTo(child, child.x, child.y);
+      //child.map();
+      //parentInstance.map()
+    //}, 2000);
   },
 
   appendChild(
     parentInstance,
     child
   ) {
-    log('appendChild') //, child, parentInstance);
+    log('appendChild', parentInstance.name, child.name);
     if (child.id && parentInstance.id) {
+      console.log('appendChild REPARENTING!!! ======= ', child.id, parentInstance.id)
       child.reparentTo(parentInstance, child.x, child.y);
-      child.map();
+      //child.map();
     }
     // const index = parentInstance.children.indexOf(child);
     // if (index !== -1) {
@@ -67,8 +80,10 @@ const Renderer = ReactFiberReconciler({
     parentInstance,
     child
   ) {
-    log('removeChild', child);
+    log('removeChild');
     // parentInstance.removeChild(child);
+    console.log('Remove child!!!', child.id)
+    child.destroy();
   },
 
   insertBefore(
@@ -91,8 +106,8 @@ const Renderer = ReactFiberReconciler({
   ) {
     log('finalizeInitialChildren');
     // setInitialProperties(instance, type, props, rootContainerInstance);
-    //return false;
-    return true;
+    return false;
+    //return true;
   },
 
   // prepare update is where you compute the diff for an instance. This is done
@@ -123,12 +138,14 @@ const Renderer = ReactFiberReconciler({
     internalInstanceHandle
   ) {
     if (type === 'window') {
-      if (newProps.title) {
+      if (newProps.title && newProps != oldProps.title) {
         instance.setTitle(newProps.title)
       } else {
         instance.setTitle('')
       }
-      instance.resize(newProps.width, newProps.height)
+      if (newProps.width !== oldProps.width || newProps.height !== oldProps.height) {
+        instance.resize(newProps.width, newProps.height)
+      }
     }
 
     // Apply the diff to the DOM node.
@@ -198,8 +215,9 @@ const Renderer = ReactFiberReconciler({
   // noop all of them.
 
   shouldSetTextContent(props, a, b, c, d) {
-    log('shouldSetTextContent', props, a, b, c, d);
-    if (typeof props.schildren === 'string') {
+    log('shouldSetTextContent');
+    return false;
+    if (typeof props.children === 'string') {
       return true;
     }
     return false;
