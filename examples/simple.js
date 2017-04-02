@@ -1,3 +1,4 @@
+/*
 const defineProperty = Object.defineProperty;
 defineProperty(global, 'WebSocket', {
   value: require('ws')
@@ -9,37 +10,16 @@ defineProperty(global, 'window', {
 });
 
 const {connectToDevTools} = require('react-devtools-core');
-connectToDevTools({
-  isAppActive() {
-  // Don't steal the DevTools from currently active app.
-  return true;
-  },
-  host: 'localhost',
-  // default port? port: ,
-  resolveRNStyle: null, // TODO maybe: require('flattenStyle')
-});
+connectToDevTools();
+*/
 
 const React = require('react');
-const ReactX11 = require('../src/Reconciler.js')
+const ReactX11 = require('../src/index.js')
 class App extends React.Component {
-
-  constructor(props) {
-    super(props);
-    this.state = {
-      w: 500
-    }
-  }
-
-  componentDidMount() {
-    setInterval(() => {
-      this.setState({w: this.state.w + 1 });
-    }, 1000);
-  }
-
   render() {
     return (
-      <window width={100} height={100} title='test'>
-        <div>test test</div>
+      <window x={100} y={100} width={100} height={100} title='test'>
+        <window width={10} height={10} x={1} y={2} title='child' />
       </window>
     )
   }

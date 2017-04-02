@@ -1,3 +1,4 @@
+/*
 const defineProperty = Object.defineProperty;
 defineProperty(global, 'WebSocket', {
   value: require('ws')
@@ -18,9 +19,10 @@ connectToDevTools({
   // default port? port: ,
   resolveRNStyle: null, // TODO maybe: require('flattenStyle')
 });
+*/
 
 const React = require('react');
-const ReactX11 = require('../src/Reconciler.js')
+const ReactX11 = require('../src/index.js')
 class App extends React.Component {
 
   constructor(props) {
@@ -77,10 +79,20 @@ class App extends React.Component {
 
   render() {
 
+    const grad1 = color => e => {
+      var ctx = e.window.getContext('2d');
+      var gradient = ctx.createRadialGradient(0, 0, 0, e.x, e.y, 500);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(1, "rgb(255, 255, 255)");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, ctx.width, ctx.height);
+    }
+
+
     const grad = (e) => {
       var ctx = e.window.getContext('2d');
       var gradient = ctx.createRadialGradient(0, 0, 0, e.x, e.y, 500);
-      gradient.addColorStop(0, "red");
+      gradient.addColorStop(0, "green");
       gradient.addColorStop(0.5, "green");
       gradient.addColorStop(1, "rgb(255, 255, 255)");
       ctx.fillStyle = gradient;
@@ -88,12 +100,13 @@ class App extends React.Component {
     }
 
     return (
-      React.createElement('window', {name: 'topWindow', ref: (w) => { this.mainWndRef(w) }, onMouseOut: () => this.setState({down: false}), onMouseOver: () => this.setState({down: true}), width: this.state.w, height: 500, title: `test ${this.state.isOver}`, onResize: ev=> this.setState({isOver: `${ev.x} ${ev.y} ${ev.width} ${ev.height}`})},
-        !!this.state.down && React.createElement('window', {title: 'child', name: 'childWindow', ref: (w) => { this.innerWndRef(w) }, width: 200, height: 200, x: 50, y: 150, onMouseOver: () => this.setState({isOver: 'yes'}), onMouseOut: () => this.setState({isOver: 'no'}) }
+      React.createElement('window', {top: true, name: 'topWindow', ref: (w) => { this.mainWndRef(w) }, onMouseOut: () => this.setState({down: false}), onMouseOver: () => this.setState({down: true}), width: this.state.w, height: 500, title: `test ${this.state.isOver}`, onResize: ev=> this.setState({isOver: `${ev.x} ${ev.y} ${ev.width} ${ev.height}`})},
+        React.createElement('window', {title: 'child', name: 'childWindow', ref: (w) => { this.innerWndRef(w) }, width: 200, height: 200, x: 50, y: 150, onMouseOver: () => this.setState({isOver: 'yes'}), onMouseOut: () => this.setState({isOver: 'no'}) },
+        //!!this.state.down && React.createElement('window', {title: 'child', name: 'childWindow', ref: (w) => { this.innerWndRef(w) }, width: 200, height: 200, x: 50, y: 150, onMouseOver: () => this.setState({isOver: 'yes'}), onMouseOut: () => this.setState({isOver: 'no'}) })
           //,React.createElement('window', {key: 1, title: 'child child1', name: 'childChildWindow1', width: 20, height: 20, x: 5, y: 15}),
-          //React.createElement('window', {key: 2, title: 'child child2', name: 'childChildWindow2', width: 20, height: 20, x: 15, y: 15},
-          //  React.createElement('div', {ref: (e) => { console.log('divele!!!!', e) }, title: 'child child child2'})
-          //
+          React.createElement('window', {key: 2, title: 'child child2', name: 'childChildWindow2', width: 20, height: 20, x: 15, y: 15, onMouseMove: grad1('green')},
+            React.createElement('window', {key: 3, title: 'child child child 2', name: 'child childChildWindow2', width: 12, height: 12, x: 5, y: 5, onMouseMove: grad1('blue')})
+          )
         )
       )
     )

@@ -1,5 +1,5 @@
+require('./DevToolsIntegration.js')
 const ReactFiberReconciler = require('react-dom/lib/ReactFiberReconciler');
-const ReactX11Component = require('./Component');
 
 const LOG_STEPS = false;//true;
 const log = (a, b, c) => {
@@ -20,12 +20,12 @@ const Renderer = ReactFiberReconciler({
     hostContext,
     internalInstanceHandle
   ) {
-
-    console.log('createInstance! ====', type)
     if (type === 'window') {
-
-      const wnd = rootContainerInstance.createWindow(props);
-      wnd.map();
+      var windowAttributes = Object.assign({}, props);
+      if (typeof hostContext.rootWindowId === 'undefined') {
+        windowAttributes.overrideRedirect = true;
+      }
+      const wnd = rootContainerInstance.createWindow(windowAttributes);
       console.log('CREATED', wnd.id, props.name)
       return wnd;
     } else {
@@ -43,13 +43,20 @@ const Renderer = ReactFiberReconciler({
     parentInstance,
     child
   ) {
+    const instance = parentInstance
     //
     log('appendInitialChild');
     //console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id)
     //setTimeout(() => {
       console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id)
+
       if (child.reparentTo) {
-        child.reparentTo(parentInstance, 0, 0);//child.x, child.y);
+        //child.reparentTo(parentInstance, 0, 0);//child.x, child.y);
+        if (instance.__children) {
+          parentInstance.__children.push(child)
+        } else {
+          parentInstance.__children = [child]
+        }
       } else {
         parentInstance.__children = [child]
       }
@@ -69,6 +76,14 @@ const Renderer = ReactFiberReconciler({
       child.reparentTo(parentInstance, child.x, child.y);
       //child.map();
     }
+
+    const instance = parentInstance
+    if (instance.__children) {
+      parentInstance.__children.push(child)
+    } else {
+      parentInstance.__children = [child]
+    }
+
     // const index = parentInstance.children.indexOf(child);
     // if (index !== -1) {
     //   parentInstance.children.splice(index, 1);
@@ -106,8 +121,8 @@ const Renderer = ReactFiberReconciler({
   ) {
     log('finalizeInitialChildren');
     // setInitialProperties(instance, type, props, rootContainerInstance);
-    return false;
-    //return true;
+    //return false;
+    return true;
   },
 
   // prepare update is where you compute the diff for an instance. This is done
@@ -162,37 +177,42 @@ const Renderer = ReactFiberReconciler({
     newProps,
     internalInstanceHandle
   ) {
-    log('commitMount');
+    //debugger
+    console.log('commitMount:', newProps.name);
     // noop
+    if (type === 'window') {
+      console.log('instance.__children', instance.__children)
+      if (instance.__children) {
+        instance.__children.forEach(w => {
+          console.log('!!!!!!============', w)
+          if (w.reparentTo) {
+            w.reparentTo(instance, w.x, w.y)
+            w.map()
+          }
+        })
+      }
+      if (newProps.top) {
+        instance.map()
+      }
+    }
   },
 
-  // HostContext is an internal object or reference for any bookkeeping your
-  // renderer may need to do based on current location in the tree. In DOM this
-  // is necessary for calling the correct `document.createElement` calls based
-  // upon being in an `html`, `svg`, `mathml`, or other context of the tree.
+  getPublicInstance(instance) {
+    log('getPublicInstance');
+    return instance;
+  },
 
   getRootHostContext(rootContainerInstance) {
-    log('getRootHostContext');
     return {
       rootWindowId: rootContainerInstance.X.display.screen[0].root
     };
   },
 
   getChildHostContext(parentHostContext, type, rootContainerInstance, a, b, c) {
-    log('getChildHostContext', type);
     return {
       parent: parentHostContext,
       type
     };
-  },
-
-  // getPublicInstance should be the identity function in 99% of all scenarios.
-  // It was added to support the `getNodeMock` functionality for the
-  // TestRenderers.
-
-  getPublicInstance(instance) {
-    log('getPublicInstance');
-    return instance;
   },
 
   // the prepareForCommit and resetAfterCommit methods are necessary for any
@@ -201,22 +221,21 @@ const Renderer = ReactFiberReconciler({
   // callbacks are fired during DOM manipulations
 
   prepareForCommit() {
-    log('prepareForCommit', arguments);
-    // noop
+    log('prepareForCommit');
   },
 
   resetAfterCommit() {
     log('resetAfterCommit');
-    // noop
   },
 
   // the following four methods are regarding TextInstances. In our example
   // renderer we don’t have specific text nodes like the DOM does so we’ll just
   // noop all of them.
 
-  shouldSetTextContent(props, a, b, c, d) {
+  shouldSetTextContent(props) {
     log('shouldSetTextContent');
     return false;
+
     if (typeof props.children === 'string') {
       return true;
     }
@@ -225,7 +244,6 @@ const Renderer = ReactFiberReconciler({
 
   resetTextContent(instance) {
     log('resetTextContent');
-    // noop
   },
 
   createTextInstance(
@@ -265,6 +283,7 @@ const Renderer = ReactFiberReconciler({
  * be considered required, though that isn’t strictly true.
  */
 const defaultContainer = {};
+let cachedNtkApp = null;
 const ReactX11 = {
   render(
     element,
@@ -272,8 +291,12 @@ const ReactX11 = {
     container
   ) {
     if (!container) {
+      if (cachedNtkApp) {
+        return ReactX11.render(element, callback, cachedNtkApp);
+      }
       const ntk = require('ntk')
       ntk.createClient((err, app) => {
+        cachedNtkApp = app;
         ReactX11.render(element, callback, app);
       })
       return;
@@ -304,13 +327,18 @@ const ReactX11 = {
 const roots = new Map();
 const emptyObject = {};
 
+if (process.env.NODE_ENV !== 'production') {
+  var injectInternals = require('react-dom/lib/ReactFiberDevToolsHook').injectInternals;
+  if (typeof injectInternals === 'function') {
+    injectInternals({
+      findFiberByHostInstance: instance => {
+        // TODO: implement this
+        // not sure yet how to get ref to component or internal
+        // instance from HostConfig handlers
+      },
+      findHostInstanceByFiber: Renderer.findHostInstance
+    });
+  }
+}
+
 module.exports = ReactX11;
-
-var injectInternals = require('react-dom/lib/ReactFiberDevToolsHook').injectInternals;
-
-if (typeof injectInternals === 'function') {
-  injectInternals({
-    findFiberByHostInstance: () => null,
-    findHostInstanceByFiber: Renderer.findHostInstance
-  });
-}``
