@@ -26,6 +26,9 @@ const Renderer = ReactFiberReconciler({
         windowAttributes.overrideRedirect = true;
       }
       const wnd = rootContainerInstance.createWindow(windowAttributes);
+      if (!windowAttributes.overrideRedirect) {
+        wnd.map()
+      }
       console.log('CREATED', wnd.id, props.name)
       return wnd;
     } else {
@@ -161,6 +164,10 @@ const Renderer = ReactFiberReconciler({
       if (newProps.width !== oldProps.width || newProps.height !== oldProps.height) {
         instance.resize(newProps.width, newProps.height)
       }
+      if (newProps.x !== oldProps.x || newProps.y !== oldProps.x) {
+        instance.move(newProps.x, newProps.y)
+      }
+
     }
 
     // Apply the diff to the DOM node.
@@ -190,9 +197,6 @@ const Renderer = ReactFiberReconciler({
             w.map()
           }
         })
-      }
-      if (newProps.top) {
-        instance.map()
       }
     }
   },
@@ -309,8 +313,9 @@ const ReactX11 = {
       roots.set(container, root);
     }
 
-    Renderer.updateContainer(element, root, null, callback);
-    return Renderer.getPublicRootInstance(root);
+    Renderer.updateContainer(element, root, null);
+    const publicInstance = Renderer.getPublicRootInstance(root);
+    callback && callback(publicInstance, container);
   },
   unmountComponentAtNode(container) {
     const containerKey = typeof container === 'undefined' ? defaultContainer : container;
