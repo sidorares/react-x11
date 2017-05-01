@@ -1,5 +1,7 @@
 # react-x11
 
+[![Greenkeeper badge](https://badges.greenkeeper.io/sidorares/react-x11.svg)](https://greenkeeper.io/)
+
 React custom rendering where side effects are communication with [X11 server](https://www.x.org/wiki/Documentation/). The goal is to create a simple library where you would apply your React or React Native like experience to build small GUI programs to run in X Window environment (usually linux desktop, but I personally more often code under osx + [XQuattz](https://www.xquartz.org/))
 
 This library is mostly written in javascript all way down, no special bridging code in different language required. For communication with X server [node-x11](https://github.com/sidorares/node-x11) library is used, which is pure JS implementation of X11 protocol (think of it as xlib rewritten in javascript/node.js)
