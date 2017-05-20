@@ -23,9 +23,9 @@
     "invariant": "^2.2.0",
     "lodash": "^3.10.1",
     "ntk": "^2.0.0",
-    "react": "^16.0.0-alpha.5",
+    "react": "16.0.0-alpha.6",
     "react-devtools-core": "^2.0.12",
-    "react-dom": "^16.0.0-alpha.5",
+    "react-dom": "16.0.0-alpha.6",
     "ws": "^2.2.2",
     "yoga-layout": "^1.2.0"
   },
