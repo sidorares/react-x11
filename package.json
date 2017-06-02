@@ -3,7 +3,11 @@
   "version": "0.0.1",
   "description": "react renderer with X11 as a target",
   "main": "./dist/index.js",
-  "scripts": {},
+  "scripts": {
+    "examples:simple": "babel-node examples/simple",
+    "examples:simple-nojsx": "node examples/simple-nojsx",
+    "examples:xeyes": "babel-node examples/xeyes"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/sidorares/react-x11"
@@ -30,7 +34,7 @@
     "yoga-layout": "^1.2.0"
   },
   "devDependencies": {
-    "babel": "^6.3.13",
+    "babel-cli": "^6.24.1",
     "babel-preset-airbnb": "^2.1.1",
     "react-devtools": "^2.0.12",
     "react-devtools-core": "^2.0.12"
