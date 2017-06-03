@@ -9,6 +9,24 @@ This library is mostly written in javascript all way down, no special bridging c
 Currently only `window` component is available, in the future we'll add windowless controls support, simple controls library and [yoga-layout](https://www.npmjs.com/package/yoga-layout) powered layout management
 
 
+## Trying it out
+
+Clone this repo and from its folder run
+
+```sh
+npm install
+```
+
+After install is complete you can run examples by running one of those commands:
+
+```sh
+npm run examples:simple
+npm run examples:simple-nojsx
+npm run examples:xeyes
+```
+
+## Example
+
 ```js
 const React = require('react');
 const ReactX11 = require('react-x11')
