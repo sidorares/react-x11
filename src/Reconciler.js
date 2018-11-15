@@ -1,25 +1,32 @@
-require('./DevToolsIntegration.js')
-const ReactFiberReconciler = require('react-dom/lib/ReactFiberReconciler');
+require('./DevToolsIntegration.js');
+const ReactReconciler = require('react-reconciler');
+console.log(ReactReconciler);
 
-const LOG_STEPS = false;//true;
+const LOG_STEPS = false; //true;
 const log = (a, b, c) => {
   if (LOG_STEPS) {
     console.log(a, b, c);
   }
 };
 
-const Renderer = ReactFiberReconciler({
-
+const Renderer = ReactReconciler({
   // the tree creation and updating methods. If you’re familiar with the DOM API
   // this will look familiar
+  now: () => Date.now(),
 
-  createInstance(
-    type,
-    props,
-    rootContainerInstance,
-    hostContext,
-    internalInstanceHandle
-  ) {
+  supportsMutation: true,
+
+  //appendAllChildren() {
+  //  console.log('AAAA appendAllChildren()');
+  //},
+
+  appendChildToContainer(config, container, publicInstance) {
+    console.log('AAAA appendAllChildren()');
+    console.log({ container, publicInstance });
+  },
+
+  createInstance(type, props, rootContainerInstance, hostContext, internalInstanceHandle) {
+    console.log('AAAA');
     if (type === 'window') {
       var windowAttributes = Object.assign({}, props);
       if (typeof hostContext.rootWindowId === 'undefined') {
@@ -27,64 +34,59 @@ const Renderer = ReactFiberReconciler({
       }
       const wnd = rootContainerInstance.createWindow(windowAttributes);
       if (!windowAttributes.overrideRedirect) {
-        wnd.map()
+        wnd.map();
       }
-      console.log('CREATED', wnd.id, props.name)
+      console.log('CREATED', wnd.id, props.name);
+      wnd._reactFiber = internalInstanceHandle;
       return wnd;
     } else {
       return {
         type,
         props
-      }
+      };
     }
   },
 
   // this is called instead of `appendChild` when the parentInstance is first
   // being created and mounted
   // added in https://github.com/facebook/react/pull/8400/
-  appendInitialChild(
-    parentInstance,
-    child
-  ) {
-    const instance = parentInstance
+  appendInitialChild(parentInstance, child) {
+    const instance = parentInstance;
     //
     log('appendInitialChild');
     //console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id)
     //setTimeout(() => {
-      console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id)
+    console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id);
 
-      if (child.reparentTo) {
-        //child.reparentTo(parentInstance, 0, 0);//child.x, child.y);
-        if (instance.__children) {
-          parentInstance.__children.push(child)
-        } else {
-          parentInstance.__children = [child]
-        }
+    if (child.reparentTo) {
+      //child.reparentTo(parentInstance, 0, 0);//child.x, child.y);
+      if (instance.__children) {
+        parentInstance.__children.push(child);
       } else {
-        parentInstance.__children = [child]
+        parentInstance.__children = [child];
       }
-      //parentInstance.reparentTo(child, child.x, child.y);
-      //child.map();
-      //parentInstance.map()
+    } else {
+      parentInstance.__children = [child];
+    }
+    //parentInstance.reparentTo(child, child.x, child.y);
+    //child.map();
+    //parentInstance.map()
     //}, 2000);
   },
 
-  appendChild(
-    parentInstance,
-    child
-  ) {
+  appendChild(parentInstance, child) {
     log('appendChild', parentInstance.name, child.name);
     if (child.id && parentInstance.id) {
-      console.log('appendChild REPARENTING!!! ======= ', child.id, parentInstance.id)
+      console.log('appendChild REPARENTING!!! ======= ', child.id, parentInstance.id);
       child.reparentTo(parentInstance, child.x, child.y);
       //child.map();
     }
 
-    const instance = parentInstance
+    const instance = parentInstance;
     if (instance.__children) {
-      parentInstance.__children.push(child)
+      parentInstance.__children.push(child);
     } else {
-      parentInstance.__children = [child]
+      parentInstance.__children = [child];
     }
 
     // const index = parentInstance.children.indexOf(child);
@@ -94,21 +96,14 @@ const Renderer = ReactFiberReconciler({
     // parentInstance.children.push(child);
   },
 
-  removeChild(
-    parentInstance,
-    child
-  ) {
+  removeChild(parentInstance, child) {
     log('removeChild');
     // parentInstance.removeChild(child);
-    console.log('Remove child!!!', child.id)
+    console.log('Remove child!!!', child.id);
     child.destroy();
   },
 
-  insertBefore(
-    parentInstance,
-    child,
-    beforeChild
-  ) {
+  insertBefore(parentInstance, child, beforeChild) {
     log('insertBefore');
     // parentInstance.insertBefore(child, beforeChild);
   },
@@ -116,12 +111,7 @@ const Renderer = ReactFiberReconciler({
   // finalizeInitialChildren is the final HostConfig method called before
   // flushing the root component to the host environment
 
-  finalizeInitialChildren(
-    instance,
-    type,
-    props,
-    rootContainerInstance
-  ) {
+  finalizeInitialChildren(instance, type, props, rootContainerInstance) {
     log('finalizeInitialChildren');
     // setInitialProperties(instance, type, props, rootContainerInstance);
     //return false;
@@ -133,41 +123,26 @@ const Renderer = ReactFiberReconciler({
   // can reuse this work even if it pauses or aborts rendering a subset of the
   // tree.
 
-  prepareUpdate(
-    instance,
-    type,
-    oldProps,
-    newProps,
-    rootContainerInstance,
-    hostContext
-  ) {
+  prepareUpdate(instance, type, oldProps, newProps, rootContainerInstance, hostContext) {
     log('TODO: prepareUpdate');
     //return null;
     //return diffProperties(instance, type, oldProps, newProps, rootContainerInstance, hostContext);
     return newProps;
   },
 
-  commitUpdate(
-    instance,
-    updatePayload,
-    type,
-    oldProps,
-    newProps,
-    internalInstanceHandle
-  ) {
+  commitUpdate(instance, updatePayload, type, oldProps, newProps, internalInstanceHandle) {
     if (type === 'window') {
       if (newProps.title && newProps != oldProps.title) {
-        instance.setTitle(newProps.title)
+        instance.setTitle(newProps.title);
       } else {
-        instance.setTitle('')
+        instance.setTitle('');
       }
       if (newProps.width !== oldProps.width || newProps.height !== oldProps.height) {
-        instance.resize(newProps.width, newProps.height)
+        instance.resize(newProps.width, newProps.height);
       }
       if (newProps.x !== oldProps.x || newProps.y !== oldProps.x) {
-        instance.move(newProps.x, newProps.y)
+        instance.move(newProps.x, newProps.y);
       }
-
     }
 
     // Apply the diff to the DOM node.
@@ -178,25 +153,19 @@ const Renderer = ReactFiberReconciler({
   // commitMount is called after initializeFinalChildren *if*
   // `initializeFinalChildren` returns true.
 
-  commitMount(
-    instance,
-    type,
-    newProps,
-    internalInstanceHandle
-  ) {
-    //debugger
+  commitMount(instance, type, newProps, internalInstanceHandle) {
     console.log('commitMount:', newProps.name);
     // noop
     if (type === 'window') {
-      console.log('instance.__children', instance.__children)
+      console.log('instance.__children', instance.__children);
       if (instance.__children) {
         instance.__children.forEach(w => {
-          console.log('!!!!!!============', w)
+          console.log('!!!!!!============', w);
           if (w.reparentTo) {
-            w.reparentTo(instance, w.x, w.y)
-            w.map()
+            w.reparentTo(instance, w.x, w.y);
+            w.map();
           }
-        })
+        });
       }
     }
   },
@@ -250,21 +219,12 @@ const Renderer = ReactFiberReconciler({
     log('resetTextContent');
   },
 
-  createTextInstance(
-    text,
-    rootContainerInstance,
-    hostContext,
-    internalInstanceHandle
-  )  {
+  createTextInstance(text, rootContainerInstance, hostContext, internalInstanceHandle) {
     log('createTextInstance');
     return text;
   },
 
-  commitTextUpdate(
-    textInstance,
-    oldText,
-    newText
-  ) {
+  commitTextUpdate(textInstance, oldText, newText) {
     console.log('commitTextUpdate', oldText, newText);
     // noop
     throw new Error('commitTextUpdate should not be called');
@@ -276,9 +236,13 @@ const Renderer = ReactFiberReconciler({
 
   scheduleDeferredCallback() {
     log('scheduleDeferredCallback');
-  },
+  }
 
-  useSyncScheduling: true,
+  //findHostInstance() {
+  //  console.log('Find Host Instance!', argunments);
+  //}
+
+  //useSyncScheduling: true
 });
 
 /**
@@ -289,20 +253,16 @@ const Renderer = ReactFiberReconciler({
 const defaultContainer = {};
 let cachedNtkApp = null;
 const ReactX11 = {
-  render(
-    element,
-    callback,
-    container
-  ) {
+  render(element, callback, container) {
     if (!container) {
       if (cachedNtkApp) {
         return ReactX11.render(element, callback, cachedNtkApp);
       }
-      const ntk = require('ntk')
+      const ntk = require('ntk');
       ntk.createClient((err, app) => {
         cachedNtkApp = app;
         ReactX11.render(element, callback, app);
-      })
+      });
       return;
     }
 
@@ -316,6 +276,24 @@ const ReactX11 = {
     Renderer.updateContainer(element, root, null);
     const publicInstance = Renderer.getPublicRootInstance(root);
     callback && callback(publicInstance, container);
+
+    if (process.env.NODE_ENV !== 'production') {
+      const injectIntoDevTools = Renderer.injectIntoDevTools;
+      console.log(ReactReconciler);
+      injectIntoDevTools({
+        bundleType: 1, // 0 for PROD, 1 for DEV
+        version: '0.1.0', // version for your renderer
+        rendererPackageName: 'react-x11-renderer', // package name
+        findFiberByHostInstance: instance => {
+          console.log('!!! findFiberByHostInstance', instance);
+          return instance._reactFiber;
+          // TODO: implement this
+          // not sure yet how to get ref to component or internal
+          // instance from HostConfig handlers
+        },
+        findHostInstanceByFiber: Renderer.findHostInstance
+      });
+    }
   },
   unmountComponentAtNode(container) {
     const containerKey = typeof container === 'undefined' ? defaultContainer : container;
@@ -325,25 +303,34 @@ const ReactX11 = {
         roots.delete(container);
       });
     }
-  },
+  }
+
+  //injectIntoDevTools() {
+  //  console.log('AAAAA, injectIntoDevTools()', arguments);
+  //}
   // other API methods you may support, such as `renderPortal()`
 };
 
 const roots = new Map();
 const emptyObject = {};
 
+/*
 if (process.env.NODE_ENV !== 'production') {
-  var injectInternals = require('react-dom/lib/ReactFiberDevToolsHook').injectInternals;
-  if (typeof injectInternals === 'function') {
-    injectInternals({
-      findFiberByHostInstance: instance => {
-        // TODO: implement this
-        // not sure yet how to get ref to component or internal
-        // instance from HostConfig handlers
-      },
-      findHostInstanceByFiber: Renderer.findHostInstance
-    });
-  }
+  const injectIntoDevTools = ReactReconciler.injectIntoDevTools;
+  console.log(ReactReconciler);
+  debugger;
+  injectIntoDevTools({
+    bundleType: 1, // 0 for PROD, 1 for DEV
+    version: '0.1.0', // version for your renderer
+    rendererPackageName: 'custom-renderer', // package name
+    findFiberByHostInstance: instance => {
+      // TODO: implement this
+      // not sure yet how to get ref to component or internal
+      // instance from HostConfig handlers
+    },
+    findHostInstanceByFiber: Renderer.findHostInstance
+  });
 }
+*/
 
 module.exports = ReactX11;
