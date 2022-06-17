@@ -62,3 +62,7 @@ class App extends React.Component {
 
 ReactX11.render(React.createElement(App));
 ```
+
+# See also
+
+https://github.com/chentsulin/awesome-react-renderer
