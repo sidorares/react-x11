@@ -57,6 +57,12 @@ no override-redirect staging (issue #4).
 - `npm run lint` / `npm run format` — ESLint 9 (flat config) + Prettier.
 - `npm run examples:{simple,simple-nojsx,xeyes,dashboard,tasks}` — need a
   running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation).
+- `npm run screenshots` — regenerate the README/docs images
+  (`docs/img/*.png`) headlessly: renders the real examples into the
+  in-process X server, drives them through the real event pipeline, and
+  sets text in a system sans-serif (Arial / Liberation / DejaVu — small
+  serif text reads as a document, not a UI). Run it whenever a change
+  affects how the examples look.
 
 ## Gotchas
 

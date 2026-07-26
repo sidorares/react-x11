@@ -105,6 +105,8 @@ run list so wrapping spans the whole content.
 
 ## `<textinput>`
 
+![textinput](img/textinput.png)
+
 Single-line editable text. Caret and selection geometry come from ntk's
 `TextLayout.caretPosition`/`indexAt` (ntk ≥ 3.3.0), so positions are exact
 across kerning, shaping boundaries and trailing whitespace.
