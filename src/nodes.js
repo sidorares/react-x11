@@ -691,10 +691,36 @@ export class TextInputNode extends Node {
     return (this.props.fontSize ?? DEFAULT_TEXT_STYLE.size) * 1.4;
   }
 
+  /** Advance of a space in the current style. TextLayout strips trailing
+   * whitespace (correct for wrapped paragraphs), so caret math has to add
+   * it back explicitly. */
+  _spaceAdvance() {
+    const fonts = this.app?.fonts;
+    if (!fonts) return 0;
+    const s = this._textStyle();
+    const key = `${s.family}|${s.size}|${s.weight}|${s.style}`;
+    if (this._spaceAdvanceKey !== key) {
+      this._spaceAdvanceKey = key;
+      this._spaceAdvanceValue =
+        fonts.layout('x x', s).width - fonts.layout('xx', s).width;
+    }
+    return this._spaceAdvanceValue;
+  }
+
   _prefixWidth(count) {
     if (count <= 0) return 0;
-    const layout = this._layoutOf(this._chars().slice(0, count).join(''));
-    return layout ? layout.width : 0;
+    const prefix = this._chars().slice(0, count);
+    // trailing whitespace measures as zero in TextLayout — count it apart
+    let spaces = 0;
+    while (
+      spaces < prefix.length &&
+      /\s/.test(prefix[prefix.length - 1 - spaces])
+    ) {
+      spaces++;
+    }
+    const solid = prefix.slice(0, prefix.length - spaces).join('');
+    const layout = solid ? this._layoutOf(solid) : null;
+    return (layout ? layout.width : 0) + spaces * this._spaceAdvance();
   }
 
   _selection() {
