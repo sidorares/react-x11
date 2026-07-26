@@ -137,9 +137,10 @@ Two more debugging aids:
 ## Developing
 
 ```sh
-npm test          # hermetic: mock smoke tests + in-process X server pixels
-npm run lint      # ESLint
-npm run format    # Prettier
+npm test             # hermetic: mock smoke tests + in-process X server pixels
+npm run lint         # ESLint
+npm run format       # Prettier
+npm run screenshots  # regenerate docs/img/*.png headlessly (no X server)
 ```
 
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
