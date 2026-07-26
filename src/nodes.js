@@ -357,6 +357,21 @@ export class BoxNode extends Node {
   }
 }
 
+/**
+ * Downward shift that recreates CSS "half-leading". ntk's TextLayout puts
+ * the first baseline at exactly `ascent` and packs each line's leading
+ * (font line gap + any lineHeight surplus) entirely *below* the glyphs, so
+ * a layout drawn at the top of its measured box rides visually high —
+ * most noticeable centered in buttons/inputs (fonts like Helvetica carry a
+ * 0.5em line gap). CSS instead splits that leading evenly above and below
+ * the ink (see seek-oss capsize for the metrics background).
+ */
+function halfLeading(layout) {
+  const last = layout.lines?.[layout.lines.length - 1];
+  if (!last) return 0;
+  return Math.max(0, (layout.height - (last.baseline + last.descent)) / 2);
+}
+
 /** Raw string/number children of <text>. */
 export class TextChunkNode extends Node {
   constructor(text, app) {
@@ -460,7 +475,7 @@ export class TextNode extends Node {
   _paintContent(ctx) {
     const content = this.contentBox();
     const layout = this._layoutFor(content.width || Infinity);
-    if (layout) layout.draw(ctx, content.x, content.y);
+    if (layout) layout.draw(ctx, content.x, content.y + halfLeading(layout));
   }
 }
 
@@ -1019,8 +1034,12 @@ export class TextInputNode extends Node {
       ? (this.props.placeholderColor ?? '#9aa0a6')
       : style.color;
     const layout = fonts.layout([{ text: shown, ...style, color }], style);
-    const lineHeight = Math.max(layout.height, this._lineHeight());
-    const textY = content.y + Math.max(0, (content.height - lineHeight) / 2);
+    // Center the glyph ink (ascent + descent) rather than layout.height:
+    // the layout box carries the line's leading entirely below the glyphs,
+    // which would push the text visually upward (see halfLeading above).
+    const line = layout.lines?.[0];
+    const inkHeight = line ? line.ascent + line.descent : layout.height;
+    const textY = content.y + Math.max(0, (content.height - inkHeight) / 2);
 
     // keep the caret inside the viewport
     const caretX = this._prefixWidth(this._caret);
@@ -1047,14 +1066,14 @@ export class TextInputNode extends Node {
       const selStart = this._prefixWidth(a);
       const selEnd = this._prefixWidth(b);
       ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
-      ctx.fillRect(originX + selStart, textY, selEnd - selStart, lineHeight);
+      ctx.fillRect(originX + selStart, textY, selEnd - selStart, inkHeight);
     }
 
     layout.draw(ctx, originX, textY);
 
     if (this._focused && this._caretOn && a === b) {
       ctx.fillStyle = this.props.caretColor ?? style.color;
-      ctx.fillRect(originX + caretX, textY, 1.5, lineHeight);
+      ctx.fillRect(originX + caretX, textY, 1.5, inkHeight);
     }
     ctx.restore();
   }

@@ -373,6 +373,66 @@ async function waitForInk(ctx, w, h, region, match, minInk, what) {
 
 const isDark = ([r, g, b]) => r < 128 && g < 128 && b < 128;
 
+test('centered text is vertically balanced (half-leading)', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 200, height: 100, backgroundColor: 'white' },
+        React.createElement(
+          'box',
+          {
+            flexGrow: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+          React.createElement('text', { fontSize: 48, color: 'black' }, 'HHH'),
+        ),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    await waitForInk(
+      ctx,
+      200,
+      100,
+      { x: 0, y: 0, width: 200, height: 100 },
+      isDark,
+      40,
+      'centered text ink',
+    );
+
+    // TextLayout packs the line's leading below the glyphs; painting must
+    // redistribute it (CSS half-leading), or centered labels ride high.
+    // Cap-only text sits (ascent - capHeight - descent) / 2 above the true
+    // center (KaTeX Main: ~1.3px at 48px); without the half-leading shift
+    // it would be ~3.6px off.
+    const image = await readPixels(ctx, 200, 100);
+    let inkTop = null;
+    let inkBottom = null;
+    for (let y = 0; y < 100; y++) {
+      for (let x = 0; x < 200; x++) {
+        if (isDark(px(image, 200, x, y))) {
+          if (inkTop == null) inkTop = y;
+          inkBottom = y;
+          break;
+        }
+      }
+    }
+    const offset = (inkTop + inkBottom + 1) / 2 - 50;
+    assert.ok(
+      Math.abs(offset) <= 2.5,
+      `centered text ink [${inkTop}..${inkBottom}] should straddle y=50, ` +
+        `off by ${offset}px`,
+    );
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
 test('<markdown> renders through MarkdownView and dispatches onLink', async () => {
   const { app } = await createHeadlessApp();
   try {
