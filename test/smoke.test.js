@@ -890,6 +890,19 @@ test('DevTools agent highlight tints the hovered node', async () => {
   const wnd = app.windows[0];
   const right = wnd._reactX11Node.children[0].children[1];
 
+  // DevTools' Highlighter/measure paths require this DOM-ish contract on
+  // public instances before showNativeHighlight is ever emitted
+  assert.strictEqual(typeof right.getClientRects, 'function');
+  assert.deepStrictEqual(
+    right.getClientRects()[0].width,
+    100,
+    'getClientRects reflects the laid-out rect',
+  );
+  assert.ok(
+    right.ownerDocument && right.ownerDocument.documentElement === null,
+    'ownerDocument stub prevents measureHostInstance crashes',
+  );
+
   const agent = new EventEmitter();
   attachHighlightAgent(agent);
 
