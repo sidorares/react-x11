@@ -1040,6 +1040,11 @@ export class TextInputNode extends Node {
     const line = layout.lines?.[0];
     const inkHeight = line ? line.ascent + line.descent : layout.height;
     const textY = content.y + Math.max(0, (content.height - inkHeight) / 2);
+    // selection/caret read better with breathing room around the glyphs
+    // (a DOM input highlights the whole line box, not just the ink)
+    const markPad = Math.min(3, Math.max(0, textY - content.y));
+    const markY = textY - markPad;
+    const markHeight = inkHeight + markPad * 2;
 
     // keep the caret inside the viewport
     const caretX = this._prefixWidth(this._caret);
@@ -1066,14 +1071,14 @@ export class TextInputNode extends Node {
       const selStart = this._prefixWidth(a);
       const selEnd = this._prefixWidth(b);
       ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
-      ctx.fillRect(originX + selStart, textY, selEnd - selStart, inkHeight);
+      ctx.fillRect(originX + selStart, markY, selEnd - selStart, markHeight);
     }
 
     layout.draw(ctx, originX, textY);
 
     if (this._focused && this._caretOn && a === b) {
       ctx.fillStyle = this.props.caretColor ?? style.color;
-      ctx.fillRect(originX + caretX, textY, 1.5, inkHeight);
+      ctx.fillRect(originX + caretX, markY, 1.5, markHeight);
     }
     ctx.restore();
   }
