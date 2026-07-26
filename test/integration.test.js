@@ -268,6 +268,51 @@ test('textinput renders its value through the ntk text stack', async () => {
   }
 });
 
+test('textinput caret advances past trailing spaces', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const ref = React.createRef();
+    await render(
+      React.createElement(
+        'window',
+        { width: 200, height: 60 },
+        React.createElement('textinput', {
+          ref,
+          defaultValue: 'hi  x',
+          flexGrow: 1,
+        }),
+      ),
+      app,
+    );
+    const input = ref.current;
+
+    // TextLayout strips trailing whitespace, so prefix widths must add
+    // space advances back: each typed space moves the caret.
+    const w2 = input._prefixWidth(2); // "hi"
+    const w3 = input._prefixWidth(3); // "hi "
+    const w4 = input._prefixWidth(4); // "hi  "
+    const w5 = input._prefixWidth(5); // "hi  x"
+    assert.ok(w3 > w2, `caret must advance after a space (${w3} > ${w2})`);
+    assert.ok(w4 > w3, `and after a second space (${w4} > ${w3})`);
+    assert.ok(w5 > w4, `and after the next character (${w5} > ${w4})`);
+    // the explicit space advance should match real shaping: "hi  x" vs
+    // measured solid text should agree within a pixel
+    const full = app.fonts.layout('hi  x', {
+      family: 'sans-serif',
+      size: 14,
+    }).width;
+    assert.ok(
+      Math.abs(w5 - full) < 1.5,
+      `synthetic advance tracks shaping (${w5} vs ${full})`,
+    );
+
+    ReactX11.unmountComponentAtNode(app);
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
 test('renders <text> through the ntk text stack', async () => {
   const { app } = await createHeadlessApp();
   try {
