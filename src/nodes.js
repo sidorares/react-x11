@@ -21,7 +21,19 @@ const DRAWN_KINDS = new Set([
   'textinput',
 ]);
 
+// DevTools' measureHostInstance dereferences instance.ownerDocument
+// unconditionally once getClientRects exists; a null documentElement and
+// defaultView give it zero scroll offsets and no crash.
+export const DEVTOOLS_FAKE_DOCUMENT = {
+  documentElement: null,
+  defaultView: null,
+};
+
 export class Node {
+  get ownerDocument() {
+    return DEVTOOLS_FAKE_DOCUMENT;
+  }
+
   constructor(kind, props, app, { yoga = true } = {}) {
     this.kind = kind;
     this.props = props;
@@ -176,6 +188,28 @@ export class Node {
       x < this.abs.x + this.abs.width &&
       y < this.abs.y + this.abs.height
     );
+  }
+
+  /** DOM-ish rect accessor. React DevTools' Highlighter requires host
+   * instances to expose getClientRects() with a non-empty rect before it
+   * emits showNativeHighlight — without this, hovering the tree silently
+   * no-ops. Anything with getClientRects is also measured at mount via
+   * `instance.ownerDocument.documentElement` (see ownerDocument below). */
+  getClientRects() {
+    const r = this.abs;
+    if (!(r.width > 0 || r.height > 0)) return [];
+    return [
+      {
+        x: r.x,
+        y: r.y,
+        left: r.x,
+        top: r.y,
+        width: r.width,
+        height: r.height,
+        right: r.x + r.width,
+        bottom: r.y + r.height,
+      },
+    ];
   }
 
   /** Front-to-back hit test. Returns the deepest hit node or null. */
@@ -1066,6 +1100,11 @@ export class WindowNode extends Node {
     this.window = wnd;
     wnd._reactX11Node = this;
     wnd._reactFiber = this._reactFiber;
+    // windows are DevTools public instances too — see Node.getClientRects
+    wnd.getClientRects ??= () => [
+      { x: 0, y: 0, left: 0, top: 0, width: wnd.width, height: wnd.height },
+    ];
+    wnd.ownerDocument ??= DEVTOOLS_FAKE_DOCUMENT;
     this._attachWindowListeners();
     for (const child of this.children) {
       if (child.isWindow && !child.isPopup) {
@@ -1244,6 +1283,21 @@ export class WindowNode extends Node {
     if (process.env.REACT_X11_DEBUG_LAYOUT) {
       this._paintDebugOverlay(ctx, this, 0);
     }
+    const highlight = this._highlight;
+    if (highlight && !highlight.destroyed) {
+      const r = highlight.abs?.width
+        ? highlight.abs
+        : { x: 0, y: 0, width, height };
+      ctx.fillStyle = 'rgba(41, 128, 185, 0.35)';
+      ctx.fillRect(r.x, r.y, r.width, r.height);
+    }
+  }
+
+  /** DevTools hover highlight: tint a node's rect on the next paint. */
+  setHighlight(node) {
+    if (this._highlight === node) return;
+    this._highlight = node;
+    this.invalidate(false);
   }
 
   /** REACT_X11_DEBUG_LAYOUT=1: outline every drawn node, color by depth. */

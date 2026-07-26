@@ -21,8 +21,10 @@
 > (user handlers can preventDefault, DOM-style). `Select` widget component
 > (dropdown on `<popup>`, scrollable menu, Escape/blur close, themable) and
 > double/triple-click selection in textinput (DOM-style `detail` counting)
-> are in. Remaining: bidi-correct caret movement in textinput, DevTools
-> highlight-on-hover, npm publish.
+> are in. DevTools highlight-on-hover is in
+> (agent showNativeHighlight → window overlay tint). Remaining:
+> bidi-correct caret movement (upstream TextLayout caret API in review),
+> npm publish (release-please PR #17 → 1.0.0).
 
 Goal: **react-like ergonomics on top of ntk** — good enough to develop and debug
 real GUI apps. This document records the current state, what we learned from

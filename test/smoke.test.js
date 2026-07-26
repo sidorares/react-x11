@@ -866,3 +866,70 @@ test('text spans collect nested styles', () => {
 
   ReactX11.unmountComponentAtNode(app);
 });
+
+test('DevTools agent highlight tints the hovered node', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { attachHighlightAgent } =
+    await import('../src/DevToolsIntegration.js');
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 100 },
+      React.createElement(
+        'box',
+        { flexDirection: 'row', flexGrow: 1 },
+        React.createElement('box', { flexGrow: 1 }),
+        React.createElement('box', { flexGrow: 1, backgroundColor: 'blue' }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const right = wnd._reactX11Node.children[0].children[1];
+
+  // DevTools' Highlighter/measure paths require this DOM-ish contract on
+  // public instances before showNativeHighlight is ever emitted
+  assert.strictEqual(typeof right.getClientRects, 'function');
+  assert.deepStrictEqual(
+    right.getClientRects()[0].width,
+    100,
+    'getClientRects reflects the laid-out rect',
+  );
+  assert.ok(
+    right.ownerDocument && right.ownerDocument.documentElement === null,
+    'ownerDocument stub prevents measureHostInstance crashes',
+  );
+
+  const agent = new EventEmitter();
+  attachHighlightAgent(agent);
+
+  agent.emit('showNativeHighlight', right);
+  await tick();
+  const tint = () =>
+    wnd.ctx.ops.filter(
+      ([op, , , , , style]) =>
+        op === 'fillRect' && style === 'rgba(41, 128, 185, 0.35)',
+    );
+  assert.deepStrictEqual(tint().at(-1), [
+    'fillRect',
+    100,
+    0,
+    100,
+    100,
+    'rgba(41, 128, 185, 0.35)',
+  ]);
+
+  const before = wnd.ctx.ops.length;
+  agent.emit('hideNativeHighlight');
+  await tick();
+  const newOps = wnd.ctx.ops.slice(before);
+  assert.ok(
+    !newOps.some(([, , , , , style]) => style === 'rgba(41, 128, 185, 0.35)'),
+    'highlight cleared on hide',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
