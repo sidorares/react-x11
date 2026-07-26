@@ -1,11 +1,62 @@
-// Opt-in React DevTools bridge. Enabled by setting REACT_X11_DEVTOOLS=1 in the
-// environment; requires the `react-devtools-core` and `ws` packages (dev
-// dependencies of this repo, not shipped with the library).
+// Opt-in React DevTools bridge. Enabled by setting REACT_X11_DEVTOOLS=1 in
+// the environment; requires the `react-devtools-core` and `ws` dev
+// dependencies. Start the standalone UI first (`npx react-devtools`), then
+// run the app: REACT_X11_DEVTOOLS=1 npm run examples:dashboard
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 
+let api = null;
 let connected = false;
+
+/**
+ * Install the DevTools global hook. Must run before the first React commit
+ * so mounted roots are observed — Reconciler.js awaits this at module load
+ * when REACT_X11_DEVTOOLS is set.
+ */
+export async function prepare() {
+  try {
+    // react-devtools-core's backend bundle expects browser-ish globals
+    global.self ??= global;
+    global.window ??= global;
+    if (!global.WebSocket) {
+      global.WebSocket = (await import('ws')).default;
+    }
+    const mod = await import('react-devtools-core');
+    // v7 exposes the API on the default export under node ESM interop
+    api = mod.default?.initialize ? mod.default : mod;
+    api.initialize();
+  } catch (err) {
+    api = null;
+    console.warn(
+      'react-x11: REACT_X11_DEVTOOLS is set but devtools could not be loaded. ' +
+        'Install react-devtools-core and ws. Original error: ' +
+        err.message,
+    );
+  }
+}
+
+/** Connect the backend to the standalone DevTools app and register the
+ * renderer. Called by Reconciler.js right after the renderer is created. */
+export function connect(renderer) {
+  if (!api || connected) return;
+  connected = true;
+
+  api.connectToDevTools({
+    isAppActive: () => true,
+    host: process.env.REACT_X11_DEVTOOLS_HOST || 'localhost',
+    port: Number(process.env.REACT_X11_DEVTOOLS_PORT) || 8097,
+  });
+
+  renderer.injectIntoDevTools({
+    bundleType: 1,
+    version: require('../package.json').version,
+    rendererPackageName: 'react-x11',
+    findFiberByHostInstance: (instance) => instance._reactFiber,
+  });
+
+  watchForAgent();
+}
 
 /**
  * Wire a DevTools backend agent's element-hover events to the renderer:
@@ -52,40 +103,4 @@ function watchForAgent() {
   } catch {
     // highlight support is best-effort; the tree view still works without it
   }
-}
-
-export async function connect(renderer) {
-  if (connected) {
-    return;
-  }
-  connected = true;
-
-  let connectToDevTools;
-  try {
-    if (!global.WebSocket) {
-      global.WebSocket = (await import('ws')).default;
-    }
-    ({ connectToDevTools } = await import('react-devtools-core'));
-  } catch (err) {
-    console.warn(
-      'react-x11: REACT_X11_DEVTOOLS is set but devtools could not be loaded. ' +
-        'Install react-devtools-core and ws. Original error: ' +
-        err.message,
-    );
-    return;
-  }
-
-  connectToDevTools({
-    isAppActive: () => true,
-    host: process.env.REACT_X11_DEVTOOLS_HOST || 'localhost',
-  });
-
-  renderer.injectIntoDevTools({
-    bundleType: 1,
-    version: require('../package.json').version,
-    rendererPackageName: 'react-x11',
-    findFiberByHostInstance: (instance) => instance._reactFiber,
-  });
-
-  watchForAgent();
 }

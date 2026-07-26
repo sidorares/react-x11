@@ -296,6 +296,15 @@ const HostConfig = {
 
 export const Renderer = ReactReconciler(HostConfig);
 
+if (process.env.REACT_X11_DEVTOOLS) {
+  // Install the DevTools hook before any React commit (top-level await:
+  // module evaluation finishes before app code can call render) and
+  // register the renderer with the standalone DevTools app.
+  const devtools = await import('./DevToolsIntegration.js');
+  await devtools.prepare();
+  devtools.connect(Renderer);
+}
+
 const roots = new Map();
 let cachedNtkApp = null;
 
@@ -339,10 +348,6 @@ function renderIntoContainer(element, container, callback) {
     }
   });
   Renderer.flushSyncWork();
-
-  if (process.env.REACT_X11_DEVTOOLS) {
-    import('./DevToolsIntegration.js').then((m) => m.connect(Renderer));
-  }
 }
 
 /**

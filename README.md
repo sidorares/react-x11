@@ -114,9 +114,17 @@ npm run lint      # ESLint
 npm run format    # Prettier
 ```
 
-`REACT_X11_DEVTOOLS=1` connects to a running `react-devtools` instance —
-including highlight-on-hover: hovering an element in the DevTools tree
-tints its rect in the window.
+### React DevTools
+
+```sh
+npx react-devtools                                # 1. start the standalone UI
+REACT_X11_DEVTOOLS=1 npm run examples:dashboard   # 2. run any example with the bridge on
+```
+
+The component tree, props and hook state show up live in the DevTools
+window, and hovering an element in the tree tints its rect in the X11
+window (highlight-on-hover). `REACT_X11_DEVTOOLS_HOST` /
+`REACT_X11_DEVTOOLS_PORT` override the default `localhost:8097`.
 
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
 guidance, and [NEXT_STEPS.md](NEXT_STEPS.md) for the roadmap.
