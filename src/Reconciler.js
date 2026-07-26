@@ -26,6 +26,13 @@ import {
   ScrollViewNode,
   TextInputNode,
 } from './nodes.js';
+import {
+  MarkdownNode,
+  HtmlNode,
+  SvgNode,
+  SvgChildNode,
+  TexNode,
+} from './richnodes.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
@@ -39,6 +46,10 @@ const HOST_TYPES = [
   'canvas',
   'scrollview',
   'textinput',
+  'markdown',
+  'html',
+  'svg',
+  'tex',
 ];
 
 const isEventProp = (name) => /^on[A-Z]/.test(name);
@@ -76,12 +87,18 @@ const HostConfig = {
   scheduleMicrotask: queueMicrotask,
 
   getRootHostContext() {
-    return { isInsideText: false };
+    return { isInsideText: false, isInsideSvg: false, isInsideRichText: false };
   },
 
   getChildHostContext(parentHostContext, type) {
     return {
       isInsideText: parentHostContext.isInsideText || type === 'text',
+      // <svg> children are declarative SVG elements, not react-x11 nodes
+      isInsideSvg: parentHostContext.isInsideSvg || type === 'svg',
+      // <markdown>/<html>/<tex> take their content as a string child
+      // (react-markdown style); no elements are allowed inside
+      isInsideRichText:
+        type === 'markdown' || type === 'html' || type === 'tex',
     };
   },
 
@@ -98,6 +115,20 @@ const HostConfig = {
   resetAfterCommit() {},
 
   createInstance(type, props, rootContainer, hostContext, internalHandle) {
+    if (hostContext.isInsideSvg) {
+      // Inside <svg> every element is a declarative SVG element (React-DOM
+      // style: <circle cx={12} strokeWidth={2} />); SvgView skips tags it
+      // does not support.
+      const node = new SvgChildNode(type, props, rootContainer);
+      node._reactFiber = internalHandle;
+      return node;
+    }
+    if (hostContext.isInsideRichText) {
+      throw new Error(
+        `react-x11: <${type}> is not allowed inside <markdown>/<html>/<tex>; ` +
+          'their content is a string child (or the source prop).',
+      );
+    }
     if (hostContext.isInsideText && type !== 'text') {
       throw new Error(
         `react-x11: <${type}> is not allowed inside <text>; only nested ` +
@@ -134,6 +165,18 @@ const HostConfig = {
       case 'canvas':
         node = new CanvasNode(props, rootContainer);
         break;
+      case 'markdown':
+        node = new MarkdownNode(props, rootContainer);
+        break;
+      case 'html':
+        node = new HtmlNode(props, rootContainer);
+        break;
+      case 'svg':
+        node = new SvgNode(props, rootContainer);
+        break;
+      case 'tex':
+        node = new TexNode(props, rootContainer);
+        break;
       default:
         throw new Error(
           `react-x11: unknown element type <${type}>. Supported: ` +
@@ -146,10 +189,15 @@ const HostConfig = {
   },
 
   createTextInstance(text, rootContainer, hostContext) {
-    if (!hostContext.isInsideText) {
+    if (
+      !hostContext.isInsideText &&
+      !hostContext.isInsideRichText &&
+      !hostContext.isInsideSvg
+    ) {
       throw new Error(
         `react-x11: raw text ${JSON.stringify(text)} must be wrapped in a ` +
-          '<text> element.',
+          '<text> element (or be the string child of <markdown>/<html>/' +
+          '<tex>/an SVG <text>).',
       );
     }
     return new TextChunkNode(text, rootContainer);

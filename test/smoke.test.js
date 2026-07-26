@@ -62,6 +62,25 @@ function createMockApp() {
         drawImage(...args) {
           ops.push(['drawImage']);
         },
+        // enough of the canvas surface for SvgView.draw to run headlessly
+        scale(sx, sy) {
+          ops.push(['scale', sx, sy]);
+        },
+        transform() {},
+        setTransform() {},
+        getTransform() {
+          return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+        },
+        arc() {},
+        ellipse() {},
+        bezierCurveTo() {},
+        quadraticCurveTo() {},
+        createLinearGradient() {
+          return { addColorStop() {} };
+        },
+        createRadialGradient() {
+          return { addColorStop() {} };
+        },
       };
       const wnd = {
         id: app.windows.length + 100,
@@ -932,4 +951,35 @@ test('DevTools agent highlight tints the hovered node', async () => {
   );
 
   ReactX11.unmountComponentAtNode(app);
+});
+
+test('rich content elements mount, update and unmount headlessly', async () => {
+  const app = createMockApp();
+  const ui = (md) =>
+    React.createElement(
+      'window',
+      { width: 400, height: 300 },
+      React.createElement('markdown', null, md), // string child (react-markdown style)
+      React.createElement('html', { source: '<p>hello</p>' }),
+      React.createElement(
+        'svg',
+        { viewBox: '0 0 10 10', width: 20, height: 20 },
+        React.createElement('rect', { width: 10, height: 10, fill: '#f00' }),
+      ),
+      React.createElement('svg', {
+        source: '<svg viewBox="0 0 10 10"><circle r="5" fill="#00f"/></svg>',
+      }),
+      React.createElement('tex', { size: 20 }, 'x^2'),
+    );
+
+  ReactX11.render(ui('# One'), null, app);
+  await tick(); // paint flush: no fonts on the mock app, must not throw
+  const [wnd] = app.windows;
+  assert.ok(wnd.mapped, 'window mounted with rich content children');
+
+  ReactX11.render(ui('# Two'), null, app);
+  await tick();
+
+  ReactX11.unmountComponentAtNode(app);
+  assert.ok(wnd.destroyed, 'clean unmount');
 });

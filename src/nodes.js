@@ -19,6 +19,10 @@ const DRAWN_KINDS = new Set([
   'canvas',
   'scrollview',
   'textinput',
+  'markdown',
+  'html',
+  'svg',
+  'tex',
 ]);
 
 // DevTools' measureHostInstance dereferences instance.ownerDocument

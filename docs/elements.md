@@ -153,3 +153,102 @@ The escape hatch: a retained node whose content you paint.
 conical, `setLineDash`, round caps/joins, images, text — XRender-backed),
 translated to the node's origin and clipped to its bounds. `onDraw` runs on
 every repaint of the window.
+
+---
+
+## Rich content
+
+Thin wrappers over ntk's document widgets in standalone mode. The widget's
+own layout feeds a yoga measure function: given the width the flexbox
+offers, the element reports the document's content height — so rich content
+participates in flex layout and scrolls naturally inside a `<scrollview>`.
+Spacing comes from the box model (`padding` prop), not a widget page margin.
+
+Async content (a ` ```mermaid ` fence, an `<img>`) reflows when it
+arrives via ntk's `onInvalidate` widget hook (ntk ≥ 3.4.0 — the declared
+dependency).
+
+`<markdown>`, `<html>` and `<tex>` take their content as a **string
+child** (the react-markdown convention) or a `source` prop; the child
+wins when both are present. Use a template-literal expression — JSX
+collapses newlines in literal text:
+
+```jsx
+<markdown onLink={open}>{`
+# Hi
+
+Some *markdown*.
+`}</markdown>
+```
+
+### `<markdown>`
+
+ntk `MarkdownView`: headings, emphasis, lists, quotes, tables,
+syntax-highlighted code fences, `math`/`latex` fences (KaTeX), `mermaid`
+fences (flowchart/sequence, async).
+
+| prop               |                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------- |
+| children           | markdown text (string), or use `source`                                         |
+| `source`           | markdown text                                                                   |
+| `onLink(href, ev)` | a rendered link was clicked                                                     |
+| `theme`            | MarkdownView theme overrides (`{size, color, family, linkColor, codeTheme, …}`) |
+
+### `<html>`
+
+ntk `HtmlView`: its own CSS cascade (document `<style>`s plus the
+`stylesheet` prop), block/flex layout, images.
+
+| prop                           |                                               |
+| ------------------------------ | --------------------------------------------- |
+| children                       | HTML markup (string), or use `source`         |
+| `source`                       | HTML document or fragment                     |
+| `stylesheet`                   | extra author CSS (string or array)            |
+| `baseUrl`                      | resolve relative image `src` against this     |
+| `loadResource(url, {element})` | custom resource loader (or `null` to disable) |
+| `onLink(href, ev, element)`    | a link was clicked                            |
+| `theme`                        | base look (`{family, size, color}`)           |
+
+### `<svg>`
+
+ntk `SvgView` (static SVG via Path2D — paths, shapes, gradients,
+transforms, basic text). Sized like `<image>`: natural `viewBox` size,
+aspect-preserving shrink-to-width, or explicit `width`/`height` (the
+drawing scales to the content box).
+
+Content is **JSX children, like SVG in React DOM** — SVG elements are
+declarative children with camelCase props (`strokeWidth`, `fillRule`;
+native-camelCase attributes like `viewBox` stay as-is), re-rendered on
+any prop change:
+
+```jsx
+<svg viewBox="0 0 24 24" width={40} height={40}>
+  <circle cx={12} cy={12} r={10} fill={active ? '#2980b9' : '#ccc'} />
+  <path d="M8 12l3 3 5-6" stroke="white" strokeWidth={2} fill="none" />
+</svg>
+```
+
+A `source` markup string is also accepted (children win when both are
+present). Supported elements/attributes are SvgView's (unsupported tags
+are skipped); per-child event handlers are not dispatched — put handlers
+on the `<svg>` element itself.
+
+| prop      |                                   |
+| --------- | --------------------------------- |
+| children  | declarative SVG elements          |
+| `source`  | SVG markup string                 |
+| `viewBox` | coordinate system (children form) |
+
+### `<tex>`
+
+A KaTeX formula via ntk `layoutTex` — an intrinsically-sized box (no
+wrapping), drawn as server-side glyphs/rects.
+
+| prop          |                                         |
+| ------------- | --------------------------------------- |
+| children      | TeX source (string), or use `source`    |
+| `source`      | TeX source                              |
+| `size`        | base font size (the formula em), px     |
+| `color`       | ink color (default `#222222`)           |
+| `displayMode` | KaTeX display mode (default `false`)    |
+| `katex`       | extra KaTeX options (macros, strict, …) |

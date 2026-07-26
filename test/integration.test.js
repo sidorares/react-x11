@@ -351,3 +351,262 @@ test('renders <text> through the ntk text stack', async () => {
     await app.close();
   }
 });
+
+// Scan a region until it contains at least `minInk` pixels matching `match`.
+async function waitForInk(ctx, w, h, region, match, minInk, what) {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    const image = await readPixels(ctx, w, h);
+    const hits = [];
+    for (let y = region.y; y < region.y + region.height; y++) {
+      for (let x = region.x; x < region.x + region.width; x++) {
+        if (match(px(image, w, x, y))) hits.push([x, y]);
+      }
+    }
+    if (hits.length >= minInk) return hits;
+    if (Date.now() > deadline) {
+      assert.fail(`${what}: found only ${hits.length}/${minInk} pixels`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+const isDark = ([r, g, b]) => r < 128 && g < 128 && b < 128;
+
+test('<markdown> renders through MarkdownView and dispatches onLink', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const clicked = [];
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200, backgroundColor: 'white' },
+        React.createElement('markdown', {
+          source: '# Heading\n\n[the link](https://example.com/)',
+          onLink: (href) => clicked.push(href),
+        }),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+
+    // heading ink (2em bold) in the top region
+    await waitForInk(
+      ctx,
+      300,
+      200,
+      { x: 0, y: 0, width: 200, height: 50 },
+      isDark,
+      20,
+      'markdown heading ink',
+    );
+    // the link paragraph paints in the theme link color; click it
+    const linkPixels = await waitForInk(
+      ctx,
+      300,
+      200,
+      { x: 0, y: 0, width: 300, height: 120 },
+      ([r, g, b]) => b > 140 && b - r > 60 && b - g > 40,
+      5,
+      'link-colored ink',
+    );
+    const [lx, ly] = linkPixels[Math.floor(linkPixels.length / 2)];
+    wnd.emit('mousedown', { x: lx, y: ly, keycode: 1 });
+    wnd.emit('mouseup', { x: lx, y: ly, keycode: 1 });
+    assert.deepStrictEqual(clicked, ['https://example.com/']);
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('<html> renders styled boxes through HtmlView', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 200, height: 120, backgroundColor: 'white' },
+        React.createElement('html', {
+          source:
+            '<div style="width: 80px; height: 40px; background: #0000ff; margin: 0"></div>',
+        }),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    await waitForPixel(ctx, 200, 120, 20, 20, [0, 0, 255], 'html div blue');
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('<svg> scales its viewBox into the content box', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 100, height: 100, backgroundColor: 'white' },
+        React.createElement('svg', {
+          width: 60,
+          height: 60,
+          source:
+            '<svg viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" fill="#ff0000"/></svg>',
+        }),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    await waitForPixel(ctx, 100, 100, 30, 30, [255, 0, 0], 'svg rect red');
+    await waitForPixel(ctx, 100, 100, 80, 80, [255, 255, 255], 'outside white');
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('<tex> lays out and draws a formula', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 200, height: 80, backgroundColor: 'white' },
+        React.createElement('tex', {
+          source: 'x = \\frac{1}{2}',
+          size: 32,
+          displayMode: true,
+        }),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    await waitForInk(
+      ctx,
+      200,
+      80,
+      { x: 0, y: 0, width: 150, height: 80 },
+      isDark,
+      15,
+      'tex formula ink',
+    );
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('<markdown> mermaid fence reflows into a diagram (ntk onInvalidate)', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200, backgroundColor: 'white' },
+        React.createElement('markdown', {
+          source: '```mermaid\nflowchart LR\n  A[Hello] --> B[World]\n```',
+        }),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+
+    // the fence first paints as a code block; when the async mermaid model
+    // arrives the widget fires onInvalidate and the element reflows into
+    // diagram node boxes (theme fill #ececff). The grammar loads lazily,
+    // so allow more time than the default waitForInk deadline.
+    const isNodeFill = ([r, g, b]) =>
+      r > 220 && g > 220 && b > 245 && b > r + 8;
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      const image = await readPixels(ctx, 300, 200);
+      let hits = 0;
+      for (let y = 0; y < 120; y++) {
+        for (let x = 0; x < 300; x++) {
+          if (isNodeFill(px(image, 300, x, y))) hits++;
+        }
+      }
+      if (hits > 50) break;
+      if (Date.now() > deadline) {
+        assert.fail(`mermaid diagram never painted (${hits} fill pixels)`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('<svg> JSX children render and update declaratively', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const ui = (fill) =>
+      React.createElement(
+        'window',
+        { width: 100, height: 100, backgroundColor: 'white' },
+        React.createElement(
+          'svg',
+          { viewBox: '0 0 10 10', width: 60, height: 60 },
+          React.createElement('rect', {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+            fill,
+          }),
+        ),
+      );
+
+    const wnd = await render(ui('#ff0000'), app);
+    const ctx = wnd.getContext('2d');
+    await waitForPixel(ctx, 100, 100, 30, 30, [255, 0, 0], 'children rect red');
+
+    // prop update on the SVG child re-renders the drawing
+    await render(ui('#00ff00'), app);
+    await waitForPixel(
+      ctx,
+      100,
+      100,
+      30,
+      30,
+      [0, 255, 0],
+      'children rect green',
+    );
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('<markdown> accepts its content as a string child', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 100, backgroundColor: 'white' },
+        React.createElement('markdown', null, '# From a child string'),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    await waitForInk(
+      ctx,
+      300,
+      100,
+      { x: 0, y: 0, width: 280, height: 50 },
+      isDark,
+      20,
+      'child-string markdown heading ink',
+    );
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});

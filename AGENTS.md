@@ -31,6 +31,11 @@ no override-redirect staging (issue #4).
 - `src/nodes.js` — the retained node tree: `WindowNode` (real X window,
   paint/event/flex root), `BoxNode`, `TextNode` (+ spans/chunks),
   `ImageNode`, `CanvasNode`. Layout (yoga), painting, hit testing.
+- `src/richnodes.js` — rich-content elements (`<markdown>`, `<html>`,
+  `<svg>`, `<tex>`) wrapping ntk's document widgets in standalone mode:
+  the widget's `layout(width)`/`contentHeight` feeds a yoga measure
+  function, `draw(ctx, x, y)` paints, `onInvalidate` (ntk ≥ 3.4.0)
+  reflows on async content (mermaid, images).
 - `src/styles.js` — flat style props → yoga setters; paint prop
   classification; text style resolution.
 - `src/events.js` — `EventManager`: ntk window events → synthetic events
@@ -58,7 +63,7 @@ no override-redirect staging (issue #4).
 - The package is **ESM** (`"type": "module"`). ntk is ESM with top-level
   await in its graph; yoga-layout is ESM WASM. Everything imports statically
   now (no `require`).
-- ntk >= 3.3.0 comes from npm. Yoga is imported **from ntk**, so renderer
+- ntk >= 3.4.0 comes from npm. Yoga is imported **from ntk**, so renderer
   and ntk widgets share one WASM instance — do not add a direct
   yoga-layout dependency. `<textinput>` caret math uses ntk 3.3.0's
   `TextLayout.caretPosition`/`indexAt`.
