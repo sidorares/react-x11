@@ -541,3 +541,72 @@ test('<markdown> mermaid fence reflows into a diagram (ntk onInvalidate)', async
     await app.close();
   }
 });
+
+test('<svg> JSX children render and update declaratively', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const ui = (fill) =>
+      React.createElement(
+        'window',
+        { width: 100, height: 100, backgroundColor: 'white' },
+        React.createElement(
+          'svg',
+          { viewBox: '0 0 10 10', width: 60, height: 60 },
+          React.createElement('rect', {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 10,
+            fill,
+          }),
+        ),
+      );
+
+    const wnd = await render(ui('#ff0000'), app);
+    const ctx = wnd.getContext('2d');
+    await waitForPixel(ctx, 100, 100, 30, 30, [255, 0, 0], 'children rect red');
+
+    // prop update on the SVG child re-renders the drawing
+    await render(ui('#00ff00'), app);
+    await waitForPixel(
+      ctx,
+      100,
+      100,
+      30,
+      30,
+      [0, 255, 0],
+      'children rect green',
+    );
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('<markdown> accepts its content as a string child', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 100, backgroundColor: 'white' },
+        React.createElement('markdown', null, '# From a child string'),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    await waitForInk(
+      ctx,
+      300,
+      100,
+      { x: 0, y: 0, width: 280, height: 50 },
+      isDark,
+      20,
+      'child-string markdown heading ink',
+    );
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});

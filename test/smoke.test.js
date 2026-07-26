@@ -959,15 +959,17 @@ test('rich content elements mount, update and unmount headlessly', async () => {
     React.createElement(
       'window',
       { width: 400, height: 300 },
-      React.createElement('markdown', { source: md }),
+      React.createElement('markdown', null, md), // string child (react-markdown style)
       React.createElement('html', { source: '<p>hello</p>' }),
+      React.createElement(
+        'svg',
+        { viewBox: '0 0 10 10', width: 20, height: 20 },
+        React.createElement('rect', { width: 10, height: 10, fill: '#f00' }),
+      ),
       React.createElement('svg', {
-        source:
-          '<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="#f00"/></svg>',
-        width: 20,
-        height: 20,
+        source: '<svg viewBox="0 0 10 10"><circle r="5" fill="#00f"/></svg>',
       }),
-      React.createElement('tex', { source: 'x^2', size: 20 }),
+      React.createElement('tex', { size: 20 }, 'x^2'),
     );
 
   ReactX11.render(ui('# One'), null, app);

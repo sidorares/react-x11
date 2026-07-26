@@ -168,6 +168,19 @@ Async content (a ` ```mermaid ` fence, an `<img>`) reflows when it
 arrives via ntk's `onInvalidate` widget hook (ntk ≥ 3.4.0 — the declared
 dependency).
 
+`<markdown>`, `<html>` and `<tex>` take their content as a **string
+child** (the react-markdown convention) or a `source` prop; the child
+wins when both are present. Use a template-literal expression — JSX
+collapses newlines in literal text:
+
+```jsx
+<markdown onLink={open}>{`
+# Hi
+
+Some *markdown*.
+`}</markdown>
+```
+
 ### `<markdown>`
 
 ntk `MarkdownView`: headings, emphasis, lists, quotes, tables,
@@ -176,6 +189,7 @@ fences (flowchart/sequence, async).
 
 | prop               |                                                                                 |
 | ------------------ | ------------------------------------------------------------------------------- |
+| children           | markdown text (string), or use `source`                                         |
 | `source`           | markdown text                                                                   |
 | `onLink(href, ev)` | a rendered link was clicked                                                     |
 | `theme`            | MarkdownView theme overrides (`{size, color, family, linkColor, codeTheme, …}`) |
@@ -187,6 +201,7 @@ ntk `HtmlView`: its own CSS cascade (document `<style>`s plus the
 
 | prop                           |                                               |
 | ------------------------------ | --------------------------------------------- |
+| children                       | HTML markup (string), or use `source`         |
 | `source`                       | HTML document or fragment                     |
 | `stylesheet`                   | extra author CSS (string or array)            |
 | `baseUrl`                      | resolve relative image `src` against this     |
@@ -201,9 +216,28 @@ transforms, basic text). Sized like `<image>`: natural `viewBox` size,
 aspect-preserving shrink-to-width, or explicit `width`/`height` (the
 drawing scales to the content box).
 
-| prop     |            |
-| -------- | ---------- |
-| `source` | SVG markup |
+Content is **JSX children, like SVG in React DOM** — SVG elements are
+declarative children with camelCase props (`strokeWidth`, `fillRule`;
+native-camelCase attributes like `viewBox` stay as-is), re-rendered on
+any prop change:
+
+```jsx
+<svg viewBox="0 0 24 24" width={40} height={40}>
+  <circle cx={12} cy={12} r={10} fill={active ? '#2980b9' : '#ccc'} />
+  <path d="M8 12l3 3 5-6" stroke="white" strokeWidth={2} fill="none" />
+</svg>
+```
+
+A `source` markup string is also accepted (children win when both are
+present). Supported elements/attributes are SvgView's (unsupported tags
+are skipped); per-child event handlers are not dispatched — put handlers
+on the `<svg>` element itself.
+
+| prop      |                                   |
+| --------- | --------------------------------- |
+| children  | declarative SVG elements          |
+| `source`  | SVG markup string                 |
+| `viewBox` | coordinate system (children form) |
 
 ### `<tex>`
 
@@ -212,6 +246,7 @@ wrapping), drawn as server-side glyphs/rects.
 
 | prop          |                                         |
 | ------------- | --------------------------------------- |
+| children      | TeX source (string), or use `source`    |
 | `source`      | TeX source                              |
 | `size`        | base font size (the formula em), px     |
 | `color`       | ink color (default `#222222`)           |
