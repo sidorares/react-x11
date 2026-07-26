@@ -18,16 +18,21 @@ jobs:
         with:
           release-type: node
 
+      # Publishing uses npm trusted publishing (OIDC) — no token secret.
+      # Configure this repo + workflow as a trusted publisher for the package
+      # on npmjs.com; id-token: write above is what lets npm mint the OIDC
+      # credential, and provenance is generated automatically.
       - uses: actions/checkout@v4
         if: ${{ steps.release.outputs.release_created }}
       - uses: actions/setup-node@v4
         if: ${{ steps.release.outputs.release_created }}
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1
+      - run: npm install -g npm@latest
+        if: ${{ steps.release.outputs.release_created }}
       - run: npm ci
         if: ${{ steps.release.outputs.release_created }}
-      - run: npm publish --provenance --access public
+      - run: npm publish --access public
         if: ${{ steps.release.outputs.release_created }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
