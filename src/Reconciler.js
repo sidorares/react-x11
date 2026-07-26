@@ -1,336 +1,356 @@
-require('./DevToolsIntegration.js');
+const React = require('react');
 const ReactReconciler = require('react-reconciler');
-console.log(ReactReconciler);
+const {
+  ConcurrentRoot,
+  DefaultEventPriority,
+  NoEventPriority,
+} = require('react-reconciler/constants');
 
-const LOG_STEPS = false; //true;
-const log = (a, b, c) => {
-  if (LOG_STEPS) {
-    console.log(a, b, c);
+const packageJson = require('../package.json');
+
+// Props that configure the X11 window itself; everything else (event
+// handlers, children, refs) is handled elsewhere.
+const isEventProp = (name) => /^on[A-Z]/.test(name);
+
+function windowAttributes(props) {
+  const attributes = {};
+  for (const key of Object.keys(props)) {
+    if (key === 'children') continue;
+    attributes[key] = props[key];
   }
-};
+  return attributes;
+}
 
-const Renderer = ReactReconciler({
-  // the tree creation and updating methods. If you’re familiar with the DOM API
-  // this will look familiar
-  now: () => Date.now(),
+let currentUpdatePriority = NoEventPriority;
 
+const HostConfig = {
   supportsMutation: true,
+  supportsPersistence: false,
+  supportsHydration: false,
+  supportsResources: false,
+  supportsSingletons: false,
+  supportsTestSelectors: false,
+  supportsMicrotasks: true,
+  isPrimaryRenderer: true,
+  warnsIfNotActing: false,
 
-  //appendAllChildren() {
-  //  console.log('AAAA appendAllChildren()');
-  //},
+  rendererVersion: packageJson.version,
+  rendererPackageName: packageJson.name,
+  extraDevToolsConfig: null,
 
-  appendChildToContainer(config, container, publicInstance) {
-    console.log('AAAA appendAllChildren()');
-    console.log({ container, publicInstance });
+  scheduleTimeout: setTimeout,
+  cancelTimeout: clearTimeout,
+  noTimeout: -1,
+  scheduleMicrotask: queueMicrotask,
+
+  getRootHostContext(rootContainer) {
+    return {
+      rootWindowId: rootContainer.X.display.screen[0].root,
+    };
   },
 
-  createInstance(type, props, rootContainerInstance, hostContext, internalInstanceHandle) {
-    console.log('AAAA');
-    if (type === 'window') {
-      var windowAttributes = Object.assign({}, props);
-      if (typeof hostContext.rootWindowId === 'undefined') {
-        windowAttributes.overrideRedirect = true;
-      }
-      const wnd = rootContainerInstance.createWindow(windowAttributes);
-      if (!windowAttributes.overrideRedirect) {
-        wnd.map();
-      }
-      console.log('CREATED', wnd.id, props.name);
-      wnd._reactFiber = internalInstanceHandle;
-      return wnd;
-    } else {
-      return {
-        type,
-        props
-      };
+  getChildHostContext(parentHostContext, type) {
+    return { parent: parentHostContext, type };
+  },
+
+  getPublicInstance(instance) {
+    return instance;
+  },
+
+  prepareForCommit() {
+    return null;
+  },
+
+  resetAfterCommit() {},
+
+  createInstance(type, props, rootContainer, hostContext, internalHandle) {
+    if (type !== 'window') {
+      throw new Error(
+        `react-x11: unknown element type <${type}>. Only <window> is supported for now.`,
+      );
     }
+    const attributes = windowAttributes(props);
+    // Windows that are not direct children of the root get reparented into
+    // their parent window on commit; overrideRedirect keeps the window
+    // manager from decorating them in the meantime.
+    if (typeof hostContext.rootWindowId === 'undefined') {
+      attributes.overrideRedirect = true;
+    }
+    const wnd = rootContainer.createWindow(attributes);
+    if (!attributes.overrideRedirect) {
+      wnd.map();
+    }
+    wnd._reactFiber = internalHandle;
+    return wnd;
   },
 
-  // this is called instead of `appendChild` when the parentInstance is first
-  // being created and mounted
-  // added in https://github.com/facebook/react/pull/8400/
   appendInitialChild(parentInstance, child) {
-    const instance = parentInstance;
-    //
-    log('appendInitialChild');
-    //console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id)
-    //setTimeout(() => {
-    console.log('appendInitialChild REPARENTING!!! ======= ', child.id, parentInstance.id);
-
-    if (child.reparentTo) {
-      //child.reparentTo(parentInstance, 0, 0);//child.x, child.y);
-      if (instance.__children) {
-        parentInstance.__children.push(child);
-      } else {
-        parentInstance.__children = [child];
-      }
-    } else {
-      parentInstance.__children = [child];
-    }
-    //parentInstance.reparentTo(child, child.x, child.y);
-    //child.map();
-    //parentInstance.map()
-    //}, 2000);
-  },
-
-  appendChild(parentInstance, child) {
-    log('appendChild', parentInstance.name, child.name);
-    if (child.id && parentInstance.id) {
-      console.log('appendChild REPARENTING!!! ======= ', child.id, parentInstance.id);
-      child.reparentTo(parentInstance, child.x, child.y);
-      //child.map();
-    }
-
-    const instance = parentInstance;
-    if (instance.__children) {
+    if (parentInstance.__children) {
       parentInstance.__children.push(child);
     } else {
       parentInstance.__children = [child];
     }
-
-    // const index = parentInstance.children.indexOf(child);
-    // if (index !== -1) {
-    //   parentInstance.children.splice(index, 1);
-    // }
-    // parentInstance.children.push(child);
   },
 
-  removeChild(parentInstance, child) {
-    log('removeChild');
-    // parentInstance.removeChild(child);
-    console.log('Remove child!!!', child.id);
-    child.destroy();
-  },
-
-  insertBefore(parentInstance, child, beforeChild) {
-    log('insertBefore');
-    // parentInstance.insertBefore(child, beforeChild);
-  },
-
-  // finalizeInitialChildren is the final HostConfig method called before
-  // flushing the root component to the host environment
-
-  finalizeInitialChildren(instance, type, props, rootContainerInstance) {
-    log('finalizeInitialChildren');
-    // setInitialProperties(instance, type, props, rootContainerInstance);
-    //return false;
+  finalizeInitialChildren() {
+    // Return true so commitMount runs and reparents buffered children.
     return true;
   },
 
-  // prepare update is where you compute the diff for an instance. This is done
-  // here to separate computation of the diff to the applying of the diff. Fiber
-  // can reuse this work even if it pauses or aborts rendering a subset of the
-  // tree.
-
-  prepareUpdate(instance, type, oldProps, newProps, rootContainerInstance, hostContext) {
-    log('TODO: prepareUpdate');
-    //return null;
-    //return diffProperties(instance, type, oldProps, newProps, rootContainerInstance, hostContext);
-    return newProps;
-  },
-
-  commitUpdate(instance, updatePayload, type, oldProps, newProps, internalInstanceHandle) {
-    if (type === 'window') {
-      if (newProps.title && newProps != oldProps.title) {
-        instance.setTitle(newProps.title);
-      } else {
-        instance.setTitle('');
-      }
-      if (newProps.width !== oldProps.width || newProps.height !== oldProps.height) {
-        instance.resize(newProps.width, newProps.height);
-      }
-      if (newProps.x !== oldProps.x || newProps.y !== oldProps.x) {
-        instance.move(newProps.x, newProps.y);
-      }
+  commitMount(instance, type) {
+    if (type !== 'window' || !instance.__children) {
+      return;
     }
-
-    // Apply the diff to the DOM node.
-    // updateProperties(instance, updatePayload, type, oldProps, newProps);
-    log('TODO: commitUpdate');
-  },
-
-  // commitMount is called after initializeFinalChildren *if*
-  // `initializeFinalChildren` returns true.
-
-  commitMount(instance, type, newProps, internalInstanceHandle) {
-    console.log('commitMount:', newProps.name);
-    // noop
-    if (type === 'window') {
-      console.log('instance.__children', instance.__children);
-      if (instance.__children) {
-        instance.__children.forEach(w => {
-          console.log('!!!!!!============', w);
-          if (w.reparentTo) {
-            w.reparentTo(instance, w.x, w.y);
-            w.map();
-          }
-        });
+    for (const child of instance.__children) {
+      if (child.reparentTo) {
+        child.reparentTo(instance, child.x, child.y);
+        child.map();
       }
     }
   },
 
-  getPublicInstance(instance) {
-    log('getPublicInstance');
-    return instance;
-  },
-
-  getRootHostContext(rootContainerInstance) {
-    return {
-      rootWindowId: rootContainerInstance.X.display.screen[0].root
-    };
-  },
-
-  getChildHostContext(parentHostContext, type, rootContainerInstance, a, b, c) {
-    return {
-      parent: parentHostContext,
-      type
-    };
-  },
-
-  // the prepareForCommit and resetAfterCommit methods are necessary for any
-  // global side-effects you need to trigger in the host environment. In
-  // ReactDOM this does things like disable the ReactDOM events to ensure no
-  // callbacks are fired during DOM manipulations
-
-  prepareForCommit() {
-    log('prepareForCommit');
-  },
-
-  resetAfterCommit() {
-    log('resetAfterCommit');
-  },
-
-  // the following four methods are regarding TextInstances. In our example
-  // renderer we don’t have specific text nodes like the DOM does so we’ll just
-  // noop all of them.
-
-  shouldSetTextContent(props) {
-    log('shouldSetTextContent');
-    return false;
-
-    if (typeof props.children === 'string') {
-      return true;
+  appendChild(parentInstance, child) {
+    if (child.id && parentInstance.id && child.reparentTo) {
+      child.reparentTo(parentInstance, child.x, child.y);
+      child.map();
     }
+    if (parentInstance.__children) {
+      parentInstance.__children.push(child);
+    } else {
+      parentInstance.__children = [child];
+    }
+  },
+
+  appendChildToContainer() {
+    // Top-level windows are created directly on the X connection and mapped
+    // in createInstance; nothing to attach to the container.
+  },
+
+  insertBefore(parentInstance, child) {
+    // X11 stacking order is not modelled yet; treat as append.
+    HostConfig.appendChild(parentInstance, child);
+  },
+
+  insertInContainerBefore() {},
+
+  removeChild(parentInstance, child) {
+    if (parentInstance.__children) {
+      const index = parentInstance.__children.indexOf(child);
+      if (index !== -1) {
+        parentInstance.__children.splice(index, 1);
+      }
+    }
+    if (child.destroy) {
+      child.destroy();
+    }
+  },
+
+  removeChildFromContainer(container, child) {
+    if (child.destroy) {
+      child.destroy();
+    }
+  },
+
+  clearContainer() {},
+
+  commitUpdate(instance, type, oldProps, newProps) {
+    if (type !== 'window') {
+      return;
+    }
+    if (newProps.title !== oldProps.title) {
+      instance.setTitle(newProps.title || '');
+    }
+    if (
+      newProps.width !== oldProps.width ||
+      newProps.height !== oldProps.height
+    ) {
+      instance.resize(newProps.width, newProps.height);
+    }
+    if (newProps.x !== oldProps.x || newProps.y !== oldProps.y) {
+      instance.move(newProps.x, newProps.y);
+    }
+    for (const key of Object.keys(newProps)) {
+      if (
+        isEventProp(key) &&
+        newProps[key] !== oldProps[key] &&
+        instance.setProp
+      ) {
+        instance.setProp(key, newProps[key]);
+      }
+    }
+  },
+
+  shouldSetTextContent() {
     return false;
   },
 
-  resetTextContent(instance) {
-    log('resetTextContent');
+  createTextInstance(text) {
+    throw new Error(
+      `react-x11: text nodes are not supported yet (got ${JSON.stringify(text)}). ` +
+        'Wrap text handling in an expose/paint handler instead.',
+    );
   },
 
-  createTextInstance(text, rootContainerInstance, hostContext, internalInstanceHandle) {
-    log('createTextInstance');
-    return text;
+  commitTextUpdate() {},
+  resetTextContent() {},
+
+  hideInstance(instance) {
+    if (instance.unmap) {
+      instance.unmap();
+    }
   },
 
-  commitTextUpdate(textInstance, oldText, newText) {
-    console.log('commitTextUpdate', oldText, newText);
-    // noop
-    throw new Error('commitTextUpdate should not be called');
+  unhideInstance(instance) {
+    if (instance.map) {
+      instance.map();
+    }
   },
 
-  scheduleAnimationCallback() {
-    log('scheduleAnimationCallback');
+  hideTextInstance() {},
+  unhideTextInstance() {},
+
+  detachDeletedInstance() {},
+  preparePortalMount() {},
+  prepareScopeUpdate() {},
+  getInstanceFromScope() {
+    return null;
+  },
+  getInstanceFromNode() {
+    return null;
+  },
+  beforeActiveInstanceBlur() {},
+  afterActiveInstanceBlur() {},
+
+  // Update priority plumbing (React 19 scheduling contract).
+  setCurrentUpdatePriority(newPriority) {
+    currentUpdatePriority = newPriority;
+  },
+  getCurrentUpdatePriority() {
+    return currentUpdatePriority;
+  },
+  resolveUpdatePriority() {
+    return currentUpdatePriority !== NoEventPriority
+      ? currentUpdatePriority
+      : DefaultEventPriority;
+  },
+  shouldAttemptEagerTransition() {
+    return false;
+  },
+  trackSchedulerEvent() {},
+  resolveEventType() {
+    return null;
+  },
+  resolveEventTimeStamp() {
+    return -1.1;
+  },
+  requestPostPaintCallback() {},
+
+  // Suspensey commits are not used by this renderer.
+  maySuspendCommit() {
+    return false;
+  },
+  maySuspendCommitOnUpdate() {
+    return false;
+  },
+  maySuspendCommitInSyncRender() {
+    return false;
+  },
+  preloadInstance() {
+    return true;
+  },
+  startSuspendingCommit() {},
+  suspendInstance() {},
+  waitForCommitToBeReady() {
+    return null;
   },
 
-  scheduleDeferredCallback() {
-    log('scheduleDeferredCallback');
-  }
+  // Form actions / transitions (unused, required by the contract).
+  NotPendingTransition: null,
+  HostTransitionContext: React.createContext(null),
+  resetFormInstance() {},
 
-  //findHostInstance() {
-  //  console.log('Find Host Instance!', argunments);
-  //}
+  bindToConsole(methodName, args) {
+    return Function.prototype.bind.apply(console[methodName], [
+      console,
+      ...args,
+    ]);
+  },
+};
 
-  //useSyncScheduling: true
-});
+const Renderer = ReactReconciler(HostConfig);
 
-/**
- * Our public renderer. When someone requires your renderer, this is all they
- * should have access to. `render` and `unmountComponentAtNode` methods should
- * be considered required, though that isn’t strictly true.
- */
-const defaultContainer = {};
+const roots = new Map();
 let cachedNtkApp = null;
+
+async function connectAndRender(element, callback) {
+  // ntk is ESM (with top-level await in its graph), so it must be loaded with
+  // a dynamic import from this CommonJS module.
+  const { createClient } = await import('ntk');
+  let app;
+  try {
+    app = await createClient();
+  } catch (err) {
+    throw new Error(
+      'react-x11: could not connect to the X server. Is an X server running ' +
+        `and DISPLAY set (DISPLAY=${process.env.DISPLAY || '<unset>'})? ` +
+        'Original error: ' +
+        err.message,
+    );
+  }
+  cachedNtkApp = app;
+  ReactX11.render(element, callback, app);
+}
+
 const ReactX11 = {
   render(element, callback, container) {
     if (!container) {
       if (cachedNtkApp) {
         return ReactX11.render(element, callback, cachedNtkApp);
       }
-      const ntk = require('ntk');
-      ntk.createClient((err, app) => {
-        cachedNtkApp = app;
-        ReactX11.render(element, callback, app);
-      });
-      return;
+      // Returns a promise; an unawaited connection failure still surfaces as
+      // an unhandled rejection with a descriptive message.
+      return connectAndRender(element, callback);
     }
 
-    const containerKey = typeof container === 'undefined' ? defaultContainer : container;
-    let root = roots.get(containerKey);
+    let root = roots.get(container);
     if (!root) {
-      root = Renderer.createContainer(containerKey);
+      root = Renderer.createContainer(
+        container,
+        ConcurrentRoot,
+        null,
+        false,
+        null,
+        '',
+        (error) => console.error('react-x11: uncaught error', error),
+        (error) => console.error('react-x11: caught error', error),
+        (error) => console.error('react-x11: recoverable error', error),
+        null,
+      );
       roots.set(container, root);
     }
 
-    Renderer.updateContainer(element, root, null);
-    const publicInstance = Renderer.getPublicRootInstance(root);
-    callback && callback(publicInstance, container);
+    Renderer.updateContainerSync(element, root, null, () => {
+      const publicInstance = Renderer.getPublicRootInstance(root);
+      if (callback) {
+        callback(publicInstance, container);
+      }
+    });
+    Renderer.flushSyncWork();
 
-    if (process.env.NODE_ENV !== 'production') {
-      const injectIntoDevTools = Renderer.injectIntoDevTools;
-      console.log(ReactReconciler);
-      injectIntoDevTools({
-        bundleType: 1, // 0 for PROD, 1 for DEV
-        version: '0.1.0', // version for your renderer
-        rendererPackageName: 'react-x11-renderer', // package name
-        findFiberByHostInstance: instance => {
-          console.log('!!! findFiberByHostInstance', instance);
-          return instance._reactFiber;
-          // TODO: implement this
-          // not sure yet how to get ref to component or internal
-          // instance from HostConfig handlers
-        },
-        findHostInstanceByFiber: Renderer.findHostInstance
-      });
+    if (process.env.REACT_X11_DEVTOOLS) {
+      require('./DevToolsIntegration.js').connect(Renderer);
     }
   },
+
   unmountComponentAtNode(container) {
-    const containerKey = typeof container === 'undefined' ? defaultContainer : container;
-    const root = roots.get(containerKey);
+    const root = roots.get(container);
     if (root) {
-      Renderer.updateContainer(null, root, null, () => {
+      Renderer.updateContainerSync(null, root, null, () => {
         roots.delete(container);
       });
+      Renderer.flushSyncWork();
     }
-  }
-
-  //injectIntoDevTools() {
-  //  console.log('AAAAA, injectIntoDevTools()', arguments);
-  //}
-  // other API methods you may support, such as `renderPortal()`
+  },
 };
-
-const roots = new Map();
-const emptyObject = {};
-
-/*
-if (process.env.NODE_ENV !== 'production') {
-  const injectIntoDevTools = ReactReconciler.injectIntoDevTools;
-  console.log(ReactReconciler);
-  debugger;
-  injectIntoDevTools({
-    bundleType: 1, // 0 for PROD, 1 for DEV
-    version: '0.1.0', // version for your renderer
-    rendererPackageName: 'custom-renderer', // package name
-    findFiberByHostInstance: instance => {
-      // TODO: implement this
-      // not sure yet how to get ref to component or internal
-      // instance from HostConfig handlers
-    },
-    findHostInstanceByFiber: Renderer.findHostInstance
-  });
-}
-*/
 
 module.exports = ReactX11;

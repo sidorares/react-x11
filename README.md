@@ -1,5 +1,7 @@
 # react-x11
 
+[![CI](https://github.com/sidorares/react-x11/actions/workflows/ci.yml/badge.svg)](https://github.com/sidorares/react-x11/actions/workflows/ci.yml)
+
 React custom rendering where side effects are communication with [X11 server](https://www.x.org/wiki/Documentation/). The goal is to create a simple library where you would apply your React or React Native like experience to build small GUI programs to run in X Window environment (usually linux desktop, but I personally more often code under osx + [XQuattz](https://www.xquartz.org/))
 
 This library is mostly written in javascript all way down, no special bridging code in different language required. For communication with X server [node-x11](https://github.com/sidorares/node-x11) library is used, which is pure JS implementation of X11 protocol (think of it as xlib rewritten in javascript/node.js)
@@ -8,6 +10,7 @@ This library is mostly written in javascript all way down, no special bridging c
 
 Currently only `window` component is available, in the future we'll add windowless controls support, simple controls library and [yoga-layout](https://www.npmjs.com/package/yoga-layout) powered layout management
 
+Built on React 19 and react-reconciler 0.33. Requires Node.js >= 20.19.
 
 ## Trying it out
 
@@ -17,46 +20,62 @@ Clone this repo and from its folder run
 npm install
 ```
 
-After install is complete you can run examples by running one of those commands:
+Running the examples needs an X server (a linux desktop, Xvfb, or XQuartz on
+macOS) with `DISPLAY` set. [ntk](https://github.com/sidorares/ntk) is pure
+JavaScript all the way down — `npm install` never compiles anything. It is
+currently consumed straight from git (`github:sidorares/ntk`) until the next
+version is published to npm. `npm test` needs no X server at all: ntk ships
+an in-process pure-JS X server that the integration test renders into.
 
 ```sh
-npm run examples:simple
+npm run examples:simple        # JSX version, runs via tsx
 npm run examples:simple-nojsx
 npm run examples:xeyes
 ```
+
+## Developing
+
+```sh
+npm test          # headless smoke tests (no X server needed)
+npm run lint      # ESLint
+npm run format    # Prettier
+```
+
+See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
+guidance.
 
 ## Example
 
 ```js
 const React = require('react');
-const ReactX11 = require('react-x11')
+const ReactX11 = require('react-x11');
 class App extends React.Component {
-
-  handleRef (win) {
+  handleRef(win) {
+    if (!win) return;
     // win is https://github.com/sidorares/ntk/blob/master/lib/window.js instance
-    win.on('expose', ev => {
+    win.on('expose', (ev) => {
+      const ctx = win.getContext('2d');
       ctx.fillStyle = 'black';
       ctx.fillText('Hello', ev.x, ev.y);
-    })
+    });
   }
 
   render() {
-
-    const paintRadialGradient = e => {
+    const paintRadialGradient = (e) => {
       const ctx = e.window.getContext('2d');
       const gradient = ctx.createRadialGradient(0, 0, 0, e.x, e.y, 500);
-      gradient.addColorStop(0, "green");
-      gradient.addColorStop(0.5, "green");
-      gradient.addColorStop(1, "rgb(255, 255, 255)");
+      gradient.addColorStop(0, 'green');
+      gradient.addColorStop(0.5, 'green');
+      gradient.addColorStop(1, 'rgb(255, 255, 255)');
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, ctx.width, ctx.height);
-    }
+    };
 
     return (
-      <window ref={this.handleRef} onMouseDown={ev => console.log('hello')}>
+      <window ref={this.handleRef} onMouseDown={(ev) => console.log('hello')}>
         <window onMouseMove={paintRadialGradient} />
       </window>
-    )
+    );
   }
 }
 

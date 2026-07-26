@@ -1,71 +1,38 @@
-if (process.env.NODE_ENV !== 'production') {
-  const defineProperty = Object.defineProperty;
-  defineProperty(global, 'WebSocket', {
-    value: require('ws')
-  });
+// Opt-in React DevTools bridge. Enabled by setting REACT_X11_DEVTOOLS=1 in the
+// environment; requires the `react-devtools-core` and `ws` packages (dev
+// dependencies of this repo, not shipped with the library).
+let connected = false;
 
-  global.window = global;
-  defineProperty(global, 'window', {
-    value: global
-  });
+function connect(renderer) {
+  if (connected) {
+    return;
+  }
+  connected = true;
 
-  const { connectToDevTools } = require('react-devtools-core');
+  let connectToDevTools;
+  try {
+    global.WebSocket = global.WebSocket || require('ws');
+    ({ connectToDevTools } = require('react-devtools-core'));
+  } catch (err) {
+    console.warn(
+      'react-x11: REACT_X11_DEVTOOLS is set but devtools could not be loaded. ' +
+        'Install react-devtools-core and ws. Original error: ' +
+        err.message,
+    );
+    return;
+  }
+
   connectToDevTools({
-    isAppActive() {
-      return true;
-    },
-    host: 'localhost'
+    isAppActive: () => true,
+    host: process.env.REACT_X11_DEVTOOLS_HOST || 'localhost',
   });
 
-  const highlight = function(n) {
-    // TODO: add code to highlight components
-    // probably allow component to provide hook to highlight itself
-    // and only as a fallback draw rectangle overlay on top
-    //console.log('highlight!!!');
-
-    debugger;
-
-    const ctx = n.getContext('2d');
-    ctx.beginPath();
-    ctx.strokeStyle = 'red';
-    ctx.lineWidth = 3;
-    ctx.fillRect(0, 0, n.window, n.height);
-    ctx.stroke();
-  };
-
-  const hideHighlight = function(n) {
-    // TODO: add code to hide highlight
-    //console.log('hide highlight!!!');
-    const ctx = n.getContext('2d');
-    ctx.beginPath();
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 3;
-    ctx.fillRect(0, 0, n.width, n.height);
-    ctx.stroke();
-  };
-
-  window.__REACT_DEVTOOLS_GLOBAL_HOOK__.on('react-devtools', agent => {
-    //agent.on('highlight', data => hl.highlight(data.node, data.name));
-    higlightedNodes = [];
-    agent.on('highlight', data => {
-      // TODO try to implement 'highlighted' state via change in '__hilighted' prop?
-      const firstInternalKey = Object.keys(agent.reactInternals)[0];
-      const internals = agent.reactInternals[firstInternalKey];
-      if (internals) {
-        // TODO this will only work if injectInternals/findFiberByHostInstance
-        // is implemented in ./Reconsiler.js
-        const ele = internals.getReactElementFromNative(data.node);
-        console.log(ele);
-        debugger;
-      }
-      highlight(data.node, data.name);
-      higlightedNodes.push(data.node);
-    });
-    agent.on('hideHighlight', () => {
-      higlightedNodes.forEach(n => {
-        hideHighlight(n);
-      });
-      higlightedNodes = [];
-    });
+  renderer.injectIntoDevTools({
+    bundleType: 1,
+    version: require('../package.json').version,
+    rendererPackageName: 'react-x11',
+    findFiberByHostInstance: (instance) => instance._reactFiber,
   });
 }
+
+module.exports = { connect };

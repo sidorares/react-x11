@@ -2,15 +2,22 @@
   "name": "react-x11",
   "version": "0.0.1",
   "description": "react renderer with X11 as a target",
-  "main": "./dist/index.js",
+  "main": "./src/index.js",
+  "files": [
+    "src"
+  ],
   "scripts": {
-    "examples:simple": "babel-node examples/simple",
-    "examples:simple-nojsx": "node examples/simple-nojsx",
-    "examples:xeyes": "babel-node examples/xeyes"
+    "test": "node --test",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "examples:simple": "tsx examples/simple.jsx",
+    "examples:simple-nojsx": "node examples/simple-nojsx.js",
+    "examples:xeyes": "node examples/xeyes.js"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/sidorares/react-x11"
+    "url": "git+https://github.com/sidorares/react-x11.git"
   },
   "keywords": [
     "react",
@@ -19,15 +26,28 @@
     "x11",
     "ui"
   ],
-  "author": "Andrey Sidorov <sidorares@yandex.ru>",
+  "author": "Andrey Sidorov <andrey.sidorov@gmail.com>",
   "license": "MIT",
+  "engines": {
+    "node": ">=20.19"
+  },
   "dependencies": {
-    "extrude-polyline": "^1.0.6",
-    "react": "^16.6.3",
-    "react-reconciler": "^0.17.2"
+    "ntk": "github:sidorares/ntk",
+    "react-reconciler": "^0.33.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.8"
   },
   "devDependencies": {
-    "react-devtools": "^3.4.2",
-    "react-devtools-core": "^3.4.2"
+    "@eslint/js": "^9.32.0",
+    "eslint": "^9.32.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.0.0",
+    "prettier": "^3.6.0",
+    "react": "^19.2.8",
+    "tsx": "^4.23.1"
   }
 }
