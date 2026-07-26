@@ -18,9 +18,9 @@
 
 ## Roadmap refresh — what's missing now (for the next session)
 
-### 1. Expose ntk's rich-content widgets as elements — DONE
+### 1. Expose ntk's rich-content widgets as elements — DONE (PR #27)
 
-Shipped in `src/richnodes.js` (branch `feat/rich-content`): `<markdown>`,
+Shipped in `src/richnodes.js`: `<markdown>`,
 `<html>`, `<svg>`, `<tex>` wrap the ntk document widgets in standalone
 mode — `layout(width)`/`contentHeight` feed a yoga measure function,
 `draw(ctx, x, y)` paints into the window context, `linkAt` is wired into
