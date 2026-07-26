@@ -146,7 +146,15 @@ react-native-dom-like architecture.
   attachments instead — GitHub's user-attachments storage, the same one
   used when pasting or drag-&-dropping an image into the PR description.
   Commit an image under `docs/img/` only when it is useful beyond the PR
-  itself (README, docs site). Caveat for agents: user-attachments has no
-  API (browser session only — PATs/OAuth are rejected), so generate the
-  PNGs, leave placeholders in the PR body, and hand the file paths to a
-  human to drag in.
+  itself (README, docs site).
+- user-attachments still has **no public API**
+  (github/community#29993) — uploading needs a browser session, so it
+  can't be done with a PAT or `gh` alone. The maintainer drives it with a
+  small local tool that replays the web UI's upload flow using a saved
+  session cookie; if you don't have that, generate the PNGs, leave
+  `<!-- drag in: name.png -->` placeholders in the PR body, and hand over
+  the file paths.
+- A freshly uploaded asset is **private**: its URL 404s for logged-out
+  visitors until it is referenced from content they can see. Embedding it
+  in the PR body is what publishes it — a bare uploaded URL is useless on
+  its own.
