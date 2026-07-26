@@ -37,23 +37,20 @@ Left for later: per-link pointer cursor (cursor is per-node today),
 
 ### 2. Standard UI components (plain React, like `Select`)
 
-In `src/components.js` (or split to `src/components/` as it grows):
+Mostly DONE (PR #30): `Button`, `Checkbox`, `Radio`/`RadioGroup`,
+`Switch`, `ProgressBar` shipped in `src/components.js` with a shared
+merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
+`useControl` hook (hover/focus, click + Space/Enter, disabled). Gallery:
+`examples/widgets.jsx`. Still open:
 
-- **Checkbox** — box + canvas checkmark (or ntk Path2D), `checked`,
-  `onChange`, Space toggles, focusable, label as children
-- **Radio / RadioGroup** — group via context (like tasks.jsx's
-  DispatchContext pattern); arrow keys move selection within the group
-  (needs nothing new from the renderer)
-- **Switch** — Checkbox variant with sliding thumb (animate via
-  requestAnimationFrame on the window ref, or step-render)
 - **Slider** — drag via the `_defaultMouseDrag`-style pattern but in
   userland (onMouseDown + window-level move? needs pointer-capture
   exposure — see renderer gaps below)
-- **ProgressBar** — trivial (two boxes)
+- **Switch animation** — thumb snaps today; animate via
+  requestAnimationFrame on the window ref, or step-render
 - **Tooltip** — `<popup>` + hover timer; extract the anchoring math from
   `Select` into a shared `useAnchor(ref)` hook
 - **Menu/MenuBar, ContextMenu** — generalize examples/menu.jsx
-- **Button** — the examples re-implement it 3×; promote to a component
 
 ### 3. Renderer gaps found while building the above
 
@@ -72,6 +69,9 @@ In `src/components.js` (or split to `src/components/` as it grows):
   (NEXT_STEPS §8.4 below); fine so far, measure before optimizing
 - **Stacking of real windows** — `insertBefore` for `<window>`/`<popup>`
   ignores order (X ConfigureWindow stackMode not modelled)
+- ~~WM close button~~ DONE: `<window onCloseRequest>` opts into
+  WM_DELETE_WINDOW and dispatches at discrete priority (unmount/hide/quit
+  is the handler's choice); see examples/windows.jsx
 - **Keyboard**: AltGr/compose/IME not handled (ntk TODO), key repeat is
   server-side (works), keymap beyond index 0/1 unhandled
 

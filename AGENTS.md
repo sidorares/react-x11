@@ -55,8 +55,10 @@ no override-redirect staging (issue #4).
 - `npm test` — node:test. **Headless: no X server needed.** Primary feedback
   loop; keep it green and extend it when touching the host config.
 - `npm run lint` / `npm run format` — ESLint 9 (flat config) + Prettier.
-- `npm run examples:{simple,simple-nojsx,xeyes,dashboard,tasks}` — need a
-  running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation).
+- `npm run examples:{simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,windows}`
+  — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
+  automation). All examples export their App and skip auto-running under
+  `REACT_X11_NO_AUTORUN=1` so scripts/tests can import them.
 - `npm run screenshots` — regenerate the README/docs images
   (`docs/img/*.png`) headlessly: renders the real examples into the
   in-process X server, drives them through the real event pipeline, and

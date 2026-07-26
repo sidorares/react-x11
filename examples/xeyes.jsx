@@ -4,33 +4,50 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from '../src/index.js';
 
-function Eye({ color, lookingAt }) {
+function Eye({ lookingAt }) {
   return (
     <canvas
       flexGrow={1}
       onDraw={(ctx, { width, height, node }) => {
+        const cx = width / 2;
+        const cy = height / 2;
+        const rx = cx - 4;
+        const ry = cy - 4;
+
         // lookingAt is in root (screen) coordinates; convert to eye-local
         const win = node.root.window;
-        const px = lookingAt.x - win.x - node.abs.x - width / 2;
-        const py = lookingAt.y - win.y - node.abs.y - height / 2;
+        const dx = lookingAt.x - (win.x ?? 0) - node.abs.x - cx;
+        const dy = lookingAt.y - (win.y ?? 0) - node.abs.y - cy;
 
-        ctx.fillStyle = color;
-        ctx.fillRect(0, 0, width, height);
-        const gradient = ctx.createRadialGradient(
-          px + width / 2,
-          py + height / 2,
+        // sclera
+        ctx.fillStyle = 'white';
+        ctx.strokeStyle = 'black';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // pupil: aim at the pointer, clamped inside the sclera
+        const pr = Math.min(rx, ry) * 0.35;
+        const reachX = Math.max(1, rx - pr - 4);
+        const reachY = Math.max(1, ry - pr - 4);
+        const nx = dx / reachX;
+        const ny = dy / reachY;
+        const overshoot = Math.hypot(nx, ny);
+        const s = overshoot > 1 ? 1 / overshoot : 1;
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.ellipse(
+          cx + nx * s * reachX,
+          cy + ny * s * reachY,
+          pr,
+          pr,
           0,
-          width / 2,
-          height / 2,
-          width / 2,
+          0,
+          Math.PI * 2,
         );
-        gradient.addColorStop(0, color);
-        gradient.addColorStop(0.5, color);
-        gradient.addColorStop(0.505, 'white');
-        gradient.addColorStop(0.995, 'white');
-        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, width, height);
+        ctx.fill();
       }}
     />
   );
@@ -41,6 +58,7 @@ function App({ app }) {
 
   // While the pointer is outside the window we get no motion events; poll.
   useEffect(() => {
+    if (!app) return undefined;
     const id = setInterval(() => {
       app.rootWindow().queryPointer((err, pointer) => {
         if (!err) setLookingAt({ x: pointer.childX, y: pointer.childY });
@@ -59,12 +77,16 @@ function App({ app }) {
       }
     >
       <box flexDirection="row" flexGrow={1}>
-        <Eye color="green" lookingAt={lookingAt} />
-        <Eye color="blue" lookingAt={lookingAt} />
+        <Eye lookingAt={lookingAt} />
+        <Eye lookingAt={lookingAt} />
       </box>
     </window>
   );
 }
 
-const root = await createRoot();
-root.render(<App app={root.app} />);
+export default App;
+
+if (!process.env.REACT_X11_NO_AUTORUN) {
+  const root = await createRoot();
+  root.render(<App app={root.app} />);
+}
