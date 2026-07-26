@@ -7,6 +7,53 @@ const require = createRequire(import.meta.url);
 
 let connected = false;
 
+/**
+ * Wire a DevTools backend agent's element-hover events to the renderer:
+ * hovering an element in the DevTools tree tints its rect in the window.
+ * Exported separately so it can be tested without react-devtools-core.
+ */
+export function attachHighlightAgent(agent) {
+  let highlightedRoot = null;
+
+  const show = (payload) => {
+    // newer devtools versions pass an array of public instances
+    const target = Array.isArray(payload) ? payload[0] : payload;
+    // public instances are ntk windows for <window>/<popup>, nodes otherwise
+    const node = target?._reactX11Node ?? target;
+    const root = node?.root;
+    if (!root || typeof root.setHighlight !== 'function') return;
+    if (highlightedRoot && highlightedRoot !== root) {
+      highlightedRoot.setHighlight(null);
+    }
+    highlightedRoot = root;
+    root.setHighlight(node);
+  };
+
+  const hide = () => {
+    highlightedRoot?.setHighlight(null);
+    highlightedRoot = null;
+  };
+
+  agent.addListener?.('showNativeHighlight', show);
+  agent.addListener?.('hideNativeHighlight', hide);
+  agent.addListener?.('shutdown', hide);
+}
+
+function watchForAgent() {
+  const hook = global.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  if (!hook) return;
+  try {
+    if (hook.reactDevtoolsAgent) {
+      attachHighlightAgent(hook.reactDevtoolsAgent);
+    } else if (typeof hook.on === 'function') {
+      // the backend emits 'react-devtools' once the agent is initialized
+      hook.on('react-devtools', (agent) => attachHighlightAgent(agent));
+    }
+  } catch {
+    // highlight support is best-effort; the tree view still works without it
+  }
+}
+
 export async function connect(renderer) {
   if (connected) {
     return;
@@ -39,4 +86,6 @@ export async function connect(renderer) {
     rendererPackageName: 'react-x11',
     findFiberByHostInstance: (instance) => instance._reactFiber,
   });
+
+  watchForAgent();
 }

@@ -114,7 +114,9 @@ npm run lint      # ESLint
 npm run format    # Prettier
 ```
 
-`REACT_X11_DEVTOOLS=1` connects to a running `react-devtools` instance.
+`REACT_X11_DEVTOOLS=1` connects to a running `react-devtools` instance —
+including highlight-on-hover: hovering an element in the DevTools tree
+tints its rect in the window.
 
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
 guidance, and [NEXT_STEPS.md](NEXT_STEPS.md) for the roadmap.

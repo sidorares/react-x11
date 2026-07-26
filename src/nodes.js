@@ -1244,6 +1244,21 @@ export class WindowNode extends Node {
     if (process.env.REACT_X11_DEBUG_LAYOUT) {
       this._paintDebugOverlay(ctx, this, 0);
     }
+    const highlight = this._highlight;
+    if (highlight && !highlight.destroyed) {
+      const r = highlight.abs?.width
+        ? highlight.abs
+        : { x: 0, y: 0, width, height };
+      ctx.fillStyle = 'rgba(41, 128, 185, 0.35)';
+      ctx.fillRect(r.x, r.y, r.width, r.height);
+    }
+  }
+
+  /** DevTools hover highlight: tint a node's rect on the next paint. */
+  setHighlight(node) {
+    if (this._highlight === node) return;
+    this._highlight = node;
+    this.invalidate(false);
   }
 
   /** REACT_X11_DEBUG_LAYOUT=1: outline every drawn node, color by depth. */
