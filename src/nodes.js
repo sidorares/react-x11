@@ -11,6 +11,7 @@ import {
   TEXT_LAYOUT_PROPS,
 } from './styles.js';
 import { EventManager } from './events.js';
+import { runWithPriority, DiscreteEventPriority } from './priority.js';
 
 const DRAWN_KINDS = new Set([
   'box',
@@ -1156,6 +1157,27 @@ export class WindowNode extends Node {
     wnd.on('expose', (ev) => {
       this.props.onExpose?.(ev);
     });
+    // WM close button: with an onCloseRequest prop the window opts into the
+    // WM_DELETE_WINDOW protocol and the handler decides what happens
+    // (unmount, hide, quit). Without it the WM default stands (the server
+    // kills the connection). Opt-in is decided at realize time.
+    if (this.props.onCloseRequest && typeof wnd.setActions === 'function') {
+      wnd.setActions();
+      const X = this.app.X;
+      if (typeof X?.InternAtom === 'function') {
+        X.InternAtom(false, 'WM_DELETE_WINDOW', (err, atom) => {
+          if (!err) this._wmDeleteAtom = atom;
+        });
+      }
+      wnd.on('message', (ev) => {
+        if (this._wmDeleteAtom != null && ev.data?.[0] === this._wmDeleteAtom) {
+          // a WM close is a user action: discrete priority, like clicks
+          runWithPriority(DiscreteEventPriority, () => {
+            this.props.onCloseRequest?.(ev);
+          });
+        }
+      });
+    }
     this.events.attach();
   }
 

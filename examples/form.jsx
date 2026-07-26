@@ -2,7 +2,7 @@
 // on <popup>), submit via Enter or button, result styled by the selections.
 // Run with: npm run examples:form  (needs an X server / DISPLAY)
 import React, { useState } from 'react';
-import { createRoot, Select } from '../src/index.js';
+import { Button, createRoot, Select } from '../src/index.js';
 
 const COLORS = [
   { value: '#2980b9', label: 'Blue' },
@@ -16,30 +16,6 @@ const SIZES = [
   { value: 20, label: 'Medium' },
   { value: 28, label: 'Large' },
 ];
-
-function Button({ label, onPress }) {
-  const [hover, setHover] = useState(false);
-  return (
-    <box
-      focusable
-      cursor="pointer"
-      padding={8}
-      paddingLeft={16}
-      paddingRight={16}
-      borderRadius={4}
-      backgroundColor={hover ? '#1f6693' : '#2980b9'}
-      alignItems="center"
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      onClick={onPress}
-      onKeyDown={(ev) => {
-        if (ev.codepoint === 32 || ev.keysym === 0xff0d) onPress();
-      }}
-    >
-      <text color="white">{label}</text>
-    </box>
-  );
-}
 
 function App() {
   const [name, setName] = useState('');
@@ -85,7 +61,7 @@ function App() {
         </box>
 
         <box flexDirection="row">
-          <Button label="Sign" onPress={submit} />
+          <Button primary label="Sign" onPress={submit} />
         </box>
 
         <box flexGrow={1} justifyContent="center" alignItems="center">

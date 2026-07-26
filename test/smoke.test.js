@@ -9,7 +9,13 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 // exercised without a running X server.
 function createMockApp() {
   const app = {
-    X: { display: { screen: [{ root: 1 }] }, keycode2keysyms: {} },
+    X: {
+      display: { screen: [{ root: 1 }] },
+      keycode2keysyms: {},
+      InternAtom(onlyIfExists, name, cb) {
+        cb(null, name === 'WM_DELETE_WINDOW' ? 999 : 1);
+      },
+    },
     windows: [],
     createWindow(attributes) {
       const handlers = {};
@@ -125,6 +131,9 @@ function createMockApp() {
         setTitle(title) {
           wnd.title = title;
           wnd.calls.push(['setTitle', title]);
+        },
+        setActions() {
+          wnd.calls.push(['setActions']);
         },
         setCursor(name) {
           wnd.cursor = name;
@@ -1195,5 +1204,59 @@ test('ProgressBar fill width follows value', async () => {
     Math.abs(fill.abs.width - 100) <= 1,
     `fill should be ~half the track, got ${fill.abs.width}`,
   );
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('multiple root windows share one tree; onCloseRequest handles WM close', async () => {
+  const app = createMockApp();
+  const events = [];
+  function Wrapper() {
+    const [open, setOpen] = React.useState(true);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement('window', {
+        width: 100,
+        height: 80,
+        title: 'main',
+        onCloseRequest: () => events.push('main-close'),
+      }),
+      open &&
+        React.createElement('window', {
+          width: 90,
+          height: 70,
+          title: 'satellite',
+          onCloseRequest: () => {
+            events.push('sat-close');
+            setOpen(false);
+          },
+        }),
+    );
+  }
+  ReactX11.render(React.createElement(Wrapper), null, app);
+  await tick();
+  assert.strictEqual(app.windows.length, 2, 'two real top-level windows');
+  const sat = app.windows[1];
+  assert.ok(
+    sat.calls.some((c) => c[0] === 'setActions'),
+    'onCloseRequest opts the window into WM_DELETE_WINDOW',
+  );
+
+  // WM close button: ClientMessage with data[0] = WM_DELETE_WINDOW atom
+  sat.emit('message', { format: 32, data: [999, 0, 0, 0, 0] });
+  await tick();
+  assert.deepStrictEqual(events, ['sat-close']);
+  assert.strictEqual(
+    sat.destroyed,
+    true,
+    'unmounting the closed <window> destroys the real window',
+  );
+  assert.strictEqual(app.windows[0].destroyed, false, 'main window stays');
+
+  // unrelated client messages do not fire the handler
+  app.windows[0].emit('message', { format: 32, data: [123, 0, 0, 0, 0] });
+  await tick();
+  assert.deepStrictEqual(events, ['sat-close']);
+
   ReactX11.unmountComponentAtNode(app);
 });
