@@ -18,29 +18,22 @@
 
 ## Roadmap refresh — what's missing now (for the next session)
 
-### 1. Expose ntk's rich-content widgets as elements
+### 1. Expose ntk's rich-content widgets as elements — DONE
 
-ntk ships document viewers with a standalone mode
-(`layout(width)` + `draw(ctx, x, y)` + `contentHeight` + `onInvalidate`)
-that slots directly into a yoga measure function + `_paintContent`. One
-generic `NtkViewNode` base can wrap them all:
+Shipped in `src/richnodes.js` (branch `feat/rich-content`): `<markdown>`,
+`<html>`, `<svg>`, `<tex>` wrap the ntk document widgets in standalone
+mode — `layout(width)`/`contentHeight` feed a yoga measure function,
+`draw(ctx, x, y)` paints into the window context, `linkAt` is wired into
+the mousedown default action (`onLink` prop), and `<scrollview>` wrapping
+works via the normal measured-height path. Async content (mermaid models,
+HTML images) reflows through the widgets' `onInvalidate` hook — filed and
+implemented upstream as sidorares/ntk#75 (needs the next ntk release;
+static content works on 3.3.0). `<mermaid>` needs no dedicated element
+(markdown fences cover it); `<paragraph>` stays out (see below —
+maxLines/ellipsis would be a TextLayout feature first).
 
-- `<markdown source>` — MarkdownView (incl. code fences, tables, math,
-  async mermaid via `onInvalidate` → `root.invalidate(true)`)
-- `<html source stylesheet onLink>` — HtmlView (its own CSS cascade; also
-  gives us `linkAt` for click handling)
-- `<svg source>` — SvgView
-- `<tex source displayMode>` — TexView
-- `<mermaid source>` — via MarkdownView's mermaid path or `layoutMermaid`
-- `<paragraph>` — NOT needed as a new element: `<text>` already does
-  multi-span shaped paragraphs; consider instead exposing `TextLayout`
-  options we don't surface yet (maxLines/ellipsis would need ntk support).
-- image and canvas2d already exist as `<image>` / `<canvas>`.
-
-Interaction questions to solve: scrolling (wrap in `<scrollview>` — needs
-measure-height plumbing), link clicks (HtmlView/MarkdownView `linkAt(x,y)`
-→ wire into the hit-test/default-action path), invalidation for async
-content (mermaid), and resource loading (`loadResource`/`baseUrl` props).
+Left for later: per-link pointer cursor (cursor is per-node today),
+`<tex>` baseline alignment with surrounding `<text>`.
 
 ### 2. Standard UI components (plain React, like `Select`)
 

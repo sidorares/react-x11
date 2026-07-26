@@ -17,7 +17,8 @@
     "examples:dashboard": "tsx examples/dashboard.jsx",
     "examples:tasks": "tsx examples/tasks.jsx",
     "examples:menu": "tsx examples/menu.jsx",
-    "examples:form": "tsx examples/form.jsx"
+    "examples:form": "tsx examples/form.jsx",
+    "examples:richtext": "tsx examples/richtext.jsx"
   },
   "repository": {
     "type": "git",

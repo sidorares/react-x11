@@ -2,6 +2,7 @@
 
 - [elements.md](elements.md) — the host elements: `<window>`, `<popup>`,
   `<box>`, `<scrollview>`, `<text>`, `<textinput>`, `<image>`, `<canvas>`,
+  and the rich-content wrappers `<markdown>`, `<html>`, `<svg>`, `<tex>`,
   their props and refs.
 - [components.md](components.md) — widget components built on the
   primitives: `Select`.

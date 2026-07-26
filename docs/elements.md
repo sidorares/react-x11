@@ -153,3 +153,68 @@ The escape hatch: a retained node whose content you paint.
 conical, `setLineDash`, round caps/joins, images, text — XRender-backed),
 translated to the node's origin and clipped to its bounds. `onDraw` runs on
 every repaint of the window.
+
+---
+
+## Rich content
+
+Thin wrappers over ntk's document widgets in standalone mode. The widget's
+own layout feeds a yoga measure function: given the width the flexbox
+offers, the element reports the document's content height — so rich content
+participates in flex layout and scrolls naturally inside a `<scrollview>`.
+Spacing comes from the box model (`padding` prop), not a widget page margin.
+
+Async content (a ` ```mermaid ` fence, an `<img>`) needs ntk > 3.3.0's
+`onInvalidate` widget hook to trigger a reflow when it arrives
+([sidorares/ntk#75](https://github.com/sidorares/ntk/pull/75)); everything
+static works on 3.3.0.
+
+### `<markdown>`
+
+ntk `MarkdownView`: headings, emphasis, lists, quotes, tables,
+syntax-highlighted code fences, `math`/`latex` fences (KaTeX), `mermaid`
+fences (flowchart/sequence, async).
+
+| prop               |                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------- |
+| `source`           | markdown text                                                                   |
+| `onLink(href, ev)` | a rendered link was clicked                                                     |
+| `theme`            | MarkdownView theme overrides (`{size, color, family, linkColor, codeTheme, …}`) |
+
+### `<html>`
+
+ntk `HtmlView`: its own CSS cascade (document `<style>`s plus the
+`stylesheet` prop), block/flex layout, images.
+
+| prop                           |                                               |
+| ------------------------------ | --------------------------------------------- |
+| `source`                       | HTML document or fragment                     |
+| `stylesheet`                   | extra author CSS (string or array)            |
+| `baseUrl`                      | resolve relative image `src` against this     |
+| `loadResource(url, {element})` | custom resource loader (or `null` to disable) |
+| `onLink(href, ev, element)`    | a link was clicked                            |
+| `theme`                        | base look (`{family, size, color}`)           |
+
+### `<svg>`
+
+ntk `SvgView` (static SVG via Path2D — paths, shapes, gradients,
+transforms, basic text). Sized like `<image>`: natural `viewBox` size,
+aspect-preserving shrink-to-width, or explicit `width`/`height` (the
+drawing scales to the content box).
+
+| prop     |            |
+| -------- | ---------- |
+| `source` | SVG markup |
+
+### `<tex>`
+
+A KaTeX formula via ntk `layoutTex` — an intrinsically-sized box (no
+wrapping), drawn as server-side glyphs/rects.
+
+| prop          |                                         |
+| ------------- | --------------------------------------- |
+| `source`      | TeX source                              |
+| `size`        | base font size (the formula em), px     |
+| `color`       | ink color (default `#222222`)           |
+| `displayMode` | KaTeX display mode (default `false`)    |
+| `katex`       | extra KaTeX options (macros, strict, …) |

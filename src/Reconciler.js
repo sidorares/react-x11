@@ -26,6 +26,7 @@ import {
   ScrollViewNode,
   TextInputNode,
 } from './nodes.js';
+import { MarkdownNode, HtmlNode, SvgNode, TexNode } from './richnodes.js';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
@@ -39,6 +40,10 @@ const HOST_TYPES = [
   'canvas',
   'scrollview',
   'textinput',
+  'markdown',
+  'html',
+  'svg',
+  'tex',
 ];
 
 const isEventProp = (name) => /^on[A-Z]/.test(name);
@@ -133,6 +138,18 @@ const HostConfig = {
         break;
       case 'canvas':
         node = new CanvasNode(props, rootContainer);
+        break;
+      case 'markdown':
+        node = new MarkdownNode(props, rootContainer);
+        break;
+      case 'html':
+        node = new HtmlNode(props, rootContainer);
+        break;
+      case 'svg':
+        node = new SvgNode(props, rootContainer);
+        break;
+      case 'tex':
+        node = new TexNode(props, rootContainer);
         break;
       default:
         throw new Error(
