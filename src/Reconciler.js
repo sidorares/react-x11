@@ -23,6 +23,38 @@ function windowAttributes(props) {
 
 let currentUpdatePriority = NoEventPriority;
 
+// Host instances are lightweight handles, not X11 windows. React creates
+// instances bottom-up (completeWork) during the render phase, where the
+// parent window cannot exist yet and where concurrent rendering may still
+// discard the work. The real CreateWindow calls happen top-down in the
+// commit phase (see realize), so every window names its actual parent from
+// the start — no ReparentWindow, no override-redirect staging (issue #4).
+function createHandle(props, rootContainer, fiber) {
+  return {
+    props,
+    container: rootContainer,
+    fiber,
+    children: [],
+    window: null,
+  };
+}
+
+function realize(handle, parentWindow) {
+  const attributes = windowAttributes(handle.props);
+  if (parentWindow) {
+    attributes.parent = parentWindow;
+  }
+  const wnd = handle.container.createWindow(attributes);
+  wnd._reactFiber = handle.fiber;
+  handle.window = wnd;
+  for (const child of handle.children) {
+    realize(child, wnd);
+  }
+  // Children map before their parent, so the subtree appears at once when
+  // the outermost window maps.
+  wnd.map();
+}
+
 const HostConfig = {
   supportsMutation: true,
   supportsPersistence: false,
@@ -43,18 +75,18 @@ const HostConfig = {
   noTimeout: -1,
   scheduleMicrotask: queueMicrotask,
 
-  getRootHostContext(rootContainer) {
-    return {
-      rootWindowId: rootContainer.X.display.screen[0].root,
-    };
+  getRootHostContext() {
+    return {};
   },
 
-  getChildHostContext(parentHostContext, type) {
-    return { parent: parentHostContext, type };
+  getChildHostContext(parentHostContext) {
+    return parentHostContext;
   },
 
   getPublicInstance(instance) {
-    return instance;
+    // Refs attach in the layout phase, after the mutation phase realized
+    // the window, so this is always the live ntk window.
+    return instance.window || instance;
   },
 
   prepareForCommit() {
@@ -69,61 +101,40 @@ const HostConfig = {
         `react-x11: unknown element type <${type}>. Only <window> is supported for now.`,
       );
     }
-    const attributes = windowAttributes(props);
-    // Windows that are not direct children of the root get reparented into
-    // their parent window on commit; overrideRedirect keeps the window
-    // manager from decorating them in the meantime.
-    if (typeof hostContext.rootWindowId === 'undefined') {
-      attributes.overrideRedirect = true;
-    }
-    const wnd = rootContainer.createWindow(attributes);
-    if (!attributes.overrideRedirect) {
-      wnd.map();
-    }
-    wnd._reactFiber = internalHandle;
-    return wnd;
+    // No X11 calls here: this runs in the render phase, which concurrent
+    // React may discard. The window is created in the commit phase.
+    return createHandle(props, rootContainer, internalHandle);
   },
 
   appendInitialChild(parentInstance, child) {
-    if (parentInstance.__children) {
-      parentInstance.__children.push(child);
-    } else {
-      parentInstance.__children = [child];
-    }
+    parentInstance.children.push(child);
   },
 
   finalizeInitialChildren() {
-    // Return true so commitMount runs and reparents buffered children.
-    return true;
+    return false;
   },
 
-  commitMount(instance, type) {
-    if (type !== 'window' || !instance.__children) {
-      return;
-    }
-    for (const child of instance.__children) {
-      if (child.reparentTo) {
-        child.reparentTo(instance, child.x, child.y);
-        child.map();
-      }
-    }
-  },
+  commitMount() {},
 
   appendChild(parentInstance, child) {
-    if (child.id && parentInstance.id && child.reparentTo) {
-      child.reparentTo(parentInstance, child.x, child.y);
-      child.map();
+    const index = parentInstance.children.indexOf(child);
+    if (index !== -1) {
+      parentInstance.children.splice(index, 1);
     }
-    if (parentInstance.__children) {
-      parentInstance.__children.push(child);
-    } else {
-      parentInstance.__children = [child];
+    parentInstance.children.push(child);
+    if (!child.window) {
+      realize(child, parentInstance.window);
     }
+    // An already-realized child means a reorder among siblings; X11
+    // stacking order is not modelled yet.
   },
 
-  appendChildToContainer() {
-    // Top-level windows are created directly on the X connection and mapped
-    // in createInstance; nothing to attach to the container.
+  appendChildToContainer(container, child) {
+    if (!child.window) {
+      // Top-level window: realize the whole subtree top-down against the
+      // screen root.
+      realize(child, null);
+    }
   },
 
   insertBefore(parentInstance, child) {
@@ -131,51 +142,52 @@ const HostConfig = {
     HostConfig.appendChild(parentInstance, child);
   },
 
-  insertInContainerBefore() {},
+  insertInContainerBefore(container, child) {
+    HostConfig.appendChildToContainer(container, child);
+  },
 
   removeChild(parentInstance, child) {
-    if (parentInstance.__children) {
-      const index = parentInstance.__children.indexOf(child);
-      if (index !== -1) {
-        parentInstance.__children.splice(index, 1);
-      }
+    const index = parentInstance.children.indexOf(child);
+    if (index !== -1) {
+      parentInstance.children.splice(index, 1);
     }
-    if (child.destroy) {
-      child.destroy();
+    if (child.window) {
+      // DestroyWindow destroys all subwindows server-side as well.
+      child.window.destroy();
+      child.window = null;
     }
   },
 
   removeChildFromContainer(container, child) {
-    if (child.destroy) {
-      child.destroy();
+    if (child.window) {
+      child.window.destroy();
+      child.window = null;
     }
   },
 
   clearContainer() {},
 
   commitUpdate(instance, type, oldProps, newProps) {
-    if (type !== 'window') {
+    instance.props = newProps;
+    const wnd = instance.window;
+    if (type !== 'window' || !wnd) {
       return;
     }
     if (newProps.title !== oldProps.title) {
-      instance.setTitle(newProps.title || '');
+      wnd.setTitle(newProps.title || '');
     }
     if (
       newProps.width !== oldProps.width ||
       newProps.height !== oldProps.height
     ) {
-      instance.resize(newProps.width, newProps.height);
+      wnd.resize(newProps.width, newProps.height);
     }
     if (newProps.x !== oldProps.x || newProps.y !== oldProps.y) {
-      instance.move(newProps.x, newProps.y);
+      wnd.move(newProps.x, newProps.y);
     }
     for (const key of Object.keys(newProps)) {
-      if (
-        isEventProp(key) &&
-        newProps[key] !== oldProps[key] &&
-        instance.setProp
-      ) {
-        instance.setProp(key, newProps[key]);
+      if (isEventProp(key) && newProps[key] !== oldProps[key] && wnd.setProp) {
+        wnd.setProp(key, newProps[key]);
       }
     }
   },
@@ -195,21 +207,25 @@ const HostConfig = {
   resetTextContent() {},
 
   hideInstance(instance) {
-    if (instance.unmap) {
-      instance.unmap();
+    if (instance.window) {
+      instance.window.unmap();
     }
   },
 
   unhideInstance(instance) {
-    if (instance.map) {
-      instance.map();
+    if (instance.window) {
+      instance.window.map();
     }
   },
 
   hideTextInstance() {},
   unhideTextInstance() {},
 
-  detachDeletedInstance() {},
+  detachDeletedInstance(instance) {
+    // Descendants of a destroyed window were destroyed server-side by
+    // DestroyWindow; drop the JS-side reference.
+    instance.window = null;
+  },
   preparePortalMount() {},
   prepareScopeUpdate() {},
   getInstanceFromScope() {
