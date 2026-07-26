@@ -29,13 +29,11 @@
   "author": "Andrey Sidorov <andrey.sidorov@gmail.com>",
   "license": "MIT",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   },
   "dependencies": {
+    "ntk": "github:sidorares/ntk",
     "react-reconciler": "^0.33.0"
-  },
-  "optionalDependencies": {
-    "ntk": "^2.2.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"

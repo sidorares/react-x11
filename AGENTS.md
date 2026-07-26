@@ -34,19 +34,23 @@ windowless controls, a small widget library, and yoga-layout powered layout.
   the host config.
 - `npm run lint` / `npm run format` — ESLint 9 (flat config) + Prettier.
 - `npm run examples:simple` (JSX via tsx), `examples:simple-nojsx`,
-  `examples:xeyes` — need a running X server (`DISPLAY` set; XQuartz on macOS,
-  Xvfb works for automation) **and** a successfully installed `ntk`.
+  `examples:xeyes` — need a running X server (`DISPLAY` set; XQuartz on
+  macOS, Xvfb works for automation).
 
 ## Gotchas
 
-- `ntk` is an **optionalDependency**: its transitive native modules
-  (`freetype2@0.3.x`, `weak-napi@1.x`) currently fail to build on modern
-  Node.js, so `npm install` tolerates its absence. The core renderer and the
-  test suite do not need it — `render(element, callback, container)` accepts
-  any ntk-compatible container, which is how tests inject a mock. Modernizing
-  ntk's native deps is upstream work in the ntk repo.
-- Tests render with a mock container defined in `test/smoke.test.js`. If you
-  add usage of a new ntk window method in the host config, add it to the mock.
+- `ntk` (>= 3.0.0) is a required dependency, currently consumed from git
+  (`github:sidorares/ntk`) until the next version is published to npm. It is
+  pure JavaScript — no native modules, nothing compiles at install time.
+- ntk is **ESM with top-level await** in its module graph, so it cannot be
+  `require()`d from this CommonJS codebase — only dynamic `import('ntk')`
+  works. That's why `connectAndRender` in `src/Reconciler.js` is async, and
+  why `ntk.createClient()` is promise-based there.
+- `test/smoke.test.js` renders with a mock container (fast, pins the host
+  config contract) — if you use a new ntk window method in the host config,
+  add it to the mock. `test/integration.test.js` runs end-to-end against
+  node-x11's in-process pure-JS X server (see ntk `docs/xserver.md`), so no
+  `$DISPLAY` is needed even for the real-client path.
 - Child (non-top-level) windows are created with `overrideRedirect: true`,
   then reparented into their parent and mapped in `commitMount`/`appendChild`.
   That ordering is load-bearing; the first smoke test pins it.
@@ -58,8 +62,8 @@ windowless controls, a small widget library, and yoga-layout powered layout.
 
 ## Style
 
-- CommonJS (`require`/`module.exports`) throughout; ESM migration is possible
-  future work, but ntk and friends are CJS.
+- CommonJS (`require`/`module.exports`) throughout, except the dynamic
+  `import('ntk')` noted above. ESM migration is possible future work.
 - Prettier (single quotes) is the formatter; run it before committing.
 - Conventional commit messages (`feat:`, `fix:`, `chore:`, ...) — releases are
   automated with release-please, which reads commit messages to compute

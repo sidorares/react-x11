@@ -282,30 +282,23 @@ const Renderer = ReactReconciler(HostConfig);
 const roots = new Map();
 let cachedNtkApp = null;
 
-function connectAndRender(element, callback) {
-  let ntk;
+async function connectAndRender(element, callback) {
+  // ntk is ESM (with top-level await in its graph), so it must be loaded with
+  // a dynamic import from this CommonJS module.
+  const { createClient } = await import('ntk');
+  let app;
   try {
-    ntk = require('ntk');
+    app = await createClient();
   } catch (err) {
     throw new Error(
-      'react-x11: the optional "ntk" dependency is not available, so react-x11 ' +
-        'cannot open an X11 connection by itself. Install ntk (it needs native ' +
-        'build tools) or pass a container to render(). Original error: ' +
+      'react-x11: could not connect to the X server. Is an X server running ' +
+        `and DISPLAY set (DISPLAY=${process.env.DISPLAY || '<unset>'})? ` +
+        'Original error: ' +
         err.message,
     );
   }
-  ntk.createClient((err, app) => {
-    if (err) {
-      throw new Error(
-        'react-x11: could not connect to the X server. Is an X server running ' +
-          `and DISPLAY set (DISPLAY=${process.env.DISPLAY || '<unset>'})? ` +
-          'Original error: ' +
-          err.message,
-      );
-    }
-    cachedNtkApp = app;
-    ReactX11.render(element, callback, app);
-  });
+  cachedNtkApp = app;
+  ReactX11.render(element, callback, app);
 }
 
 const ReactX11 = {
@@ -314,8 +307,9 @@ const ReactX11 = {
       if (cachedNtkApp) {
         return ReactX11.render(element, callback, cachedNtkApp);
       }
-      connectAndRender(element, callback);
-      return;
+      // Returns a promise; an unawaited connection failure still surfaces as
+      // an unhandled rejection with a descriptive message.
+      return connectAndRender(element, callback);
     }
 
     let root = roots.get(container);

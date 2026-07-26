@@ -10,7 +10,7 @@ This library is mostly written in javascript all way down, no special bridging c
 
 Currently only `window` component is available, in the future we'll add windowless controls support, simple controls library and [yoga-layout](https://www.npmjs.com/package/yoga-layout) powered layout management
 
-Built on React 19 and react-reconciler 0.33. Requires Node.js >= 20.
+Built on React 19 and react-reconciler 0.33. Requires Node.js >= 20.19.
 
 ## Trying it out
 
@@ -21,10 +21,11 @@ npm install
 ```
 
 Running the examples needs an X server (a linux desktop, Xvfb, or XQuartz on
-macOS) with `DISPLAY` set, and a successful install of the optional
-[ntk](https://github.com/sidorares/ntk) dependency — ntk contains native
-modules, so a C/C++ toolchain and freetype are needed for it to build. The
-renderer itself (and `npm test`) work without ntk or an X server.
+macOS) with `DISPLAY` set. [ntk](https://github.com/sidorares/ntk) is pure
+JavaScript all the way down — `npm install` never compiles anything. It is
+currently consumed straight from git (`github:sidorares/ntk`) until the next
+version is published to npm. `npm test` needs no X server at all: ntk ships
+an in-process pure-JS X server that the integration test renders into.
 
 ```sh
 npm run examples:simple        # JSX version, runs via tsx
