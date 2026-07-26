@@ -35,6 +35,11 @@ context — see [NEXT_STEPS.md](NEXT_STEPS.md) for why.
 | `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                                                                                                                                |
 | `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                                                                                                                |
 
+On top of the primitives the package exports widget **components** (plain
+React, no reconciler support needed): `Select` — a dropdown built on
+`<popup>` with keyboard support and a themable appearance
+(`SelectThemeProvider`).
+
 Events are synthetic with capture/bubble phases and hit testing over the
 drawn tree: `onClick`, `onMouseDown/Up/Move`, `onMouseEnter/Leave`,
 `onWheel` (default action scrolls the nearest `<scrollview>`),
@@ -95,6 +100,7 @@ npm run examples:xeyes         # canvas drawing + hooks
 npm run examples:dashboard     # context theming, custom hooks, components
 npm run examples:tasks         # useReducer, scrollview, keyboard interaction
 npm run examples:menu          # right-click context menu via <popup>
+npm run examples:form          # <textinput> + Select dropdowns
 ```
 
 `REACT_X11_DEBUG_LAYOUT=1` outlines every laid-out node (color = tree

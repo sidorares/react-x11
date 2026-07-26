@@ -50,6 +50,15 @@ function createMockApp() {
         setLineDash(segments) {
           ops.push(['setLineDash', segments]);
         },
+        moveTo(x, y) {
+          ops.push(['moveTo', x, y]);
+        },
+        lineTo(x, y) {
+          ops.push(['lineTo', x, y]);
+        },
+        closePath() {
+          ops.push(['closePath']);
+        },
         drawImage(...args) {
           ops.push(['drawImage']);
         },
@@ -695,6 +704,120 @@ test('dashed borders emit setLineDash when the context supports it', async () =>
   const dashOps = app.windows[0].ctx.ops.filter(([op]) => op === 'setLineDash');
   assert.deepStrictEqual(dashOps[0], ['setLineDash', [6, 4]]);
   assert.deepStrictEqual(dashOps.at(-1), ['setLineDash', []]);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: double-click selects word, triple-click selects all', async () => {
+  const app = createMockApp();
+  app.clipboard = {
+    writes: [],
+    write(text, opts) {
+      this.writes.push([text, opts?.selection ?? 'CLIPBOARD']);
+      return Promise.resolve();
+    },
+    read() {
+      return Promise.resolve('');
+    },
+  };
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 50 },
+      React.createElement('textinput', {
+        defaultValue: 'hello world',
+        flexGrow: 1,
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+
+  const clickAt = (x, y) => {
+    wnd.emit('mousedown', { x, y, keycode: 1 });
+    wnd.emit('mouseup', { x, y, keycode: 1 });
+  };
+
+  clickAt(10, 10); // focus, detail 1
+  clickAt(10, 10); // detail 2 → word select
+  assert.deepStrictEqual(input._selection(), [6, 11]);
+  assert.deepStrictEqual(app.clipboard.writes.at(-1), ['world', 'PRIMARY']);
+
+  clickAt(10, 10); // detail 3 → select all
+  assert.deepStrictEqual(input._selection(), [0, 11]);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Select opens a popup menu, picks an option, closes on Escape', async () => {
+  const { Select } = await import('../src/index.js');
+  const app = createMockApp();
+  const picks = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 240, height: 120 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 10 },
+        React.createElement(Select, {
+          options: ['red', 'green', 'blue'],
+          value: null,
+          width: 160,
+          onChange: (v) => picks.push(v),
+        }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const windowNode = wnd._reactX11Node;
+
+  const findFocusable = (node) => {
+    if (node.props?.focusable) return node;
+    for (const child of node.children) {
+      if (child.isWindow) continue;
+      const hit = findFocusable(child);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const trigger = findFocusable(windowNode);
+  assert.ok(trigger, 'Select trigger should be focusable');
+  const cx = trigger.abs.x + 10;
+  const cy = trigger.abs.y + trigger.abs.height / 2;
+
+  wnd.emit('mousedown', { x: cx, y: cy, keycode: 1 });
+  wnd.emit('mouseup', { x: cx, y: cy, keycode: 1 });
+  await tick();
+
+  assert.strictEqual(app.windows.length, 2, 'menu popup window created');
+  const popup = app.windows[1];
+  assert.strictEqual(popup.attributes.overrideRedirect, true);
+  assert.strictEqual(popup.attributes.width, trigger.abs.width);
+  await tick();
+
+  // click the first option inside the popup's own window
+  popup.emit('mousedown', { x: 20, y: 19, keycode: 1 });
+  popup.emit('mouseup', { x: 20, y: 19, keycode: 1 });
+  await tick();
+  assert.deepStrictEqual(picks, ['red']);
+  assert.strictEqual(popup.destroyed, true, 'menu closes after picking');
+
+  // reopen (wait out the multi-click window), then Escape closes
+  await new Promise((resolve) => setTimeout(resolve, 450));
+  wnd.emit('mousedown', { x: cx, y: cy, keycode: 1 });
+  wnd.emit('mouseup', { x: cx, y: cy, keycode: 1 });
+  await tick();
+  assert.strictEqual(app.windows.length, 3, 'menu reopened');
+  pressKey(app, wnd, { keysym: 0xff1b }); // Escape
+  await tick();
+  assert.strictEqual(app.windows[2].destroyed, true);
 
   ReactX11.unmountComponentAtNode(app);
 });
