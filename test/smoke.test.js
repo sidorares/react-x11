@@ -72,22 +72,28 @@ test('renders a top-level window with a child window', () => {
   ReactX11.render(element, null, app);
 
   assert.strictEqual(app.windows.length, 2);
-  const [child, top] = [app.windows[0], app.windows[1]];
+  // Windows are created top-down: the parent window first, then children
+  // created directly against it (issue #4) — no reparenting involved.
+  const [top, child] = [app.windows[0], app.windows[1]];
 
   assert.strictEqual(top.attributes.title, 'main');
   assert.strictEqual(top.mapped, true, 'top-level window should be mapped');
 
-  assert.strictEqual(child.attributes.overrideRedirect, true);
   assert.strictEqual(
-    child.parent,
+    child.attributes.parent,
     top,
-    'child should be reparented into the top window',
+    'child should be created with its parent window from the start',
   );
   assert.strictEqual(
-    child.mapped,
-    true,
-    'child should be mapped after reparenting',
+    child.attributes.overrideRedirect,
+    undefined,
+    'no override-redirect staging is needed with top-down creation',
   );
+  assert.ok(
+    !child.calls.some(([name]) => name === 'reparentTo'),
+    'child should never be reparented',
+  );
+  assert.strictEqual(child.mapped, true, 'child should be mapped');
 
   ReactX11.unmountComponentAtNode(app);
 });
@@ -110,6 +116,39 @@ test('applies prop updates to the window', () => {
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('adds a child to an already-mounted window top-down', () => {
+  const app = createMockApp();
+  const render = (withChild) =>
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        withChild
+          ? React.createElement('window', { width: 10, height: 10 })
+          : null,
+      ),
+      null,
+      app,
+    );
+
+  render(false);
+  assert.strictEqual(app.windows.length, 1);
+  const top = app.windows[0];
+
+  render(true);
+  assert.strictEqual(app.windows.length, 2);
+  const child = app.windows[1];
+  assert.strictEqual(
+    child.attributes.parent,
+    top,
+    'late-added child should be created against its real parent',
+  );
+  assert.strictEqual(child.mapped, true);
+  assert.ok(!child.calls.some(([name]) => name === 'reparentTo'));
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('destroys windows that are removed', () => {
   const app = createMockApp();
   const render = (withChild) =>
@@ -127,7 +166,7 @@ test('destroys windows that are removed', () => {
 
   render(true);
   assert.strictEqual(app.windows.length, 2);
-  const child = app.windows.find((w) => w.attributes.overrideRedirect);
+  const child = app.windows.find((w) => w.attributes.parent);
 
   render(false);
   assert.strictEqual(

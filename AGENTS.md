@@ -51,13 +51,17 @@ windowless controls, a small widget library, and yoga-layout powered layout.
   add it to the mock. `test/integration.test.js` runs end-to-end against
   node-x11's in-process pure-JS X server (see ntk `docs/xserver.md`), so no
   `$DISPLAY` is needed even for the real-client path.
-- Child (non-top-level) windows are created with `overrideRedirect: true`,
-  then reparented into their parent and mapped in `commitMount`/`appendChild`.
-  That ordering is load-bearing; the first smoke test pins it.
+- Host instances are lightweight handles; `createInstance` performs **no
+  X11 calls** (the render phase is discardable under concurrent React).
+  Real windows are created **top-down** in the commit phase — `realize()`
+  walks the handle tree from `appendChildToContainer`/`appendChild`, so
+  every `CreateWindow` names its actual parent and nothing is ever
+  reparented (issue #4). That ordering is load-bearing; the first smoke
+  test pins it.
 - `render()` uses `updateContainerSync` + `flushSyncWork`, so mounts/updates
   are applied synchronously — tests rely on that.
-- Instance bookkeeping uses `__children` arrays and a `_reactFiber` field
-  stashed on ntk window objects.
+- Instance bookkeeping lives on the handle (`children`, `props`, `window`);
+  a `_reactFiber` field is stashed on ntk window objects for DevTools.
 - Text nodes are not supported (`createTextInstance` throws on purpose).
 
 ## Style
