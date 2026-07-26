@@ -1,3 +1,7 @@
 node_modules/
 *.log
 .DS_Store
+
+# framed screenshots are machine-specific (they capture the local WM's
+# decorations), so they are generated on demand rather than committed
+docs/img/framed/

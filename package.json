@@ -21,7 +21,8 @@
     "examples:richtext": "tsx examples/richtext.jsx",
     "examples:widgets": "tsx examples/widgets.jsx",
     "examples:windows": "tsx examples/windows.jsx",
-    "screenshots": "tsx scripts/screenshots.jsx"
+    "screenshots": "tsx scripts/screenshots.jsx",
+    "screenshots:framed": "tsx scripts/screenshots-framed.jsx"
   },
   "repository": {
     "type": "git",
