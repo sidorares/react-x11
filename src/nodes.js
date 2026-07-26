@@ -847,6 +847,20 @@ export class TextInputNode extends Node {
     return chars.length;
   }
 
+  /** Word range around a code-point index (whitespace-delimited). */
+  _wordRangeAt(index) {
+    const chars = this._chars();
+    if (chars.length === 0) return [0, 0];
+    let i = Math.min(index, chars.length - 1);
+    const isSpace = (c) => /\s/.test(c);
+    if (isSpace(chars[i]) && i > 0) i--;
+    let a = i;
+    let b = i;
+    while (a > 0 && !isSpace(chars[a - 1])) a--;
+    while (b < chars.length && !isSpace(chars[b])) b++;
+    return [a, b];
+  }
+
   _defaultMouseDown(ev) {
     if (ev.button === 2) {
       // X11 middle-click: paste the PRIMARY selection at the click position
@@ -857,10 +871,28 @@ export class TextInputNode extends Node {
       return;
     }
     const i = this._indexAtX(ev.x);
+    if (ev.detail >= 3) {
+      this._anchor = 0;
+      this._caret = this._chars().length;
+      this._ownSelection();
+      return;
+    }
+    if (ev.detail === 2) {
+      const [a, b] = this._wordRangeAt(i);
+      this._anchor = a;
+      this._caret = b;
+      this._ownSelection();
+      return;
+    }
     this._caret = i;
     this._anchor = i;
     this._dragging = true;
     this._repaint();
+  }
+
+  _ownSelection() {
+    this._repaint();
+    if (this._caret !== this._anchor) this._copySelection('PRIMARY');
   }
 
   _defaultMouseDrag(ev) {

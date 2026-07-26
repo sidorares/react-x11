@@ -17,6 +17,22 @@ export class EventManager {
     this.hoverPath = [];
     this.downNode = null;
     this.focused = null;
+    this._lastClick = { time: 0, x: 0, y: 0, detail: 0 };
+  }
+
+  /** DOM-style click counting: repeated presses within 400ms / 4px bump
+   * `detail` (2 = double click, 3 = triple …). */
+  _clickDetail(native) {
+    const now = Date.now();
+    const last = this._lastClick;
+    const detail =
+      now - last.time < 400 &&
+      Math.abs(native.x - last.x) <= 4 &&
+      Math.abs(native.y - last.y) <= 4
+        ? last.detail + 1
+        : 1;
+    this._lastClick = { time: now, x: native.x, y: native.y, detail };
+    return detail;
   }
 
   attach() {
@@ -133,6 +149,7 @@ export class EventManager {
       this.focus(focusable ?? null);
       const ev = this.dispatch('MouseDown', target, native, {
         button: native.keycode,
+        detail: this._clickDetail(native),
       });
       if (!ev.defaultPrevented) {
         target._defaultMouseDown?.(ev);

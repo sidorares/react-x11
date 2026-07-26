@@ -4,6 +4,7 @@ export {
   unmountComponentAtNode,
   Renderer,
 } from './Reconciler.js';
+export { Select, SelectThemeProvider } from './components.js';
 
 import { render, createRoot, unmountComponentAtNode } from './Reconciler.js';
 

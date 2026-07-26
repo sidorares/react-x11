@@ -18,9 +18,11 @@
 > TextLayout prefix widths, Ctrl+C/X/V, PRIMARY middle-click paste and
 > select-to-own, controlled/uncontrolled, placeholder, blink, hover text
 > cursor), `borderStyle="dashed"`, and EventManager default-action hooks
-> (user handlers can preventDefault, DOM-style). Remaining: `<select>` on
-> top of popup, word-select/double-click and bidi-correct caret movement in
-> textinput, DevTools highlight-on-hover, npm publish.
+> (user handlers can preventDefault, DOM-style). `Select` widget component
+> (dropdown on `<popup>`, scrollable menu, Escape/blur close, themable) and
+> double/triple-click selection in textinput (DOM-style `detail` counting)
+> are in. Remaining: bidi-correct caret movement in textinput, DevTools
+> highlight-on-hover, npm publish.
 
 Goal: **react-like ergonomics on top of ntk** — good enough to develop and debug
 real GUI apps. This document records the current state, what we learned from
