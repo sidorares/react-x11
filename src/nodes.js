@@ -589,6 +589,7 @@ export class ScrollViewNode extends Node {
     }
     this.contentHeight =
       bottom + this.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
+    this._resolveScrollIntoView();
     this.scrollY = Math.min(
       Math.max(0, this.scrollY),
       Math.max(0, this.contentHeight - this.abs.height),
@@ -615,6 +616,39 @@ export class ScrollViewNode extends Node {
 
   scrollBy(dy) {
     this.scrollTo(this.scrollY + dy);
+  }
+
+  /**
+   * Scroll the minimum amount that brings a descendant fully into view.
+   * The request is queued rather than applied immediately: absolute rects
+   * only exist after a layout pass, so a caller reacting to a mount (a
+   * list widget moving its selection, say) would otherwise measure a node
+   * that has no geometry yet. `absolutize` resolves it against freshly
+   * computed yoga positions.
+   */
+  scrollIntoView(node) {
+    if (!node) return;
+    this._scrollIntoViewTarget = node;
+    this.root?.invalidate(true);
+  }
+
+  _resolveScrollIntoView() {
+    const target = this._scrollIntoViewTarget;
+    if (!target) return;
+    this._scrollIntoViewTarget = null;
+    if (target.destroyed || !target.yoga) return;
+    // offset of the target within our content box, summed up the chain so
+    // targets nested below a direct child work too
+    let top = 0;
+    for (let n = target; n && n !== this; n = n.parent) {
+      if (!n.yoga) return; // not (or no longer) inside this scrollview
+      top += n.yoga.getComputedTop();
+      if (!n.parent) return;
+    }
+    const bottom = top + target.yoga.getComputedHeight();
+    const viewport = this.abs.height;
+    if (bottom > this.scrollY + viewport) this.scrollY = bottom - viewport;
+    if (top < this.scrollY) this.scrollY = top;
   }
 
   paint(ctx) {

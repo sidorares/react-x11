@@ -35,6 +35,20 @@ Behavior: click / Space / Enter toggles the menu; Escape, focus loss, or
 picking closes it; the option list scrolls when taller than 220px; the
 trigger participates in Tab traversal.
 
+Keyboard, while the trigger is focused (the popup is override-redirect and
+never takes focus, so the trigger keeps handling keys with the menu open):
+
+| key               | closed         | open                                    |
+| ----------------- | -------------- | --------------------------------------- |
+| `Down` / `Up`     | opens the menu | move the active option, wrapping around |
+| `Home` / `End`    | —              | first / last option                     |
+| `Enter` / `Space` | opens the menu | pick the active option                  |
+| `Escape`          | —              | close without picking                   |
+
+The menu opens with the current value active, hovering an option makes it
+active (pointer and keyboard share one highlight), and the active option is
+scrolled into view.
+
 ### Theming
 
 ```jsx
