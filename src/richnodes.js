@@ -2,8 +2,7 @@
 // widgets in standalone mode (`layout(width)` + `draw(ctx, x, y)` +
 // `contentHeight`). One yoga measure function per node feeds the widget's
 // own layout into flexbox; async content (mermaid models, images) arrives
-// through the widget's `onInvalidate` hook (ntk > 3.3.0 — sidorares/ntk#75;
-// static content works without it).
+// through the widget's `onInvalidate` hook (ntk >= 3.4.0).
 import { MarkdownView, HtmlView, SvgView, layoutTex } from 'ntk';
 
 import { Node } from './nodes.js';
@@ -43,7 +42,7 @@ class DocumentViewNode extends Node {
     if (this.view || !this.app?.fonts) return this.view;
     this.view = this._createView();
     if (this.view) {
-      // ntk > 3.3.0 notifies here when async content (a mermaid model, an
+      // ntk >= 3.4.0 notifies here when async content (a mermaid model, an
       // image) invalidates the widget layout; harmless no-op before that
       this.view.onInvalidate = () => this._contentInvalidated();
       this._setSource(this.view);

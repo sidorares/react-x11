@@ -37,7 +37,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^3.3.0",
+    "ntk": "^3.4.0",
     "react-reconciler": "^0.33.0"
   },
   "peerDependencies": {

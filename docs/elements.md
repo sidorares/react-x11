@@ -164,10 +164,9 @@ offers, the element reports the document's content height — so rich content
 participates in flex layout and scrolls naturally inside a `<scrollview>`.
 Spacing comes from the box model (`padding` prop), not a widget page margin.
 
-Async content (a ` ```mermaid ` fence, an `<img>`) needs ntk > 3.3.0's
-`onInvalidate` widget hook to trigger a reflow when it arrives
-([sidorares/ntk#75](https://github.com/sidorares/ntk/pull/75)); everything
-static works on 3.3.0.
+Async content (a ` ```mermaid ` fence, an `<img>`) reflows when it
+arrives via ntk's `onInvalidate` widget hook (ntk ≥ 3.4.0 — the declared
+dependency).
 
 ### `<markdown>`
 

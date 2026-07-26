@@ -26,9 +26,9 @@ mode — `layout(width)`/`contentHeight` feed a yoga measure function,
 `draw(ctx, x, y)` paints into the window context, `linkAt` is wired into
 the mousedown default action (`onLink` prop), and `<scrollview>` wrapping
 works via the normal measured-height path. Async content (mermaid models,
-HTML images) reflows through the widgets' `onInvalidate` hook — filed and
-implemented upstream as sidorares/ntk#75 (needs the next ntk release;
-static content works on 3.3.0). `<mermaid>` needs no dedicated element
+HTML images) reflows through the widgets' `onInvalidate` hook —
+implemented upstream as sidorares/ntk#75, released in **ntk 3.4.0**
+(the dependency is bumped). `<mermaid>` needs no dedicated element
 (markdown fences cover it); `<paragraph>` stays out (see below —
 maxLines/ellipsis would be a TextLayout feature first).
 

@@ -498,3 +498,46 @@ test('<tex> lays out and draws a formula', async () => {
     await app.close();
   }
 });
+
+test('<markdown> mermaid fence reflows into a diagram (ntk onInvalidate)', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200, backgroundColor: 'white' },
+        React.createElement('markdown', {
+          source: '```mermaid\nflowchart LR\n  A[Hello] --> B[World]\n```',
+        }),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+
+    // the fence first paints as a code block; when the async mermaid model
+    // arrives the widget fires onInvalidate and the element reflows into
+    // diagram node boxes (theme fill #ececff). The grammar loads lazily,
+    // so allow more time than the default waitForInk deadline.
+    const isNodeFill = ([r, g, b]) =>
+      r > 220 && g > 220 && b > 245 && b > r + 8;
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      const image = await readPixels(ctx, 300, 200);
+      let hits = 0;
+      for (let y = 0; y < 120; y++) {
+        for (let x = 0; x < 300; x++) {
+          if (isNodeFill(px(image, 300, x, y))) hits++;
+        }
+      }
+      if (hits > 50) break;
+      if (Date.now() > deadline) {
+        assert.fail(`mermaid diagram never painted (${hits} fill pixels)`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
