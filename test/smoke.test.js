@@ -516,6 +516,49 @@ test('scrollview scrolls, clamps and offsets hit testing', async () => {
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('scrollview scrollIntoView scrolls the minimum amount', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 100, height: 100 },
+      React.createElement(
+        'scrollview',
+        { flexGrow: 1 },
+        [0, 1, 2].map((i) =>
+          React.createElement('box', { key: i, height: 60 }),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const sv = app.windows[0]._reactX11Node.children[0];
+
+  // last child (content 120..180) into a 100px viewport: scroll to its bottom
+  sv.scrollIntoView(sv.children[2]);
+  await tick();
+  assert.strictEqual(sv.scrollY, 80);
+
+  // first child is above the viewport: align its top
+  sv.scrollIntoView(sv.children[0]);
+  await tick();
+  assert.strictEqual(sv.scrollY, 0);
+
+  // already fully visible → no movement
+  sv.scrollIntoView(sv.children[0]);
+  await tick();
+  assert.strictEqual(sv.scrollY, 0);
+
+  // a node outside this scrollview is ignored
+  sv.scrollIntoView(app.windows[0]._reactX11Node);
+  await tick();
+  assert.strictEqual(sv.scrollY, 0);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('popup mounts as an override-redirect window and unmounts cleanly', () => {
   const app = createMockApp();
   const render = (open) =>
@@ -846,6 +889,201 @@ test('Select opens a popup menu, picks an option, closes on Escape', async () =>
   pressKey(app, wnd, { keysym: 0xff1b }); // Escape
   await tick();
   assert.strictEqual(app.windows[2].destroyed, true);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Select: arrow keys move the active option, Enter picks it', async () => {
+  const { Select } = await import('../src/index.js');
+  const XK_DOWN = 0xff54;
+  const XK_UP = 0xff52;
+  const XK_HOME = 0xff50;
+  const XK_END = 0xff57;
+  const HOVER_BG = '#2980b9';
+
+  const app = createMockApp();
+  const picks = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 240, height: 120 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 10 },
+        React.createElement(Select, {
+          options: ['red', 'green', 'blue'],
+          value: 'green',
+          width: 160,
+          onChange: (v) => picks.push(v),
+        }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+
+  const findFocusable = (node) => {
+    if (node.props?.focusable) return node;
+    for (const child of node.children) {
+      if (child.isWindow) continue;
+      const hit = findFocusable(child);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const trigger = findFocusable(wnd._reactX11Node);
+  const cx = trigger.abs.x + 10;
+  const cy = trigger.abs.y + trigger.abs.height / 2;
+
+  // the active option is the one painted with the highlight background
+  const activeIndex = () => {
+    const popup = app.windows.at(-1);
+    let scroller = null;
+    const walk = (n) => {
+      if (n.kind === 'scrollview') scroller = n;
+      else n.children.forEach(walk);
+    };
+    walk(popup._reactX11Node);
+    return scroller.children.findIndex(
+      (o) => o.props.backgroundColor === HOVER_BG,
+    );
+  };
+
+  // click focuses the trigger and opens the menu on the selected option
+  wnd.emit('mousedown', { x: cx, y: cy, keycode: 1 });
+  wnd.emit('mouseup', { x: cx, y: cy, keycode: 1 });
+  await tick();
+  assert.strictEqual(activeIndex(), 1, 'opens on the current value');
+
+  pressKey(app, wnd, { keysym: XK_DOWN });
+  await tick();
+  assert.strictEqual(activeIndex(), 2);
+
+  pressKey(app, wnd, { keysym: XK_DOWN }); // wraps
+  await tick();
+  assert.strictEqual(activeIndex(), 0);
+
+  pressKey(app, wnd, { keysym: XK_UP }); // wraps back
+  await tick();
+  assert.strictEqual(activeIndex(), 2);
+
+  pressKey(app, wnd, { keysym: XK_HOME });
+  await tick();
+  assert.strictEqual(activeIndex(), 0);
+
+  pressKey(app, wnd, { keysym: XK_END });
+  await tick();
+  assert.strictEqual(activeIndex(), 2);
+
+  // Enter picks the active option (not the one under the pointer)
+  pressKey(app, wnd, { keysym: XK.Return });
+  await tick();
+  assert.deepStrictEqual(picks, ['blue']);
+  assert.strictEqual(app.windows[1].destroyed, true, 'menu closes on pick');
+
+  // with the menu closed, Down reopens it — focus stayed on the trigger
+  pressKey(app, wnd, { keysym: XK_DOWN });
+  await tick();
+  assert.strictEqual(app.windows.length, 3, 'Down reopens the menu');
+  assert.strictEqual(activeIndex(), 1, 'still anchored on the current value');
+
+  pressKey(app, wnd, { keysym: 0xff1b }); // Escape
+  await tick();
+  assert.strictEqual(app.windows[2].destroyed, true);
+  assert.deepStrictEqual(picks, ['blue'], 'Escape does not pick');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Select: an overlong menu scrolls the active option into view', async () => {
+  const { Select } = await import('../src/index.js');
+  const XK_DOWN = 0xff54;
+  const XK_END = 0xff57;
+  const ITEM_HEIGHT = 28;
+  const options = Array.from({ length: 12 }, (_, i) => `option-${i}`);
+
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 120 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 10 },
+        React.createElement(Select, { options, value: options[0], width: 220 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+
+  const findFocusable = (node) => {
+    if (node.props?.focusable) return node;
+    for (const child of node.children) {
+      if (child.isWindow) continue;
+      const hit = findFocusable(child);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const trigger = findFocusable(wnd._reactX11Node);
+  wnd.emit('mousedown', {
+    x: trigger.abs.x + 10,
+    y: trigger.abs.y + trigger.abs.height / 2,
+    keycode: 1,
+  });
+  wnd.emit('mouseup', {
+    x: trigger.abs.x + 10,
+    y: trigger.abs.y + trigger.abs.height / 2,
+    keycode: 1,
+  });
+  // scrollIntoView resolves on the popup's next layout pass, so a key press
+  // needs the effect's tick plus the flush it schedules
+  const settle = async () => {
+    await tick();
+    await tick();
+  };
+  await settle();
+
+  const scroller = (() => {
+    let found = null;
+    const walk = (n) => {
+      if (n.kind === 'scrollview') found = n;
+      else n.children.forEach(walk);
+    };
+    walk(app.windows[1]._reactX11Node);
+    return found;
+  })();
+
+  // the frame must shrink to the popup so the viewport is the clamped menu
+  // height, not the full content height — otherwise nothing ever scrolls
+  assert.ok(
+    scroller.contentHeight > scroller.abs.height,
+    `menu should overflow: content ${scroller.contentHeight} vs viewport ${scroller.abs.height}`,
+  );
+  assert.strictEqual(scroller.scrollY, 0);
+
+  // arrowing down only scrolls once the active option leaves the viewport
+  const visible = Math.floor((scroller.abs.height - 4) / ITEM_HEIGHT);
+  for (let i = 0; i < visible - 1; i++) pressKey(app, wnd, { keysym: XK_DOWN });
+  await settle();
+  assert.strictEqual(scroller.scrollY, 0, 'still within the viewport');
+
+  pressKey(app, wnd, { keysym: XK_DOWN });
+  await settle();
+  assert.ok(scroller.scrollY > 0, 'scrolls to keep the active option visible');
+
+  // End jumps to the last option: scrolled to the bottom of the content
+  pressKey(app, wnd, { keysym: XK_END });
+  await settle();
+  assert.strictEqual(
+    scroller.scrollY,
+    4 + options.length * ITEM_HEIGHT - scroller.abs.height,
+  );
 
   ReactX11.unmountComponentAtNode(app);
 });

@@ -9,10 +9,13 @@ const ITEM_HEIGHT = 28;
 const MAX_MENU_HEIGHT = 220;
 
 const XK_RETURN = 0xff0d;
+const XK_ESCAPE = 0xff1b;
+const XK_HOME = 0xff50;
 const XK_LEFT = 0xff51;
 const XK_UP = 0xff52;
 const XK_RIGHT = 0xff53;
 const XK_DOWN = 0xff54;
+const XK_END = 0xff57;
 
 const DefaultTheme = {
   border: '#b2bec3',
@@ -349,25 +352,26 @@ function normalizeOption(option) {
     : { value: option, label: String(option) };
 }
 
-function Option({ option, selected, onPick }) {
+function Option({ option, selected, active, onPick, onHover, nodeRef }) {
   const theme = useTheme();
-  const [hover, setHover] = useState(false);
+  // one highlight, shared by pointer and keyboard: hovering moves the
+  // active index rather than tracking a second, competing state
   return h(
     'box',
     {
+      ref: nodeRef,
       height: ITEM_HEIGHT,
       justifyContent: 'center',
       paddingLeft: 10,
       cursor: 'pointer',
-      backgroundColor: hover ? theme.hoverBackground : theme.background,
-      onMouseEnter: () => setHover(true),
-      onMouseLeave: () => setHover(false),
+      backgroundColor: active ? theme.hoverBackground : theme.background,
+      onMouseEnter: () => onHover?.(),
       onClick: () => onPick(option),
     },
     h(
       'text',
       {
-        color: hover ? theme.hoverText : theme.text,
+        color: active ? theme.hoverText : theme.text,
         fontWeight: selected ? 'bold' : 'normal',
       },
       option.label,
@@ -381,6 +385,12 @@ function Option({ option, selected, onPick }) {
  * anchored below the trigger (owner window position + trigger rect).
  * Closes on pick, Escape, toggling the trigger, or focus loss within the
  * owner window.
+ *
+ * Keyboard (the trigger keeps focus while the menu is open — the popup is
+ * override-redirect and never takes it): Up/Down open the menu, then move
+ * the active option with wrapping; Home/End jump to the ends; Enter/Space
+ * pick the active option (or open the menu when closed); Escape closes.
+ * The active option is scrolled into view.
  */
 export function Select({
   value,
@@ -394,17 +404,16 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState(null);
   const [focused, setFocused] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const triggerRef = useRef(null);
+  const scrollRef = useRef(null);
+  const activeRef = useRef(null);
 
   const normalized = options.map(normalizeOption);
   const current = normalized.find((o) => o.value === value);
 
   const close = () => setOpen(false);
-  const toggle = () => {
-    if (open) {
-      close();
-      return;
-    }
+  const openMenu = () => {
     const node = triggerRef.current;
     if (!node) return;
     const win = node.root?.window;
@@ -413,13 +422,54 @@ export function Select({
       y: (win?.y ?? 0) + node.abs.y + node.abs.height + 2,
       width: node.abs.width,
     });
+    const selected = normalized.findIndex((o) => o.value === value);
+    setActiveIndex(selected >= 0 ? selected : 0);
     setOpen(true);
   };
+  const toggle = () => (open ? close() : openMenu());
 
   const pick = (option) => {
     close();
     if (option.value !== value) onChange?.(option.value);
   };
+
+  const move = (delta) => {
+    const count = normalized.length;
+    if (!count) return;
+    setActiveIndex((i) => (i < 0 ? 0 : (i + delta + count) % count));
+  };
+
+  const onKeyDown = (ev) => {
+    const count = normalized.length;
+    switch (ev.keysym) {
+      case XK_ESCAPE:
+        if (open) close();
+        return;
+      case XK_DOWN:
+      case XK_UP:
+        if (open) move(ev.keysym === XK_DOWN ? 1 : -1);
+        else openMenu();
+        return;
+      case XK_HOME:
+      case XK_END:
+        if (open && count)
+          setActiveIndex(ev.keysym === XK_HOME ? 0 : count - 1);
+        return;
+      default:
+        break;
+    }
+    if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
+      const option = open ? normalized[activeIndex] : null;
+      if (option) pick(option);
+      else toggle();
+    }
+  };
+
+  // keep the highlighted option visible while arrowing through a menu that
+  // overflows MAX_MENU_HEIGHT (resolved on the popup's next layout pass)
+  useEffect(() => {
+    if (open) scrollRef.current?.scrollIntoView(activeRef.current);
+  }, [open, activeIndex]);
 
   const menuHeight = Math.min(
     normalized.length * ITEM_HEIGHT + 8,
@@ -449,10 +499,7 @@ export function Select({
         setFocused(false);
         close();
       },
-      onKeyDown: (ev) => {
-        if (ev.keysym === 0xff1b /* Escape */) close();
-        if (ev.codepoint === 32 || ev.keysym === 0xff0d) toggle();
-      },
+      onKeyDown,
       ...boxProps,
     },
     h(
@@ -489,18 +536,26 @@ export function Select({
           'box',
           {
             flexGrow: 1,
+            // yoga's default flexShrink is 0: without this the frame keeps
+            // its content height, the scrollview inside it never shrinks to
+            // the viewport, and a menu longer than MAX_MENU_HEIGHT gets
+            // clipped by the popup's edge instead of scrolling
+            flexShrink: 1,
             borderWidth: 1,
             borderColor: theme.border,
             backgroundColor: theme.background,
           },
           h(
             'scrollview',
-            { flexGrow: 1, padding: 4 },
-            normalized.map((option) =>
+            { ref: scrollRef, flexGrow: 1, padding: 4 },
+            normalized.map((option, index) =>
               h(Option, {
                 key: String(option.value),
                 option,
                 selected: option.value === value,
+                active: index === activeIndex,
+                nodeRef: index === activeIndex ? activeRef : undefined,
+                onHover: () => setActiveIndex(index),
                 onPick: pick,
               }),
             ),

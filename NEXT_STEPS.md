@@ -1,18 +1,38 @@
 # NEXT_STEPS.md — making react-x11 actually usable
 
-> **Status (2026-07-26, end of session):** Everything below through phase 5
-> is DONE and merged (or in review): retained drawn-node architecture
-> (PR #22, incl. top-down commit-phase window creation from #21),
-> `<scrollview>`/`<popup>`/`<textinput>`/`Select`/cursor
-> prop/`borderStyle="dashed"`/debug overlay (#22, #23), trailing-space
-> caret fix (#24), DevTools bridge + highlight-on-hover with the
-> DOM-contract fixes that make selection & highlight actually work (#25 —
-> in review), docs + README overhaul + caret-API adoption (this branch,
-> stacked on #25). Upstream: ntk **3.3.0** released with everything we
-> filed (#56 #58 #60 #63 #68 #69 #70 and the TextLayout caret API #73);
-> `<textinput>` now uses `caretPosition`/`indexAt` — caret math is exact
-> across kerning/bidi/trailing whitespace. npm publish: release-please
-> **PR #17 (1.0.0)** — merge it to publish.
+> **Status (2026-07-27):** Phases 0–5 are done. #28 (sans-serif README
+> screenshots) and #29 (CSS half-leading for text) are on master. #30
+> (`Button`/`Checkbox`/`Radio`/`Switch`/`ProgressBar` + `ThemeProvider`),
+> #31 (`<window onCloseRequest>` + examples overhaul), and #32 (multi-line
+> `<textarea>`) were merged into their stacked base **after** that base had
+> already landed as #29, so their commits never reached master — **#33**
+> lands them (no new code).
+>
+> In review on top of that: **#34** `Select` keyboard navigation (Up/Down
+> open + move with wrapping, Home/End, Enter/Space pick, Escape close;
+> pointer and keyboard share one highlight), a `scrollIntoView(node)`
+> primitive on `<scrollview>`, and the `flexShrink` fix that made a menu
+> longer than `MAX_MENU_HEIGHT` actually scroll instead of being clipped by
+> the popup edge.
+>
+> Upstream: ntk **3.4.0** (async rich-content `onInvalidate`); everything
+> we filed through #75 is released. npm publish still waits on
+> release-please **PR #17 (1.0.0)**.
+>
+> **Plan (next session):**
+>
+> 1. Merge #33 → #34, then release-please #17 and publish 1.0.0.
+> 2. Pointer capture for userland (EventManager already drags via
+>    downNode; expose it), then build `Slider` on it.
+> 3. Extract `useAnchor(ref)` from `Select` → `Tooltip`, then
+>    Menu/MenuBar/ContextMenu.
+> 4. `<textarea>` polish: Ctrl+arrow word movement, PageUp/Down,
+>    Shift+click extend, drawn scrollbar.
+> 5. `Select` follow-ups: type-ahead (jump to the option matching typed
+>    letters) and PageUp/PageDown in the open menu.
+> 6. Upstream (ntk): distribute half-leading inside TextLayout itself
+>    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
+>    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>`.
 
 ---
 
@@ -51,15 +71,17 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Tooltip** — `<popup>` + hover timer; extract the anchoring math from
   `Select` into a shared `useAnchor(ref)` hook
 - **Menu/MenuBar, ContextMenu** — generalize examples/menu.jsx
+- **`Select` type-ahead / PageUp-PageDown** — keyboard navigation itself
+  is done (#34: Up/Down/Home/End/Enter/Escape, shared pointer+keyboard
+  highlight, active option scrolled into view)
 
 ### 3. Renderer gaps found while building the above
 
 - **Pointer capture for userland** — `EventManager` has downNode-based
   dragging internally; expose `ev.capturePointer()` or deliver move/up to
   the mousedown target while dragging (Slider needs this)
-- **Multi-line `<textarea>`** — TextLayout is already multi-line and the
-  caret API returns `{y, line}`; needs vertical caret movement, scroll-Y,
-  wrap-aware Home/End
+- **Multi-line `<textarea>`** — DONE (#32). Polish left: Ctrl+arrow word
+  movement, PageUp/Down, Shift+click extend, drawn scrollbar
 - **Bidi caret polish** — caret positions are bidi-correct now (ntk
   caret API), but arrow keys still move logically; visual-order movement
   - split caret at direction boundaries is a later refinement

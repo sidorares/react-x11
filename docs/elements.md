@@ -86,8 +86,13 @@ by default; a scrollbar thumb is drawn when content overflows.
 | `scrollbar={false}`                                  | hide the drawn scrollbar |
 | `scrollbarColor`                                     | thumb color              |
 
-**Ref**: the node, plus `scrollTo(y)` / `scrollBy(dy)` and `scrollY` /
-`contentHeight`.
+**Ref**: the node, plus `scrollTo(y)` / `scrollBy(dy)` /
+`scrollIntoView(node)` and `scrollY` / `contentHeight`.
+
+`scrollIntoView(node)` scrolls the minimum amount that makes a descendant
+node fully visible, and is safe to call from an effect right after that
+node mounts: the request is resolved on the next layout pass, when the
+node actually has geometry.
 
 ## `<text>`
 
