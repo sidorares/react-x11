@@ -1,0 +1,62 @@
+# Events
+
+ntk delivers raw X11 events per window; react-x11 turns them into synthetic
+events dispatched over the drawn node tree with DOM-like semantics.
+
+## Dispatch
+
+1. **Hit test**: front-to-back walk of the stacking-ordered tree (zIndex,
+   then document order), respecting `overflow` clipping and
+   `pointerEvents="none"`.
+2. **Capture phase**: `on<Event>Capture` handlers from the window down to
+   the target.
+3. **Target + bubble phase**: `on<Event>` handlers from the target up.
+4. **Default action**: the element's built-in behavior (textinput editing,
+   scrollview wheel scrolling) — skipped if any handler called
+   `ev.preventDefault()`.
+
+`ev.stopPropagation()` stops the walk. Handlers always read from current
+props — they can never go stale.
+
+## Event object
+
+```
+{
+  type, target, currentTarget,      // public instances
+  x, y,                             // window coordinates
+  localX, localY,                   // target-relative
+  nativeEvent,                      // the raw ntk/X11 event
+  preventDefault(), stopPropagation(),
+  // mouse: button, detail (DOM-style click count: 2 = double, 3 = triple)
+  // wheel: deltaX, deltaY
+  // keyboard: keycode, keysym, codepoint, key, shiftKey, ctrlKey
+}
+```
+
+`nativeEvent.rootx/rooty` are screen coordinates — useful for anchoring a
+`<popup>` at the pointer.
+
+## Handlers
+
+| handler                                     | notes                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `onClick`                                   | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks |
+| `onMouseDown` / `onMouseUp` / `onMouseMove` | move is coalesced to once per frame by ntk                                            |
+| `onMouseEnter` / `onMouseLeave`             | do not propagate; synthesized by hover-path diffing                                   |
+| `onWheel`                                   | X buttons 4–7; default action scrolls the nearest `<scrollview>`                      |
+| `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus                       |
+| `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal              |
+
+## Focus
+
+`focusable` opts a node into focus (`<textinput>` is focusable by
+default). Mousedown focuses the nearest focusable ancestor of the hit node;
+Tab / Shift+Tab cycle through focusable nodes in tree order. Keyboard
+events route to the focused node's ancestor chain.
+
+## Cursors
+
+The `cursor` prop (`'pointer'`, `'text'`, `'wait'`, `'move'`,
+`'crosshair'`, `'ew-resize'`, `'ns-resize'`, `'grab'`, `'not-allowed'`, …)
+applies the deepest hovered node's cursor to the window, via ntk's cursor
+cache over the standard X cursor font.

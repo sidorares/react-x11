@@ -725,36 +725,28 @@ export class TextInputNode extends Node {
     return (this.props.fontSize ?? DEFAULT_TEXT_STYLE.size) * 1.4;
   }
 
-  /** Advance of a space in the current style. TextLayout strips trailing
-   * whitespace (correct for wrapped paragraphs), so caret math has to add
-   * it back explicitly. */
-  _spaceAdvance() {
+  /** Shaped layout of the current value, cached per (value, style).
+   * Caret math rides ntk >= 3.3.0's TextLayout caret API, which is exact
+   * across kerning/shaping boundaries, bidi runs and trailing whitespace
+   * (replaces the prefix-width measurement this used before). */
+  _valueLayout() {
     const fonts = this.app?.fonts;
-    if (!fonts) return 0;
+    if (!fonts) return null;
+    const text = this.value;
     const s = this._textStyle();
-    const key = `${s.family}|${s.size}|${s.weight}|${s.style}`;
-    if (this._spaceAdvanceKey !== key) {
-      this._spaceAdvanceKey = key;
-      this._spaceAdvanceValue =
-        fonts.layout('x x', s).width - fonts.layout('xx', s).width;
+    const key = `${text}|${s.family}|${s.size}|${s.weight}|${s.style}`;
+    if (this._valueLayoutKey !== key) {
+      this._valueLayoutKey = key;
+      this._valueLayoutCache = fonts.layout(text, s);
     }
-    return this._spaceAdvanceValue;
+    return this._valueLayoutCache;
   }
 
+  /** Visual caret x for a logical code-point index. */
   _prefixWidth(count) {
-    if (count <= 0) return 0;
-    const prefix = this._chars().slice(0, count);
-    // trailing whitespace measures as zero in TextLayout — count it apart
-    let spaces = 0;
-    while (
-      spaces < prefix.length &&
-      /\s/.test(prefix[prefix.length - 1 - spaces])
-    ) {
-      spaces++;
-    }
-    const solid = prefix.slice(0, prefix.length - spaces).join('');
-    const layout = solid ? this._layoutOf(solid) : null;
-    return (layout ? layout.width : 0) + spaces * this._spaceAdvance();
+    const layout = this._valueLayout();
+    if (!layout) return 0;
+    return layout.caretPosition(count).x;
   }
 
   _selection() {
@@ -896,15 +888,12 @@ export class TextInputNode extends Node {
     }
   }
 
+  /** Click-to-caret: logical code-point index for a window x coordinate. */
   _indexAtX(x) {
+    const layout = this._valueLayout();
+    if (!layout) return this._chars().length;
     const content = this.contentBox();
-    const local = x - content.x + this._scrollX;
-    const chars = this._chars();
-    for (let i = 0; i < chars.length; i++) {
-      const mid = (this._prefixWidth(i) + this._prefixWidth(i + 1)) / 2;
-      if (local < mid) return i;
-    }
-    return chars.length;
+    return layout.indexAt(x - content.x + this._scrollX, 0);
   }
 
   /** Word range around a code-point index (whitespace-delimited). */
