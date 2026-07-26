@@ -1,58 +1,58 @@
-const React = require('react');
-const ReactReconciler = require('react-reconciler');
-const {
-  ConcurrentRoot,
-  DefaultEventPriority,
-  NoEventPriority,
-} = require('react-reconciler/constants');
+// The react-reconciler host config plus the public render entry points.
+// Host instances are the retained nodes from nodes.js; only <window> and
+// <popup> map to real X11 windows (see NEXT_STEPS.md), and those windows
+// are created top-down in the commit phase (WindowNode.realize) so every
+// CreateWindow names its actual parent from the start — createInstance
+// performs no X11 calls, since the render phase is discardable (issue #4).
+import { createRequire } from 'node:module';
+import React from 'react';
+import ReactReconciler from 'react-reconciler';
+import { createClient } from 'ntk';
 
+import {
+  ConcurrentRoot,
+  getCurrentUpdatePriority,
+  setCurrentUpdatePriority,
+  resolveUpdatePriority,
+} from './priority.js';
+import {
+  WindowNode,
+  PopupNode,
+  BoxNode,
+  TextNode,
+  TextChunkNode,
+  ImageNode,
+  CanvasNode,
+  ScrollViewNode,
+  TextInputNode,
+} from './nodes.js';
+
+const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
 
-// Props that configure the X11 window itself; everything else (event
-// handlers, children, refs) is handled elsewhere.
+const HOST_TYPES = [
+  'window',
+  'popup',
+  'box',
+  'text',
+  'image',
+  'canvas',
+  'scrollview',
+  'textinput',
+];
+
 const isEventProp = (name) => /^on[A-Z]/.test(name);
 
+// Props forwarded to ntk createWindow. Event handlers are dispatched by the
+// EventManager from current props (never registered at creation, so they
+// cannot go stale) and children are handled by the tree.
 function windowAttributes(props) {
   const attributes = {};
   for (const key of Object.keys(props)) {
-    if (key === 'children') continue;
+    if (key === 'children' || isEventProp(key)) continue;
     attributes[key] = props[key];
   }
   return attributes;
-}
-
-let currentUpdatePriority = NoEventPriority;
-
-// Host instances are lightweight handles, not X11 windows. React creates
-// instances bottom-up (completeWork) during the render phase, where the
-// parent window cannot exist yet and where concurrent rendering may still
-// discard the work. The real CreateWindow calls happen top-down in the
-// commit phase (see realize), so every window names its actual parent from
-// the start — no ReparentWindow, no override-redirect staging (issue #4).
-function createHandle(props, rootContainer, fiber) {
-  return {
-    props,
-    container: rootContainer,
-    fiber,
-    children: [],
-    window: null,
-  };
-}
-
-function realize(handle, parentWindow) {
-  const attributes = windowAttributes(handle.props);
-  if (parentWindow) {
-    attributes.parent = parentWindow;
-  }
-  const wnd = handle.container.createWindow(attributes);
-  wnd._reactFiber = handle.fiber;
-  handle.window = wnd;
-  for (const child of handle.children) {
-    realize(child, wnd);
-  }
-  // Children map before their parent, so the subtree appears at once when
-  // the outermost window maps.
-  wnd.map();
 }
 
 const HostConfig = {
@@ -76,17 +76,19 @@ const HostConfig = {
   scheduleMicrotask: queueMicrotask,
 
   getRootHostContext() {
-    return {};
+    return { isInsideText: false };
   },
 
-  getChildHostContext(parentHostContext) {
-    return parentHostContext;
+  getChildHostContext(parentHostContext, type) {
+    return {
+      isInsideText: parentHostContext.isInsideText || type === 'text',
+    };
   },
 
   getPublicInstance(instance) {
     // Refs attach in the layout phase, after the mutation phase realized
-    // the window, so this is always the live ntk window.
-    return instance.window || instance;
+    // the window, so for windows this is the live ntk window.
+    return instance.isWindow ? instance.window || instance : instance;
   },
 
   prepareForCommit() {
@@ -96,50 +98,93 @@ const HostConfig = {
   resetAfterCommit() {},
 
   createInstance(type, props, rootContainer, hostContext, internalHandle) {
-    if (type !== 'window') {
+    if (hostContext.isInsideText && type !== 'text') {
       throw new Error(
-        `react-x11: unknown element type <${type}>. Only <window> is supported for now.`,
+        `react-x11: <${type}> is not allowed inside <text>; only nested ` +
+          '<text> spans and strings are.',
       );
     }
-    // No X11 calls here: this runs in the render phase, which concurrent
-    // React may discard. The window is created in the commit phase.
-    return createHandle(props, rootContainer, internalHandle);
+    let node;
+    switch (type) {
+      case 'window':
+        // No X11 calls here: the render phase may be discarded. The real
+        // window is created top-down in the commit phase (realize).
+        node = new WindowNode(rootContainer, windowAttributes(props), props);
+        break;
+      case 'popup':
+        node = new PopupNode(rootContainer, windowAttributes(props), props);
+        break;
+      case 'box':
+        node = new BoxNode(props, rootContainer);
+        break;
+      case 'scrollview':
+        node = new ScrollViewNode(props, rootContainer);
+        break;
+      case 'textinput':
+        node = new TextInputNode(props, rootContainer);
+        break;
+      case 'text':
+        node = new TextNode(props, rootContainer, {
+          span: hostContext.isInsideText,
+        });
+        break;
+      case 'image':
+        node = new ImageNode(props, rootContainer);
+        break;
+      case 'canvas':
+        node = new CanvasNode(props, rootContainer);
+        break;
+      default:
+        throw new Error(
+          `react-x11: unknown element type <${type}>. Supported: ` +
+            HOST_TYPES.map((t) => `<${t}>`).join(', ') +
+            '.',
+        );
+    }
+    node._reactFiber = internalHandle;
+    return node;
+  },
+
+  createTextInstance(text, rootContainer, hostContext) {
+    if (!hostContext.isInsideText) {
+      throw new Error(
+        `react-x11: raw text ${JSON.stringify(text)} must be wrapped in a ` +
+          '<text> element.',
+      );
+    }
+    return new TextChunkNode(text, rootContainer);
   },
 
   appendInitialChild(parentInstance, child) {
-    parentInstance.children.push(child);
+    parentInstance.insertBefore(child, null);
   },
 
-  finalizeInitialChildren() {
-    return false;
+  finalizeInitialChildren(instance, type) {
+    // Popups are not attached to the container or realized by a parent
+    // window; commitMount realizes them against the screen root.
+    return type === 'popup';
   },
 
-  commitMount() {},
+  commitMount(instance, type) {
+    if (type === 'popup') {
+      instance.realize(null);
+    }
+  },
 
   appendChild(parentInstance, child) {
-    const index = parentInstance.children.indexOf(child);
-    if (index !== -1) {
-      parentInstance.children.splice(index, 1);
-    }
-    parentInstance.children.push(child);
-    if (!child.window) {
-      realize(child, parentInstance.window);
-    }
-    // An already-realized child means a reorder among siblings; X11
-    // stacking order is not modelled yet.
+    parentInstance.insertBefore(child, null);
   },
 
   appendChildToContainer(container, child) {
     if (!child.window) {
       // Top-level window: realize the whole subtree top-down against the
       // screen root.
-      realize(child, null);
+      child.realize(null);
     }
   },
 
-  insertBefore(parentInstance, child) {
-    // X11 stacking order is not modelled yet; treat as append.
-    HostConfig.appendChild(parentInstance, child);
+  insertBefore(parentInstance, child, beforeChild) {
+    parentInstance.insertBefore(child, beforeChild);
   },
 
   insertInContainerBefore(container, child) {
@@ -147,85 +192,49 @@ const HostConfig = {
   },
 
   removeChild(parentInstance, child) {
-    const index = parentInstance.children.indexOf(child);
-    if (index !== -1) {
-      parentInstance.children.splice(index, 1);
-    }
-    if (child.window) {
-      // DestroyWindow destroys all subwindows server-side as well.
-      child.window.destroy();
-      child.window = null;
-    }
+    parentInstance.removeChild(child);
   },
 
   removeChildFromContainer(container, child) {
-    if (child.window) {
-      child.window.destroy();
-      child.window = null;
-    }
+    child.destroySubtree();
   },
 
   clearContainer() {},
 
   commitUpdate(instance, type, oldProps, newProps) {
-    instance.props = newProps;
-    const wnd = instance.window;
-    if (type !== 'window' || !wnd) {
-      return;
-    }
-    if (newProps.title !== oldProps.title) {
-      wnd.setTitle(newProps.title || '');
-    }
-    if (
-      newProps.width !== oldProps.width ||
-      newProps.height !== oldProps.height
-    ) {
-      wnd.resize(newProps.width, newProps.height);
-    }
-    if (newProps.x !== oldProps.x || newProps.y !== oldProps.y) {
-      wnd.move(newProps.x, newProps.y);
-    }
-    for (const key of Object.keys(newProps)) {
-      if (isEventProp(key) && newProps[key] !== oldProps[key] && wnd.setProp) {
-        wnd.setProp(key, newProps[key]);
-      }
-    }
+    instance.applyProps(newProps, oldProps);
   },
 
   shouldSetTextContent() {
     return false;
   },
 
-  createTextInstance(text) {
-    throw new Error(
-      `react-x11: text nodes are not supported yet (got ${JSON.stringify(text)}). ` +
-        'Wrap text handling in an expose/paint handler instead.',
-    );
+  commitTextUpdate(textInstance, oldText, newText) {
+    textInstance.setText(newText);
   },
 
-  commitTextUpdate() {},
   resetTextContent() {},
 
   hideInstance(instance) {
-    if (instance.window) {
-      instance.window.unmap();
-    }
+    instance.setHidden(true);
   },
 
   unhideInstance(instance) {
-    if (instance.window) {
-      instance.window.map();
-    }
+    instance.setHidden(false);
   },
 
-  hideTextInstance() {},
-  unhideTextInstance() {},
+  hideTextInstance(textInstance) {
+    textInstance.setText('');
+  },
+
+  unhideTextInstance(textInstance, text) {
+    textInstance.setText(text);
+  },
 
   detachDeletedInstance(instance) {
-    // Descendants of a destroyed window were destroyed server-side by
-    // DestroyWindow; drop the JS-side reference.
-    instance.window = null;
+    instance.root?.events?.forget(instance);
   },
+
   preparePortalMount() {},
   prepareScopeUpdate() {},
   getInstanceFromScope() {
@@ -238,17 +247,9 @@ const HostConfig = {
   afterActiveInstanceBlur() {},
 
   // Update priority plumbing (React 19 scheduling contract).
-  setCurrentUpdatePriority(newPriority) {
-    currentUpdatePriority = newPriority;
-  },
-  getCurrentUpdatePriority() {
-    return currentUpdatePriority;
-  },
-  resolveUpdatePriority() {
-    return currentUpdatePriority !== NoEventPriority
-      ? currentUpdatePriority
-      : DefaultEventPriority;
-  },
+  setCurrentUpdatePriority,
+  getCurrentUpdatePriority,
+  resolveUpdatePriority,
   shouldAttemptEagerTransition() {
     return false;
   },
@@ -293,18 +294,15 @@ const HostConfig = {
   },
 };
 
-const Renderer = ReactReconciler(HostConfig);
+export const Renderer = ReactReconciler(HostConfig);
 
 const roots = new Map();
 let cachedNtkApp = null;
 
-async function connectAndRender(element, callback) {
-  // ntk is ESM (with top-level await in its graph), so it must be loaded with
-  // a dynamic import from this CommonJS module.
-  const { createClient } = await import('ntk');
-  let app;
+async function connectApp() {
+  if (cachedNtkApp) return cachedNtkApp;
   try {
-    app = await createClient();
+    cachedNtkApp = await createClient();
   } catch (err) {
     throw new Error(
       'react-x11: could not connect to the X server. Is an X server running ' +
@@ -313,60 +311,80 @@ async function connectAndRender(element, callback) {
         err.message,
     );
   }
-  cachedNtkApp = app;
-  ReactX11.render(element, callback, app);
+  return cachedNtkApp;
 }
 
-const ReactX11 = {
-  render(element, callback, container) {
-    if (!container) {
-      if (cachedNtkApp) {
-        return ReactX11.render(element, callback, cachedNtkApp);
-      }
-      // Returns a promise; an unawaited connection failure still surfaces as
-      // an unhandled rejection with a descriptive message.
-      return connectAndRender(element, callback);
-    }
+function renderIntoContainer(element, container, callback) {
+  let root = roots.get(container);
+  if (!root) {
+    root = Renderer.createContainer(
+      container,
+      ConcurrentRoot,
+      null,
+      false,
+      null,
+      '',
+      (error) => console.error('react-x11: uncaught error', error),
+      (error) => console.error('react-x11: caught error', error),
+      (error) => console.error('react-x11: recoverable error', error),
+      null,
+    );
+    roots.set(container, root);
+  }
 
-    let root = roots.get(container);
-    if (!root) {
-      root = Renderer.createContainer(
-        container,
-        ConcurrentRoot,
-        null,
-        false,
-        null,
-        '',
-        (error) => console.error('react-x11: uncaught error', error),
-        (error) => console.error('react-x11: caught error', error),
-        (error) => console.error('react-x11: recoverable error', error),
-        null,
-      );
-      roots.set(container, root);
+  Renderer.updateContainerSync(element, root, null, () => {
+    const publicInstance = Renderer.getPublicRootInstance(root);
+    if (callback) {
+      callback(publicInstance, container);
     }
+  });
+  Renderer.flushSyncWork();
 
-    Renderer.updateContainerSync(element, root, null, () => {
-      const publicInstance = Renderer.getPublicRootInstance(root);
-      if (callback) {
-        callback(publicInstance, container);
-      }
+  if (process.env.REACT_X11_DEVTOOLS) {
+    import('./DevToolsIntegration.js').then((m) => m.connect(Renderer));
+  }
+}
+
+/**
+ * Legacy entry point. Without a container it connects to the X server
+ * (returns a promise in that case).
+ */
+export function render(element, callback, container) {
+  if (!container) {
+    return connectApp().then((app) =>
+      renderIntoContainer(element, app, callback),
+    );
+  }
+  return renderIntoContainer(element, container, callback);
+}
+
+/**
+ * Modern entry point:
+ *
+ *   const root = await createRoot();       // connects via DISPLAY
+ *   root.render(<App />);
+ *
+ * Pass an ntk App (or a mock) to render into an existing connection.
+ */
+export async function createRoot(container) {
+  const app = container ?? (await connectApp());
+  return {
+    app,
+    render(element, callback) {
+      renderIntoContainer(element, app, callback);
+    },
+    unmount() {
+      unmountComponentAtNode(app);
+    },
+  };
+}
+
+export function unmountComponentAtNode(container) {
+  const root = roots.get(container);
+  if (root) {
+    Renderer.updateContainerSync(null, root, null, () => {
+      roots.delete(container);
     });
     Renderer.flushSyncWork();
-
-    if (process.env.REACT_X11_DEVTOOLS) {
-      require('./DevToolsIntegration.js').connect(Renderer);
-    }
-  },
-
-  unmountComponentAtNode(container) {
-    const root = roots.get(container);
-    if (root) {
-      Renderer.updateContainerSync(null, root, null, () => {
-        roots.delete(container);
-      });
-      Renderer.flushSyncWork();
-    }
-  },
-};
-
-module.exports = ReactX11;
+  }
+}

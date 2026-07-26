@@ -1,14 +1,14 @@
-const js = require('@eslint/js');
-const globals = require('globals');
-const react = require('eslint-plugin-react');
+import js from '@eslint/js';
+import globals from 'globals';
+import react from 'eslint-plugin-react';
 
-module.exports = [
+export default [
   js.configs.recommended,
   {
     files: ['**/*.js', '**/*.jsx'],
     languageOptions: {
       ecmaVersion: 'latest',
-      sourceType: 'commonjs',
+      sourceType: 'module',
       parserOptions: {
         ecmaFeatures: { jsx: true },
       },

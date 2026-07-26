@@ -1,14 +1,33 @@
-const React = require('react');
-const ReactX11 = require('../src/index.js');
+// Hello world: flex layout + text, no manual pixel math.
+// Run with: npm run examples:simple  (needs an X server / DISPLAY)
+import React from 'react';
+import { createRoot } from '../src/index.js';
 
-class App extends React.Component {
-  render() {
-    return (
-      <window x={100} y={100} width={100} height={100} title="test">
-        <window width={10} height={10} x={1} y={2} title="child" />
-      </window>
-    );
-  }
+function App() {
+  return (
+    <window
+      width={320}
+      height={200}
+      title="react-x11"
+      backgroundColor="#f4f4f4"
+    >
+      <box
+        flexGrow={1}
+        justifyContent="center"
+        alignItems="center"
+        gap={12}
+        padding={16}
+      >
+        <text fontSize={24} color="#222">
+          Hello, <text color="#c0392b">X11</text>!
+        </text>
+        <box backgroundColor="#3498db" borderRadius={6} padding={10}>
+          <text color="white">flexbox via yoga-layout</text>
+        </box>
+      </box>
+    </window>
+  );
 }
 
-ReactX11.render(React.createElement(App));
+const root = await createRoot();
+root.render(<App />);
