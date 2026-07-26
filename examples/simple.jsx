@@ -29,5 +29,9 @@ function App() {
   );
 }
 
-const root = await createRoot();
-root.render(<App />);
+export default App;
+
+if (!process.env.REACT_X11_NO_AUTORUN) {
+  const root = await createRoot();
+  root.render(<App />);
+}

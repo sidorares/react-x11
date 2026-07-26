@@ -9,7 +9,13 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 // exercised without a running X server.
 function createMockApp() {
   const app = {
-    X: { display: { screen: [{ root: 1 }] }, keycode2keysyms: {} },
+    X: {
+      display: { screen: [{ root: 1 }] },
+      keycode2keysyms: {},
+      InternAtom(onlyIfExists, name, cb) {
+        cb(null, name === 'WM_DELETE_WINDOW' ? 999 : 1);
+      },
+    },
     windows: [],
     createWindow(attributes) {
       const handlers = {};
@@ -125,6 +131,9 @@ function createMockApp() {
         setTitle(title) {
           wnd.title = title;
           wnd.calls.push(['setTitle', title]);
+        },
+        setActions() {
+          wnd.calls.push(['setActions']);
         },
         setCursor(name) {
           wnd.cursor = name;
@@ -982,4 +991,272 @@ test('rich content elements mount, update and unmount headlessly', async () => {
 
   ReactX11.unmountComponentAtNode(app);
   assert.ok(wnd.destroyed, 'clean unmount');
+});
+
+// --- standard widgets (components.js) --------------------------------------
+
+const findAllFocusable = (node, out = []) => {
+  if (node.props?.focusable) out.push(node);
+  for (const child of node.children) {
+    if (!child.isWindow) findAllFocusable(child, out);
+  }
+  return out;
+};
+
+const clickNode = (wnd, node) => {
+  const x = node.abs.x + node.abs.width / 2;
+  const y = node.abs.y + node.abs.height / 2;
+  wnd.emit('mousedown', { x, y, keycode: 1 });
+  wnd.emit('mouseup', { x, y, keycode: 1 });
+};
+
+test('Button fires onPress via click and Space; disabled is inert', async () => {
+  const { Button } = await import('../src/index.js');
+  const app = createMockApp();
+  const presses = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 10, gap: 10, alignItems: 'flex-start' },
+        React.createElement(Button, {
+          label: 'Go',
+          onPress: () => presses.push('go'),
+        }),
+        React.createElement(Button, {
+          label: 'Nope',
+          disabled: true,
+          onPress: () => presses.push('nope'),
+        }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const focusables = findAllFocusable(wnd._reactX11Node);
+  assert.strictEqual(focusables.length, 1, 'disabled button is not focusable');
+  const [go] = focusables;
+
+  clickNode(wnd, go);
+  assert.deepStrictEqual(presses, ['go']);
+  // the click focused it; Space activates
+  pressKey(app, wnd, { codepoint: 32 });
+  assert.deepStrictEqual(presses, ['go', 'go']);
+
+  // clicking the disabled button does nothing
+  const disabledText = (function find(n) {
+    if (
+      n.kind === 'text' &&
+      n.children.some((c) => c.kind === 'textchunk' && c.text === 'Nope')
+    ) {
+      return n;
+    }
+    for (const c of n.children) {
+      if (c.isWindow) continue;
+      const hit = find(c);
+      if (hit) return hit;
+    }
+    return null;
+  })(wnd._reactX11Node);
+  clickNode(wnd, disabledText.parent);
+  assert.deepStrictEqual(presses, ['go', 'go']);
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Checkbox and Switch toggle through onChange', async () => {
+  const { Checkbox, Switch } = await import('../src/index.js');
+  const app = createMockApp();
+  const log = [];
+  function Wrapper() {
+    const [checked, setChecked] = React.useState(false);
+    const [on, setOn] = React.useState(false);
+    return React.createElement(
+      'box',
+      { flexGrow: 1, padding: 10, gap: 10, alignItems: 'flex-start' },
+      React.createElement(
+        Checkbox,
+        {
+          checked,
+          onChange: (next) => {
+            log.push(['check', next]);
+            setChecked(next);
+          },
+        },
+        'Enable',
+      ),
+      React.createElement(Switch, {
+        checked: on,
+        onChange: (next) => {
+          log.push(['switch', next]);
+          setOn(next);
+        },
+      }),
+    );
+  }
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement(Wrapper),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const [checkbox, sw] = findAllFocusable(wnd._reactX11Node);
+
+  clickNode(wnd, checkbox);
+  await tick();
+  pressKey(app, wnd, { codepoint: 32 }); // Space toggles back
+  await tick();
+  clickNode(wnd, sw);
+  await tick();
+  assert.deepStrictEqual(log, [
+    ['check', true],
+    ['check', false],
+    ['switch', true],
+  ]);
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('RadioGroup: click selects, arrow keys move selection (wrapping)', async () => {
+  const { Radio, RadioGroup } = await import('../src/index.js');
+  const app = createMockApp();
+  const picks = [];
+  function Wrapper() {
+    const [value, setValue] = React.useState('a');
+    return React.createElement(
+      RadioGroup,
+      {
+        value,
+        onChange: (v) => {
+          picks.push(v);
+          setValue(v);
+        },
+      },
+      React.createElement(Radio, { value: 'a' }, 'A'),
+      React.createElement(Radio, { value: 'b' }, 'B'),
+      React.createElement(Radio, { value: 'c' }, 'C'),
+    );
+  }
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement(Wrapper),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const radios = findAllFocusable(wnd._reactX11Node);
+  assert.strictEqual(radios.length, 3);
+
+  clickNode(wnd, radios[1]); // select B (and focus it)
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff54 }); // Down -> C
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff54 }); // Down wraps -> A
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff52 }); // Up wraps back -> C
+  await tick();
+  assert.deepStrictEqual(picks, ['b', 'c', 'a', 'c']);
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('ProgressBar fill width follows value', async () => {
+  const { ProgressBar } = await import('../src/index.js');
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 100 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 0 },
+        React.createElement(ProgressBar, { value: 0.5, width: 200 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const track = (function find(n) {
+    if (n.props?.overflow === 'hidden' && n.kind === 'box') return n;
+    for (const c of n.children) {
+      if (c.isWindow) continue;
+      const hit = find(c);
+      if (hit) return hit;
+    }
+    return null;
+  })(wnd._reactX11Node);
+  assert.ok(track, 'progress track renders');
+  assert.strictEqual(track.abs.width, 200);
+  const fill = track.children[0];
+  assert.ok(
+    Math.abs(fill.abs.width - 100) <= 1,
+    `fill should be ~half the track, got ${fill.abs.width}`,
+  );
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('multiple root windows share one tree; onCloseRequest handles WM close', async () => {
+  const app = createMockApp();
+  const events = [];
+  function Wrapper() {
+    const [open, setOpen] = React.useState(true);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement('window', {
+        width: 100,
+        height: 80,
+        title: 'main',
+        onCloseRequest: () => events.push('main-close'),
+      }),
+      open &&
+        React.createElement('window', {
+          width: 90,
+          height: 70,
+          title: 'satellite',
+          onCloseRequest: () => {
+            events.push('sat-close');
+            setOpen(false);
+          },
+        }),
+    );
+  }
+  ReactX11.render(React.createElement(Wrapper), null, app);
+  await tick();
+  assert.strictEqual(app.windows.length, 2, 'two real top-level windows');
+  const sat = app.windows[1];
+  assert.ok(
+    sat.calls.some((c) => c[0] === 'setActions'),
+    'onCloseRequest opts the window into WM_DELETE_WINDOW',
+  );
+
+  // WM close button: ClientMessage with data[0] = WM_DELETE_WINDOW atom
+  sat.emit('message', { format: 32, data: [999, 0, 0, 0, 0] });
+  await tick();
+  assert.deepStrictEqual(events, ['sat-close']);
+  assert.strictEqual(
+    sat.destroyed,
+    true,
+    'unmounting the closed <window> destroys the real window',
+  );
+  assert.strictEqual(app.windows[0].destroyed, false, 'main window stays');
+
+  // unrelated client messages do not fire the handler
+  app.windows[0].emit('message', { format: 32, data: [123, 0, 0, 0, 0] });
+  await tick();
+  assert.deepStrictEqual(events, ['sat-close']);
+
+  ReactX11.unmountComponentAtNode(app);
 });

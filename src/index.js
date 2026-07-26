@@ -4,7 +4,17 @@ export {
   unmountComponentAtNode,
   Renderer,
 } from './Reconciler.js';
-export { Select, SelectThemeProvider } from './components.js';
+export {
+  Select,
+  SelectThemeProvider,
+  ThemeProvider,
+  Button,
+  Checkbox,
+  Radio,
+  RadioGroup,
+  Switch,
+  ProgressBar,
+} from './components.js';
 
 import { render, createRoot, unmountComponentAtNode } from './Reconciler.js';
 

@@ -19,6 +19,8 @@
     "examples:menu": "tsx examples/menu.jsx",
     "examples:form": "tsx examples/form.jsx",
     "examples:richtext": "tsx examples/richtext.jsx",
+    "examples:widgets": "tsx examples/widgets.jsx",
+    "examples:windows": "tsx examples/windows.jsx",
     "screenshots": "tsx scripts/screenshots.jsx"
   },
   "repository": {

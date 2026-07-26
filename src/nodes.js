@@ -11,6 +11,7 @@ import {
   TEXT_LAYOUT_PROPS,
 } from './styles.js';
 import { EventManager } from './events.js';
+import { runWithPriority, DiscreteEventPriority } from './priority.js';
 
 const DRAWN_KINDS = new Set([
   'box',
@@ -19,6 +20,7 @@ const DRAWN_KINDS = new Set([
   'canvas',
   'scrollview',
   'textinput',
+  'textarea',
   'markdown',
   'html',
   'svg',
@@ -681,7 +683,9 @@ const XK_RETURN = 0xff0d;
 const XK_KP_ENTER = 0xff8d;
 const XK_HOME = 0xff50;
 const XK_LEFT = 0xff51;
+const XK_UP = 0xff52;
 const XK_RIGHT = 0xff53;
+const XK_DOWN = 0xff54;
 const XK_END = 0xff57;
 const XK_DELETE = 0xffff;
 
@@ -695,8 +699,8 @@ const XK_DELETE = 0xffff;
  * (`defaultValue`). Caret indices are in code points, not UTF-16 units.
  */
 export class TextInputNode extends Node {
-  constructor(props, app) {
-    super('textinput', props, app);
+  constructor(props, app, kind = 'textinput') {
+    super(kind, props, app);
     this.focusableByDefault = true;
     this.defaultCursor = 'text';
     this._value =
@@ -797,8 +801,13 @@ export class TextInputNode extends Node {
     this._repaint();
   }
 
+  /** Single-line: newlines collapse to spaces (textarea overrides). */
+  _normalizeInsert(text) {
+    return String(text).replace(/[\r\n]+/g, ' ');
+  }
+
   _insert(text) {
-    const insert = Array.from(String(text).replace(/[\r\n]+/g, ' '));
+    const insert = Array.from(this._normalizeInsert(text));
     if (this.props.maxLength != null) {
       const room =
         this.props.maxLength -
@@ -915,6 +924,11 @@ export class TextInputNode extends Node {
     return layout.indexAt(x - content.x + this._scrollX, 0);
   }
 
+  /** Click-to-caret for a mouse event (textarea also uses ev.y). */
+  _indexAtPoint(ev) {
+    return this._indexAtX(ev.x);
+  }
+
   /** Word range around a code-point index (whitespace-delimited). */
   _wordRangeAt(index) {
     const chars = this._chars();
@@ -932,13 +946,13 @@ export class TextInputNode extends Node {
   _defaultMouseDown(ev) {
     if (ev.button === 2) {
       // X11 middle-click: paste the PRIMARY selection at the click position
-      const i = this._indexAtX(ev.x);
+      const i = this._indexAtPoint(ev);
       this._caret = i;
       this._anchor = i;
       this._pasteFrom('PRIMARY');
       return;
     }
-    const i = this._indexAtX(ev.x);
+    const i = this._indexAtPoint(ev);
     if (ev.detail >= 3) {
       this._anchor = 0;
       this._caret = this._chars().length;
@@ -965,7 +979,7 @@ export class TextInputNode extends Node {
 
   _defaultMouseDrag(ev) {
     if (!this._dragging) return;
-    this._caret = this._indexAtX(ev.x);
+    this._caret = this._indexAtPoint(ev);
     this._repaint();
   }
 
@@ -1085,6 +1099,198 @@ export class TextInputNode extends Node {
 }
 
 /**
+ * <textarea>: multi-line editable text on the same editing core as
+ * <textinput>. Word-wraps at the content width (ntk TextLayout), Enter
+ * inserts a newline (Ctrl+Enter fires onSubmit), Up/Down move the caret
+ * between visual lines keeping a goal column, Home/End are wrap-aware,
+ * selection spans lines, and the view scrolls vertically to follow the
+ * caret (wheel scrolls too). `rows` (default 3) sets the preferred height.
+ */
+export class TextAreaNode extends TextInputNode {
+  constructor(props, app) {
+    super(props, app, 'textarea');
+    this._scrollY = 0;
+    this._goalX = null;
+    this.yoga.setMeasureFunc((width, widthMode) => {
+      const preferred = 220;
+      const w =
+        widthMode === Yoga.MEASURE_MODE_UNDEFINED
+          ? preferred
+          : Math.min(preferred, width);
+      const rows = Math.max(1, this.props.rows ?? 3);
+      return { width: w, height: Math.ceil(this._lineHeight() * rows) };
+    });
+  }
+
+  /** Multi-line: preserve newlines (normalize CRLF). */
+  _normalizeInsert(text) {
+    return String(text).replace(/\r\n?/g, '\n');
+  }
+
+  /** Wrapped, styled layout of the value (or placeholder), cached per
+   * (text, style, width). Used for painting and all caret geometry, so
+   * caret math always agrees with what is on screen. */
+  _valueLayout() {
+    const fonts = this.app?.fonts;
+    if (!fonts) return null;
+    const text = this.value;
+    const isEmpty = text.length === 0;
+    const shown = isEmpty ? (this.props.placeholder ?? '') : text;
+    const s = this._textStyle();
+    const color = isEmpty
+      ? (this.props.placeholderColor ?? '#9aa0a6')
+      : s.color;
+    const width = this.contentBox().width || undefined;
+    const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}`;
+    if (this._valueLayoutKey !== key) {
+      this._valueLayoutKey = key;
+      this._valueLayoutCache = fonts.layout([{ text: shown, ...s, color }], s, {
+        maxWidth: width,
+      });
+    }
+    return this._valueLayoutCache;
+  }
+
+  applyProps(newProps, oldProps) {
+    const before = oldProps ?? this.props;
+    super.applyProps(newProps, oldProps);
+    if (newProps.rows !== before.rows) {
+      this.yoga.markDirty();
+      this.root?.invalidate(true);
+    }
+  }
+
+  _indexAtPoint(ev) {
+    const layout = this._valueLayout();
+    if (!layout) return this._chars().length;
+    const content = this.contentBox();
+    return layout.indexAt(ev.x - content.x, ev.y - content.y + this._scrollY);
+  }
+
+  scrollBy(dy) {
+    const layout = this._valueLayout();
+    const content = this.contentBox();
+    const max = layout ? Math.max(0, layout.height - content.height) : 0;
+    const next = Math.min(Math.max(0, this._scrollY + dy), max);
+    if (next === this._scrollY) return;
+    this._scrollY = next;
+    this.root?.invalidate(false);
+  }
+
+  /** Caret index on an adjacent visual line, keeping the goal column. */
+  _verticalMove(layout, delta) {
+    const pos = layout.caretPosition(this._caret);
+    const li = pos.line + delta;
+    if (li < 0) {
+      this._goalX = null;
+      return 0;
+    }
+    if (li >= layout.lines.length) {
+      this._goalX = null;
+      return this._chars().length;
+    }
+    const x = this._goalX ?? pos.x;
+    this._goalX = x;
+    const line = layout.lines[li];
+    return layout.indexAt(x, line.y + (line.ascent + line.descent) / 2);
+  }
+
+  _defaultKeyDown(ev) {
+    const k = ev.keysym;
+    const layout = this._valueLayout();
+
+    if (k === XK_RETURN || k === XK_KP_ENTER) {
+      if (ev.ctrlKey) {
+        this.props.onSubmit?.(this.value, ev);
+        return;
+      }
+      this._goalX = null;
+      this._insert('\n');
+      return;
+    }
+    if ((k === XK_UP || k === XK_DOWN) && layout && this.value.length > 0) {
+      const i = this._verticalMove(layout, k === XK_UP ? -1 : 1);
+      this._moveCaret(i, ev.shiftKey);
+      if (ev.shiftKey) this._copySelection('PRIMARY');
+      return;
+    }
+    if ((k === XK_HOME || k === XK_END) && layout && this.value.length > 0) {
+      const pos = layout.caretPosition(this._caret);
+      const line = layout.lines[pos.line];
+      const y = line.y + (line.ascent + line.descent) / 2;
+      // indexAt clamps into the line: far left = line start; just past the
+      // right edge = end of visible content (before the newline)
+      const i =
+        k === XK_HOME
+          ? layout.indexAt(-1e6, y)
+          : layout.indexAt(line.x + line.width + 0.01, y);
+      this._goalX = null;
+      this._moveCaret(i, ev.shiftKey);
+      return;
+    }
+    this._goalX = null;
+    super._defaultKeyDown(ev);
+  }
+
+  _paintContent(ctx) {
+    const layout = this._valueLayout();
+    if (!layout) return;
+    const content = this.contentBox();
+    if (content.width <= 0 || content.height <= 0) return;
+    const isEmpty = this.value.length === 0;
+
+    // keep the caret line inside the viewport
+    const pos = layout.caretPosition(this._caret);
+    if (pos.y + pos.height - this._scrollY > content.height) {
+      this._scrollY = pos.y + pos.height - content.height;
+    }
+    if (pos.y - this._scrollY < 0) {
+      this._scrollY = pos.y;
+    }
+    this._scrollY = Math.min(
+      this._scrollY,
+      Math.max(0, layout.height - content.height),
+    );
+    this._scrollY = Math.max(0, this._scrollY);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(content.x, content.y, content.width, content.height);
+    ctx.clip();
+    const originX = content.x;
+    const originY = content.y - this._scrollY;
+
+    const [a, b] = this._selection();
+    if (this._focused && a !== b && !isEmpty) {
+      const posA = layout.caretPosition(a);
+      const posB = layout.caretPosition(b);
+      ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
+      for (let li = posA.line; li <= posB.line; li++) {
+        const line = layout.lines[li];
+        const x0 = li === posA.line ? posA.x : line.x;
+        const x1 = li === posB.line ? posB.x : line.x + line.width;
+        // a selected bare newline still shows as a sliver
+        const w = Math.max(x1 - x0, 4);
+        ctx.fillRect(
+          originX + x0,
+          originY + line.y,
+          w,
+          line.ascent + line.descent,
+        );
+      }
+    }
+
+    layout.draw(ctx, originX, originY);
+
+    if (this._focused && this._caretOn && a === b) {
+      ctx.fillStyle = this.props.caretColor ?? this._textStyle().color;
+      ctx.fillRect(originX + pos.x, originY + pos.y, 1.5, pos.height);
+    }
+    ctx.restore();
+  }
+}
+
+/**
  * <window>: backed by a real X11 window. Acts as the flex root and
  * paint/event root for its drawn subtree. The node is a lightweight handle
  * during the render phase — the real window is created top-down in the
@@ -1156,6 +1362,27 @@ export class WindowNode extends Node {
     wnd.on('expose', (ev) => {
       this.props.onExpose?.(ev);
     });
+    // WM close button: with an onCloseRequest prop the window opts into the
+    // WM_DELETE_WINDOW protocol and the handler decides what happens
+    // (unmount, hide, quit). Without it the WM default stands (the server
+    // kills the connection). Opt-in is decided at realize time.
+    if (this.props.onCloseRequest && typeof wnd.setActions === 'function') {
+      wnd.setActions();
+      const X = this.app.X;
+      if (typeof X?.InternAtom === 'function') {
+        X.InternAtom(false, 'WM_DELETE_WINDOW', (err, atom) => {
+          if (!err) this._wmDeleteAtom = atom;
+        });
+      }
+      wnd.on('message', (ev) => {
+        if (this._wmDeleteAtom != null && ev.data?.[0] === this._wmDeleteAtom) {
+          // a WM close is a user action: discrete priority, like clicks
+          runWithPriority(DiscreteEventPriority, () => {
+            this.props.onCloseRequest?.(ev);
+          });
+        }
+      });
+    }
     this.events.attach();
   }
 
