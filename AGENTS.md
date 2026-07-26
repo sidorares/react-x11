@@ -58,9 +58,10 @@ no override-redirect staging (issue #4).
 - The package is **ESM** (`"type": "module"`). ntk is ESM with top-level
   await in its graph; yoga-layout is ESM WASM. Everything imports statically
   now (no `require`).
-- ntk >= 3.1.0 comes from npm. Yoga is imported **from ntk** (its 3.1.0
-  re-export), so renderer and ntk widgets share one WASM instance — do not
-  add a direct yoga-layout dependency.
+- ntk >= 3.3.0 comes from npm. Yoga is imported **from ntk**, so renderer
+  and ntk widgets share one WASM instance — do not add a direct
+  yoga-layout dependency. `<textinput>` caret math uses ntk 3.3.0's
+  `TextLayout.caretPosition`/`indexAt`.
 - Text measurement runs through a yoga **measure function** calling ntk's
   `FontManager.layout` (`TextLayout`), memoized per max-width. Any change to
   text content or text style props must call `_textContentChanged()` →
@@ -110,7 +111,8 @@ no override-redirect staging (issue #4).
 
 ## Roadmap pointers
 
-See NEXT_STEPS.md. Done: phase 0 (ntk 3.1.0), phase 1 (drawn layer),
+See NEXT_STEPS.md (the "Roadmap refresh" section is the current
+source of truth for what's next). Done: phase 0 (ntk 3.1.0), phase 1 (drawn layer),
 phase 2 (events, `<scrollview>`), phase 3's `<popup>` and `<textinput>`
 (on ntk 3.2.0: clipboard, cursors, setLineDash), and the layout debug
 overlay (`REACT_X11_DEBUG_LAYOUT=1`). Element default actions (textinput

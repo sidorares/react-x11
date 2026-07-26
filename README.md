@@ -14,44 +14,24 @@ Everything is JavaScript all the way down: ntk /
 in pure JS (think xlib rewritten in node.js), layout is
 [yoga-layout](https://www.npmjs.com/package/yoga-layout), text shaping is
 [fontkit](https://github.com/foliojs/fontkit). `npm install` never compiles
-anything.
+anything — and `npm test` doesn't even need an X server (node-x11 ships an
+in-process pure-JS X server that the tests render into and read pixels back
+from; every screenshot below was rendered that way too, by driving the real
+examples through the real event pipeline).
 
-![react-devtools-x11](https://cloud.githubusercontent.com/assets/173025/24536323/6af97598-1625-11e7-88d4-74f429b7f470.gif)
+| `examples/dashboard.jsx` — context theming, hooks | `examples/tasks.jsx` — useReducer, textinput, scrollview |
+| ------------------------------------------------- | -------------------------------------------------------- |
+| ![dashboard](docs/img/dashboard.png)              | ![tasks](docs/img/tasks.png)                             |
 
-## Elements
+| `examples/form.jsx` — textinput + Select | the open Select menu (a real `<popup>` window) |
+| ---------------------------------------- | ---------------------------------------------- |
+| ![form](docs/img/form.png)               | ![select menu](docs/img/select-menu.png)       |
 
-Only `<window>` and `<popup>` map to real X11 windows. Everything else is
-laid out by yoga and drawn client-side into the window's double-buffered 2d
-context — see [NEXT_STEPS.md](NEXT_STEPS.md) for why.
+## Quick start
 
-| element        | what it is                                                                                                                                                                                                             |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<window>`     | a real X11 window; the flex, paint and event root. Props: `title` (UTF-8 via ntk ≥ 3.1), `width`, `height`, `x`, `y`, `backgroundColor`, `onResize`, …                                                                 |
-| `<popup>`      | an override-redirect window at screen coordinates — menus, tooltips, dropdowns. May appear anywhere in the JSX tree; anchor with `ev.nativeEvent.rootx/rooty`                                                          |
-| `<box>`        | flex container. Layout props (`flexDirection`, `flexGrow`, `padding`, `gap`, `position`, …) plus `backgroundColor`, `borderWidth/Color/Radius`, `overflow`, `zIndex`                                                   |
-| `<scrollview>` | clipped, wheel-scrollable viewport with a drawn scrollbar; `scrollTo`/`scrollBy` on the ref, `onScroll`                                                                                                                |
-| `<text>`       | shaped, wrapped text (bidi, ligatures, fallback via ntk). Strings are only legal inside `<text>`; nested `<text>` elements are style spans. `fontSize`, `fontFamily`, `fontWeight`, `color`, `textAlign`, `lineHeight` |
-| `<textinput>`  | single-line editable text: caret, selection, Ctrl+C/X/V (CLIPBOARD), middle-click paste + select-to-own (PRIMARY), controlled (`value`/`onChange`) or uncontrolled (`defaultValue`), `placeholder`, `onSubmit`         |
-| `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                                                                                                                                |
-| `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                                                                                                                |
-
-On top of the primitives the package exports widget **components** (plain
-React, no reconciler support needed): `Select` — a dropdown built on
-`<popup>` with keyboard support and a themable appearance
-(`SelectThemeProvider`).
-
-Events are synthetic with capture/bubble phases and hit testing over the
-drawn tree: `onClick`, `onMouseDown/Up/Move`, `onMouseEnter/Leave`,
-`onWheel` (default action scrolls the nearest `<scrollview>`),
-`onKeyDown/Up`, plus `focusable`, `onFocus`/`onBlur` and Tab traversal.
-Handlers always see current props (no stale closures). A `cursor` prop
-(`"pointer"`, `"text"`, …) changes the pointer while a node is hovered, and
-`borderStyle="dashed"` draws dashed borders (both need ntk ≥ 3.2.0;
-silently inert/solid on older ntk). User handlers run before element
-default actions — `ev.preventDefault()` in `onKeyDown` stops a
-`<textinput>` from editing, like the DOM.
-
-## Example
+```sh
+npm install react-x11 react
+```
 
 ```jsx
 import React, { useState } from 'react';
@@ -67,6 +47,7 @@ function Counter() {
           backgroundColor="#2980b9"
           borderRadius={6}
           padding={8}
+          cursor="pointer"
           onClick={() => setN(n + 1)}
         >
           <text color="white">+1</text>
@@ -80,41 +61,55 @@ const root = await createRoot(); // connects via $DISPLAY
 root.render(<Counter />);
 ```
 
-## Trying it out
+Run it with `tsx` or any JSX-capable loader — or skip JSX entirely with
+`React.createElement` (see
+[`examples/simple-nojsx.js`](examples/simple-nojsx.js), plain node, no build
+step).
 
-Clone this repo and from its folder run
+## Elements
 
-```sh
-npm install
-```
+Only `<window>` and `<popup>` map to real X11 windows. Everything else is
+laid out by yoga and drawn client-side into the window's double-buffered 2d
+context — see [NEXT_STEPS.md](NEXT_STEPS.md) for the architecture rationale
+and [docs/](docs/README.md) for the full API reference.
 
-Running the examples needs an X server (a linux desktop, Xvfb, or XQuartz on
-macOS) with `DISPLAY` set. `npm test` needs no X server at all: node-x11
-ships an in-process pure-JS X server that the integration tests render into
-and read pixels back from.
+| element        | what it is                                                                                                           |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `<window>`     | a real X11 window; the flex, paint and event root                                                                    |
+| `<popup>`      | an override-redirect window at screen coordinates — menus, tooltips, dropdowns                                       |
+| `<box>`        | flex container: layout props → yoga, plus backgrounds, borders (solid/dashed, radius), overflow clipping, zIndex     |
+| `<scrollview>` | clipped, wheel-scrollable viewport with a drawn scrollbar                                                            |
+| `<text>`       | shaped, wrapped text (bidi, ligatures, font fallback); nested `<text>` elements are style spans                      |
+| `<textinput>`  | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select |
+| `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                              |
+| `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)              |
+
+Widget **components** (plain React on top of the primitives): `Select` — a
+dropdown built on `<popup>`, themable via `SelectThemeProvider`.
+
+Events are synthetic with capture/bubble phases and hit testing over the
+drawn tree: `onClick` (with DOM-style `detail` click counting),
+`onMouseDown/Up/Move`, `onMouseEnter/Leave`, `onWheel`, `onKeyDown/Up`,
+`focusable` + `onFocus`/`onBlur` + Tab traversal, and a `cursor` prop.
+User handlers run before element default actions and can
+`ev.preventDefault()` — stopping a `<textinput>` from editing or a
+`<scrollview>` from scrolling, like the DOM.
+
+## Examples
+
+All need an X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation):
 
 ```sh
 npm run examples:simple        # hello world (JSX via tsx)
-npm run examples:simple-nojsx  # the same, plain node
+npm run examples:simple-nojsx  # the same, plain node — no build step
 npm run examples:xeyes         # canvas drawing + hooks
 npm run examples:dashboard     # context theming, custom hooks, components
-npm run examples:tasks         # useReducer, scrollview, keyboard interaction
+npm run examples:tasks         # useReducer, textinput, scrollview
 npm run examples:menu          # right-click context menu via <popup>
 npm run examples:form          # <textinput> + Select dropdowns
 ```
 
-`REACT_X11_DEBUG_LAYOUT=1` outlines every laid-out node (color = tree
-depth) — handy when a flexbox doesn't do what you expect.
-
-## Developing
-
-```sh
-npm test          # headless: mock smoke tests + in-process X server pixels
-npm run lint      # ESLint
-npm run format    # Prettier
-```
-
-### React DevTools
+## React DevTools
 
 ```sh
 npx react-devtools                                # 1. start the standalone UI
@@ -122,12 +117,30 @@ REACT_X11_DEVTOOLS=1 npm run examples:dashboard   # 2. run any example with the 
 ```
 
 The component tree, props and hook state show up live in the DevTools
-window, and hovering an element in the tree tints its rect in the X11
-window (highlight-on-hover). `REACT_X11_DEVTOOLS_HOST` /
-`REACT_X11_DEVTOOLS_PORT` override the default `localhost:8097`.
+window; selecting a component inspects it, and hovering an element in the
+tree tints its rect in the X11 window (highlight-on-hover).
+`REACT_X11_DEVTOOLS_HOST` / `REACT_X11_DEVTOOLS_PORT` override the default
+`localhost:8097`. See [docs/devtools.md](docs/devtools.md).
+
+Two more debugging aids:
+
+- `REACT_X11_DEBUG_LAYOUT=1` outlines every laid-out node (color = tree
+  depth) — handy when a flexbox doesn't do what you expect.
+- refs give you the retained node (`abs` rect, `scrollTo`, …) for drawn
+  elements, or the live [ntk](https://github.com/sidorares/ntk) window for
+  `<window>`/`<popup>` — the whole ntk API is a ref away.
+
+## Developing
+
+```sh
+npm test          # hermetic: mock smoke tests + in-process X server pixels
+npm run lint      # ESLint
+npm run format    # Prettier
+```
 
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
-guidance, and [NEXT_STEPS.md](NEXT_STEPS.md) for the roadmap.
+guidance, [docs/](docs/README.md) for API documentation, and
+[NEXT_STEPS.md](NEXT_STEPS.md) for the roadmap.
 
 # See also
 

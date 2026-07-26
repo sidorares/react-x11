@@ -1,30 +1,100 @@
 # NEXT_STEPS.md — making react-x11 actually usable
 
-> **Status (2026-07-26):** Phase 0 shipped in **ntk 3.1.0** (PRs #56, #58,
-> #60 merged); react-x11 consumes `Yoga` from ntk, no direct yoga dep.
-> Phase 1 done — ESM migration, retained node tree, yoga per node,
-> `<box>`/`<text>`/`<image>`/`<canvas>`, paint on ntk's frame clock,
-> hermetic pixel tests. Phase 2 done — synthetic events (capture/bubble,
-> click, enter/leave, wheel, focus/Tab), hit testing, **`<scrollview>`**
-> (wheel default action, drawn scrollbar). From phase 3: **`<popup>`**
-> (override-redirect, server-verified). From phase 5: layout debug overlay
-> (`REACT_X11_DEBUG_LAYOUT=1`). Examples: dashboard, tasks (scrollable),
-> menu (popup), xeyes (zero manual layout), simple. Upstream in review:
-> ntk#62→PR#63 (setTitle/setActions close race), ntk#65→PR#68 (cursors —
-> the `cursor` prop here already feature-detects `setCursor`), ntk#66→PR#69
-> (clipboard: CLIPBOARD/PRIMARY, TARGETS, UTF-8 + INCR reads), ntk#67→PR#70
-> (setLineDash + round caps/joins) — **all merged and released as ntk
-> 3.2.0**. On top of 3.2.0: **`<textinput>`** (caret/selection via
-> TextLayout prefix widths, Ctrl+C/X/V, PRIMARY middle-click paste and
-> select-to-own, controlled/uncontrolled, placeholder, blink, hover text
-> cursor), `borderStyle="dashed"`, and EventManager default-action hooks
-> (user handlers can preventDefault, DOM-style). `Select` widget component
-> (dropdown on `<popup>`, scrollable menu, Escape/blur close, themable) and
-> double/triple-click selection in textinput (DOM-style `detail` counting)
-> are in. DevTools highlight-on-hover is in
-> (agent showNativeHighlight → window overlay tint). Remaining:
-> bidi-correct caret movement (upstream TextLayout caret API in review),
-> npm publish (release-please PR #17 → 1.0.0).
+> **Status (2026-07-26, end of session):** Everything below through phase 5
+> is DONE and merged (or in review): retained drawn-node architecture
+> (PR #22, incl. top-down commit-phase window creation from #21),
+> `<scrollview>`/`<popup>`/`<textinput>`/`Select`/cursor
+> prop/`borderStyle="dashed"`/debug overlay (#22, #23), trailing-space
+> caret fix (#24), DevTools bridge + highlight-on-hover with the
+> DOM-contract fixes that make selection & highlight actually work (#25 —
+> in review), docs + README overhaul + caret-API adoption (this branch,
+> stacked on #25). Upstream: ntk **3.3.0** released with everything we
+> filed (#56 #58 #60 #63 #68 #69 #70 and the TextLayout caret API #73);
+> `<textinput>` now uses `caretPosition`/`indexAt` — caret math is exact
+> across kerning/bidi/trailing whitespace. npm publish: release-please
+> **PR #17 (1.0.0)** — merge it to publish.
+
+---
+
+## Roadmap refresh — what's missing now (for the next session)
+
+### 1. Expose ntk's rich-content widgets as elements
+
+ntk ships document viewers with a standalone mode
+(`layout(width)` + `draw(ctx, x, y)` + `contentHeight` + `onInvalidate`)
+that slots directly into a yoga measure function + `_paintContent`. One
+generic `NtkViewNode` base can wrap them all:
+
+- `<markdown source>` — MarkdownView (incl. code fences, tables, math,
+  async mermaid via `onInvalidate` → `root.invalidate(true)`)
+- `<html source stylesheet onLink>` — HtmlView (its own CSS cascade; also
+  gives us `linkAt` for click handling)
+- `<svg source>` — SvgView
+- `<tex source displayMode>` — TexView
+- `<mermaid source>` — via MarkdownView's mermaid path or `layoutMermaid`
+- `<paragraph>` — NOT needed as a new element: `<text>` already does
+  multi-span shaped paragraphs; consider instead exposing `TextLayout`
+  options we don't surface yet (maxLines/ellipsis would need ntk support).
+- image and canvas2d already exist as `<image>` / `<canvas>`.
+
+Interaction questions to solve: scrolling (wrap in `<scrollview>` — needs
+measure-height plumbing), link clicks (HtmlView/MarkdownView `linkAt(x,y)`
+→ wire into the hit-test/default-action path), invalidation for async
+content (mermaid), and resource loading (`loadResource`/`baseUrl` props).
+
+### 2. Standard UI components (plain React, like `Select`)
+
+In `src/components.js` (or split to `src/components/` as it grows):
+
+- **Checkbox** — box + canvas checkmark (or ntk Path2D), `checked`,
+  `onChange`, Space toggles, focusable, label as children
+- **Radio / RadioGroup** — group via context (like tasks.jsx's
+  DispatchContext pattern); arrow keys move selection within the group
+  (needs nothing new from the renderer)
+- **Switch** — Checkbox variant with sliding thumb (animate via
+  requestAnimationFrame on the window ref, or step-render)
+- **Slider** — drag via the `_defaultMouseDrag`-style pattern but in
+  userland (onMouseDown + window-level move? needs pointer-capture
+  exposure — see renderer gaps below)
+- **ProgressBar** — trivial (two boxes)
+- **Tooltip** — `<popup>` + hover timer; extract the anchoring math from
+  `Select` into a shared `useAnchor(ref)` hook
+- **Menu/MenuBar, ContextMenu** — generalize examples/menu.jsx
+- **Button** — the examples re-implement it 3×; promote to a component
+
+### 3. Renderer gaps found while building the above
+
+- **Pointer capture for userland** — `EventManager` has downNode-based
+  dragging internally; expose `ev.capturePointer()` or deliver move/up to
+  the mousedown target while dragging (Slider needs this)
+- **Multi-line `<textarea>`** — TextLayout is already multi-line and the
+  caret API returns `{y, line}`; needs vertical caret movement, scroll-Y,
+  wrap-aware Home/End
+- **Bidi caret polish** — caret positions are bidi-correct now (ntk
+  caret API), but arrow keys still move logically; visual-order movement
+  - split caret at direction boundaries is a later refinement
+- **`opacity`** — needs offscreen composition (pixmap + Composite);
+  ntk can do it, renderer needs a group-opacity paint path
+- **Dirty-rect painting** — still full-window repaint per frame
+  (NEXT_STEPS §8.4 below); fine so far, measure before optimizing
+- **Stacking of real windows** — `insertBefore` for `<window>`/`<popup>`
+  ignores order (X ConfigureWindow stackMode not modelled)
+- **Keyboard**: AltGr/compose/IME not handled (ntk TODO), key repeat is
+  server-side (works), keymap beyond index 0/1 unhandled
+
+### 4. Ecosystem / DX
+
+- npm publish (merge release-please #17 → 1.0.0, then examples via
+  `npx`?), CHANGELOG is automated
+- README screenshots are now committed under `docs/img/` and regenerated
+  by script (see AGENTS.md Pull requests section for the rule: PR-only
+  images go to GitHub attachments, committed images only when globally
+  useful — README qualifies)
+- API docs live in `docs/` (elements/components/events/devtools)
+- window-manager example (#3) — SubstructureRedirect is plumbed in ntk
+  (`child-event`); would exercise `<foreign>`-style window wrapping
+- react-native-dom-like packaging (#13) and mylittledom reuse (#10) are
+  superseded by the native architecture; consider closing those issues
 
 Goal: **react-like ergonomics on top of ntk** — good enough to develop and debug
 real GUI apps. This document records the current state, what we learned from
