@@ -43,7 +43,7 @@ function App() {
   }, [notify]);
 
   return (
-    <window width={460} height={430} title="widgets" backgroundColor="#f5f6fa">
+    <window width={460} height={530} title="widgets" backgroundColor="#f5f6fa">
       <box flexGrow={1} padding={16} gap={14}>
         <text fontSize={20} color="#2d3436">
           Widget gallery
@@ -102,6 +102,21 @@ function App() {
           <textinput
             flexGrow={1}
             placeholder="Type here…"
+            padding={8}
+            borderRadius={4}
+            borderWidth={1}
+            borderColor="#b2bec3"
+            backgroundColor="white"
+          />
+        </Row>
+
+        <Row label="Textarea">
+          <textarea
+            flexGrow={1}
+            rows={3}
+            defaultValue={
+              'Multi-line editing:\nEnter for a newline, arrows move by visual line, selection spans lines.'
+            }
             padding={8}
             borderRadius={4}
             borderWidth={1}

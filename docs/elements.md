@@ -128,6 +128,20 @@ PRIMARY (X11 conventions). Focusable by default; shows the text cursor.
 `ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses the
 built-in editing behavior.
 
+## `<textarea>`
+
+Multi-line editable text on the same editing core as `<textinput>`:
+word-wraps at the content width, Enter inserts a newline (Ctrl+Enter fires
+`onSubmit`), Up/Down move between visual lines keeping a goal column,
+Home/End go to the start/end of the visual (wrapped) line, selection spans
+lines, and the view scrolls vertically to follow the caret (mouse wheel
+scrolls too).
+
+| prop            |                                                   |
+| --------------- | ------------------------------------------------- |
+| `rows`          | preferred height in text lines (default 3)        |
+| everything else | as `<textinput>` (`onSubmit` fires on Ctrl+Enter) |
+
 ## `<image>`
 
 | prop  |                                     |

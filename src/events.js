@@ -132,7 +132,7 @@ export class EventManager {
         if (!ev.defaultPrevented) {
           // default action: scroll the nearest enclosing <scrollview>
           for (let n = target; n; n = n.parent) {
-            if (n.kind === 'scrollview') {
+            if (n.kind === 'scrollview' || n.kind === 'textarea') {
               n.scrollBy(ev.deltaY);
               break;
             }
