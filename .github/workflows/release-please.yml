@@ -22,7 +22,7 @@ jobs:
       # Configure this repo + workflow as a trusted publisher for the package
       # on npmjs.com; id-token: write above is what lets npm mint the OIDC
       # credential, and provenance is generated automatically.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ steps.release.outputs.release_created }}
       - uses: actions/setup-node@v4
         if: ${{ steps.release.outputs.release_created }}
