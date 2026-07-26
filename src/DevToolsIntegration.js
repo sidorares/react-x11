@@ -1,9 +1,13 @@
 // Opt-in React DevTools bridge. Enabled by setting REACT_X11_DEVTOOLS=1 in the
 // environment; requires the `react-devtools-core` and `ws` packages (dev
 // dependencies of this repo, not shipped with the library).
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+
 let connected = false;
 
-function connect(renderer) {
+export async function connect(renderer) {
   if (connected) {
     return;
   }
@@ -11,8 +15,10 @@ function connect(renderer) {
 
   let connectToDevTools;
   try {
-    global.WebSocket = global.WebSocket || require('ws');
-    ({ connectToDevTools } = require('react-devtools-core'));
+    if (!global.WebSocket) {
+      global.WebSocket = (await import('ws')).default;
+    }
+    ({ connectToDevTools } = await import('react-devtools-core'));
   } catch (err) {
     console.warn(
       'react-x11: REACT_X11_DEVTOOLS is set but devtools could not be loaded. ' +
@@ -34,5 +40,3 @@ function connect(renderer) {
     findFiberByHostInstance: (instance) => instance._reactFiber,
   });
 }
-
-module.exports = { connect };
