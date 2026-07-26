@@ -1,7 +1,7 @@
 # react-x11 documentation
 
 - [elements.md](elements.md) — the host elements: `<window>`, `<popup>`,
-  `<box>`, `<scrollview>`, `<text>`, `<textinput>`, `<image>`, `<canvas>`,
+  `<box>`, `<scrollview>`, `<text>`, `<textinput>`, `<textarea>`, `<image>`, `<canvas>`,
   and the rich-content wrappers `<markdown>`, `<html>`, `<svg>`, `<tex>`,
   their props and refs.
 - [components.md](components.md) — widget components built on the

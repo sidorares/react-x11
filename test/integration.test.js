@@ -670,3 +670,77 @@ test('<markdown> accepts its content as a string child', async () => {
     await app.close();
   }
 });
+
+test('<textarea> edits multi-line text with line-aware caret movement', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const ref = React.createRef();
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 220, height: 140, backgroundColor: 'white' },
+        React.createElement('textarea', {
+          ref,
+          defaultValue: 'hello\nworld',
+          flexGrow: 1,
+          backgroundColor: 'white',
+        }),
+      ),
+      app,
+    );
+    const ta = ref.current;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    assert.strictEqual(ta._valueLayout().lines.length, 2, 'two lines');
+
+    // focus by clicking at the end of "world" (line 2)
+    const content = ta.contentBox();
+    wnd.emit('mousedown', {
+      x: content.x + 200,
+      y: content.y + 25,
+      keycode: 1,
+    });
+    wnd.emit('mouseup', { x: content.x + 200, y: content.y + 25, keycode: 1 });
+    assert.strictEqual(ta._caret, 11, 'click at line end places caret there');
+
+    const press = (keysym, codepoint, extra = {}) => {
+      app.X.keycode2keysyms[254] = [keysym];
+      wnd.emit('keydown', { keycode: 254, codepoint, buttons: 0, ...extra });
+    };
+
+    press(0xff52); // Up -> same column on line 1 -> after "hello"
+    assert.strictEqual(ta._caret, 5, 'Up keeps the goal column');
+    press(0xff50); // Home -> line start
+    assert.strictEqual(ta._caret, 0, 'Home goes to line start');
+    press(0xff54); // Down -> line 2 column 0
+    assert.strictEqual(ta._caret, 6, 'Down lands at the same column below');
+    press(0xff57); // End -> end of "world"
+    assert.strictEqual(ta._caret, 11, 'End goes to the visual line end');
+
+    // Enter inserts a newline (unlike <textinput>)
+    press(0xff0d, 0x0d);
+    press(0x21, 0x21); // '!'
+    assert.strictEqual(ta.value, 'hello\nworld\n!');
+    assert.strictEqual(ta._valueLayout().lines.length, 3, 'three lines now');
+
+    // word-wrap: a long unbroken-by-newline text wraps at the content width
+    const wrapped = app.fonts.layout(
+      [
+        {
+          text: 'aaa bbb ccc ddd eee fff ggg',
+          family: 'sans-serif',
+          size: 14,
+          color: 'black',
+        },
+      ],
+      { family: 'sans-serif', size: 14 },
+      { maxWidth: 60 },
+    );
+    assert.ok(wrapped.lines.length > 1, 'TextLayout wraps at maxWidth');
+
+    ReactX11.unmountComponentAtNode(app);
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});

@@ -25,6 +25,7 @@ import {
   CanvasNode,
   ScrollViewNode,
   TextInputNode,
+  TextAreaNode,
 } from './nodes.js';
 import {
   MarkdownNode,
@@ -46,6 +47,7 @@ const HOST_TYPES = [
   'canvas',
   'scrollview',
   'textinput',
+  'textarea',
   'markdown',
   'html',
   'svg',
@@ -153,6 +155,9 @@ const HostConfig = {
         break;
       case 'textinput':
         node = new TextInputNode(props, rootContainer);
+        break;
+      case 'textarea':
+        node = new TextAreaNode(props, rootContainer);
         break;
       case 'text':
         node = new TextNode(props, rootContainer, {
