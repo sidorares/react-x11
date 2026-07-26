@@ -65,6 +65,34 @@ no override-redirect staging (issue #4).
   sets text in a system sans-serif (Arial / Liberation / DejaVu — small
   serif text reads as a document, not a UI). Run it whenever a change
   affects how the examples look.
+- `npm run screenshots:framed [scene…]` — the same examples captured
+  **with the window manager's frame**, into `docs/img/framed/`
+  (gitignored — the decorations are whatever WM is running locally, so
+  they are generated on demand, not committed). Needs a real `DISPLAY`
+  with a **reparenting** WM; `npm run screenshots` has no WM at all and
+  therefore no frames. See "Framed screenshots" below.
+
+## Framed screenshots
+
+A reparenting WM puts the client window inside a frame window that is a
+child of root, and draws the decoration into it — so the frame is ordinary
+X pixels and `GetImage` can read it. On XQuartz this works because
+quartz-wm renders the Aqua titlebar through the Apple-WM extension's
+`FrameDraw`; on Linux any normal WM does the same with its own theme.
+
+Two things the script has to get right:
+
+- **Find the frame**: walk up from the client window to the ancestor whose
+  parent is root. `ntk`'s `window.queryTree()` or `X.QueryTree` both do.
+- **Beat occlusion**: `GetImage` on a window returns the current _screen_
+  contents of that region, so an overlapping window is captured instead of
+  yours. The script floats the window first — Apple-WM
+  `SetWindowLevel(Floating)` where available, plus `RaiseWindow`.
+  Note quartz-wm does **not** advertise `_NET_WM_STATE_ABOVE`, so on
+  XQuartz the Apple-WM window level is the only always-on-top mechanism.
+- Apple-WM's `SetWindowLevel` wants the **frame**, not the client: once
+  reparented the client is no longer a child of root and the request
+  answers `BadWindow` (opcode 130).
 
 ## Gotchas
 
