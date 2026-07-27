@@ -155,13 +155,36 @@ import { MenuBar, ContextMenu } from 'react-x11';
 </ContextMenu>;
 ```
 
-Item shape: `{ label, onSelect, shortcut, disabled, separator, checked }`.
-Both take an `onSelect(item)` prop as well, fired after the item's own.
+Item shape: `{ label, onSelect, shortcut, disabled, separator, checked,
+items }`. Both take an `onSelect(item)` prop as well, fired after the
+item's own.
+
+**Submenus.** Give an item its own `items` and it becomes a submenu parent,
+marked with `▸` and opening to the side:
+
+```jsx
+{ label: 'Export', items: [
+    { label: 'PNG', onSelect: exportPng },
+    { label: 'SVG', onSelect: exportSvg },
+] }
+```
+
+Nesting is unlimited. Each level is its own `<popup>`, anchored to its
+parent row with `placement: 'right'`, so it flips to the left near a screen
+edge like any other anchored popup.
 
 **Keyboard.** Up/Down move the active item, **skipping separators and
-disabled entries** and wrapping; Home/End jump to the ends; Enter/Space
-activate; Escape closes. In a `MenuBar`, Left/Right walk between menus, and
-with one menu open, hovering another switches to it.
+disabled entries** and wrapping; Home/End jump to the ends; Right opens a
+submenu (selecting its first item) and Left leaves one; Enter/Space
+activate — or open a submenu, for a parent row; Escape closes **one level
+at a time**. In a `MenuBar`, Left/Right walk between menus _when there is
+no submenu to move through_, and with one menu open, hovering another
+switches to it. Hovering a submenu parent opens it with nothing selected
+inside.
+
+Open state is a single path of active indices — one per open level — so
+moving the selection at any level truncates the path and closes deeper
+levels for free.
 
 Both keep focus on a node in the _owner_ window — the popup is
 override-redirect and never takes focus — which is the same arrangement
