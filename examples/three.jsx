@@ -6,8 +6,29 @@
 // Run with: npm run examples:three  (needs an X server with indirect GLX)
 import React, { useEffect, useRef, useState } from 'react';
 
+import { Image } from 'ntk';
+
 import { Button, Canvas3D, Switch } from '../src/components/index.js';
 import { createRoot } from '../src/index.js';
+
+/** A procedural checker, uploaded to the server once and bound per frame. */
+function checkerTexture(size = 64, squares = 8) {
+  const data = Buffer.alloc(size * size * 4);
+  const step = size / squares;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dark = (Math.floor(x / step) + Math.floor(y / step)) % 2 === 0;
+      const i = (y * size + x) * 4;
+      data[i] = dark ? 0x20 : 0xf2;
+      data[i + 1] = dark ? 0x30 : 0xf6;
+      data[i + 2] = dark ? 0x45 : 0xf8;
+      data[i + 3] = 255;
+    }
+  }
+  return new Image({ width: size, height: size, data });
+}
+
+const CHECKER = checkerTexture();
 
 /** Advance a value every frame while `running`, via the window frame clock. */
 function useSpin(running, windowRef) {
@@ -35,7 +56,21 @@ function App() {
   const windowRef = useRef(null);
   const [running, setRunning] = useState(true);
   const [wireframe, setWireframe] = useState(false);
+  const [textured, setTextured] = useState(true);
+  const [hovered, setHovered] = useState(null);
+  const [picked, setPicked] = useState(null);
   const angle = useSpin(running, windowRef);
+
+  // pointer props shared by every mesh: hover highlight and click to pick,
+  // both resolved by raycasting against the geometry on the client
+  const pointer = (name) => ({
+    cursor: 'pointer',
+    onPointerOver: () => setHovered(name),
+    onPointerOut: () => setHovered((h) => (h === name ? null : h)),
+    onClick: () => setPicked((p) => (p === name ? null : name)),
+  });
+  const lift = (name) => (hovered === name ? 1.12 : 1);
+  const tint = (name, color) => (picked === name ? '#f1c40f' : color);
 
   return (
     <window ref={windowRef} width={560} height={460} title="react-x11 — 3D">
@@ -55,25 +90,43 @@ function App() {
           />
 
           <group rotation={[0, angle, 0]}>
-            <mesh position={[-1.6, 0, 0]} rotation={[0.5, 0.4, 0]}>
+            <mesh
+              position={[-1.6, 0, 0]}
+              rotation={[0.5, 0.4, 0]}
+              scale={lift('box')}
+              {...pointer('box')}
+            >
               <boxGeometry args={[1.4, 1.4, 1.4]} />
               <meshPhongMaterial
-                color="#2980b9"
+                color={tint('box', '#2980b9')}
+                map={textured ? CHECKER : undefined}
                 shininess={60}
                 wireframe={wireframe}
               />
             </mesh>
-            <mesh position={[1.6, 0, 0]}>
+            <mesh
+              position={[1.6, 0, 0]}
+              scale={lift('ball')}
+              {...pointer('ball')}
+            >
               <sphereGeometry args={[0.9, 24, 16]} />
               <meshPhongMaterial
-                color="#e67e22"
+                color={tint('ball', '#e67e22')}
                 shininess={12}
                 wireframe={wireframe}
               />
             </mesh>
-            <mesh position={[0, -1.4, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <mesh
+              position={[0, -1.4, 0]}
+              rotation={[Math.PI / 2, 0, 0]}
+              scale={lift('ring')}
+              {...pointer('ring')}
+            >
               <torusGeometry args={[1.1, 0.28, 12, 36]} />
-              <meshLambertMaterial color="#27ae60" wireframe={wireframe} />
+              <meshLambertMaterial
+                color={tint('ring', '#27ae60')}
+                wireframe={wireframe}
+              />
             </mesh>
           </group>
         </Canvas3D>
@@ -83,7 +136,12 @@ function App() {
           <text fontSize={13}>Spin</text>
           <Switch checked={wireframe} onChange={setWireframe} />
           <text fontSize={13}>Wireframe</text>
+          <Switch checked={textured} onChange={setTextured} />
+          <text fontSize={13}>Texture</text>
           <box flexGrow={1} />
+          <text fontSize={13} color="#5b6570">
+            {picked ? `picked: ${picked}` : 'click a shape'}
+          </text>
           <Button onPress={() => setRunning((r) => !r)}>
             {running ? 'Pause' : 'Play'}
           </Button>

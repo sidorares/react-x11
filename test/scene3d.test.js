@@ -143,6 +143,17 @@ function takeFrameControl(surface) {
   return surface;
 }
 
+/**
+ * The GL calls of a single frame. A frame already scheduled by the mount can
+ * still land after the test clears the buffer — it draws the same scene, so
+ * the content is right either way, but counting across two frames is not.
+ * SwapBuffers ends a frame, and the emulator surfaces that as `finish`.
+ */
+function frameCalls(backend) {
+  const end = backend.calls.findIndex((c) => c[0] === 'finish');
+  return end === -1 ? backend.calls : backend.calls.slice(0, end + 1);
+}
+
 /** Draw one frame the way an animation tick or an expose would. */
 async function drawFrame(surface, app, tap) {
   surface._drawFrame();
@@ -414,16 +425,17 @@ test('lights drive the lit materials, and ambient needs no unit of its own', asy
     await drawFrame(surface, app, tap);
 
     // one light unit: the ambient term rides on it, the point light drives it
-    const enabled = backend.calls.filter(
+    const calls = frameCalls(backend);
+    const enabled = calls.filter(
       (c) => c[0] === 'enable' && c[1] === 0x4000, // GL_LIGHT0
     );
     assert.equal(enabled.length, 1, 'GL_LIGHT0 enabled, and only it');
     assert.ok(
-      backend.calls.some((c) => c[0] === 'enable' && c[1] === 0x0b50), // LIGHTING
+      calls.some((c) => c[0] === 'enable' && c[1] === 0x0b50), // LIGHTING
       'lighting turned on for a lit material',
     );
 
-    const lightCalls = backend.calls.filter((c) => c[0] === 'light');
+    const lightCalls = calls.filter((c) => c[0] === 'light');
     // backend.light(lightEnum, pname, params)
     const position = lightCalls.find((c) => c[2] === 0x1203); // GL_POSITION
     assert.deepEqual(
@@ -437,7 +449,7 @@ test('lights drive the lit materials, and ambient needs no unit of its own', asy
       `<ambientLight intensity={0.3}> lands in GL_AMBIENT, got ${ambient[3][0]}`,
     );
 
-    const material = backend.calls.filter((c) => c[0] === 'material');
+    const material = calls.filter((c) => c[0] === 'material');
     assert.ok(
       material.some((c) => c[2] === 0x1602), // AMBIENT_AND_DIFFUSE
       'the material colour becomes the surface reflectance',
@@ -486,6 +498,109 @@ test('a lit material with no lights falls back to flat colour', async () => {
       backend.calls.some((c) => c[0] === 'color'),
       'the colour is sent flat instead',
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a texture is uploaded once and only rebound afterwards', async () => {
+  const { app, backend, tap } = await createGlApp();
+  try {
+    // a 2x2 RGBA checker, the shape ntk's Image has
+    const map = {
+      width: 2,
+      height: 2,
+      data: Buffer.from([
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+      ]),
+    };
+    const scene = (color) =>
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          { flexGrow: 1 },
+          h(
+            'mesh',
+            {},
+            h('planeGeometry', { args: [2, 2] }),
+            h('meshBasicMaterial', { map, color }),
+          ),
+        ),
+      );
+
+    const instance = await render(scene('white'), app);
+    const surface = findSurface(instance._reactX11Node);
+    await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
+    // no clearing here: the upload happens on the very first frame, which
+    // the mount already drew
+    await drawFrame(surface, app, tap);
+    const first = frameCalls(backend);
+    const uploads = first.filter((c) => c[0] === 'texImage2D');
+    assert.equal(uploads.length, 1, 'uploaded on first use');
+    assert.deepEqual(
+      [uploads[0][4], uploads[0][5]],
+      [2, 2],
+      'with the image size',
+    );
+    assert.ok(
+      first.some((c) => c[0] === 'bindTexture'),
+      'and bound for the draw',
+    );
+
+    // a material change re-sends state, never the pixels
+    backend.calls.length = 0;
+    await render(scene('tomato'), app);
+    await drawFrame(surface, app, tap);
+    const second = frameCalls(backend);
+    assert.equal(
+      second.filter((c) => c[0] === 'texImage2D').length,
+      0,
+      'no re-upload',
+    );
+    assert.ok(
+      second.some((c) => c[0] === 'bindTexture'),
+      'just a rebind',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a material without a map turns texturing off', async () => {
+  const { app, backend, tap } = await createGlApp();
+  try {
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          { flexGrow: 1 },
+          h(
+            'mesh',
+            {},
+            h('boxGeometry', { args: [1, 1, 1] }),
+            h('meshBasicMaterial', { color: 'white' }),
+          ),
+        ),
+      ),
+      app,
+    );
+    const surface = findSurface(instance._reactX11Node);
+    await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
+
+    backend.calls.length = 0;
+    await drawFrame(surface, app, tap);
+    const calls = frameCalls(backend);
+    assert.ok(
+      calls.some((c) => c[0] === 'disable' && c[1] === 0x0de1), // GL_TEXTURE_2D
+      'texturing disabled for an untextured mesh',
+    );
+    assert.equal(calls.filter((c) => c[0] === 'texImage2D').length, 0);
   } finally {
     await app.close();
   }

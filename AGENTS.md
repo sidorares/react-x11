@@ -40,7 +40,8 @@ no override-redirect staging (issue #4).
   `<group>`, geometry/material nodes and the renderer that compiles each
   geometry into a server-side **display list** (a frame is matrices +
   material state + one `CallList` per mesh). `src/geometry3d.js` generates
-  the primitives, `src/mat4.js` is the matrix math.
+  the primitives, `src/mat4.js` is the matrix math, `src/raycast3d.js` +
+  `src/pointer3d.js` are picking and mesh pointer events.
 - `src/richnodes.js` — rich-content elements (`<markdown>`, `<html>`,
   `<svg>`, `<tex>`) wrapping ntk's document widgets in standalone mode:
   the widget's `layout(width)`/`contentHeight` feeds a yoga measure

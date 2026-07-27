@@ -283,23 +283,23 @@ names wherever the concept survives the translation to fixed-function GL.
 </Canvas3D>
 ```
 
-| element                 | notes                                                                                                     |
-| ----------------------- | --------------------------------------------------------------------------------------------------------- |
-| `<group>`               | transform only; nests children                                                                            |
-| `<mesh>`                | one geometry child + one material child                                                                   |
-| `<boxGeometry>`         | `args={[width, height, depth, widthSeg, heightSeg, depthSeg]}`                                            |
-| `<planeGeometry>`       | `args={[width, height, widthSeg, heightSeg]}`                                                             |
-| `<sphereGeometry>`      | `args={[radius, widthSeg, heightSeg]}`                                                                    |
-| `<cylinderGeometry>`    | `args={[radiusTop, radiusBottom, height, radialSeg, heightSeg, openEnded]}`                               |
-| `<torusGeometry>`       | `args={[radius, tube, radialSeg, tubularSeg]}`                                                            |
-| `<bufferGeometry>`      | `position` / `normal` / `uv` / `index` arrays; normals are derived from the triangles when omitted        |
-| `<meshBasicMaterial>`   | unlit flat colour: `color`, `wireframe`, `opacity`, `transparent`, `side` (`front` \| `back` \| `double`) |
-| `<meshLambertMaterial>` | diffuse shading; the same props plus `emissive`                                                           |
-| `<meshPhongMaterial>`   | + `specular`, `shininess` (default 30)                                                                    |
-| `<ambientLight>`        | `color`, `intensity` — costs no light unit                                                                |
-| `<directionalLight>`    | `position` is the direction the light comes from                                                          |
-| `<pointLight>`          | `position`, plus `distance`/`decay` for attenuation                                                       |
-| `<spotLight>`           | + `angle` in radians, `penumbra`, `target`                                                                |
+| element                 | notes                                                                                                            |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `<group>`               | transform only; nests children                                                                                   |
+| `<mesh>`                | one geometry child + one material child                                                                          |
+| `<boxGeometry>`         | `args={[width, height, depth, widthSeg, heightSeg, depthSeg]}`                                                   |
+| `<planeGeometry>`       | `args={[width, height, widthSeg, heightSeg]}`                                                                    |
+| `<sphereGeometry>`      | `args={[radius, widthSeg, heightSeg]}`                                                                           |
+| `<cylinderGeometry>`    | `args={[radiusTop, radiusBottom, height, radialSeg, heightSeg, openEnded]}`                                      |
+| `<torusGeometry>`       | `args={[radius, tube, radialSeg, tubularSeg]}`                                                                   |
+| `<bufferGeometry>`      | `position` / `normal` / `uv` / `index` arrays; normals are derived from the triangles when omitted               |
+| `<meshBasicMaterial>`   | unlit flat colour: `color`, `map`, `wireframe`, `opacity`, `transparent`, `side` (`front` \| `back` \| `double`) |
+| `<meshLambertMaterial>` | diffuse shading; the same props plus `emissive`                                                                  |
+| `<meshPhongMaterial>`   | + `specular`, `shininess` (default 30)                                                                           |
+| `<ambientLight>`        | `color`, `intensity` — costs no light unit                                                                       |
+| `<directionalLight>`    | `position` is the direction the light comes from                                                                 |
+| `<pointLight>`          | `position`, plus `distance`/`decay` for attenuation                                                              |
+| `<spotLight>`           | + `angle` in radians, `penumbra`, `target`                                                                       |
 
 Transforms are `position`, `rotation` (XYZ euler radians) and `scale`, each
 a `[x, y, z]` tuple (or one number for a uniform scale), plus `visible`.
@@ -313,6 +313,59 @@ material re-sends neither; changing a geometry's `args` recompiles just
 that list. `test/scene3d.test.js` asserts exactly this on the encoded
 command stream.
 
+### Textures
+
+`map` on any material takes an ntk `Image` — or anything with
+`{ width, height, data }` in RGBA byte order:
+
+```jsx
+import { Image, loadImage } from 'ntk';
+
+const texture = await loadImage('crate.png');
+
+<mesh>
+  <boxGeometry args={[1, 1, 1]} />
+  <meshPhongMaterial map={texture} color="#ffffff" />
+</mesh>;
+```
+
+The pixels are uploaded once, on first use, and only rebound afterwards —
+the same rule as geometry, since a texture is kilobytes that must not cross
+the wire twice. The upload goes through `RenderLarge`, so it is one chunked
+request rather than a stream of commands. Texture coordinates come from the
+geometry (the primitives all generate them); the texture is applied in
+`GL_MODULATE`, so the material `color` tints it and lighting still applies.
+Filtering is linear and wrapping repeats.
+
+### Pointer events on meshes
+
+`<mesh>` and `<group>` take `onClick`, `onPointerDown`, `onPointerUp`,
+`onPointerMove`, `onPointerOver` and `onPointerOut`, plus a `cursor` prop
+applied while the pointer is over them. `<glarea>`/`<Canvas3D>` takes
+`onPointerMissed` for clicks that hit nothing.
+
+```jsx
+<mesh
+  cursor="pointer"
+  onPointerOver={() => setHovered(true)}
+  onPointerOut={() => setHovered(false)}
+  onClick={(ev) => console.log('hit at', ev.point, 'distance', ev.distance)}
+>
+```
+
+The event carries `object` (the mesh that was hit), `point` (world
+coordinates), `distance`, `face`, `uv`, the pixel `x`/`y`, `nativeEvent`,
+and `stopPropagation()` — events bubble from the mesh up through its
+`<group>` ancestors. Only the nearest hit is dispatched.
+
+**Picking is client-side raycasting**, not GPU picking: a ray through the
+clicked pixel is intersected with the same CPU-side geometry the display
+lists were compiled from, using the world matrices of the last frame drawn.
+Reading pixels back would be a round trip per event, and on XQuartz GL
+output is not readable through `GetImage` at all. Only meshes that — or
+whose ancestors — have handlers are tested, and the surface asks the X
+server for pointer events only when the scene has at least one handler.
+
 **Lighting is the fixed-function pipeline**: per-vertex Gouraud shading and
 **8 light units** in total — more than eight non-ambient lights warns and
 uses the first eight. `<ambientLight>` costs no unit; its colour rides on
@@ -323,8 +376,8 @@ world space, so a light inside a rotating `<group>` moves with it.
 Not implemented, and failing with an error naming the reason:
 `<shaderMaterial>` (the protocol encodes no shaders), `<instancedMesh>`,
 `<points>`, `<line>`, post-processing — and no shadows, which need
-framebuffer objects. Camera elements, textures and pointer interaction are
-the phases still to come — see [glx-plan.md](glx-plan.md).
+framebuffer objects. Camera elements are the one r3f concept still missing
+— the `camera` prop covers it for now. See [glx-plan.md](glx-plan.md).
 
 ---
 

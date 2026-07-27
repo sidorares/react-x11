@@ -201,12 +201,17 @@ commands with no vertices in it.
 **Phase 3 — shading.** Lights, `meshLambert`/`meshPhong`, `ShadeModel`,
 normals, `<perspectiveCamera>`/`<orthographicCamera>`, `<group>`.
 
-**Phase 4 — textures.** `TexImage2D` from ntk `Image`, texture cache,
-`map` prop on materials, `TexParameter` filtering/wrap.
+**Phase 4 — textures. DONE.** `map` on any material takes an ntk `Image`;
+`TexImage2D` uploads once through `RenderLarge`, the texture is cached per
+surface and only rebound afterwards, `GL_MODULATE` keeps the material
+colour and the lighting, filtering is linear and wrapping repeats.
 
-**Phase 5 — interaction.** `onClick`/`onPointerOver` on `<mesh>` via
-**client-side** raycasting against the CPU-side geometry — there is no GPU
-picking here. Reuse the existing event plumbing on the `<glarea>` window.
+**Phase 5 — interaction. DONE.** `onClick`, `onPointerDown`/`Up`/`Move`,
+`onPointerOver`/`Out` and `cursor` on `<mesh>`/`<group>`, plus
+`onPointerMissed` on the surface. Client-side raycasting against the
+CPU-side geometry with the world matrices of the last frame drawn; events
+bubble with `stopPropagation()`, and the surface selects X pointer events
+only when the scene has a handler.
 
 **Phase 6 — docs and example.** `docs/3d.md`, an `examples/three.jsx`
 comparable to the widget gallery, README screenshots.
@@ -255,8 +260,10 @@ should be defended by the benchmark rather than by intent.
   the GL child window always sit on top? (Affects whether HUD overlays are
   possible — likely "always on top", so overlays would need a sibling
   window.)
-- Is `RenderLarge` needed for compiling big display lists in one request,
-  and is it correctly implemented in node-x11?
+- ~~Is `RenderLarge` correctly implemented in node-x11?~~ **Yes** — texture
+  uploads go through it and land correctly on XQuartz. Display lists never
+  needed it: the vertex commands are ordinary `Render` batches, which the
+  pipeline already splits at 64 KB.
 
 ---
 

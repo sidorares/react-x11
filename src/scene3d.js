@@ -23,6 +23,7 @@ import {
   perspective,
 } from './mat4.js';
 import { Node } from './nodes.js';
+import { hasPointerHandlers } from './raycast3d.js';
 
 export const GEOMETRY_KINDS = new Set([
   ...Object.keys(GEOMETRY_BUILDERS),
@@ -94,19 +95,27 @@ export class Object3DNode extends Node {
   insertBefore(child, beforeChild) {
     super.insertBefore(child, beforeChild);
     child._setSurface?.(this.surface);
-    this.surface?.requestFrame();
+    this.surface?._sceneChanged?.();
   }
 
   removeChild(child) {
     super.removeChild(child);
     this.surface?.invalidateGeometry?.(child);
-    this.surface?.requestFrame();
+    this.surface?.pointer?.forget(child);
+    this.surface?._sceneChanged?.();
   }
 
   applyProps(newProps) {
+    const before = this.props;
     this.props = newProps;
     this._matrixDirty = true;
-    this.surface?.requestFrame();
+    // gaining or losing handlers changes whether the surface needs X
+    // pointer events at all
+    if (hasPointerHandlers({ props: before }) !== hasPointerHandlers(this)) {
+      this.surface?._sceneChanged?.();
+    } else {
+      this.surface?.requestFrame();
+    }
   }
 
   setHidden(hidden) {
@@ -257,7 +266,7 @@ const DEFAULT_CAMERA = {
   zoom: 1,
 };
 
-function cameraMatrices(spec, { width, height }) {
+export function cameraMatrices(spec, { width, height }) {
   const camera = { ...DEFAULT_CAMERA, ...spec };
   const aspect = width / Math.max(1, height);
   const projection = camera.orthographic
@@ -309,6 +318,8 @@ export class SceneRenderer {
     this.surface = surface;
     this.lists = new Map(); // GeometryNode -> { id, version }
     this.nextList = 1;
+    this.textures = new Map(); // image -> texture id
+    this.nextTexture = 1;
     this.materialKey = null;
     this.initialized = false;
     this.enabledLights = 0;
@@ -333,6 +344,8 @@ export class SceneRenderer {
       this.surface.props.camera,
       info,
     );
+    // kept for picking: rays are cast against the frame that is on screen
+    this.camera = { projection, view, width: info.width, height: info.height };
     gl.MatrixMode(gl.PROJECTION);
     gl.LoadIdentity();
     gl.MultMatrixf(projection);
@@ -345,17 +358,21 @@ export class SceneRenderer {
     // positions land in eye space exactly as GL expects
     this.applyLights(gl, collectLights(roots, identity()));
 
-    for (const node of roots) this.drawObject(gl, node);
+    for (const node of roots) this.drawObject(gl, node, identity());
     return true;
   }
 
-  drawObject(gl, node) {
+  drawObject(gl, node, parentWorld) {
     if (!node.visible) return;
+    // the world matrix is recorded rather than recomputed later: picking
+    // rays are transformed by exactly what was drawn
+    const world = multiply(parentWorld, node.localMatrix());
+    node._world = world;
     gl.PushMatrix();
     gl.MultMatrixf(node.localMatrix());
     if (node.kind === 'mesh') this.drawMesh(gl, node);
     for (const child of node.children) {
-      if (child.isObject3D) this.drawObject(gl, child);
+      if (child.isObject3D) this.drawObject(gl, child, world);
     }
     gl.PopMatrix();
   }
@@ -365,6 +382,37 @@ export class SceneRenderer {
     if (!geometry) return;
     this.applyMaterial(gl, mesh.material);
     gl.CallList(this.listFor(gl, geometry));
+  }
+
+  /**
+   * Upload once, bind per frame. Texture pixels are the same problem as
+   * geometry — kilobytes that must not cross the wire twice — so an ntk
+   * `Image` is uploaded on first use and only rebound afterwards.
+   * `map` is an ntk Image, or anything with { width, height, data } in
+   * RGBA byte order.
+   */
+  textureFor(gl, image) {
+    const cached = this.textures.get(image);
+    if (cached) return cached;
+    const id = this.nextTexture++;
+    gl.BindTexture(gl.TEXTURE_2D, id);
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.TexParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.TexImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      image.width,
+      image.height,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      image.data,
+    );
+    this.textures.set(image, id);
+    return id;
   }
 
   /** Compile once, replay forever — this is the whole point of the design. */
@@ -538,6 +586,8 @@ export class SceneRenderer {
     // <meshBasicMaterial> is unlit by definition, and a lit material with no
     // light in the scene would render black — fall back to flat colour
     const lit = kind !== 'meshBasicMaterial' && this.lit;
+    // texturing is state like everything else here, so it is part of the key
+    const map = props.map ?? null;
     const key = [
       kind,
       lit,
@@ -551,6 +601,7 @@ export class SceneRenderer {
       props.shininess,
       props.specular,
       props.emissive,
+      map ? (this.textures.get(map) ?? 'new') : 'none',
     ].join('|');
     if (key === this.materialKey) return;
     this.materialKey = key;
@@ -597,6 +648,15 @@ export class SceneRenderer {
       else gl.Color3f(r, g, b);
     }
 
+    if (map?.width && map?.data) {
+      gl.Enable(gl.TEXTURE_2D);
+      gl.BindTexture(gl.TEXTURE_2D, this.textureFor(gl, map));
+      // MODULATE: the texture is tinted by the colour and the lighting
+      gl.TexEnvi(gl.TEXTURE_ENV, gl.TEXTURE_ENV_MODE, gl.MODULATE);
+    } else {
+      gl.Disable(gl.TEXTURE_2D);
+    }
+
     gl.PolygonMode(gl.FRONT_AND_BACK, props.wireframe ? gl.LINE : gl.FILL);
     if (props.side === 'double') {
       gl.Disable(gl.CULL_FACE);
@@ -617,5 +677,7 @@ export class SceneRenderer {
   dispose(gl) {
     for (const { id } of this.lists.values()) gl?.DeleteLists?.(id, 1);
     this.lists.clear();
+    if (this.textures.size) gl?.DeleteTextures?.([...this.textures.values()]);
+    this.textures.clear();
   }
 }
