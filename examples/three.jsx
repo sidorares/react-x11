@@ -1,0 +1,85 @@
+// A react-three-fiber-shaped scene over indirect GLX: <Canvas3D> with
+// <mesh>, geometries and materials. Each geometry is compiled into a
+// server-side display list once — a frame is matrices plus one CallList per
+// mesh, whatever the triangle count.
+//
+// Run with: npm run examples:three  (needs an X server with indirect GLX)
+import React, { useEffect, useRef, useState } from 'react';
+
+import { Button, Canvas3D, Switch } from '../src/components/index.js';
+import { createRoot } from '../src/index.js';
+
+/** Advance a value every frame while `running`, via the window frame clock. */
+function useSpin(running, windowRef) {
+  const [angle, setAngle] = useState(0.6);
+  const frame = useRef(0);
+  useEffect(() => {
+    const wnd = windowRef.current;
+    if (!running || !wnd?.requestAnimationFrame) return;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      setAngle((a) => a + 0.02);
+      frame.current = wnd.requestAnimationFrame(tick);
+    };
+    frame.current = wnd.requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      wnd.cancelAnimationFrame?.(frame.current);
+    };
+  }, [running, windowRef]);
+  return angle;
+}
+
+function App() {
+  const windowRef = useRef(null);
+  const [running, setRunning] = useState(true);
+  const [wireframe, setWireframe] = useState(false);
+  const angle = useSpin(running, windowRef);
+
+  return (
+    <window ref={windowRef} width={560} height={460} title="react-x11 — 3D">
+      <box flexGrow={1} padding={12} gap={12} backgroundColor="#f4f6f8">
+        <Canvas3D
+          flexGrow={1}
+          clearColor="#12161f"
+          glx={{ DEPTH_SIZE: 24 }}
+          camera={{ position: [0, 2.6, 8.5], target: [0, -0.2, 0], fov: 45 }}
+        >
+          <group rotation={[0, angle, 0]}>
+            <mesh position={[-1.6, 0, 0]} rotation={[0.5, 0.4, 0]}>
+              <boxGeometry args={[1.4, 1.4, 1.4]} />
+              <meshBasicMaterial color="#2980b9" wireframe={wireframe} />
+            </mesh>
+            <mesh position={[1.6, 0, 0]}>
+              <sphereGeometry args={[0.9, 24, 16]} />
+              <meshBasicMaterial color="#e67e22" wireframe={wireframe} />
+            </mesh>
+            <mesh position={[0, -1.4, 0]} rotation={[Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[1.1, 0.28, 12, 36]} />
+              <meshBasicMaterial color="#27ae60" wireframe={wireframe} />
+            </mesh>
+          </group>
+        </Canvas3D>
+
+        <box flexDirection="row" alignItems="center" gap={12}>
+          <Switch checked={running} onChange={setRunning} />
+          <text fontSize={13}>Spin</text>
+          <Switch checked={wireframe} onChange={setWireframe} />
+          <text fontSize={13}>Wireframe</text>
+          <box flexGrow={1} />
+          <Button onPress={() => setRunning((r) => !r)}>
+            {running ? 'Pause' : 'Play'}
+          </Button>
+        </box>
+      </box>
+    </window>
+  );
+}
+
+export default App;
+
+if (!process.env.REACT_X11_NO_AUTORUN) {
+  const root = await createRoot();
+  root.render(<App />);
+}

@@ -20,6 +20,7 @@ export {
   ContextMenu,
   useAnchor,
   anchorRect,
+  Canvas3D,
 } from './components/index.js';
 
 import { render, createRoot, unmountComponentAtNode } from './Reconciler.js';

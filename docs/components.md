@@ -215,6 +215,45 @@ takes focus when the menu opens.
 Switching between `MenuBar` menus reuses the same X window and moves it
 rather than destroying and recreating one, so there is no flicker.
 
+## `Canvas3D`
+
+The entry point to the [3D scene](elements.md#3d-scene-mesh-group-geometries-materials)
+— a thin wrapper over the `<glarea>` host element, named `Canvas3D` rather
+than r3f's `Canvas` because react-x11 already has a `<canvas>` element (the
+2D `onDraw` escape hatch).
+
+```jsx
+import { Canvas3D } from 'react-x11';
+
+<Canvas3D
+  flexGrow={1}
+  clearColor="#12161f"
+  camera={{ position: [0, 2, 6], fov: 45 }}
+>
+  <group rotation={[0, angle, 0]}>
+    <mesh position={[-1.6, 0, 0]}>
+      <boxGeometry args={[1.4, 1.4, 1.4]} />
+      <meshBasicMaterial color="#2980b9" />
+    </mesh>
+    <mesh position={[1.6, 0, 0]}>
+      <sphereGeometry args={[0.9, 24, 16]} />
+      <meshBasicMaterial color="#e67e22" wireframe />
+    </mesh>
+  </group>
+</Canvas3D>;
+```
+
+Takes every `<glarea>` prop (layout props, `clearColor`, `frameLoop`, `glx`,
+`onCreated`, `onDraw`, `onError`) plus:
+
+- `camera` — `{ position, target, up, fov, near, far }`, or
+  `{ orthographic: true, zoom }`. Defaults to a perspective camera at
+  `[0, 0, 5]` looking at the origin with a 50° vertical field of view.
+
+Animate by changing props from a `requestAnimationFrame` loop on the window
+ref (see `examples/three.jsx`) — a scene only redraws when something
+changes, unless `frameLoop="always"`.
+
 ## `useAnchor(ref)` / `anchorRect(node, options)`
 
 The placement math behind `Select` and `Tooltip`, exported for building

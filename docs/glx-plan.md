@@ -1,8 +1,13 @@
 # Plan: 3D components over indirect GLX
 
-Status: **plan only, nothing implemented.** Written to be picked up in a
-later session. Everything in "What was verified" below was measured on
-2026-07-27 against XQuartz + node-x11 3.1.2 + ntk 3.5.3, not assumed.
+Status: **phases 0, 1 and 2 are implemented** (2026-07-27). Phase 0 shipped
+in ntk 3.6.0 (sidorares/ntk#85): the context tag, GLX visuals on
+`createWindow`, visual discovery over the protocol instead of `glxinfo`.
+Phase 1 is the `<glarea>` element, phase 2 the scene tree — `<mesh>`,
+`<group>`, the primitive geometries and `<meshBasicMaterial>` over a
+display-list compiler (docs/elements.md). Phase 3 (lights, lit materials,
+camera elements) is next. Everything in "What was verified" below was
+measured against XQuartz + node-x11 3.1.2 + ntk 3.5.3, not assumed.
 
 Goal: a react-three-fiber-shaped component set — `<mesh>`, geometries,
 materials, lights, a camera — rendering through **indirect GLX**, i.e. the
@@ -166,7 +171,7 @@ the protocol limit: `shaderMaterial`, `<Effects>`, shadows,
 
 Each phase should land as its own PR with tests, per the usual workflow.
 
-**Phase 0 — unblock (upstream ntk).**
+**Phase 0 — unblock (upstream ntk). DONE — sidorares/ntk#85.**
 
 1. Use `MakeCurrent`'s returned context tag in
    `RenderingContextOpenGL`. Verified fix; this alone makes
@@ -178,15 +183,20 @@ Each phase should land as its own PR with tests, per the usual workflow.
    `GetVisualConfigs` path, choosing a visual with a depth buffer.
    Shelling out cannot work headlessly or on CI.
 
-**Phase 1 — surface.** `<glarea>` host element; `Canvas3D` with clear
-colour, viewport, frame loop on ntk's `requestAnimationFrame`, and
-`SwapBuffers`. Success: a window that clears to a colour and resizes
-correctly.
+**Phase 1 — surface. DONE.** `<glarea>` host element: a child X window on
+a GLX visual, sized by the parent's yoga rect, with clear colour, viewport,
+`onCreated`/`onDraw`, `SwapBuffers` and a demand-or-continuous frame loop
+on ntk's `requestAnimationFrame`. `Canvas3D` moves to phase 2 — the
+surface duties live in the host element, so the component only earns its
+keep once there is a scene tree to own.
 
-**Phase 2 — geometry.** Display-list compiler, `<mesh>`,
-`<bufferGeometry>` + the primitive geometries, `<meshBasicMaterial>`.
-Success: a spinning wireframe/solid cube whose per-frame cost does not
-grow with triangle count.
+**Phase 2 — geometry. DONE.** Display-list compiler, `<mesh>`, `<group>`,
+`<bufferGeometry>` + box/plane/sphere/cylinder/torus,
+`<meshBasicMaterial>`, the `camera` prop and the `Canvas3D` component.
+The per-frame cost is independent of triangle count and
+`test/scene3d.test.js` asserts it on the encoded command stream: a 6 000-
+vertex sphere compiles once, and the steady-state frame is under 30 GL
+commands with no vertices in it.
 
 **Phase 3 — shading.** Lights, `meshLambert`/`meshPhong`, `ShadeModel`,
 normals, `<perspectiveCamera>`/`<orthographicCamera>`, `<group>`.
@@ -233,9 +243,10 @@ should be defended by the benchmark rather than by intent.
 
 ## 7. Open questions
 
-- Does XQuartz's indirect GLX handle display lists and lighting reliably,
-  or only the trivial path the probe exercised? **Test early in Phase 2** —
-  the entire design rests on display lists working.
+- ~~Does XQuartz's indirect GLX handle display lists reliably?~~ **Yes** —
+  `examples/three.jsx` draws box/sphere/torus from display lists with depth
+  testing and back-face culling on XQuartz. Lighting is still untested
+  there (phase 3).
 - Is there a depth-buffer-capable visual reachable via `GetVisualConfigs`
   on both XQuartz and Xvfb/llvmpipe?
 - Does `SwapBuffers` interact sanely with ntk's frame clock and the

@@ -1474,8 +1474,19 @@ export class WindowNode extends Node {
         child.realize(wnd);
       }
     }
+    // <glarea>s mounted before the window existed own a child X window too
+    this._realizeGlAreas(this);
     wnd.map?.();
     this.invalidate(true);
+  }
+
+  /** Walk the drawn subtree and give every <glarea> its child X window. */
+  _realizeGlAreas(node) {
+    for (const child of node.children) {
+      if (child.isWindow) continue;
+      if (child.isGlArea) child.realize();
+      else this._realizeGlAreas(child);
+    }
   }
 
   /**

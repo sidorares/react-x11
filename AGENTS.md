@@ -9,8 +9,9 @@ react-like ergonomics on top of [ntk](https://github.com/sidorares/ntk) /
 [node-x11](https://github.com/sidorares/node-x11) — pure JavaScript
 implementations of the X11 protocol, no native bridge.
 
-Architecture (see NEXT_STEPS.md for the full rationale): only `<window>`
-and `<popup>` map to real X11 windows; everything else is a retained
+Architecture (see NEXT_STEPS.md for the full rationale): only `<window>`,
+`<popup>` and `<glarea>` map to real X11 windows (`<glarea>` because GLX
+needs its own visual); everything else is a retained
 lightweight node — one yoga-layout node each — painted into the owning
 window's double-buffered 2d context on ntk's frame clock, with synthetic
 capture/bubble events dispatched via front-to-back hit testing. X11
@@ -31,6 +32,15 @@ no override-redirect staging (issue #4).
 - `src/nodes.js` — the retained node tree: `WindowNode` (real X window,
   paint/event/flex root), `BoxNode`, `TextNode` (+ spans/chunks),
   `ImageNode`, `CanvasNode`. Layout (yoga), painting, hit testing.
+- `src/glnodes.js` — `<glarea>`: the GL surface. A child X window on a
+  GLX visual (ntk's `chooseGLXConfig`), positioned by the parent's yoga
+  rect, drawing `onDraw` frames on its own frame clock. First step of
+  docs/glx-plan.md.
+- `src/scene3d.js` — the 3D scene tree inside a `<glarea>`: `<mesh>`,
+  `<group>`, geometry/material nodes and the renderer that compiles each
+  geometry into a server-side **display list** (a frame is matrices +
+  material state + one `CallList` per mesh). `src/geometry3d.js` generates
+  the primitives, `src/mat4.js` is the matrix math.
 - `src/richnodes.js` — rich-content elements (`<markdown>`, `<html>`,
   `<svg>`, `<tex>`) wrapping ntk's document widgets in standalone mode:
   the widget's `layout(width)`/`contentHeight` feeds a yoga measure
