@@ -36,6 +36,11 @@ no override-redirect staging (issue #4).
   GLX visual (ntk's `chooseGLXConfig`), positioned by the parent's yoga
   rect, drawing `onDraw` frames on its own frame clock. First step of
   docs/glx-plan.md.
+- `src/scene3d.js` — the 3D scene tree inside a `<glarea>`: `<mesh>`,
+  `<group>`, geometry/material nodes and the renderer that compiles each
+  geometry into a server-side **display list** (a frame is matrices +
+  material state + one `CallList` per mesh). `src/geometry3d.js` generates
+  the primitives, `src/mat4.js` is the matrix math.
 - `src/richnodes.js` — rich-content elements (`<markdown>`, `<html>`,
   `<svg>`, `<tex>`) wrapping ntk's document widgets in standalone mode:
   the widget's `layout(width)`/`contentHeight` feeds a yoga measure

@@ -1,8 +1,8 @@
 # Elements
 
-Only `<window>` and `<popup>` are backed by real X11 windows, created
-top-down in React's commit phase so every `CreateWindow` names its actual
-parent. Everything else is a retained lightweight node — one
+Only `<window>`, `<popup>` and `<glarea>` are backed by real X11 windows,
+created top-down in React's commit phase so every `CreateWindow` names its
+actual parent. Everything else is a retained lightweight node — one
 [yoga-layout](https://www.yogalayout.dev/) node each — painted into the
 owning window's double-buffered 2d context on ntk's frame clock.
 
@@ -259,8 +259,59 @@ drawn in the parent, so 2D content cannot overlap it — a HUD needs a
 sibling `<popup>`. Pointer events over the surface go to its own window;
 `<glarea>` does not take part in the parent's hit testing yet.
 
-See `examples/gl.jsx` and [glx-plan.md](glx-plan.md) for where this is
-going (a react-three-fiber-shaped `<mesh>` set on top).
+`onDraw` is the raw escape hatch; for a scene, put 3D elements inside
+(below) and let the renderer drive the GL. See `examples/gl.jsx` for the
+raw form, `examples/three.jsx` for the declarative one.
+
+---
+
+## 3D scene: `<mesh>`, `<group>`, geometries, materials
+
+Inside a `<glarea>` (or the [`Canvas3D`](components.md#canvas3d) component
+that wraps it) the children are **scene** elements, not drawn ones — a
+separate tree with no yoga and no 2D painting, using react-three-fiber's
+names wherever the concept survives the translation to fixed-function GL.
+
+```jsx
+<Canvas3D flexGrow={1} camera={{ position: [0, 2, 6], fov: 45 }}>
+  <group rotation={[0, angle, 0]}>
+    <mesh position={[-1.6, 0, 0]} rotation={[0.5, 0.4, 0]} scale={1.2}>
+      <boxGeometry args={[1.4, 1.4, 1.4]} />
+      <meshBasicMaterial color="#2980b9" />
+    </mesh>
+  </group>
+</Canvas3D>
+```
+
+| element               | notes                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| `<group>`             | transform only; nests children                                                                     |
+| `<mesh>`              | one geometry child + one material child                                                            |
+| `<boxGeometry>`       | `args={[width, height, depth, widthSeg, heightSeg, depthSeg]}`                                     |
+| `<planeGeometry>`     | `args={[width, height, widthSeg, heightSeg]}`                                                      |
+| `<sphereGeometry>`    | `args={[radius, widthSeg, heightSeg]}`                                                             |
+| `<cylinderGeometry>`  | `args={[radiusTop, radiusBottom, height, radialSeg, heightSeg, openEnded]}`                        |
+| `<torusGeometry>`     | `args={[radius, tube, radialSeg, tubularSeg]}`                                                     |
+| `<bufferGeometry>`    | `position` / `normal` / `uv` / `index` arrays; normals are derived from the triangles when omitted |
+| `<meshBasicMaterial>` | `color`, `wireframe`, `opacity`, `transparent`, `side` (`front` \| `back` \| `double`)             |
+
+Transforms are `position`, `rotation` (XYZ euler radians) and `scale`, each
+a `[x, y, z]` tuple (or one number for a uniform scale), plus `visible`.
+
+**Geometry lives on the server.** GLX encodes no vertex arrays, so vertices
+can only travel as immediate-mode commands — a 1 000-triangle mesh re-sent
+every frame is ~96 KB per frame. Each geometry is therefore compiled into a
+**display list** once, and a frame is matrices + material state + one
+`CallList` per mesh, whatever the triangle count. Changing a transform or a
+material re-sends neither; changing a geometry's `args` recompiles just
+that list. `test/scene3d.test.js` asserts exactly this on the encoded
+command stream.
+
+Not implemented, and failing with an error naming the reason:
+`<shaderMaterial>` (the protocol encodes no shaders), `<instancedMesh>`,
+`<points>`, `<line>`, post-processing. Lighting materials
+(`<meshLambertMaterial>`, `<meshPhongMaterial>`), lights and camera
+elements are the next phase — see [glx-plan.md](glx-plan.md).
 
 ---
 

@@ -8,6 +8,7 @@
 import { cssColor } from 'ntk';
 
 import { Node } from './nodes.js';
+import { SceneRenderer } from './scene3d.js';
 
 // One visual query per (app, spec): GetFBConfigs is a round trip and every
 // <glarea> in an app wants the same answer.
@@ -72,6 +73,7 @@ export class GlAreaNode extends Node {
     this._realizing = false;
     this._frameScheduled = false;
     this._created = false;
+    this.scene = new SceneRenderer(this);
   }
 
   get isGlArea() {
@@ -196,6 +198,7 @@ export class GlAreaNode extends Node {
     const [r, g, b, a] = clearColorOf(this.props);
     gl.ClearColor(r, g, b, a);
     gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    this.scene.render(gl, info);
     this.props.onDraw?.(gl, info);
     gl.SwapBuffers();
     if (this.props.frameLoop === 'always') this.requestFrame();
@@ -213,6 +216,26 @@ export class GlAreaNode extends Node {
     else this.window?.map?.();
   }
 
+  /** scene children (<mesh>, <group>, …) attach to this surface. */
+  insertBefore(child, beforeChild) {
+    super.insertBefore(child, beforeChild);
+    child._setSurface?.(this);
+    this.requestFrame();
+  }
+
+  removeChild(child) {
+    super.removeChild(child);
+    this.invalidateGeometry(child);
+    this.requestFrame();
+  }
+
+  /** A removed geometry's display list is no longer needed server-side. */
+  invalidateGeometry(node) {
+    if (!node) return;
+    if (node.isGeometry) this.scene.forget(this.gl, node);
+    for (const child of node.children ?? []) this.invalidateGeometry(child);
+  }
+
   // the child window covers this rect: nothing to paint into the parent's
   // 2d context, and no drawn children are allowed under it
   paint() {}
@@ -220,6 +243,7 @@ export class GlAreaNode extends Node {
   destroySubtree() {
     if (this.destroyed) return;
     super.destroySubtree();
+    this.scene.dispose(this.gl);
     this.gl?.destroy?.();
     this.gl = null;
     this.window?.destroy?.();

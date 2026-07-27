@@ -13,3 +13,4 @@ export { Slider } from './Slider.js';
 export { Tooltip } from './Tooltip.js';
 export { ContextMenu, MenuBar } from './Menu.js';
 export { Select } from './Select.js';
+export { Canvas3D } from './Canvas3D.js';

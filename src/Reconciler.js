@@ -28,6 +28,7 @@ import {
   TextAreaNode,
 } from './nodes.js';
 import { GlAreaNode } from './glnodes.js';
+import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
 import {
   MarkdownNode,
   HtmlNode,
@@ -91,7 +92,12 @@ const HostConfig = {
   scheduleMicrotask: queueMicrotask,
 
   getRootHostContext() {
-    return { isInsideText: false, isInsideSvg: false, isInsideRichText: false };
+    return {
+      isInsideText: false,
+      isInsideSvg: false,
+      isInsideRichText: false,
+      isInside3d: false,
+    };
   },
 
   getChildHostContext(parentHostContext, type) {
@@ -103,6 +109,8 @@ const HostConfig = {
       // (react-markdown style); no elements are allowed inside
       isInsideRichText:
         type === 'markdown' || type === 'html' || type === 'tex',
+      // inside <glarea> the children are scene nodes, not drawn nodes
+      isInside3d: parentHostContext.isInside3d || type === 'glarea',
     };
   },
 
@@ -137,6 +145,24 @@ const HostConfig = {
       throw new Error(
         `react-x11: <${type}> is not allowed inside <text>; only nested ` +
           '<text> spans and strings are.',
+      );
+    }
+    if (hostContext.isInside3d) {
+      const scene = createSceneNode(type, props, rootContainer);
+      if (scene) {
+        scene._reactFiber = internalHandle;
+        return scene;
+      }
+      if (UNSUPPORTED_KINDS[type]) {
+        throw new Error(
+          `react-x11: <${type}> cannot work over indirect GLX — ` +
+            `${UNSUPPORTED_KINDS[type]}. See docs/glx-plan.md.`,
+        );
+      }
+      throw new Error(
+        `react-x11: <${type}> is not a 3D element; inside <glarea> only ` +
+          [...SCENE_KINDS].map((t) => `<${t}>`).join(', ') +
+          ' are.',
       );
     }
     let node;
@@ -188,6 +214,12 @@ const HostConfig = {
         node = new GlAreaNode(props, rootContainer);
         break;
       default:
+        if (SCENE_KINDS.has(type) || UNSUPPORTED_KINDS[type]) {
+          throw new Error(
+            `react-x11: <${type}> is a 3D element and only works inside ` +
+              '<glarea> (or the <Canvas3D> component).',
+          );
+        }
         throw new Error(
           `react-x11: unknown element type <${type}>. Supported: ` +
             HOST_TYPES.map((t) => `<${t}>`).join(', ') +
