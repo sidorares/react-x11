@@ -113,3 +113,77 @@ export function measureLabel(node, text, style) {
 }
 
 export const DEFAULT_LABEL_SIZE = 13;
+
+/** How long a hover change is held back while the pointer crosses the
+ *  polygon — long enough to be forgiving, short enough not to feel stuck. */
+export const SAFE_HOVER_DELAY = 320;
+
+/**
+ * "Safe polygon" hover, after
+ * [floating-ui](https://floating-ui.com/docs/usehover#safepolygon).
+ *
+ * A submenu opens to the side of its parent row, so reaching it means
+ * moving the pointer *diagonally* across the rows in between — and those
+ * rows would each take the hover and close the submenu being aimed at. The
+ * fix is to treat the triangle between where the pointer was and the near
+ * edge of the child surface as "still hovering the parent": while the
+ * pointer is inside it, hover changes are held back.
+ *
+ * `apex` is where the pointer was while it was still over the parent (its
+ * exit point, near enough), `rect` the child popup — both in **screen**
+ * coordinates, because parent and child are different X windows.
+ */
+export function movingToward(point, apex, rect, buffer = 8) {
+  if (!point || !apex || !rect?.width) return false;
+  return pointInPolygon(point, safePolygon(apex, rect, buffer));
+}
+
+/** The triangle from `apex` to the child's near edge, grown by `buffer`. */
+export function safePolygon(apex, rect, buffer = 8) {
+  const left = rect.x;
+  const right = rect.x + rect.width;
+  const top = rect.y;
+  const bottom = rect.y + rect.height;
+
+  // the edge the pointer has to cross to reach the child
+  let a;
+  let b;
+  if (apex.x <= left) {
+    a = { x: left, y: top - buffer };
+    b = { x: left, y: bottom + buffer };
+  } else if (apex.x >= right) {
+    a = { x: right, y: top - buffer };
+    b = { x: right, y: bottom + buffer };
+  } else if (apex.y <= top) {
+    a = { x: left - buffer, y: top };
+    b = { x: right + buffer, y: top };
+  } else {
+    a = { x: left - buffer, y: bottom };
+    b = { x: right + buffer, y: bottom };
+  }
+  return [apex, a, b];
+}
+
+/** Ray casting; the polygon is a triangle here but the test is general. */
+export function pointInPolygon(point, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const pi = polygon[i];
+    const pj = polygon[j];
+    const straddles = pi.y > point.y !== pj.y > point.y;
+    if (
+      straddles &&
+      point.x < ((pj.x - pi.x) * (point.y - pi.y)) / (pj.y - pi.y) + pi.x
+    ) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Pointer position of an event in screen coordinates, or null. */
+export function screenPoint(ev) {
+  const native = ev?.nativeEvent;
+  if (native?.rootx == null || native?.rooty == null) return null;
+  return { x: native.rootx, y: native.rooty };
+}
