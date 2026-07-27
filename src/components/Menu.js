@@ -8,7 +8,10 @@ import {
   DEFAULT_LABEL_SIZE,
   anchorRect,
   measureLabel,
+  movingToward,
+  SAFE_HOVER_DELAY,
   screenOf,
+  screenPoint,
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
@@ -84,7 +87,15 @@ function nextSelectable(items, from, dir) {
   return -1;
 }
 
-function MenuRow({ item, active, onHover, onSelect, fontSize, nodeRef }) {
+function MenuRow({
+  item,
+  active,
+  onHover,
+  onMove,
+  onSelect,
+  fontSize,
+  nodeRef,
+}) {
   const theme = useTheme();
   if (item.separator) {
     return h(
@@ -107,6 +118,7 @@ function MenuRow({ item, active, onHover, onSelect, fontSize, nodeRef }) {
       cursor: dim ? undefined : 'pointer',
       backgroundColor: active ? theme.hoverBackground : theme.background,
       onMouseEnter: dim ? undefined : onHover,
+      onMouseMove: dim ? undefined : onMove,
       onClick: dim ? undefined : () => onSelect(item),
     },
     h(
@@ -201,10 +213,63 @@ function MenuLevel({
     );
   }, [childOpen, active, depth, fontSize, rect.x, rect.y]);
 
-  const hover = (index) => {
+  // "safe polygon" hover: while a submenu is open, the triangle between the
+  // pointer and the submenu's near edge counts as still hovering the parent
+  // row, so moving diagonally across the rows in between does not close the
+  // submenu being aimed at (docs/components.md).
+  const apexRef = useRef(null);
+  const pendingRef = useRef(null);
+
+  const cancelPending = () => {
+    if (pendingRef.current) {
+      clearTimeout(pendingRef.current);
+      pendingRef.current = null;
+    }
+  };
+
+  // any change to the open path — including the pointer reaching the
+  // submenu — retires a deferred switch: it would close what was reached
+  useEffect(() => cancelPending, []);
+  useEffect(cancelPending, [path.join(','), childOpen]);
+
+  const applyHover = (index) => {
     const base = [...path.slice(0, depth), index];
     // hovering a parent row opens its submenu with nothing selected inside
     setPath(items[index]?.items?.length ? [...base, -1] : base);
+  };
+
+  const hover = (index, ev) => {
+    const point = screenPoint(ev);
+    if (
+      index !== active &&
+      childOpen &&
+      childRect &&
+      movingToward(point, apexRef.current, childRect)
+    ) {
+      // heading for the open submenu: hold the switch, but not forever —
+      // a pointer that stops inside the triangle still meant this row
+      cancelPending();
+      pendingRef.current = setTimeout(() => {
+        pendingRef.current = null;
+        applyHover(index);
+      }, SAFE_HOVER_DELAY);
+      return;
+    }
+    cancelPending();
+    applyHover(index);
+  };
+
+  const move = (index, ev) => {
+    // over the row that owns the open submenu: remember where the pointer
+    // is, so its exit point becomes the apex of the polygon
+    if (index === active) {
+      apexRef.current = screenPoint(ev) ?? apexRef.current;
+      return;
+    }
+    // over another row: mouseEnter only fired once, but the pointer is
+    // still moving — re-decide, so leaving the polygon switches at once
+    // instead of waiting out the delay
+    hover(index, ev);
   };
 
   const choose = (item) => {
@@ -242,7 +307,8 @@ function MenuLevel({
           active: index === active,
           fontSize,
           nodeRef: index === active ? activeRowRef : undefined,
-          onHover: () => hover(index),
+          onHover: (ev) => hover(index, ev),
+          onMove: (ev) => move(index, ev),
           onSelect: choose,
         }),
       ),

@@ -470,7 +470,7 @@ menus/tooltips.
 Found while using the widget set. Both are worth doing before 1.0.0 gets
 much use, and neither depends on the GLX work.
 
-### 11.1 "Safe polygon" for menus, submenus and tooltips
+### 11.1 "Safe polygon" for menus, submenus and tooltips — DONE
 
 Submenus open and switch **on hover with no delay and no exit tolerance**
 (`Menu.js`, the `hover(index)` path). Moving the pointer diagonally from a
@@ -479,6 +479,12 @@ each of which immediately re-points `path` and closes the submenu the user
 was aiming at. Tooltips have the same shape of problem: any pixel outside
 the trigger dismisses them, so a tooltip with interactive content cannot be
 reached.
+
+Fixed: the helpers live in `src/components/anchor.js` (`movingToward`,
+`safePolygon`, `pointInPolygon`, `screenPoint`, `SAFE_HOVER_DELAY`), and
+both `MenuLevel` and `Tooltip` use them; a tooltip now also stays up while
+the pointer is over it, so tooltip content is reachable. What follows is
+the original description.
 
 The fix is floating-ui's [`safePolygon`](https://floating-ui.com/docs/usehover#safepolygon):
 while a child surface is open, build a triangle from the pointer's position

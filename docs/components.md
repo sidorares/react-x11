@@ -215,6 +215,27 @@ takes focus when the menu opens.
 Switching between `MenuBar` menus reuses the same X window and moves it
 rather than destroying and recreating one, so there is no flicker.
 
+### Safe-polygon hover
+
+Reaching a submenu means moving the pointer _diagonally_ across the rows in
+between, and reaching a tooltip means leaving the trigger it belongs to — so
+naive hover handling closes both just as the user aims at them. `MenuBar`,
+`ContextMenu` and `Tooltip` therefore use
+[floating-ui's safePolygon](https://floating-ui.com/docs/usehover#safepolygon)
+idea: the triangle between where the pointer was and the near edge of the
+open surface counts as still hovering the parent.
+
+While the pointer is inside that triangle, hover changes are held back —
+but only for `SAFE_HOVER_DELAY` (320 ms), so a pointer that stops there
+still means what it landed on. Leaving the triangle switches immediately,
+and reaching the surface keeps it open for as long as the pointer stays.
+
+The helpers are exported for widgets of your own:
+`movingToward(point, apex, rect)`, `safePolygon(apex, rect, buffer)`,
+`pointInPolygon(point, polygon)` and `screenPoint(ev)`. All coordinates are
+**screen** coordinates, because the trigger and the popup are different X
+windows.
+
 ## `Canvas3D`
 
 The entry point to the [3D scene](elements.md#3d-scene-mesh-group-geometries-materials)

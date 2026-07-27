@@ -4,7 +4,14 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useTheme } from './theme.js';
-import { DEFAULT_LABEL_SIZE, measureLabel, useAnchor } from './anchor.js';
+import {
+  DEFAULT_LABEL_SIZE,
+  measureLabel,
+  movingToward,
+  SAFE_HOVER_DELAY,
+  screenPoint,
+  useAnchor,
+} from './anchor.js';
 
 const h = React.createElement;
 
@@ -50,6 +57,25 @@ export function Tooltip({
     setRect(null);
   };
 
+  // safe-polygon hover (docs/components.md): leaving the trigger *toward*
+  // the tooltip keeps it up, so a tooltip with content in it can be
+  // reached instead of vanishing the moment the pointer moves
+  const apex = useRef(null);
+  const hideSoon = () => {
+    cancel();
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setRect(null);
+    }, SAFE_HOVER_DELAY);
+  };
+  const onMouseMove = (ev) => {
+    apex.current = screenPoint(ev) ?? apex.current;
+  };
+  const onMouseLeave = (ev) => {
+    if (rect && movingToward(screenPoint(ev), apex.current, rect)) hideSoon();
+    else hide();
+  };
+
   // a pending timer must not outlive the component
   useEffect(() => cancel, []);
 
@@ -78,7 +104,8 @@ export function Tooltip({
       flexDirection: 'row',
       alignItems: 'center',
       onMouseEnter,
-      onMouseLeave: hide,
+      onMouseMove,
+      onMouseLeave,
       onMouseDown: hide,
       ...boxProps,
     },
@@ -97,6 +124,10 @@ export function Tooltip({
         h(
           'box',
           {
+            // the pointer reaching the tooltip keeps it up; leaving it
+            // dismisses, as if the trigger had been left
+            onMouseEnter: cancel,
+            onMouseLeave: hide,
             flexGrow: 1,
             borderWidth: 1,
             borderColor: theme.text,

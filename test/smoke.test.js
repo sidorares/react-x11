@@ -1916,6 +1916,74 @@ test('Tooltip shows after the delay in a popup and hides on leave', async () => 
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('Tooltip stays up when the pointer moves toward it, and is reachable', async () => {
+  const { Tooltip, Button } = await import('../src/index.js');
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 160 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 20 },
+        React.createElement(
+          Tooltip,
+          { label: 'Save the file', delay: 20 },
+          React.createElement(Button, { onPress: () => {} }, 'Save'),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const wrapper = wnd._reactX11Node.children[0].children[0];
+  const { x, y, width, height } = wrapper.abs;
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+
+  wnd.emit('mousemove', { x: cx, y: cy, rootx: cx, rooty: cy });
+  await new Promise((r) => setTimeout(r, 60));
+  await tick();
+  assert.strictEqual(app.windows.length, 2, 'tooltip shown');
+  const tip = app.windows[1];
+
+  // leaving the trigger straight at the tooltip keeps it up. The tooltip
+  // flips below the trigger here (it is near the top of the window), so
+  // "toward it" is the gap just above its top edge.
+  const rect = tip.attributes;
+  const near =
+    rect.y > cy ? { toward: rect.y - 2 } : { toward: rect.y + rect.height + 2 };
+  wnd.emit('mousemove', {
+    x: 0,
+    y: 0,
+    rootx: rect.x + rect.width / 2,
+    rooty: near.toward,
+  });
+  await tick();
+  await tick();
+  assert.strictEqual(tip.destroyed, false, 'still up while heading for it');
+
+  // and the pointer reaching it keeps it up for as long as it stays
+  const content = tip._reactX11Node.children[0];
+  tip.emit('mousemove', {
+    x: content.abs.x + 2,
+    y: content.abs.y + 2,
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await tick();
+  assert.strictEqual(tip.destroyed, false, 'hovering the tooltip holds it');
+
+  // leaving the tooltip dismisses it
+  tip.emit('mousemove', { x: -20, y: -20 });
+  await tick();
+  await tick();
+  assert.strictEqual(tip.destroyed, true, 'gone once the pointer leaves');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('Tooltip does not show if the pointer leaves before the delay', async () => {
   const { Tooltip, Button } = await import('../src/index.js');
   const app = createMockApp();
@@ -2408,6 +2476,110 @@ test('submenu: hovering a parent row opens it with nothing selected inside', asy
   for (let i = 0; i < 4; i++) await tick();
   assert.strictEqual(app.windows[2].destroyed, true, 'submenu closed');
   assert.strictEqual(activeIn(app, 1), 2, 'Quit active');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('submenu: a diagonal path toward it keeps it open (safe polygon)', async () => {
+  const app = createMockApp();
+  const picked = [];
+  await openNested(app, picked);
+  const menu = app.windows[1];
+  const rows = rowsOf(app, 1);
+  const exportRow = rows[1];
+  const quitRow = rows[2];
+
+  // over the parent row: the submenu opens
+  const overExport = {
+    x: exportRow.abs.x + 5,
+    y: exportRow.abs.y + exportRow.abs.height / 2,
+  };
+  menu.emit('mousemove', {
+    ...overExport,
+    rootx: overExport.x,
+    rooty: overExport.y,
+  });
+  for (let i = 0; i < 4; i++) await tick();
+  assert.strictEqual(app.windows.length, 3, 'submenu opened on hover');
+
+  // a second move records where the pointer is on its way out, near the
+  // right edge of the row — the apex of the safe polygon
+  const apex = {
+    x: exportRow.abs.x + exportRow.abs.width - 4,
+    y: overExport.y,
+  };
+  menu.emit('mousemove', { ...apex, rootx: apex.x, rooty: apex.y });
+  await tick();
+
+  const submenu = app.windows[2].attributes;
+  // now the diagonal: the pointer is over Quit, but heading into the gap
+  // in front of the submenu — this is what used to close it
+  menu.emit('mousemove', {
+    x: quitRow.abs.x + 5,
+    y: quitRow.abs.y + quitRow.abs.height / 2,
+    rootx: submenu.x - 3,
+    rooty: submenu.y + 10,
+  });
+  for (let i = 0; i < 4; i++) await tick();
+
+  assert.strictEqual(app.windows[2].destroyed, false, 'submenu still open');
+  assert.strictEqual(activeIn(app, 1), 1, 'Export still the active row');
+
+  // moving away from the submenu switches immediately, as before
+  menu.emit('mousemove', {
+    x: quitRow.abs.x + 5,
+    y: quitRow.abs.y + quitRow.abs.height / 2,
+    rootx: quitRow.abs.x + 5,
+    rooty: quitRow.abs.y + 40,
+  });
+  for (let i = 0; i < 4; i++) await tick();
+  assert.strictEqual(app.windows[2].destroyed, true, 'submenu closed');
+  assert.strictEqual(activeIn(app, 1), 2, 'Quit active');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('submenu: a pointer that stops inside the safe polygon still switches', async () => {
+  const app = createMockApp();
+  const picked = [];
+  await openNested(app, picked);
+  const menu = app.windows[1];
+  const rows = rowsOf(app, 1);
+  const exportRow = rows[1];
+  const quitRow = rows[2];
+
+  const overExport = {
+    x: exportRow.abs.x + 5,
+    y: exportRow.abs.y + exportRow.abs.height / 2,
+  };
+  menu.emit('mousemove', {
+    ...overExport,
+    rootx: overExport.x,
+    rooty: overExport.y,
+  });
+  for (let i = 0; i < 4; i++) await tick();
+  menu.emit('mousemove', {
+    x: exportRow.abs.x + exportRow.abs.width - 4,
+    y: overExport.y,
+    rootx: exportRow.abs.x + exportRow.abs.width - 4,
+    rooty: overExport.y,
+  });
+  await tick();
+
+  const submenu = app.windows[2].attributes;
+  menu.emit('mousemove', {
+    x: quitRow.abs.x + 5,
+    y: quitRow.abs.y + quitRow.abs.height / 2,
+    rootx: submenu.x - 3,
+    rooty: submenu.y + 10,
+  });
+  for (let i = 0; i < 4; i++) await tick();
+  assert.strictEqual(activeIn(app, 1), 1, 'held back at first');
+
+  // the hold is a delay, not a veto: a pointer parked there meant that row
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  for (let i = 0; i < 4; i++) await tick();
+  assert.strictEqual(activeIn(app, 1), 2, 'Quit active once the delay lapses');
 
   ReactX11.unmountComponentAtNode(app);
 });
