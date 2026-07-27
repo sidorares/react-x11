@@ -433,6 +433,72 @@ test('centered text is vertically balanced (half-leading)', async () => {
   }
 });
 
+test('rich content scrolled out of a scrollview leaves no ink behind', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    // a math fence: KaTeX draws glyph runs and vector shapes of its own,
+    // which used to bypass the 2d clip and paint over whatever was above
+    // the scrollview once they were scrolled out (fixed in ntk 3.7.1)
+    const source = `# Heading\n\n\`\`\`math\n\\sqrt{\\frac{x+1}{2}}\n\`\`\`\n\n${'filler paragraph. '.repeat(40)}\n`;
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 300, backgroundColor: 'white' },
+        React.createElement(
+          'box',
+          { flexGrow: 1, padding: 20 },
+          React.createElement('box', { height: 60 }), // the band above it
+          React.createElement(
+            'scrollview',
+            { flexGrow: 1 },
+            React.createElement('markdown', { source }),
+          ),
+        ),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    const node = wnd._reactX11Node;
+    const scroll = node.children[0].children[1];
+
+    // wait until the document has laid out and drawn something
+    await waitForInk(
+      ctx,
+      300,
+      300,
+      { x: 20, y: 80, width: 260, height: 200 },
+      isDark,
+      20,
+      'markdown ink inside the scrollview',
+    );
+
+    const inkAbove = async () => {
+      const image = await readPixels(ctx, 300, 300);
+      let n = 0;
+      for (let y = 20; y < 79; y++) {
+        for (let x = 20; x < 280; x++) if (isDark(px(image, 300, x, y))) n++;
+      }
+      return n;
+    };
+    assert.equal(await inkAbove(), 0, 'nothing above it to begin with');
+
+    for (const offset of [120, 160, 200]) {
+      scroll.scrollTo(offset);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      assert.equal(
+        await inkAbove(),
+        0,
+        `nothing painted above the scrollview at offset ${offset}`,
+      );
+    }
+
+    ReactX11.unmountComponentAtNode(app);
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
 test('<markdown> renders through MarkdownView and dispatches onLink', async () => {
   const { app } = await createHeadlessApp();
   try {
