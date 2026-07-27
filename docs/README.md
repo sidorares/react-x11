@@ -52,3 +52,5 @@ on ntk's frame clock.
 | `REACT_X11_DEVTOOLS_HOST`  | devtools host (default `localhost`)                     |
 | `REACT_X11_DEVTOOLS_PORT`  | devtools port (default `8097`)                          |
 | `REACT_X11_DEBUG_LAYOUT=1` | outline every laid-out node, color-coded by tree depth  |
+
+- [glx-plan.md](glx-plan.md) — plan for 3D components over indirect GLX

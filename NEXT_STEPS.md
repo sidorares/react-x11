@@ -15,9 +15,14 @@
 >
 > **Plan (next session):**
 >
-> 1. Merge release-please #17 and publish 1.0.0 — the planned widget work
->    is complete.
-> 2. Upstream (ntk): distribute half-leading inside TextLayout itself
+> 1. **3D components over indirect GLX** — the one large feature going in
+>    before 1.0.0. Plan, with the feasibility work already done, is in
+>    [docs/glx-plan.md](docs/glx-plan.md). Starts with two ntk blockers:
+>    `getContext('opengl')` passes the context XID where the protocol
+>    wants MakeCurrent's tag (every draw fails), and `createWindow` cannot
+>    take a visual.
+> 2. Then merge release-please #17 and publish 1.0.0.
+> 3. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
 >    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>`.
 
