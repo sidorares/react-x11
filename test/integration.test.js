@@ -499,6 +499,41 @@ test('rich content scrolled out of a scrollview leaves no ink behind', async () 
   }
 });
 
+test('<markdown> survives a document being typed down to nothing', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    let setText;
+    const Host = () => {
+      const [text, set] = React.useState('# hello\n\nsome **text**');
+      setText = set;
+      return React.createElement(
+        'window',
+        { width: 300, height: 200, backgroundColor: 'white' },
+        React.createElement(
+          'scrollview',
+          { flexGrow: 1 },
+          React.createElement('markdown', { padding: 6 }, text),
+        ),
+      );
+    };
+    await render(React.createElement(Host), app);
+
+    // a live preview goes through these states on the way to empty, and a
+    // blank block lays out with no spans at all — which used to throw
+    // inside TextLayout and take the frame with it (ntk 3.7.2)
+    for (const value of ['# h', '#', '', ' ', '\n\n', '- ']) {
+      setText(value);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    await settle(app);
+
+    ReactX11.unmountComponentAtNode(app);
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
 test('<markdown> renders through MarkdownView and dispatches onLink', async () => {
   const { app } = await createHeadlessApp();
   try {

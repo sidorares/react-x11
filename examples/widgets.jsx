@@ -1,6 +1,7 @@
 // Widget gallery: every standard component in one window — Button,
 // Checkbox, Radio/RadioGroup, Switch, Slider, ProgressBar, Select,
-// Tooltip, <textinput>.
+// Tooltip, <textinput> — plus a live <markdown> preview of what you type
+// into the <textarea>.
 // Run with: npm run examples:widgets  (needs an X server / DISPLAY)
 import React, { useEffect, useState } from 'react';
 import {
@@ -16,9 +17,9 @@ import {
   Tooltip,
 } from '../src/index.js';
 
-function Row({ label, children }) {
+function Row({ label, children, alignItems = 'center' }) {
   return (
-    <box flexDirection="row" alignItems="center" gap={12}>
+    <box flexDirection="row" alignItems={alignItems} gap={12}>
       <text color="#7f8c8d" width={90}>
         {label}
       </text>
@@ -35,6 +36,9 @@ function App() {
   const [presses, setPresses] = useState(0);
   const [volume, setVolume] = useState(40);
   const [progress, setProgress] = useState(0.2);
+  const [note, setNote] = useState(
+    '## Live preview\n\nType **markdown** — `code`, [links](https://x.org)\nand lists all render below.\n',
+  );
 
   // demo animation: creep the progress bar while "notifications" are on
   useEffect(() => {
@@ -47,7 +51,7 @@ function App() {
   }, [notify]);
 
   return (
-    <window width={460} height={580} title="widgets" backgroundColor="#f5f6fa">
+    <window width={460} height={720} title="widgets" backgroundColor="#f5f6fa">
       <box flexGrow={1} padding={16} gap={14}>
         <text fontSize={20} color="#2d3436">
           Widget gallery
@@ -128,19 +132,33 @@ function App() {
           />
         </Row>
 
-        <Row label="Textarea">
-          <textarea
-            flexGrow={1}
-            rows={3}
-            defaultValue={
-              'Multi-line editing:\nEnter for a newline, arrows move by visual line, selection spans lines.'
-            }
-            padding={8}
-            borderRadius={4}
-            borderWidth={1}
-            borderColor="#b2bec3"
-            backgroundColor="white"
-          />
+        <Row label="Markdown" alignItems="flex-start">
+          <box flexGrow={1} gap={8}>
+            {/* the textarea is the source, the <markdown> element is the
+                preview: every keystroke re-parses through ntk's
+                MarkdownView, which is cheap enough for a document this size */}
+            <textarea
+              flexGrow={0}
+              rows={4}
+              value={note}
+              onChange={setNote}
+              padding={8}
+              borderRadius={4}
+              borderWidth={1}
+              borderColor="#b2bec3"
+              backgroundColor="white"
+            />
+            <scrollview
+              height={110}
+              padding={4}
+              borderRadius={4}
+              borderWidth={1}
+              borderColor="#dfe6e9"
+              backgroundColor="white"
+            >
+              <markdown padding={6}>{note}</markdown>
+            </scrollview>
+          </box>
         </Row>
       </box>
     </window>
