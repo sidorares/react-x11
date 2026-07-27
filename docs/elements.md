@@ -54,10 +54,37 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `backgroundColor`           | full-window clear color (default white)                              |
 | `onResize(ev)`              | ConfigureNotify — the tree reflows automatically                     |
 | `onExpose(ev)`              | after a repaint was required                                         |
+| `onCloseRequest(ev)`        | WM close button (opts into `WM_DELETE_WINDOW`)                       |
 
 Windows may be nested inside other windows (real X11 child windows).
 **Ref**: the live ntk `Window` — `getContext('2d')`,
 `requestAnimationFrame`, `setCursor`, the whole ntk API.
+
+### Window manager hints
+
+Properties the window manager reads (ntk ≥ 3.5.0). All work at mount and
+update; unchanged values are not re-sent.
+
+| prop          |                                                                                                                         |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `resizable`   | `false` pins min and max size to the current size                                                                       |
+| `sizeHints`   | `{minWidth, minHeight, maxWidth, maxHeight, widthInc, heightInc, baseWidth, baseHeight, minAspect, maxAspect, gravity}` |
+| `wmClass`     | `'instance'`, `['instance', 'Class']` or `{instance, class}`                                                            |
+| `windowType`  | `'dialog'`, `'utility'`, `'tooltip'`… or an array of fallbacks                                                          |
+| `alwaysOnTop` | keep above normal windows                                                                                               |
+
+```jsx
+<window width={400} height={300} resizable={false} windowType="dialog" />
+<window sizeHints={{ minWidth: 320, minHeight: 200 }} />
+```
+
+`sizeHints` is an object rather than flat `minWidth`/`maxWidth` props
+because those names are yoga layout style everywhere else — `<window>`
+already has the wrinkle that `width`/`height` are window state, and
+overloading two more would compound it.
+
+`alwaysOnTop` uses EWMH `_NET_WM_STATE_ABOVE`, falling back to Apple-WM
+window levels on XQuartz, where quartz-wm does not support that state.
 
 ## `<popup>`
 
@@ -68,6 +95,13 @@ the tree does not affect its position on screen); it is its own paint and
 event root. Anchor with `ev.nativeEvent.rootx/rooty` (pointer in screen
 coordinates) or a ref's `abs` rect plus the owner window's `x`/`y`.
 Same props as `<window>`; conditional rendering controls its lifetime.
+
+Defaults to `windowType="dropdown_menu"`; pass `windowType` to override
+(`"tooltip"`, `"popup_menu"`, …). The hint is **additive** — override-
+redirect is what keeps the WM from moving or decorating the popup, and
+stays on. The EWMH spec asks for the type hint on override-redirect
+windows too, so compositing managers can give menus and tooltips
+consistent shadows and animations.
 
 ## `<box>`
 

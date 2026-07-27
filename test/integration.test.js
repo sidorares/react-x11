@@ -744,3 +744,63 @@ test('<textarea> edits multi-line text with line-aware caret movement', async ()
     await app.close();
   }
 });
+
+test('window hints reach the X server as real properties', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    // the render callback resolves to the live ntk window (getPublicInstance)
+    const wnd = await render(
+      React.createElement('window', {
+        width: 300,
+        height: 200,
+        resizable: false,
+        wmClass: ['react-x11', 'React-X11'],
+        windowType: 'dialog',
+      }),
+      app,
+    );
+    await settle(app, 6); // deferred InternAtom -> ChangeProperty chains
+
+    const X = app.X;
+    const win = wnd.id;
+    assert.ok(win > 0, 'render resolved to a realized ntk window');
+
+    const getProp = (atom, type = 0) =>
+      new Promise((resolve, reject) =>
+        X.GetProperty(0, win, atom, type, 0, 1024, (err, p) =>
+          err ? reject(err) : resolve(p),
+        ),
+      );
+    const intern = (name) =>
+      new Promise((resolve, reject) =>
+        X.InternAtom(false, name, (err, a) => (err ? reject(err) : resolve(a))),
+      );
+
+    // WM_NORMAL_HINTS: resizable={false} pins min and max to the size
+    const hints = await getProp(X.atoms.WM_NORMAL_HINTS);
+    const w = [];
+    for (let i = 0; i + 4 <= hints.data.length; i += 4) {
+      w.push(hints.data.readUInt32LE(i));
+    }
+    assert.strictEqual(w.length, 18, 'XSizeHints is 18 words');
+    assert.strictEqual(w[0] & 16, 16, 'PMinSize set');
+    assert.strictEqual(w[0] & 32, 32, 'PMaxSize set');
+    assert.deepStrictEqual([w[5], w[6]], [300, 200], 'min == created size');
+    assert.deepStrictEqual([w[7], w[8]], [300, 200], 'max == created size');
+
+    const cls = await getProp(X.atoms.WM_CLASS);
+    assert.strictEqual(cls.data.toString('latin1'), 'react-x11\0React-X11\0');
+
+    const [typeAtom, dialog] = await Promise.all([
+      intern('_NET_WM_WINDOW_TYPE'),
+      intern('_NET_WM_WINDOW_TYPE_DIALOG'),
+    ]);
+    const type = await getProp(typeAtom);
+    assert.strictEqual(type.data.readUInt32LE(0), dialog);
+
+    ReactX11.unmountComponentAtNode(app);
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});

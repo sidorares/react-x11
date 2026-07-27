@@ -374,10 +374,16 @@ File these as ntk issues; react-x11 should not work around them long-term.
    `saveUnder`, input-only class are all silently ignored (`lib/window.js`).
    react-x11 passes `overrideRedirect: true` today and it does nothing.
    Blocking `<popup>`.
-2. **UTF-8 window titles + EWMH.** `setTitle` writes only latin `WM_NAME`;
-   add `_NET_WM_NAME` (UTF8_STRING), `_NET_WM_WINDOW_TYPE`
-   (MENU/TOOLTIP/DIALOG — the WM-friendly alternative to overrideRedirect),
-   `WM_CLASS`, icons.
+2. **UTF-8 window titles + EWMH** — DONE. `_NET_WM_NAME` shipped in ntk
+   3.3.0; `WM_NORMAL_HINTS`, `WM_CLASS`, `_NET_WM_WINDOW_TYPE` and
+   always-on-top in **ntk 3.5.0** (sidorares/ntk#77), surfaced here as
+   `<window resizable sizeHints wmClass windowType alwaysOnTop>` and a
+   default `windowType="dropdown_menu"` on `<popup>`. Note the type hint is
+   _additive_, not a replacement for override-redirect: the spec asks for it
+   on override-redirect windows so compositors can style menus consistently,
+   while override-redirect is still what stops the WM repositioning them.
+   Still missing upstream: `_NET_WM_ICON`, `_NET_WM_STATE` (fullscreen /
+   maximize / minimize), `_NET_WM_PID`.
 3. **Re-export the Yoga instance** so renderer and HtmlView share one WASM
    module and version.
 4. **Rect-level presentation.** `_presentNow` blits the full window; accept

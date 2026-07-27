@@ -35,6 +35,18 @@ export const DEVTOOLS_FAKE_DOCUMENT = {
   defaultView: null,
 };
 
+/** Equality for props that may be a scalar, an array or a plain object
+ *  (window hints are all three shapes), so an unchanged inline object
+ *  literal does not re-send the property every render. */
+function shallowEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || !a || !b) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
+}
+
 export class Node {
   get ownerDocument() {
     return DEVTOOLS_FAKE_DOCUMENT;
@@ -1372,6 +1384,42 @@ export class WindowNode extends Node {
     this.invalidate(true);
   }
 
+  /**
+   * Window-manager hints that changed since the last render (ntk >= 3.5.0).
+   * Creation is handled by ntk's Window constructor — every non-event prop
+   * is forwarded there as a creation attribute — so this only has to cover
+   * updates.
+   *
+   * `sizeHints` is an object rather than flat minWidth/maxWidth props on
+   * purpose: those names are yoga layout style, and a `<window>` already
+   * has the confusing split where width/height are window state instead.
+   */
+  _applyWindowHints(next, prev) {
+    const wnd = this.window;
+
+    if (
+      next.resizable !== prev.resizable ||
+      !shallowEqual(next.sizeHints, prev.sizeHints)
+    ) {
+      wnd.setSizeHints?.({
+        ...next.sizeHints,
+        ...(next.resizable === false && { resizable: false }),
+      });
+    }
+    if (!shallowEqual(next.wmClass, prev.wmClass) && next.wmClass) {
+      const c = next.wmClass;
+      if (Array.isArray(c)) wnd.setClass?.(c[0], c[1]);
+      else if (typeof c === 'object') wnd.setClass?.(c.instance, c.class);
+      else wnd.setClass?.(c);
+    }
+    if (!shallowEqual(next.windowType, prev.windowType) && next.windowType) {
+      wnd.setWindowType?.(next.windowType);
+    }
+    if (Boolean(next.alwaysOnTop) !== Boolean(prev.alwaysOnTop)) {
+      wnd.setAlwaysOnTop?.(Boolean(next.alwaysOnTop));
+    }
+  }
+
   // window geometry props are window state, not yoga style — never feed
   // width/height into the root yoga node (flush() sets them from the real
   // window size, which the user may have changed by resizing)
@@ -1477,6 +1525,7 @@ export class WindowNode extends Node {
     if (newProps.title !== before.title) {
       wnd.setTitle?.(newProps.title || '');
     }
+    this._applyWindowHints(newProps, before);
     const geometryChanged =
       newProps.width !== before.width ||
       newProps.height !== before.height ||
@@ -1608,7 +1657,20 @@ export class WindowNode extends Node {
  */
 export class PopupNode extends WindowNode {
   constructor(app, attributes, props) {
-    super(app, { ...attributes, overrideRedirect: true }, props);
+    // override-redirect stays: it is what keeps the window manager from
+    // repositioning or decorating a menu. The EWMH type hint is additive —
+    // the spec asks for it on override-redirect windows too, so compositing
+    // managers can give menus and tooltips consistent shadows/animations.
+    // `windowType` overrides the default (e.g. "tooltip", "popup_menu").
+    super(
+      app,
+      {
+        ...attributes,
+        overrideRedirect: true,
+        windowType: attributes.windowType ?? 'dropdown_menu',
+      },
+      props,
+    );
     this.isPopup = true;
   }
 }

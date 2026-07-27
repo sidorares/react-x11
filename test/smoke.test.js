@@ -132,6 +132,18 @@ function createMockApp() {
           wnd.title = title;
           wnd.calls.push(['setTitle', title]);
         },
+        setSizeHints(hints) {
+          wnd.calls.push(['setSizeHints', hints]);
+        },
+        setClass(instance, className) {
+          wnd.calls.push(['setClass', instance, className]);
+        },
+        setWindowType(type) {
+          wnd.calls.push(['setWindowType', type]);
+        },
+        setAlwaysOnTop(on) {
+          wnd.calls.push(['setAlwaysOnTop', on]);
+        },
         setActions() {
           wnd.calls.push(['setActions']);
         },
@@ -559,6 +571,72 @@ test('scrollview scrollIntoView scrolls the minimum amount', async () => {
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('window manager hints pass through at creation and on update', () => {
+  const app = createMockApp();
+  const render = (props) =>
+    ReactX11.render(
+      React.createElement('window', { width: 200, height: 100, ...props }),
+      null,
+      app,
+    );
+
+  // creation goes through ntk's Window constructor as creation attributes
+  render({
+    resizable: false,
+    wmClass: ['react-x11', 'React-X11'],
+    windowType: 'dialog',
+    sizeHints: { minWidth: 120 },
+  });
+  const wnd = app.windows[0];
+  assert.strictEqual(wnd.attributes.resizable, false);
+  assert.deepStrictEqual(wnd.attributes.wmClass, ['react-x11', 'React-X11']);
+  assert.strictEqual(wnd.attributes.windowType, 'dialog');
+  assert.deepStrictEqual(wnd.attributes.sizeHints, { minWidth: 120 });
+
+  const hintCalls = () =>
+    wnd.calls.filter(([name]) => name.startsWith('set') && name !== 'setTitle');
+
+  // a re-render with identical hints must not re-send them: sizeHints is an
+  // inline object literal, so identity changes every render
+  wnd.calls.length = 0;
+  render({
+    resizable: false,
+    wmClass: ['react-x11', 'React-X11'],
+    windowType: 'dialog',
+    sizeHints: { minWidth: 120 },
+  });
+  assert.deepStrictEqual(hintCalls(), [], 'unchanged hints are not re-sent');
+
+  // changing one hint sends only that one
+  wnd.calls.length = 0;
+  render({
+    resizable: false,
+    wmClass: ['react-x11', 'React-X11'],
+    windowType: 'dialog',
+    sizeHints: { minWidth: 300, maxWidth: 900 },
+  });
+  assert.deepStrictEqual(hintCalls(), [
+    ['setSizeHints', { minWidth: 300, maxWidth: 900, resizable: false }],
+  ]);
+
+  // alwaysOnTop toggles both ways
+  wnd.calls.length = 0;
+  render({ alwaysOnTop: true });
+  assert.ok(
+    wnd.calls.some(([name, on]) => name === 'setAlwaysOnTop' && on === true),
+    'setAlwaysOnTop(true) on enable',
+  );
+
+  wnd.calls.length = 0;
+  render({ alwaysOnTop: false });
+  assert.ok(
+    wnd.calls.some(([name, on]) => name === 'setAlwaysOnTop' && on === false),
+    'setAlwaysOnTop(false) on disable',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('popup mounts as an override-redirect window and unmounts cleanly', () => {
   const app = createMockApp();
   const render = (open) =>
@@ -590,6 +668,10 @@ test('popup mounts as an override-redirect window and unmounts cleanly', () => {
   assert.strictEqual(app.windows.length, 2);
   const popup = app.windows[1];
   assert.strictEqual(popup.attributes.overrideRedirect, true);
+  // the EWMH type hint is additive — override-redirect still keeps the WM
+  // from moving or decorating the menu; the hint only lets compositing
+  // managers style it consistently (wm-spec asks for it on o-r windows)
+  assert.strictEqual(popup.attributes.windowType, 'dropdown_menu');
   assert.deepStrictEqual([popup.attributes.x, popup.attributes.y], [300, 150]);
   assert.strictEqual(popup.mapped, true);
 
