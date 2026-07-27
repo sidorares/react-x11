@@ -133,18 +133,19 @@ function findSurface(node) {
   return null;
 }
 
-/** Draw one more frame the way an animation tick or an expose would. */
+/**
+ * Take the frame clock out of the picture: from here on frames happen only
+ * when the test asks for one, so command counts are exact. The scheduling
+ * path itself is covered by test/glarea.test.js.
+ */
+function takeFrameControl(surface) {
+  surface.requestFrame = () => {};
+  return surface;
+}
+
+/** Draw one frame the way an animation tick or an expose would. */
 async function drawFrame(surface, app, tap) {
-  const done = new Promise((resolve) => {
-    const original = surface._drawFrame.bind(surface);
-    surface._drawFrame = (...args) => {
-      surface._drawFrame = original;
-      original(...args);
-      resolve();
-    };
-  });
-  surface.requestFrame();
-  await done;
+  surface._drawFrame();
   await settle(app);
   return tap;
 }
@@ -171,6 +172,7 @@ test('a mesh compiles once, then every frame is one CallList', async () => {
     const instance = await render(scene([0, 0, 0]), app);
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
     await drawFrame(surface, app, tap);
 
     const first = tap.glx(app.display.GLX.majorOpcode);
@@ -225,6 +227,7 @@ test('per-frame cost does not grow with triangle count', async () => {
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
     await drawFrame(surface, app, tap);
 
     const compile = tap.glx(app.display.GLX.majorOpcode);
@@ -270,6 +273,7 @@ test('changing geometry args recompiles that list once', async () => {
     const instance = await render(scene(1), app);
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
     await drawFrame(surface, app, tap);
 
     tap.reset();
@@ -321,6 +325,7 @@ test('groups nest transforms and each material switches state once', async () =>
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
     await drawFrame(surface, app, tap);
 
     tap.reset();
