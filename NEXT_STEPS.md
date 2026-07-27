@@ -15,15 +15,10 @@
 >
 > **Plan (next session):**
 >
-> 1. Upstream (ntk): make the clipped glyph path cheap. `npm run bench`
->    shows a clipped paragraph costs 25 composites / 4.0 Mpx against 1 /
->    0.16 Mpx unclipped — the mask path runs per line over the whole
->    surface. Two fixes: use `SetPictureClipRectangles` on the destination
->    when the clip stack is all axis-aligned rects (the common case:
->    contentBox, scrollview, overflow hidden), and bound the fallback mask
->    to the glyph bbox. Also batch `TextLayout.draw` per paragraph rather
->    than per line. Same full-surface problem affects every fill
->    (`_fillPolys`): 50 small boxes cost 8.16 Mpx.
+> 1. Upstream (ntk): bound `_fillPolys`/`_strokePolys` to the path's
+>    bounding box. They clear and composite the whole surface per
+>    operation, so 50 small rounded boxes cost 8.16 Mpx in `npm run bench`
+>    — the same pattern the glyph path had before ntk 3.5.2.
 > 2. `Select`/menu follow-up: PageUp/PageDown in the open menu.
 > 3. Then merge release-please #17 and publish 1.0.0 (the owner wants the
 >    planned widget work in first).
@@ -84,14 +79,14 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Bidi caret polish** — caret positions are bidi-correct now (ntk
   caret API), but arrow keys still move logically; visual-order movement
   - split caret at direction boundaries is a later refinement
-- **Full-surface mask composites (ntk)** — clipping is correct since ntk
-  3.5.1, but the mask path (`_fillPolys`, `drawGlyphs`) clears and
-  composites the _entire_ surface per operation. Measured by
-  `npm run bench`: a clipped 12-line paragraph does 25 composites over
-  4.0 Mpx where the ink covers 0.08 Mpx, and 50 small filled boxes do
-  8.16 Mpx. Bound these to the damaged rect, and prefer
-  `SetPictureClipRectangles` for rectangular clips so glyphs clip
-  server-side with no mask at all.
+- **Full-surface mask composites in fills (ntk)** — `_fillPolys` and
+  `_strokePolys` clear and composite the _entire_ surface per operation,
+  so 50 small rounded boxes cost 8.16 Mpx in `npm run bench`. Bound them
+  to the path's bounding box. The glyph path had the same problem and was
+  fixed in ntk 3.5.2 (sidorares/ntk#81): rectangular clips now go through
+  `SetPictureClipRectangles` server-side, and `TextLayout.draw` batches
+  the whole layout, so a clipped paragraph costs the same as an unclipped
+  one (1 composite / 0.16 Mpx, down from 25 / 4.0).
 - **`opacity`** — needs offscreen composition (pixmap + Composite);
   ntk can do it, renderer needs a group-opacity paint path
 - **Dirty-rect painting** — still full-window repaint per frame
