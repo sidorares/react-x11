@@ -504,7 +504,17 @@ plus a small close delay as the fallback. Notes for the implementation:
 - Worth a hermetic test: synthesize a diagonal pointer path across a sibling
   row and assert the submenu stays open, which is exactly the bug today.
 
-### 11.2 Focus state — audit and gaps
+### 11.2 Focus state — audit and gaps (mostly DONE)
+
+Done since: X `FocusIn`/`FocusOut` and `SetInputFocus` are exposed by ntk
+(sidorares/ntk#89) and used here — the focused node keeps focus across a
+window blur but stops looking active; `focus()`/`blur()`/`focused` and
+`autoFocus` are public; focusing inside a `<scrollview>` scrolls into view;
+and popups can hold a pointer grab so a press anywhere else dismisses them
+(gap 3's real fix, and the cause of menus surviving a click on the window
+frame). Still open from the list below: a proper focus _scope_ per popup
+(so Tab is trapped in a modal), `tabIndex` ordering, and restoring focus
+when a popup closes. The original audit follows.
 
 Everything below is how it works **today**; the state lives in
 `EventManager` (`src/events.js`), one instance per `<window>`:

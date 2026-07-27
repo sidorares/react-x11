@@ -233,6 +233,10 @@ export function Select({
           width: anchor.width,
           height: menuHeight + 2,
           backgroundColor: theme.background,
+          // a press anywhere else closes the menu, the window frame
+          // included — see PopupNode's `grab`
+          grab: true,
+          onDismiss: close,
         },
         h(
           'box',

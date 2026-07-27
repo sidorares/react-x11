@@ -118,6 +118,16 @@ function createMockApp() {
           wnd.destroyed = true;
           wnd.calls.push(['destroy']);
         },
+        // ntk >= 3.7.0: menus hold a pointer grab while they are up
+        grabPointer(options, cb) {
+          wnd.grabbed = true;
+          wnd.calls.push(['grabPointer']);
+          cb?.(null, 0);
+        },
+        ungrabPointer() {
+          wnd.grabbed = false;
+          wnd.calls.push(['ungrabPointer']);
+        },
         resize(width, height) {
           wnd.width = width;
           wnd.height = height;
@@ -1862,6 +1872,180 @@ test('anchorRect places, flips at a screen edge and clamps', async () => {
   assert.deepStrictEqual([noScreen.x, noScreen.y], [5, 27]);
 
   assert.strictEqual(anchorRect(null), null, 'no node -> no rect');
+});
+
+test('window focus: the focused node keeps focus but stops looking active', async () => {
+  const app = createMockApp();
+  const events = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      {
+        width: 200,
+        height: 100,
+        onFocus: () => events.push('window:focus'),
+        onBlur: () => events.push('window:blur'),
+      },
+      React.createElement('textinput', {
+        defaultValue: 'hi',
+        width: 120,
+        height: 24,
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+
+  input.focus();
+  assert.strictEqual(input.focused, true, 'node focused');
+  assert.ok(input._blinkTimer, 'caret blinking');
+
+  // the window manager gives the keyboard to someone else
+  wnd.emit('blur', {});
+  await tick();
+  assert.strictEqual(
+    input.focused,
+    true,
+    'the node keeps focus, as in the DOM',
+  );
+  assert.strictEqual(input._blinkTimer, null, 'but the caret stops blinking');
+  assert.deepStrictEqual(events, ['window:blur']);
+
+  wnd.emit('focus', {});
+  await tick();
+  assert.ok(
+    input._blinkTimer,
+    'caret resumes when the window is focused again',
+  );
+  assert.deepStrictEqual(events, ['window:blur', 'window:focus']);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('focus(): ref API, autoFocus, and blur', async () => {
+  const app = createMockApp();
+  const seen = [];
+  const ref = React.createRef();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 100 },
+      React.createElement('box', {
+        ref,
+        focusable: true,
+        width: 40,
+        height: 20,
+        onFocus: () => seen.push('a:focus'),
+        onBlur: () => seen.push('a:blur'),
+      }),
+      React.createElement('box', {
+        focusable: true,
+        autoFocus: true,
+        width: 40,
+        height: 20,
+        onFocus: () => seen.push('b:focus'),
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  assert.deepStrictEqual(seen, ['b:focus'], 'autoFocus took it at mount');
+
+  ref.current.focus();
+  assert.deepStrictEqual(seen, ['b:focus', 'a:focus']);
+  assert.strictEqual(ref.current.focused, true);
+
+  ref.current.blur();
+  assert.strictEqual(ref.current.focused, false);
+  assert.deepStrictEqual(seen, ['b:focus', 'a:focus', 'a:blur']);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Tab into a scrollview scrolls the focused node into view', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 100 },
+      React.createElement(
+        'scrollview',
+        { flexGrow: 1 },
+        ...Array.from({ length: 12 }, (_, i) =>
+          React.createElement('box', {
+            key: i,
+            focusable: true,
+            height: 30,
+            flexShrink: 0,
+          }),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const scroll = wnd._reactX11Node.children[0];
+  const last = scroll.children[scroll.children.length - 1];
+
+  assert.strictEqual(scroll.scrollY, 0, 'starts at the top');
+  last.focus();
+  await tick();
+  await tick();
+  assert.ok(scroll.scrollY > 0, `scrolled to reveal it (${scroll.scrollY})`);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('context menu: a press outside — the window frame — dismisses it', async () => {
+  const app = createMockApp();
+  const picked = [];
+  await openNested(app, picked);
+  const menu = app.windows[1];
+
+  // the root level asks for a pointer grab; that is what makes the press
+  // below reach us at all instead of going to the window manager
+  assert.strictEqual(menu.attributes.grab, true, 'root menu grabs the pointer');
+  assert.ok(menu.grabbed, 'and the grab was taken');
+
+  // a press on the title bar arrives here, outside our bounds
+  menu.emit('mousedown', { x: -40, y: -12, keycode: 1 });
+  await tick();
+  await tick();
+  assert.strictEqual(menu.destroyed, true, 'menu closed');
+  assert.deepStrictEqual(picked, [], 'and nothing was selected');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a press inside the menu is a normal click, not a dismissal', async () => {
+  const app = createMockApp();
+  const picked = [];
+  await openNested(app, picked);
+  const menu = app.windows[1];
+  const row = rowsOf(app, 1)[0];
+
+  menu.emit('mousedown', {
+    x: row.abs.x + 4,
+    y: row.abs.y + row.abs.height / 2,
+    keycode: 1,
+  });
+  menu.emit('mouseup', {
+    x: row.abs.x + 4,
+    y: row.abs.y + row.abs.height / 2,
+    keycode: 1,
+  });
+  await tick();
+  await tick();
+  assert.deepStrictEqual(picked, ['New'], 'the row was selected');
+
+  ReactX11.unmountComponentAtNode(app);
 });
 
 test('Tooltip shows after the delay in a popup and hides on leave', async () => {

@@ -188,6 +188,28 @@ export class Node {
     this.root?.invalidate(true);
   }
 
+  /**
+   * Focus this node, as clicking it would: the owning window's focus moves
+   * here, `onBlur` fires on whatever had it, `onFocus` here. Also pulls the
+   * X input focus to the window if the window manager gave it away.
+   */
+  focus() {
+    this.root?.events?.focus(this);
+    return this;
+  }
+
+  /** Give up focus, leaving the window with nothing focused. */
+  blur() {
+    const events = this.root?.events;
+    if (events?.focused === this) events.focus(null);
+    return this;
+  }
+
+  /** Whether this node has the owning window's focus. */
+  get focused() {
+    return this.root?.events?.focused === this;
+  }
+
   /** Drawn, visible children in paint order (stable sort by zIndex). */
   paintOrder() {
     const drawn = this.children.filter(
@@ -1761,6 +1783,27 @@ export class WindowNode extends Node {
  * in commitMount.
  */
 export class PopupNode extends WindowNode {
+  /**
+   * `grab`: hold a pointer grab while this popup is up. That is how menus
+   * work on X — without it a press that lands anywhere else (another app,
+   * the root, or this app's own window *frame*, which belongs to the window
+   * manager) never reaches us, so the menu stays open behind whatever the
+   * user clicked. With the grab, that press arrives here instead, outside
+   * our bounds, and `onDismiss` fires. Needs ntk >= 3.7.0; without it the
+   * popup simply behaves as before.
+   */
+  realize(parentWindow) {
+    super.realize(parentWindow);
+    if (this.props.grab && !this.destroyed) {
+      this.window?.grabPointer?.({}, () => {});
+    }
+  }
+
+  destroySubtree() {
+    if (this.props.grab) this.window?.ungrabPointer?.();
+    super.destroySubtree();
+  }
+
   constructor(app, attributes, props) {
     // override-redirect stays: it is what keeps the window manager from
     // repositioning or decorating a menu. The EWMH type hint is additive —
