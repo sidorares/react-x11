@@ -1,19 +1,19 @@
 {
   "text: paragraph, no clip": {
-    "requests": 43,
-    "bytesOut": 6192,
+    "requests": 32,
+    "bytesOut": 5884,
     "bytesIn": 32,
     "replies": 1,
     "composites": 1,
     "compositePixels": 160000
   },
   "text: paragraph, inside a rect clip": {
-    "requests": 91,
-    "bytesOut": 7576,
+    "requests": 43,
+    "bytesOut": 6064,
     "bytesIn": 32,
     "replies": 1,
-    "composites": 25,
-    "compositePixels": 4000000
+    "composites": 1,
+    "compositePixels": 160000
   },
   "shapes: 50 filled rounded boxes": {
     "requests": 175,
