@@ -99,6 +99,51 @@ Two things the script has to get right:
   reparented the client is no longer a child of root and the request
   answers `BadWindow` (opcode 130).
 
+## Protocol efficiency
+
+X11 is a network protocol even on a local socket. The three libraries have
+distinct jobs, and this one is the layer that decides _how often_ anything
+is drawn, so cost is a design concern here rather than an afterthought:
+
+- **node-x11** — the protocol and minimal ergonomics. No policy, no
+  drawing strategy.
+- **ntk** — ergonomics and higher-level primitives over it; owns how
+  drawing is _encoded_.
+- **react-x11** — React primitives and ecosystem over ntk; owns how often
+  drawing _happens_.
+
+Rules, in rough order of how much they usually matter:
+
+1. **Use server-side primitives instead of client-side pixel work.**
+   XRender composites, glyph caches, `CopyArea`, server-side clip
+   rectangles. Reach for readback or per-pixel manipulation last.
+2. **Batch into as few requests as possible.** A shaped paragraph is one
+   glyph run batch, not one request per word or per character. Prefer one
+   request covering N items over N requests.
+3. **Bound work to the damaged area.** An operation over the whole surface
+   costs the same on the wire as one over a 20x20 rect and vastly more in
+   the server. This is the failure mode request counts do not show.
+4. **Avoid round trips.** A request that waits for a reply stalls the
+   pipeline; cache what the server already told us (atoms, geometry,
+   glyph pages) rather than asking again.
+5. **Prefer server-side text rendering.** Shape once, upload glyphs once,
+   draw whole runs.
+
+### Measuring it
+
+`npm run bench` runs scenarios against the in-process X server and reports
+requests, bytes, replies, Render composites and **the pixel area those
+composites touch**. That last metric exists because the others hide the
+most common regression: a change can add almost nothing to the wire while
+multiplying the server's work many times over.
+
+- `npm run bench -- --save` rewrites `scripts/bench/baseline.json`
+- `npm run bench -- --check` fails if a metric regressed past tolerance
+
+Re-run it when touching painting, layout flushing, or anything in ntk's
+drawing path, and update the baseline in the same PR that changes it, so
+the diff records the cost.
+
 ## Gotchas
 
 - The package is **ESM** (`"type": "module"`). ntk is ESM with top-level

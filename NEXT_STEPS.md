@@ -15,8 +15,15 @@
 >
 > **Plan (next session):**
 >
-> 1. Upstream (ntk): make glyph drawing honour the 2d clip mask — text
->    currently paints outside clipped boxes (see §3).
+> 1. Upstream (ntk): make the clipped glyph path cheap. `npm run bench`
+>    shows a clipped paragraph costs 25 composites / 4.0 Mpx against 1 /
+>    0.16 Mpx unclipped — the mask path runs per line over the whole
+>    surface. Two fixes: use `SetPictureClipRectangles` on the destination
+>    when the clip stack is all axis-aligned rects (the common case:
+>    contentBox, scrollview, overflow hidden), and bound the fallback mask
+>    to the glyph bbox. Also batch `TextLayout.draw` per paragraph rather
+>    than per line. Same full-surface problem affects every fill
+>    (`_fillPolys`): 50 small boxes cost 8.16 Mpx.
 > 2. `Select`/menu follow-up: PageUp/PageDown in the open menu.
 > 3. Then merge release-please #17 and publish 1.0.0 (the owner wants the
 >    planned widget work in first).
@@ -77,14 +84,14 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Bidi caret polish** — caret positions are bidi-correct now (ntk
   caret API), but arrow keys still move logically; visual-order movement
   - split caret at direction boundaries is a later refinement
-- **Text ignores the 2d clip (ntk bug)** — `TextLayout.draw` composites
-  glyphs straight onto `ctx.picture` via `drawGlyphRuns`, while fill/stroke
-  intersect their coverage with `ctx.clipMask` first. So shapes clip and
-  text does not: scrolled-away `<textarea>` lines, a horizontally scrolled
-  `<textinput>`, and `<text>` inside a `<scrollview>` all paint outside
-  their box. Masked wherever the clip coincides with an X window edge
-  (popups), which is why menus look fine. Fix belongs in ntk — glyph
-  compositing should honour the clip mask.
+- **Full-surface mask composites (ntk)** — clipping is correct since ntk
+  3.5.1, but the mask path (`_fillPolys`, `drawGlyphs`) clears and
+  composites the _entire_ surface per operation. Measured by
+  `npm run bench`: a clipped 12-line paragraph does 25 composites over
+  4.0 Mpx where the ink covers 0.08 Mpx, and 50 small filled boxes do
+  8.16 Mpx. Bound these to the damaged rect, and prefer
+  `SetPictureClipRectangles` for rectangular clips so glyphs clip
+  server-side with no mask at all.
 - **`opacity`** — needs offscreen composition (pixmap + Composite);
   ntk can do it, renderer needs a group-opacity paint path
 - **Dirty-rect painting** — still full-window repaint per frame

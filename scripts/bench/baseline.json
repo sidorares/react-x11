@@ -1,0 +1,34 @@
+{
+  "text: paragraph, no clip": {
+    "requests": 43,
+    "bytesOut": 6192,
+    "bytesIn": 32,
+    "replies": 1,
+    "composites": 1,
+    "compositePixels": 160000
+  },
+  "text: paragraph, inside a rect clip": {
+    "requests": 91,
+    "bytesOut": 7576,
+    "bytesIn": 32,
+    "replies": 1,
+    "composites": 25,
+    "compositePixels": 4000000
+  },
+  "shapes: 50 filled rounded boxes": {
+    "requests": 175,
+    "bytesOut": 15056,
+    "bytesIn": 32,
+    "replies": 1,
+    "composites": 51,
+    "compositePixels": 8160000
+  },
+  "mount: window with 40 boxes and labels": {
+    "requests": 125,
+    "bytesOut": 5464,
+    "bytesIn": 160,
+    "replies": 3,
+    "composites": 41,
+    "compositePixels": 436480
+  }
+}
