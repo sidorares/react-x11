@@ -1,36 +1,28 @@
 # NEXT_STEPS.md — making react-x11 actually usable
 
-> **Status (2026-07-27):** Phases 0–5 are done. #28 (sans-serif README
-> screenshots) and #29 (CSS half-leading for text) are on master. #30
-> (`Button`/`Checkbox`/`Radio`/`Switch`/`ProgressBar` + `ThemeProvider`),
-> #31 (`<window onCloseRequest>` + examples overhaul), and #32 (multi-line
-> `<textarea>`) were merged into their stacked base **after** that base had
-> already landed as #29, so their commits never reached master — **#33**
-> lands them (no new code).
+> **Status (2026-07-27):** Phases 0–5 are done and merged: the widget set
+> (#30), examples overhaul + `<window onCloseRequest>` (#31), multi-line
+> `<textarea>` (#32), `Select` keyboard navigation + `scrollview`
+> `scrollIntoView` (#34), framed screenshots via the real WM (#36), and
+> window-manager hints as `<window>` props (#37). Pointer capture
+> (`ev.capturePointer()`) and `Slider` are the newest.
 >
-> In review on top of that: **#34** `Select` keyboard navigation (Up/Down
-> open + move with wrapping, Home/End, Enter/Space pick, Escape close;
-> pointer and keyboard share one highlight), a `scrollIntoView(node)`
-> primitive on `<scrollview>`, and the `flexShrink` fix that made a menu
-> longer than `MAX_MENU_HEIGHT` actually scroll instead of being clipped by
-> the popup edge.
+> Upstream, all released: ntk **3.5.0** — `WM_NORMAL_HINTS`, `WM_CLASS`,
+> `_NET_WM_WINDOW_TYPE`, always-on-top (ntk#77) — on node-x11 **3.1.2**,
+> which carries the Apple-WM `FrameHitTest` fix (node-x11#229).
 >
-> Upstream: ntk **3.4.0** (async rich-content `onInvalidate`); everything
-> we filed through #75 is released. npm publish still waits on
-> release-please **PR #17 (1.0.0)**.
+> npm publish still waits on release-please **PR #17 (1.0.0)**.
 >
 > **Plan (next session):**
 >
-> 1. Merge #33 → #34, then release-please #17 and publish 1.0.0.
-> 2. Pointer capture for userland (EventManager already drags via
->    downNode; expose it), then build `Slider` on it.
-> 3. Extract `useAnchor(ref)` from `Select` → `Tooltip`, then
+> 1. Merge release-please #17 and publish 1.0.0.
+> 2. Extract `useAnchor(ref)` from `Select` → `Tooltip`, then
 >    Menu/MenuBar/ContextMenu.
-> 4. `<textarea>` polish: Ctrl+arrow word movement, PageUp/Down,
+> 3. `<textarea>` polish: Ctrl+arrow word movement, PageUp/Down,
 >    Shift+click extend, drawn scrollbar.
-> 5. `Select` follow-ups: type-ahead (jump to the option matching typed
+> 4. `Select` follow-ups: type-ahead (jump to the option matching typed
 >    letters) and PageUp/PageDown in the open menu.
-> 6. Upstream (ntk): distribute half-leading inside TextLayout itself
+> 5. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
 >    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>`.
 
@@ -63,9 +55,9 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 `useControl` hook (hover/focus, click + Space/Enter, disabled). Gallery:
 `examples/widgets.jsx`. Still open:
 
-- **Slider** — drag via the `_defaultMouseDrag`-style pattern but in
-  userland (onMouseDown + window-level move? needs pointer-capture
-  exposure — see renderer gaps below)
+- **Slider** — DONE: `ev.capturePointer()` exposes pointer capture to
+  userland, and `Slider` is built on it (drag past the widget bounds,
+  arrows/Home/End/PageUp/Down)
 - **Switch animation** — thumb snaps today; animate via
   requestAnimationFrame on the window ref, or step-render
 - **Tooltip** — `<popup>` + hover timer; extract the anchoring math from
@@ -77,9 +69,9 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 
 ### 3. Renderer gaps found while building the above
 
-- **Pointer capture for userland** — `EventManager` has downNode-based
-  dragging internally; expose `ev.capturePointer()` or deliver move/up to
-  the mousedown target while dragging (Slider needs this)
+- **Pointer capture for userland** — DONE: `ev.capturePointer()` /
+  `ev.releasePointer()` route move/up to the capturing node, released on
+  mouseup and on unmount; hover freezes during a capture
 - **Multi-line `<textarea>`** — DONE (#32). Polish left: Ctrl+arrow word
   movement, PageUp/Down, Shift+click extend, drawn scrollbar
 - **Bidi caret polish** — caret positions are bidi-correct now (ntk

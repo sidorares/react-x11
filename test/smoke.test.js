@@ -1580,3 +1580,199 @@ test('multiple root windows share one tree; onCloseRequest handles WM close', as
 
   ReactX11.unmountComponentAtNode(app);
 });
+
+test('Slider: drag keeps tracking after the pointer leaves the widget', async () => {
+  const { Slider } = await import('../src/index.js');
+  const app = createMockApp();
+  const seen = [];
+  const Host = () => {
+    const [v, setV] = React.useState(0);
+    seen.push(v);
+    return React.createElement(
+      'window',
+      { width: 400, height: 120 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 20 },
+        React.createElement(Slider, {
+          value: v,
+          min: 0,
+          max: 100,
+          step: 1,
+          width: 200,
+          onChange: setV,
+        }),
+      ),
+    );
+  };
+  ReactX11.render(React.createElement(Host), null, app);
+  await tick();
+
+  const wnd = app.windows[0];
+  const track = (function find(n) {
+    if (n.props?.focusable) return n;
+    for (const c of n.children) {
+      if (c.isWindow) continue;
+      const hit = find(c);
+      if (hit) return hit;
+    }
+    return null;
+  })(wnd._reactX11Node);
+  assert.ok(track, 'slider track is focusable');
+
+  const { x, y, width, height } = track.abs;
+  const cy = y + height / 2;
+  const THUMB = 16;
+  const travel = width - THUMB; // thumb is centred on the value
+  const atFraction = (f) => x + THUMB / 2 + travel * f;
+
+  // press at the middle -> 50
+  wnd.emit('mousedown', { x: atFraction(0.5), y: cy, keycode: 1 });
+  await tick();
+  assert.strictEqual(seen.at(-1), 50, 'press sets the value under the pointer');
+
+  // drag while still inside
+  wnd.emit('mousemove', { x: atFraction(0.25), y: cy });
+  await tick();
+  assert.strictEqual(seen.at(-1), 25);
+
+  // pointer leaves the widget entirely (far below and to the right).
+  // without pointer capture this would dispatch to whatever is under the
+  // pointer and the slider would stop following.
+  wnd.emit('mousemove', { x: atFraction(0.9), y: cy + 400 });
+  await tick();
+  assert.strictEqual(seen.at(-1), 90, 'still tracking outside the widget');
+
+  // and clamps past the ends
+  wnd.emit('mousemove', { x: x - 500, y: cy });
+  await tick();
+  assert.strictEqual(seen.at(-1), 0, 'clamps at min');
+
+  // release out of bounds ends the drag; later moves are ignored
+  wnd.emit('mouseup', { x: x - 500, y: cy, keycode: 1 });
+  await tick();
+  const afterRelease = seen.at(-1);
+  wnd.emit('mousemove', { x: atFraction(0.75), y: cy });
+  await tick();
+  assert.strictEqual(seen.at(-1), afterRelease, 'no tracking after release');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Slider: keyboard steps, Home/End and PageUp/Down', async () => {
+  const { Slider } = await import('../src/index.js');
+  const app = createMockApp();
+  let current = 50;
+  const Host = () => {
+    const [v, setV] = React.useState(50);
+    current = v;
+    return React.createElement(
+      'window',
+      { width: 300, height: 100 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 10 },
+        React.createElement(Slider, {
+          value: v,
+          min: 0,
+          max: 100,
+          step: 2,
+          width: 200,
+          onChange: setV,
+        }),
+      ),
+    );
+  };
+  ReactX11.render(React.createElement(Host), null, app);
+  await tick();
+
+  const wnd = app.windows[0];
+  const track = (function find(n) {
+    if (n.props?.focusable) return n;
+    for (const c of n.children) {
+      if (c.isWindow) continue;
+      const hit = find(c);
+      if (hit) return hit;
+    }
+    return null;
+  })(wnd._reactX11Node);
+
+  // focus it without changing the value: click, then reset
+  wnd.emit('mousedown', { x: track.abs.x, y: track.abs.y + 8, keycode: 1 });
+  wnd.emit('mouseup', { x: track.abs.x, y: track.abs.y + 8, keycode: 1 });
+  await tick();
+
+  const press = async (keysym) => {
+    pressKey(app, wnd, { keysym });
+    await tick();
+  };
+
+  await press(0xff53); // Right
+  const afterRight = current;
+  await press(0xff51); // Left
+  assert.strictEqual(current, afterRight - 2, 'arrows move by step');
+
+  await press(0xff57); // End
+  assert.strictEqual(current, 100);
+  await press(0xff50); // Home
+  assert.strictEqual(current, 0);
+
+  await press(0xff55); // PageUp -> ten steps
+  assert.strictEqual(current, 20);
+  await press(0xff56); // PageDown
+  assert.strictEqual(current, 0);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Slider: thumb stays within the track at both extremes', async () => {
+  const { Slider } = await import('../src/index.js');
+  const findTrack = (n) =>
+    n.props?.focusable
+      ? n
+      : n.children.reduce(
+          (a, c) => a || (c.isWindow ? null : findTrack(c)),
+          null,
+        );
+
+  for (const [value, expected] of [
+    [0, 'flush left'],
+    [50, 'centred'],
+    [100, 'flush right'],
+  ]) {
+    const app = createMockApp();
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 400, height: 100 },
+        React.createElement(
+          'box',
+          { flexGrow: 1, padding: 20 },
+          React.createElement(Slider, { value, min: 0, max: 100, width: 200 }),
+        ),
+      ),
+      null,
+      app,
+    );
+    await tick();
+    const track = findTrack(app.windows[0]._reactX11Node);
+    const thumb = track.children.find((c) => c.props.position === 'absolute');
+    assert.ok(
+      thumb.abs.x >= track.abs.x - 0.5,
+      `${expected}: thumb past the left edge at ${value}`,
+    );
+    assert.ok(
+      thumb.abs.x + thumb.abs.width <= track.abs.x + track.abs.width + 0.5,
+      `${expected}: thumb past the right edge at ${value}`,
+    );
+    if (value === 50) {
+      const thumbMid = thumb.abs.x + thumb.abs.width / 2;
+      const trackMid = track.abs.x + track.abs.width / 2;
+      assert.ok(
+        Math.abs(thumbMid - trackMid) < 1,
+        'midpoint value centres the thumb',
+      );
+    }
+    ReactX11.unmountComponentAtNode(app);
+  }
+});

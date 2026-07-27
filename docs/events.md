@@ -27,6 +27,7 @@ props — they can never go stale.
   localX, localY,                   // target-relative
   nativeEvent,                      // the raw ntk/X11 event
   preventDefault(), stopPropagation(),
+  capturePointer(), releasePointer(),   // see Pointer capture below
   // mouse: button, detail (DOM-style click count: 2 = double, 3 = triple)
   // wheel: deltaX, deltaY
   // keyboard: keycode, keysym, codepoint, key, shiftKey, ctrlKey
@@ -46,6 +47,27 @@ props — they can never go stale.
 | `onWheel`                                   | X buttons 4–7; default action scrolls the nearest `<scrollview>`                      |
 | `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus                       |
 | `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal              |
+
+## Pointer capture
+
+`ev.capturePointer()` routes every following `mousemove` and `mouseup` to
+the capturing node instead of whatever is under the pointer, so a drag
+keeps working past the widget's own bounds — and a release far outside it
+still ends the gesture. This is what `Slider` is built on:
+
+```jsx
+onMouseDown: (ev) => {
+  ev.capturePointer();
+  setDragging(true);
+},
+onMouseMove: (ev) => { if (dragging) setValue(valueAt(ev)); },
+onMouseUp: () => setDragging(false),
+```
+
+Capture is released automatically on `mouseup` (like the DOM's implicit
+pointer capture) and when the capturing node unmounts; `ev.releasePointer()`
+ends it early. While captured, hover stays where it was — dragging must not
+light up every widget the pointer crosses.
 
 ## Focus
 
