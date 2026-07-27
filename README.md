@@ -155,6 +155,23 @@ npm run examples:three         # <Canvas3D> scene: meshes, lights, textures
 The two GL examples additionally need a server with **indirect GLX**
 enabled (`+iglx` / `AllowIndirectGLX` — off by default on many).
 
+### Hot reloading
+
+```sh
+npm run examples:tasks:hot     # then edit examples/tasks.jsx while it runs
+```
+
+Runs the tasks example under
+[hot-module-replacement](https://github.com/sidorares/hot-module-replacement)'s
+ESM hooks (Node ≥ 22.15) with React **Fast Refresh**: saving
+`examples/tasks.jsx` updates the edited components in place. The X11
+connection, the mounted window, and component state — the task list, even
+half-typed text in the input — survive the reload (a component whose hook
+signature changed remounts alone). `examples/hmr-register.mjs` wires up the
+transform half (babel JSX + react-refresh, chained under the HMR hooks),
+`examples/hmr-refresh.js` the runtime half, and `examples/tasks-hot.jsx` is
+the hot entry — the pattern works for any example split the same way.
+
 ## React DevTools
 
 ```sh

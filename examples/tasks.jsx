@@ -4,16 +4,11 @@
 // throughout (Tab moves focus, Space/Enter toggles). Type a task and press
 // Enter or click Add; Ctrl+C/V and middle-click PRIMARY paste work in the
 // input. Run with: npm run examples:tasks  (needs an X server / DISPLAY)
-import React, {
-  createContext,
-  useContext,
-  useMemo,
-  useReducer,
-  useState,
-} from 'react';
+// — or hot-reloadable with: npm run examples:tasks:hot  (edit this file
+// while it runs; see tasks-hot.jsx)
+import React, { useContext, useMemo, useReducer, useState } from 'react';
 import { Button, Checkbox, createRoot } from '../src/index.js';
-
-const DispatchContext = createContext(null);
+import { DispatchContext } from './tasks-context.js';
 
 const initialState = {
   filter: 'all',
@@ -170,7 +165,9 @@ function App() {
 
 export default App;
 
-if (!process.env.REACT_X11_NO_AUTORUN) {
+// Skip the autorun under hot reload too: tasks-hot.jsx owns the root
+// there, and this module re-evaluates on every reload.
+if (!process.env.REACT_X11_NO_AUTORUN && !import.meta.hot) {
   const root = await createRoot();
   root.render(<App />);
 }
