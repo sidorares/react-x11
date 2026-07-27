@@ -15,9 +15,9 @@
 >
 > **Plan (next session):**
 >
-> 1. `Select`/menu follow-up: PageUp/PageDown in the open menu.
-> 2. Then merge release-please #17 and publish 1.0.0.
-> 3. Upstream (ntk): distribute half-leading inside TextLayout itself
+> 1. Merge release-please #17 and publish 1.0.0 — the planned widget work
+>    is complete.
+> 2. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
 >    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>`.
 
@@ -60,7 +60,8 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Menu/MenuBar, ContextMenu** — DONE: built on `useAnchor`, with
   separators, disabled items, shortcuts, checkmarks, nested submenus and
   full keyboard navigation; `examples/menu.jsx` rewritten on them
-- **`Select` PageUp/PageDown** — type-ahead is done; keyboard navigation
+- **`Select`/menu keyboard — DONE.** Arrows, Home/End, PageUp/PageDown,
+  type-ahead, submenus. Keyboard navigation
   is done (#34: Up/Down/Home/End/Enter/Escape, shared pointer+keyboard
   highlight, active option scrolled into view)
 

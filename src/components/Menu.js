@@ -17,6 +17,8 @@ import {
   XK_ESCAPE,
   XK_HOME,
   XK_LEFT,
+  XK_PAGE_DOWN,
+  XK_PAGE_UP,
   XK_RETURN,
   XK_RIGHT,
   XK_UP,
@@ -35,6 +37,9 @@ const MENU_PAD = 4;
 const MENU_GUTTER = 24; // room for the check column
 
 const MENU_SHORTCUT_GAP = 24;
+// menus size to their content rather than scrolling, so a page is a fixed
+// stride — deriving one from the menu height would just equal Home/End
+const MENU_PAGE_ROWS = 10;
 
 const isSelectable = (item) => item && !item.separator && !item.disabled;
 
@@ -298,6 +303,22 @@ function handleMenuKey(
     case XK_END:
       setActive(nextSelectable(items, items.length, -1));
       return true;
+    case XK_PAGE_UP:
+    case XK_PAGE_DOWN: {
+      // step a viewport's worth of rows, then settle on the nearest
+      // selectable entry in the direction of travel so a page never lands
+      // on a separator or a disabled row
+      const dir = ev.keysym === XK_PAGE_DOWN ? 1 : -1;
+      const page = MENU_PAGE_ROWS;
+      const from = active < 0 ? (dir > 0 ? -1 : items.length) : active;
+      const target = Math.min(items.length - 1, Math.max(0, from + dir * page));
+      setActive(
+        isSelectable(items[target])
+          ? target
+          : nextSelectable(items, target - dir, dir),
+      );
+      return true;
+    }
     case XK_RIGHT:
       return enterSubmenu();
     case XK_LEFT:

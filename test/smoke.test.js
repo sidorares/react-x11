@@ -2762,3 +2762,152 @@ test('textarea: draws a scrollbar thumb only when the text overflows', async () 
 
   ReactX11.unmountComponentAtNode(app);
 });
+
+test('Select: PageDown/PageUp move by a menu viewport, clamped at the ends', async () => {
+  const { Select } = await import('../src/index.js');
+  const app = createMockApp();
+  const options = Array.from({ length: 40 }, (_, i) => `option-${i}`);
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 120 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 10 },
+        React.createElement(Select, { options, value: options[0], width: 200 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const findFocusable = (n) =>
+    n.props?.focusable
+      ? n
+      : n.children.reduce(
+          (a, c) => a || (c.isWindow ? null : findFocusable(c)),
+          null,
+        );
+  const trigger = findFocusable(wnd._reactX11Node);
+  wnd.emit('mousedown', {
+    x: trigger.abs.x + 10,
+    y: trigger.abs.y + trigger.abs.height / 2,
+    keycode: 1,
+  });
+  wnd.emit('mouseup', {
+    x: trigger.abs.x + 10,
+    y: trigger.abs.y + trigger.abs.height / 2,
+    keycode: 1,
+  });
+  await tick();
+  await tick();
+
+  const scroller = (() => {
+    let found = null;
+    const walk = (n) => {
+      if (n.kind === 'scrollview') found = n;
+      else n.children.forEach(walk);
+    };
+    walk(app.windows[1]._reactX11Node);
+    return found;
+  })();
+  const active = () =>
+    scroller.children.findIndex((o) => o.props.backgroundColor === '#2980b9');
+
+  assert.strictEqual(active(), 0, 'opens on the current value');
+  // page = floor(MAX_MENU_HEIGHT / ITEM_HEIGHT) = floor(220 / 28) = 7
+  const PAGE = 7;
+
+  pressKey(app, wnd, { keysym: 0xff56 }); // Page Down
+  await tick();
+  assert.strictEqual(active(), PAGE, 'down one page');
+
+  pressKey(app, wnd, { keysym: 0xff56 });
+  await tick();
+  assert.strictEqual(active(), PAGE * 2);
+
+  pressKey(app, wnd, { keysym: 0xff55 }); // Page Up
+  await tick();
+  assert.strictEqual(active(), PAGE, 'back up one page');
+
+  // paging past an end clamps rather than wrapping — unlike the arrows.
+  // each press needs its own tick: a synchronous burst would not re-render
+  // between them, so the handler would keep reading the same index
+  for (let i = 0; i < 10; i++) {
+    pressKey(app, wnd, { keysym: 0xff56 });
+    await tick();
+  }
+  assert.strictEqual(active(), options.length - 1, 'clamps at the last option');
+
+  for (let i = 0; i < 10; i++) {
+    pressKey(app, wnd, { keysym: 0xff55 });
+    await tick();
+  }
+  assert.strictEqual(active(), 0, 'clamps at the first option');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('menu: PageDown/PageUp land on a selectable row, never a separator', async () => {
+  const { ContextMenu } = await import('../src/index.js');
+  const app = createMockApp();
+  const picked = [];
+  // 12 rows where the row a page-stride away (index 10) is a separator, so
+  // a naive jump would land on something unselectable
+  const items = Array.from({ length: 12 }, (_, i) =>
+    i === 10
+      ? { separator: true }
+      : { label: `entry-${i}`, onSelect: () => picked.push(i) },
+  );
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 320, height: 220 },
+      React.createElement(
+        ContextMenu,
+        { items, flexGrow: 1 },
+        React.createElement('box', { flexGrow: 1 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  wnd.emit('mousedown', { x: 20, y: 20, keycode: 3, rootx: 100, rooty: 100 });
+  await tick();
+  await tick();
+
+  const rows = () => app.windows[1]._reactX11Node.children[0].children;
+  const active = () =>
+    rows().findIndex((r) => r.props.backgroundColor === '#2980b9');
+
+  pressKey(app, wnd, { keysym: 0xff54 }); // Down -> entry-0
+  await tick();
+  assert.strictEqual(active(), 0);
+
+  // a page is 10 rows: index 10 is the separator, so it must settle on a
+  // selectable row instead
+  pressKey(app, wnd, { keysym: 0xff56 }); // Page Down
+  await tick();
+  const landed = active();
+  assert.notStrictEqual(landed, 10, 'never lands on the separator');
+  assert.ok(
+    rows()[landed].props.backgroundColor === '#2980b9',
+    'landed on a real row',
+  );
+  assert.ok(landed > 0, 'and moved forward');
+
+  // paging back is symmetric in *rows*, not a history undo: the page down
+  // settled on 11 after skipping the separator, so 10 rows up is 1
+  pressKey(app, wnd, { keysym: 0xff55 }); // Page Up
+  await tick();
+  assert.strictEqual(active(), landed - 10, 'a page back in rows');
+
+  pressKey(app, wnd, { keysym: 0xff55 });
+  await tick();
+  assert.strictEqual(active(), 0, 'and clamps at the first entry');
+
+  ReactX11.unmountComponentAtNode(app);
+});

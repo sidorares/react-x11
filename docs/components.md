@@ -49,6 +49,9 @@ The menu opens with the current value active, hovering an option makes it
 active (pointer and keyboard share one highlight), and the active option is
 scrolled into view.
 
+**PageUp/PageDown** move by a menu viewport (`MAX_MENU_HEIGHT / ITEM_HEIGHT`
+options), clamping at the ends rather than wrapping the way the arrows do.
+
 **Type-ahead.** Typing letters jumps to the matching option: with the menu
 open it moves the highlight, and with it closed it changes the value
 outright, the way a native select does. Keystrokes within 700ms accumulate
@@ -187,6 +190,12 @@ at a time**. In a `MenuBar`, Left/Right walk between menus _when there is
 no submenu to move through_, and with one menu open, hovering another
 switches to it. Hovering a submenu parent opens it with nothing selected
 inside.
+
+**PageUp/PageDown** step ten rows and then settle on the nearest selectable
+entry in the direction of travel, so a page never lands on a separator or a
+disabled row. Menus size to their content rather than scrolling, so the
+stride is fixed — deriving one from the menu height would just equal
+Home/End.
 
 **Type-ahead.** Typing letters jumps to the entry whose label starts with
 them, in whichever level is deepest open. Keystrokes within 700ms
