@@ -15,14 +15,9 @@
 >
 > **Plan (next session):**
 >
-> 1. Upstream (ntk): bound `_fillPolys`/`_strokePolys` to the path's
->    bounding box. They clear and composite the whole surface per
->    operation, so 50 small rounded boxes cost 8.16 Mpx in `npm run bench`
->    — the same pattern the glyph path had before ntk 3.5.2.
-> 2. `Select`/menu follow-up: PageUp/PageDown in the open menu.
-> 3. Then merge release-please #17 and publish 1.0.0 (the owner wants the
->    planned widget work in first).
-> 4. Upstream (ntk): distribute half-leading inside TextLayout itself
+> 1. `Select`/menu follow-up: PageUp/PageDown in the open menu.
+> 2. Then merge release-please #17 and publish 1.0.0.
+> 3. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
 >    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>`.
 
@@ -79,14 +74,14 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Bidi caret polish** — caret positions are bidi-correct now (ntk
   caret API), but arrow keys still move logically; visual-order movement
   - split caret at direction boundaries is a later refinement
-- **Full-surface mask composites in fills (ntk)** — `_fillPolys` and
-  `_strokePolys` clear and composite the _entire_ surface per operation,
-  so 50 small rounded boxes cost 8.16 Mpx in `npm run bench`. Bound them
-  to the path's bounding box. The glyph path had the same problem and was
-  fixed in ntk 3.5.2 (sidorares/ntk#81): rectangular clips now go through
-  `SetPictureClipRectangles` server-side, and `TextLayout.draw` batches
-  the whole layout, so a clipped paragraph costs the same as an unclipped
-  one (1 composite / 0.16 Mpx, down from 25 / 4.0).
+- **Full-surface mask composites — DONE upstream.** Both paths are now
+  bounded: glyphs in ntk 3.5.2 (sidorares/ntk#81 — rectangular clips go
+  through `SetPictureClipRectangles` server-side, `TextLayout.draw`
+  batches the whole layout) and fills/strokes in 3.5.3
+  (sidorares/ntk#83 — mask work bounded to the path bbox). A clipped
+  paragraph now costs the same as an unclipped one, and 50 small boxes
+  dropped 8.16 -> 0.22 Mpx. Still full-surface: `drawImage` (two sites),
+  and react-x11 repaints the whole window per frame (§8.4 below).
 - **`opacity`** — needs offscreen composition (pixmap + Composite);
   ntk can do it, renderer needs a group-opacity paint path
 - **Dirty-rect painting** — still full-window repaint per frame
