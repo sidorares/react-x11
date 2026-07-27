@@ -2106,6 +2106,102 @@ test('a press inside the menu is a normal click, not a dismissal', async () => {
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('Slider keeps its width as the value changes (no drag feedback loop)', async () => {
+  const { Slider } = await import('../src/index.js');
+  const app = createMockApp();
+  let setValue;
+  const Host = () => {
+    const [v, setV] = React.useState(0);
+    setValue = setV;
+    return React.createElement(
+      'window',
+      { width: 300, height: 80 },
+      React.createElement(
+        'box',
+        { flexDirection: 'row', alignItems: 'center', flexGrow: 1, gap: 10 },
+        React.createElement('box', { width: 40, height: 10 }),
+        React.createElement(Slider, {
+          flexGrow: 1,
+          min: 0,
+          max: 100,
+          value: v,
+          onChange: setV,
+        }),
+      ),
+    );
+  };
+
+  ReactX11.render(React.createElement(Host), null, app);
+  await tick();
+  const row = app.windows[0]._reactX11Node.children[0];
+  const slider = row.children[1];
+  const widths = [];
+  for (const value of [0, 25, 50, 75, 100]) {
+    setValue(value);
+    await tick();
+    await tick();
+    widths.push(slider.abs.width);
+  }
+
+  // the fill used to be a percentage width, which fed back into the
+  // control's own intrinsic width: at the maximum it grew, the handle
+  // moved with it, and a drag oscillated between the two layouts
+  assert.strictEqual(
+    new Set(widths).size,
+    1,
+    `width is stable across the range, got ${widths.join(', ')}`,
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('ProgressBar does not widen the box it sits in', async () => {
+  const { ProgressBar } = await import('../src/index.js');
+  const app = createMockApp();
+  const Card = ({ progress }) =>
+    React.createElement(
+      'box',
+      { flexGrow: 1, padding: 10 },
+      React.createElement(ProgressBar, { value: progress }),
+    );
+
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 120 },
+      React.createElement(
+        'box',
+        { flexDirection: 'row', flexGrow: 1, gap: 10 },
+        React.createElement(Card, { key: 'a', progress: 0.1 }),
+        React.createElement(Card, { key: 'b', progress: 0.9 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  const row = app.windows[0]._reactX11Node.children[0];
+  const [low, high] = row.children;
+  // a fuller bar used to make its card wider — the percentage width fed
+  // back into the intrinsic size — and the row overflowed the window
+  assert.strictEqual(low.abs.width, high.abs.width, 'cards are equal width');
+  assert.ok(
+    high.abs.x + high.abs.width <= 300,
+    `the row fits the window (right edge ${high.abs.x + high.abs.width})`,
+  );
+
+  // and the fill still tracks the value
+  const fill = high.children[0].children[0];
+  const track = high.children[0];
+  assert.ok(
+    Math.abs(fill.abs.width / track.abs.width - 0.9) < 0.02,
+    `fill is 90% of the track, got ${fill.abs.width}/${track.abs.width}`,
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('Tooltip shows after the delay in a popup and hides on leave', async () => {
   const { Tooltip, Button } = await import('../src/index.js');
   const app = createMockApp();
