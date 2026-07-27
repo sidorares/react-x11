@@ -49,6 +49,12 @@ The menu opens with the current value active, hovering an option makes it
 active (pointer and keyboard share one highlight), and the active option is
 scrolled into view.
 
+**Type-ahead.** Typing letters jumps to the matching option: with the menu
+open it moves the highlight, and with it closed it changes the value
+outright, the way a native select does. Keystrokes within 700ms accumulate
+into one query (`b`,`l` finds _blueberry_, not _banana_); repeating a
+single letter cycles through the options starting with it.
+
 ### Theming
 
 ```jsx
@@ -181,6 +187,12 @@ at a time**. In a `MenuBar`, Left/Right walk between menus _when there is
 no submenu to move through_, and with one menu open, hovering another
 switches to it. Hovering a submenu parent opens it with nothing selected
 inside.
+
+**Type-ahead.** Typing letters jumps to the entry whose label starts with
+them, in whichever level is deepest open. Keystrokes within 700ms
+accumulate into one query, so `c`,`a` finds _Carrot_ rather than jumping to
+_Apple_ first; repeating a single letter cycles through the entries
+starting with it. Disabled entries and separators are never matched.
 
 Open state is a single path of active indices — one per open level — so
 moving the selection at any level truncates the path and closes deeper

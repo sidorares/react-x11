@@ -2411,3 +2411,146 @@ test('submenu: hovering a parent row opens it with nothing selected inside', asy
 
   ReactX11.unmountComponentAtNode(app);
 });
+
+const typeChar = (app, wnd, ch) =>
+  pressKey(app, wnd, { keysym: ch.charCodeAt(0), codepoint: ch.charCodeAt(0) });
+
+test('Select: type-ahead jumps, refines and cycles', async () => {
+  const { Select } = await import('../src/index.js');
+  const app = createMockApp();
+  const options = ['apple', 'banana', 'blueberry', 'cherry'];
+  let current = null;
+  const Host = () => {
+    const [v, setV] = React.useState(null);
+    current = v;
+    return React.createElement(
+      'window',
+      { width: 300, height: 120 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 10 },
+        React.createElement(Select, {
+          options,
+          value: v,
+          width: 200,
+          onChange: setV,
+        }),
+      ),
+    );
+  };
+  ReactX11.render(React.createElement(Host), null, app);
+  await tick();
+  const wnd = app.windows[0];
+  const findFocusable = (n) =>
+    n.props?.focusable
+      ? n
+      : n.children.reduce(
+          (a, c) => a || (c.isWindow ? null : findFocusable(c)),
+          null,
+        );
+  const trigger = findFocusable(wnd._reactX11Node);
+  const cx = trigger.abs.x + 10;
+  const cy = trigger.abs.y + trigger.abs.height / 2;
+
+  // closed: type-ahead changes the value outright, like a native select
+  wnd.emit('mousedown', { x: cx, y: cy, keycode: 1 });
+  wnd.emit('mouseup', { x: cx, y: cy, keycode: 1 });
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff1b }); // close again, keep focus
+  await tick();
+
+  typeChar(app, wnd, 'c');
+  await tick();
+  assert.strictEqual(current, 'cherry', 'closed type-ahead selects');
+
+  // open it and use type-ahead on the highlight
+  await new Promise((r) => setTimeout(r, 800)); // let the query expire
+  wnd.emit('mousedown', { x: cx, y: cy, keycode: 1 });
+  wnd.emit('mouseup', { x: cx, y: cy, keycode: 1 });
+  await tick();
+
+  const activeIndex = () => {
+    const popup = app.windows.at(-1);
+    let scroller = null;
+    const walk = (n) => {
+      if (n.kind === 'scrollview') scroller = n;
+      else n.children.forEach(walk);
+    };
+    walk(popup._reactX11Node);
+    return scroller.children.findIndex(
+      (o) => o.props.backgroundColor === '#2980b9',
+    );
+  };
+
+  typeChar(app, wnd, 'b');
+  await tick();
+  assert.strictEqual(activeIndex(), 1, 'b -> banana');
+
+  // a growing query searches from the current entry
+  typeChar(app, wnd, 'l');
+  await tick();
+  assert.strictEqual(activeIndex(), 2, 'bl -> blueberry');
+
+  // repeating one letter cycles rather than sticking
+  await new Promise((r) => setTimeout(r, 800));
+  typeChar(app, wnd, 'b');
+  await tick();
+  assert.strictEqual(activeIndex(), 1, 'b -> banana again');
+  typeChar(app, wnd, 'b');
+  await tick();
+  assert.strictEqual(activeIndex(), 2, 'bb cycles to blueberry');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('menu type-ahead moves the active row and skips disabled entries', async () => {
+  const app = createMockApp();
+  const picked = [];
+  const wnd = await openNested(app, picked); // New / Export / Quit
+
+  typeChar(app, wnd, 'q');
+  await tick();
+  assert.strictEqual(activeIn(app, 1), 2, 'q -> Quit');
+
+  typeChar(app, wnd, 'e');
+  await tick();
+  // 'qe' matches nothing, so the active row stays put
+  assert.strictEqual(activeIn(app, 1), 2, 'no match leaves the selection');
+
+  await new Promise((r) => setTimeout(r, 800));
+  typeChar(app, wnd, 'e');
+  await tick();
+  assert.strictEqual(activeIn(app, 1), 1, 'e -> Export');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('menu type-ahead applies to the deepest open submenu', async () => {
+  const app = createMockApp();
+  const picked = [];
+  const wnd = await openNested(app, picked);
+
+  // into Export's submenu: PNG / --- / SVG / PDF(disabled)
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff53 });
+  await tick();
+  await tick();
+  assert.strictEqual(app.windows.length, 3, 'submenu open');
+  assert.strictEqual(activeIn(app, 2), 0, 'PNG active');
+
+  typeChar(app, wnd, 's');
+  await tick();
+  assert.strictEqual(activeIn(app, 2), 2, 's -> SVG, inside the submenu');
+  assert.strictEqual(activeIn(app, 1), 1, 'parent row unchanged');
+
+  // the disabled PDF is never matched
+  await new Promise((r) => setTimeout(r, 800));
+  typeChar(app, wnd, 'p');
+  await tick();
+  assert.strictEqual(activeIn(app, 2), 0, 'p -> PNG, never the disabled PDF');
+
+  ReactX11.unmountComponentAtNode(app);
+});

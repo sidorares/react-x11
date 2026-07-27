@@ -166,6 +166,59 @@ export function useAnchor(ref) {
   return useCallback((options) => anchorRect(ref.current, options), [ref]);
 }
 
+const TYPE_AHEAD_TIMEOUT = 700;
+
+/**
+ * Type-ahead: typing letters jumps to the entry whose label starts with
+ * them. Shared by `Select` and the menus.
+ *
+ * Keystrokes within `timeout` accumulate into one query, so "ca" finds
+ * Carrot rather than jumping to Apple then Carrot. Two behaviours the
+ * platform conventions call for:
+ *
+ * - a growing query searches from the *current* entry, so refining a
+ *   prefix keeps you on it while it still matches;
+ * - repeating one letter ("c", "c", "c") cycles through the entries
+ *   starting with it instead of sticking on the first.
+ *
+ * Returns the matching index, or -1.
+ */
+function useTypeAhead(timeout = TYPE_AHEAD_TIMEOUT) {
+  const state = useRef({ text: '', at: 0 });
+  return useCallback(
+    (char, items, current, labelOf, selectable) => {
+      if (!char || char.length !== 1) return -1;
+      const now = Date.now();
+      const s = state.current;
+      s.text = now - s.at > timeout ? char : s.text + char;
+      s.at = now;
+
+      const query = s.text.toLowerCase();
+      const cycling = query.length > 1 && /^(.)\1+$/.test(query);
+      const needle = cycling ? query[0] : query;
+      const from =
+        cycling || query.length === 1 ? (current ?? -1) + 1 : (current ?? 0);
+
+      const n = items.length;
+      for (let k = 0; k < n; k++) {
+        const i = (((from + k) % n) + n) % n;
+        const item = items[i];
+        if (selectable && !selectable(item)) continue;
+        const label = String(labelOf(item) ?? '').toLowerCase();
+        if (label.startsWith(needle)) return i;
+      }
+      return -1;
+    },
+    [timeout],
+  );
+}
+
+/** A printable character usable for type-ahead. Space is excluded: it
+ *  activates the focused entry everywhere in this widget set. */
+function typeAheadChar(ev) {
+  return ev.key && ev.key.length === 1 && ev.codepoint > 32 ? ev.key : null;
+}
+
 /** Measured size of a single-line label, for sizing a popup around it.
  *  Falls back to a rough estimate where no font stack is available. */
 function measureLabel(node, text, style) {
@@ -957,7 +1010,10 @@ function MenuLevel({
  * Returns true when the key was consumed. Left and Right fall through when
  * there is no submenu to enter or leave, so `MenuBar` can walk the bar.
  */
-function handleMenuKey(ev, { rootItems, path, setPath, select, close }) {
+function handleMenuKey(
+  ev,
+  { rootItems, path, setPath, select, close, typeAhead },
+) {
   const depth = path.length - 1;
   if (depth < 0) return false;
   const items = levelItems(rootItems, path, depth);
@@ -1004,6 +1060,13 @@ function handleMenuKey(ev, { rootItems, path, setPath, select, close }) {
     if (isSelectable(item)) select(item);
     return true;
   }
+
+  const char = typeAheadChar(ev);
+  if (char && typeAhead) {
+    const i = typeAhead(char, items, active, (it) => it.label, isSelectable);
+    if (i >= 0) setActive(i);
+    return true;
+  }
   return false;
 }
 
@@ -1025,6 +1088,7 @@ export function ContextMenu({
   const ref = useRef(null);
   const [rect, setRect] = useState(null);
   const [path, setPath] = useState([]);
+  const typeAhead = useTypeAhead();
 
   const close = () => {
     setRect(null);
@@ -1073,6 +1137,7 @@ export function ContextMenu({
           setPath,
           select,
           close,
+          typeAhead,
         });
       },
       onBlur: close,
@@ -1109,6 +1174,7 @@ export function MenuBar({
   const [rect, setRect] = useState(null);
   const [path, setPath] = useState([]);
   const refs = useRef([]);
+  const typeAhead = useTypeAhead();
 
   const items = openIndex >= 0 ? (menus[openIndex]?.items ?? []) : [];
 
@@ -1193,6 +1259,7 @@ export function MenuBar({
               setPath,
               select,
               close,
+              typeAhead,
             });
             if (consumed) return;
             if (ev.keysym === XK_LEFT) moveMenu(-1);
@@ -1288,6 +1355,7 @@ export function Select({
   const activeRef = useRef(null);
 
   const measureAnchor = useAnchor(triggerRef);
+  const typeAhead = useTypeAhead();
 
   const normalized = options.map(normalizeOption);
   const current = normalized.find((o) => o.value === value);
@@ -1345,7 +1413,20 @@ export function Select({
       const option = open ? normalized[activeIndex] : null;
       if (option) pick(option);
       else toggle();
+      return;
     }
+
+    // type-ahead: with the menu open it moves the highlight; closed, it
+    // changes the value outright, the way a native select does
+    const char = typeAheadChar(ev);
+    if (!char) return;
+    const current = open
+      ? activeIndex
+      : normalized.findIndex((o) => o.value === value);
+    const i = typeAhead(char, normalized, current, (o) => o.label);
+    if (i < 0) return;
+    if (open) setActiveIndex(i);
+    else if (normalized[i].value !== value) onChange?.(normalized[i].value);
   };
 
   // keep the highlighted option visible while arrowing through a menu that
