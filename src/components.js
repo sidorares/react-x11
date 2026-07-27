@@ -771,7 +771,7 @@ function nextSelectable(items, from, dir) {
   return -1;
 }
 
-function MenuRow({ item, active, onHover, onSelect, fontSize }) {
+function MenuRow({ item, active, onHover, onSelect, fontSize, nodeRef }) {
   const theme = useTheme();
   if (item.separator) {
     return h(
@@ -781,9 +781,11 @@ function MenuRow({ item, active, onHover, onSelect, fontSize }) {
     );
   }
   const dim = item.disabled;
+  const hasSubmenu = item.items?.length > 0;
   return h(
     'box',
     {
+      ref: nodeRef,
       height: MENU_ITEM_HEIGHT,
       flexDirection: 'row',
       alignItems: 'center',
@@ -801,7 +803,7 @@ function MenuRow({ item, active, onHover, onSelect, fontSize }) {
         h('text', {
           color: active ? theme.hoverText : theme.text,
           fontSize,
-          children: '✓',
+          children: '\u2713',
         }),
     ),
     h(
@@ -822,16 +824,84 @@ function MenuRow({ item, active, onHover, onSelect, fontSize }) {
         },
         item.shortcut,
       ),
+    hasSubmenu &&
+      h('text', {
+        color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
+        fontSize,
+        children: '\u25b8',
+      }),
   );
 }
 
+/** Items at `depth`, walking `path` down through nested `items`. */
+function levelItems(rootItems, path, depth) {
+  let items = rootItems;
+  for (let d = 0; d < depth; d++) items = items[path[d]]?.items ?? [];
+  return items;
+}
+
 /**
- * The menu popup itself: an override-redirect `<popup>` at `rect` holding a
- * list of items. Shared by `MenuBar` and `ContextMenu`; `rect` comes from
- * `useAnchor`, so menus flip at screen edges like `Select`'s.
+ * One level of a menu: an override-redirect `<popup>` at `rect` holding the
+ * items for `depth`, plus — recursively — its open submenu.
+ *
+ * Open state is a single `path` of active indices, one per level, rather
+ * than a flat index: `path.length` is how many levels are open, `path[d]`
+ * which row is active at level `d` (-1 for none). Moving the selection at
+ * any level truncates the path, which closes deeper levels for free.
  */
-function MenuPopup({ rect, items, activeIndex, onHover, onSelect, fontSize }) {
+function MenuLevel({
+  rect,
+  rootItems,
+  path,
+  depth,
+  setPath,
+  onSelect,
+  fontSize,
+}) {
   const theme = useTheme();
+  const items = levelItems(rootItems, path, depth);
+  const active = path[depth] ?? -1;
+  const childItems = items[active]?.items;
+  const childOpen = path.length > depth + 1 && childItems?.length > 0;
+
+  const activeRowRef = useRef(null);
+  const [childRect, setChildRect] = useState(null);
+
+  useEffect(() => {
+    if (!childOpen) {
+      setChildRect(null);
+      return;
+    }
+    const node = activeRowRef.current;
+    // the parent popup is always laid out by the time a submenu can be
+    // reached (it has to be hovered or arrowed into first), but guard
+    // anyway rather than anchoring off a zero rect
+    if (!node?.abs?.width) return;
+    setChildRect(
+      anchorRect(node, {
+        placement: 'right',
+        align: 'start',
+        offset: 0,
+        width: menuListWidth(node, childItems, fontSize),
+        height: menuListHeight(childItems),
+      }),
+    );
+  }, [childOpen, active, depth, fontSize, rect.x, rect.y]);
+
+  const hover = (index) => {
+    const base = [...path.slice(0, depth), index];
+    // hovering a parent row opens its submenu with nothing selected inside
+    setPath(items[index]?.items?.length ? [...base, -1] : base);
+  };
+
+  const choose = (item) => {
+    if (item.items?.length) {
+      setPath([...path.slice(0, depth), items.indexOf(item), -1]);
+      return;
+    }
+    onSelect(item);
+  };
+
   return h(
     'popup',
     {
@@ -856,47 +926,81 @@ function MenuPopup({ rect, items, activeIndex, onHover, onSelect, fontSize }) {
         h(MenuRow, {
           key: item.separator ? `sep-${index}` : (item.key ?? item.label),
           item,
-          active: index === activeIndex,
+          active: index === active,
           fontSize,
-          onHover: () => onHover(index),
-          onSelect,
+          nodeRef: index === active ? activeRowRef : undefined,
+          onHover: () => hover(index),
+          onSelect: choose,
         }),
       ),
     ),
+    childOpen &&
+      childRect &&
+      h(MenuLevel, {
+        rect: childRect,
+        rootItems,
+        path,
+        depth: depth + 1,
+        setPath,
+        onSelect,
+        fontSize,
+      }),
   );
 }
 
 /**
- * Keyboard handling shared by every menu: Up/Down move the active item
- * (skipping separators and disabled entries, wrapping), Home/End jump to
- * the ends, Enter/Space activate, Escape closes. Returns true when the key
- * was consumed so callers can add their own (MenuBar adds Left/Right).
+ * Keyboard handling shared by every menu, operating on the deepest open
+ * level: Up/Down move the active item (skipping separators and disabled
+ * entries, wrapping), Home/End jump to the ends, Right enters a submenu,
+ * Left leaves one, Enter/Space activate, Escape closes one level.
+ *
+ * Returns true when the key was consumed. Left and Right fall through when
+ * there is no submenu to enter or leave, so `MenuBar` can walk the bar.
  */
-function handleMenuKey(
-  ev,
-  { items, activeIndex, setActiveIndex, select, close },
-) {
+function handleMenuKey(ev, { rootItems, path, setPath, select, close }) {
+  const depth = path.length - 1;
+  if (depth < 0) return false;
+  const items = levelItems(rootItems, path, depth);
+  const active = path[depth];
+  const setActive = (i) => setPath([...path.slice(0, depth), i]);
+  const enterSubmenu = () => {
+    const sub = items[active]?.items;
+    if (!sub?.length) return false;
+    setPath([...path, nextSelectable(sub, -1, 1)]);
+    return true;
+  };
+
   switch (ev.keysym) {
     case XK_ESCAPE:
-      close();
+      if (depth > 0) setPath(path.slice(0, -1));
+      else close();
       return true;
     case XK_DOWN:
-      setActiveIndex(nextSelectable(items, activeIndex, 1));
+      setActive(nextSelectable(items, active, 1));
       return true;
     case XK_UP:
-      setActiveIndex(nextSelectable(items, activeIndex, -1));
+      setActive(nextSelectable(items, active, -1));
       return true;
     case XK_HOME:
-      setActiveIndex(nextSelectable(items, -1, 1));
+      setActive(nextSelectable(items, -1, 1));
       return true;
     case XK_END:
-      setActiveIndex(nextSelectable(items, items.length, -1));
+      setActive(nextSelectable(items, items.length, -1));
       return true;
+    case XK_RIGHT:
+      return enterSubmenu();
+    case XK_LEFT:
+      if (depth > 0) {
+        setPath(path.slice(0, -1));
+        return true;
+      }
+      return false;
     default:
       break;
   }
   if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
-    const item = items[activeIndex];
+    if (enterSubmenu()) return true;
+    const item = items[active];
     if (isSelectable(item)) select(item);
     return true;
   }
@@ -920,11 +1024,11 @@ export function ContextMenu({
 }) {
   const ref = useRef(null);
   const [rect, setRect] = useState(null);
-  const [activeIndex, setActiveIndex] = useState(-1);
+  const [path, setPath] = useState([]);
 
   const close = () => {
     setRect(null);
-    setActiveIndex(-1);
+    setPath([]);
   };
   const select = (item) => {
     close();
@@ -948,7 +1052,7 @@ export function ContextMenu({
       width,
       height,
     });
-    setActiveIndex(-1);
+    setPath([-1]);
     node.root?.events?.focus?.(node);
   };
 
@@ -964,9 +1068,9 @@ export function ContextMenu({
       onKeyDown: (ev) => {
         if (!rect) return;
         handleMenuKey(ev, {
-          items,
-          activeIndex,
-          setActiveIndex,
+          rootItems: items,
+          path,
+          setPath,
           select,
           close,
         });
@@ -976,12 +1080,14 @@ export function ContextMenu({
     },
     children,
     rect &&
-      h(MenuPopup, {
+      path.length > 0 &&
+      h(MenuLevel, {
         rect,
-        items,
-        activeIndex,
+        rootItems: items,
+        path,
+        depth: 0,
+        setPath,
         fontSize,
-        onHover: setActiveIndex,
         onSelect: select,
       }),
   );
@@ -1001,7 +1107,7 @@ export function MenuBar({
   const theme = useTheme();
   const [openIndex, setOpenIndex] = useState(-1);
   const [rect, setRect] = useState(null);
-  const [activeIndex, setActiveIndex] = useState(-1);
+  const [path, setPath] = useState([]);
   const refs = useRef([]);
 
   const items = openIndex >= 0 ? (menus[openIndex]?.items ?? []) : [];
@@ -1009,7 +1115,7 @@ export function MenuBar({
   const close = () => {
     setOpenIndex(-1);
     setRect(null);
-    setActiveIndex(-1);
+    setPath([]);
   };
 
   const openMenu = (index) => {
@@ -1022,7 +1128,7 @@ export function MenuBar({
     if (!next) return;
     setRect(next);
     setOpenIndex(index);
-    setActiveIndex(-1);
+    setPath([-1]);
   };
 
   const select = (item) => {
@@ -1060,7 +1166,7 @@ export function MenuBar({
           paddingTop: 6,
           paddingBottom: 6,
           backgroundColor:
-            openIndex === index ? theme.hoverBackground : 'transparent',
+            openIndex === index ? theme.hoverBackground : undefined,
           onClick: () => (openIndex === index ? close() : openMenu(index)),
           // with a menu already open, hovering the bar switches menus —
           // standard pull-down behaviour
@@ -1071,21 +1177,26 @@ export function MenuBar({
             if (openIndex === index) close();
           },
           onKeyDown: (ev) => {
-            if (ev.keysym === XK_LEFT) return moveMenu(-1);
-            if (ev.keysym === XK_RIGHT) return moveMenu(1);
             if (openIndex !== index) {
               if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
                 openMenu(index);
-              }
+              } else if (ev.keysym === XK_LEFT) moveMenu(-1);
+              else if (ev.keysym === XK_RIGHT) moveMenu(1);
               return;
             }
-            handleMenuKey(ev, {
-              items,
-              activeIndex,
-              setActiveIndex,
+            // the menu gets first refusal: Left leaves a submenu and Right
+            // enters one, and only when there is no submenu to move through
+            // do they walk the bar
+            const consumed = handleMenuKey(ev, {
+              rootItems: items,
+              path,
+              setPath,
               select,
               close,
             });
+            if (consumed) return;
+            if (ev.keysym === XK_LEFT) moveMenu(-1);
+            else if (ev.keysym === XK_RIGHT) moveMenu(1);
           },
         },
         h(
@@ -1100,12 +1211,14 @@ export function MenuBar({
     ),
     openIndex >= 0 &&
       rect &&
-      h(MenuPopup, {
+      path.length > 0 &&
+      h(MenuLevel, {
         rect,
-        items,
-        activeIndex,
+        rootItems: items,
+        path,
+        depth: 0,
+        setPath,
         fontSize,
-        onHover: setActiveIndex,
         onSelect: select,
       }),
   );

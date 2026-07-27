@@ -2076,21 +2076,22 @@ test('ContextMenu: Escape closes without selecting; disabled items are inert', a
 
   wnd.emit('mousedown', { x: 10, y: 10, keycode: 3, rootx: 100, rooty: 100 });
   await tick();
+  await tick(); // the popup lays out a tick after creation
   const menu = app.windows[1];
 
-  // clicking the disabled row does nothing
   const rows = menu._reactX11Node.children[0].children;
+  assert.ok(rows[0].abs.width > 0, 'rows are laid out — clicks below are real');
+
+  const clickRow = (row) => {
+    const x = row.abs.x + 5;
+    const y = row.abs.y + row.abs.height / 2;
+    menu.emit('mousedown', { x, y, keycode: 1 });
+    menu.emit('mouseup', { x, y, keycode: 1 });
+  };
+
+  // clicking the disabled row does nothing
   const paste = rows[3];
-  menu.emit('mousedown', {
-    x: paste.abs.x + 5,
-    y: paste.abs.y + paste.abs.height / 2,
-    keycode: 1,
-  });
-  menu.emit('mouseup', {
-    x: paste.abs.x + 5,
-    y: paste.abs.y + paste.abs.height / 2,
-    keycode: 1,
-  });
+  clickRow(paste);
   await tick();
   assert.deepStrictEqual(picked, [], 'disabled item is inert');
   assert.strictEqual(menu.destroyed, false, 'and does not close the menu');
@@ -2099,6 +2100,44 @@ test('ContextMenu: Escape closes without selecting; disabled items are inert', a
   await tick();
   assert.strictEqual(menu.destroyed, true);
   assert.deepStrictEqual(picked, []);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('ContextMenu: clicking an enabled row selects it and closes', async () => {
+  const { ContextMenu } = await import('../src/index.js');
+  const app = createMockApp();
+  const picked = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement(
+        ContextMenu,
+        { items: MENU_ITEMS(picked), flexGrow: 1 },
+        React.createElement('box', { flexGrow: 1 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 3, rootx: 100, rooty: 100 });
+  await tick();
+  await tick(); // the popup lays out a tick after creation
+
+  const menu = app.windows[1];
+  const copy = menu._reactX11Node.children[0].children[1];
+  assert.ok(copy.abs.width > 0, 'row is laid out');
+  const x = copy.abs.x + 5;
+  const y = copy.abs.y + copy.abs.height / 2;
+  menu.emit('mousedown', { x, y, keycode: 1 });
+  menu.emit('mouseup', { x, y, keycode: 1 });
+  await tick();
+
+  assert.deepStrictEqual(picked, ['Copy']);
+  assert.strictEqual(menu.destroyed, true, 'closes after selecting');
 
   ReactX11.unmountComponentAtNode(app);
 });
@@ -2211,6 +2250,164 @@ test('backgroundColor/borderColor "transparent" paints nothing (and does not thr
     !ops.some(([op, style]) => op === 'stroke' && style === 'transparent'),
     'no transparent stroke was issued',
   );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+const NESTED_ITEMS = (picked) => [
+  { label: 'New', onSelect: () => picked.push('New') },
+  {
+    label: 'Export',
+    items: [
+      { label: 'PNG', onSelect: () => picked.push('PNG') },
+      { separator: true },
+      { label: 'SVG', onSelect: () => picked.push('SVG') },
+      { label: 'PDF', disabled: true },
+    ],
+  },
+  { label: 'Quit', onSelect: () => picked.push('Quit') },
+];
+
+/** Rows of the popup at `index` among the app's windows. */
+const rowsOf = (app, index) =>
+  app.windows[index]._reactX11Node.children[0].children;
+const activeIn = (app, index) =>
+  rowsOf(app, index).findIndex((r) => r.props.backgroundColor === '#2980b9');
+
+async function openNested(app, picked) {
+  const { ContextMenu } = await import('../src/index.js');
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 320, height: 220 },
+      React.createElement(
+        ContextMenu,
+        { items: NESTED_ITEMS(picked), flexGrow: 1 },
+        React.createElement('box', { flexGrow: 1 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  wnd.emit('mousedown', { x: 20, y: 20, keycode: 3, rootx: 200, rooty: 120 });
+  // a popup lays out one tick after it is created: without this second
+  // tick its rows still have zero rects and pointer assertions are vacuous
+  await tick();
+  await tick();
+  return wnd;
+}
+
+test('submenu: Right opens it, Left leaves, Escape closes one level', async () => {
+  const app = createMockApp();
+  const picked = [];
+  const wnd = await openNested(app, picked);
+  assert.strictEqual(app.windows.length, 2, 'root menu open');
+
+  // move onto Export (index 1)
+  pressKey(app, wnd, { keysym: 0xff54 }); // Down -> New
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff54 }); // Down -> Export
+  await tick();
+  assert.strictEqual(activeIn(app, 1), 1, 'Export active');
+  assert.strictEqual(app.windows.length, 2, 'not opened by arrowing alone');
+
+  // Right enters the submenu, selecting its first selectable item
+  pressKey(app, wnd, { keysym: 0xff53 });
+  await tick();
+  await tick();
+  assert.strictEqual(app.windows.length, 3, 'submenu popup opened');
+  assert.strictEqual(activeIn(app, 2), 0, 'PNG active');
+
+  // Down inside the submenu skips the separator to SVG, and PDF is disabled
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  assert.strictEqual(activeIn(app, 2), 2, 'SVG (separator skipped)');
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  assert.strictEqual(
+    activeIn(app, 2),
+    0,
+    'wraps past disabled PDF back to PNG',
+  );
+
+  // Left leaves the submenu without closing the root
+  pressKey(app, wnd, { keysym: 0xff51 });
+  await tick();
+  await tick();
+  assert.strictEqual(app.windows[2].destroyed, true, 'submenu closed');
+  assert.strictEqual(app.windows[1].destroyed, false, 'root menu still open');
+  assert.strictEqual(activeIn(app, 1), 1, 'Export still active');
+
+  // Enter also opens a submenu
+  pressKey(app, wnd, { keysym: XK.Return });
+  await tick();
+  await tick();
+  assert.strictEqual(app.windows.length, 4, 'reopened via Enter');
+
+  // Escape closes one level at a time
+  pressKey(app, wnd, { keysym: 0xff1b });
+  await tick();
+  await tick();
+  assert.strictEqual(app.windows[3].destroyed, true, 'submenu closed');
+  assert.strictEqual(app.windows[1].destroyed, false, 'root survives');
+  pressKey(app, wnd, { keysym: 0xff1b });
+  await tick();
+  assert.strictEqual(app.windows[1].destroyed, true, 'root closed');
+  assert.deepStrictEqual(picked, []);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('submenu: selecting a nested item closes every level', async () => {
+  const app = createMockApp();
+  const picked = [];
+  const wnd = await openNested(app, picked);
+
+  pressKey(app, wnd, { keysym: 0xff54 }); // New
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff54 }); // Export
+  await tick();
+  pressKey(app, wnd, { keysym: 0xff53 }); // into submenu -> PNG
+  await tick();
+  await tick();
+  pressKey(app, wnd, { keysym: XK.Return });
+  await tick();
+
+  assert.deepStrictEqual(picked, ['PNG']);
+  assert.strictEqual(app.windows[1].destroyed, true, 'root closed');
+  assert.strictEqual(app.windows[2].destroyed, true, 'submenu closed');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('submenu: hovering a parent row opens it with nothing selected inside', async () => {
+  const app = createMockApp();
+  const picked = [];
+  await openNested(app, picked);
+  const menu = app.windows[1];
+  const exportRow = rowsOf(app, 1)[1];
+
+  menu.emit('mousemove', {
+    x: exportRow.abs.x + 5,
+    y: exportRow.abs.y + exportRow.abs.height / 2,
+  });
+  // hover is continuous priority (scheduled, not flushed), and the submenu
+  // rect is then measured in an effect — so this settles over a few ticks
+  for (let i = 0; i < 4; i++) await tick();
+  assert.strictEqual(app.windows.length, 3, 'submenu opened on hover');
+  assert.strictEqual(activeIn(app, 2), -1, 'nothing active inside yet');
+
+  // hovering a sibling closes the submenu again
+  const quitRow = rowsOf(app, 1)[2];
+  menu.emit('mousemove', {
+    x: quitRow.abs.x + 5,
+    y: quitRow.abs.y + quitRow.abs.height / 2,
+  });
+  for (let i = 0; i < 4; i++) await tick();
+  assert.strictEqual(app.windows[2].destroyed, true, 'submenu closed');
+  assert.strictEqual(activeIn(app, 1), 2, 'Quit active');
 
   ReactX11.unmountComponentAtNode(app);
 });

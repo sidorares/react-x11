@@ -4,7 +4,8 @@
 //
 // Keyboard: click or Enter opens a bar menu, Left/Right walk the bar,
 // Up/Down move within a menu (skipping separators and disabled entries),
-// Enter picks, Escape closes.
+// Right opens a submenu and Left leaves it, Enter picks, Escape closes one
+// level at a time.
 //
 // Run with: npm run examples:menu  (needs an X server / DISPLAY)
 import React, { useState } from 'react';
@@ -24,6 +25,15 @@ function App() {
         { separator: true },
         { label: 'Save', shortcut: 'Ctrl+S', onSelect: note('Save') },
         { label: 'Save As…', disabled: true },
+        {
+          label: 'Export',
+          items: [
+            { label: 'PNG image', onSelect: note('Export → PNG') },
+            { label: 'SVG vector', onSelect: note('Export → SVG') },
+            { separator: true },
+            { label: 'PDF', disabled: true },
+          ],
+        },
         { separator: true },
         { label: 'Quit', shortcut: 'Ctrl+Q', onSelect: note('Quit') },
       ],
