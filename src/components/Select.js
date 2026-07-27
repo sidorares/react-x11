@@ -11,6 +11,8 @@ import {
   XK_END,
   XK_ESCAPE,
   XK_HOME,
+  XK_PAGE_DOWN,
+  XK_PAGE_UP,
   XK_RETURN,
   XK_UP,
 } from './keys.js';
@@ -136,6 +138,17 @@ export function Select({
         if (open && count)
           setActiveIndex(ev.keysym === XK_HOME ? 0 : count - 1);
         return;
+      case XK_PAGE_UP:
+      case XK_PAGE_DOWN: {
+        // a page is what the menu shows at once, so paging lines up with
+        // what the user can see rather than an arbitrary count
+        if (!open || !count) return;
+        const page = Math.max(1, Math.floor(MAX_MENU_HEIGHT / ITEM_HEIGHT));
+        const dir = ev.keysym === XK_PAGE_DOWN ? 1 : -1;
+        const from = activeIndex < 0 ? 0 : activeIndex;
+        setActiveIndex(Math.min(count - 1, Math.max(0, from + dir * page)));
+        return;
+      }
       default:
         break;
     }
