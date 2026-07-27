@@ -238,7 +238,7 @@ clamping.
 The other components — `Button`, `Checkbox`, `Radio`/`RadioGroup`,
 `Switch`, `ProgressBar` — are demoed together in `examples/widgets.jsx`.
 
-The `Select` source (`src/components.js`) is the reference for building
+The `Select` source (`src/components/Select.js`) is the reference for building
 your own: hover/focus state with `useState`, a `<popup>` for anything that
 must escape the window bounds, and a ref to the trigger node for anchoring
 (`node.abs` + `node.root.window.x/y`).
