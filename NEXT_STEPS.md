@@ -17,10 +17,11 @@
 >
 > 1. **3D components over indirect GLX** — the one large feature going in
 >    before 1.0.0. Plan, with the feasibility work already done, is in
->    [docs/glx-plan.md](docs/glx-plan.md). Starts with two ntk blockers:
->    `getContext('opengl')` passes the context XID where the protocol
->    wants MakeCurrent's tag (every draw fails), and `createWindow` cannot
->    take a visual.
+>    [docs/glx-plan.md](docs/glx-plan.md). Phase 0 (the ntk blockers:
+>    MakeCurrent's context tag, `createWindow` visuals, server-side visual
+>    discovery) is sidorares/ntk#85; Phase 1 — the `<glarea>` surface
+>    element — is done here and waiting on that release. Next up: the
+>    display-list geometry compiler and `<mesh>` (plan §5, phase 2).
 > 2. Then merge release-please #17 and publish 1.0.0.
 > 3. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim

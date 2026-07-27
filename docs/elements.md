@@ -211,6 +211,59 @@ every repaint of the window.
 
 ---
 
+## `<glarea>`
+
+An OpenGL surface in the layout — the only drawn element that owns a real X
+window, because GLX needs a drawable created for a GL-capable visual and
+cannot share the XRender pipeline the rest of the tree paints through
+(NEXT_STEPS §4). Needs ntk ≥ 3.6.0 and a server with **indirect GLX**
+enabled (`+iglx` / `AllowIndirectGLX` — off by default on many).
+
+```jsx
+<glarea
+  flexGrow={1}
+  clearColor="#0b1021"
+  frameLoop="always"
+  onCreated={(gl) => gl.Enable(gl.DEPTH_TEST)}
+  onDraw={(gl, { width, height }) => {
+    gl.MatrixMode(gl.PROJECTION);
+    gl.LoadIdentity();
+    gl.Frustum(-1, 1, -height / width, height / width, 2, 20);
+    // ... immediate-mode or display-list drawing
+  }}
+/>
+```
+
+- `onDraw(gl, { width, height, node })` — draw one frame. The viewport is
+  set and the buffers are cleared before it, `SwapBuffers` follows it.
+- `onCreated(gl, info)` — runs once, when the context is current: one-time
+  GL state, texture uploads, display-list compilation.
+- `clearColor` — CSS colour or `[r, g, b, a]` floats (default black).
+- `frameLoop` — `'demand'` (default) redraws on prop, size and expose
+  changes only; `'always'` renders continuously on ntk's frame clock.
+- `glx` — a visual spec for ntk's `chooseGLXConfig`, e.g.
+  `{ DEPTH_SIZE: 24 }`. One query per app, shared by every `<glarea>`.
+- `onError(err)` — no GL surface (no GLX, no matching visual). Without a
+  handler the failure is a console warning.
+
+`gl` is ntk's indirect-GLX context: fixed-function OpenGL 1.4 (immediate
+mode, matrices, lighting, textures, display lists) — no shaders, no vertex
+arrays, since the GLX protocol does not encode them. **Geometry belongs in
+display lists**: every immediate-mode vertex is a command on the wire, so a
+mesh re-sent per frame costs kilobytes per frame, while a compiled list
+costs one `CallList`.
+
+Layout treats it as a leaf: it is sized and positioned like any other node,
+and its X window follows that rect. The window is stacked above everything
+drawn in the parent, so 2D content cannot overlap it — a HUD needs a
+sibling `<popup>`. Pointer events over the surface go to its own window;
+`<glarea>` does not take part in the parent's hit testing yet.
+
+See `examples/gl.jsx` and [glx-plan.md](glx-plan.md) for where this is
+going (a react-three-fiber-shaped `<mesh>` set on top).
+
+---
+
 ## Rich content
 
 Thin wrappers over ntk's document widgets in standalone mode. The widget's

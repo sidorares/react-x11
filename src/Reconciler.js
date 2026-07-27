@@ -27,6 +27,7 @@ import {
   TextInputNode,
   TextAreaNode,
 } from './nodes.js';
+import { GlAreaNode } from './glnodes.js';
 import {
   MarkdownNode,
   HtmlNode,
@@ -52,6 +53,7 @@ const HOST_TYPES = [
   'html',
   'svg',
   'tex',
+  'glarea',
 ];
 
 const isEventProp = (name) => /^on[A-Z]/.test(name);
@@ -181,6 +183,9 @@ const HostConfig = {
         break;
       case 'tex':
         node = new TexNode(props, rootContainer);
+        break;
+      case 'glarea':
+        node = new GlAreaNode(props, rootContainer);
         break;
       default:
         throw new Error(

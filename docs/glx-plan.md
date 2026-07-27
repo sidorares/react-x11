@@ -1,8 +1,12 @@
 # Plan: 3D components over indirect GLX
 
-Status: **plan only, nothing implemented.** Written to be picked up in a
-later session. Everything in "What was verified" below was measured on
-2026-07-27 against XQuartz + node-x11 3.1.2 + ntk 3.5.3, not assumed.
+Status: **phases 0 and 1 are implemented** (2026-07-27). Phase 0 is
+sidorares/ntk#85 — the context tag, GLX visuals on `createWindow`, and
+visual discovery over the protocol instead of `glxinfo`. Phase 1 is the
+`<glarea>` element here (docs/elements.md), which waits on that ntk
+release. Phase 2 (display lists, `<mesh>`) is next. Everything in "What
+was verified" below was measured against XQuartz + node-x11 3.1.2 +
+ntk 3.5.3, not assumed.
 
 Goal: a react-three-fiber-shaped component set — `<mesh>`, geometries,
 materials, lights, a camera — rendering through **indirect GLX**, i.e. the
@@ -166,7 +170,7 @@ the protocol limit: `shaderMaterial`, `<Effects>`, shadows,
 
 Each phase should land as its own PR with tests, per the usual workflow.
 
-**Phase 0 — unblock (upstream ntk).**
+**Phase 0 — unblock (upstream ntk). DONE — sidorares/ntk#85.**
 
 1. Use `MakeCurrent`'s returned context tag in
    `RenderingContextOpenGL`. Verified fix; this alone makes
@@ -178,10 +182,12 @@ Each phase should land as its own PR with tests, per the usual workflow.
    `GetVisualConfigs` path, choosing a visual with a depth buffer.
    Shelling out cannot work headlessly or on CI.
 
-**Phase 1 — surface.** `<glarea>` host element; `Canvas3D` with clear
-colour, viewport, frame loop on ntk's `requestAnimationFrame`, and
-`SwapBuffers`. Success: a window that clears to a colour and resizes
-correctly.
+**Phase 1 — surface. DONE.** `<glarea>` host element: a child X window on
+a GLX visual, sized by the parent's yoga rect, with clear colour, viewport,
+`onCreated`/`onDraw`, `SwapBuffers` and a demand-or-continuous frame loop
+on ntk's `requestAnimationFrame`. `Canvas3D` moves to phase 2 — the
+surface duties live in the host element, so the component only earns its
+keep once there is a scene tree to own.
 
 **Phase 2 — geometry.** Display-list compiler, `<mesh>`,
 `<bufferGeometry>` + the primitive geometries, `<meshBasicMaterial>`.
