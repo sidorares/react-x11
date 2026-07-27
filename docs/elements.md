@@ -283,17 +283,23 @@ names wherever the concept survives the translation to fixed-function GL.
 </Canvas3D>
 ```
 
-| element               | notes                                                                                              |
-| --------------------- | -------------------------------------------------------------------------------------------------- |
-| `<group>`             | transform only; nests children                                                                     |
-| `<mesh>`              | one geometry child + one material child                                                            |
-| `<boxGeometry>`       | `args={[width, height, depth, widthSeg, heightSeg, depthSeg]}`                                     |
-| `<planeGeometry>`     | `args={[width, height, widthSeg, heightSeg]}`                                                      |
-| `<sphereGeometry>`    | `args={[radius, widthSeg, heightSeg]}`                                                             |
-| `<cylinderGeometry>`  | `args={[radiusTop, radiusBottom, height, radialSeg, heightSeg, openEnded]}`                        |
-| `<torusGeometry>`     | `args={[radius, tube, radialSeg, tubularSeg]}`                                                     |
-| `<bufferGeometry>`    | `position` / `normal` / `uv` / `index` arrays; normals are derived from the triangles when omitted |
-| `<meshBasicMaterial>` | `color`, `wireframe`, `opacity`, `transparent`, `side` (`front` \| `back` \| `double`)             |
+| element                 | notes                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `<group>`               | transform only; nests children                                                                            |
+| `<mesh>`                | one geometry child + one material child                                                                   |
+| `<boxGeometry>`         | `args={[width, height, depth, widthSeg, heightSeg, depthSeg]}`                                            |
+| `<planeGeometry>`       | `args={[width, height, widthSeg, heightSeg]}`                                                             |
+| `<sphereGeometry>`      | `args={[radius, widthSeg, heightSeg]}`                                                                    |
+| `<cylinderGeometry>`    | `args={[radiusTop, radiusBottom, height, radialSeg, heightSeg, openEnded]}`                               |
+| `<torusGeometry>`       | `args={[radius, tube, radialSeg, tubularSeg]}`                                                            |
+| `<bufferGeometry>`      | `position` / `normal` / `uv` / `index` arrays; normals are derived from the triangles when omitted        |
+| `<meshBasicMaterial>`   | unlit flat colour: `color`, `wireframe`, `opacity`, `transparent`, `side` (`front` \| `back` \| `double`) |
+| `<meshLambertMaterial>` | diffuse shading; the same props plus `emissive`                                                           |
+| `<meshPhongMaterial>`   | + `specular`, `shininess` (default 30)                                                                    |
+| `<ambientLight>`        | `color`, `intensity` — costs no light unit                                                                |
+| `<directionalLight>`    | `position` is the direction the light comes from                                                          |
+| `<pointLight>`          | `position`, plus `distance`/`decay` for attenuation                                                       |
+| `<spotLight>`           | + `angle` in radians, `penumbra`, `target`                                                                |
 
 Transforms are `position`, `rotation` (XYZ euler radians) and `scale`, each
 a `[x, y, z]` tuple (or one number for a uniform scale), plus `visible`.
@@ -307,11 +313,18 @@ material re-sends neither; changing a geometry's `args` recompiles just
 that list. `test/scene3d.test.js` asserts exactly this on the encoded
 command stream.
 
+**Lighting is the fixed-function pipeline**: per-vertex Gouraud shading and
+**8 light units** in total — more than eight non-ambient lights warns and
+uses the first eight. `<ambientLight>` costs no unit; its colour rides on
+the first light's ambient term. A lit material in a scene with no lights
+falls back to flat colour rather than rendering black. Light positions are
+world space, so a light inside a rotating `<group>` moves with it.
+
 Not implemented, and failing with an error naming the reason:
 `<shaderMaterial>` (the protocol encodes no shaders), `<instancedMesh>`,
-`<points>`, `<line>`, post-processing. Lighting materials
-(`<meshLambertMaterial>`, `<meshPhongMaterial>`), lights and camera
-elements are the next phase — see [glx-plan.md](glx-plan.md).
+`<points>`, `<line>`, post-processing — and no shadows, which need
+framebuffer objects. Camera elements, textures and pointer interaction are
+the phases still to come — see [glx-plan.md](glx-plan.md).
 
 ---
 

@@ -382,3 +382,111 @@ test('3D elements outside a <glarea> say where they belong', async () => {
     await app.close();
   }
 });
+
+test('lights drive the lit materials, and ambient needs no unit of its own', async () => {
+  const { app, backend, tap } = await createGlApp();
+  try {
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          { flexGrow: 1, camera: { position: [0, 0, 6] } },
+          h('ambientLight', { intensity: 0.3 }),
+          h('pointLight', { position: [4, 5, 3], intensity: 1 }),
+          h(
+            'mesh',
+            {},
+            h('boxGeometry', { args: [1, 1, 1] }),
+            h('meshPhongMaterial', { color: '#2980b9', shininess: 40 }),
+          ),
+        ),
+      ),
+      app,
+    );
+    const surface = findSurface(instance._reactX11Node);
+    await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
+
+    backend.calls.length = 0;
+    tap.reset();
+    await drawFrame(surface, app, tap);
+
+    // one light unit: the ambient term rides on it, the point light drives it
+    const enabled = backend.calls.filter(
+      (c) => c[0] === 'enable' && c[1] === 0x4000, // GL_LIGHT0
+    );
+    assert.equal(enabled.length, 1, 'GL_LIGHT0 enabled, and only it');
+    assert.ok(
+      backend.calls.some((c) => c[0] === 'enable' && c[1] === 0x0b50), // LIGHTING
+      'lighting turned on for a lit material',
+    );
+
+    const lightCalls = backend.calls.filter((c) => c[0] === 'light');
+    // backend.light(lightEnum, pname, params)
+    const position = lightCalls.find((c) => c[2] === 0x1203); // GL_POSITION
+    assert.deepEqual(
+      position[3].map((v) => Math.round(v)),
+      [4, 5, 3, 1],
+      'a point light: world position with w = 1',
+    );
+    const ambient = lightCalls.find((c) => c[2] === 0x1200); // GL_AMBIENT
+    assert.ok(
+      Math.abs(ambient[3][0] - 0.3) < 1e-3,
+      `<ambientLight intensity={0.3}> lands in GL_AMBIENT, got ${ambient[3][0]}`,
+    );
+
+    const material = backend.calls.filter((c) => c[0] === 'material');
+    assert.ok(
+      material.some((c) => c[2] === 0x1602), // AMBIENT_AND_DIFFUSE
+      'the material colour becomes the surface reflectance',
+    );
+    assert.ok(
+      material.some((c) => c[2] === 0x1601 && c[3][0] === 40), // SHININESS
+      'phong shininess reaches the server',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a lit material with no lights falls back to flat colour', async () => {
+  const { app, backend, tap } = await createGlApp();
+  try {
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          { flexGrow: 1 },
+          h(
+            'mesh',
+            {},
+            h('boxGeometry', { args: [1, 1, 1] }),
+            h('meshLambertMaterial', { color: 'tomato' }),
+          ),
+        ),
+      ),
+      app,
+    );
+    const surface = findSurface(instance._reactX11Node);
+    await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
+
+    backend.calls.length = 0;
+    await drawFrame(surface, app, tap);
+
+    assert.ok(
+      backend.calls.some((c) => c[0] === 'disable' && c[1] === 0x0b50),
+      'lighting stays off, so the mesh is not rendered black',
+    );
+    assert.ok(
+      backend.calls.some((c) => c[0] === 'color'),
+      'the colour is sent flat instead',
+    );
+  } finally {
+    await app.close();
+  }
+});
