@@ -27,6 +27,13 @@ examples through the real event pipeline).
 | ---------------------------------------- | ---------------------------------------------- |
 | ![form](docs/img/form.png)               | ![select menu](docs/img/select-menu.png)       |
 
+`examples/three.jsx` — a react-three-fiber-shaped scene over **indirect
+GLX**: `<mesh>`, geometries, materials, lights and a texture, drawn by
+sending the GL protocol over the X connection. No native bindings, no GPU
+driver bindings — the same "JavaScript all the way down" story as the rest.
+
+![3D over indirect GLX](docs/img/three.png)
+
 ## Quick start
 
 ```sh
@@ -68,9 +75,9 @@ step).
 
 ## Elements
 
-Only `<window>` and `<popup>` map to real X11 windows. Everything else is
-laid out by yoga and drawn client-side into the window's double-buffered 2d
-context — see [NEXT_STEPS.md](NEXT_STEPS.md) for the architecture rationale
+Only `<window>`, `<popup>` and `<glarea>` map to real X11 windows.
+Everything else is laid out by yoga and drawn client-side into the window's
+double-buffered 2d context — see [NEXT_STEPS.md](NEXT_STEPS.md) for the architecture rationale
 and [docs/](docs/README.md) for the full API reference.
 
 | element        | what it is                                                                                                           |
@@ -87,9 +94,36 @@ and [docs/](docs/README.md) for the full API reference.
 | `<html>`       | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                       |
 | `<svg>`        | static SVG through ntk SvgView, sized like `<image>`                                                                 |
 | `<tex>`        | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                               |
+| `<glarea>`     | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                              |
 
 Widget **components** (plain React on top of the primitives): `Select` — a
 dropdown built on `<popup>`, themable via `SelectThemeProvider`.
+
+### 3D
+
+Inside a `<glarea>` (or the `Canvas3D` component) the children are scene
+elements with react-three-fiber's names:
+
+```jsx
+<Canvas3D flexGrow={1} camera={{ position: [0, 2, 6], fov: 45 }}>
+  <ambientLight intensity={0.35} />
+  <pointLight position={[5, 6, 6]} />
+  <mesh rotation={[0.5, 0.4, 0]} onClick={() => pick()}>
+    <boxGeometry args={[1.4, 1.4, 1.4]} />
+    <meshPhongMaterial color="#2980b9" shininess={60} />
+  </mesh>
+</Canvas3D>
+```
+
+`<mesh>`, `<group>`, box/plane/sphere/cylinder/torus geometries,
+`<bufferGeometry>`, basic/Lambert/Phong materials with textures, four light
+types, and pointer events resolved by client-side raycasting. Each geometry
+is compiled into a **server-side display list** once, so a frame costs
+matrices plus one `CallList` per mesh whatever the triangle count. What the
+protocol cannot do — shaders, instancing, post-processing, shadows — throws
+with the reason rather than half-working. See
+[docs/elements.md](docs/elements.md#3d-scene-mesh-group-geometries-materials)
+and [docs/glx-plan.md](docs/glx-plan.md).
 
 Events are synthetic with capture/bubble phases and hit testing over the
 drawn tree: `onClick` (with DOM-style `detail` click counting),
@@ -111,7 +145,12 @@ npm run examples:dashboard     # context theming, custom hooks, components
 npm run examples:tasks         # useReducer, textinput, scrollview
 npm run examples:menu          # right-click context menu via <popup>
 npm run examples:form          # <textinput> + Select dropdowns
+npm run examples:gl            # raw GL in a <glarea> (display-list cube)
+npm run examples:three         # <Canvas3D> scene: meshes, lights, textures
 ```
+
+The two GL examples additionally need a server with **indirect GLX**
+enabled (`+iglx` / `AllowIndirectGLX` — off by default on many).
 
 ## React DevTools
 
@@ -142,6 +181,10 @@ npm run lint         # ESLint
 npm run format       # Prettier
 npm run screenshots  # regenerate docs/img/*.png headlessly (no X server)
 ```
+
+`docs/img/three.png` is the exception: the headless path has no GL, so the
+3D shot is captured by hand from `npm run examples:three` on a real server
+with indirect GLX.
 
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
 guidance, [docs/](docs/README.md) for API documentation, and
