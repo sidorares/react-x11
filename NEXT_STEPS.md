@@ -16,8 +16,8 @@
 > **Plan (next session):**
 >
 > 1. Merge release-please #17 and publish 1.0.0.
-> 2. Type-ahead in menus and `Select` (jump to the entry matching typed
->    letters).
+> 2. Split `src/components.js` (1500+ lines, 13 components) into
+>    `src/components/`.
 > 3. `<textarea>` polish: Ctrl+arrow word movement, PageUp/Down,
 >    Shift+click extend, drawn scrollbar.
 > 4. `Select` follow-ups: type-ahead (jump to the option matching typed
@@ -65,7 +65,7 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Menu/MenuBar, ContextMenu** — DONE: built on `useAnchor`, with
   separators, disabled items, shortcuts, checkmarks, nested submenus and
   full keyboard navigation; `examples/menu.jsx` rewritten on them
-- **`Select` type-ahead / PageUp-PageDown** — keyboard navigation itself
+- **`Select` PageUp/PageDown** — type-ahead is done; keyboard navigation
   is done (#34: Up/Down/Home/End/Enter/Escape, shared pointer+keyboard
   highlight, active option scrolled into view)
 
