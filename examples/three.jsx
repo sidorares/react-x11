@@ -6,8 +6,29 @@
 // Run with: npm run examples:three  (needs an X server with indirect GLX)
 import React, { useEffect, useRef, useState } from 'react';
 
+import { Image } from 'ntk';
+
 import { Button, Canvas3D, Switch } from '../src/components/index.js';
 import { createRoot } from '../src/index.js';
+
+/** A procedural checker, uploaded to the server once and bound per frame. */
+function checkerTexture(size = 64, squares = 8) {
+  const data = Buffer.alloc(size * size * 4);
+  const step = size / squares;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dark = (Math.floor(x / step) + Math.floor(y / step)) % 2 === 0;
+      const i = (y * size + x) * 4;
+      data[i] = dark ? 0x20 : 0xf2;
+      data[i + 1] = dark ? 0x30 : 0xf6;
+      data[i + 2] = dark ? 0x45 : 0xf8;
+      data[i + 3] = 255;
+    }
+  }
+  return new Image({ width: size, height: size, data });
+}
+
+const CHECKER = checkerTexture();
 
 /** Advance a value every frame while `running`, via the window frame clock. */
 function useSpin(running, windowRef) {
@@ -35,6 +56,7 @@ function App() {
   const windowRef = useRef(null);
   const [running, setRunning] = useState(true);
   const [wireframe, setWireframe] = useState(false);
+  const [textured, setTextured] = useState(true);
   const [hovered, setHovered] = useState(null);
   const [picked, setPicked] = useState(null);
   const angle = useSpin(running, windowRef);
@@ -77,6 +99,7 @@ function App() {
               <boxGeometry args={[1.4, 1.4, 1.4]} />
               <meshPhongMaterial
                 color={tint('box', '#2980b9')}
+                map={textured ? CHECKER : undefined}
                 shininess={60}
                 wireframe={wireframe}
               />
@@ -113,6 +136,8 @@ function App() {
           <text fontSize={13}>Spin</text>
           <Switch checked={wireframe} onChange={setWireframe} />
           <text fontSize={13}>Wireframe</text>
+          <Switch checked={textured} onChange={setTextured} />
+          <text fontSize={13}>Texture</text>
           <box flexGrow={1} />
           <text fontSize={13} color="#5b6570">
             {picked ? `picked: ${picked}` : 'click a shape'}

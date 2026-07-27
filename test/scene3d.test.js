@@ -502,3 +502,106 @@ test('a lit material with no lights falls back to flat colour', async () => {
     await app.close();
   }
 });
+
+test('a texture is uploaded once and only rebound afterwards', async () => {
+  const { app, backend, tap } = await createGlApp();
+  try {
+    // a 2x2 RGBA checker, the shape ntk's Image has
+    const map = {
+      width: 2,
+      height: 2,
+      data: Buffer.from([
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+      ]),
+    };
+    const scene = (color) =>
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          { flexGrow: 1 },
+          h(
+            'mesh',
+            {},
+            h('planeGeometry', { args: [2, 2] }),
+            h('meshBasicMaterial', { map, color }),
+          ),
+        ),
+      );
+
+    const instance = await render(scene('white'), app);
+    const surface = findSurface(instance._reactX11Node);
+    await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
+    // no clearing here: the upload happens on the very first frame, which
+    // the mount already drew
+    await drawFrame(surface, app, tap);
+    const first = frameCalls(backend);
+    const uploads = first.filter((c) => c[0] === 'texImage2D');
+    assert.equal(uploads.length, 1, 'uploaded on first use');
+    assert.deepEqual(
+      [uploads[0][4], uploads[0][5]],
+      [2, 2],
+      'with the image size',
+    );
+    assert.ok(
+      first.some((c) => c[0] === 'bindTexture'),
+      'and bound for the draw',
+    );
+
+    // a material change re-sends state, never the pixels
+    backend.calls.length = 0;
+    await render(scene('tomato'), app);
+    await drawFrame(surface, app, tap);
+    const second = frameCalls(backend);
+    assert.equal(
+      second.filter((c) => c[0] === 'texImage2D').length,
+      0,
+      'no re-upload',
+    );
+    assert.ok(
+      second.some((c) => c[0] === 'bindTexture'),
+      'just a rebind',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a material without a map turns texturing off', async () => {
+  const { app, backend, tap } = await createGlApp();
+  try {
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          { flexGrow: 1 },
+          h(
+            'mesh',
+            {},
+            h('boxGeometry', { args: [1, 1, 1] }),
+            h('meshBasicMaterial', { color: 'white' }),
+          ),
+        ),
+      ),
+      app,
+    );
+    const surface = findSurface(instance._reactX11Node);
+    await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
+    takeFrameControl(surface);
+
+    backend.calls.length = 0;
+    await drawFrame(surface, app, tap);
+    const calls = frameCalls(backend);
+    assert.ok(
+      calls.some((c) => c[0] === 'disable' && c[1] === 0x0de1), // GL_TEXTURE_2D
+      'texturing disabled for an untextured mesh',
+    );
+    assert.equal(calls.filter((c) => c[0] === 'texImage2D').length, 0);
+  } finally {
+    await app.close();
+  }
+});
