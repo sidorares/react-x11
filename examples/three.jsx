@@ -46,18 +46,34 @@ function App() {
           glx={{ DEPTH_SIZE: 24 }}
           camera={{ position: [0, 2.6, 8.5], target: [0, -0.2, 0], fov: 45 }}
         >
+          <ambientLight intensity={0.35} />
+          <pointLight position={[5, 6, 6]} intensity={1} />
+          <directionalLight
+            position={[-6, 2, 3]}
+            intensity={0.4}
+            color="#9ecbff"
+          />
+
           <group rotation={[0, angle, 0]}>
             <mesh position={[-1.6, 0, 0]} rotation={[0.5, 0.4, 0]}>
               <boxGeometry args={[1.4, 1.4, 1.4]} />
-              <meshBasicMaterial color="#2980b9" wireframe={wireframe} />
+              <meshPhongMaterial
+                color="#2980b9"
+                shininess={60}
+                wireframe={wireframe}
+              />
             </mesh>
             <mesh position={[1.6, 0, 0]}>
               <sphereGeometry args={[0.9, 24, 16]} />
-              <meshBasicMaterial color="#e67e22" wireframe={wireframe} />
+              <meshPhongMaterial
+                color="#e67e22"
+                shininess={12}
+                wireframe={wireframe}
+              />
             </mesh>
             <mesh position={[0, -1.4, 0]} rotation={[Math.PI / 2, 0, 0]}>
               <torusGeometry args={[1.1, 0.28, 12, 36]} />
-              <meshBasicMaterial color="#27ae60" wireframe={wireframe} />
+              <meshLambertMaterial color="#27ae60" wireframe={wireframe} />
             </mesh>
           </group>
         </Canvas3D>
