@@ -196,8 +196,11 @@ test('<glarea> follows layout changes and redraws once per change', async () => 
       { width: 240, height: 160 },
       'the X child window followed the yoga rect',
     );
+    // the resize can be preceded by one more frame at the old size (an
+    // Expose while the window is being moved), so it is the latest frame
+    // that has to match
     assert.deepEqual(
-      backend.calls.find((c) => c[0] === 'viewport').slice(1),
+      backend.calls.findLast((c) => c[0] === 'viewport').slice(1),
       [0, 0, 240, 160],
       'and so did the GL viewport',
     );
