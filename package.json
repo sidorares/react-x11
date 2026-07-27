@@ -22,7 +22,8 @@
     "examples:widgets": "tsx examples/widgets.jsx",
     "examples:windows": "tsx examples/windows.jsx",
     "screenshots": "tsx scripts/screenshots.jsx",
-    "screenshots:framed": "tsx scripts/screenshots-framed.jsx"
+    "screenshots:framed": "tsx scripts/screenshots-framed.jsx",
+    "bench": "tsx scripts/bench/protocol.js"
   },
   "repository": {
     "type": "git",
@@ -41,7 +42,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^3.5.0",
+    "ntk": "^3.5.1",
     "react-reconciler": "^0.33.0"
   },
   "peerDependencies": {
