@@ -719,6 +719,398 @@ export function Tooltip({
   );
 }
 
+// --- menus ------------------------------------------------------------------
+
+const MENU_ITEM_HEIGHT = 26;
+const MENU_SEPARATOR_HEIGHT = 7;
+const MENU_MIN_WIDTH = 140;
+const MENU_PAD = 4;
+const MENU_GUTTER = 24; // room for the check column
+const MENU_SHORTCUT_GAP = 24;
+
+const isSelectable = (item) => item && !item.separator && !item.disabled;
+
+/** Total popup height for a menu's items (separators are shorter). */
+function menuListHeight(items) {
+  const body = items.reduce(
+    (sum, item) =>
+      sum + (item.separator ? MENU_SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT),
+    0,
+  );
+  return body + MENU_PAD * 2 + 2;
+}
+
+/** Widest label + shortcut, measured, so the popup can be sized up front. */
+function menuListWidth(node, items, fontSize) {
+  let widest = 0;
+  for (const item of items) {
+    if (item.separator) continue;
+    const label = measureLabel(node, item.label ?? '', {
+      size: fontSize,
+    }).width;
+    const shortcut = item.shortcut
+      ? measureLabel(node, item.shortcut, { size: fontSize }).width +
+        MENU_SHORTCUT_GAP
+      : 0;
+    widest = Math.max(widest, label + shortcut);
+  }
+  return Math.max(
+    MENU_MIN_WIDTH,
+    Math.ceil(widest) + MENU_GUTTER + MENU_PAD * 2 + 12,
+  );
+}
+
+/** Next selectable index in `dir`, wrapping, skipping separators/disabled. */
+function nextSelectable(items, from, dir) {
+  const n = items.length;
+  if (!n) return -1;
+  for (let step = 1; step <= n; step++) {
+    const i = (from + dir * step + n * step) % n;
+    if (isSelectable(items[i])) return i;
+  }
+  return -1;
+}
+
+function MenuRow({ item, active, onHover, onSelect, fontSize }) {
+  const theme = useTheme();
+  if (item.separator) {
+    return h(
+      'box',
+      { height: MENU_SEPARATOR_HEIGHT, justifyContent: 'center' },
+      h('box', { height: 1, backgroundColor: theme.border }),
+    );
+  }
+  const dim = item.disabled;
+  return h(
+    'box',
+    {
+      height: MENU_ITEM_HEIGHT,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingLeft: 8,
+      paddingRight: 8,
+      cursor: dim ? undefined : 'pointer',
+      backgroundColor: active ? theme.hoverBackground : theme.background,
+      onMouseEnter: dim ? undefined : onHover,
+      onClick: dim ? undefined : () => onSelect(item),
+    },
+    h(
+      'box',
+      { width: MENU_GUTTER - 8, alignItems: 'center' },
+      item.checked &&
+        h('text', {
+          color: active ? theme.hoverText : theme.text,
+          fontSize,
+          children: '✓',
+        }),
+    ),
+    h(
+      'text',
+      {
+        color: dim ? theme.dim : active ? theme.hoverText : theme.text,
+        fontSize,
+      },
+      item.label,
+    ),
+    h('box', { flexGrow: 1 }),
+    item.shortcut &&
+      h(
+        'text',
+        {
+          color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
+          fontSize,
+        },
+        item.shortcut,
+      ),
+  );
+}
+
+/**
+ * The menu popup itself: an override-redirect `<popup>` at `rect` holding a
+ * list of items. Shared by `MenuBar` and `ContextMenu`; `rect` comes from
+ * `useAnchor`, so menus flip at screen edges like `Select`'s.
+ */
+function MenuPopup({ rect, items, activeIndex, onHover, onSelect, fontSize }) {
+  const theme = useTheme();
+  return h(
+    'popup',
+    {
+      x: rect.x,
+      y: rect.y,
+      width: rect.width,
+      height: rect.height,
+      windowType: 'popup_menu',
+      backgroundColor: theme.background,
+    },
+    h(
+      'box',
+      {
+        flexGrow: 1,
+        flexShrink: 1,
+        padding: MENU_PAD,
+        borderWidth: 1,
+        borderColor: theme.border,
+        backgroundColor: theme.background,
+      },
+      items.map((item, index) =>
+        h(MenuRow, {
+          key: item.separator ? `sep-${index}` : (item.key ?? item.label),
+          item,
+          active: index === activeIndex,
+          fontSize,
+          onHover: () => onHover(index),
+          onSelect,
+        }),
+      ),
+    ),
+  );
+}
+
+/**
+ * Keyboard handling shared by every menu: Up/Down move the active item
+ * (skipping separators and disabled entries, wrapping), Home/End jump to
+ * the ends, Enter/Space activate, Escape closes. Returns true when the key
+ * was consumed so callers can add their own (MenuBar adds Left/Right).
+ */
+function handleMenuKey(
+  ev,
+  { items, activeIndex, setActiveIndex, select, close },
+) {
+  switch (ev.keysym) {
+    case XK_ESCAPE:
+      close();
+      return true;
+    case XK_DOWN:
+      setActiveIndex(nextSelectable(items, activeIndex, 1));
+      return true;
+    case XK_UP:
+      setActiveIndex(nextSelectable(items, activeIndex, -1));
+      return true;
+    case XK_HOME:
+      setActiveIndex(nextSelectable(items, -1, 1));
+      return true;
+    case XK_END:
+      setActiveIndex(nextSelectable(items, items.length, -1));
+      return true;
+    default:
+      break;
+  }
+  if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
+    const item = items[activeIndex];
+    if (isSelectable(item)) select(item);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * <ContextMenu items>…</ContextMenu> — right-click anywhere in the children
+ * to open a menu at the pointer.
+ *
+ * The wrapper is focusable and takes focus when the menu opens, because the
+ * popup is override-redirect and never gets focus itself — the same trick
+ * `Select` uses to keep arrow keys working while its menu is open.
+ */
+export function ContextMenu({
+  items = [],
+  children,
+  onSelect,
+  fontSize = DEFAULT_LABEL_SIZE,
+  ...boxProps
+}) {
+  const ref = useRef(null);
+  const [rect, setRect] = useState(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  const close = () => {
+    setRect(null);
+    setActiveIndex(-1);
+  };
+  const select = (item) => {
+    close();
+    item.onSelect?.(item);
+    onSelect?.(item);
+  };
+
+  const openAt = (ev) => {
+    const node = ref.current;
+    if (!node || !items.length) return;
+    const width = menuListWidth(node, items, fontSize);
+    const height = menuListHeight(items);
+    const screen = screenOf(node);
+    // anchored at the pointer rather than at a widget: clamp by hand, since
+    // there is no anchor rect to flip around
+    const x = ev.nativeEvent?.rootx ?? ev.x;
+    const y = ev.nativeEvent?.rooty ?? ev.y;
+    setRect({
+      x: screen ? Math.max(0, Math.min(x, screen.pixel_width - width)) : x,
+      y: screen ? Math.max(0, Math.min(y, screen.pixel_height - height)) : y,
+      width,
+      height,
+    });
+    setActiveIndex(-1);
+    node.root?.events?.focus?.(node);
+  };
+
+  return h(
+    'box',
+    {
+      ref,
+      focusable: true,
+      onMouseDown: (ev) => {
+        if (ev.button === 3) openAt(ev);
+        else if (rect) close();
+      },
+      onKeyDown: (ev) => {
+        if (!rect) return;
+        handleMenuKey(ev, {
+          items,
+          activeIndex,
+          setActiveIndex,
+          select,
+          close,
+        });
+      },
+      onBlur: close,
+      ...boxProps,
+    },
+    children,
+    rect &&
+      h(MenuPopup, {
+        rect,
+        items,
+        activeIndex,
+        fontSize,
+        onHover: setActiveIndex,
+        onSelect: select,
+      }),
+  );
+}
+
+/**
+ * <MenuBar menus={[{ label, items }]}/> — a horizontal bar of pull-down
+ * menus. Click or Enter opens; with one open, hovering another switches to
+ * it and Left/Right walk the bar; the usual menu keys work inside.
+ */
+export function MenuBar({
+  menus = [],
+  onSelect,
+  fontSize = DEFAULT_LABEL_SIZE,
+  ...boxProps
+}) {
+  const theme = useTheme();
+  const [openIndex, setOpenIndex] = useState(-1);
+  const [rect, setRect] = useState(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const refs = useRef([]);
+
+  const items = openIndex >= 0 ? (menus[openIndex]?.items ?? []) : [];
+
+  const close = () => {
+    setOpenIndex(-1);
+    setRect(null);
+    setActiveIndex(-1);
+  };
+
+  const openMenu = (index) => {
+    const node = refs.current[index];
+    const menu = menus[index];
+    if (!node || !menu?.items?.length) return;
+    const width = menuListWidth(node, menu.items, fontSize);
+    const height = menuListHeight(menu.items);
+    const next = anchorRect(node, { placement: 'bottom', width, height });
+    if (!next) return;
+    setRect(next);
+    setOpenIndex(index);
+    setActiveIndex(-1);
+  };
+
+  const select = (item) => {
+    close();
+    item.onSelect?.(item);
+    onSelect?.(item);
+  };
+
+  const moveMenu = (dir) => {
+    if (!menus.length) return;
+    const n = menus.length;
+    openMenu((openIndex + dir + n) % n);
+  };
+
+  return h(
+    'box',
+    {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.surfaceHover,
+      ...boxProps,
+    },
+    menus.map((menu, index) =>
+      h(
+        'box',
+        {
+          key: menu.label,
+          ref: (node) => {
+            refs.current[index] = node;
+          },
+          focusable: true,
+          cursor: 'pointer',
+          paddingLeft: 10,
+          paddingRight: 10,
+          paddingTop: 6,
+          paddingBottom: 6,
+          backgroundColor:
+            openIndex === index ? theme.hoverBackground : 'transparent',
+          onClick: () => (openIndex === index ? close() : openMenu(index)),
+          // with a menu already open, hovering the bar switches menus —
+          // standard pull-down behaviour
+          onMouseEnter: () => {
+            if (openIndex >= 0 && openIndex !== index) openMenu(index);
+          },
+          onBlur: () => {
+            if (openIndex === index) close();
+          },
+          onKeyDown: (ev) => {
+            if (ev.keysym === XK_LEFT) return moveMenu(-1);
+            if (ev.keysym === XK_RIGHT) return moveMenu(1);
+            if (openIndex !== index) {
+              if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
+                openMenu(index);
+              }
+              return;
+            }
+            handleMenuKey(ev, {
+              items,
+              activeIndex,
+              setActiveIndex,
+              select,
+              close,
+            });
+          },
+        },
+        h(
+          'text',
+          {
+            color: openIndex === index ? theme.hoverText : theme.text,
+            fontSize,
+          },
+          menu.label,
+        ),
+      ),
+    ),
+    openIndex >= 0 &&
+      rect &&
+      h(MenuPopup, {
+        rect,
+        items,
+        activeIndex,
+        fontSize,
+        onHover: setActiveIndex,
+        onSelect: select,
+      }),
+  );
+}
+
 function normalizeOption(option) {
   return typeof option === 'object' && option !== null
     ? option

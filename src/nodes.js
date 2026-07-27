@@ -35,6 +35,13 @@ export const DEVTOOLS_FAKE_DOCUMENT = {
   defaultView: null,
 };
 
+/** CSS's `transparent` keyword means "paint nothing". ntk's colour parser
+ *  does not know it and throws deep inside the 2d context, taking the whole
+ *  frame with it, so filter it out at the source alongside null/''. */
+function isPaintedColor(color) {
+  return Boolean(color) && color !== 'transparent';
+}
+
 /** Equality for props that may be a scalar, an array or a plain object
  *  (window hints are all three shapes), so an unchanged inline object
  *  literal does not re-send the property every render. */
@@ -302,7 +309,7 @@ export class Node {
 
   _paintBackground(ctx) {
     const { backgroundColor, borderRadius = 0 } = this.props;
-    if (!backgroundColor) return;
+    if (!isPaintedColor(backgroundColor)) return;
     ctx.fillStyle = backgroundColor;
     if (borderRadius > 0) {
       this._roundedPath(ctx, borderRadius);
@@ -314,7 +321,7 @@ export class Node {
 
   _paintBorder(ctx) {
     const { borderWidth = 0, borderColor, borderRadius = 0 } = this.props;
-    if (!(borderWidth > 0) || !borderColor) return;
+    if (!(borderWidth > 0) || !isPaintedColor(borderColor)) return;
     // dashed borders need ntk >= 3.2.0 (setLineDash); solid fallback below
     const dashed =
       this.props.borderStyle === 'dashed' &&

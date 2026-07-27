@@ -128,6 +128,49 @@ mousedown — a tooltip lingering over the menu you just opened is the
 classic annoyance. The popup is sized from the _measured_ label, because a
 `<popup>` is a real X window and needs its size before layout.
 
+## `MenuBar` / `ContextMenu`
+
+Pull-down and right-click menus, both rendered in `<popup>` windows so they
+escape the owner window, both anchored with `useAnchor`.
+
+```jsx
+import { MenuBar, ContextMenu } from 'react-x11';
+
+<MenuBar
+  menus={[
+    {
+      label: 'File',
+      items: [
+        { label: 'New', shortcut: 'Ctrl+N', onSelect: newFile },
+        { separator: true },
+        { label: 'Save As…', disabled: true },
+        { label: 'Wrap lines', checked: wrap, onSelect: toggleWrap },
+      ],
+    },
+  ]}
+/>;
+
+<ContextMenu items={items} flexGrow={1}>
+  <text>Right-click me</text>
+</ContextMenu>;
+```
+
+Item shape: `{ label, onSelect, shortcut, disabled, separator, checked }`.
+Both take an `onSelect(item)` prop as well, fired after the item's own.
+
+**Keyboard.** Up/Down move the active item, **skipping separators and
+disabled entries** and wrapping; Home/End jump to the ends; Enter/Space
+activate; Escape closes. In a `MenuBar`, Left/Right walk between menus, and
+with one menu open, hovering another switches to it.
+
+Both keep focus on a node in the _owner_ window — the popup is
+override-redirect and never takes focus — which is the same arrangement
+`Select` uses. `ContextMenu`'s wrapper is focusable for that reason and
+takes focus when the menu opens.
+
+Switching between `MenuBar` menus reuses the same X window and moves it
+rather than destroying and recreating one, so there is no flicker.
+
 ## `useAnchor(ref)` / `anchorRect(node, options)`
 
 The placement math behind `Select` and `Tooltip`, exported for building
