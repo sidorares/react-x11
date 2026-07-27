@@ -6,7 +6,12 @@
 // same arrays the display lists were compiled from — the way three.js does
 // it. Only meshes that (or whose ancestors) have pointer handlers take part,
 // which is r3f's one optimization that matters.
-import { invert, multiply, transformDirection, transformPoint } from './mat4.js';
+import {
+  invert,
+  multiply,
+  transformDirection,
+  transformPoint,
+} from './mat4.js';
 
 const EPSILON = 1e-8;
 

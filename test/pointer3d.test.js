@@ -67,7 +67,11 @@ function findSurface(node) {
 /** Mount a scene and draw one frame, so picking has a camera to work with. */
 async function mount(app, scene, size = { width: 400, height: 300 }) {
   const instance = await render(
-    h('window', size, h(Canvas3D, { flexGrow: 1, ...scene.canvas }, scene.children)),
+    h(
+      'window',
+      size,
+      h(Canvas3D, { flexGrow: 1, ...scene.canvas }, scene.children),
+    ),
     app,
   );
   const surface = findSurface(instance._reactX11Node);
@@ -145,14 +149,7 @@ test('hover enters and leaves as the pointer crosses a mesh', async () => {
     pointer(surface, 'mousemove', 5, 5); // off it
     pointer(surface, 'mousemove', 200, 150); // back on
 
-    assert.deepEqual(log, [
-      'over',
-      'move',
-      'move',
-      'out',
-      'over',
-      'move',
-    ]);
+    assert.deepEqual(log, ['over', 'move', 'move', 'out', 'over', 'move']);
   } finally {
     await app.close();
   }
@@ -179,7 +176,11 @@ test('the nearest mesh wins, and events bubble to the group', async () => {
 
     assert.deepEqual(hits, ['near'], 'only the nearest mesh is hit');
     assert.equal(groupClicks.length, 1, 'and the click bubbles to the group');
-    assert.equal(groupClicks[0].object.props.position[2], 2, 'with the hit mesh on it');
+    assert.equal(
+      groupClicks[0].object.props.position[2],
+      2,
+      'with the hit mesh on it',
+    );
   } finally {
     await app.close();
   }

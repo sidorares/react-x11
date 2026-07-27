@@ -143,6 +143,17 @@ function takeFrameControl(surface) {
   return surface;
 }
 
+/**
+ * The GL calls of a single frame. A frame already scheduled by the mount can
+ * still land after the test clears the buffer — it draws the same scene, so
+ * the content is right either way, but counting across two frames is not.
+ * SwapBuffers ends a frame, and the emulator surfaces that as `finish`.
+ */
+function frameCalls(backend) {
+  const end = backend.calls.findIndex((c) => c[0] === 'finish');
+  return end === -1 ? backend.calls : backend.calls.slice(0, end + 1);
+}
+
 /** Draw one frame the way an animation tick or an expose would. */
 async function drawFrame(surface, app, tap) {
   surface._drawFrame();
@@ -414,16 +425,17 @@ test('lights drive the lit materials, and ambient needs no unit of its own', asy
     await drawFrame(surface, app, tap);
 
     // one light unit: the ambient term rides on it, the point light drives it
-    const enabled = backend.calls.filter(
+    const calls = frameCalls(backend);
+    const enabled = calls.filter(
       (c) => c[0] === 'enable' && c[1] === 0x4000, // GL_LIGHT0
     );
     assert.equal(enabled.length, 1, 'GL_LIGHT0 enabled, and only it');
     assert.ok(
-      backend.calls.some((c) => c[0] === 'enable' && c[1] === 0x0b50), // LIGHTING
+      calls.some((c) => c[0] === 'enable' && c[1] === 0x0b50), // LIGHTING
       'lighting turned on for a lit material',
     );
 
-    const lightCalls = backend.calls.filter((c) => c[0] === 'light');
+    const lightCalls = calls.filter((c) => c[0] === 'light');
     // backend.light(lightEnum, pname, params)
     const position = lightCalls.find((c) => c[2] === 0x1203); // GL_POSITION
     assert.deepEqual(
@@ -437,7 +449,7 @@ test('lights drive the lit materials, and ambient needs no unit of its own', asy
       `<ambientLight intensity={0.3}> lands in GL_AMBIENT, got ${ambient[3][0]}`,
     );
 
-    const material = backend.calls.filter((c) => c[0] === 'material');
+    const material = calls.filter((c) => c[0] === 'material');
     assert.ok(
       material.some((c) => c[2] === 0x1602), // AMBIENT_AND_DIFFUSE
       'the material colour becomes the surface reflectance',
