@@ -16,6 +16,7 @@
     "examples:xeyes": "tsx examples/xeyes.jsx",
     "examples:dashboard": "tsx examples/dashboard.jsx",
     "examples:tasks": "tsx examples/tasks.jsx",
+    "examples:tasks:hot": "node --enable-source-maps --import ./examples/hmr-register.mjs examples/tasks-hot.jsx",
     "examples:menu": "tsx examples/menu.jsx",
     "examples:form": "tsx examples/form.jsx",
     "examples:richtext": "tsx examples/richtext.jsx",
@@ -54,13 +55,17 @@
     "brace-expansion": "^5.0.8"
   },
   "devDependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/plugin-transform-react-jsx": "^8.0.1",
     "@eslint/js": "^9.32.0",
     "eslint": "^9.32.0",
     "eslint-plugin-react": "^7.37.5",
     "globals": "^16.0.0",
+    "hot-module-replacement": "^4.0.0",
     "prettier": "^3.6.0",
     "react": "^19.2.8",
     "react-devtools-core": "^7.0.1",
+    "react-refresh": "^0.18.0",
     "tsx": "^4.23.1",
     "ws": "^8.21.1"
   },

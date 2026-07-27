@@ -75,6 +75,27 @@ no override-redirect staging (issue #4).
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). All examples export their App and skip auto-running under
   `REACT_X11_NO_AUTORUN=1` so scripts/tests can import them.
+- `npm run examples:tasks:hot` — the tasks example with hot reloading via
+  React **Fast Refresh**: edit `examples/tasks.jsx` while it runs and the
+  edited components update in place — connection, window, and component
+  state (the task list, half-typed input text) survive; a component whose
+  hook signature changed remounts alone. `examples/hmr-register.mjs`
+  chains a sync babel loader (JSX classic + `react-refresh/babel`,
+  `retainLines`) under `hot-module-replacement`'s ESM hooks (Node ≥
+  22.15, `module.registerHooks`); `examples/hmr-refresh.js` injects the
+  refresh runtime into the reconciler (must be the entry's first import);
+  `examples/tasks-hot.jsx` is the accept boundary, calling
+  `performReactRefresh()` on accept. Constraints inside hot modules: no
+  _named_-import calls at module top level (bindings become `let`s
+  initialized in a microtask — use the default import, e.g.
+  `React.createContext`), and identity that must survive a reload
+  (contexts, stores) lives in its own untouched module
+  (`examples/tasks-context.js`). Loader-chain gotcha: the HMR import
+  rewrite emits no trailing semicolon, so anything the babel stage
+  puts _after an import on the same line_ becomes a syntax error — keep
+  one statement per line in injected preludes and use the classic JSX
+  runtime (the automatic runtime appends its `react/jsx-runtime` import
+  to the last import's line).
 - `npm run screenshots` — regenerate the README/docs images
   (`docs/img/*.png`) headlessly: renders the real examples into the
   in-process X server, drives them through the real event pipeline, and
