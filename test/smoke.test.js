@@ -1776,3 +1776,181 @@ test('Slider: thumb stays within the track at both extremes', async () => {
     ReactX11.unmountComponentAtNode(app);
   }
 });
+
+test('anchorRect places, flips at a screen edge and clamps', async () => {
+  const { anchorRect } = await import('../src/index.js');
+  // a stand-in node: laid-out rect, owner window position, screen size
+  const node = (
+    abs,
+    win = { x: 100, y: 50 },
+    screen = { pixel_width: 1000, pixel_height: 800 },
+  ) => ({
+    abs,
+    root: { window: win },
+    app: { display: { screen: [screen] } },
+  });
+
+  // default: below the anchor, left edges aligned, in screen coordinates
+  const below = anchorRect(node({ x: 10, y: 20, width: 160, height: 30 }), {
+    height: 100,
+  });
+  assert.deepStrictEqual(
+    [below.x, below.y, below.placement],
+    [110, 102, 'bottom'],
+    'win.x + abs.x, and win.y + abs.y + height + offset',
+  );
+
+  // no room below -> flips above the anchor
+  const flipped = anchorRect(node({ x: 10, y: 700, width: 160, height: 30 }), {
+    height: 100,
+  });
+  assert.strictEqual(flipped.placement, 'top');
+  assert.strictEqual(flipped.y, 50 + 700 - 100 - 2, 'sits above the anchor');
+
+  // ... but only if there is room above; otherwise it stays below
+  const noRoomEither = anchorRect(
+    node(
+      { x: 10, y: 10, width: 160, height: 30 },
+      { x: 0, y: 0 },
+      { pixel_width: 1000, pixel_height: 60 },
+    ),
+    { height: 100 },
+  );
+  assert.strictEqual(noRoomEither.placement, 'bottom');
+
+  // centre alignment and right-edge clamping
+  const centred = anchorRect(node({ x: 10, y: 20, width: 100, height: 30 }), {
+    width: 40,
+    height: 10,
+    align: 'center',
+  });
+  assert.strictEqual(centred.x, 100 + 10 + (100 - 40) / 2);
+
+  const clamped = anchorRect(node({ x: 850, y: 20, width: 100, height: 30 }), {
+    width: 300,
+    height: 10,
+  });
+  assert.strictEqual(clamped.x, 1000 - 300, 'clamped to the right edge');
+
+  // side placement flips when it would overflow
+  const right = anchorRect(node({ x: 10, y: 20, width: 100, height: 30 }), {
+    placement: 'right',
+    width: 80,
+    height: 40,
+  });
+  assert.deepStrictEqual(
+    [right.placement, right.x],
+    ['right', 100 + 10 + 100 + 2],
+  );
+
+  const flipsLeft = anchorRect(
+    node({ x: 800, y: 20, width: 100, height: 30 }),
+    {
+      placement: 'right',
+      width: 300,
+      height: 40,
+    },
+  );
+  assert.strictEqual(flipsLeft.placement, 'left');
+
+  // no screen geometry (headless mock): still places, just never clamps
+  const noScreen = anchorRect({
+    abs: { x: 5, y: 5, width: 50, height: 20 },
+    root: { window: { x: 0, y: 0 } },
+    app: {},
+  });
+  assert.deepStrictEqual([noScreen.x, noScreen.y], [5, 27]);
+
+  assert.strictEqual(anchorRect(null), null, 'no node -> no rect');
+});
+
+test('Tooltip shows after the delay in a popup and hides on leave', async () => {
+  const { Tooltip, Button } = await import('../src/index.js');
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 120 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 20 },
+        React.createElement(
+          Tooltip,
+          { label: 'Save the file', delay: 20 },
+          React.createElement(Button, { onPress: () => {} }, 'Save'),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const wrapper = wnd._reactX11Node.children[0].children[0];
+  const { x, y, width, height } = wrapper.abs;
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+
+  assert.strictEqual(app.windows.length, 1, 'no popup before hovering');
+
+  wnd.emit('mousemove', { x: cx, y: cy });
+  await tick();
+  assert.strictEqual(app.windows.length, 1, 'nothing shows before the delay');
+
+  await new Promise((r) => setTimeout(r, 60));
+  await tick();
+  assert.strictEqual(app.windows.length, 2, 'popup appears after the delay');
+  const tip = app.windows[1];
+  assert.strictEqual(tip.attributes.overrideRedirect, true);
+  assert.strictEqual(tip.attributes.windowType, 'tooltip');
+  assert.ok(tip.attributes.width > 0 && tip.attributes.height > 0);
+
+  // leaving hides it
+  wnd.emit('mousemove', { x: 0, y: 0 });
+  // mousemove runs at ContinuousEventPriority, so React schedules the
+  // update rather than flushing it synchronously the way keydown does
+  await tick();
+  await tick();
+  assert.strictEqual(tip.destroyed, true, 'popup destroyed on mouse leave');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Tooltip does not show if the pointer leaves before the delay', async () => {
+  const { Tooltip, Button } = await import('../src/index.js');
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 120 },
+      React.createElement(
+        'box',
+        { flexGrow: 1, padding: 20 },
+        React.createElement(
+          Tooltip,
+          { label: 'Never seen', delay: 50 },
+          React.createElement(Button, { onPress: () => {} }, 'Save'),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const wrapper = wnd._reactX11Node.children[0].children[0];
+
+  wnd.emit('mousemove', {
+    x: wrapper.abs.x + 2,
+    y: wrapper.abs.y + wrapper.abs.height / 2,
+  });
+  await tick();
+  wnd.emit('mousemove', { x: 0, y: 0 }); // leave well before the delay
+  await tick();
+
+  await new Promise((r) => setTimeout(r, 90));
+  await tick();
+  assert.strictEqual(app.windows.length, 1, 'the pending timer was cancelled');
+
+  ReactX11.unmountComponentAtNode(app);
+});
