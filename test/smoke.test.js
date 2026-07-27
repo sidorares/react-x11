@@ -538,6 +538,64 @@ test('scrollview scrolls, clamps and offsets hit testing', async () => {
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('a shrinking window shrinks the scrollview, not the footer out of view', async () => {
+  const app = createMockApp();
+  const Host = ({ height }) =>
+    React.createElement(
+      'window',
+      { width: 200, height },
+      React.createElement(
+        'box',
+        { flexGrow: 1 },
+        React.createElement('box', { height: 30 }), // header
+        React.createElement(
+          'scrollview',
+          { flexGrow: 1 },
+          ...Array.from({ length: 10 }, (_, i) =>
+            React.createElement('box', { key: i, height: 40, flexShrink: 0 }),
+          ),
+        ),
+        React.createElement('box', { height: 24 }), // footer
+      ),
+    );
+
+  ReactX11.render(React.createElement(Host, { height: 400 }), null, app);
+  await tick();
+  const wnd = app.windows[0];
+  const root = wnd._reactX11Node;
+  const [header, scroll, footer] = root.children[0].children;
+  assert.strictEqual(header.abs.y, 0);
+  assert.strictEqual(
+    footer.abs.y + footer.abs.height,
+    400,
+    'footer at the bottom',
+  );
+
+  // the user drags the window smaller: 400 -> 160, less than the content
+  wnd.width = 200;
+  wnd.height = 160;
+  wnd.emit('resize', { width: 200, height: 160, x: 0, y: 0 });
+  await tick();
+  await tick();
+
+  assert.strictEqual(
+    footer.abs.y + footer.abs.height,
+    160,
+    'footer is still on screen, not pushed past the bottom',
+  );
+  assert.strictEqual(
+    scroll.abs.height,
+    160 - 30 - 24,
+    'the scrollview took the squeeze',
+  );
+  assert.ok(
+    scroll.contentHeight > scroll.abs.height,
+    'and its content now overflows, so it scrolls',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('scrollview scrollIntoView scrolls the minimum amount', async () => {
   const app = createMockApp();
   ReactX11.render(

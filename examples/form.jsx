@@ -1,8 +1,18 @@
-// A small form: <textinput> + the <Select> widget component (dropdown built
-// on <popup>), submit via Enter or button, result styled by the selections.
+// A small form, exercising the widget set the way an app would: <textinput>
+// with autoFocus, a <Select> dropdown (a real <popup> window), a RadioGroup,
+// a Slider and a Checkbox — submit with Enter or the button, and the result
+// is styled by what you picked.
 // Run with: npm run examples:form  (needs an X server / DISPLAY)
 import React, { useState } from 'react';
-import { Button, createRoot, Select } from '../src/index.js';
+import {
+  Button,
+  Checkbox,
+  createRoot,
+  Radio,
+  RadioGroup,
+  Select,
+  Slider,
+} from '../src/index.js';
 
 const COLORS = [
   { value: '#2980b9', label: 'Blue' },
@@ -11,29 +21,34 @@ const COLORS = [
   { value: '#8e44ad', label: 'Purple' },
 ];
 
-const SIZES = [
-  { value: 14, label: 'Small' },
-  { value: 20, label: 'Medium' },
-  { value: 28, label: 'Large' },
-];
+const WEIGHTS = ['normal', 'bold'];
 
 function App() {
   const [name, setName] = useState('');
   const [color, setColor] = useState('#2980b9');
   const [size, setSize] = useState(20);
+  const [weight, setWeight] = useState('normal');
+  const [shout, setShout] = useState(false);
   const [greeting, setGreeting] = useState(null);
 
   const submit = () =>
-    setGreeting({ name: name.trim() || 'stranger', color, size });
+    setGreeting({
+      name: name.trim() || 'stranger',
+      color,
+      size,
+      weight,
+      shout,
+    });
 
   return (
-    <window width={400} height={320} title="form" backgroundColor="#f5f6fa">
+    <window width={420} height={380} title="form" backgroundColor="#f5f6fa">
       <box flexGrow={1} padding={16} gap={12}>
         <text fontSize={20} color="#2d3436">
           Sign the guestbook
         </text>
 
         <textinput
+          autoFocus
           value={name}
           placeholder="Your name"
           onChange={setName}
@@ -45,29 +60,53 @@ function App() {
           backgroundColor="white"
         />
 
-        <box flexDirection="row" gap={12}>
+        <box flexDirection="row" alignItems="center" gap={12}>
           <Select
             flexGrow={1}
             options={COLORS}
             value={color}
             onChange={setColor}
           />
-          <Select
+          <RadioGroup
+            value={weight}
+            onChange={setWeight}
+            flexDirection="row"
+            gap={12}
+          >
+            {WEIGHTS.map((w) => (
+              <Radio key={w} value={w} label={w} />
+            ))}
+          </RadioGroup>
+        </box>
+
+        <box flexDirection="row" alignItems="center" gap={12}>
+          <text color="#636e72">size</text>
+          <Slider
             flexGrow={1}
-            options={SIZES}
+            min={12}
+            max={32}
             value={size}
             onChange={setSize}
           />
+          <text color="#636e72">{String(size)}</text>
         </box>
 
-        <box flexDirection="row">
+        <box flexDirection="row" alignItems="center" gap={12}>
+          <Checkbox checked={shout} onChange={setShout} label="Shout it" />
+          <box flexGrow={1} />
           <Button primary label="Sign" onPress={submit} />
         </box>
 
         <box flexGrow={1} justifyContent="center" alignItems="center">
           {greeting && (
-            <text fontSize={greeting.size} color={greeting.color}>
-              Hello, {greeting.name}!
+            <text
+              fontSize={greeting.size}
+              fontWeight={greeting.weight}
+              color={greeting.color}
+            >
+              {greeting.shout
+                ? `HELLO, ${greeting.name.toUpperCase()}!`
+                : `Hello, ${greeting.name}!`}
             </text>
           )}
         </box>
