@@ -21,10 +21,10 @@
 >    for the protocol blockers, then `<glarea>`, the `<mesh>` scene tree on
 >    a display-list compiler, and lights. Left: textures, mesh pointer
 >    events, README screenshots.
-> 2. **Queued behind it (§11):** the menu/tooltip **safe polygon**, the
->    **focus-state** gaps — starting with the ntk `FocusIn`/`FocusOut` hole
->    that hides window focus changes from us — and the AT-SPI
->    accessibility work the research in §11.3 scopes out.
+> 2. **Queued behind it (§11):** the menu/tooltip **safe polygon** (done)
+>    and the **focus-state** gaps (done: window focus, the public focus API,
+>    `tabIndex` ordering, focus scopes/modals and focus restore) — next in
+>    §11 is the AT-SPI accessibility work the research in §11.3 scopes out.
 > 3. Then merge release-please #17 and publish 1.0.0.
 > 4. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
@@ -66,6 +66,8 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   requestAnimationFrame on the window ref, or step-render
 - **Tooltip** — DONE: `useAnchor(ref)`/`anchorRect()` extracted from
   `Select` (and now flip at screen edges), `Tooltip` built on them
+- **Dialog** — DONE: a modal over `<popup trapFocus grab>`, centred with
+  `centerRect()`; see §11.2
 - **Menu/MenuBar, ContextMenu** — DONE: built on `useAnchor`, with
   separators, disabled items, shortcuts, checkmarks, nested submenus and
   full keyboard navigation; `examples/menu.jsx` rewritten on them
@@ -504,7 +506,7 @@ plus a small close delay as the fallback. Notes for the implementation:
 - Worth a hermetic test: synthesize a diagonal pointer path across a sibling
   row and assert the submenu stays open, which is exactly the bug today.
 
-### 11.2 Focus state — audit and gaps (mostly DONE)
+### 11.2 Focus state — audit and gaps (DONE)
 
 Done since: X `FocusIn`/`FocusOut` and `SetInputFocus` are exposed by ntk
 (sidorares/ntk#89) and used here — the focused node keeps focus across a
@@ -512,9 +514,37 @@ window blur but stops looking active; `focus()`/`blur()`/`focused` and
 `autoFocus` are public; focusing inside a `<scrollview>` scrolls into view;
 and popups can hold a pointer grab so a press anywhere else dismisses them
 (gap 3's real fix, and the cause of menus surviving a click on the window
-frame). Still open from the list below: a proper focus _scope_ per popup
-(so Tab is trapped in a modal), `tabIndex` ordering, and restoring focus
-when a popup closes. The original audit follows.
+frame).
+
+The rest of the list is done too:
+
+- **`tabIndex` ordering** — DOM sequential focus order (positive indices
+  ascending, then the implicit-zero group in tree order); `tabIndex={-1}`
+  is focusable by press/`focus()` but never tabbed to, and an explicit
+  `tabIndex` implies `focusable`. `disabled` opts back out.
+- **Focus scopes** — `trapFocus` on any node (a `<popup>`, in practice)
+  owns a scope: Tab only visits focusables inside it, a press outside it
+  does not move focus, and popping the scope restores focus to whatever
+  had it before — so `<popup trapFocus grab>` + `autoFocus` _is_ a modal
+  dialog, with no per-widget bookkeeping. Scopes nest.
+- **Focus inside a popup** — an override-redirect window never gets the X
+  input focus, so a popup's `EventManager` now **delegates focus to the
+  owner window's** (`EventManager.focusManager`): a node inside the popup
+  can be the owner window's focused node, keys arrive at the owner and
+  dispatch to it, then bubble out through the popup's place in the JSX
+  tree. That removes the reason for the focusable-proxy trick, though
+  `Menu`/`Select` still use theirs (their rows are not focusable and the
+  trigger wants the keys — a press inside a popup on nothing focusable
+  deliberately leaves the owner's focus alone).
+
+`Dialog` (`src/components/Dialog.js`) is the first consumer: a modal in a
+`<popup trapFocus grab>` centred over the owner window, Escape to close,
+`autoFocus` inside to pick the first stop, focus handed back on close —
+demoed by the "Clear" confirmation in `examples/form.jsx`. It does **not**
+enforce pointer modality (widgets behind it stay clickable); a full-window
+overlay in the owner window would, and is the obvious follow-up along with
+converting `Menu`/`Select` to the delegated focus path. The original audit
+follows.
 
 Everything below is how it works **today**; the state lives in
 `EventManager` (`src/events.js`), one instance per `<window>`:

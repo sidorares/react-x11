@@ -96,8 +96,11 @@ and [docs/](docs/README.md) for the full API reference.
 | `<tex>`        | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                               |
 | `<glarea>`     | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                              |
 
-Widget **components** (plain React on top of the primitives): `Select` — a
-dropdown built on `<popup>`, themable via `SelectThemeProvider`.
+Widget **components** (plain React on top of the primitives, themable via
+`ThemeProvider`): `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch`,
+`Slider`, `ProgressBar`, `Select`, `Tooltip`, `MenuBar`/`ContextMenu` and
+`Dialog` — a modal built on `<popup trapFocus>`, which traps Tab and
+restores focus when it closes. See [docs/components.md](docs/components.md).
 
 ### 3D
 

@@ -18,11 +18,38 @@ export class EventManager {
     this.downNode = null;
     this.capturedNode = null;
     this.focused = null;
+    // what had focus before `focused`, so a focus scope opened by something
+    // that focuses itself still knows where to hand focus back
+    this._previousFocus = null;
+    // focus scopes, innermost last: [{ node, restore }]
+    this.scopes = [];
+    // resolved lazily for popups: the manager that owns focus (focusManager)
+    this._focusOwner = null;
     // whether the X server sends keys to this window at all. Assume yes
     // until told otherwise: ntk < 3.7 never reports focus changes, and a
     // toolkit that believed it was unfocused would blink no caret at all.
     this.windowFocused = true;
     this._lastClick = { time: 0, x: 0, y: 0, detail: 0 };
+  }
+
+  /**
+   * The manager that owns focus for this window — normally itself, but for a
+   * `<popup>` the nearest enclosing real window's manager. Override-redirect
+   * windows never receive the X input focus, so a popup cannot hold it: keys
+   * arrive at the owner window, and routing them into the popup's subtree is
+   * only possible if both windows share one notion of "the focused node".
+   * Nodes inside a popup are still ordinary tree nodes, so capture/bubble
+   * from them reaches the owner window's handlers.
+   */
+  get focusManager() {
+    if (!this.node.isPopup) return this;
+    // a popup's parent is a node in the owner window (or an outer popup,
+    // whose own delegate resolves recursively). Remember it: the parent link
+    // is cut before the deletion bookkeeping runs, and unmounting a modal is
+    // exactly when the owner has to hear about it (focus restore).
+    const manager = this.node.parent?.root?.events;
+    if (manager && manager !== this) this._focusOwner = manager.focusManager;
+    return this._focusOwner ?? this;
   }
 
   /** DOM-style click counting: repeated presses within 400ms / 4px bump
@@ -209,11 +236,7 @@ export class EventManager {
         return;
       }
       this.downNode = target;
-      // DOM-like: mousedown moves focus to the nearest focusable ancestor
-      const focusable = this._path(target)
-        .reverse()
-        .find((n) => this._isFocusable(n));
-      this.focus(focusable ?? null);
+      this._focusFromPress(target);
       const ev = this.dispatch('MouseDown', target, native, {
         button: native.keycode,
         detail: this._clickDetail(native),
@@ -277,8 +300,34 @@ export class EventManager {
     return this.capturedNode;
   }
 
+  /**
+   * DOM-like: mousedown moves focus to the nearest focusable ancestor of the
+   * hit node. A press outside an open focus scope leaves focus where it is —
+   * a modal keeps focus even when the user pokes at what is behind it.
+   */
+  _focusFromPress(target) {
+    const manager = this.focusManager;
+    const scope = manager._scopeRoot();
+    if (scope !== manager.node && !this._within(target, scope)) return;
+    const focusable = this._path(target)
+      .reverse()
+      .find((n) => this._isFocusable(n));
+    // a press inside a popup on nothing focusable leaves the owner window's
+    // focus alone: the press never reached that window, and menus rely on it
+    // (their rows are not focusable, the trigger keeps the keys)
+    if (!focusable && manager !== this) return;
+    manager.focus(focusable ?? null);
+  }
+
+  /** Focusable: `focusable`, an explicit `tabIndex` (including a negative
+   * one, focusable but not tabbable), or a kind that is focusable by default
+   * (`<textinput>`). `focusable={false}` and `disabled` opt back out. */
   _isFocusable(node) {
-    return node.props.focusable ?? node.focusableByDefault ?? false;
+    if (node.props.disabled) return false;
+    return (
+      node.props.focusable ??
+      (node.props.tabIndex != null ? true : (node.focusableByDefault ?? false))
+    );
   }
 
   _onMouseOut(native) {
@@ -339,8 +388,10 @@ export class EventManager {
       const wnd = this.node.window;
       const syms = wnd.X?.keycode2keysyms?.[native.keycode];
       const keysym = syms?.[0];
-      const target =
-        this.focused && !this.focused.destroyed ? this.focused : this.node;
+      // the focused node may live inside a <popup> of this window: focus is
+      // shared with the popup (see focusManager), key delivery follows it
+      const focused = this.focusManager.focused;
+      const target = focused && !focused.destroyed ? focused : this.node;
       const ev = this.dispatch(name, target, native, {
         keycode: native.keycode,
         keysym,
@@ -363,12 +414,18 @@ export class EventManager {
   }
 
   focus(node) {
+    const manager = this.focusManager;
+    if (manager !== this) return manager.focus(node);
     if (node === this.focused) return;
     const old = this.focused;
+    this._previousFocus = old;
     this.focused = node;
     if (old && !old.destroyed) {
       old._defaultBlur?.();
       old.props.onBlur?.(this._makeEvent('blur', null, old));
+      // the ring/caret it was drawing has to go, and it may be in another
+      // window than the new focus (owner window ↔ its popup)
+      old.root?.invalidate(false);
     }
     if (node) {
       // keys only reach a node whose window has the X focus
@@ -376,7 +433,63 @@ export class EventManager {
       this._scrollIntoView(node);
       if (this.windowFocused) node._defaultFocus?.();
       node.props.onFocus?.(this._makeEvent('focus', null, node));
+      node.root?.invalidate(false);
     }
+  }
+
+  /**
+   * Focus scopes. A node with `trapFocus` — a modal `<popup>`, typically —
+   * pushes one: while it is the innermost scope Tab only visits focusables
+   * inside it, and presses outside it leave focus alone. Popping the scope
+   * (usually when the modal unmounts) hands focus back to whatever had it
+   * before the scope opened, which is what makes a dialog feel finished
+   * rather than abandoned.
+   */
+  pushScope(node) {
+    const manager = this.focusManager;
+    if (manager !== this) return manager.pushScope(node);
+    if (this.scopes.some((s) => s.node === node)) return;
+    // commitMount runs children before parents, so a scope's own autoFocus
+    // may already have taken focus by the time the scope registers — then
+    // the node to come back to is the one focused before that.
+    const focused = this.focused;
+    const restore =
+      focused && this._within(focused, node) ? this._previousFocus : focused;
+    this.scopes.push({ node, restore });
+  }
+
+  popScope(node) {
+    const manager = this.focusManager;
+    if (manager !== this) return manager.popScope(node);
+    const index = this.scopes.findIndex((s) => s.node === node);
+    if (index === -1) return;
+    const [scope] = this.scopes.splice(index, 1);
+    const focused = this.focused;
+    // focus only comes back if it was inside the scope that just closed
+    if (focused && !this._within(focused, node)) return;
+    const restore = scope.restore;
+    const alive = restore && !restore.destroyed && this._isFocusable(restore);
+    this.focus(alive ? restore : null);
+  }
+
+  /** The innermost live focus scope, or the window node when there is none.
+   * Destroyed scopes are dropped; a hidden one is skipped but kept, since
+   * unhiding it puts the trap back. */
+  _scopeRoot() {
+    while (this.scopes.length > 0 && this.scopes.at(-1).node.destroyed) {
+      this.scopes.pop();
+    }
+    for (let i = this.scopes.length - 1; i >= 0; i--) {
+      if (!this.scopes[i].node.hidden) return this.scopes[i].node;
+    }
+    return this.node;
+  }
+
+  _within(node, root) {
+    for (let n = node; n; n = n.parent) {
+      if (n === root) return true;
+    }
+    return false;
   }
 
   /** Tab to something inside a scrollview and it should be on screen. */
@@ -389,7 +502,11 @@ export class EventManager {
     }
   }
 
-  _focusables() {
+  /** Focusable nodes in tree order, from `root` down. Windows are their own
+   * focus roots, so a nested `<window>` or `<popup>` is not walked into —
+   * except when it _is_ the root, which is how a modal popup's own
+   * focusables are reached. */
+  _focusables(root = this._scopeRoot()) {
     const out = [];
     const walk = (node) => {
       if (node.hidden) return;
@@ -398,25 +515,54 @@ export class EventManager {
         if (!child.isWindow) walk(child);
       }
     };
-    walk(this.node);
+    walk(root);
     return out;
   }
 
+  /** Tab order, following the DOM's sequential focus navigation: positive
+   * `tabIndex` first in ascending order, then the implicit-zero group in tree
+   * order. `tabIndex={-1}` is focusable by press and `focus()` but never
+   * tabbable. Ties keep tree order (the sort is made stable by index). */
+  _tabbables(root) {
+    return this._focusables(root)
+      .map((node, i) => ({ node, i, order: node.props.tabIndex ?? 0 }))
+      .filter((e) => e.order >= 0)
+      .sort((a, b) => {
+        if (a.order === b.order) return a.i - b.i;
+        if (a.order === 0) return 1;
+        if (b.order === 0) return -1;
+        return a.order - b.order;
+      })
+      .map((e) => e.node);
+  }
+
   _cycleFocus(backwards) {
-    const list = this._focusables();
+    const manager = this.focusManager;
+    if (manager !== this) return manager._cycleFocus(backwards);
+    const list = this._tabbables();
     if (list.length === 0) return;
     const index = list.indexOf(this.focused);
-    const next = backwards
-      ? list[(index <= 0 ? list.length : index) - 1]
-      : list[(index + 1) % list.length];
-    this.focus(next);
+    if (index === -1) {
+      // nothing focused, or focus sits outside the current scope: Tab enters
+      this.focus(backwards ? list[list.length - 1] : list[0]);
+      return;
+    }
+    this.focus(
+      backwards
+        ? list[(index || list.length) - 1]
+        : list[(index + 1) % list.length],
+    );
   }
 
   /** Called when a node leaves the tree so stale references don't linger. */
   forget(node) {
     if (this.downNode === node) this.downNode = null;
     if (this.capturedNode === node) this.capturedNode = null;
-    if (this.focused === node) this.focused = null;
     this.hoverPath = this.hoverPath.filter((n) => n !== node);
+    const manager = this.focusManager;
+    // a scope closing restores focus, so pop before the focus reference goes
+    manager.popScope(node);
+    if (manager.focused === node) manager.focused = null;
+    if (manager._previousFocus === node) manager._previousFocus = null;
   }
 }

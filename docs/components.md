@@ -137,6 +137,56 @@ mousedown — a tooltip lingering over the menu you just opened is the
 classic annoyance. The popup is sized from the _measured_ label, because a
 `<popup>` is a real X window and needs its size before layout.
 
+## `Dialog`
+
+A modal dialog in a `<popup trapFocus grab>`, centred over the owner window.
+
+```jsx
+import { Button, Dialog } from 'react-x11';
+
+<Dialog
+  open={confirming}
+  title="Clear the form?"
+  onClose={() => setConfirming(false)}
+  actions={
+    <>
+      <Button label="Cancel" onPress={() => setConfirming(false)} />
+      <Button primary autoFocus label="Clear" onPress={clear} />
+    </>
+  }
+>
+  The name and the greeting below it will be discarded.
+</Dialog>;
+```
+
+| prop              |                                                              |
+| ----------------- | ------------------------------------------------------------ |
+| `open`            | renders nothing when false; the popup exists only while true |
+| `title`           | bold heading (optional)                                      |
+| `children`        | body content; strings become `<text>`                        |
+| `actions`         | elements for the right-aligned button row                    |
+| `onClose`         | Escape, or a press outside the dialog                        |
+| `width`, `height` | popup size (default 360×170)                                 |
+
+The focus behaviour is the **renderer's**, not the component's: `trapFocus`
+keeps Tab inside the dialog, stops presses elsewhere from moving focus, and
+hands focus back to whatever had it — usually the button that opened the
+dialog — when it closes. See
+[Focus scopes](events.md#focus-scopes-modals). Put `autoFocus` on a control
+inside to pick the first stop; with nothing to focus, the dialog surface
+takes focus itself (`tabIndex={-1}`) so Escape and Tab work immediately.
+
+Escape closes because keys go to the focused node inside the popup and
+bubble out through the popup's place in the JSX tree; `grab` makes a press
+anywhere else in the session close it too. **Pointer modality is not
+enforced** — widgets in the owner window stay clickable behind the dialog —
+so it is for confirmations, not for guarding state.
+
+A `<popup>` is a real X window and needs its size up front, hence explicit
+`width`/`height` rather than sizing to content. Placement comes from
+`centerRect(node, {width, height})`, exported alongside `anchorRect` for
+window-centred popups of your own.
+
 ## `MenuBar` / `ContextMenu`
 
 Pull-down and right-click menus, both rendered in `<popup>` windows so they
