@@ -15,6 +15,9 @@ export {
   Switch,
   ProgressBar,
   Slider,
+  Tooltip,
+  useAnchor,
+  anchorRect,
 } from './components.js';
 
 import { render, createRoot, unmountComponentAtNode } from './Reconciler.js';

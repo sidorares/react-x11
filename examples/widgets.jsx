@@ -1,6 +1,6 @@
 // Widget gallery: every standard component in one window — Button,
 // Checkbox, Radio/RadioGroup, Switch, Slider, ProgressBar, Select,
-// <textinput>.
+// Tooltip, <textinput>.
 // Run with: npm run examples:widgets  (needs an X server / DISPLAY)
 import React, { useEffect, useState } from 'react';
 import {
@@ -13,6 +13,7 @@ import {
   Select,
   Slider,
   Switch,
+  Tooltip,
 } from '../src/index.js';
 
 function Row({ label, children }) {
@@ -56,7 +57,9 @@ function App() {
           <Button primary onPress={() => setPresses((n) => n + 1)}>
             Press me
           </Button>
-          <Button onPress={() => setPresses(0)}>Reset</Button>
+          <Tooltip label="Back to zero">
+            <Button onPress={() => setPresses(0)}>Reset</Button>
+          </Tooltip>
           <Button disabled>Disabled</Button>
           <text color="#2d3436">{`${presses}×`}</text>
         </Row>

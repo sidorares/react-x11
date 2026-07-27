@@ -1,7 +1,14 @@
 // Widget components built purely on the host primitives — no reconciler
 // support needed. Plain createElement (no JSX) so the library stays
 // build-step-free for consumers.
-import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 const h = React.createElement;
 
@@ -65,6 +72,117 @@ function useControl(disabled, onActivate) {
       };
   return { hover: hover && !disabled, focused: focused && !disabled, props };
 }
+
+/** The X screen the node's window lives on, if reachable (the smoke-test
+ *  mock app has no screen geometry — callers must cope with null). */
+function screenOf(node) {
+  const app = node?.app;
+  const screen = (app?.display ?? app?.X?.display)?.screen?.[0];
+  return screen?.pixel_width ? screen : null;
+}
+
+/**
+ * Where to put a `<popup>` anchored to a drawn node, in **screen**
+ * coordinates: the owner window's position plus the node's laid-out rect.
+ *
+ * `placement` is a preference, not a promise — a menu near the bottom of
+ * the screen flips above its trigger rather than opening off-screen, and
+ * the result is clamped into the screen either way. The chosen side comes
+ * back as `placement` so the caller can style accordingly.
+ */
+export function anchorRect(node, options = {}) {
+  if (!node?.abs) return null;
+  const {
+    placement = 'bottom',
+    align = 'start',
+    offset = 2,
+    width = node.abs.width,
+    height = 0,
+  } = options;
+
+  const win = node.root?.window;
+  const ax = (win?.x ?? 0) + node.abs.x;
+  const ay = (win?.y ?? 0) + node.abs.y;
+  const aw = node.abs.width;
+  const ah = node.abs.height;
+
+  const screen = screenOf(node);
+  const sw = screen?.pixel_width;
+  const sh = screen?.pixel_height;
+
+  const alignAlong = (start, size, extent) =>
+    align === 'center'
+      ? start + (size - extent) / 2
+      : align === 'end'
+        ? start + size - extent
+        : start;
+
+  let side = placement;
+  let x;
+  let y;
+
+  if (side === 'bottom' || side === 'top') {
+    const below = ay + ah + offset;
+    const above = ay - height - offset;
+    if (side === 'bottom' && sh != null && below + height > sh && above >= 0) {
+      side = 'top';
+    } else if (
+      side === 'top' &&
+      above < 0 &&
+      (sh == null || below + height <= sh)
+    ) {
+      side = 'bottom';
+    }
+    y = side === 'bottom' ? below : above;
+    x = alignAlong(ax, aw, width);
+  } else {
+    const after = ax + aw + offset;
+    const before = ax - width - offset;
+    if (side === 'right' && sw != null && after + width > sw && before >= 0) {
+      side = 'left';
+    } else if (
+      side === 'left' &&
+      before < 0 &&
+      (sw == null || after + width <= sw)
+    ) {
+      side = 'right';
+    }
+    x = side === 'right' ? after : before;
+    y = alignAlong(ay, ah, height);
+  }
+
+  if (sw != null) x = Math.max(0, Math.min(x, sw - width));
+  if (sh != null && height) y = Math.max(0, Math.min(y, sh - height));
+
+  return { x: Math.round(x), y: Math.round(y), width, height, placement: side };
+}
+
+/**
+ * useAnchor(ref) — stable `measure(options)` returning `anchorRect` for the
+ * referenced node. The anchoring math `Select` used to inline, shared with
+ * `Tooltip` and anything else that hangs a `<popup>` off a drawn node.
+ */
+export function useAnchor(ref) {
+  return useCallback((options) => anchorRect(ref.current, options), [ref]);
+}
+
+/** Measured size of a single-line label, for sizing a popup around it.
+ *  Falls back to a rough estimate where no font stack is available. */
+function measureLabel(node, text, style) {
+  const fonts = node?.app?.fonts;
+  const size = style?.size ?? DEFAULT_LABEL_SIZE;
+  if (!fonts?.layout) {
+    return { width: String(text).length * size * 0.55, height: size * 1.4 };
+  }
+  const layout = fonts.layout(String(text), {
+    family: style?.family ?? 'sans-serif',
+    size,
+    weight: style?.weight ?? 'normal',
+  });
+  return { width: layout.width, height: layout.height };
+}
+
+const DEFAULT_LABEL_SIZE = 13;
 
 /** String/number children become a <text>; elements pass through. */
 function labelContent(children, textProps) {
@@ -498,6 +616,109 @@ export function Slider({
   );
 }
 
+const TOOLTIP_PADDING_X = 8;
+const TOOLTIP_PADDING_Y = 4;
+
+/**
+ * <Tooltip label placement delay>…</Tooltip> — a hover hint in a `<popup>`,
+ * so it can extend past the owner window's bounds.
+ *
+ * Wraps its children in a row box that carries the hover handlers and the
+ * anchor ref. Shows after `delay` ms of hover, hides immediately on leave
+ * (and on mousedown — a tooltip lingering over a menu you just opened is
+ * the classic annoyance). `placement` flips automatically near a screen
+ * edge, via the same `useAnchor` math `Select` uses.
+ *
+ * The popup is sized from the measured label, since a `<popup>` is a real
+ * X window and needs its size up front rather than after layout.
+ */
+export function Tooltip({
+  label,
+  children,
+  placement = 'top',
+  delay = 500,
+  fontSize = DEFAULT_LABEL_SIZE,
+  ...boxProps
+}) {
+  const theme = useTheme();
+  const ref = useRef(null);
+  const measureAnchor = useAnchor(ref);
+  const [rect, setRect] = useState(null);
+  const timer = useRef(null);
+
+  const cancel = () => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  };
+  const hide = () => {
+    cancel();
+    setRect(null);
+  };
+
+  // a pending timer must not outlive the component
+  useEffect(() => cancel, []);
+
+  const show = () => {
+    const node = ref.current;
+    if (!node || !label) return;
+    const text = measureLabel(node, label, { size: fontSize });
+    const width = Math.ceil(text.width) + TOOLTIP_PADDING_X * 2 + 2;
+    const height = Math.ceil(text.height) + TOOLTIP_PADDING_Y * 2 + 2;
+    const next = measureAnchor({ placement, align: 'center', width, height });
+    if (next) setRect(next);
+  };
+
+  const onMouseEnter = () => {
+    cancel();
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      show();
+    }, delay);
+  };
+
+  return h(
+    'box',
+    {
+      ref,
+      flexDirection: 'row',
+      alignItems: 'center',
+      onMouseEnter,
+      onMouseLeave: hide,
+      onMouseDown: hide,
+      ...boxProps,
+    },
+    children,
+    rect &&
+      h(
+        'popup',
+        {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          windowType: 'tooltip',
+          backgroundColor: theme.text,
+        },
+        h(
+          'box',
+          {
+            flexGrow: 1,
+            borderWidth: 1,
+            borderColor: theme.text,
+            borderRadius: 3,
+            backgroundColor: theme.text,
+            justifyContent: 'center',
+            paddingLeft: TOOLTIP_PADDING_X,
+            paddingRight: TOOLTIP_PADDING_X,
+          },
+          h('text', { color: theme.background, fontSize }, label),
+        ),
+      ),
+  );
+}
+
 function normalizeOption(option) {
   return typeof option === 'object' && option !== null
     ? option
@@ -561,19 +782,24 @@ export function Select({
   const scrollRef = useRef(null);
   const activeRef = useRef(null);
 
+  const measureAnchor = useAnchor(triggerRef);
+
   const normalized = options.map(normalizeOption);
   const current = normalized.find((o) => o.value === value);
+  const menuHeight = Math.min(
+    normalized.length * ITEM_HEIGHT + 8,
+    MAX_MENU_HEIGHT,
+  );
 
   const close = () => setOpen(false);
   const openMenu = () => {
     const node = triggerRef.current;
     if (!node) return;
-    const win = node.root?.window;
-    setAnchor({
-      x: (win?.x ?? 0) + node.abs.x,
-      y: (win?.y ?? 0) + node.abs.y + node.abs.height + 2,
-      width: node.abs.width,
-    });
+    // shared anchoring: also flips the menu above the trigger when there is
+    // no room below, instead of opening off the bottom of the screen
+    const rect = measureAnchor({ placement: 'bottom', height: menuHeight + 2 });
+    if (!rect) return;
+    setAnchor(rect);
     const selected = normalized.findIndex((o) => o.value === value);
     setActiveIndex(selected >= 0 ? selected : 0);
     setOpen(true);
@@ -622,11 +848,6 @@ export function Select({
   useEffect(() => {
     if (open) scrollRef.current?.scrollIntoView(activeRef.current);
   }, [open, activeIndex]);
-
-  const menuHeight = Math.min(
-    normalized.length * ITEM_HEIGHT + 8,
-    MAX_MENU_HEIGHT,
-  );
 
   return h(
     'box',

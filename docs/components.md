@@ -103,6 +103,58 @@ move by ten steps.
 The thumb is centred on its value, so the usable travel is the track width
 minus one thumb width — otherwise `min` and `max` would be unreachable.
 
+## `Tooltip`
+
+A hover hint in a `<popup>`, so it can extend past the owner window.
+
+```jsx
+import { Tooltip } from 'react-x11';
+
+<Tooltip label="Back to zero">
+  <Button onPress={reset}>Reset</Button>
+</Tooltip>;
+```
+
+| prop        |                                                    |
+| ----------- | -------------------------------------------------- |
+| `label`     | the hint text (nothing shows without it)           |
+| `placement` | `'top'` (default), `'bottom'`, `'left'`, `'right'` |
+| `delay`     | ms of hover before showing (default 500)           |
+| `fontSize`  | label size, also used to size the popup            |
+
+Wraps its children in a row box carrying the hover handlers and the anchor
+ref, so it composes around any element. Hides immediately on leave and on
+mousedown — a tooltip lingering over the menu you just opened is the
+classic annoyance. The popup is sized from the _measured_ label, because a
+`<popup>` is a real X window and needs its size before layout.
+
+## `useAnchor(ref)` / `anchorRect(node, options)`
+
+The placement math behind `Select` and `Tooltip`, exported for building
+your own popup-based widgets.
+
+```jsx
+const ref = useRef(null);
+const measure = useAnchor(ref);
+
+// screen coordinates for a <popup>, given the size you intend to use
+const rect = measure({ placement: 'bottom', align: 'center', width, height });
+// -> { x, y, width, height, placement }
+```
+
+| option            |                                                            |
+| ----------------- | ---------------------------------------------------------- |
+| `placement`       | `'bottom'` (default), `'top'`, `'left'`, `'right'`         |
+| `align`           | `'start'` (default), `'center'`, `'end'` on the cross axis |
+| `offset`          | gap from the anchor in px (default 2)                      |
+| `width`, `height` | size of the popup you are positioning                      |
+
+`placement` is a **preference, not a promise**: a menu near the bottom of
+the screen flips above its trigger rather than opening off-screen, and the
+result is clamped into the screen either way. The side actually used comes
+back as `placement`. Where screen geometry is unavailable it places without
+clamping.
+
 ---
 
 The other components — `Button`, `Checkbox`, `Radio`/`RadioGroup`,
