@@ -16,6 +16,8 @@ export {
   ProgressBar,
   Slider,
   Tooltip,
+  MenuBar,
+  ContextMenu,
   useAnchor,
   anchorRect,
 } from './components.js';

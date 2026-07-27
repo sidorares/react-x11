@@ -1954,3 +1954,263 @@ test('Tooltip does not show if the pointer leaves before the delay', async () =>
 
   ReactX11.unmountComponentAtNode(app);
 });
+
+const MENU_ITEMS = (picked) => [
+  { label: 'Cut', shortcut: 'Ctrl+X', onSelect: () => picked.push('Cut') },
+  { label: 'Copy', onSelect: () => picked.push('Copy') },
+  { separator: true },
+  { label: 'Paste', disabled: true, onSelect: () => picked.push('Paste') },
+  { label: 'Delete', onSelect: () => picked.push('Delete') },
+];
+
+/** Index of the highlighted row inside the newest popup. */
+function activeMenuIndex(app) {
+  const popup = app.windows.at(-1);
+  const rows = popup._reactX11Node.children[0].children;
+  return rows.findIndex((r) => r.props.backgroundColor === '#2980b9');
+}
+
+test('ContextMenu opens at the pointer and skips separators/disabled', async () => {
+  const { ContextMenu } = await import('../src/index.js');
+  const app = createMockApp();
+  const picked = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement(
+        ContextMenu,
+        { items: MENU_ITEMS(picked), flexGrow: 1 },
+        React.createElement('box', { flexGrow: 1 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+
+  assert.strictEqual(app.windows.length, 1, 'closed until right-click');
+
+  // right-click (button 3) opens at the pointer, in screen coordinates
+  wnd.emit('mousedown', {
+    x: 40,
+    y: 30,
+    keycode: 3,
+    rootx: 540,
+    rooty: 430,
+  });
+  await tick();
+  assert.strictEqual(app.windows.length, 2, 'menu opened');
+  const menu = app.windows[1];
+  assert.strictEqual(menu.attributes.overrideRedirect, true);
+  assert.strictEqual(menu.attributes.windowType, 'popup_menu');
+  assert.deepStrictEqual(
+    [menu.attributes.x, menu.attributes.y],
+    [540, 430],
+    'anchored at the pointer in screen coordinates',
+  );
+  assert.strictEqual(activeMenuIndex(app), -1, 'nothing active until a key');
+
+  // Down from nothing -> first selectable
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  assert.strictEqual(activeMenuIndex(app), 0, 'Cut');
+
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  assert.strictEqual(activeMenuIndex(app), 1, 'Copy');
+
+  // next Down must skip the separator (2) AND the disabled Paste (3)
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  assert.strictEqual(
+    activeMenuIndex(app),
+    4,
+    'Delete — separator and disabled skipped',
+  );
+
+  // wraps back to the first selectable
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  assert.strictEqual(activeMenuIndex(app), 0, 'wraps');
+
+  // Up wraps the other way, also skipping
+  pressKey(app, wnd, { keysym: 0xff52 });
+  await tick();
+  assert.strictEqual(activeMenuIndex(app), 4);
+
+  // End / Home
+  pressKey(app, wnd, { keysym: 0xff50 });
+  await tick();
+  assert.strictEqual(activeMenuIndex(app), 0, 'Home -> first selectable');
+
+  // Enter activates
+  pressKey(app, wnd, { keysym: XK.Return });
+  await tick();
+  assert.deepStrictEqual(picked, ['Cut']);
+  assert.strictEqual(app.windows[1].destroyed, true, 'closes after selecting');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('ContextMenu: Escape closes without selecting; disabled items are inert', async () => {
+  const { ContextMenu } = await import('../src/index.js');
+  const app = createMockApp();
+  const picked = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement(
+        ContextMenu,
+        { items: MENU_ITEMS(picked), flexGrow: 1 },
+        React.createElement('box', { flexGrow: 1 }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 3, rootx: 100, rooty: 100 });
+  await tick();
+  const menu = app.windows[1];
+
+  // clicking the disabled row does nothing
+  const rows = menu._reactX11Node.children[0].children;
+  const paste = rows[3];
+  menu.emit('mousedown', {
+    x: paste.abs.x + 5,
+    y: paste.abs.y + paste.abs.height / 2,
+    keycode: 1,
+  });
+  menu.emit('mouseup', {
+    x: paste.abs.x + 5,
+    y: paste.abs.y + paste.abs.height / 2,
+    keycode: 1,
+  });
+  await tick();
+  assert.deepStrictEqual(picked, [], 'disabled item is inert');
+  assert.strictEqual(menu.destroyed, false, 'and does not close the menu');
+
+  pressKey(app, wnd, { keysym: 0xff1b }); // Escape
+  await tick();
+  assert.strictEqual(menu.destroyed, true);
+  assert.deepStrictEqual(picked, []);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('MenuBar opens menus, switches on hover and walks with Left/Right', async () => {
+  const { MenuBar } = await import('../src/index.js');
+  const app = createMockApp();
+  const picked = [];
+  const menus = [
+    {
+      label: 'File',
+      items: [
+        { label: 'New', onSelect: () => picked.push('New') },
+        { label: 'Open', onSelect: () => picked.push('Open') },
+      ],
+    },
+    {
+      label: 'Edit',
+      items: [{ label: 'Undo', onSelect: () => picked.push('Undo') }],
+    },
+  ];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 320, height: 200 },
+      React.createElement(MenuBar, { menus }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const bar = wnd._reactX11Node.children[0];
+  const [fileBtn, editBtn] = bar.children.filter((c) => c.props.focusable);
+
+  const clickNode = (node) => {
+    const x = node.abs.x + node.abs.width / 2;
+    const y = node.abs.y + node.abs.height / 2;
+    wnd.emit('mousedown', { x, y, keycode: 1 });
+    wnd.emit('mouseup', { x, y, keycode: 1 });
+  };
+
+  clickNode(fileBtn);
+  await tick();
+  assert.strictEqual(app.windows.length, 2, 'File menu opened');
+  const fileMenu = app.windows[1];
+  // anchored below the button, in screen coordinates
+  assert.strictEqual(
+    fileMenu.attributes.y,
+    fileBtn.abs.y + fileBtn.abs.height + 2,
+  );
+
+  // hovering Edit while File is open switches menus. The <popup> keeps its
+  // place in the tree, so React reuses the same X window and moves it —
+  // no destroy/recreate flicker between menus.
+  wnd.emit('mousemove', {
+    x: editBtn.abs.x + editBtn.abs.width / 2,
+    y: editBtn.abs.y + editBtn.abs.height / 2,
+  });
+  await tick();
+  await tick(); // mousemove is continuous priority
+  assert.strictEqual(app.windows.length, 2, 'window reused, not recreated');
+  assert.strictEqual(fileMenu.destroyed, false);
+  assert.strictEqual(fileMenu.x, editBtn.abs.x, 'moved under Edit');
+
+  // Left walks back to File
+  pressKey(app, wnd, { keysym: 0xff51 });
+  await tick();
+  assert.strictEqual(fileMenu.x, fileBtn.abs.x, 'moved back under File');
+
+  // Down then Enter picks the first item of the File menu
+  pressKey(app, wnd, { keysym: 0xff54 });
+  await tick();
+  pressKey(app, wnd, { keysym: XK.Return });
+  await tick();
+  assert.deepStrictEqual(picked, ['New']);
+  assert.strictEqual(fileMenu.destroyed, true, 'closes after selecting');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('backgroundColor/borderColor "transparent" paints nothing (and does not throw)', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 100, height: 60 },
+      React.createElement('box', {
+        flexGrow: 1,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        borderColor: 'transparent',
+      }),
+      React.createElement('box', {
+        flexGrow: 1,
+        backgroundColor: '#ff0000',
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const ops = app.windows[0].ctx.ops;
+  // ntk's colour parser has no 'transparent' keyword and throws inside the
+  // 2d context, which would take down the whole frame
+  const fills = ops.filter(([op]) => op === 'fillRect').map((o) => o[5]);
+  assert.ok(!fills.includes('transparent'), 'no transparent fill was issued');
+  assert.ok(fills.includes('#ff0000'), 'real colours still paint');
+  assert.ok(
+    !ops.some(([op, style]) => op === 'stroke' && style === 'transparent'),
+    'no transparent stroke was issued',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
