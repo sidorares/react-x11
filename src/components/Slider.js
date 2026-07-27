@@ -125,6 +125,7 @@ export function Slider({
       ref: trackRef,
       width,
       height: SLIDER_THUMB,
+      minWidth: 0,
       justifyContent: 'center',
       ...controlProps,
       ...boxProps,
@@ -140,12 +141,20 @@ export function Slider({
         alignItems: 'center',
         pointerEvents: 'none',
       },
+      // flex ratios, not a percentage width: a percentage child resolves
+      // against the space available while the track is still being
+      // measured, so it fed back into the slider's own intrinsic width —
+      // at value = max the control grew, which moved the handle, which
+      // changed the value, and a drag turned into an oscillation
       h('box', {
-        width: `${fraction * 100}%`,
+        flexGrow: fraction,
+        flexShrink: 0,
+        flexBasis: 0,
         height,
         borderRadius: height / 2,
         backgroundColor: disabled ? theme.dim : theme.accent,
       }),
+      h('box', { flexGrow: 1 - fraction, flexShrink: 0, flexBasis: 0 }),
     ),
     // thumb, centred on the value within the same travel the math uses
     h('box', {
