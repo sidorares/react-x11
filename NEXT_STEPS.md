@@ -15,8 +15,8 @@
 >
 > **Plan (next session):**
 >
-> 1. `<textarea>` polish: Ctrl+arrow word movement, PageUp/Down,
->    Shift+click extend, drawn scrollbar.
+> 1. Upstream (ntk): make glyph drawing honour the 2d clip mask — text
+>    currently paints outside clipped boxes (see §3).
 > 2. `Select`/menu follow-up: PageUp/PageDown in the open menu.
 > 3. Then merge release-please #17 and publish 1.0.0 (the owner wants the
 >    planned widget work in first).
@@ -77,6 +77,14 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Bidi caret polish** — caret positions are bidi-correct now (ntk
   caret API), but arrow keys still move logically; visual-order movement
   - split caret at direction boundaries is a later refinement
+- **Text ignores the 2d clip (ntk bug)** — `TextLayout.draw` composites
+  glyphs straight onto `ctx.picture` via `drawGlyphRuns`, while fill/stroke
+  intersect their coverage with `ctx.clipMask` first. So shapes clip and
+  text does not: scrolled-away `<textarea>` lines, a horizontally scrolled
+  `<textinput>`, and `<text>` inside a `<scrollview>` all paint outside
+  their box. Masked wherever the clip coincides with an X window edge
+  (popups), which is why menus look fine. Fix belongs in ntk — glyph
+  compositing should honour the clip mask.
 - **`opacity`** — needs offscreen composition (pixmap + Composite);
   ntk can do it, renderer needs a group-opacity paint path
 - **Dirty-rect painting** — still full-window repaint per frame
