@@ -16,14 +16,17 @@
 > **Plan (next session):**
 >
 > 1. **3D components over indirect GLX** — the one large feature going in
->    before 1.0.0. Plan, with the feasibility work already done, is in
->    [docs/glx-plan.md](docs/glx-plan.md). Phase 0 (the ntk blockers:
->    MakeCurrent's context tag, `createWindow` visuals, server-side visual
->    discovery) is sidorares/ntk#85; Phase 1 — the `<glarea>` surface
->    element — is done here and waiting on that release. Next up: the
->    display-list geometry compiler and `<mesh>` (plan §5, phase 2).
-> 2. Then merge release-please #17 and publish 1.0.0.
-> 3. Upstream (ntk): distribute half-leading inside TextLayout itself
+>    before 1.0.0; plan and phase status in
+>    [docs/glx-plan.md](docs/glx-plan.md). Phases 0-3 are merged: ntk 3.6.0
+>    for the protocol blockers, then `<glarea>`, the `<mesh>` scene tree on
+>    a display-list compiler, and lights. Left: textures, mesh pointer
+>    events, README screenshots.
+> 2. **Queued behind it (§11):** the menu/tooltip **safe polygon**, the
+>    **focus-state** gaps — starting with the ntk `FocusIn`/`FocusOut` hole
+>    that hides window focus changes from us — and the AT-SPI
+>    accessibility work the research in §11.3 scopes out.
+> 3. Then merge release-please #17 and publish 1.0.0.
+> 4. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
 >    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>`.
 
@@ -407,6 +410,11 @@ File these as ntk issues; react-x11 should not work around them long-term.
    `onInvalidate` MarkdownView API already present in the source repo.
 9. (Nice-to-have) `queryPointer` promise variants and any other cb-only APIs
    used by examples.
+10. **Focus events and `SetInputFocus`.** `lib/events_map.js` has no entry
+    for X `FocusIn`/`FocusOut` (events 9/10) and no `FocusChange` mask, so a
+    client cannot tell when its window gains or loses keyboard focus, and
+    ntk exposes no wrapper for `SetInputFocus` even though node-x11 has the
+    request. Both are prerequisites for §11.2 here.
 
 ## 9. Phased plan
 
@@ -456,3 +464,116 @@ menus/tooltips.
   `@react-x11/widgets` sibling once primitives stabilize?
 - ESM migration here (ntk is ESM-with-TLA; the dynamic-import dance in
   `src/Reconciler.js` disappears if react-x11 goes ESM).
+
+## 11. Queued after the 3D work
+
+Found while using the widget set. Both are worth doing before 1.0.0 gets
+much use, and neither depends on the GLX work.
+
+### 11.1 "Safe polygon" for menus, submenus and tooltips
+
+Submenus open and switch **on hover with no delay and no exit tolerance**
+(`Menu.js`, the `hover(index)` path). Moving the pointer diagonally from a
+parent row toward its open submenu passes over the sibling rows in between,
+each of which immediately re-points `path` and closes the submenu the user
+was aiming at. Tooltips have the same shape of problem: any pixel outside
+the trigger dismisses them, so a tooltip with interactive content cannot be
+reached.
+
+The fix is floating-ui's [`safePolygon`](https://floating-ui.com/docs/usehover#safepolygon):
+while a child surface is open, build a triangle from the pointer's position
+to the two near corners of the child rect, and treat "still inside that
+triangle (or moving toward the child)" as "still hovering the parent" —
+plus a small close delay as the fallback. Notes for the implementation:
+
+- It belongs next to the other popup geometry in `src/components/anchor.js`
+  (a `useSafeHover(anchorRect, childRect)` hook), not in the renderer: it is
+  a widget-level policy, and `MenuBar`, `ContextMenu`, `Select` and
+  `Tooltip` should all share it.
+- Everything it needs already exists: pointer coordinates on the synthetic
+  events, the child's screen rect from `anchorRect`, and mousemove already
+  coalesced to one per frame by ntk's frame clock.
+- The tolerance has to be in **screen** coordinates, because the parent and
+  the child are different X windows (`<popup>`).
+- Worth a hermetic test: synthesize a diagonal pointer path across a sibling
+  row and assert the submenu stays open, which is exactly the bug today.
+
+### 11.2 Focus state — audit and gaps
+
+Everything below is how it works **today**; the state lives in
+`EventManager` (`src/events.js`), one instance per `<window>`:
+
+- `focused` is a node reference; mousedown moves it to the nearest focusable
+  ancestor of the hit node, Tab/Shift+Tab cycle `_focusables()` in tree
+  order, and `forget()` clears it on unmount.
+- "Focusable" is `props.focusable ?? node.focusableByDefault` (true for
+  `<textinput>`/`<textarea>`), and the widgets opt in through `useControl`.
+- Key events are routed to `focused` (falling back to the window node), so
+  focus is what makes keyboard input work at all.
+
+The gaps, roughly in the order they bite:
+
+1. **X focus changes are invisible to us.** ntk maps no event name and no
+   mask for X `FocusIn`/`FocusOut` (events 9 and 10 — see
+   `ntk/lib/events_map.js`), so when the window manager moves input focus to
+   another window, react-x11 never hears about it: focus rings stay lit, the
+   `<textinput>` caret keeps blinking, and no `onBlur` fires. **This is an
+   ntk change first** (§8) — event names, masks, and `FocusChange` in the
+   computed event mask — then a react-x11 change to gate node focus on
+   window focus.
+2. **We never call `SetInputFocus`.** node-x11 has the request; nothing in
+   ntk or here uses it. Without it a node's `focus()` cannot pull keyboard
+   input to its window, and a modal dialog cannot take focus on open.
+3. **Popups cannot hold focus.** Override-redirect windows never receive X
+   input focus, so `Menu` keeps a focusable proxy node in the _owner_ window
+   and routes keys from there (`Menu.js`, "the popup is override-redirect
+   and never gets focus itself"). It works, but it is a workaround every
+   popup-based widget has to re-implement — model it once as a focus scope
+   that a `<popup>` can own.
+4. **No public focus API.** Components reach into
+   `node.root.events.focus(node)`. There should be `ref.focus()` /
+   `ref.blur()`, an `autoFocus` prop, and `document.activeElement`-ish
+   access for widgets that need it.
+5. **Tab traversal is thin**: no `tabIndex` ordering, no focus trap for
+   modal popups, and focusing a node inside a `<scrollview>` does not scroll
+   it into view even though `scrollIntoView(node)` exists.
+6. **Focus is not restored** when a popup closes; menus do it by hand.
+
+### 11.3 Accessibility — what the target actually is
+
+Research, not a plan yet. Conclusion first: **being a pure-JS X11 client
+does not block accessibility**, because Linux a11y does not go over the X
+protocol at all.
+
+- **AT-SPI2 is the interface**, and it is
+  [D-Bus, not X](https://www.freedesktop.org/wiki/Accessibility/AT-SPI2/):
+  applications expose a tree of objects on a separate _accessibility bus_,
+  implementing interfaces (`Accessible`, `Component`, `Text`, `Value`,
+  `Action`, …) whose XML introspection lives in
+  [at-spi2-core/xml](https://github.com/GNOME/at-spi2-core). Toolkit-less
+  applications are expected to
+  [drive the bridge themselves](https://wiki.linuxfoundation.org/accessibility/atk/at-spi/at-spi_on_d-bus)
+  rather than inherit it from GTK/Qt. For us that means a D-Bus client
+  library and a service that mirrors the retained node tree — no native ATK,
+  no C bindings.
+- **Screen reader**: Orca. The modern stack is moving Wayland-ward — AT-SPI
+  2.56 added an `a11y-manager` backend and switched from hardware keycodes
+  to XKB keysyms for Mutter 48 / GNOME 48
+  ([LWN](https://lwn.net/Articles/1025127/)) — but that is about how the
+  _screen reader_ gets its input, not about the app-side interface. An
+  AT-SPI implementation keeps working for X11 clients, including under
+  Xwayland.
+- **The prop shape to copy is React Native's**, not ARIA's: `accessible`,
+  `accessibilityLabel`, `accessibilityHint`, `accessibilityRole`,
+  `accessibilityState` (`disabled`, `selected`, `checked`, `busy`,
+  `expanded`), `accessibilityValue`, plus accessibility actions. RN maps
+  that one prop set onto two very different native APIs, and react-native-web
+  maps the same props onto ARIA — good evidence the vocabulary survives a
+  third mapping, onto AT-SPI roles and states.
+- **Dependency on §11.2**: AT-SPI's focus notion is what a screen reader
+  follows, so `focus:` / `state-changed:focused` events can only be emitted
+  once window-level focus is tracked properly. Do the focus work first.
+- Size: a live D-Bus service (tree + `Component` geometry from `node.abs`,
+  `Text` from the text nodes, state changes on prop updates) is a sizeable
+  project on its own — a `@react-x11/a11y` sibling package is probably the
+  right shape, kept out of the core render path.
