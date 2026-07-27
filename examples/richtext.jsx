@@ -1,9 +1,16 @@
 // Rich content elements: <markdown> (with mermaid + math fences) in a
-// scrollview, a live-updating <tex> formula, and a declarative JSX <svg>
-// — all drawn client-side through ntk's document widgets.
-// Run with: npm run examples:richtext  (needs an X server / DISPLAY)
+// scrollview, a live-updating <tex> formula, a declarative JSX <svg> and an
+// <image> — all drawn client-side through ntk's document widgets and image
+// pipeline. Run with: npm run examples:richtext  (needs an X server)
+import { fileURLToPath } from 'node:url';
+
 import React, { useState } from 'react';
-import { createRoot } from '../src/index.js';
+import { Button, createRoot } from '../src/index.js';
+
+// any PNG/JPEG path works; this one ships with the docs
+const PICTURE = fileURLToPath(
+  new URL('../docs/img/three.png', import.meta.url),
+);
 
 const MARKDOWN = `# react-x11 rich content
 
@@ -96,15 +103,11 @@ function App() {
           {`e^{i\\pi} + 1 = 0 \\qquad x^{${n}}`}
         </tex>
         <box flexGrow={1} />
-        <box
-          backgroundColor="#3498db"
-          borderRadius={6}
-          padding={8}
-          cursor="pointer"
-          onClick={() => setN((v) => (v % 9) + 1)}
-        >
-          <text color="white">bump exponent</text>
-        </box>
+        <Button
+          primary
+          label="bump exponent"
+          onPress={() => setN((v) => (v % 9) + 1)}
+        />
       </box>
       <scrollview flexGrow={1}>
         <markdown
@@ -114,9 +117,30 @@ function App() {
           {MARKDOWN}
         </markdown>
       </scrollview>
+
+      <box
+        flexDirection="row"
+        alignItems="center"
+        gap={12}
+        padding={12}
+        backgroundColor="#f4f4f4"
+      >
+        {/* <image> decodes PNG/JPEG through ntk and uploads once; with only
+            one dimension given it keeps the aspect ratio */}
+        <image src={PICTURE} height={64} borderRadius={4} />
+        <text color="#636e72">
+          {
+            '<image> — PNG/JPEG, sized by the layout, uploaded to the server once'
+          }
+        </text>
+      </box>
     </window>
   );
 }
 
-const root = await createRoot();
-root.render(<App />);
+export default App;
+
+if (!process.env.REACT_X11_NO_AUTORUN) {
+  const root = await createRoot();
+  root.render(<App />);
+}

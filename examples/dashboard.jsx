@@ -9,7 +9,12 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { Button, createRoot, ThemeProvider } from '../src/index.js';
+import {
+  Button,
+  createRoot,
+  ProgressBar,
+  ThemeProvider,
+} from '../src/index.js';
 
 const THEMES = {
   light: {
@@ -61,7 +66,7 @@ function widgetTheme(t) {
   };
 }
 
-function StatCard({ label, value }) {
+function StatCard({ label, value, progress }) {
   const theme = useContext(ThemeContext);
   return (
     <box
@@ -77,6 +82,9 @@ function StatCard({ label, value }) {
       <text fontSize={26} color={theme.text}>
         {value}
       </text>
+      {progress != null && (
+        <ProgressBar value={progress} color={theme.accent} />
+      )}
     </box>
   );
 }
@@ -87,6 +95,8 @@ function App() {
   const theme = THEMES[themeName];
   const now = useClock();
   const squared = useMemo(() => count * count, [count]);
+  // re-read every tick, since useClock already re-renders us each second
+  const heap = process.memoryUsage();
 
   return (
     <ThemeContext.Provider value={theme}>
@@ -113,11 +123,16 @@ function App() {
             </box>
 
             <box flexDirection="row" gap={12}>
-              <StatCard label="counter" value={String(count)} />
+              <StatCard
+                label="counter"
+                value={String(count)}
+                progress={(count % 10) / 10}
+              />
               <StatCard label="count squared" value={String(squared)} />
               <StatCard
-                label="process uptime"
-                value={`${Math.floor(process.uptime())}s`}
+                label="heap used"
+                value={`${Math.round(heap.heapUsed / 1024 / 1024)} MB`}
+                progress={heap.heapUsed / heap.heapTotal}
               />
             </box>
 

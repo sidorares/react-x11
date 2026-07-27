@@ -515,9 +515,19 @@ export class ImageNode extends Node {
       this.yoga.unsetMeasureFunc();
       return;
     }
-    this.yoga.setMeasureFunc((width, widthMode) => {
+    this.yoga.setMeasureFunc((width, widthMode, height, heightMode) => {
       const natW = this.image?.width ?? 0;
       const natH = this.image?.height ?? 0;
+      // a height alone should scale the width with it, the way an <img>
+      // with only a height set does — not stretch to the container
+      if (
+        this.props.width == null &&
+        this.props.height != null &&
+        heightMode !== Yoga.MEASURE_MODE_UNDEFINED &&
+        natH > 0
+      ) {
+        return { width: (height * natW) / natH, height };
+      }
       let w = natW;
       if (widthMode !== Yoga.MEASURE_MODE_UNDEFINED && width < w) w = width;
       return { width: w, height: natW > 0 ? (w * natH) / natW : natH };
@@ -583,6 +593,22 @@ export class ScrollViewNode extends Node {
     if (props.flexShrink === undefined) {
       this.yoga.setFlexShrink(1);
     }
+    // …and flexShrink alone is not enough. A flex item's base size is its
+    // content, and yoga (unlike CSS) does not shrink items by default — so
+    // a window whose scrollview holds more rows than fit grew *past* the
+    // window, pushing the footer out of view, however small the window got.
+    // `flex-basis: 0` is what CSS's `flex: 1` means, and for a scroll
+    // container it is always what is wanted: take the space that is left,
+    // and let the content overflow into a scroll. It also fixes the whole
+    // ancestor chain at once, since the content no longer counts towards
+    // any of their heights.
+    const sized = props.height !== undefined || props.width !== undefined;
+    if (props.flexBasis === undefined && !sized && (props.flexGrow ?? 0) > 0) {
+      this.yoga.setFlexBasis(0);
+    }
+    // the CSS `min-height: 0` idiom, for the layouts flex-basis cannot save
+    if (props.minHeight === undefined) this.yoga.setMinHeight(0);
+    if (props.minWidth === undefined) this.yoga.setMinWidth(0);
   }
 
   clipsChildren() {

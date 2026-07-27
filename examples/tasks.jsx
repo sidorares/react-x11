@@ -1,8 +1,9 @@
 // A task list showing useReducer, context-passed dispatch, component
-// composition, list rendering, keyboard interaction (Tab to move focus,
-// Space/Enter to toggle) and <textinput> — type a task and press Enter or
-// click Add. Ctrl+C/V and middle-click PRIMARY paste work in the input.
-// Run with: npm run examples:tasks  (needs an X server / DISPLAY)
+// composition, list rendering, and the widget components — Checkbox rows in
+// a <scrollview>, Buttons for the filters — with keyboard interaction
+// throughout (Tab moves focus, Space/Enter toggles). Type a task and press
+// Enter or click Add; Ctrl+C/V and middle-click PRIMARY paste work in the
+// input. Run with: npm run examples:tasks  (needs an X server / DISPLAY)
 import React, {
   createContext,
   useContext,
@@ -10,7 +11,7 @@ import React, {
   useReducer,
   useState,
 } from 'react';
-import { createRoot } from '../src/index.js';
+import { Button, Checkbox, createRoot } from '../src/index.js';
 
 const DispatchContext = createContext(null);
 
@@ -63,6 +64,7 @@ function AddTask() {
   return (
     <box flexDirection="row" gap={8} alignItems="center">
       <textinput
+        autoFocus
         flexGrow={1}
         value={draft}
         placeholder="Add a task…"
@@ -74,17 +76,7 @@ function AddTask() {
         borderColor="#b2bec3"
         backgroundColor="white"
       />
-      <box
-        cursor="pointer"
-        padding={8}
-        paddingLeft={14}
-        paddingRight={14}
-        borderRadius={4}
-        backgroundColor="#27ae60"
-        onClick={add}
-      >
-        <text color="white">Add</text>
-      </box>
+      <Button primary label="Add" onPress={add} />
     </box>
   );
 }
@@ -92,50 +84,32 @@ function AddTask() {
 function TaskRow({ task }) {
   const dispatch = useContext(DispatchContext);
   const [hover, setHover] = useState(false);
-  const [focused, setFocused] = useState(false);
-  const toggle = () => dispatch({ type: 'toggle', id: task.id });
+  // Checkbox brings its own hover/focus/keyboard handling (click, Space or
+  // Enter toggle) and passes the rest of the props through to its box, so
+  // the row styling stays here
   return (
-    <box
-      focusable
-      cursor="pointer"
-      flexDirection="row"
-      alignItems="center"
-      gap={8}
+    <Checkbox
+      checked={task.done}
+      onChange={() => dispatch({ type: 'toggle', id: task.id })}
       padding={8}
       borderRadius={4}
-      backgroundColor={hover || focused ? '#eaf2f8' : 'white'}
+      backgroundColor={hover ? '#eaf2f8' : 'white'}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      onClick={toggle}
-      onKeyDown={(ev) => {
-        if (ev.codepoint === 32 || ev.keysym === 0xff0d) toggle();
-      }}
     >
-      <text color={task.done ? '#27ae60' : '#b2bec3'}>
-        {task.done ? '[x]' : '[ ]'}
-      </text>
       <text color={task.done ? '#95a5a6' : '#2d3436'}>{task.label}</text>
-    </box>
+    </Checkbox>
   );
 }
 
 function FilterButton({ filter, current, label }) {
   const dispatch = useContext(DispatchContext);
-  const active = filter === current;
   return (
-    <box
-      cursor="pointer"
-      padding={6}
-      paddingLeft={12}
-      paddingRight={12}
-      borderRadius={4}
-      backgroundColor={active ? '#2980b9' : '#dfe6e9'}
-      onClick={() => dispatch({ type: 'filter', filter })}
-    >
-      <text color={active ? 'white' : '#2d3436'}>{label}</text>
-    </box>
+    <Button
+      primary={filter === current}
+      label={label}
+      onPress={() => dispatch({ type: 'filter', filter })}
+    />
   );
 }
 

@@ -12,7 +12,8 @@ Flat, ink-style props; numbers are pixels, strings like `'50%'` / `'auto'`
 pass through to yoga.
 
 - **Size**: `width`, `height`, `minWidth`, `minHeight`, `maxWidth`,
-  `maxHeight`, `aspectRatio`
+  `maxHeight`, `aspectRatio`. `<image>` keeps its aspect ratio when only one
+  of `width`/`height` is given
 - **Flex**: `flexDirection` (`row`, `column`, `row-reverse`,
   `column-reverse`), `justifyContent` (`flex-start`, `center`, `flex-end`,
   `space-between`, `space-around`, `space-evenly`), `alignItems`,
@@ -113,6 +114,13 @@ window, valid after layout).
 
 A clipped viewport over its (overflowing) children. Wheel events scroll it
 by default; a scrollbar thumb is drawn when content overflows.
+
+With `flexGrow` and no explicit size it defaults to **`flex-basis: 0`** —
+what CSS's `flex: 1` means — so it takes the space left over instead of
+being sized by its content. Without that, a header/scrollview/footer window
+grows past its own bounds as rows are added and the footer is pushed out of
+view. `flexShrink` defaults to `1` and `minHeight`/`minWidth` to `0` for the
+same reason. Pass any of them explicitly to opt out.
 
 | prop                                                 |                          |
 | ---------------------------------------------------- | ------------------------ |
