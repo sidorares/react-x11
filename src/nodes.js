@@ -739,6 +739,8 @@ const XK_LEFT = 0xff51;
 const XK_UP = 0xff52;
 const XK_RIGHT = 0xff53;
 const XK_DOWN = 0xff54;
+const XK_PAGE_UP = 0xff55;
+const XK_PAGE_DOWN = 0xff56;
 const XK_END = 0xff57;
 const XK_DELETE = 0xffff;
 
@@ -921,23 +923,35 @@ export class TextInputNode extends Node {
     }
     if (k === XK_BACKSPACE) {
       if (hasSelection) this._deleteRange(a, b);
+      else if (ev.ctrlKey) this._deleteRange(this._wordBoundary(a, -1), a);
       else if (a > 0) this._deleteRange(a - 1, a);
       return;
     }
     if (k === XK_DELETE) {
       if (hasSelection) this._deleteRange(a, b);
+      else if (ev.ctrlKey) this._deleteRange(a, this._wordBoundary(a, 1));
       else this._deleteRange(a, Math.min(a + 1, this._chars().length));
       return;
     }
     if (k === XK_LEFT) {
-      if (!ev.shiftKey && hasSelection) this._moveCaret(a, false);
-      else this._moveCaret(this._caret - 1, ev.shiftKey);
+      if (ev.ctrlKey) {
+        this._moveCaret(this._wordBoundary(this._caret, -1), ev.shiftKey);
+      } else if (!ev.shiftKey && hasSelection) {
+        this._moveCaret(a, false);
+      } else {
+        this._moveCaret(this._caret - 1, ev.shiftKey);
+      }
       if (ev.shiftKey) this._copySelection('PRIMARY');
       return;
     }
     if (k === XK_RIGHT) {
-      if (!ev.shiftKey && hasSelection) this._moveCaret(b, false);
-      else this._moveCaret(this._caret + 1, ev.shiftKey);
+      if (ev.ctrlKey) {
+        this._moveCaret(this._wordBoundary(this._caret, 1), ev.shiftKey);
+      } else if (!ev.shiftKey && hasSelection) {
+        this._moveCaret(b, false);
+      } else {
+        this._moveCaret(this._caret + 1, ev.shiftKey);
+      }
       if (ev.shiftKey) this._copySelection('PRIMARY');
       return;
     }
@@ -996,6 +1010,26 @@ export class TextInputNode extends Node {
     return [a, b];
   }
 
+  /**
+   * Caret index one word away, the way Ctrl+arrow moves in a text editor:
+   * skip any run of non-word characters, then the word itself. Word
+   * characters are letters, digits and underscore, so "foo-bar" is two
+   * words and "foo_bar" is one.
+   */
+  _wordBoundary(from, dir) {
+    const chars = this._chars();
+    const isWord = (c) => /[\p{L}\p{N}_]/u.test(c);
+    let i = Math.max(0, Math.min(from, chars.length));
+    if (dir > 0) {
+      while (i < chars.length && !isWord(chars[i])) i++;
+      while (i < chars.length && isWord(chars[i])) i++;
+    } else {
+      while (i > 0 && !isWord(chars[i - 1])) i--;
+      while (i > 0 && isWord(chars[i - 1])) i--;
+    }
+    return i;
+  }
+
   _defaultMouseDown(ev) {
     if (ev.button === 2) {
       // X11 middle-click: paste the PRIMARY selection at the click position
@@ -1016,6 +1050,14 @@ export class TextInputNode extends Node {
       const [a, b] = this._wordRangeAt(i);
       this._anchor = a;
       this._caret = b;
+      this._ownSelection();
+      return;
+    }
+    // shift+click extends from the existing anchor rather than starting a
+    // fresh selection, and keeps dragging from there
+    if (ev.shiftKey) {
+      this._caret = i;
+      this._dragging = true;
       this._ownSelection();
       return;
     }
@@ -1230,6 +1272,13 @@ export class TextAreaNode extends TextInputNode {
     this.root?.invalidate(false);
   }
 
+  /** Visual lines that fit in the viewport — one Page keypress worth. */
+  _pageLines() {
+    const height = this.contentBox().height;
+    const line = this._lineHeight() || 1;
+    return Math.max(1, Math.floor(height / line));
+  }
+
   /** Caret index on an adjacent visual line, keeping the goal column. */
   _verticalMove(layout, delta) {
     const pos = layout.caretPosition(this._caret);
@@ -1267,6 +1316,19 @@ export class TextAreaNode extends TextInputNode {
       if (ev.shiftKey) this._copySelection('PRIMARY');
       return;
     }
+    if (
+      (k === XK_PAGE_UP || k === XK_PAGE_DOWN) &&
+      layout &&
+      this.value.length > 0
+    ) {
+      const i = this._verticalMove(
+        layout,
+        this._pageLines() * (k === XK_PAGE_UP ? -1 : 1),
+      );
+      this._moveCaret(i, ev.shiftKey);
+      if (ev.shiftKey) this._copySelection('PRIMARY');
+      return;
+    }
     if ((k === XK_HOME || k === XK_END) && layout && this.value.length > 0) {
       const pos = layout.caretPosition(this._caret);
       const line = layout.lines[pos.line];
@@ -1283,6 +1345,29 @@ export class TextAreaNode extends TextInputNode {
     }
     this._goalX = null;
     super._defaultKeyDown(ev);
+  }
+
+  /** Thumb for the vertical overflow, same look as <scrollview>'s. */
+  _paintScrollbar(ctx, layout) {
+    if (this.props.scrollbar === false) return;
+    const content = this.contentBox();
+    const viewport = content.height;
+    const total = layout.height;
+    if (!(total > viewport)) return;
+    const trackWidth = 6;
+    const thumbHeight = Math.max(20, (viewport * viewport) / total);
+    const range = total - viewport;
+    const thumbY =
+      content.y + (this._scrollY / range) * (viewport - thumbHeight);
+    const thumbX = content.x + content.width - trackWidth;
+    ctx.fillStyle = this.props.scrollbarColor || 'rgba(0, 0, 0, 0.25)';
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(thumbX, thumbY, trackWidth, thumbHeight, 3);
+    } else {
+      ctx.rect(thumbX, thumbY, trackWidth, thumbHeight);
+    }
+    ctx.fill();
   }
 
   _paintContent(ctx) {
@@ -1339,6 +1424,8 @@ export class TextAreaNode extends TextInputNode {
       ctx.fillStyle = this.props.caretColor ?? this._textStyle().color;
       ctx.fillRect(originX + pos.x, originY + pos.y, 1.5, pos.height);
     }
+    // inside the clip, so the thumb is bounded by the content box
+    this._paintScrollbar(ctx, layout);
     ctx.restore();
   }
 }

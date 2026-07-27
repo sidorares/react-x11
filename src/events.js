@@ -76,6 +76,10 @@ export class EventManager {
       target: this._public(target),
       currentTarget: null,
       nativeEvent: native,
+      // X11 modifier mask: bit 0 Shift, bit 2 Control. Carried on every
+      // event, not just keys — shift+click needs it too.
+      shiftKey: Boolean(native?.buttons & 1),
+      ctrlKey: Boolean(native?.buttons & 4),
       defaultPrevented: false,
       propagationStopped: false,
       preventDefault() {

@@ -2554,3 +2554,211 @@ test('menu type-ahead applies to the deepest open submenu', async () => {
 
   ReactX11.unmountComponentAtNode(app);
 });
+
+test('textinput: Ctrl+arrow moves by word, Ctrl+Backspace/Delete removes one', async () => {
+  const app = createMockApp();
+  const changes = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 80 },
+      React.createElement('textinput', {
+        defaultValue: 'foo-bar baz_qux end',
+        onChange: (v) => changes.push(v),
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+  await tick();
+
+  const caret = () => input._selection()[0];
+  const ctrl = (keysym) => pressKey(app, wnd, { keysym, buttons: 4 });
+
+  // 'foo-bar baz_qux end' — '-' is not a word char, '_' is
+  input._caret = 0;
+  input._anchor = 0;
+  ctrl(0xff53); // Ctrl+Right
+  assert.strictEqual(caret(), 3, 'end of "foo"');
+  ctrl(0xff53);
+  assert.strictEqual(caret(), 7, 'end of "bar" (hyphen is a separator)');
+  ctrl(0xff53);
+  assert.strictEqual(caret(), 15, 'end of "baz_qux" (underscore joins)');
+
+  ctrl(0xff51); // Ctrl+Left
+  assert.strictEqual(caret(), 8, 'start of "baz_qux"');
+
+  // Ctrl+Backspace removes the word before the caret
+  ctrl(0xff08);
+  await tick();
+  assert.strictEqual(changes.at(-1), 'foo-bar baz_qux end'.replace('bar ', ''));
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: shift+click extends the selection from the anchor', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 80 },
+      React.createElement('textinput', { defaultValue: 'hello world' }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+
+  // click to place the caret, then shift+click elsewhere
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+  await tick();
+  input._caret = 2;
+  input._anchor = 2;
+
+  // stub the hit index so the test does not depend on font metrics
+  const realIndexAt = input._indexAtPoint;
+  input._indexAtPoint = () => 8;
+  wnd.emit('mousedown', { x: 60, y: 5, keycode: 1, buttons: 1 });
+  wnd.emit('mouseup', { x: 60, y: 5, keycode: 1, buttons: 1 });
+  input._indexAtPoint = realIndexAt;
+
+  assert.deepStrictEqual(
+    input._selection(),
+    [2, 8],
+    'anchor kept, caret moved to the shift+clicked index',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textarea: PageDown/PageUp move by a viewport of lines', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement('textarea', {
+        defaultValue: Array.from({ length: 40 }, (_, i) => `line ${i}`).join(
+          '\n',
+        ),
+        rows: 4,
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const area = wnd._reactX11Node.children[0];
+  // keys route to the focused node, so focus it the way a user would
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+  await tick();
+
+  // the mock app has no font stack, so drive the layout the node uses
+  const LINES = 40;
+  const lineH = 10;
+  const fakeLayout = {
+    height: LINES * lineH,
+    lines: Array.from({ length: LINES }, (_, i) => ({
+      x: 0,
+      y: i * lineH,
+      width: 50,
+      ascent: 8,
+      descent: 2,
+    })),
+    caretPosition: (i) => ({
+      x: 0,
+      y: Math.floor(i / 8) * lineH,
+      height: lineH,
+      line: Math.floor(i / 8),
+    }),
+    // y is mid-line, so floor maps it to the line containing it
+    indexAt: (x, y) => Math.floor(y / lineH) * 8,
+    draw: () => {},
+  };
+  area._valueLayout = () => fakeLayout;
+  area._lineHeight = () => lineH;
+  area._focused = true;
+  area._caret = 0;
+  area._anchor = 0;
+
+  const pageLines = area._pageLines();
+  assert.ok(pageLines > 1, `viewport holds ${pageLines} lines`);
+
+  pressKey(app, wnd, { keysym: 0xff56 }); // Page Down
+  assert.strictEqual(
+    area._selection()[0],
+    pageLines * 8,
+    'caret moved down one viewport of lines',
+  );
+
+  pressKey(app, wnd, { keysym: 0xff55 }); // Page Up
+  assert.strictEqual(area._selection()[0], 0, 'and back up again');
+
+  // past the top clamps to the start rather than going negative
+  pressKey(app, wnd, { keysym: 0xff55 });
+  assert.strictEqual(area._selection()[0], 0);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textarea: draws a scrollbar thumb only when the text overflows', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement('textarea', { defaultValue: 'x', rows: 3 }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const area = wnd._reactX11Node.children[0];
+  const content = area.contentBox();
+
+  const paintWith = (layoutHeight) => {
+    area._valueLayout = () => ({
+      height: layoutHeight,
+      lines: [{ x: 0, y: 0, width: 10, ascent: 8, descent: 2 }],
+      caretPosition: () => ({ x: 0, y: 0, height: 10, line: 0 }),
+      indexAt: () => 0,
+      draw: () => {},
+    });
+    wnd.ctx.ops.length = 0;
+    area.paint(wnd.ctx);
+    return wnd.ctx.ops;
+  };
+
+  // the clip path is a 'rect' too, so identify the thumb by its 6px track
+  const findThumb = (ops) =>
+    ops.find(([op, , , w]) => (op === 'roundRect' || op === 'rect') && w === 6);
+
+  // fits: no thumb
+  let ops = paintWith(content.height - 5);
+  assert.ok(!findThumb(ops), 'no scrollbar when the content fits');
+
+  // overflows: a thumb is drawn inside the content box
+  ops = paintWith(content.height * 4);
+  const thumb = findThumb(ops);
+  assert.ok(thumb, 'thumb drawn when the content overflows');
+  const [, tx, ty, tw, th] = thumb;
+  assert.ok(tw > 0 && th >= 20, 'thumb has a usable size');
+  assert.ok(
+    tx + tw <= content.x + content.width + 0.01,
+    'thumb sits inside the content box',
+  );
+  assert.ok(ty >= content.y - 0.01, 'thumb starts at or below the top');
+
+  ReactX11.unmountComponentAtNode(app);
+});
