@@ -96,6 +96,23 @@ event root. Anchor with `ev.nativeEvent.rootx/rooty` (pointer in screen
 coordinates) or a ref's `abs` rect plus the owner window's `x`/`y`.
 Same props as `<window>`; conditional rendering controls its lifetime.
 
+| prop        |                                                                           |
+| ----------- | ------------------------------------------------------------------------- |
+| `grab`      | hold a pointer grab while the popup is up — how menus behave on X (below) |
+| `onDismiss` | a press landed outside the popup: close it                                |
+
+**`grab` is what makes a menu dismissable.** Without it, a press that lands
+anywhere else — another application, the root window, or even this app's own
+**window frame**, which belongs to the window manager — never reaches the
+client, so the menu stays open behind whatever was clicked. With the grab,
+that press is redirected to the popup instead, arrives outside its bounds,
+and `onDismiss` fires. The client's own windows still receive their own
+presses (X owner-events), so submenus and the owner window keep working
+normally, and only the root popup of a menu needs the grab. Needs
+ntk ≥ 3.7.0; on older ntk the popup behaves as it did before.
+
+`Select`, `ContextMenu` and `MenuBar` already do this.
+
 Defaults to `windowType="dropdown_menu"`; pass `windowType` to override
 (`"tooltip"`, `"popup_menu"`, …). The hint is **additive** — override-
 redirect is what keeps the WM from moving or decorating the popup, and

@@ -18,6 +18,10 @@ export class EventManager {
     this.downNode = null;
     this.capturedNode = null;
     this.focused = null;
+    // whether the X server sends keys to this window at all. Assume yes
+    // until told otherwise: ntk < 3.7 never reports focus changes, and a
+    // toolkit that believed it was unfocused would blink no caret at all.
+    this.windowFocused = true;
     this._lastClick = { time: 0, x: 0, y: 0, detail: 0 };
   }
 
@@ -45,6 +49,33 @@ export class EventManager {
     wnd.on('mouseout', (ev) => this._onMouseOut(ev));
     wnd.on('keydown', (ev) => this._onKey('KeyDown', ev));
     wnd.on('keyup', (ev) => this._onKey('KeyUp', ev));
+    // window-level focus (ntk >= 3.7.0): the window manager decides which
+    // window gets keys, and the focused node's caret/ring has to follow
+    wnd.on('focus', (ev) => this._onWindowFocus(true, ev));
+    wnd.on('blur', (ev) => this._onWindowFocus(false, ev));
+  }
+
+  /**
+   * The DOM keeps `document.activeElement` across a window blur — the
+   * element stays focused, it just stops looking active — and so do we: the
+   * node keeps focus, its default focus behaviour (a blinking caret) is
+   * suspended, and `<window onFocus/onBlur>` gets told.
+   */
+  _onWindowFocus(focused, native) {
+    if (this.windowFocused === focused) return;
+    this.windowFocused = focused;
+    const node = this.focused;
+    if (node && !node.destroyed) {
+      if (focused) node._defaultFocus?.();
+      else node._defaultBlur?.();
+    }
+    runWithPriority(DiscreteEventPriority, () => {
+      const prop = focused ? 'onFocus' : 'onBlur';
+      this.node.props[prop]?.(
+        this._makeEvent(focused ? 'focus' : 'blur', native, this.node),
+      );
+    });
+    this.node.invalidate(false);
   }
 
   _public(node) {
@@ -135,7 +166,28 @@ export class EventManager {
     return ev;
   }
 
+  /** A press the X server sent us only because we hold a pointer grab:
+   *  it landed outside this window, so it is a dismissal, not a click. */
+  _pressOutside(native) {
+    const wnd = this.node.window;
+    if (!wnd || typeof this.node.props.onDismiss !== 'function') return false;
+    return (
+      native.x < 0 ||
+      native.y < 0 ||
+      native.x >= (wnd.width ?? 0) ||
+      native.y >= (wnd.height ?? 0)
+    );
+  }
+
   _onMouseDown(native) {
+    if (this._pressOutside(native)) {
+      runWithPriority(DiscreteEventPriority, () => {
+        this.node.props.onDismiss?.(
+          this._makeEvent('dismiss', native, this.node),
+        );
+      });
+      return;
+    }
     runWithPriority(DiscreteEventPriority, () => {
       const wheel = WHEEL_BUTTONS[native.keycode];
       const target = this._hit(native);
@@ -319,8 +371,21 @@ export class EventManager {
       old.props.onBlur?.(this._makeEvent('blur', null, old));
     }
     if (node) {
-      node._defaultFocus?.();
+      // keys only reach a node whose window has the X focus
+      if (!this.windowFocused) this.node.window?.focus?.();
+      this._scrollIntoView(node);
+      if (this.windowFocused) node._defaultFocus?.();
       node.props.onFocus?.(this._makeEvent('focus', null, node));
+    }
+  }
+
+  /** Tab to something inside a scrollview and it should be on screen. */
+  _scrollIntoView(node) {
+    for (let n = node.parent; n; n = n.parent) {
+      if (typeof n.scrollIntoView === 'function') {
+        n.scrollIntoView(node);
+        return;
+      }
     }
   }
 

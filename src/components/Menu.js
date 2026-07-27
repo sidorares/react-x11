@@ -181,6 +181,7 @@ function MenuLevel({
   depth,
   setPath,
   onSelect,
+  onDismiss,
   fontSize,
 }) {
   const theme = useTheme();
@@ -289,6 +290,13 @@ function MenuLevel({
       height: rect.height,
       windowType: 'popup_menu',
       backgroundColor: theme.background,
+      // the root level holds the pointer grab for the whole menu: a press
+      // anywhere else — including this app's own window frame, which
+      // belongs to the window manager — closes it instead of vanishing
+      // into whatever was clicked. Submenus need no grab of their own;
+      // owner-events still delivers their presses to them.
+      grab: depth === 0,
+      onDismiss: depth === 0 ? onDismiss : undefined,
     },
     h(
       'box',
@@ -496,6 +504,7 @@ export function ContextMenu({
         setPath,
         fontSize,
         onSelect: select,
+        onDismiss: close,
       }),
   );
 }
@@ -629,6 +638,7 @@ export function MenuBar({
         setPath,
         fontSize,
         onSelect: select,
+        onDismiss: close,
       }),
   );
 }

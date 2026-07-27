@@ -72,9 +72,26 @@ light up every widget the pointer crosses.
 ## Focus
 
 `focusable` opts a node into focus (`<textinput>` is focusable by
-default). Mousedown focuses the nearest focusable ancestor of the hit node;
-Tab / Shift+Tab cycle through focusable nodes in tree order. Keyboard
+default), `autoFocus` takes it at mount, and every drawn node has
+`focus()` / `blur()` / `focused` on its ref. Focusing a node inside a
+`<scrollview>` scrolls it into view. Mousedown focuses the nearest
+focusable ancestor of the hit node; Tab / Shift+Tab cycle through focusable
+nodes in tree order. Keyboard
 events route to the focused node's ancestor chain.
+
+### Window focus
+
+Node focus is per `<window>`, and the window itself may or may not be the
+one the X server sends keys to — that is the window manager's call.
+`<window onFocus>` / `<window onBlur>` report it (ntk ≥ 3.7.0, X
+`FocusIn`/`FocusOut`).
+
+While the window is unfocused the focused node **keeps** focus, exactly as
+`document.activeElement` survives a window blur in a browser — it just
+stops looking active: a `<textinput>` caret stops blinking, and resumes
+when the window is focused again. Calling `focus()` on a node in a window
+that does not have the input focus asks for it (X `SetInputFocus`), though
+a window manager is free to refuse.
 
 ## Cursors
 
