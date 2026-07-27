@@ -3,8 +3,9 @@
 // theme.js (palette + control props), anchor.js (popup geometry),
 // typeahead.js and keys.js.
 export { ThemeProvider, SelectThemeProvider } from './theme.js';
-export { anchorRect, useAnchor } from './anchor.js';
+export { anchorRect, centerRect, useAnchor } from './anchor.js';
 export { Button } from './Button.js';
+export { Dialog } from './Dialog.js';
 export { Checkbox } from './Checkbox.js';
 export { Radio, RadioGroup } from './Radio.js';
 export { Switch } from './Switch.js';

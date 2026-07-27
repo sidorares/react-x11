@@ -16,10 +16,12 @@ export {
   ProgressBar,
   Slider,
   Tooltip,
+  Dialog,
   MenuBar,
   ContextMenu,
   useAnchor,
   anchorRect,
+  centerRect,
   Canvas3D,
 } from './components/index.js';
 

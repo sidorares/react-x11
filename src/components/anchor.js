@@ -88,6 +88,28 @@ export function anchorRect(node, options = {}) {
 }
 
 /**
+ * Where to put a `<popup>` of this size **centred over the owner window**,
+ * in screen coordinates, clamped into the screen. A dialog is anchored to
+ * the window rather than to a widget, which is the one placement
+ * `anchorRect` cannot express.
+ */
+export function centerRect(node, { width, height }) {
+  if (!node) return null;
+  const win = node.root?.window;
+  const ww = win?.width ?? width;
+  const wh = win?.height ?? height;
+  let x = (win?.x ?? 0) + (ww - width) / 2;
+  let y = (win?.y ?? 0) + (wh - height) / 2;
+
+  const screen = screenOf(node);
+  if (screen) {
+    x = Math.max(0, Math.min(x, screen.pixel_width - width));
+    y = Math.max(0, Math.min(y, screen.pixel_height - height));
+  }
+  return { x: Math.round(x), y: Math.round(y), width, height };
+}
+
+/**
  * useAnchor(ref) — stable `measure(options)` returning `anchorRect` for the
  * referenced node. The anchoring math `Select` used to inline, shared with
  * `Tooltip` and anything else that hangs a `<popup>` off a drawn node.

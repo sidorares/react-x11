@@ -66,6 +66,8 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   requestAnimationFrame on the window ref, or step-render
 - **Tooltip** — DONE: `useAnchor(ref)`/`anchorRect()` extracted from
   `Select` (and now flip at screen edges), `Tooltip` built on them
+- **Dialog** — DONE: a modal over `<popup trapFocus grab>`, centred with
+  `centerRect()`; see §11.2
 - **Menu/MenuBar, ContextMenu** — DONE: built on `useAnchor`, with
   separators, disabled items, shortcuts, checkmarks, nested submenus and
   full keyboard navigation; `examples/menu.jsx` rewritten on them
@@ -535,8 +537,14 @@ The rest of the list is done too:
   trigger wants the keys — a press inside a popup on nothing focusable
   deliberately leaves the owner's focus alone).
 
-Left as polish: converting `Menu`/`Select` to the delegated path, and a
-`Dialog` widget over `<popup trapFocus>`. The original audit follows.
+`Dialog` (`src/components/Dialog.js`) is the first consumer: a modal in a
+`<popup trapFocus grab>` centred over the owner window, Escape to close,
+`autoFocus` inside to pick the first stop, focus handed back on close —
+demoed by the "Clear" confirmation in `examples/form.jsx`. It does **not**
+enforce pointer modality (widgets behind it stay clickable); a full-window
+overlay in the owner window would, and is the obvious follow-up along with
+converting `Menu`/`Select` to the delegated focus path. The original audit
+follows.
 
 Everything below is how it works **today**; the state lives in
 `EventManager` (`src/events.js`), one instance per `<window>`:

@@ -2247,6 +2247,102 @@ test('<popup trapFocus> traps Tab and restores focus when it closes', async () =
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('Dialog: modal popup, Escape closes it, focus goes back', async () => {
+  const { Dialog, Button } = await import('../src/index.js');
+  const app = createMockApp();
+  const closed = [];
+  let trigger = null;
+  let input = null;
+  const App = ({ open }) =>
+    React.createElement(
+      'window',
+      { width: 400, height: 300 },
+      React.createElement(Button, {
+        ref: (n) => (trigger = n),
+        label: 'Open',
+        onPress: () => {},
+      }),
+      React.createElement(
+        Dialog,
+        {
+          open,
+          title: 'Really?',
+          onClose: () => closed.push('close'),
+          actions: React.createElement(Button, { label: 'OK' }),
+        },
+        React.createElement('textinput', {
+          ref: (n) => (input = n),
+          autoFocus: true,
+        }),
+      ),
+    );
+
+  ReactX11.render(React.createElement(App, { open: false }), null, app);
+  await tick();
+  const wnd = app.windows[0];
+  assert.strictEqual(app.windows.length, 1, 'no popup while closed');
+  trigger.focus();
+
+  ReactX11.render(React.createElement(App, { open: true }), null, app);
+  await tick();
+  const dialog = app.windows[1];
+  assert.ok(dialog, 'the dialog is a popup window');
+  assert.strictEqual(dialog.attributes.overrideRedirect, true);
+  assert.strictEqual(dialog.attributes.windowType, 'dialog');
+  assert.strictEqual(dialog.attributes.grab, true, 'grabs, so it dismisses');
+  assert.strictEqual(input.focused, true, 'autoFocus inside the dialog won');
+
+  // Escape reaches the dialog by bubbling out of the focused node
+  pressKey(app, wnd, { keysym: 0xff1b });
+  await tick();
+  assert.deepStrictEqual(closed, ['close'], 'Escape asked to close');
+
+  ReactX11.render(React.createElement(App, { open: false }), null, app);
+  await tick();
+  assert.strictEqual(dialog.destroyed, true, 'popup gone');
+  assert.strictEqual(
+    trigger.focused,
+    true,
+    'and focus returned to what opened it',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Dialog: with nothing to autoFocus, the surface takes focus', async () => {
+  const { Dialog } = await import('../src/index.js');
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 400, height: 300 },
+      React.createElement(
+        Dialog,
+        { open: true, title: 'Note' },
+        'Nothing focusable in here.',
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const dialog = app.windows[1];
+  const surface = dialog._reactX11Node.children[0];
+
+  assert.strictEqual(
+    surface.focused,
+    true,
+    'the dialog surface holds focus so keys have a target',
+  );
+  assert.strictEqual(
+    surface.props.tabIndex,
+    -1,
+    'but it is not a stop in the tab order',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('context menu: a press outside — the window frame — dismisses it', async () => {
   const app = createMockApp();
   const picked = [];
