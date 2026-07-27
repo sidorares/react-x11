@@ -204,9 +204,12 @@ normals, `<perspectiveCamera>`/`<orthographicCamera>`, `<group>`.
 **Phase 4 — textures.** `TexImage2D` from ntk `Image`, texture cache,
 `map` prop on materials, `TexParameter` filtering/wrap.
 
-**Phase 5 — interaction.** `onClick`/`onPointerOver` on `<mesh>` via
-**client-side** raycasting against the CPU-side geometry — there is no GPU
-picking here. Reuse the existing event plumbing on the `<glarea>` window.
+**Phase 5 — interaction. DONE.** `onClick`, `onPointerDown`/`Up`/`Move`,
+`onPointerOver`/`Out` and `cursor` on `<mesh>`/`<group>`, plus
+`onPointerMissed` on the surface. Client-side raycasting against the
+CPU-side geometry with the world matrices of the last frame drawn; events
+bubble with `stopPropagation()`, and the surface selects X pointer events
+only when the scene has a handler.
 
 **Phase 6 — docs and example.** `docs/3d.md`, an `examples/three.jsx`
 comparable to the widget gallery, README screenshots.

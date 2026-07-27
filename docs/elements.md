@@ -313,6 +313,35 @@ material re-sends neither; changing a geometry's `args` recompiles just
 that list. `test/scene3d.test.js` asserts exactly this on the encoded
 command stream.
 
+### Pointer events on meshes
+
+`<mesh>` and `<group>` take `onClick`, `onPointerDown`, `onPointerUp`,
+`onPointerMove`, `onPointerOver` and `onPointerOut`, plus a `cursor` prop
+applied while the pointer is over them. `<glarea>`/`<Canvas3D>` takes
+`onPointerMissed` for clicks that hit nothing.
+
+```jsx
+<mesh
+  cursor="pointer"
+  onPointerOver={() => setHovered(true)}
+  onPointerOut={() => setHovered(false)}
+  onClick={(ev) => console.log('hit at', ev.point, 'distance', ev.distance)}
+>
+```
+
+The event carries `object` (the mesh that was hit), `point` (world
+coordinates), `distance`, `face`, `uv`, the pixel `x`/`y`, `nativeEvent`,
+and `stopPropagation()` — events bubble from the mesh up through its
+`<group>` ancestors. Only the nearest hit is dispatched.
+
+**Picking is client-side raycasting**, not GPU picking: a ray through the
+clicked pixel is intersected with the same CPU-side geometry the display
+lists were compiled from, using the world matrices of the last frame drawn.
+Reading pixels back would be a round trip per event, and on XQuartz GL
+output is not readable through `GetImage` at all. Only meshes that — or
+whose ancestors — have handlers are tested, and the surface asks the X
+server for pointer events only when the scene has at least one handler.
+
 **Lighting is the fixed-function pipeline**: per-vertex Gouraud shading and
 **8 light units** in total — more than eight non-ambient lights warns and
 uses the first eight. `<ambientLight>` costs no unit; its colour rides on
@@ -323,8 +352,8 @@ world space, so a light inside a rotating `<group>` moves with it.
 Not implemented, and failing with an error naming the reason:
 `<shaderMaterial>` (the protocol encodes no shaders), `<instancedMesh>`,
 `<points>`, `<line>`, post-processing — and no shadows, which need
-framebuffer objects. Camera elements, textures and pointer interaction are
-the phases still to come — see [glx-plan.md](glx-plan.md).
+framebuffer objects. Camera elements and textures are the phases still to
+come — see [glx-plan.md](glx-plan.md).
 
 ---
 

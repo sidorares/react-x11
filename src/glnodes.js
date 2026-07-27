@@ -8,6 +8,7 @@
 import { cssColor } from 'ntk';
 
 import { Node } from './nodes.js';
+import { ScenePointer, sceneWantsPointer } from './pointer3d.js';
 import { SceneRenderer } from './scene3d.js';
 
 // One visual query per (app, spec): GetFBConfigs is a round trip and every
@@ -74,6 +75,8 @@ export class GlAreaNode extends Node {
     this._frameScheduled = false;
     this._created = false;
     this.scene = new SceneRenderer(this);
+    this.pointer = new ScenePointer(this);
+    this._pointerDirty = true;
   }
 
   get isGlArea() {
@@ -194,6 +197,7 @@ export class GlAreaNode extends Node {
       this._created = true;
       this.props.onCreated?.(gl, info);
     }
+    this._syncPointerListeners();
     gl.Viewport(0, 0, width, height);
     const [r, g, b, a] = clearColorOf(this.props);
     gl.ClearColor(r, g, b, a);
@@ -216,17 +220,36 @@ export class GlAreaNode extends Node {
     else this.window?.map?.();
   }
 
+  /**
+   * X pointer events are only worth selecting when something in the scene
+   * listens for them — the r3f rule that only handler-bearing objects take
+   * part in picking, applied one level up, to the wire.
+   */
+  _syncPointerListeners() {
+    if (!this._pointerDirty || !this.window || this.pointer.attached) return;
+    this._pointerDirty = false;
+    if (!sceneWantsPointer(this.children)) return;
+    this.pointer.attach(this.window);
+  }
+
+  /** A scene node was added, removed, or gained/lost pointer handlers. */
+  _sceneChanged() {
+    this._pointerDirty = true;
+    this.requestFrame();
+  }
+
   /** scene children (<mesh>, <group>, …) attach to this surface. */
   insertBefore(child, beforeChild) {
     super.insertBefore(child, beforeChild);
     child._setSurface?.(this);
-    this.requestFrame();
+    this._sceneChanged();
   }
 
   removeChild(child) {
     super.removeChild(child);
     this.invalidateGeometry(child);
-    this.requestFrame();
+    this.pointer.forget(child);
+    this._sceneChanged();
   }
 
   /** A removed geometry's display list is no longer needed server-side. */

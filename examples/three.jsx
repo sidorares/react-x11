@@ -35,7 +35,20 @@ function App() {
   const windowRef = useRef(null);
   const [running, setRunning] = useState(true);
   const [wireframe, setWireframe] = useState(false);
+  const [hovered, setHovered] = useState(null);
+  const [picked, setPicked] = useState(null);
   const angle = useSpin(running, windowRef);
+
+  // pointer props shared by every mesh: hover highlight and click to pick,
+  // both resolved by raycasting against the geometry on the client
+  const pointer = (name) => ({
+    cursor: 'pointer',
+    onPointerOver: () => setHovered(name),
+    onPointerOut: () => setHovered((h) => (h === name ? null : h)),
+    onClick: () => setPicked((p) => (p === name ? null : name)),
+  });
+  const lift = (name) => (hovered === name ? 1.12 : 1);
+  const tint = (name, color) => (picked === name ? '#f1c40f' : color);
 
   return (
     <window ref={windowRef} width={560} height={460} title="react-x11 — 3D">
@@ -55,25 +68,42 @@ function App() {
           />
 
           <group rotation={[0, angle, 0]}>
-            <mesh position={[-1.6, 0, 0]} rotation={[0.5, 0.4, 0]}>
+            <mesh
+              position={[-1.6, 0, 0]}
+              rotation={[0.5, 0.4, 0]}
+              scale={lift('box')}
+              {...pointer('box')}
+            >
               <boxGeometry args={[1.4, 1.4, 1.4]} />
               <meshPhongMaterial
-                color="#2980b9"
+                color={tint('box', '#2980b9')}
                 shininess={60}
                 wireframe={wireframe}
               />
             </mesh>
-            <mesh position={[1.6, 0, 0]}>
+            <mesh
+              position={[1.6, 0, 0]}
+              scale={lift('ball')}
+              {...pointer('ball')}
+            >
               <sphereGeometry args={[0.9, 24, 16]} />
               <meshPhongMaterial
-                color="#e67e22"
+                color={tint('ball', '#e67e22')}
                 shininess={12}
                 wireframe={wireframe}
               />
             </mesh>
-            <mesh position={[0, -1.4, 0]} rotation={[Math.PI / 2, 0, 0]}>
+            <mesh
+              position={[0, -1.4, 0]}
+              rotation={[Math.PI / 2, 0, 0]}
+              scale={lift('ring')}
+              {...pointer('ring')}
+            >
               <torusGeometry args={[1.1, 0.28, 12, 36]} />
-              <meshLambertMaterial color="#27ae60" wireframe={wireframe} />
+              <meshLambertMaterial
+                color={tint('ring', '#27ae60')}
+                wireframe={wireframe}
+              />
             </mesh>
           </group>
         </Canvas3D>
@@ -84,6 +114,9 @@ function App() {
           <Switch checked={wireframe} onChange={setWireframe} />
           <text fontSize={13}>Wireframe</text>
           <box flexGrow={1} />
+          <text fontSize={13} color="#5b6570">
+            {picked ? `picked: ${picked}` : 'click a shape'}
+          </text>
           <Button onPress={() => setRunning((r) => !r)}>
             {running ? 'Pause' : 'Play'}
           </Button>

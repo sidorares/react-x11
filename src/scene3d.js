@@ -23,6 +23,7 @@ import {
   perspective,
 } from './mat4.js';
 import { Node } from './nodes.js';
+import { hasPointerHandlers } from './raycast3d.js';
 
 export const GEOMETRY_KINDS = new Set([
   ...Object.keys(GEOMETRY_BUILDERS),
@@ -94,19 +95,27 @@ export class Object3DNode extends Node {
   insertBefore(child, beforeChild) {
     super.insertBefore(child, beforeChild);
     child._setSurface?.(this.surface);
-    this.surface?.requestFrame();
+    this.surface?._sceneChanged?.();
   }
 
   removeChild(child) {
     super.removeChild(child);
     this.surface?.invalidateGeometry?.(child);
-    this.surface?.requestFrame();
+    this.surface?.pointer?.forget(child);
+    this.surface?._sceneChanged?.();
   }
 
   applyProps(newProps) {
+    const before = this.props;
     this.props = newProps;
     this._matrixDirty = true;
-    this.surface?.requestFrame();
+    // gaining or losing handlers changes whether the surface needs X
+    // pointer events at all
+    if (hasPointerHandlers({ props: before }) !== hasPointerHandlers(this)) {
+      this.surface?._sceneChanged?.();
+    } else {
+      this.surface?.requestFrame();
+    }
   }
 
   setHidden(hidden) {
@@ -257,7 +266,7 @@ const DEFAULT_CAMERA = {
   zoom: 1,
 };
 
-function cameraMatrices(spec, { width, height }) {
+export function cameraMatrices(spec, { width, height }) {
   const camera = { ...DEFAULT_CAMERA, ...spec };
   const aspect = width / Math.max(1, height);
   const projection = camera.orthographic
@@ -333,6 +342,8 @@ export class SceneRenderer {
       this.surface.props.camera,
       info,
     );
+    // kept for picking: rays are cast against the frame that is on screen
+    this.camera = { projection, view, width: info.width, height: info.height };
     gl.MatrixMode(gl.PROJECTION);
     gl.LoadIdentity();
     gl.MultMatrixf(projection);
@@ -345,17 +356,21 @@ export class SceneRenderer {
     // positions land in eye space exactly as GL expects
     this.applyLights(gl, collectLights(roots, identity()));
 
-    for (const node of roots) this.drawObject(gl, node);
+    for (const node of roots) this.drawObject(gl, node, identity());
     return true;
   }
 
-  drawObject(gl, node) {
+  drawObject(gl, node, parentWorld) {
     if (!node.visible) return;
+    // the world matrix is recorded rather than recomputed later: picking
+    // rays are transformed by exactly what was drawn
+    const world = multiply(parentWorld, node.localMatrix());
+    node._world = world;
     gl.PushMatrix();
     gl.MultMatrixf(node.localMatrix());
     if (node.kind === 'mesh') this.drawMesh(gl, node);
     for (const child of node.children) {
-      if (child.isObject3D) this.drawObject(gl, child);
+      if (child.isObject3D) this.drawObject(gl, child, world);
     }
     gl.PopMatrix();
   }
