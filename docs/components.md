@@ -69,8 +69,46 @@ import { SelectThemeProvider } from 'react-x11';
 </SelectThemeProvider>;
 ```
 
-More components (Checkbox, Radio, Switch, …) are planned — see
-NEXT_STEPS.md. The `Select` source (`src/components.js`) is the reference
-for building your own: hover/focus state with `useState`, a `<popup>` for
-anything that must escape the window bounds, and a ref to the trigger node
-for anchoring (`node.abs` + `node.root.window.x/y`).
+## `Slider`
+
+A draggable value control.
+
+```jsx
+import { Slider } from 'react-x11';
+
+<Slider
+  value={volume}
+  min={0}
+  max={100}
+  step={5}
+  width={200}
+  onChange={setVolume}
+/>;
+```
+
+| prop                       |                                                        |
+| -------------------------- | ------------------------------------------------------ |
+| `value`, `onChange(value)` | current value (controlled)                             |
+| `min`, `max`, `step`       | range and quantisation (defaults 0, 100, 1)            |
+| `width`, `height`          | track width; `height` is the bar thickness (default 4) |
+| `disabled`                 | inert, dimmed                                          |
+
+Dragging uses [pointer capture](events.md#pointer-capture): the press
+captures, so the thumb keeps following a pointer that has wandered far
+outside the widget, and releasing out there still ends the drag.
+
+Keyboard: arrows step, `Home`/`End` jump to the ends, `PageUp`/`PageDown`
+move by ten steps.
+
+The thumb is centred on its value, so the usable travel is the track width
+minus one thumb width — otherwise `min` and `max` would be unreachable.
+
+---
+
+The other components — `Button`, `Checkbox`, `Radio`/`RadioGroup`,
+`Switch`, `ProgressBar` — are demoed together in `examples/widgets.jsx`.
+
+The `Select` source (`src/components.js`) is the reference for building
+your own: hover/focus state with `useState`, a `<popup>` for anything that
+must escape the window bounds, and a ref to the trigger node for anchoring
+(`node.abs` + `node.root.window.x/y`).

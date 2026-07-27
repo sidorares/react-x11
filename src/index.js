@@ -14,6 +14,7 @@ export {
   RadioGroup,
   Switch,
   ProgressBar,
+  Slider,
 } from './components.js';
 
 import { render, createRoot, unmountComponentAtNode } from './Reconciler.js';

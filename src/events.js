@@ -16,6 +16,7 @@ export class EventManager {
     this.node = windowNode;
     this.hoverPath = [];
     this.downNode = null;
+    this.capturedNode = null;
     this.focused = null;
     this._lastClick = { time: 0, x: 0, y: 0, detail: 0 };
   }
@@ -82,6 +83,16 @@ export class EventManager {
       },
       stopPropagation() {
         ev.propagationStopped = true;
+      },
+      // Pointer capture, DOM-like: while captured, mousemove/mouseup go to
+      // the capturing node instead of whatever is under the pointer, so a
+      // drag keeps working past the widget's own bounds. Released
+      // automatically on mouseup and when the node unmounts.
+      capturePointer: () => {
+        this.capturedNode = target;
+      },
+      releasePointer: () => {
+        if (this.capturedNode === target) this.capturedNode = null;
       },
       ...extra,
     };
@@ -160,10 +171,13 @@ export class EventManager {
   _onMouseUp(native) {
     if (WHEEL_BUTTONS[native.keycode]) return; // wheel release
     runWithPriority(DiscreteEventPriority, () => {
-      const target = this._hit(native);
+      const captured = this._captured();
+      const target = captured ?? this._hit(native);
       const ev = this.dispatch('MouseUp', target, native, {
         button: native.keycode,
       });
+      // capture ends with the gesture, like implicit DOM pointer capture
+      this.capturedNode = null;
       if (this.downNode && !this.downNode.destroyed) {
         this.downNode._defaultMouseUp?.(ev);
       }
@@ -188,14 +202,23 @@ export class EventManager {
 
   _onMouseMove(native) {
     runWithPriority(ContinuousEventPriority, () => {
-      const target = this._hit(native);
-      this._updateHover(this._path(target), native);
+      const captured = this._captured();
+      const target = captured ?? this._hit(native);
+      // while captured, hover stays put: dragging a slider must not light
+      // up every widget the pointer crosses
+      this._updateHover(captured ? this.hoverPath : this._path(target), native);
       const ev = this.dispatch('MouseMove', target, native);
       // drags deliver to the pressed node even when the pointer leaves it
       if (this.downNode && !this.downNode.destroyed) {
         this.downNode._defaultMouseDrag?.(ev);
       }
     });
+  }
+
+  /** The capturing node, dropping it if it has gone away. */
+  _captured() {
+    if (this.capturedNode?.destroyed) this.capturedNode = null;
+    return this.capturedNode;
   }
 
   _isFocusable(node) {
@@ -323,6 +346,7 @@ export class EventManager {
   /** Called when a node leaves the tree so stale references don't linger. */
   forget(node) {
     if (this.downNode === node) this.downNode = null;
+    if (this.capturedNode === node) this.capturedNode = null;
     if (this.focused === node) this.focused = null;
     this.hoverPath = this.hoverPath.filter((n) => n !== node);
   }

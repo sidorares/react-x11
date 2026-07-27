@@ -1,5 +1,6 @@
 // Widget gallery: every standard component in one window — Button,
-// Checkbox, Radio/RadioGroup, Switch, ProgressBar, Select, <textinput>.
+// Checkbox, Radio/RadioGroup, Switch, Slider, ProgressBar, Select,
+// <textinput>.
 // Run with: npm run examples:widgets  (needs an X server / DISPLAY)
 import React, { useEffect, useState } from 'react';
 import {
@@ -10,6 +11,7 @@ import {
   Radio,
   RadioGroup,
   Select,
+  Slider,
   Switch,
 } from '../src/index.js';
 
@@ -30,6 +32,7 @@ function App() {
   const [flavor, setFlavor] = useState('vanilla');
   const [speed, setSpeed] = useState('fast');
   const [presses, setPresses] = useState(0);
+  const [volume, setVolume] = useState(40);
   const [progress, setProgress] = useState(0.2);
 
   // demo animation: creep the progress bar while "notifications" are on
@@ -43,7 +46,7 @@ function App() {
   }, [notify]);
 
   return (
-    <window width={460} height={530} title="widgets" backgroundColor="#f5f6fa">
+    <window width={460} height={580} title="widgets" backgroundColor="#f5f6fa">
       <box flexGrow={1} padding={16} gap={14}>
         <text fontSize={20} color="#2d3436">
           Widget gallery
@@ -80,6 +83,18 @@ function App() {
         <Row label="Switch">
           <Switch checked={notify} onChange={setNotify} />
           <text color="#2d3436">{notify ? 'notifications on' : 'off'}</text>
+        </Row>
+
+        <Row label="Slider">
+          <Slider
+            value={volume}
+            min={0}
+            max={100}
+            step={5}
+            width={200}
+            onChange={setVolume}
+          />
+          <text color="#2d3436">{`${volume}`}</text>
         </Row>
 
         <Row label="Progress">
