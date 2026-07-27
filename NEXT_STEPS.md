@@ -15,14 +15,12 @@
 >
 > **Plan (next session):**
 >
-> 1. Merge release-please #17 and publish 1.0.0.
-> 2. Split `src/components.js` (1500+ lines, 13 components) into
->    `src/components/`.
-> 3. `<textarea>` polish: Ctrl+arrow word movement, PageUp/Down,
+> 1. `<textarea>` polish: Ctrl+arrow word movement, PageUp/Down,
 >    Shift+click extend, drawn scrollbar.
-> 4. `Select` follow-ups: type-ahead (jump to the option matching typed
->    letters) and PageUp/PageDown in the open menu.
-> 5. Upstream (ntk): distribute half-leading inside TextLayout itself
+> 2. `Select`/menu follow-up: PageUp/PageDown in the open menu.
+> 3. Then merge release-please #17 and publish 1.0.0 (the owner wants the
+>    planned widget work in first).
+> 4. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
 >    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>`.
 
@@ -50,7 +48,7 @@ Left for later: per-link pointer cursor (cursor is per-node today),
 ### 2. Standard UI components (plain React, like `Select`)
 
 Mostly DONE (PR #30): `Button`, `Checkbox`, `Radio`/`RadioGroup`,
-`Switch`, `ProgressBar` shipped in `src/components.js` with a shared
+`Switch`, `ProgressBar` shipped in `src/components/` with a shared
 merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 `useControl` hook (hover/focus, click + Space/Enter, disabled). Gallery:
 `examples/widgets.jsx`. Still open:

@@ -36,6 +36,11 @@ no override-redirect staging (issue #4).
   the widget's `layout(width)`/`contentHeight` feeds a yoga measure
   function, `draw(ctx, x, y)` paints, `onInvalidate` (ntk ≥ 3.4.0)
   reflows on async content (mermaid, images).
+- `src/components/` — the widget set, plain React over the host
+  primitives (no reconciler support needed). One module per widget, with
+  the shared plumbing in `theme.js` (palette, `useTheme`, `useControl`),
+  `anchor.js` (popup placement + label measurement), `typeahead.js` and
+  `keys.js`. `index.js` re-exports the public names.
 - `src/styles.js` — flat style props → yoga setters; paint prop
   classification; text style resolution.
 - `src/events.js` — `EventManager`: ntk window events → synthetic events
