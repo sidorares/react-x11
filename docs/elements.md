@@ -38,7 +38,10 @@ pass through to yoga.
 ## Interaction props
 
 `cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`,
-resize arrows, … — the ntk cursor name map), `focusable`,
+resize arrows, … — the ntk cursor name map), `focusable`, `tabIndex`
+(sequential focus order; `-1` is focusable but not tabbable), `autoFocus`,
+`trapFocus` (own a focus scope — Tab and presses stay inside it, focus is
+restored when it unmounts), `disabled` (never focusable),
 `pointerEvents: 'none'`, and the event handlers listed in
 [events.md](events.md).
 
@@ -97,10 +100,16 @@ event root. Anchor with `ev.nativeEvent.rootx/rooty` (pointer in screen
 coordinates) or a ref's `abs` rect plus the owner window's `x`/`y`.
 Same props as `<window>`; conditional rendering controls its lifetime.
 
-| prop        |                                                                           |
-| ----------- | ------------------------------------------------------------------------- |
-| `grab`      | hold a pointer grab while the popup is up — how menus behave on X (below) |
-| `onDismiss` | a press landed outside the popup: close it                                |
+| prop        |                                                                             |
+| ----------- | --------------------------------------------------------------------------- |
+| `grab`      | hold a pointer grab while the popup is up — how menus behave on X (below)   |
+| `onDismiss` | a press landed outside the popup: close it                                  |
+| `trapFocus` | own a focus scope: a modal (see [events.md](events.md#focus-scopes-modals)) |
+
+A popup never receives the X input focus, but nodes inside it can hold the
+**owner window's** focus and receive keys — with `trapFocus` and `autoFocus`
+that is a modal dialog. See
+[Focus inside a `<popup>`](events.md#focus-inside-a-popup).
 
 **`grab` is what makes a menu dismissable.** Without it, a press that lands
 anywhere else — another application, the root window, or even this app's own

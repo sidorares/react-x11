@@ -45,7 +45,7 @@ props — they can never go stale.
 | `onMouseDown` / `onMouseUp` / `onMouseMove` | move is coalesced to once per frame by ntk                                            |
 | `onMouseEnter` / `onMouseLeave`             | do not propagate; synthesized by hover-path diffing                                   |
 | `onWheel`                                   | X buttons 4–7; default action scrolls the nearest `<scrollview>`                      |
-| `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus                       |
+| `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus in `tabIndex` order   |
 | `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal              |
 
 ## Pointer capture
@@ -77,7 +77,84 @@ default), `autoFocus` takes it at mount, and every drawn node has
 `<scrollview>` scrolls it into view. Mousedown focuses the nearest
 focusable ancestor of the hit node; Tab / Shift+Tab cycle through focusable
 nodes in tree order. Keyboard
-events route to the focused node's ancestor chain.
+events route to the focused node's ancestor chain. `disabled` opts a node
+back out of focus, whatever else it says.
+
+### Tab order
+
+`tabIndex` sets the sequential focus order, following the DOM's rules:
+
+- nodes with a **positive** `tabIndex` come first, in ascending order;
+- then everything focusable without one (the implicit `0` group), in tree
+  order;
+- `tabIndex={-1}` is focusable — by a press, and by `focus()` — but Tab
+  never lands on it;
+- an explicit `tabIndex` makes a node focusable without also passing
+  `focusable`.
+
+Tab out of a node that is not in the tab order (`tabIndex={-1}`, or a node
+outside the current focus scope) and traversal starts from the beginning of
+the order.
+
+```jsx
+<box tabIndex={1} />   {/* visited first  */}
+<box tabIndex={2} />   {/* then this      */}
+<box focusable />      {/* then tree order */}
+<box tabIndex={-1} />  {/* clickable, never tabbed to */}
+```
+
+### Focus scopes (modals)
+
+`trapFocus` makes a node own a **focus scope**. While it is the innermost
+scope:
+
+- Tab / Shift+Tab only visit focusables inside it — the rest of the window
+  is unreachable by keyboard;
+- a press outside it does not move focus (poking at the window behind a
+  modal is inert as far as focus goes — the press itself still dispatches,
+  so pair it with `grab` + `onDismiss` for a real modal);
+- when the scope unmounts, focus goes back to whatever had it before the
+  scope opened — no bookkeeping in the widget.
+
+That is a modal dialog, with the popup taking focus at mount:
+
+```jsx
+function Dialog({ open, x, y, onClose }) {
+  if (!open) return null;
+  return (
+    <popup
+      trapFocus
+      grab
+      x={x}
+      y={y}
+      width={280}
+      height={120}
+      onDismiss={onClose}
+    >
+      <textinput autoFocus />
+      <Button label="OK" onPress={onClose} />
+    </popup>
+  );
+}
+```
+
+Scopes nest (a modal opened from a modal); the innermost one wins, and
+popping it hands focus back to the outer one. Programmatic `focus()` is
+never blocked by a scope — the trap is about Tab and presses.
+
+### Focus inside a `<popup>`
+
+An override-redirect window never receives the X input focus, so a popup
+cannot hold focus itself: the **owner window** does, and a node inside the
+popup can be the focused node of that window. Keys arrive at the owner
+window and are dispatched to it, then bubble out through the popup's
+position in the JSX tree into the owner's handlers, so nothing has to
+proxy them.
+
+One consequence worth knowing: a press inside a popup that lands on nothing
+focusable leaves the owner window's focus alone. Menus depend on it —
+their rows are not focusable, and the trigger keeps handling keys while the
+menu is open (`Menu`, `Select`).
 
 ### Window focus
 

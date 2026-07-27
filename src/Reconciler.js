@@ -252,13 +252,19 @@ const HostConfig = {
   finalizeInitialChildren(instance, type, props) {
     // Popups are not attached to the container or realized by a parent
     // window; commitMount realizes them against the screen root. autoFocus
-    // needs commitMount too — the node has to be in the tree first.
-    return type === 'popup' || Boolean(props.autoFocus);
+    // and trapFocus need commitMount too — the node has to be in the tree
+    // first, so it can find the EventManager that owns focus.
+    return (
+      type === 'popup' || Boolean(props.autoFocus) || Boolean(props.trapFocus)
+    );
   },
 
   commitMount(instance, type, props) {
     if (type === 'popup') {
       instance.realize(null);
+    }
+    if (props.trapFocus) {
+      instance._syncFocusScope?.();
     }
     if (props.autoFocus && typeof instance.focus === 'function') {
       instance.focus();

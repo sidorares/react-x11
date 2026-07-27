@@ -173,6 +173,9 @@ export class Node {
     if (this.yoga) {
       layoutChanged = applyLayoutStyle(this.yoga, newProps, oldProps ?? prev);
     }
+    if (Boolean(newProps.trapFocus) !== Boolean((oldProps ?? prev).trapFocus)) {
+      this._syncFocusScope();
+    }
     this.root?.invalidate(layoutChanged);
   }
 
@@ -194,20 +197,52 @@ export class Node {
    * X input focus to the window if the window manager gave it away.
    */
   focus() {
-    this.root?.events?.focus(this);
+    this._focusManager()?.focus(this);
     return this;
   }
 
   /** Give up focus, leaving the window with nothing focused. */
   blur() {
-    const events = this.root?.events;
+    const events = this._focusManager();
     if (events?.focused === this) events.focus(null);
     return this;
   }
 
   /** Whether this node has the owning window's focus. */
   get focused() {
-    return this.root?.events?.focused === this;
+    return this._focusManager()?.focused === this;
+  }
+
+  /** Whether focus is on this node or inside it — CSS `:focus-within`. A
+   * `<popup>` counts as inside the node it hangs off in the JSX tree, which
+   * is what a modal needs to know before taking focus itself. */
+  get focusWithin() {
+    const focused = this._focusManager()?.focused;
+    return Boolean(focused) && this.contains(focused);
+  }
+
+  /** Whether `node` is this node or a descendant of it (DOM `contains`). */
+  contains(node) {
+    for (let n = node; n; n = n.parent) {
+      if (n === this) return true;
+    }
+    return false;
+  }
+
+  /** Where focus for this node lives: its own window's EventManager, or —
+   * inside a `<popup>`, which never receives the X input focus — the owner
+   * window's (see EventManager.focusManager). */
+  _focusManager() {
+    return this.root?.events?.focusManager ?? null;
+  }
+
+  /** Register or drop this node's focus scope to match the `trapFocus` prop.
+   * Idempotent: called at mount (commitMount) and on every prop update. */
+  _syncFocusScope() {
+    const events = this._focusManager();
+    if (!events) return;
+    if (this.props.trapFocus) events.pushScope(this);
+    else events.popScope(this);
   }
 
   /** Drawn, visible children in paint order (stable sort by zIndex). */
@@ -1668,6 +1703,9 @@ export class WindowNode extends Node {
   applyProps(newProps, oldProps) {
     const before = oldProps ?? this.props;
     this.props = newProps;
+    if (Boolean(newProps.trapFocus) !== Boolean(before.trapFocus)) {
+      this._syncFocusScope();
+    }
     const wnd = this.window;
     if (!wnd) {
       // not realized yet: refresh creation attributes instead
