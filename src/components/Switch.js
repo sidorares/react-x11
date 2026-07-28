@@ -8,28 +8,44 @@ import { useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
 
+const TRACK_WIDTH = 36;
+const THUMB = 16;
+const INSET = 2;
+
 const s = createStyles({
   track: {
-    width: 36,
+    width: TRACK_WIDTH,
     height: 20,
     borderRadius: 10,
-    padding: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'center',
+    transition: { backgroundColor: 120 },
   },
-  thumb: { width: 16, height: 16, borderRadius: 8 },
-  on: { justifyContent: 'flex-end' },
-  off: { justifyContent: 'flex-start' },
+  // absolutely positioned so the thumb slides on `left`: `justifyContent`
+  // would flip it between the ends with nothing in between to animate
+  thumb: {
+    position: 'absolute',
+    width: THUMB,
+    height: THUMB,
+    borderRadius: THUMB / 2,
+    transition: { left: 120 },
+  },
 });
+
+const THUMB_OFF = INSET;
+const THUMB_ON = TRACK_WIDTH - THUMB - INSET;
 
 /**
  * <Switch checked onChange disabled style/> — Checkbox semantics in a
- * sliding pill; the thumb sits at the end matching the state.
+ * sliding pill; the thumb slides to the end matching the state.
  *
  * The hover and focus tints are `:hover`/`:focus` blocks rather than React
  * state: the renderer already knows which node the pointer is over and
  * which one has focus, so lighting the track up is a repaint of one node
  * instead of a re-render of this component and everything under it.
+ *
+ * The slide is a `transition` on `left`, so the animation is the renderer's
+ * frame clock rather than a requestAnimationFrame loop written here — and
+ * the same declaration animates the track colour with it.
  */
 export function Switch({
   checked = false,
@@ -50,7 +66,6 @@ export function Switch({
       style: [
         control.style,
         s.track,
-        checked ? s.on : s.off,
         {
           backgroundColor: disabled
             ? theme.track
@@ -67,6 +82,14 @@ export function Switch({
         style,
       ],
     },
-    h('box', { style: [s.thumb, { backgroundColor: theme.background }] }),
+    h('box', {
+      style: [
+        s.thumb,
+        {
+          left: checked ? THUMB_ON : THUMB_OFF,
+          backgroundColor: theme.background,
+        },
+      ],
+    }),
   );
 }

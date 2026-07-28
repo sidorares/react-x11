@@ -294,3 +294,231 @@ test('REACT_X11_STYLE_ONLY: a flat style prop is an error that names the fix', a
   assert.match(out, /style=\{\{ padding: … \}\}/, 'the error shows the fix');
   assert.match(out, /window ok/, '<window width>/<window minWidth> stay props');
 });
+
+// --- transitions -----------------------------------------------------------
+
+test('a transition eases a colour instead of snapping to it', async () => {
+  const { setAnimationClock } = await import('../src/nodes.js');
+  let clock = 1000;
+  setAnimationClock(() => clock);
+  try {
+    const app = createMockApp();
+    ReactX11.render(
+      h(
+        'window',
+        { width: 100, height: 100 },
+        h('box', {
+          style: {
+            width: 40,
+            height: 40,
+            backgroundColor: '#000000',
+            transition: 100,
+            ':hover': { backgroundColor: '#ffffff' },
+          },
+        }),
+      ),
+      null,
+      app,
+    );
+    await tick();
+
+    const root = nodeOf(app);
+    const box = root.children[0];
+    assert.strictEqual(box.style.backgroundColor, '#000000');
+
+    moveMouse(app.windows[0], 20, 20);
+    assert.strictEqual(
+      box.style.backgroundColor,
+      '#000000',
+      'the frame the pointer arrives still shows the old value',
+    );
+
+    clock = 1050; // half way, eased
+    root._advanceAnimations(clock);
+    const mid = box.style.backgroundColor;
+    assert.match(mid, /^rgba\(/, 'interpolated through ntk’s colour parser');
+    const channel = Number(mid.slice(5).split(',')[0]);
+    assert.ok(
+      channel > 0 && channel < 255,
+      `midpoint should be grey, got ${mid}`,
+    );
+
+    clock = 1200; // past the end
+    root._advanceAnimations(clock);
+    assert.strictEqual(
+      box.style.backgroundColor,
+      '#ffffff',
+      'lands exactly on the declared value, not on a rounded rgba()',
+    );
+    assert.strictEqual(root._animating.size, 0, 'and stops asking for frames');
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
+test('an interrupted transition reverses from where it got to', async () => {
+  const { setAnimationClock } = await import('../src/nodes.js');
+  let clock = 0;
+  setAnimationClock(() => clock);
+  try {
+    const app = createMockApp();
+    ReactX11.render(
+      h(
+        'window',
+        { width: 100, height: 100 },
+        h('box', {
+          style: {
+            width: 40,
+            height: 40,
+            backgroundColor: '#000000',
+            transition: 100,
+            ':hover': { backgroundColor: '#ffffff' },
+          },
+        }),
+      ),
+      null,
+      app,
+    );
+    await tick();
+    const root = nodeOf(app);
+    const box = root.children[0];
+
+    moveMouse(app.windows[0], 20, 20);
+    clock = 30;
+    root._advanceAnimations(clock);
+    const partway = box.style.backgroundColor;
+
+    moveMouse(app.windows[0], 90, 90); // leave before it finished
+    assert.strictEqual(
+      box.style.backgroundColor,
+      partway,
+      'the reverse starts from the current on-screen value, not from the end',
+    );
+    clock = 200;
+    root._advanceAnimations(clock);
+    assert.strictEqual(box.style.backgroundColor, '#000000');
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
+test('transitions cover layout too, and relayout as they run', async () => {
+  const { setAnimationClock } = await import('../src/nodes.js');
+  let clock = 0;
+  setAnimationClock(() => clock);
+  try {
+    const app = createMockApp();
+    const ui = (left) =>
+      h(
+        'window',
+        { width: 200, height: 100 },
+        h('box', {
+          style: {
+            position: 'absolute',
+            left,
+            width: 20,
+            height: 20,
+            transition: { left: 100 },
+          },
+        }),
+      );
+    ReactX11.render(ui(0), null, app);
+    await tick();
+    const root = nodeOf(app);
+    const box = root.children[0];
+    assert.strictEqual(box.abs.x, 0);
+
+    ReactX11.render(ui(100), null, app);
+    clock = 50;
+    root._advanceAnimations(clock);
+    root.flush();
+    assert.ok(
+      box.abs.x > 0 && box.abs.x < 100,
+      `mid-transition the box is laid out part way, got ${box.abs.x}`,
+    );
+
+    clock = 500;
+    root._advanceAnimations(clock);
+    root.flush();
+    assert.strictEqual(box.abs.x, 100);
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
+test('a property with no midpoint snaps rather than animating', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    h(
+      'window',
+      { width: 100, height: 100 },
+      h('box', {
+        style: {
+          flexDirection: 'row',
+          transition: 100,
+          ':hover': { backgroundColor: 'red' },
+        },
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const root = nodeOf(app);
+  ReactX11.render(
+    h(
+      'window',
+      { width: 100, height: 100 },
+      h('box', { style: { flexDirection: 'column', transition: 100 } }),
+    ),
+    null,
+    app,
+  );
+  assert.strictEqual(
+    root.children[0].style.flexDirection,
+    'column',
+    'an enum has no midpoint: it takes effect at once',
+  );
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('Switch: the thumb slides between the ends instead of snapping', async () => {
+  const { Switch } = await import('../src/index.js');
+  const { setAnimationClock } = await import('../src/nodes.js');
+  let clock = 0;
+  setAnimationClock(() => clock);
+  try {
+    const app = createMockApp();
+    const render = (checked) =>
+      ReactX11.render(
+        h(
+          'window',
+          { width: 100, height: 60 },
+          h(Switch, { checked, onChange: () => {} }),
+        ),
+        null,
+        app,
+      );
+
+    render(false);
+    await tick();
+    const root = nodeOf(app);
+    const thumb = root.children[0].children[0];
+    const off = thumb.abs.x;
+
+    render(true);
+    clock = 60;
+    root._advanceAnimations(clock);
+    root.flush();
+    const mid = thumb.abs.x;
+    assert.ok(mid > off, `thumb should have moved by mid-flight, got ${mid}`);
+
+    clock = 400;
+    root._advanceAnimations(clock);
+    root.flush();
+    assert.ok(thumb.abs.x > mid, 'and keeps going to the on position');
+    assert.strictEqual(root._animating.size, 0, 'then the frame loop stops');
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
