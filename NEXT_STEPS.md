@@ -62,8 +62,12 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Slider** — DONE: `ev.capturePointer()` exposes pointer capture to
   userland, and `Slider` is built on it (drag past the widget bounds,
   arrows/Home/End/PageUp/Down)
-- **Switch animation** — thumb snaps today; animate via
-  requestAnimationFrame on the window ref, or step-render
+- **Switch animation** — thumb snaps today. Waiting on style transitions
+  (`transition: { backgroundColor: 150 }`) rather than a hand-rolled
+  requestAnimationFrame loop per widget: the same mechanism animates every
+  `:hover` tint. Deferred out of the style-channel prototype
+  ([docs/style-prototype.md](docs/style-prototype.md)) so the animation
+  loop lands as its own change
 - **Tooltip** — DONE: `useAnchor(ref)`/`anchorRect()` extracted from
   `Select` (and now flip at screen edges), `Tooltip` built on them
 - **Dialog** — DONE: a modal over `<popup trapFocus grab>`, centred with

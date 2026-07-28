@@ -101,10 +101,22 @@ focus in React state: no enter/leave handlers, no re-render on pointer move.
 clobbered the computed one — with `style: [base, checked && on, style]`,
 where precedence is stated.
 
+## Decided
+
+- **`':hover'`, not `_hover`.** The CSS spelling costs a pair of quotes and
+  buys transfer from every other styling system.
+- **Transitions come later.** They are what turns `:hover` from a
+  nice-to-have into the reason to adopt this — and they are also the one
+  item that puts an animation loop in the renderer, so they land as their
+  own change rather than riding along with the namespace split. When they
+  do, they close the "Switch animation" item in NEXT_STEPS §2, which is
+  really a request for this feature.
+
 ## Not done here
 
 Converting the other fifteen components, the examples beyond `dashboard.jsx`,
 the docs, and deleting the legacy branch in `Node._syncStyle`. Theme tokens
-(`backgroundColor="panel"` resolved through `ThemeProvider`) and transitions
-are the two obvious follow-ons — see the discussion of size queries and
-transitions in the PR.
+(`backgroundColor="panel"` resolved through `ThemeProvider`) and window size
+queries — the X11 analogue of `@media`, and layout-capable, since they are
+only re-evaluated during a layout pass that resize already triggers — are the
+follow-ons after transitions.
