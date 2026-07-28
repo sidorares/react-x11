@@ -15,7 +15,11 @@ function createMockApp() {
       InternAtom(onlyIfExists, name, cb) {
         cb(null, name === 'WM_DELETE_WINDOW' ? 999 : 1);
       },
+      ConfigureWindow(id, options) {
+        app.configureCalls.push([id, options]);
+      },
     },
+    configureCalls: [],
     windows: [],
     createWindow(attributes) {
       const handlers = {};
@@ -226,6 +230,199 @@ test('renders a top-level window with a child window', () => {
     'child should never be reparented',
   );
   assert.strictEqual(child.mapped, true, 'child should be mapped');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+// Replay the recorded ConfigureWindow requests over the stack X gives a
+// freshly created set of siblings (each new window on top), so the tests can
+// assert the order the server ends up with rather than the exact requests.
+function serverStack(app, createdIds) {
+  const stack = [...createdIds];
+  for (const [id, { sibling, stackMode }] of app.configureCalls) {
+    stack.splice(stack.indexOf(id), 1);
+    const at = stack.indexOf(sibling);
+    stack.splice(stackMode === 1 ? at : at + 1, 0, id);
+  }
+  return stack;
+}
+
+test('child windows stack in JSX order, and a reorder restacks them', () => {
+  const app = createMockApp();
+  const App = ({ order }) =>
+    React.createElement(
+      'window',
+      { width: 300, height: 200, title: 'main' },
+      order.map((title) =>
+        React.createElement('window', {
+          key: title,
+          title,
+          width: 50,
+          height: 50,
+        }),
+      ),
+    );
+
+  ReactX11.render(
+    React.createElement(App, { order: ['a', 'b', 'c'] }),
+    null,
+    app,
+  );
+  const [, a, b, c] = app.windows;
+  assert.deepStrictEqual(
+    [a.title, b.title, c.title],
+    ['a', 'b', 'c'],
+    'children are created in JSX order',
+  );
+  assert.deepStrictEqual(
+    app.configureCalls,
+    [],
+    'mount order already stacks right — X puts each new window on top',
+  );
+
+  ReactX11.render(
+    React.createElement(App, { order: ['c', 'a', 'b'] }),
+    null,
+    app,
+  );
+  const root = app.windows[0]._reactX11Node;
+  assert.deepStrictEqual(
+    root.children.map((child) => child.props.title),
+    ['c', 'a', 'b'],
+    'the node list follows the new JSX order, with no duplicates',
+  );
+  assert.strictEqual(
+    app.windows.length,
+    4,
+    'a reorder moves the windows, it does not recreate them',
+  );
+  assert.deepStrictEqual(
+    serverStack(app, [a.id, b.id, c.id]),
+    [c.id, a.id, b.id],
+    'the server stacks bottom-to-top in JSX order: c under a under b',
+  );
+  assert.strictEqual(
+    app.configureCalls.length,
+    2,
+    'one pass per commit: n-1 requests, not one per moved child',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('zIndex raises a child window above its later siblings', () => {
+  const app = createMockApp();
+  const render = (zIndex) =>
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement('window', {
+          key: 'a',
+          title: 'a',
+          zIndex,
+          width: 50,
+          height: 50,
+        }),
+        React.createElement('window', {
+          key: 'b',
+          title: 'b',
+          width: 50,
+          height: 50,
+        }),
+      ),
+      null,
+      app,
+    );
+
+  render(0);
+  const [, a, b] = app.windows;
+  assert.deepStrictEqual(app.configureCalls, [], 'no zIndex, no requests');
+
+  render(1);
+  assert.deepStrictEqual(
+    serverStack(app, [a.id, b.id]),
+    [b.id, a.id],
+    'the higher zIndex ends up on top even though it comes first in JSX',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('zIndex on a popup is inert — it is a child of the screen root', () => {
+  const app = createMockApp();
+  const render = (zIndex) =>
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement(
+          'box',
+          { flexGrow: 1 },
+          React.createElement('popup', {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 40,
+            zIndex,
+          }),
+        ),
+      ),
+      null,
+      app,
+    );
+
+  render(0);
+  render(2); // must not try to restack the <box> the popup is written under
+  assert.deepStrictEqual(app.configureCalls, []);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('reordering keyed drawn children moves them instead of duplicating', () => {
+  const app = createMockApp();
+  const App = ({ order }) =>
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      order.map((color) =>
+        React.createElement('box', {
+          key: color,
+          backgroundColor: color,
+          width: 10,
+          height: 10,
+        }),
+      ),
+    );
+
+  ReactX11.render(
+    React.createElement(App, { order: ['red', 'green', 'blue'] }),
+    null,
+    app,
+  );
+  const root = app.windows[0]._reactX11Node;
+  const green = root.children[1];
+
+  ReactX11.render(
+    React.createElement(App, { order: ['blue', 'red', 'green'] }),
+    null,
+    app,
+  );
+
+  assert.deepStrictEqual(
+    root.children.map((child) => child.props.backgroundColor),
+    ['blue', 'red', 'green'],
+    'children follow the new order exactly once each',
+  );
+  assert.strictEqual(root.children[2], green, 'the moved node is reused');
+  assert.deepStrictEqual(
+    root.paintOrder().map((child) => child.props.backgroundColor),
+    ['blue', 'red', 'green'],
+    'paint order follows too — the last sibling paints on top',
+  );
+  // the yoga tree has to track the move: insertChild on a node that still
+  // has a parent aborts the wasm module
+  assert.strictEqual(root.yoga.getChildCount(), 3);
 
   ReactX11.unmountComponentAtNode(app);
 });

@@ -98,8 +98,14 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   ntk can do it, renderer needs a group-opacity paint path
 - **Dirty-rect painting** — still full-window repaint per frame
   (NEXT_STEPS §8.4 below); fine so far, measure before optimizing
-- **Stacking of real windows** — `insertBefore` for `<window>`/`<popup>`
-  ignores order (X ConfigureWindow stackMode not modelled)
+- **Stacking of real windows** — DONE for child `<window>`s: JSX order
+  (and `zIndex`) is the stacking order, applied with ConfigureWindow
+  `sibling`+`stackMode` once per commit. The same fix made `insertBefore`
+  handle _moves_ at all — it used to splice a keyed child in a second time
+  and abort yoga on the duplicate `insertChild`. Still open: `<popup>`s
+  are siblings of every other app's window under the screen root, so tree
+  order says nothing useful about them; top-level windows are the WM's
+  (use `alwaysOnTop`)
 - ~~WM close button~~ DONE: `<window onCloseRequest>` opts into
   WM_DELETE_WINDOW and dispatches at discrete priority (unmount/hide/quit
   is the handler's choice); see examples/windows.jsx
