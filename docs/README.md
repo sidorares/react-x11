@@ -10,6 +10,8 @@
   event object shape, focus, cursors, default actions.
 - [devtools.md](devtools.md) — React DevTools integration and other
   debugging aids.
+- [click-to-component.md](click-to-component.md) — Alt+Click a rendered
+  element to open its JSX source line in your editor.
 
 ## Entry points
 
@@ -45,12 +47,14 @@ on ntk's frame clock.
 
 ## Environment variables
 
-| variable                   | effect                                                  |
-| -------------------------- | ------------------------------------------------------- |
-| `DISPLAY`                  | X server to connect to (standard X11)                   |
-| `REACT_X11_DEVTOOLS=1`     | connect to a running `react-devtools` (see devtools.md) |
-| `REACT_X11_DEVTOOLS_HOST`  | devtools host (default `localhost`)                     |
-| `REACT_X11_DEVTOOLS_PORT`  | devtools port (default `8097`)                          |
-| `REACT_X11_DEBUG_LAYOUT=1` | outline every laid-out node, color-coded by tree depth  |
+| variable                         | effect                                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------------- |
+| `DISPLAY`                        | X server to connect to (standard X11)                                                    |
+| `REACT_X11_DEVTOOLS=1`           | connect to a running `react-devtools` (see devtools.md)                                  |
+| `REACT_X11_DEVTOOLS_HOST`        | devtools host (default `localhost`)                                                      |
+| `REACT_X11_DEVTOOLS_PORT`        | devtools port (default `8097`)                                                           |
+| `REACT_X11_DEBUG_LAYOUT=1`       | outline every laid-out node, color-coded by tree depth                                   |
+| `REACT_X11_CLICK_TO_COMPONENT=1` | Alt+Click opens the clicked element's source, using `cursor` (see click-to-component.md) |
+| `REACT_X11_EDITOR`               | editor CLI for click-to-component — setting this alone also enables it                   |
 
 - [glx-plan.md](glx-plan.md) — plan for 3D components over indirect GLX

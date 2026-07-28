@@ -405,6 +405,13 @@ if (process.env.REACT_X11_DEVTOOLS) {
   devtools.connect(Renderer);
 }
 
+if (process.env.REACT_X11_CLICK_TO_COMPONENT || process.env.REACT_X11_EDITOR) {
+  // Naming an editor already means you want the feature on — no need to
+  // also set REACT_X11_CLICK_TO_COMPONENT=1 just to pick one.
+  const clickToComponent = await import('./ClickToComponent.js');
+  clickToComponent.install();
+}
+
 const roots = new Map();
 let cachedNtkApp = null;
 

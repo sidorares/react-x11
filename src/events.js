@@ -10,6 +10,18 @@ import {
 
 const XK_TAB = 0xff09;
 const WHEEL_BUTTONS = { 4: [0, -48], 5: [0, 48], 6: [-48, 0], 7: [48, 0] };
+// X11 KeyButMask bit for Mod1 (Alt on virtually every layout), same bitmask
+// `shiftKey`/`ctrlKey` above already read `buttons` from.
+const MOD1_MASK = 8;
+
+// Click-to-component hook (see ClickToComponent.js). At most one handler is
+// installed, gated by REACT_X11_CLICK_TO_COMPONENT — checked ahead of the
+// normal press handling so an Alt+Click never also starts a drag or moves
+// focus.
+let clickToComponentHandler = null;
+export function setClickToComponentHandler(fn) {
+  clickToComponentHandler = fn;
+}
 
 export class EventManager {
   constructor(windowNode) {
@@ -207,6 +219,10 @@ export class EventManager {
   }
 
   _onMouseDown(native) {
+    if (clickToComponentHandler && Boolean(native.buttons & MOD1_MASK)) {
+      clickToComponentHandler(this._hit(native), native);
+      return;
+    }
     if (this._pressOutside(native)) {
       runWithPriority(DiscreteEventPriority, () => {
         this.node.props.onDismiss?.(
