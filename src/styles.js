@@ -178,8 +178,77 @@ export const isStyleProp = (name) => STYLE_PROPS.has(name);
 
 const isState = (key) => key.charCodeAt(0) === 58; /* ':' */
 
+/**
+ * Window size queries: `'@width >= 600'`. The X11 analogue of `@media` —
+ * what a style can usefully ask about here is the window it is being laid
+ * out in, not the screen.
+ *
+ * Unlike a state block, a size query *may* set layout properties. That is
+ * not an inconsistency: pointer state changes must never reflow the tree,
+ * but a size query is only ever re-evaluated during a layout pass that a
+ * resize has already triggered, so it costs nothing extra.
+ */
+const SIZE_QUERY = /^@(width|height)\s*(>=|<=|>|<)\s*(\d+(?:\.\d+)?)$/;
+const isSizeQuery = (key) => key.charCodeAt(0) === 64; /* '@' */
+
+const parsedQueries = new Map();
+function parseSizeQuery(key) {
+  let q = parsedQueries.get(key);
+  if (q === undefined) {
+    const m = SIZE_QUERY.exec(key);
+    q = m ? { axis: m[1], op: m[2], value: Number(m[3]) } : null;
+    parsedQueries.set(key, q);
+  }
+  return q;
+}
+
+function queryMatches(q, size) {
+  const v = size[q.axis];
+  if (v == null) return false;
+  return q.op === '>='
+    ? v >= q.value
+    : q.op === '<='
+      ? v <= q.value
+      : q.op === '>'
+        ? v > q.value
+        : v < q.value;
+}
+
+export function styleHasSizeQueries(style) {
+  for (const key of Object.keys(style)) if (isSizeQuery(key)) return true;
+  return false;
+}
+
+/**
+ * Merge the size-query blocks that match `size`, in declaration order, over
+ * the base. Returns the style itself when nothing matches, so the identity
+ * fast path survives the common case.
+ */
+export function resolveSizeQueries(style, size) {
+  if (!size) return style;
+  let out = style;
+  for (const key of Object.keys(style)) {
+    if (!isSizeQuery(key)) continue;
+    const q = parseSizeQuery(key);
+    if (!q || !queryMatches(q, size)) continue;
+    if (out === style) out = { ...style };
+    Object.assign(out, style[key]);
+  }
+  return out;
+}
+
 function validateStyle(style, where) {
   for (const key of Object.keys(style)) {
+    if (isSizeQuery(key)) {
+      if (!parseSizeQuery(key)) {
+        throw new Error(
+          `react-x11: bad size query "${key}" in ${where} ` +
+            '(expected e.g. "@width >= 600" on width or height)',
+        );
+      }
+      validateStyle(style[key] ?? {}, `${where} ${key}`);
+      continue;
+    }
     if (isState(key)) {
       if (!STATE_KEYS.includes(key)) {
         throw new Error(

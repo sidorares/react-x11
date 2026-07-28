@@ -21,6 +21,8 @@ import {
   isLayoutProp,
   styleUsesTokens,
   resolveTokens,
+  styleHasSizeQueries,
+  resolveSizeQueries,
 } from './styles.js';
 import { EventManager } from './events.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
@@ -195,6 +197,23 @@ export class Node {
     // `disabled` is a prop, not something the pointer does, so it is read
     // straight off props rather than driven by the event manager
     this.states[':disabled'] = Boolean(props.disabled);
+    // window size queries fold into the base before state blocks, so a
+    // `:hover` inside the wide layout still wins over the wide layout
+    const queried = styleHasSizeQueries(this._baseStyle);
+    if (queried !== this._queried) {
+      this._queried = queried;
+      const root = this.root;
+      if (root?._sizeQueryNodes) {
+        if (queried) root._sizeQueryNodes.add(this);
+        else root._sizeQueryNodes.delete(this);
+      }
+    }
+    if (queried) {
+      this._baseStyle = resolveSizeQueries(
+        this._baseStyle,
+        this.root?.querySize ?? null,
+      );
+    }
     this._stateful = hasStateStyles(this._baseStyle);
     return this._retarget(
       this._stateful
@@ -288,6 +307,19 @@ export class Node {
     return this.kind === 'window';
   }
 
+  /** Join the owning window's size-query registry, and take the current
+   * size into account — a node mounted after a resize has to match against
+   * the size the window is now, not the one it started at. */
+  _registerSizeQueries() {
+    if (this._queried && this.root?._sizeQueryNodes) {
+      this.root._sizeQueryNodes.add(this);
+      if (this.root.querySize) this._sizeQueriesChanged();
+    }
+    for (const child of this.children) {
+      if (!child.isWindow) child._registerSizeQueries();
+    }
+  }
+
   /** Style names this element claims as its own semantics (see WindowNode). */
   get semanticNames() {
     return NO_SEMANTIC_NAMES;
@@ -310,6 +342,18 @@ export class Node {
         : own
       : (inherited ?? null);
     return this._theme;
+  }
+
+  /** The owning window resized: re-resolve, since a query block may now
+   * match that did not, or the other way round. */
+  _sizeQueriesChanged() {
+    if (!this._queried || this.destroyed) return;
+    const before = this.style;
+    this._syncStyle(this.props);
+    if (textStyleChanged(this.style, before)) this._textContentChanged();
+    if (this.yoga && this.style !== before) {
+      applyLayoutStyle(this.yoga, this.style, before);
+    }
   }
 
   /** The theme above or on this node changed: drop the caches and restyle
@@ -398,6 +442,7 @@ export class Node {
       this.yoga.insertChild(child.yoga, this._yogaIndexAt(index));
     }
     child._setRoot(this.root);
+    child._registerSizeQueries();
     // it can see its ancestors now, so any token in its style can resolve.
     // With no theme anywhere there is nothing to resolve and nothing to walk
     if (this.theme || child.props.theme) child._themeChanged();
@@ -1818,6 +1863,10 @@ export class WindowNode extends Node {
     // frame is being rendered for
     this._animating = new Set();
     this.frameTime = 0;
+    // nodes with `@width`/`@height` blocks, and the size they last matched
+    // against
+    this._sizeQueryNodes = new Set();
+    this.querySize = null;
   }
 
   /** Create the real X11 window (commit phase only). Children windows are
@@ -2118,6 +2167,27 @@ export class WindowNode extends Node {
     );
   }
 
+  /**
+   * Re-evaluate the size-query blocks for this window's current size, just
+   * before laying out. This is the whole reason a size query may carry
+   * layout properties while a state block may not: it only ever runs inside
+   * a layout pass the resize already required.
+   */
+  _resolveSizeQueries(width, height) {
+    if (this._sizeQueryNodes.size === 0) {
+      this.querySize = this.querySize ?? { width, height };
+      return;
+    }
+    if (this.querySize?.width === width && this.querySize?.height === height) {
+      return;
+    }
+    this.querySize = { width, height };
+    for (const node of [...this._sizeQueryNodes]) {
+      if (node.destroyed) this._sizeQueryNodes.delete(node);
+      else node._sizeQueriesChanged();
+    }
+  }
+
   /** A node in this window started a transition. */
   _startAnimating(node) {
     this._animating.add(node);
@@ -2167,6 +2237,7 @@ export class WindowNode extends Node {
     const width = this.window.width ?? this.props.width ?? 0;
     const height = this.window.height ?? this.props.height ?? 0;
     if (this.needsLayout) {
+      this._resolveSizeQueries(width, height);
       this.yoga.setWidth(width);
       this.yoga.setHeight(height);
       this.yoga.calculateLayout(width, height, Yoga.DIRECTION_LTR);

@@ -128,7 +128,9 @@ instead of a silent no-op. `transition` animates numbers and colours off the
 window's frame clock, starting from what is on screen so an interrupted
 transition reverses. `$token` style values resolve against the nearest
 `theme` prop, so a hoisted style can follow the palette with no React
-context. See [docs/styling.md](docs/styling.md). Left: window size queries.
+context, and `'@width >= 600'` blocks restyle for the window's size —
+layout included, since they only re-run inside a layout pass a resize
+already required. See [docs/styling.md](docs/styling.md).
 
 ### 4. Ecosystem / DX
 

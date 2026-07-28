@@ -49,6 +49,8 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
   change to that property takes ([styling.md](styling.md#transitions))
 - any value may be a **theme token**: `'$panel'` resolves against the nearest
   `theme` prop above the node ([styling.md](styling.md#theme-tokens))
+- `'@width >= 600'` blocks restyle for the window's size, layout included
+  ([styling.md](styling.md#window-size-queries))
 - `opacity` is not implemented yet (see NEXT_STEPS.md)
 
 `cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`, resize
