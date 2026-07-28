@@ -85,7 +85,6 @@ function Scene({ spinning }) {
 
   return (
     <glarea
-      flexGrow={1}
       clearColor="#12161f"
       glx={{ DEPTH_SIZE: 24 }}
       frameLoop={spinning ? 'always' : 'demand'}
@@ -106,6 +105,7 @@ function Scene({ spinning }) {
         gl.CallList(CUBE_LIST);
         if (spinning) setAngle((a) => a + 1.5);
       }}
+      style={{ flexGrow: 1 }}
     />
   );
 }
@@ -115,12 +115,19 @@ function App() {
 
   return (
     <window width={520} height={400} title="react-x11 — <glarea>">
-      <box flexGrow={1} padding={12} gap={12} backgroundColor="#f4f6f8">
+      <box
+        style={{
+          flexGrow: 1,
+          padding: 12,
+          gap: 12,
+          backgroundColor: '#f4f6f8',
+        }}
+      >
         <Scene spinning={spinning} />
-        <box flexDirection="row" alignItems="center" gap={12}>
+        <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Switch checked={spinning} onChange={setSpinning} />
-          <text fontSize={13}>Spin</text>
-          <box flexGrow={1} />
+          <text style={{ fontSize: 13 }}>Spin</text>
+          <box style={{ flexGrow: 1 }} />
           <Button onPress={() => setSpinning((s) => !s)}>
             {spinning ? 'Pause' : 'Play'}
           </Button>

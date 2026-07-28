@@ -16,13 +16,17 @@ function Satellite({ id, index, clicks, onClick, onClose }) {
       x={420 + index * 44}
       y={120 + index * 44}
       title={`satellite #${id}`}
-      backgroundColor={PALETTE[id % PALETTE.length]}
       onCloseRequest={onClose}
+      style={{ backgroundColor: PALETTE[id % PALETTE.length] }}
     >
-      <box flexGrow={1} padding={14} gap={10} alignItems="flex-start">
-        <text color="#2d3436">{`I am window #${id}.`}</text>
-        <text color="#7f8c8d">{`${clicks} clicks — in every window`}</text>
-        <box flexDirection="row" gap={8}>
+      <box
+        style={{ flexGrow: 1, padding: 14, gap: 10, alignItems: 'flex-start' }}
+      >
+        <text style={{ color: '#2d3436' }}>{`I am window #${id}.`}</text>
+        <text
+          style={{ color: '#7f8c8d' }}
+        >{`${clicks} clicks — in every window`}</text>
+        <box style={{ flexDirection: 'row', gap: 8 }}>
           <Button primary onPress={onClick}>
             +1
           </Button>
@@ -47,14 +51,21 @@ function App() {
         width={320}
         height={200}
         title="windows"
-        backgroundColor="#f5f6fa"
         onCloseRequest={() => process.exit(0)}
+        style={{ backgroundColor: '#f5f6fa' }}
       >
-        <box flexGrow={1} padding={16} gap={12} alignItems="flex-start">
-          <text fontSize={18} color="#2d3436">
+        <box
+          style={{
+            flexGrow: 1,
+            padding: 16,
+            gap: 12,
+            alignItems: 'flex-start',
+          }}
+        >
+          <text style={{ fontSize: 18, color: '#2d3436' }}>
             One React tree, many windows
           </text>
-          <text color="#7f8c8d">
+          <text style={{ color: '#7f8c8d' }}>
             {`${wins.length} satellite${wins.length === 1 ? '' : 's'} open, ${clicks} clicks total`}
           </text>
           <Button primary onPress={open}>

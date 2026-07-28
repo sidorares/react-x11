@@ -52,9 +52,14 @@ function App() {
   };
 
   return (
-    <window width={420} height={380} title="form" backgroundColor="#f5f6fa">
-      <box flexGrow={1} padding={16} gap={12}>
-        <text fontSize={20} color="#2d3436">
+    <window
+      width={420}
+      height={380}
+      title="form"
+      style={{ backgroundColor: '#f5f6fa' }}
+    >
+      <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
+        <text style={{ fontSize: 20, color: '#2d3436' }}>
           Sign the guestbook
         </text>
 
@@ -64,25 +69,26 @@ function App() {
           placeholder="Your name"
           onChange={setName}
           onSubmit={submit}
-          padding={8}
-          borderRadius={4}
-          borderWidth={1}
-          borderColor="#b2bec3"
-          backgroundColor="white"
+          style={{
+            padding: 8,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: '#b2bec3',
+            backgroundColor: 'white',
+          }}
         />
 
-        <box flexDirection="row" alignItems="center" gap={12}>
+        <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Select
-            flexGrow={1}
             options={COLORS}
             value={color}
             onChange={setColor}
+            style={{ flexGrow: 1 }}
           />
           <RadioGroup
             value={weight}
             onChange={setWeight}
-            flexDirection="row"
-            gap={12}
+            style={{ flexDirection: 'row', gap: 12 }}
           >
             {WEIGHTS.map((w) => (
               <Radio key={w} value={w} label={w} />
@@ -90,21 +96,21 @@ function App() {
           </RadioGroup>
         </box>
 
-        <box flexDirection="row" alignItems="center" gap={12}>
-          <text color="#636e72">size</text>
+        <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <text style={{ color: '#636e72' }}>size</text>
           <Slider
-            flexGrow={1}
             min={12}
             max={32}
             value={size}
             onChange={setSize}
+            style={{ flexGrow: 1 }}
           />
-          <text color="#636e72">{String(size)}</text>
+          <text style={{ color: '#636e72' }}>{String(size)}</text>
         </box>
 
-        <box flexDirection="row" alignItems="center" gap={12}>
+        <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Checkbox checked={shout} onChange={setShout} label="Shout it" />
-          <box flexGrow={1} />
+          <box style={{ flexGrow: 1 }} />
           <Button label="Clear" onPress={() => setConfirming(true)} />
           <Button primary label="Sign" onPress={submit} />
         </box>
@@ -125,12 +131,20 @@ function App() {
           The name and the greeting below it will be discarded.
         </Dialog>
 
-        <box flexGrow={1} justifyContent="center" alignItems="center">
+        <box
+          style={{
+            flexGrow: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
           {greeting && (
             <text
-              fontSize={greeting.size}
-              fontWeight={greeting.weight}
-              color={greeting.color}
+              style={{
+                fontSize: greeting.size,
+                fontWeight: greeting.weight,
+                color: greeting.color,
+              }}
             >
               {greeting.shout
                 ? `HELLO, ${greeting.name.toUpperCase()}!`

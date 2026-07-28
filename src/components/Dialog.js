@@ -41,6 +41,7 @@ export function Dialog({
   actions,
   width = DEFAULT_WIDTH,
   height = DEFAULT_HEIGHT,
+  style,
   ...boxProps
 }) {
   const theme = useTheme();
@@ -79,7 +80,7 @@ export function Dialog({
   return h(
     'box',
     // out of flow: an anchor for the window geometry, never part of layout
-    { ref: anchor, position: 'absolute', width: 0, height: 0 },
+    { ref: anchor, style: { position: 'absolute', width: 0, height: 0 } },
     rect &&
       h(
         'popup',
@@ -91,44 +92,51 @@ export function Dialog({
           trapFocus: true,
           grab: true,
           windowType: 'dialog',
-          backgroundColor: theme.background,
           onDismiss: () => onClose?.(),
           onKeyDown,
+          style: { backgroundColor: theme.background },
         },
         h(
           'box',
           {
             ref: surface,
-            // focusable but not tabbable: a fallback focus holder, never a
-            // stop in the dialog's own tab order
             tabIndex: -1,
-            flexGrow: 1,
-            padding: 16,
-            gap: 12,
-            borderWidth: 1,
-            borderColor: theme.border,
-            backgroundColor: theme.background,
             ...boxProps,
+            style: [
+              {
+                flexGrow: 1,
+                padding: 16,
+                gap: 12,
+                borderWidth: 1,
+                borderColor: theme.border,
+                backgroundColor: theme.background,
+              },
+              style,
+            ],
           },
           title &&
             h(
               'text',
-              { fontSize: 15, fontWeight: 'bold', color: theme.text },
+              {
+                style: { fontSize: 15, fontWeight: 'bold', color: theme.text },
+              },
               title,
             ),
           h(
             'box',
-            { flexGrow: 1, gap: 8 },
+            { style: { flexGrow: 1, gap: 8 } },
             labelContent(children, { color: theme.text }),
           ),
           actions &&
             h(
               'box',
               {
-                flexDirection: 'row',
-                justifyContent: 'flex-end',
-                alignItems: 'center',
-                gap: 8,
+                style: {
+                  flexDirection: 'row',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  gap: 8,
+                },
               },
               actions,
             ),

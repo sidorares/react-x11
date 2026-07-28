@@ -15,7 +15,7 @@ const RadioGroupContext = React.createContext(null);
  * exclusive choice. Arrow keys move the selection through the group in
  * mount order (wrapping); click or Space selects the focused radio.
  */
-export function RadioGroup({ value, onChange, children, ...boxProps }) {
+export function RadioGroup({ value, onChange, children, style, ...boxProps }) {
   const order = useRef([]).current;
   const ctx = useMemo(
     () => ({
@@ -36,7 +36,7 @@ export function RadioGroup({ value, onChange, children, ...boxProps }) {
   );
   return h(
     'box',
-    { gap: 6, ...boxProps },
+    { ...boxProps, style: [{ gap: 6 }, style] },
     h(RadioGroupContext.Provider, { value: ctx }, children),
   );
 }
@@ -49,7 +49,11 @@ export function Radio({ value, children, label, disabled = false }) {
   }
   useEffect(() => group.register(value), [group, value]);
   const selected = group.value === value;
-  const { focused, props } = useControl(disabled, () => {
+  const {
+    focused,
+    props,
+    style: controlStyle,
+  } = useControl(disabled, () => {
     if (!selected) group.onChange?.(value);
   });
   const onKeyDown = props.onKeyDown;
@@ -63,29 +67,39 @@ export function Radio({ value, children, label, disabled = false }) {
   const fill = disabled ? theme.dim : theme.accent;
   return h(
     'box',
-    { flexDirection: 'row', alignItems: 'center', gap: 8, ...props },
+    {
+      ...props,
+      style: [
+        controlStyle,
+        { flexDirection: 'row', alignItems: 'center', gap: 8 },
+      ],
+    },
     h(
       'box',
       {
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: selected
-          ? fill
-          : focused
-            ? theme.borderActive
-            : theme.border,
-        backgroundColor: theme.background,
-        alignItems: 'center',
-        justifyContent: 'center',
+        style: {
+          width: 16,
+          height: 16,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderColor: selected
+            ? fill
+            : focused
+              ? theme.borderActive
+              : theme.border,
+          backgroundColor: theme.background,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
       },
       selected &&
         h('box', {
-          width: 8,
-          height: 8,
-          borderRadius: 4,
-          backgroundColor: fill,
+          style: {
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: fill,
+          },
         }),
     ),
     labelContent(children ?? label, {

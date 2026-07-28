@@ -5,182 +5,7 @@ import ReactX11 from '../src/index.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-// A minimal stand-in for an ntk application object, so the renderer can be
-// exercised without a running X server.
-function createMockApp() {
-  const app = {
-    X: {
-      display: { screen: [{ root: 1 }] },
-      keycode2keysyms: {},
-      InternAtom(onlyIfExists, name, cb) {
-        cb(null, name === 'WM_DELETE_WINDOW' ? 999 : 1);
-      },
-      ConfigureWindow(id, options) {
-        app.configureCalls.push([id, options]);
-      },
-    },
-    configureCalls: [],
-    windows: [],
-    createWindow(attributes) {
-      const handlers = {};
-      const ops = [];
-      const ctx = {
-        ops,
-        fillStyle: null,
-        strokeStyle: null,
-        lineWidth: 1,
-        fillRect(x, y, w, h) {
-          ops.push(['fillRect', x, y, w, h, ctx.fillStyle]);
-        },
-        beginPath() {},
-        rect(x, y, w, h) {
-          ops.push(['rect', x, y, w, h]);
-        },
-        roundRect(x, y, w, h, r) {
-          ops.push(['roundRect', x, y, w, h, r]);
-        },
-        fill() {
-          ops.push(['fill', ctx.fillStyle]);
-        },
-        stroke() {
-          ops.push(['stroke', ctx.strokeStyle, ctx.lineWidth]);
-        },
-        clip() {
-          ops.push(['clip']);
-        },
-        save() {
-          ops.push(['save']);
-        },
-        restore() {
-          ops.push(['restore']);
-        },
-        translate(x, y) {
-          ops.push(['translate', x, y]);
-        },
-        setLineDash(segments) {
-          ops.push(['setLineDash', segments]);
-        },
-        moveTo(x, y) {
-          ops.push(['moveTo', x, y]);
-        },
-        lineTo(x, y) {
-          ops.push(['lineTo', x, y]);
-        },
-        closePath() {
-          ops.push(['closePath']);
-        },
-        drawImage(...args) {
-          ops.push(['drawImage']);
-        },
-        // enough of the canvas surface for SvgView.draw to run headlessly
-        scale(sx, sy) {
-          ops.push(['scale', sx, sy]);
-        },
-        transform() {},
-        setTransform() {},
-        getTransform() {
-          return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
-        },
-        arc() {},
-        ellipse() {},
-        bezierCurveTo() {},
-        quadraticCurveTo() {},
-        createLinearGradient() {
-          return { addColorStop() {} };
-        },
-        createRadialGradient() {
-          return { addColorStop() {} };
-        },
-      };
-      const wnd = {
-        id: app.windows.length + 100,
-        X: app.X,
-        attributes,
-        x: attributes.x,
-        y: attributes.y,
-        width: attributes.width,
-        height: attributes.height,
-        title: attributes.title,
-        mapped: false,
-        destroyed: false,
-        parent: null,
-        calls: [],
-        ctx,
-        map() {
-          wnd.mapped = true;
-          wnd.calls.push(['map']);
-        },
-        unmap() {
-          wnd.mapped = false;
-          wnd.calls.push(['unmap']);
-        },
-        reparentTo(parent, x, y) {
-          wnd.parent = parent;
-          wnd.calls.push(['reparentTo', parent.id, x, y]);
-        },
-        destroy() {
-          wnd.destroyed = true;
-          wnd.calls.push(['destroy']);
-        },
-        // ntk >= 3.7.0: menus hold a pointer grab while they are up
-        grabPointer(options, cb) {
-          wnd.grabbed = true;
-          wnd.calls.push(['grabPointer']);
-          cb?.(null, 0);
-        },
-        ungrabPointer() {
-          wnd.grabbed = false;
-          wnd.calls.push(['ungrabPointer']);
-        },
-        resize(width, height) {
-          wnd.width = width;
-          wnd.height = height;
-          wnd.calls.push(['resize', width, height]);
-        },
-        move(x, y) {
-          wnd.x = x;
-          wnd.y = y;
-          wnd.calls.push(['move', x, y]);
-        },
-        setTitle(title) {
-          wnd.title = title;
-          wnd.calls.push(['setTitle', title]);
-        },
-        setSizeHints(hints) {
-          wnd.calls.push(['setSizeHints', hints]);
-        },
-        setClass(instance, className) {
-          wnd.calls.push(['setClass', instance, className]);
-        },
-        setWindowType(type) {
-          wnd.calls.push(['setWindowType', type]);
-        },
-        setAlwaysOnTop(on) {
-          wnd.calls.push(['setAlwaysOnTop', on]);
-        },
-        setActions() {
-          wnd.calls.push(['setActions']);
-        },
-        setCursor(name) {
-          wnd.cursor = name;
-          wnd.calls.push(['setCursor', name]);
-        },
-        getContext() {
-          return ctx;
-        },
-        on(name, fn) {
-          (handlers[name] ??= []).push(fn);
-        },
-        emit(name, ev) {
-          for (const fn of handlers[name] ?? []) fn(ev);
-        },
-      };
-      app.windows.push(wnd);
-      return wnd;
-    },
-  };
-  return app;
-}
+import { createMockApp } from './helpers/mock-app.js';
 
 // Simulate an ntk keydown: registers the keysym for a synthetic keycode and
 // emits the raw event shape the EventManager consumes.
@@ -320,9 +145,9 @@ test('zIndex raises a child window above its later siblings', () => {
         React.createElement('window', {
           key: 'a',
           title: 'a',
-          zIndex,
           width: 50,
           height: 50,
+          style: { zIndex: zIndex },
         }),
         React.createElement('window', {
           key: 'b',
@@ -358,13 +183,13 @@ test('zIndex on a popup is inert — it is a child of the screen root', () => {
         { width: 300, height: 200 },
         React.createElement(
           'box',
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           React.createElement('popup', {
             x: 0,
             y: 0,
             width: 40,
             height: 40,
-            zIndex,
+            style: { zIndex: zIndex },
           }),
         ),
       ),
@@ -388,9 +213,7 @@ test('reordering keyed drawn children moves them instead of duplicating', () => 
       order.map((color) =>
         React.createElement('box', {
           key: color,
-          backgroundColor: color,
-          width: 10,
-          height: 10,
+          style: { backgroundColor: color, width: 10, height: 10 },
         }),
       ),
     );
@@ -410,13 +233,13 @@ test('reordering keyed drawn children moves them instead of duplicating', () => 
   );
 
   assert.deepStrictEqual(
-    root.children.map((child) => child.props.backgroundColor),
+    root.children.map((child) => child.style.backgroundColor),
     ['blue', 'red', 'green'],
     'children follow the new order exactly once each',
   );
   assert.strictEqual(root.children[2], green, 'the moved node is reused');
   assert.deepStrictEqual(
-    root.paintOrder().map((child) => child.props.backgroundColor),
+    root.paintOrder().map((child) => child.style.backgroundColor),
     ['blue', 'red', 'green'],
     'paint order follows too — the last sibling paints on top',
   );
@@ -544,9 +367,13 @@ test('lays out a flex box tree with yoga and paints it', async () => {
       { width: 200, height: 100 },
       React.createElement(
         'box',
-        { flexDirection: 'row', flexGrow: 1 },
-        React.createElement('box', { flexGrow: 1, backgroundColor: 'red' }),
-        React.createElement('box', { flexGrow: 1, backgroundColor: 'blue' }),
+        { style: { flexDirection: 'row', flexGrow: 1 } },
+        React.createElement('box', {
+          style: { flexGrow: 1, backgroundColor: 'red' },
+        }),
+        React.createElement('box', {
+          style: { flexGrow: 1, backgroundColor: 'blue' },
+        }),
       ),
     ),
     null,
@@ -579,9 +406,9 @@ test('updates reflow the tree', async () => {
         { width: 200, height: 100 },
         React.createElement(
           'box',
-          { flexDirection: direction, flexGrow: 1 },
-          React.createElement('box', { flexGrow: 1 }),
-          React.createElement('box', { flexGrow: 1 }),
+          { style: { flexDirection: direction, flexGrow: 1 } },
+          React.createElement('box', { style: { flexGrow: 1 } }),
+          React.createElement('box', { style: { flexGrow: 1 } }),
         ),
       ),
       null,
@@ -612,9 +439,11 @@ test('dispatches synthetic clicks, hover and focus events', async () => {
       { width: 200, height: 100 },
       React.createElement(
         'box',
-        { flexDirection: 'row', flexGrow: 1, onClick: () => log.push('outer') },
+        {
+          onClick: () => log.push('outer'),
+          style: { flexDirection: 'row', flexGrow: 1 },
+        },
         React.createElement('box', {
-          flexGrow: 1,
           focusable: true,
           onClick: (ev) => {
             log.push(['left', ev.localX, ev.localY]);
@@ -623,8 +452,9 @@ test('dispatches synthetic clicks, hover and focus events', async () => {
           onMouseEnter: () => log.push('enter-left'),
           onMouseLeave: () => log.push('leave-left'),
           onFocus: () => log.push('focus-left'),
+          style: { flexGrow: 1 },
         }),
-        React.createElement('box', { flexGrow: 1 }),
+        React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
     null,
@@ -659,21 +489,25 @@ test('zIndex controls hit testing order', async () => {
       'window',
       { width: 100, height: 100 },
       React.createElement('box', {
-        position: 'absolute',
-        left: 0,
-        top: 0,
-        width: 100,
-        height: 100,
-        zIndex: 2,
         onClick: () => log.push('top'),
+        style: {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width: 100,
+          height: 100,
+          zIndex: 2,
+        },
       }),
       React.createElement('box', {
-        position: 'absolute',
-        left: 0,
-        top: 0,
-        width: 100,
-        height: 100,
         onClick: () => log.push('bottom'),
+        style: {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width: 100,
+          height: 100,
+        },
       }),
     ),
     null,
@@ -697,12 +531,12 @@ test('scrollview scrolls, clamps and offsets hit testing', async () => {
       { width: 100, height: 100 },
       React.createElement(
         'scrollview',
-        { flexGrow: 1 },
+        { style: { flexGrow: 1 } },
         [0, 1, 2].map((i) =>
           React.createElement('box', {
             key: i,
-            height: 60,
             onClick: () => clicks.push(i),
+            style: { height: 60 },
           }),
         ),
       ),
@@ -744,16 +578,19 @@ test('a shrinking window shrinks the scrollview, not the footer out of view', as
       { width: 200, height },
       React.createElement(
         'box',
-        { flexGrow: 1 },
-        React.createElement('box', { height: 30 }), // header
+        { style: { flexGrow: 1 } },
+        React.createElement('box', { style: { height: 30 } }), // header
         React.createElement(
           'scrollview',
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           ...Array.from({ length: 10 }, (_, i) =>
-            React.createElement('box', { key: i, height: 40, flexShrink: 0 }),
+            React.createElement('box', {
+              key: i,
+              style: { height: 40, flexShrink: 0 },
+            }),
           ),
         ),
-        React.createElement('box', { height: 24 }), // footer
+        React.createElement('box', { style: { height: 24 } }), // footer
       ),
     );
 
@@ -802,9 +639,9 @@ test('scrollview scrollIntoView scrolls the minimum amount', async () => {
       { width: 100, height: 100 },
       React.createElement(
         'scrollview',
-        { flexGrow: 1 },
+        { style: { flexGrow: 1 } },
         [0, 1, 2].map((i) =>
-          React.createElement('box', { key: i, height: 60 }),
+          React.createElement('box', { key: i, style: { height: 60 } }),
         ),
       ),
     ),
@@ -851,7 +688,7 @@ test('window manager hints pass through at creation and on update', () => {
     resizable: false,
     wmClass: ['react-x11', 'React-X11'],
     windowType: 'dialog',
-    sizeHints: { minWidth: 120 },
+    minWidth: 120,
   });
   const wnd = app.windows[0];
   assert.strictEqual(wnd.attributes.resizable, false);
@@ -862,14 +699,14 @@ test('window manager hints pass through at creation and on update', () => {
   const hintCalls = () =>
     wnd.calls.filter(([name]) => name.startsWith('set') && name !== 'setTitle');
 
-  // a re-render with identical hints must not re-send them: sizeHints is an
-  // inline object literal, so identity changes every render
+  // a re-render with identical hints must not re-send them: the hints are
+  // collected into a fresh object every render, so identity always changes
   wnd.calls.length = 0;
   render({
     resizable: false,
     wmClass: ['react-x11', 'React-X11'],
     windowType: 'dialog',
-    sizeHints: { minWidth: 120 },
+    minWidth: 120,
   });
   assert.deepStrictEqual(hintCalls(), [], 'unchanged hints are not re-sent');
 
@@ -879,7 +716,8 @@ test('window manager hints pass through at creation and on update', () => {
     resizable: false,
     wmClass: ['react-x11', 'React-X11'],
     windowType: 'dialog',
-    sizeHints: { minWidth: 300, maxWidth: 900 },
+    minWidth: 300,
+    maxWidth: 900,
   });
   assert.deepStrictEqual(hintCalls(), [
     ['setSizeHints', { minWidth: 300, maxWidth: 900, resizable: false }],
@@ -912,7 +750,7 @@ test('popup mounts as an override-redirect window and unmounts cleanly', () => {
         { width: 200, height: 100 },
         React.createElement(
           'box',
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           open
             ? React.createElement('popup', {
                 x: 300,
@@ -955,9 +793,11 @@ test('cursor prop follows hover (feature-detected setCursor)', async () => {
       { width: 200, height: 100 },
       React.createElement(
         'box',
-        { flexDirection: 'row', flexGrow: 1 },
-        React.createElement('box', { flexGrow: 1, cursor: 'pointer' }),
-        React.createElement('box', { flexGrow: 1 }),
+        { style: { flexDirection: 'row', flexGrow: 1 } },
+        React.createElement('box', {
+          style: { flexGrow: 1, cursor: 'pointer' },
+        }),
+        React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
     null,
@@ -985,9 +825,9 @@ test('textinput: typing, backspace, arrows, submit (uncontrolled)', async () => 
       { width: 200, height: 50 },
       React.createElement('textinput', {
         defaultValue: '',
-        flexGrow: 1,
         onChange: (v) => changes.push(v),
         onSubmit: (v) => (submitted = v),
+        style: { flexGrow: 1 },
       }),
     ),
     null,
@@ -1031,8 +871,8 @@ test('textinput: controlled value does not change until props do', async () => {
         { width: 200, height: 50 },
         React.createElement('textinput', {
           value,
-          flexGrow: 1,
           onChange: (v) => changes.push(v),
+          style: { flexGrow: 1 },
         }),
       ),
       null,
@@ -1074,7 +914,10 @@ test('textinput: clipboard shortcuts and middle-click PRIMARY paste', async () =
     React.createElement(
       'window',
       { width: 200, height: 50 },
-      React.createElement('textinput', { defaultValue: 'hello', flexGrow: 1 }),
+      React.createElement('textinput', {
+        defaultValue: 'hello',
+        style: { flexGrow: 1 },
+      }),
     ),
     null,
     app,
@@ -1110,10 +953,12 @@ test('dashed borders emit setLineDash when the context supports it', async () =>
       'window',
       { width: 100, height: 100 },
       React.createElement('box', {
-        flexGrow: 1,
-        borderWidth: 2,
-        borderColor: 'black',
-        borderStyle: 'dashed',
+        style: {
+          flexGrow: 1,
+          borderWidth: 2,
+          borderColor: 'black',
+          borderStyle: 'dashed',
+        },
       }),
     ),
     null,
@@ -1145,7 +990,7 @@ test('textinput: double-click selects word, triple-click selects all', async () 
       { width: 200, height: 50 },
       React.createElement('textinput', {
         defaultValue: 'hello world',
-        flexGrow: 1,
+        style: { flexGrow: 1 },
       }),
     ),
     null,
@@ -1181,12 +1026,12 @@ test('Select opens a popup menu, picks an option, closes on Escape', async () =>
       { width: 240, height: 120 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 10 },
+        { style: { flexGrow: 1, padding: 10 } },
         React.createElement(Select, {
           options: ['red', 'green', 'blue'],
           value: null,
-          width: 160,
           onChange: (v) => picks.push(v),
+          style: { width: 160 },
         }),
       ),
     ),
@@ -1257,12 +1102,12 @@ test('Select: arrow keys move the active option, Enter picks it', async () => {
       { width: 240, height: 120 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 10 },
+        { style: { flexGrow: 1, padding: 10 } },
         React.createElement(Select, {
           options: ['red', 'green', 'blue'],
           value: 'green',
-          width: 160,
           onChange: (v) => picks.push(v),
+          style: { width: 160 },
         }),
       ),
     ),
@@ -1295,7 +1140,7 @@ test('Select: arrow keys move the active option, Enter picks it', async () => {
     };
     walk(popup._reactX11Node);
     return scroller.children.findIndex(
-      (o) => o.props.backgroundColor === HOVER_BG,
+      (o) => o.style.backgroundColor === HOVER_BG,
     );
   };
 
@@ -1359,8 +1204,12 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
       { width: 300, height: 120 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 10 },
-        React.createElement(Select, { options, value: options[0], width: 220 }),
+        { style: { flexGrow: 1, padding: 10 } },
+        React.createElement(Select, {
+          options,
+          value: options[0],
+          style: { width: 220 },
+        }),
       ),
     ),
     null,
@@ -1444,11 +1293,11 @@ test('text spans collect nested styles', () => {
       { width: 100, height: 100 },
       React.createElement(
         'text',
-        { color: 'black', fontSize: 12 },
+        { style: { color: 'black', fontSize: 12 } },
         'Hello ',
         React.createElement(
           'text',
-          { color: 'red', fontWeight: 'bold' },
+          { style: { color: 'red', fontWeight: 'bold' } },
           'world',
         ),
       ),
@@ -1492,9 +1341,11 @@ test('DevTools agent highlight tints the hovered node', async () => {
       { width: 200, height: 100 },
       React.createElement(
         'box',
-        { flexDirection: 'row', flexGrow: 1 },
-        React.createElement('box', { flexGrow: 1 }),
-        React.createElement('box', { flexGrow: 1, backgroundColor: 'blue' }),
+        { style: { flexDirection: 'row', flexGrow: 1 } },
+        React.createElement('box', { style: { flexGrow: 1 } }),
+        React.createElement('box', {
+          style: { flexGrow: 1, backgroundColor: 'blue' },
+        }),
       ),
     ),
     null,
@@ -1558,7 +1409,7 @@ test('rich content elements mount, update and unmount headlessly', async () => {
       React.createElement('html', { source: '<p>hello</p>' }),
       React.createElement(
         'svg',
-        { viewBox: '0 0 10 10', width: 20, height: 20 },
+        { viewBox: '0 0 10 10', style: { width: 20, height: 20 } },
         React.createElement('rect', { width: 10, height: 10, fill: '#f00' }),
       ),
       React.createElement('svg', {
@@ -1606,7 +1457,14 @@ test('Button fires onPress via click and Space; disabled is inert', async () => 
       { width: 300, height: 200 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 10, gap: 10, alignItems: 'flex-start' },
+        {
+          style: {
+            flexGrow: 1,
+            padding: 10,
+            gap: 10,
+            alignItems: 'flex-start',
+          },
+        },
         React.createElement(Button, {
           label: 'Go',
           onPress: () => presses.push('go'),
@@ -1662,7 +1520,9 @@ test('Checkbox and Switch toggle through onChange', async () => {
     const [on, setOn] = React.useState(false);
     return React.createElement(
       'box',
-      { flexGrow: 1, padding: 10, gap: 10, alignItems: 'flex-start' },
+      {
+        style: { flexGrow: 1, padding: 10, gap: 10, alignItems: 'flex-start' },
+      },
       React.createElement(
         Checkbox,
         {
@@ -1765,8 +1625,8 @@ test('ProgressBar fill width follows value', async () => {
       { width: 300, height: 100 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 0 },
-        React.createElement(ProgressBar, { value: 0.5, width: 200 }),
+        { style: { flexGrow: 1, padding: 0 } },
+        React.createElement(ProgressBar, { value: 0.5, style: { width: 200 } }),
       ),
     ),
     null,
@@ -1775,7 +1635,7 @@ test('ProgressBar fill width follows value', async () => {
   await tick();
   const wnd = app.windows[0];
   const track = (function find(n) {
-    if (n.props?.overflow === 'hidden' && n.kind === 'box') return n;
+    if (n.style?.overflow === 'hidden' && n.kind === 'box') return n;
     for (const c of n.children) {
       if (c.isWindow) continue;
       const hit = find(c);
@@ -1859,14 +1719,14 @@ test('Slider: drag keeps tracking after the pointer leaves the widget', async ()
       { width: 400, height: 120 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 20 },
+        { style: { flexGrow: 1, padding: 20 } },
         React.createElement(Slider, {
           value: v,
           min: 0,
           max: 100,
           step: 1,
-          width: 200,
           onChange: setV,
+          style: { width: 200 },
         }),
       ),
     );
@@ -1937,14 +1797,14 @@ test('Slider: keyboard steps, Home/End and PageUp/Down', async () => {
       { width: 300, height: 100 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 10 },
+        { style: { flexGrow: 1, padding: 10 } },
         React.createElement(Slider, {
           value: v,
           min: 0,
           max: 100,
           step: 2,
-          width: 200,
           onChange: setV,
+          style: { width: 200 },
         }),
       ),
     );
@@ -2013,8 +1873,13 @@ test('Slider: thumb stays within the track at both extremes', async () => {
         { width: 400, height: 100 },
         React.createElement(
           'box',
-          { flexGrow: 1, padding: 20 },
-          React.createElement(Slider, { value, min: 0, max: 100, width: 200 }),
+          { style: { flexGrow: 1, padding: 20 } },
+          React.createElement(Slider, {
+            value,
+            min: 0,
+            max: 100,
+            style: { width: 200 },
+          }),
         ),
       ),
       null,
@@ -2022,7 +1887,7 @@ test('Slider: thumb stays within the track at both extremes', async () => {
     );
     await tick();
     const track = findTrack(app.windows[0]._reactX11Node);
-    const thumb = track.children.find((c) => c.props.position === 'absolute');
+    const thumb = track.children.find((c) => c.style.position === 'absolute');
     assert.ok(
       thumb.abs.x >= track.abs.x - 0.5,
       `${expected}: thumb past the left edge at ${value}`,
@@ -2144,8 +2009,7 @@ test('window focus: the focused node keeps focus but stops looking active', asyn
       },
       React.createElement('textinput', {
         defaultValue: 'hi',
-        width: 120,
-        height: 24,
+        style: { width: 120, height: 24 },
       }),
     ),
     null,
@@ -2192,17 +2056,15 @@ test('focus(): ref API, autoFocus, and blur', async () => {
       React.createElement('box', {
         ref,
         focusable: true,
-        width: 40,
-        height: 20,
         onFocus: () => seen.push('a:focus'),
         onBlur: () => seen.push('a:blur'),
+        style: { width: 40, height: 20 },
       }),
       React.createElement('box', {
         focusable: true,
         autoFocus: true,
-        width: 40,
-        height: 20,
         onFocus: () => seen.push('b:focus'),
+        style: { width: 40, height: 20 },
       }),
     ),
     null,
@@ -2231,13 +2093,12 @@ test('Tab into a scrollview scrolls the focused node into view', async () => {
       { width: 200, height: 100 },
       React.createElement(
         'scrollview',
-        { flexGrow: 1 },
+        { style: { flexGrow: 1 } },
         ...Array.from({ length: 12 }, (_, i) =>
           React.createElement('box', {
             key: i,
             focusable: true,
-            height: 30,
-            flexShrink: 0,
+            style: { height: 30, flexShrink: 0 },
           }),
         ),
       ),
@@ -2265,10 +2126,9 @@ test('tabIndex orders Tab traversal; -1 focuses but never tabs', async () => {
     React.createElement('box', {
       key: String(tabIndex),
       focusable: true,
-      width: 100,
-      height: 20,
       ...(tabIndex == null ? {} : { tabIndex }),
       ...extra,
+      style: { width: 100, height: 20 },
     });
   const refs = { plain: null, two: null, one: null, skip: null };
   ReactX11.render(
@@ -2329,9 +2189,8 @@ test('<popup> shares the owner window focus, so keys reach into it', async () =>
           ref: (n) => (inner = n),
           focusable: true,
           autoFocus: true,
-          width: 100,
-          height: 20,
           onKeyDown: () => seen.push('box'),
+          style: { width: 100, height: 20 },
         }),
       ),
     ),
@@ -2377,14 +2236,12 @@ test('<popup trapFocus> traps Tab and restores focus when it closes', async () =
       React.createElement('box', {
         ref: (n) => (refs.trigger = n),
         focusable: true,
-        width: 100,
-        height: 20,
+        style: { width: 100, height: 20 },
       }),
       React.createElement('box', {
         ref: (n) => (refs.other = n),
         focusable: true,
-        width: 100,
-        height: 20,
+        style: { width: 100, height: 20 },
       }),
       open &&
         React.createElement(
@@ -2394,14 +2251,12 @@ test('<popup trapFocus> traps Tab and restores focus when it closes', async () =
             ref: (n) => (refs.first = n),
             focusable: true,
             autoFocus: true,
-            width: 120,
-            height: 20,
+            style: { width: 120, height: 20 },
           }),
           React.createElement('box', {
             ref: (n) => (refs.second = n),
             focusable: true,
-            width: 120,
-            height: 20,
+            style: { width: 120, height: 20 },
           }),
         ),
     );
@@ -2597,14 +2452,21 @@ test('Slider keeps its width as the value changes (no drag feedback loop)', asyn
       { width: 300, height: 80 },
       React.createElement(
         'box',
-        { flexDirection: 'row', alignItems: 'center', flexGrow: 1, gap: 10 },
-        React.createElement('box', { width: 40, height: 10 }),
+        {
+          style: {
+            flexDirection: 'row',
+            alignItems: 'center',
+            flexGrow: 1,
+            gap: 10,
+          },
+        },
+        React.createElement('box', { style: { width: 40, height: 10 } }),
         React.createElement(Slider, {
-          flexGrow: 1,
           min: 0,
           max: 100,
           value: v,
           onChange: setV,
+          style: { flexGrow: 1 },
         }),
       ),
     );
@@ -2640,7 +2502,7 @@ test('ProgressBar does not widen the box it sits in', async () => {
   const Card = ({ progress }) =>
     React.createElement(
       'box',
-      { flexGrow: 1, padding: 10 },
+      { style: { flexGrow: 1, padding: 10 } },
       React.createElement(ProgressBar, { value: progress }),
     );
 
@@ -2650,7 +2512,7 @@ test('ProgressBar does not widen the box it sits in', async () => {
       { width: 300, height: 120 },
       React.createElement(
         'box',
-        { flexDirection: 'row', flexGrow: 1, gap: 10 },
+        { style: { flexDirection: 'row', flexGrow: 1, gap: 10 } },
         React.createElement(Card, { key: 'a', progress: 0.1 }),
         React.createElement(Card, { key: 'b', progress: 0.9 }),
       ),
@@ -2690,7 +2552,7 @@ test('Tooltip shows after the delay in a popup and hides on leave', async () => 
       { width: 300, height: 120 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 20 },
+        { style: { flexGrow: 1, padding: 20 } },
         React.createElement(
           Tooltip,
           { label: 'Save the file', delay: 20 },
@@ -2742,7 +2604,7 @@ test('Tooltip stays up when the pointer moves toward it, and is reachable', asyn
       { width: 300, height: 160 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 20 },
+        { style: { flexGrow: 1, padding: 20 } },
         React.createElement(
           Tooltip,
           { label: 'Save the file', delay: 20 },
@@ -2810,7 +2672,7 @@ test('Tooltip does not show if the pointer leaves before the delay', async () =>
       { width: 300, height: 120 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 20 },
+        { style: { flexGrow: 1, padding: 20 } },
         React.createElement(
           Tooltip,
           { label: 'Never seen', delay: 50 },
@@ -2852,7 +2714,7 @@ const MENU_ITEMS = (picked) => [
 function activeMenuIndex(app) {
   const popup = app.windows.at(-1);
   const rows = popup._reactX11Node.children[0].children;
-  return rows.findIndex((r) => r.props.backgroundColor === '#2980b9');
+  return rows.findIndex((r) => r.style.backgroundColor === '#2980b9');
 }
 
 test('ContextMenu opens at the pointer and skips separators/disabled', async () => {
@@ -2865,8 +2727,8 @@ test('ContextMenu opens at the pointer and skips separators/disabled', async () 
       { width: 300, height: 200 },
       React.createElement(
         ContextMenu,
-        { items: MENU_ITEMS(picked), flexGrow: 1 },
-        React.createElement('box', { flexGrow: 1 }),
+        { items: MENU_ITEMS(picked), style: { flexGrow: 1 } },
+        React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
     null,
@@ -2949,8 +2811,8 @@ test('ContextMenu: Escape closes without selecting; disabled items are inert', a
       { width: 300, height: 200 },
       React.createElement(
         ContextMenu,
-        { items: MENU_ITEMS(picked), flexGrow: 1 },
-        React.createElement('box', { flexGrow: 1 }),
+        { items: MENU_ITEMS(picked), style: { flexGrow: 1 } },
+        React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
     null,
@@ -2999,8 +2861,8 @@ test('ContextMenu: clicking an enabled row selects it and closes', async () => {
       { width: 300, height: 200 },
       React.createElement(
         ContextMenu,
-        { items: MENU_ITEMS(picked), flexGrow: 1 },
-        React.createElement('box', { flexGrow: 1 }),
+        { items: MENU_ITEMS(picked), style: { flexGrow: 1 } },
+        React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
     null,
@@ -3111,14 +2973,15 @@ test('backgroundColor/borderColor "transparent" paints nothing (and does not thr
       'window',
       { width: 100, height: 60 },
       React.createElement('box', {
-        flexGrow: 1,
-        backgroundColor: 'transparent',
-        borderWidth: 2,
-        borderColor: 'transparent',
+        style: {
+          flexGrow: 1,
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderColor: 'transparent',
+        },
       }),
       React.createElement('box', {
-        flexGrow: 1,
-        backgroundColor: '#ff0000',
+        style: { flexGrow: 1, backgroundColor: '#ff0000' },
       }),
     ),
     null,
@@ -3157,7 +3020,7 @@ const NESTED_ITEMS = (picked) => [
 const rowsOf = (app, index) =>
   app.windows[index]._reactX11Node.children[0].children;
 const activeIn = (app, index) =>
-  rowsOf(app, index).findIndex((r) => r.props.backgroundColor === '#2980b9');
+  rowsOf(app, index).findIndex((r) => r.style.backgroundColor === '#2980b9');
 
 async function openNested(app, picked) {
   const { ContextMenu } = await import('../src/index.js');
@@ -3167,8 +3030,8 @@ async function openNested(app, picked) {
       { width: 320, height: 220 },
       React.createElement(
         ContextMenu,
-        { items: NESTED_ITEMS(picked), flexGrow: 1 },
-        React.createElement('box', { flexGrow: 1 }),
+        { items: NESTED_ITEMS(picked), style: { flexGrow: 1 } },
+        React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
     null,
@@ -3417,12 +3280,12 @@ test('Select: type-ahead jumps, refines and cycles', async () => {
       { width: 300, height: 120 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 10 },
+        { style: { flexGrow: 1, padding: 10 } },
         React.createElement(Select, {
           options,
           value: v,
-          width: 200,
           onChange: setV,
+          style: { width: 200 },
         }),
       ),
     );
@@ -3467,7 +3330,7 @@ test('Select: type-ahead jumps, refines and cycles', async () => {
     };
     walk(popup._reactX11Node);
     return scroller.children.findIndex(
-      (o) => o.props.backgroundColor === '#2980b9',
+      (o) => o.style.backgroundColor === '#2980b9',
     );
   };
 
@@ -3762,8 +3625,12 @@ test('Select: PageDown/PageUp move by a menu viewport, clamped at the ends', asy
       { width: 300, height: 120 },
       React.createElement(
         'box',
-        { flexGrow: 1, padding: 10 },
-        React.createElement(Select, { options, value: options[0], width: 200 }),
+        { style: { flexGrow: 1, padding: 10 } },
+        React.createElement(Select, {
+          options,
+          value: options[0],
+          style: { width: 200 },
+        }),
       ),
     ),
     null,
@@ -3802,7 +3669,7 @@ test('Select: PageDown/PageUp move by a menu viewport, clamped at the ends', asy
     return found;
   })();
   const active = () =>
-    scroller.children.findIndex((o) => o.props.backgroundColor === '#2980b9');
+    scroller.children.findIndex((o) => o.style.backgroundColor === '#2980b9');
 
   assert.strictEqual(active(), 0, 'opens on the current value');
   // page = floor(MAX_MENU_HEIGHT / ITEM_HEIGHT) = floor(220 / 28) = 7
@@ -3855,8 +3722,8 @@ test('menu: PageDown/PageUp land on a selectable row, never a separator', async 
       { width: 320, height: 220 },
       React.createElement(
         ContextMenu,
-        { items, flexGrow: 1 },
-        React.createElement('box', { flexGrow: 1 }),
+        { items, style: { flexGrow: 1 } },
+        React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
     null,
@@ -3870,7 +3737,7 @@ test('menu: PageDown/PageUp land on a selectable row, never a separator', async 
 
   const rows = () => app.windows[1]._reactX11Node.children[0].children;
   const active = () =>
-    rows().findIndex((r) => r.props.backgroundColor === '#2980b9');
+    rows().findIndex((r) => r.style.backgroundColor === '#2980b9');
 
   pressKey(app, wnd, { keysym: 0xff54 }); // Down -> entry-0
   await tick();
@@ -3883,7 +3750,7 @@ test('menu: PageDown/PageUp land on a selectable row, never a separator', async 
   const landed = active();
   assert.notStrictEqual(landed, 10, 'never lands on the separator');
   assert.ok(
-    rows()[landed].props.backgroundColor === '#2980b9',
+    rows()[landed].style.backgroundColor === '#2980b9',
     'landed on a real row',
   );
   assert.ok(landed > 0, 'and moved forward');

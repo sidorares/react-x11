@@ -38,8 +38,8 @@ export function Slider({
   step = 1,
   onChange,
   disabled = false,
-  width,
   height = 4,
+  style,
   ...boxProps
 }) {
   const theme = useTheme();
@@ -78,7 +78,6 @@ export function Slider({
     ? {}
     : {
         focusable: true,
-        cursor: 'pointer',
         onFocus: () => setFocused(true),
         onBlur: () => setFocused(false),
         onMouseDown: (ev) => {
@@ -123,23 +122,30 @@ export function Slider({
     'box',
     {
       ref: trackRef,
-      width,
-      height: SLIDER_THUMB,
-      minWidth: 0,
-      justifyContent: 'center',
       ...controlProps,
       ...boxProps,
+      style: [
+        disabled || { cursor: 'pointer' },
+        {
+          height: SLIDER_THUMB,
+          minWidth: 0,
+          justifyContent: 'center',
+        },
+        style,
+      ],
     },
     // track
     h(
       'box',
       {
-        height,
-        borderRadius: height / 2,
-        backgroundColor: theme.track,
-        flexDirection: 'row',
-        alignItems: 'center',
-        pointerEvents: 'none',
+        style: {
+          height: height,
+          borderRadius: height / 2,
+          backgroundColor: theme.track,
+          flexDirection: 'row',
+          alignItems: 'center',
+          pointerEvents: 'none',
+        },
       },
       // flex ratios, not a percentage width: a percentage child resolves
       // against the space available while the track is still being
@@ -147,31 +153,37 @@ export function Slider({
       // at value = max the control grew, which moved the handle, which
       // changed the value, and a drag turned into an oscillation
       h('box', {
-        flexGrow: fraction,
-        flexShrink: 0,
-        flexBasis: 0,
-        height,
-        borderRadius: height / 2,
-        backgroundColor: disabled ? theme.dim : theme.accent,
+        style: {
+          flexGrow: fraction,
+          flexShrink: 0,
+          flexBasis: 0,
+          height: height,
+          borderRadius: height / 2,
+          backgroundColor: disabled ? theme.dim : theme.accent,
+        },
       }),
-      h('box', { flexGrow: 1 - fraction, flexShrink: 0, flexBasis: 0 }),
+      h('box', {
+        style: { flexGrow: 1 - fraction, flexShrink: 0, flexBasis: 0 },
+      }),
     ),
     // thumb, centred on the value within the same travel the math uses
     h('box', {
-      position: 'absolute',
-      left: `${fraction * 100}%`,
-      marginLeft: -SLIDER_THUMB * fraction,
-      width: SLIDER_THUMB,
-      height: SLIDER_THUMB,
-      borderRadius: SLIDER_THUMB / 2,
-      borderWidth: 1,
-      borderColor: disabled
-        ? theme.border
-        : focused || dragging
-          ? theme.accentHover
-          : theme.border,
-      backgroundColor: disabled ? theme.surfaceHover : theme.background,
-      pointerEvents: 'none',
+      style: {
+        position: 'absolute',
+        left: `${fraction * 100}%`,
+        marginLeft: -SLIDER_THUMB * fraction,
+        width: SLIDER_THUMB,
+        height: SLIDER_THUMB,
+        borderRadius: SLIDER_THUMB / 2,
+        borderWidth: 1,
+        borderColor: disabled
+          ? theme.border
+          : focused || dragging
+            ? theme.accentHover
+            : theme.border,
+        backgroundColor: disabled ? theme.surfaceHover : theme.background,
+        pointerEvents: 'none',
+      },
     }),
   );
 }

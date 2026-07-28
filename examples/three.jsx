@@ -74,12 +74,19 @@ function App() {
 
   return (
     <window ref={windowRef} width={560} height={460} title="react-x11 — 3D">
-      <box flexGrow={1} padding={12} gap={12} backgroundColor="#f4f6f8">
+      <box
+        style={{
+          flexGrow: 1,
+          padding: 12,
+          gap: 12,
+          backgroundColor: '#f4f6f8',
+        }}
+      >
         <Canvas3D
-          flexGrow={1}
           clearColor="#12161f"
           glx={{ DEPTH_SIZE: 24 }}
           camera={{ position: [0, 2.6, 8.5], target: [0, -0.2, 0], fov: 45 }}
+          style={{ flexGrow: 1 }}
         >
           <ambientLight intensity={0.35} />
           <pointLight position={[5, 6, 6]} intensity={1} />
@@ -131,15 +138,15 @@ function App() {
           </group>
         </Canvas3D>
 
-        <box flexDirection="row" alignItems="center" gap={12}>
+        <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
           <Switch checked={running} onChange={setRunning} />
-          <text fontSize={13}>Spin</text>
+          <text style={{ fontSize: 13 }}>Spin</text>
           <Switch checked={wireframe} onChange={setWireframe} />
-          <text fontSize={13}>Wireframe</text>
+          <text style={{ fontSize: 13 }}>Wireframe</text>
           <Switch checked={textured} onChange={setTextured} />
-          <text fontSize={13}>Texture</text>
-          <box flexGrow={1} />
-          <text fontSize={13} color="#5b6570">
+          <text style={{ fontSize: 13 }}>Texture</text>
+          <box style={{ flexGrow: 1 }} />
+          <text style={{ fontSize: 13, color: '#5b6570' }}>
             {picked ? `picked: ${picked}` : 'click a shape'}
           </text>
           <Button onPress={() => setRunning((r) => !r)}>

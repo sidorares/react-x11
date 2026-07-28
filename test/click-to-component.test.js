@@ -36,9 +36,7 @@ async function createHeadlessApp() {
 function Leaf() {
   return React.createElement('box', {
     id: 'leaf',
-    width: 50,
-    height: 50,
-    backgroundColor: 'red',
+    style: { width: 50, height: 50, backgroundColor: 'red' },
   });
 }
 

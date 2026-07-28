@@ -266,36 +266,42 @@ await scene(async (app) => {
 
 await scene(async (app) => {
   const wnd = await render(
-    <window width={420} height={260} backgroundColor="#f5f6fa">
-      <box flexGrow={1} padding={16} gap={12}>
-        <text fontSize={18} color="#2d3436">
-          textinput
-        </text>
+    <window width={420} height={260} style={{ backgroundColor: '#f5f6fa' }}>
+      <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
+        <text style={{ fontSize: 18, color: '#2d3436' }}>textinput</text>
         <textinput
           defaultValue="Hello, X11 world"
-          padding={8}
-          borderRadius={4}
-          borderWidth={1}
-          borderColor="#b2bec3"
-          backgroundColor="white"
+          style={{
+            padding: 8,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: '#b2bec3',
+            backgroundColor: 'white',
+          }}
         />
         <textinput
           placeholder="placeholder text..."
-          padding={8}
-          borderRadius={4}
-          borderWidth={1}
-          borderColor="#b2bec3"
-          backgroundColor="white"
+          style={{
+            padding: 8,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: '#b2bec3',
+            backgroundColor: 'white',
+          }}
         />
         <box
-          padding={12}
-          borderWidth={2}
-          borderColor="#2980b9"
-          borderStyle="dashed"
-          borderRadius={4}
-          alignItems="center"
+          style={{
+            padding: 12,
+            borderWidth: 2,
+            borderColor: '#2980b9',
+            borderStyle: 'dashed',
+            borderRadius: 4,
+            alignItems: 'center',
+          }}
         >
-          <text color="#2980b9">dashed border (ntk 3.2 setLineDash)</text>
+          <text style={{ color: '#2980b9' }}>
+            dashed border (ntk 3.2 setLineDash)
+          </text>
         </box>
       </box>
     </window>,

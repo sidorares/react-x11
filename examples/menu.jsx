@@ -75,23 +75,32 @@ function App() {
   ];
 
   return (
-    <window width={460} height={280} title="menus" backgroundColor="#f5f6fa">
-      <box flexGrow={1}>
+    <window
+      width={460}
+      height={280}
+      title="menus"
+      style={{ backgroundColor: '#f5f6fa' }}
+    >
+      <box style={{ flexGrow: 1 }}>
         <MenuBar menus={menus} />
         <ContextMenu
           items={contextItems}
-          flexGrow={1}
-          justifyContent="center"
-          alignItems="center"
-          gap={10}
+          style={{
+            flexGrow: 1,
+            justifyContent: 'center',
+            alignItems: 'center',
+            gap: 10,
+          }}
         >
-          <text fontSize={18} color="#2d3436">
+          <text style={{ fontSize: 18, color: '#2d3436' }}>
             Right-click anywhere below the bar
           </text>
-          <text color="#7f8c8d">
-            last choice: <text color="#2980b9">{last}</text>
+          <text style={{ color: '#7f8c8d' }}>
+            last choice: <text style={{ color: '#2980b9' }}>{last}</text>
           </text>
-          <text color="#7f8c8d">wrap lines: {wrap ? 'on' : 'off'}</text>
+          <text style={{ color: '#7f8c8d' }}>
+            wrap lines: {wrap ? 'on' : 'off'}
+          </text>
         </ContextMenu>
       </box>
     </window>

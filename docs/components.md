@@ -1,5 +1,21 @@
 # Components
 
+Every component takes **`style`** and merges it after its own, so an override
+wins by position rather than by clobbering a computed value:
+
+```jsx
+<Button
+  label="Sign"
+  style={{ marginTop: 8, ':hover': { borderColor: '#333' } }}
+/>
+```
+
+Props that a component consumes itself are never style — `ProgressBar`'s
+`color`, `Dialog`'s `width`/`height` (a dialog is a real popup window and
+needs its geometry up front), `ContextMenu`'s `fontSize` (it measures labels
+with it). Everything else is forwarded to the host box. See
+[styling.md](styling.md).
+
 Widget components are plain React built on the host elements — no
 reconciler support involved. They live in the package root export.
 
@@ -12,7 +28,7 @@ below the trigger.
 import { Select } from 'react-x11';
 
 <Select
-  width={160}
+  style={{ width: 160 }}
   value={color}
   options={[
     { value: '#2980b9', label: 'Blue' },
@@ -29,7 +45,7 @@ import { Select } from 'react-x11';
 | `options`                  | array of `{value, label}` or plain values |
 | `value`, `onChange(value)` | selection                                 |
 | `placeholder`              | trigger text when nothing is selected     |
-| `width` + any box props    | forwarded to the trigger box              |
+| `style` + any box props    | forwarded to the trigger box              |
 
 Behavior: click / Space / Enter toggles the menu; Escape, focus loss, or
 picking closes it; the option list scrolls when taller than 220px; the
@@ -90,7 +106,7 @@ import { Slider } from 'react-x11';
   min={0}
   max={100}
   step={5}
-  width={200}
+  style={{ width: 200 }}
   onChange={setVolume}
 />;
 ```
@@ -209,7 +225,7 @@ import { MenuBar, ContextMenu } from 'react-x11';
   ]}
 />;
 
-<ContextMenu items={items} flexGrow={1}>
+<ContextMenu items={items} style={{ flexGrow: 1 }}>
   <text>Right-click me</text>
 </ContextMenu>;
 ```
@@ -297,7 +313,7 @@ than r3f's `Canvas` because react-x11 already has a `<canvas>` element (the
 import { Canvas3D } from 'react-x11';
 
 <Canvas3D
-  flexGrow={1}
+  style={{ flexGrow: 1 }}
   clearColor="#12161f"
   camera={{ position: [0, 2, 6], fov: 45 }}
 >

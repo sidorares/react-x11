@@ -232,6 +232,15 @@ the diff records the cost.
 
 ## Style
 
+- **Style lives in `style`, never in flat props.** Layout, paint, text,
+  `cursor`, `overflow`, `zIndex`, `pointerEvents` go in the `style` prop —
+  an object or an array flattened left-to-right — and everything else is a
+  prop: `title`, window geometry and size hints, `value`, `focusable`,
+  handlers. No name means both, which is what keeps `<window width>`
+  unambiguous. Passing a style property flat throws in development.
+  `:hover`/`:focus`/`:active`/`:disabled` blocks resolve in the renderer as
+  repaints, and may only set paint properties. See
+  [docs/styling.md](docs/styling.md).
 - ESM, Prettier (single quotes); run `npm run format` before committing.
 - Conventional commit messages (`feat:`, `fix:`, `chore:`, ...) — releases
   are automated with release-please.

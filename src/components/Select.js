@@ -37,19 +37,23 @@ function Option({ option, selected, active, onPick, onHover, nodeRef }) {
     'box',
     {
       ref: nodeRef,
-      height: ITEM_HEIGHT,
-      justifyContent: 'center',
-      paddingLeft: 10,
-      cursor: 'pointer',
-      backgroundColor: active ? theme.hoverBackground : theme.background,
       onMouseEnter: () => onHover?.(),
       onClick: () => onPick(option),
+      style: {
+        height: ITEM_HEIGHT,
+        justifyContent: 'center',
+        paddingLeft: 10,
+        cursor: 'pointer',
+        backgroundColor: active ? theme.hoverBackground : theme.background,
+      },
     },
     h(
       'text',
       {
-        color: active ? theme.hoverText : theme.text,
-        fontWeight: selected ? 'bold' : 'normal',
+        style: {
+          color: active ? theme.hoverText : theme.text,
+          fontWeight: selected ? 'bold' : 'normal',
+        },
       },
       option.label,
     ),
@@ -57,7 +61,7 @@ function Option({ option, selected, active, onPick, onHover, nodeRef }) {
 }
 
 /**
- * <Select value options onChange placeholder width …boxProps> — a dropdown
+ * <Select value options onChange placeholder …boxProps> — a dropdown
  * built on <popup>. The menu is a real override-redirect X11 window
  * anchored below the trigger (owner window position + trigger rect).
  * Closes on pick, Escape, toggling the trigger, or focus loss within the
@@ -74,7 +78,7 @@ export function Select({
   options = [],
   onChange,
   placeholder = 'Select…',
-  width,
+  style,
   ...boxProps
 }) {
   const theme = useTheme();
@@ -183,18 +187,6 @@ export function Select({
     {
       ref: triggerRef,
       focusable: true,
-      cursor: 'pointer',
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      width,
-      padding: 8,
-      paddingLeft: 10,
-      paddingRight: 10,
-      borderWidth: 1,
-      borderRadius: 4,
-      borderColor: focused || open ? theme.borderActive : theme.border,
-      backgroundColor: theme.background,
       onClick: toggle,
       onFocus: () => setFocused(true),
       onBlur: () => {
@@ -203,16 +195,30 @@ export function Select({
       },
       onKeyDown,
       ...boxProps,
+      style: [
+        {
+          cursor: 'pointer',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          padding: 8,
+          paddingLeft: 10,
+          paddingRight: 10,
+          borderWidth: 1,
+          borderRadius: 4,
+          borderColor: focused || open ? theme.borderActive : theme.border,
+          backgroundColor: theme.background,
+        },
+        style,
+      ],
     },
     h(
       'text',
-      { color: current ? theme.text : theme.dim },
+      { style: { color: current ? theme.text : theme.dim } },
       current ? current.label : placeholder,
     ),
-    h('box', { flexGrow: 1 }),
+    h('box', { style: { flexGrow: 1 } }),
     h('canvas', {
-      width: 10,
-      height: 6,
       onDraw: (ctx, { width: w, height: hgt }) => {
         ctx.fillStyle = theme.dim;
         ctx.beginPath();
@@ -222,6 +228,7 @@ export function Select({
         ctx.closePath();
         ctx.fill();
       },
+      style: { width: 10, height: 6 },
     }),
     open &&
       anchor &&
@@ -232,28 +239,24 @@ export function Select({
           y: anchor.y,
           width: anchor.width,
           height: menuHeight + 2,
-          backgroundColor: theme.background,
-          // a press anywhere else closes the menu, the window frame
-          // included — see PopupNode's `grab`
           grab: true,
           onDismiss: close,
+          style: { backgroundColor: theme.background },
         },
         h(
           'box',
           {
-            flexGrow: 1,
-            // yoga's default flexShrink is 0: without this the frame keeps
-            // its content height, the scrollview inside it never shrinks to
-            // the viewport, and a menu longer than MAX_MENU_HEIGHT gets
-            // clipped by the popup's edge instead of scrolling
-            flexShrink: 1,
-            borderWidth: 1,
-            borderColor: theme.border,
-            backgroundColor: theme.background,
+            style: {
+              flexGrow: 1,
+              flexShrink: 1,
+              borderWidth: 1,
+              borderColor: theme.border,
+              backgroundColor: theme.background,
+            },
           },
           h(
             'scrollview',
-            { ref: scrollRef, flexGrow: 1, padding: 4 },
+            { ref: scrollRef, style: { flexGrow: 1, padding: 4 } },
             normalized.map((option, index) =>
               h(Option, {
                 key: String(option.value),

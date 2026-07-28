@@ -170,7 +170,7 @@ test('a mesh compiles once, then every frame is one CallList', async () => {
         { width: 320, height: 240 },
         h(
           Canvas3D,
-          { flexGrow: 1, camera: { position: [0, 0, 6] } },
+          { style: { flexGrow: 1 }, camera: { position: [0, 0, 6] } },
           h(
             'mesh',
             { rotation },
@@ -225,7 +225,7 @@ test('per-frame cost does not grow with triangle count', async () => {
         { width: 320, height: 240 },
         h(
           Canvas3D,
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           h(
             'mesh',
             {},
@@ -271,7 +271,7 @@ test('changing geometry args recompiles that list once', async () => {
         { width: 320, height: 240 },
         h(
           Canvas3D,
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           h(
             'mesh',
             {},
@@ -313,7 +313,7 @@ test('groups nest transforms and each material switches state once', async () =>
         { width: 320, height: 240 },
         h(
           Canvas3D,
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           h(
             'group',
             { position: [0, 1, 0] },
@@ -403,7 +403,7 @@ test('lights drive the lit materials, and ambient needs no unit of its own', asy
         { width: 320, height: 240 },
         h(
           Canvas3D,
-          { flexGrow: 1, camera: { position: [0, 0, 6] } },
+          { style: { flexGrow: 1 }, camera: { position: [0, 0, 6] } },
           h('ambientLight', { intensity: 0.3 }),
           h('pointLight', { position: [4, 5, 3], intensity: 1 }),
           h(
@@ -472,7 +472,7 @@ test('a lit material with no lights falls back to flat colour', async () => {
         { width: 320, height: 240 },
         h(
           Canvas3D,
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           h(
             'mesh',
             {},
@@ -520,7 +520,7 @@ test('a texture is uploaded once and only rebound afterwards', async () => {
         { width: 320, height: 240 },
         h(
           Canvas3D,
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           h(
             'mesh',
             {},
@@ -578,7 +578,7 @@ test('a material without a map turns texturing off', async () => {
         { width: 320, height: 240 },
         h(
           Canvas3D,
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           h(
             'mesh',
             {},

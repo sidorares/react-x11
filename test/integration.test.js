@@ -131,8 +131,10 @@ test('child windows stack bottom-to-top in JSX order on the server', async () =>
             'window',
             { key, ref: refs[key], x: 20, y: 20, width: 80, height: 60 },
             React.createElement('box', {
-              flexGrow: 1,
-              backgroundColor: key === 'a' ? 'red' : 'blue',
+              style: {
+                flexGrow: 1,
+                backgroundColor: key === 'a' ? 'red' : 'blue',
+              },
             }),
           ),
         ),
@@ -174,12 +176,13 @@ test('paints a flex box tree and reflows on update', async () => {
         { width: 160, height: 120 },
         React.createElement(
           'box',
-          { flexDirection: 'row', flexGrow: 1 },
+          { style: { flexDirection: 'row', flexGrow: 1 } },
           React.createElement('box', {
-            flexGrow: 1,
-            backgroundColor: leftColor,
+            style: { flexGrow: 1, backgroundColor: leftColor },
           }),
-          React.createElement('box', { flexGrow: 1, backgroundColor: 'blue' }),
+          React.createElement('box', {
+            style: { flexGrow: 1, backgroundColor: 'blue' },
+          }),
         ),
       );
 
@@ -209,11 +212,12 @@ test('scrollview scrolls content (pixel-verified)', async () => {
         { width: 100, height: 100 },
         React.createElement(
           'scrollview',
-          { flexGrow: 1, ref, scrollbar: false },
-          React.createElement('box', { height: 100, backgroundColor: 'red' }),
+          { ref, scrollbar: false, style: { flexGrow: 1 } },
           React.createElement('box', {
-            height: 100,
-            backgroundColor: '#00ff00',
+            style: { height: 100, backgroundColor: 'red' },
+          }),
+          React.createElement('box', {
+            style: { height: 100, backgroundColor: '#00ff00' },
           }),
         ),
       ),
@@ -241,13 +245,12 @@ test('popup is override-redirect on the server and paints', async () => {
         { width: 120, height: 80 },
         React.createElement(
           'box',
-          { flexGrow: 1 },
+          { style: { flexGrow: 1 } },
           React.createElement(
             'popup',
             { ref, x: 10, y: 10, width: 60, height: 40 },
             React.createElement('box', {
-              flexGrow: 1,
-              backgroundColor: 'red',
+              style: { flexGrow: 1, backgroundColor: 'red' },
             }),
           ),
         ),
@@ -285,12 +288,10 @@ test('textinput renders its value through the ntk text stack', async () => {
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 200, height: 60, backgroundColor: 'white' },
+        { width: 200, height: 60, style: { backgroundColor: 'white' } },
         React.createElement('textinput', {
           value: 'Hello',
-          fontSize: 24,
-          flexGrow: 1,
-          backgroundColor: 'white',
+          style: { fontSize: 24, flexGrow: 1, backgroundColor: 'white' },
         }),
       ),
       app,
@@ -331,7 +332,7 @@ test('textinput caret advances past trailing spaces', async () => {
         React.createElement('textinput', {
           ref,
           defaultValue: 'hi  x',
-          flexGrow: 1,
+          style: { flexGrow: 1 },
         }),
       ),
       app,
@@ -371,8 +372,12 @@ test('renders <text> through the ntk text stack', async () => {
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 160, height: 60, backgroundColor: 'white' },
-        React.createElement('text', { fontSize: 24, color: 'black' }, 'Hello'),
+        { width: 160, height: 60, style: { backgroundColor: 'white' } },
+        React.createElement(
+          'text',
+          { style: { fontSize: 24, color: 'black' } },
+          'Hello',
+        ),
       ),
       app,
     );
@@ -431,15 +436,21 @@ test('centered text is vertically balanced (half-leading)', async () => {
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 200, height: 100, backgroundColor: 'white' },
+        { width: 200, height: 100, style: { backgroundColor: 'white' } },
         React.createElement(
           'box',
           {
-            flexGrow: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
+            style: {
+              flexGrow: 1,
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
           },
-          React.createElement('text', { fontSize: 48, color: 'black' }, 'HHH'),
+          React.createElement(
+            'text',
+            { style: { fontSize: 48, color: 'black' } },
+            'HHH',
+          ),
         ),
       ),
       app,
@@ -495,14 +506,14 @@ test('rich content scrolled out of a scrollview leaves no ink behind', async () 
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 300, height: 300, backgroundColor: 'white' },
+        { width: 300, height: 300, style: { backgroundColor: 'white' } },
         React.createElement(
           'box',
-          { flexGrow: 1, padding: 20 },
-          React.createElement('box', { height: 60 }), // the band above it
+          { style: { flexGrow: 1, padding: 20 } },
+          React.createElement('box', { style: { height: 60 } }), // the band above it
           React.createElement(
             'scrollview',
-            { flexGrow: 1 },
+            { style: { flexGrow: 1 } },
             React.createElement('markdown', { source }),
           ),
         ),
@@ -560,11 +571,11 @@ test('<markdown> survives a document being typed down to nothing', async () => {
       setText = set;
       return React.createElement(
         'window',
-        { width: 300, height: 200, backgroundColor: 'white' },
+        { width: 300, height: 200, style: { backgroundColor: 'white' } },
         React.createElement(
           'scrollview',
-          { flexGrow: 1 },
-          React.createElement('markdown', { padding: 6 }, text),
+          { style: { flexGrow: 1 } },
+          React.createElement('markdown', { style: { padding: 6 } }, text),
         ),
       );
     };
@@ -593,7 +604,7 @@ test('<markdown> renders through MarkdownView and dispatches onLink', async () =
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 300, height: 200, backgroundColor: 'white' },
+        { width: 300, height: 200, style: { backgroundColor: 'white' } },
         React.createElement('markdown', {
           source: '# Heading\n\n[the link](https://example.com/)',
           onLink: (href) => clicked.push(href),
@@ -640,7 +651,7 @@ test('<html> renders styled boxes through HtmlView', async () => {
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 200, height: 120, backgroundColor: 'white' },
+        { width: 200, height: 120, style: { backgroundColor: 'white' } },
         React.createElement('html', {
           source:
             '<div style="width: 80px; height: 40px; background: #0000ff; margin: 0"></div>',
@@ -662,12 +673,11 @@ test('<svg> scales its viewBox into the content box', async () => {
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 100, height: 100, backgroundColor: 'white' },
+        { width: 100, height: 100, style: { backgroundColor: 'white' } },
         React.createElement('svg', {
-          width: 60,
-          height: 60,
           source:
             '<svg viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" fill="#ff0000"/></svg>',
+          style: { width: 60, height: 60 },
         }),
       ),
       app,
@@ -687,7 +697,7 @@ test('<tex> lays out and draws a formula', async () => {
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 200, height: 80, backgroundColor: 'white' },
+        { width: 200, height: 80, style: { backgroundColor: 'white' } },
         React.createElement('tex', {
           source: 'x = \\frac{1}{2}',
           size: 32,
@@ -718,7 +728,7 @@ test('<markdown> mermaid fence reflows into a diagram (ntk onInvalidate)', async
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 300, height: 200, backgroundColor: 'white' },
+        { width: 300, height: 200, style: { backgroundColor: 'white' } },
         React.createElement('markdown', {
           source: '```mermaid\nflowchart LR\n  A[Hello] --> B[World]\n```',
         }),
@@ -761,10 +771,10 @@ test('<svg> JSX children render and update declaratively', async () => {
     const ui = (fill) =>
       React.createElement(
         'window',
-        { width: 100, height: 100, backgroundColor: 'white' },
+        { width: 100, height: 100, style: { backgroundColor: 'white' } },
         React.createElement(
           'svg',
-          { viewBox: '0 0 10 10', width: 60, height: 60 },
+          { viewBox: '0 0 10 10', style: { width: 60, height: 60 } },
           React.createElement('rect', {
             x: 0,
             y: 0,
@@ -803,7 +813,7 @@ test('<markdown> accepts its content as a string child', async () => {
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 300, height: 100, backgroundColor: 'white' },
+        { width: 300, height: 100, style: { backgroundColor: 'white' } },
         React.createElement('markdown', null, '# From a child string'),
       ),
       app,
@@ -831,12 +841,11 @@ test('<textarea> edits multi-line text with line-aware caret movement', async ()
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 220, height: 140, backgroundColor: 'white' },
+        { width: 220, height: 140, style: { backgroundColor: 'white' } },
         React.createElement('textarea', {
           ref,
           defaultValue: 'hello\nworld',
-          flexGrow: 1,
-          backgroundColor: 'white',
+          style: { flexGrow: 1, backgroundColor: 'white' },
         }),
       ),
       app,

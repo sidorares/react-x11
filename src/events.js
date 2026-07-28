@@ -252,6 +252,7 @@ export class EventManager {
         return;
       }
       this.downNode = target;
+      target?.setStyleState(':active', true);
       this._focusFromPress(target);
       const ev = this.dispatch('MouseDown', target, native, {
         button: native.keycode,
@@ -274,6 +275,7 @@ export class EventManager {
       // capture ends with the gesture, like implicit DOM pointer capture
       this.capturedNode = null;
       if (this.downNode && !this.downNode.destroyed) {
+        this.downNode.setStyleState(':active', false);
         this.downNode._defaultMouseUp?.(ev);
       }
       if (this.downNode) {
@@ -369,11 +371,16 @@ export class EventManager {
     for (let i = oldPath.length - 1; i >= common; i--) {
       const n = oldPath[i];
       if (!n.destroyed) {
+        // the hover path is the ancestor chain, so a `:hover` block on a
+        // parent lights up while a child is hovered — CSS semantics, for
+        // free, because the path is already computed for enter/leave
+        n.setStyleState(':hover', false);
         n.props.onMouseLeave?.(this._makeEvent('mouseLeave', native, n));
       }
     }
     for (let i = common; i < newPath.length; i++) {
       const n = newPath[i];
+      n.setStyleState(':hover', true);
       n.props.onMouseEnter?.(this._makeEvent('mouseEnter', native, n));
     }
     this.hoverPath = newPath;
@@ -387,7 +394,7 @@ export class EventManager {
     if (typeof wnd.setCursor !== 'function') return;
     let cursor = null;
     for (let i = path.length - 1; i >= 0; i--) {
-      const c = path[i].props.cursor ?? path[i].defaultCursor;
+      const c = path[i].style.cursor ?? path[i].defaultCursor;
       if (c != null) {
         cursor = c;
         break;
@@ -437,6 +444,7 @@ export class EventManager {
     this._previousFocus = old;
     this.focused = node;
     if (old && !old.destroyed) {
+      old.setStyleState(':focus', false);
       old._defaultBlur?.();
       old.props.onBlur?.(this._makeEvent('blur', null, old));
       // the ring/caret it was drawing has to go, and it may be in another
@@ -446,6 +454,7 @@ export class EventManager {
     if (node) {
       // keys only reach a node whose window has the X focus
       if (!this.windowFocused) this.node.window?.focus?.();
+      node.setStyleState(':focus', true);
       this._scrollIntoView(node);
       if (this.windowFocused) node._defaultFocus?.();
       node.props.onFocus?.(this._makeEvent('focus', null, node));

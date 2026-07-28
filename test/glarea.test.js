@@ -77,10 +77,9 @@ test('<glarea> gets a GL child window and draws a frame', async () => {
       h(
         'window',
         { width: 320, height: 240 },
-        h('box', { padding: 20, flexGrow: 1 }, [
+        h('box', { style: { padding: 20, flexGrow: 1 } }, [
           h('glarea', {
             key: 'gl',
-            flexGrow: 1,
             clearColor: '#3366cc',
             onCreated: (gl) => gl.Enable(gl.DEPTH_TEST),
             onDraw: (gl, info) => {
@@ -89,6 +88,7 @@ test('<glarea> gets a GL child window and draws a frame', async () => {
               gl.Vertex3f(0, 0, 0);
               gl.End();
             },
+            style: { flexGrow: 1 },
           }),
         ]),
       ),
@@ -168,11 +168,11 @@ test('<glarea> follows layout changes and redraws once per change', async () => 
       h(
         'window',
         { width: 320, height: 240 },
-        h('box', { padding, flexGrow: 1 }, [
+        h('box', { style: { padding: padding, flexGrow: 1 } }, [
           h('glarea', {
             key: 'gl',
-            flexGrow: 1,
             onDraw: (gl, info) => frames.push([info.width, info.height]),
+            style: { flexGrow: 1 },
           }),
         ]),
       );
