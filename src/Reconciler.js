@@ -26,6 +26,7 @@ import {
   ScrollViewNode,
   TextInputNode,
   TextAreaNode,
+  flushWindowRestacks,
 } from './nodes.js';
 import { GlAreaNode } from './glnodes.js';
 import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
@@ -124,7 +125,11 @@ const HostConfig = {
     return null;
   },
 
-  resetAfterCommit() {},
+  // child <window>s that moved in the tree restack here, so a reorder costs
+  // one pass instead of one per insertBefore
+  resetAfterCommit() {
+    flushWindowRestacks();
+  },
 
   createInstance(type, props, rootContainer, hostContext, internalHandle) {
     if (hostContext.isInsideSvg) {

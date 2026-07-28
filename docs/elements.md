@@ -64,6 +64,25 @@ Windows may be nested inside other windows (real X11 child windows).
 **Ref**: the live ntk `Window` — `getContext('2d')`,
 `requestAnimationFrame`, `setCursor`, the whole ntk API.
 
+### Stacking
+
+Nested `<window>`s stack the way drawn siblings paint: the later sibling
+sits on top, and `zIndex` wins over document order. Reordering them in JSX
+restacks the real windows — one `ConfigureWindow` pass per commit, and
+nothing at all when mount order already agrees.
+
+```jsx
+<window>
+  <window key="back" /> {/* bottom */}
+  <window key="front" /> {/* on top */}
+  <window key="always" zIndex={1} /> {/* above both, wherever it sits here */}
+</window>
+```
+
+Top-level windows are the window manager's to stack — it redirects the
+request — so their order in the tree carries no stacking meaning. Use
+`alwaysOnTop` (below) for those.
+
 ### Window manager hints
 
 Properties the window manager reads (ntk ≥ 3.5.0). All work at mount and

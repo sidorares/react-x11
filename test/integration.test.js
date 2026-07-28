@@ -113,6 +113,58 @@ test('renders a window tree into an in-process X server', async () => {
   }
 });
 
+test('child windows stack bottom-to-top in JSX order on the server', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const refs = { a: React.createRef(), b: React.createRef() };
+    // Two child windows on the same spot. The check is QueryTree, not
+    // pixels: getImageData reads a window's backing pixmap, which stays
+    // valid while the window is occluded, and the in-process server does
+    // not composite children into the parent or the root either. QueryTree
+    // is what stacking order *means* in the protocol.
+    const ui = (order) =>
+      React.createElement(
+        'window',
+        { width: 160, height: 120 },
+        order.map((key) =>
+          React.createElement(
+            'window',
+            { key, ref: refs[key], x: 20, y: 20, width: 80, height: 60 },
+            React.createElement('box', {
+              flexGrow: 1,
+              backgroundColor: key === 'a' ? 'red' : 'blue',
+            }),
+          ),
+        ),
+      );
+
+    const parent = await render(ui(['a', 'b']), app);
+    const queryTree = (id) =>
+      new Promise((resolve, reject) =>
+        app.X.QueryTree(id, (err, tree) => (err ? reject(err) : resolve(tree))),
+      );
+
+    // X reports children bottom to top, so this is the JSX order verbatim
+    assert.deepStrictEqual(
+      (await queryTree(parent.id)).children,
+      [refs.a.current.id, refs.b.current.id],
+      'the later sibling starts on top',
+    );
+
+    await render(ui(['b', 'a']), app);
+    assert.deepStrictEqual(
+      (await queryTree(parent.id)).children,
+      [refs.b.current.id, refs.a.current.id],
+      'reordering the JSX restacks the real windows',
+    );
+
+    ReactX11.unmountComponentAtNode(app);
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
 test('paints a flex box tree and reflows on update', async () => {
   const { app } = await createHeadlessApp();
   try {

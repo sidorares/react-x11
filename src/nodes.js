@@ -27,6 +27,21 @@ const DRAWN_KINDS = new Set([
   'tex',
 ]);
 
+// X ConfigureWindow stack-mode: Below places the window directly under the
+// named sibling (X11 protocol, ConfigureWindow).
+const STACK_BELOW = 1;
+
+// Windows whose child stacking order may have gone stale during the commit
+// in progress; drained by flushWindowRestacks from resetAfterCommit.
+const pendingRestack = new Set();
+
+/** Apply any child-window stacking changes the commit produced, once. */
+export function flushWindowRestacks() {
+  const nodes = [...pendingRestack];
+  pendingRestack.clear();
+  for (const node of nodes) node._restackWindowChildren();
+}
+
 // DevTools' measureHostInstance dereferences instance.ownerDocument
 // unconditionally once getClientRects exists; a null documentElement and
 // defaultView give it zero scroll offsets and no crash.
@@ -98,15 +113,25 @@ export class Node {
     this.insertBefore(child, null);
   }
 
+  /** Splice `child` in front of `beforeChild` (end of the list when that is
+   * null), first taking it out of its old slot: React reorders a keyed list
+   * by calling insertBefore with a child that is *already* mounted here, and
+   * without the removal it would appear twice. Returns the new index. */
+  _spliceChild(child, beforeChild) {
+    const from = this.children.indexOf(child);
+    if (from !== -1) this.children.splice(from, 1);
+    const before =
+      beforeChild == null ? -1 : this.children.indexOf(beforeChild);
+    const index = before === -1 ? this.children.length : before;
+    this.children.splice(index, 0, child);
+    return index;
+  }
+
   insertBefore(child, beforeChild) {
     if (child.isPopup) {
       // popups live anywhere in the JSX tree but are independent
       // override-redirect windows: bookkeeping only, no yoga, no paint
-      const at =
-        beforeChild == null
-          ? this.children.length
-          : this.children.indexOf(beforeChild);
-      this.children.splice(at, 0, child);
+      this._spliceChild(child, beforeChild);
       child.parent = this;
       return;
     }
@@ -116,11 +141,12 @@ export class Node {
           'windows may only appear at the root or inside another <window>.',
       );
     }
-    const index =
-      beforeChild == null
-        ? this.children.length
-        : this.children.indexOf(beforeChild);
-    this.children.splice(index, 0, child);
+    // a move has to leave the yoga tree too — yoga aborts on insertChild of
+    // a node that still has a parent
+    if (this.children.includes(child) && this._joinsYoga(child)) {
+      this.yoga.removeChild(child.yoga);
+    }
+    const index = this._spliceChild(child, beforeChild);
     child.parent = this;
     if (this._joinsYoga(child)) {
       this.yoga.insertChild(child.yoga, this._yogaIndexAt(index));
@@ -1531,6 +1557,9 @@ export class WindowNode extends Node {
     this.needsPaint = true;
     this._scheduled = false;
     this.events = new EventManager(this);
+    // ids of the child windows in the order the *server* stacks them,
+    // bottom to top — see _restackWindowChildren
+    this._xStack = [];
   }
 
   /** Create the real X11 window (commit phase only). Children windows are
@@ -1555,8 +1584,10 @@ export class WindowNode extends Node {
     for (const child of this.children) {
       if (child.isWindow && !child.isPopup) {
         child.realize(wnd);
+        if (child.window) this._xStack.push(child.window.id);
       }
     }
+    this._restackWindowChildren();
     // <glarea>s mounted before the window existed own a child X window too
     this._realizeGlAreas(this);
     wnd.map?.();
@@ -1656,20 +1687,74 @@ export class WindowNode extends Node {
     this.events.attach();
   }
 
+  /** Child <window>s in the order they should stack, bottom to top: the same
+   * rule drawn children paint by (later sibling on top, `zIndex` first). */
+  _windowStackOrder() {
+    return this.children
+      .filter((c) => c.isWindow && !c.isPopup && c.window)
+      .map((node, i) => ({ node, i }))
+      .sort(
+        (a, b) =>
+          (a.node.props.zIndex ?? 0) - (b.node.props.zIndex ?? 0) || a.i - b.i,
+      )
+      .map((e) => e.node);
+  }
+
+  /**
+   * Make the server's stacking order match the JSX order. X stacks a new
+   * window on top of its siblings, so plain mount order already comes out
+   * right and this sends nothing; it costs requests only when React moves a
+   * child window or a `zIndex` changes. Walking top-down and putting each
+   * window directly below the one above it fixes any permutation in one
+   * pass — after step i, everything from i upwards is a contiguous run in
+   * the right order. Top-level windows are excluded on purpose: they are
+   * the window manager's to stack, and it redirects the request anyway;
+   * so are popups, which are children of the screen root wherever they sit
+   * in the tree. Only `<window>` children are ordered against each other —
+   * a `<glarea>`'s X window is a sibling at the server, but it belongs to
+   * the drawn tree, which has no stacking relationship with them.
+   */
+  _restackWindowChildren() {
+    const X = this.app?.X;
+    if (!this.window || typeof X?.ConfigureWindow !== 'function') return;
+    const stack = this._windowStackOrder();
+    const ids = stack.map((c) => c.window.id);
+    if (
+      ids.length === this._xStack.length &&
+      ids.every((id, i) => id === this._xStack[i])
+    ) {
+      return;
+    }
+    for (let i = stack.length - 2; i >= 0; i--) {
+      X.ConfigureWindow(ids[i], {
+        sibling: ids[i + 1],
+        stackMode: STACK_BELOW,
+      });
+    }
+    this._xStack = ids;
+  }
+
   insertBefore(child, beforeChild) {
     if (child.isPopup) {
       Node.prototype.insertBefore.call(this, child, beforeChild);
       return;
     }
     if (child.isWindow) {
-      this.children.push(child);
+      this._spliceChild(child, beforeChild);
       child.parent = this;
       // Initial children are realized when this window realizes; a child
       // appended to an already-realized window is created immediately,
-      // top-down against its real parent.
+      // top-down against its real parent — and lands on top of its
+      // siblings, which _restackWindowChildren then corrects if the JSX
+      // order says otherwise.
       if (this.window && !child.window) {
         child.realize(this.window);
+        if (child.window) this._xStack.push(child.window.id);
       }
+      // React reorders a keyed list with one insertBefore per moved child;
+      // restacking once at the end of the commit skips the intermediate
+      // orders, which nobody ever sees.
+      pendingRestack.add(this);
       return;
     }
     Node.prototype.insertBefore.call(this, child, beforeChild);
@@ -1679,8 +1764,10 @@ export class WindowNode extends Node {
     if (child.isWindow) {
       const index = this.children.indexOf(child);
       if (index !== -1) this.children.splice(index, 1);
+      const id = child.window?.id;
       child.parent = null;
       child.destroySubtree();
+      if (id != null) this._xStack = this._xStack.filter((w) => w !== id);
       return;
     }
     Node.prototype.removeChild.call(this, child);
@@ -1715,6 +1802,16 @@ export class WindowNode extends Node {
 
     if (newProps.title !== before.title) {
       wnd.setTitle?.(newProps.title || '');
+    }
+    // a popup is a child of the screen root, not of the node it is written
+    // under, so its zIndex means nothing — and its parent here may well be
+    // a drawn node with no children to stack
+    if (
+      (newProps.zIndex ?? 0) !== (before.zIndex ?? 0) &&
+      !this.isPopup &&
+      this.parent?._restackWindowChildren
+    ) {
+      pendingRestack.add(this.parent);
     }
     this._applyWindowHints(newProps, before);
     const geometryChanged =
