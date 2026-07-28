@@ -23,6 +23,11 @@ const MIN_COLUMN = 40;
 // rows kept either side of the viewport, so a fast scroll does not show a
 // gap before the next frame catches up
 const OVERSCAN = 4;
+// What to build before the viewport has been measured. onViewport cannot
+// arrive until layout has run, which is a frame after the first commit, so
+// there is always one render that has to guess — and guessing "all of them"
+// means ten thousand rows land in the tree for a frame.
+const ASSUMED_ROWS = 40;
 
 const s = createStyles({
   root: { flexGrow: 1, minHeight: 0, minWidth: 0 },
@@ -149,7 +154,7 @@ export function Table({
   const visibleCount =
     view.height > 0
       ? Math.ceil(view.height / rowHeight) + OVERSCAN * 2
-      : sorted.length;
+      : ASSUMED_ROWS;
   const last = Math.min(sorted.length, first + visibleCount);
   const slice = sorted.slice(first, last);
 

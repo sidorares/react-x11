@@ -97,6 +97,33 @@ test('only the rows in view are built', async () => {
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('the first render, before anything is measured, is still bounded', () => {
+  const app = createMockApp();
+  // no awaits: this is the tree as the very first commit leaves it, before
+  // layout has run and onViewport could have said how tall the viewport is.
+  // Rendering "all of them" here put 130,000 nodes in the tree and froze the
+  // window for the best part of a second.
+  ReactX11.render(
+    h(
+      'window',
+      { width: 300, height: 200 },
+      h(Table, { columns: COLUMNS, rows: makeRows(10_000) }),
+    ),
+    null,
+    app,
+  );
+
+  let nodes = 0;
+  const walk = (n) => {
+    nodes++;
+    n.children.forEach((c) => !c.isWindow && walk(c));
+  };
+  walk(root(app));
+  assert.ok(nodes < 1000, `first commit built ${nodes} nodes for 10,000 rows`);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('the scrollbar still measures the whole list', async () => {
   const app = mount({}, 10_000);
   await settle();
