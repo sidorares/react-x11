@@ -116,7 +116,7 @@ Widget **components** (plain React on top of the primitives, themable via
 `Slider`, `ProgressBar`, `Select`, `Tooltip`, `MenuBar`/`ContextMenu`,
 `Dialog` — a modal built on `<popup trapFocus>`, which traps Tab and
 restores focus when it closes — plus the two containers an application
-window is built from: `Tabs` and `SplitPane`. See
+window is built from: `Tabs`, `Tree` and `SplitPane`. See
 [docs/components.md](docs/components.md).
 
 ### 3D

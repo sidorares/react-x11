@@ -335,6 +335,43 @@ and wrap, Home/End jump to the ends, disabled tabs are skipped. Arrows
 select as they move, the way a desktop notebook behaves; `manual` splits
 focus from selection, which is what you want when a panel is expensive.
 
+## `Tree`
+
+A disclosure tree: file browsers, outline panes, property inspectors.
+
+```jsx
+<Tree
+  items={[{ id: 'src', label: 'src', children: [{ id: 'a', label: 'a.js' }] }]}
+  defaultExpanded={['src']}
+  onSelect={(id, item) => open(item)}
+/>
+```
+
+| prop                           |                                                          |
+| ------------------------------ | -------------------------------------------------------- |
+| `items`                        | `{ id, label, children, disabled }[]`                    |
+| `expanded` / `defaultExpanded` | ids of open branches; controlled with `onExpandedChange` |
+| `selected` / `defaultSelected` | selected id; controlled with `onSelect`                  |
+| `onSelect(id, item)`           | the selection moved                                      |
+| `onActivate(id, item)`         | Enter or Space on a row                                  |
+
+An item with a `children` **array** is a branch, even when the array is
+empty — that is how an unexpanded directory shows a twisty before its
+contents are known. Load lazily by handing back `children: []` and filling
+it in when `onExpandedChange` fires.
+
+The twisty is its own hit target: clicking it opens a branch **without**
+moving the selection, the way a file browser lets you peek inside a folder
+you have not chosen. Clicking the label selects.
+
+The tree is a single tab stop. Up/Down walk the rows that are currently
+visible, skipping disabled ones. Right expands a branch and, if it is
+already open, steps into it; Left collapses it and, if it is already closed,
+steps out to the parent. Home/End jump to the ends, Enter and Space
+activate, and typing letters jumps by prefix — the same type-ahead `Select`
+and the menus use, so a quick "bu" refines rather than jumping twice. The
+tree scrolls the focused row into view as you move.
+
 ## `SplitPane`
 
 Two panes with a divider you can drag.

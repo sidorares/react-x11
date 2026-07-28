@@ -8,6 +8,7 @@ export { createStyles, flattenStyle } from './styles.js';
 export {
   Select,
   Tabs,
+  Tree,
   SplitPane,
   SelectThemeProvider,
   ThemeProvider,
