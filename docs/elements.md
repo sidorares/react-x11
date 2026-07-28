@@ -209,6 +209,7 @@ same reason. Pass any of them explicitly to opt out.
 | prop                |                                                                                  |
 | ------------------- | -------------------------------------------------------------------------------- |
 | `onScroll(ev)`      | `{scrollX, scrollY, contentWidth, contentHeight, viewportWidth, viewportHeight}` |
+| `onViewport(ev)`    | `{width, height, contentWidth, contentHeight}` whenever they change              |
 | `scrollbar={false}` | hide the drawn scrollbars                                                        |
 | `scrollbarColor`    | thumb color                                                                      |
 
@@ -230,6 +231,12 @@ belongs to them.
 X sends buttons 6 and 7 for a horizontal wheel; **Shift + vertical wheel**
 scrolls sideways too, for mice and touchpads that have none. When both bars
 show, each stops short of the other's corner.
+
+`onViewport` fires from **layout**, not from scrolling, so it arrives for a
+list nobody has scrolled yet. That is what a virtualized list needs before
+it can decide how many rows are worth building: layout runs on the frame
+clock, after the commit that mounted the node, so an effect cannot read the
+size off the ref. `Table` is built on it.
 
 `scrollIntoView(node)` scrolls the minimum amount that makes a descendant
 node fully visible, and is safe to call from an effect right after that
