@@ -188,6 +188,35 @@ pays a layout pass per frame for it. `Switch` is the worked example — the
 thumb is absolutely positioned and slides on `left`, because
 `justifyContent` would flip between the ends with nothing in between.
 
+## Window size queries
+
+`'@width >= 600'` and friends are the X11 analogue of `@media`: what a style
+can usefully ask about here is the window it is laid out in, not the screen.
+
+```jsx
+const s = createStyles({
+  bar: {
+    flexDirection: 'column',
+    gap: 4,
+    '@width >= 600': { flexDirection: 'row', gap: 16 },
+  },
+});
+```
+
+`width` and `height`, with `>=`, `<=`, `>` or `<`. Blocks that match are
+merged in declaration order, before state blocks — so a `:hover` inside the
+wide layout still wins over the wide layout.
+
+**A size query may set layout properties, unlike a state block.** That is
+not an inconsistency: a pointer state must never reflow the tree, but a size
+query is only ever re-evaluated inside a layout pass that a resize has
+already required, so it costs nothing extra. Nodes that declare one are
+registered with their window and re-resolved just before it lays out, and
+only when the size actually changed.
+
+A malformed query is an error rather than a key that silently never
+matches.
+
 ## Decided
 
 - **`':hover'`, not `_hover`.** The CSS spelling costs a pair of quotes and
@@ -203,6 +232,5 @@ way it does not apply to an `<input type>` in the DOM. They report
 
 ## Next
 
-Window size queries — the X11 analogue of `@media`, and layout-capable,
-since they are only re-evaluated during a layout pass that a resize already
-triggers.
+`opacity` (needs offscreen composition — see NEXT_STEPS §3), and per-node
+container queries if the window-level ones prove too coarse.
