@@ -26,7 +26,9 @@ function Row({ label, children, alignItems = 'center' }) {
   );
 }
 
-function App() {
+/** The gallery itself, without a window round it — so examples/app.jsx can
+ * show it in a tab. */
+export function WidgetsPanel() {
   const [agreed, setAgreed] = useState(true);
   const [notify, setNotify] = useState(false);
   const [flavor, setFlavor] = useState('vanilla');
@@ -49,87 +51,105 @@ function App() {
   }, [notify]);
 
   return (
-    <window
-      width={460}
-      height={720}
-      title="widgets"
-      style={{ backgroundColor: '#f5f6fa' }}
-    >
-      <box style={{ flexGrow: 1, padding: 16, gap: 14 }}>
-        <text style={{ fontSize: 20, color: '#2d3436' }}>Widget gallery</text>
+    <box style={{ flexGrow: 1, padding: 16, gap: 14 }}>
+      <text style={{ fontSize: 20, color: '#2d3436' }}>Widget gallery</text>
 
-        <Row label="Button">
-          <Button primary onPress={() => setPresses((n) => n + 1)}>
-            Press me
-          </Button>
-          <Tooltip label="Back to zero">
-            <Button onPress={() => setPresses(0)}>Reset</Button>
-          </Tooltip>
-          <Button disabled>Disabled</Button>
-          <text style={{ color: '#2d3436' }}>{`${presses}×`}</text>
-        </Row>
+      <Row label="Button">
+        <Button primary onPress={() => setPresses((n) => n + 1)}>
+          Press me
+        </Button>
+        <Tooltip label="Back to zero">
+          <Button onPress={() => setPresses(0)}>Reset</Button>
+        </Tooltip>
+        <Button disabled>Disabled</Button>
+        <text style={{ color: '#2d3436' }}>{`${presses}×`}</text>
+      </Row>
 
-        <Row label="Checkbox">
-          <box style={{ gap: 6 }}>
-            <Checkbox checked={agreed} onChange={setAgreed}>
-              I agree to nothing in particular
-            </Checkbox>
-            <Checkbox checked={false} disabled>
-              Disabled
-            </Checkbox>
-          </box>
-        </Row>
+      <Row label="Checkbox">
+        <box style={{ gap: 6 }}>
+          <Checkbox checked={agreed} onChange={setAgreed}>
+            I agree to nothing in particular
+          </Checkbox>
+          <Checkbox checked={false} disabled>
+            Disabled
+          </Checkbox>
+        </box>
+      </Row>
 
-        <Row label="Radio">
-          <RadioGroup value={flavor} onChange={setFlavor}>
-            <Radio value="vanilla">Vanilla</Radio>
-            <Radio value="chocolate">Chocolate</Radio>
-            <Radio value="pistachio">Pistachio</Radio>
-          </RadioGroup>
-        </Row>
+      <Row label="Radio">
+        <RadioGroup value={flavor} onChange={setFlavor}>
+          <Radio value="vanilla">Vanilla</Radio>
+          <Radio value="chocolate">Chocolate</Radio>
+          <Radio value="pistachio">Pistachio</Radio>
+        </RadioGroup>
+      </Row>
 
-        <Row label="Switch">
-          <Switch checked={notify} onChange={setNotify} />
-          <text style={{ color: '#2d3436' }}>
-            {notify ? 'notifications on' : 'off'}
-          </text>
-        </Row>
+      <Row label="Switch">
+        <Switch checked={notify} onChange={setNotify} />
+        <text style={{ color: '#2d3436' }}>
+          {notify ? 'notifications on' : 'off'}
+        </text>
+      </Row>
 
-        <Row label="Slider">
-          <Slider
-            value={volume}
-            min={0}
-            max={100}
-            step={5}
-            onChange={setVolume}
-            style={{ width: 200 }}
-          />
-          <text style={{ color: '#2d3436' }}>{`${volume}`}</text>
-        </Row>
+      <Row label="Slider">
+        <Slider
+          value={volume}
+          min={0}
+          max={100}
+          step={5}
+          onChange={setVolume}
+          style={{ width: 200 }}
+        />
+        <text style={{ color: '#2d3436' }}>{`${volume}`}</text>
+      </Row>
 
-        <Row label="Progress">
-          <box style={{ flexGrow: 1 }}>
-            <ProgressBar value={progress} />
-          </box>
-          <text
-            style={{ color: '#7f8c8d' }}
-          >{`${Math.round(progress * 100)}%`}</text>
-        </Row>
+      <Row label="Progress">
+        <box style={{ flexGrow: 1 }}>
+          <ProgressBar value={progress} />
+        </box>
+        <text
+          style={{ color: '#7f8c8d' }}
+        >{`${Math.round(progress * 100)}%`}</text>
+      </Row>
 
-        <Row label="Select">
-          <Select
-            options={['fast', 'faster', 'ludicrous']}
-            value={speed}
-            onChange={setSpeed}
-            style={{ width: 160 }}
-          />
-        </Row>
+      <Row label="Select">
+        <Select
+          options={['fast', 'faster', 'ludicrous']}
+          value={speed}
+          onChange={setSpeed}
+          style={{ width: 160 }}
+        />
+      </Row>
 
-        <Row label="Input">
-          <textinput
-            placeholder="Type here…"
+      <Row label="Input">
+        <textinput
+          placeholder="Type here…"
+          style={{
+            flexGrow: 1,
+            padding: 8,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: '#b2bec3',
+            backgroundColor: 'white',
+          }}
+        />
+      </Row>
+
+      <Row label="Markdown" alignItems="flex-start">
+        {/* `flex: 1` in full — grow *and* a zero basis. yoga defaults
+            flexShrink to 0 (CSS says 1), so with a content-sized basis the
+            markdown's natural width became a floor and pushed the row past
+            the window edge */}
+        <box style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 8 }}>
+          {/* the textarea is the source, the <markdown> element is the
+              preview: every keystroke re-parses through ntk's
+              MarkdownView, which is cheap enough for a document this size */}
+          <textarea
+            rows={4}
+            value={note}
+            onChange={setNote}
             style={{
-              flexGrow: 1,
+              flexGrow: 0,
               padding: 8,
               borderRadius: 4,
               borderWidth: 1,
@@ -137,41 +157,33 @@ function App() {
               backgroundColor: 'white',
             }}
           />
-        </Row>
+          <scrollview
+            style={{
+              height: 110,
+              padding: 4,
+              borderRadius: 4,
+              borderWidth: 1,
+              borderColor: '#dfe6e9',
+              backgroundColor: 'white',
+            }}
+          >
+            <markdown style={{ padding: 6 }}>{note}</markdown>
+          </scrollview>
+        </box>
+      </Row>
+    </box>
+  );
+}
 
-        <Row label="Markdown" alignItems="flex-start">
-          <box style={{ flexGrow: 1, gap: 8 }}>
-            {/* the textarea is the source, the <markdown> element is the
-                preview: every keystroke re-parses through ntk's
-                MarkdownView, which is cheap enough for a document this size */}
-            <textarea
-              rows={4}
-              value={note}
-              onChange={setNote}
-              style={{
-                flexGrow: 0,
-                padding: 8,
-                borderRadius: 4,
-                borderWidth: 1,
-                borderColor: '#b2bec3',
-                backgroundColor: 'white',
-              }}
-            />
-            <scrollview
-              style={{
-                height: 110,
-                padding: 4,
-                borderRadius: 4,
-                borderWidth: 1,
-                borderColor: '#dfe6e9',
-                backgroundColor: 'white',
-              }}
-            >
-              <markdown style={{ padding: 6 }}>{note}</markdown>
-            </scrollview>
-          </box>
-        </Row>
-      </box>
+function App() {
+  return (
+    <window
+      width={460}
+      height={720}
+      title="widgets"
+      style={{ backgroundColor: '#f5f6fa' }}
+    >
+      <WidgetsPanel />
     </window>
   );
 }

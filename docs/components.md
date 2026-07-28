@@ -302,6 +302,67 @@ The helpers are exported for widgets of your own:
 **screen** coordinates, because the trigger and the popup are different X
 windows.
 
+## `Tabs`
+
+One panel visible at a time, switched by a strip of tabs.
+
+```jsx
+<Tabs
+  items={[
+    { id: 'general', label: 'General', content: <GeneralPage /> },
+    { id: 'advanced', label: 'Advanced', content: () => <AdvancedPage /> },
+    { id: 'legacy', label: 'Legacy', disabled: true },
+  ]}
+/>
+```
+
+| prop                     |                                                    |
+| ------------------------ | -------------------------------------------------- |
+| `items`                  | `{ id, label, content, disabled }[]`               |
+| `value` / `defaultValue` | selected id — controlled with `value` + `onChange` |
+| `onChange(id)`           | a tab was chosen                                   |
+| `orientation`            | `'horizontal'` (default) or `'vertical'`           |
+| `manual`                 | arrows move focus only; Enter or Space commits     |
+
+`content` may be a node or a function. A function is called only while that
+tab is selected, which is how to avoid building a panel nobody is looking
+at. Items with no `content` at all make `Tabs` a pure navigator — useful
+when the panel lives elsewhere, as in `examples/app.jsx`, where the strip is
+in one half of a `SplitPane` and the panel in the other.
+
+The strip is a **single tab stop**. Left/Right (Up/Down when vertical) move
+and wrap, Home/End jump to the ends, disabled tabs are skipped. Arrows
+select as they move, the way a desktop notebook behaves; `manual` splits
+focus from selection, which is what you want when a panel is expensive.
+
+## `SplitPane`
+
+Two panes with a divider you can drag.
+
+```jsx
+<SplitPane direction="row" defaultSize={220} min={120} minSecond={300}>
+  <Sidebar />
+  <Editor />
+</SplitPane>
+```
+
+| prop                   |                                                 |
+| ---------------------- | ----------------------------------------------- |
+| `direction`            | `'row'` (default) or `'column'`                 |
+| `size` / `defaultSize` | the **first** pane's width or height, in pixels |
+| `onResize(size)`       | after a drag or a key step                      |
+| `min` / `minSecond`    | how small either pane may get                   |
+
+Only the first pane's size is stored; the second takes what is left, so a
+window resize can never leave a gap. The drag clamps against the container
+as it is laid out at that moment, so the limits stay honest when the window
+changes underneath it.
+
+The divider is focusable: arrows move it by 16px, Home/End drive it to
+either limit. Dragging captures the pointer, so it keeps tracking after the
+pointer leaves the six pixels it started on, and it keeps the grip where it
+was taken rather than jumping to the pointer.
+
 ## `Canvas3D`
 
 The entry point to the [3D scene](elements.md#3d-scene-mesh-group-geometries-materials)

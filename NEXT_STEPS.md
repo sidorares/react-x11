@@ -74,6 +74,16 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Menu/MenuBar, ContextMenu** — DONE: built on `useAnchor`, with
   separators, disabled items, shortcuts, checkmarks, nested submenus and
   full keyboard navigation; `examples/menu.jsx` rewritten on them
+- **Tabs / SplitPane — DONE.** The two containers an application window is
+  built from: `Tabs` (one panel at a time, roving focus, horizontal or
+  vertical, lazy panels) and `SplitPane` (a draggable divider, keyboard
+  resizable, clamped against the live container size). `examples/app.jsx`
+  hosts `form`, `widgets` and `tasks` as tabs by importing the panel each
+  now exports — new controls get demonstrated there rather than in yet
+  another example. Still missing, roughly in order: Tree, horizontal
+  scrolling in `<scrollview>` (which Table needs first), Table with
+  virtualization, undo/redo in the text controls, a generic Popover, and a
+  file open/save dialog
 - **`Select`/menu keyboard — DONE.** Arrows, Home/End, PageUp/PageDown,
   type-ahead, submenus. Keyboard navigation
   is done (#34: Up/Down/Home/End/Enter/Escape, shared pointer+keyboard

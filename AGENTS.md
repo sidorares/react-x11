@@ -71,9 +71,11 @@ no override-redirect staging (issue #4).
 - `npm test` — node:test. **Headless: no X server needed.** Primary feedback
   loop; keep it green and extend it when touching the host config.
 - `npm run lint` / `npm run format` — ESLint 9 (flat config) + Prettier.
-- `npm run examples:{simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,windows}`
+- `npm run examples:{app,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,windows}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
-  automation). All examples export their App and skip auto-running under
+  automation). `examples:app` is the showcase: it hosts `form`, `widgets`
+  and `tasks` as tabs by importing the panel each of them exports, so a new
+  control gets demonstrated there rather than in yet another example. All examples export their App and skip auto-running under
   `REACT_X11_NO_AUTORUN=1` so scripts/tests can import them.
 - `npm run examples:tasks:hot` — the tasks example with hot reloading via
   React **Fast Refresh**: edit `examples/tasks.jsx` while it runs and the

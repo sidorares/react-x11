@@ -114,7 +114,9 @@ function FilterButton({ filter, current, label }) {
   );
 }
 
-function App() {
+/** The list itself, without a window round it — so examples/app.jsx can
+ * show it in a tab. The dispatch provider comes with it. */
+export function TasksPanel() {
   const [state, dispatch] = useReducer(reducer, initialState);
 
   const visible = useMemo(() => {
@@ -127,50 +129,52 @@ function App() {
 
   return (
     <DispatchContext.Provider value={dispatch}>
-      <window
-        width={420}
-        height={400}
-        title="tasks"
-        style={{ backgroundColor: '#f5f6fa' }}
-      >
-        <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
-          <text style={{ fontSize: 20, color: '#2d3436' }}>Tasks</text>
+      <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
+        <text style={{ fontSize: 20, color: '#2d3436' }}>Tasks</text>
 
-          <AddTask />
+        <AddTask />
 
-          <box style={{ flexDirection: 'row', gap: 8 }}>
-            <FilterButton filter="all" current={state.filter} label="All" />
-            <FilterButton
-              filter="active"
-              current={state.filter}
-              label="Active"
-            />
-            <FilterButton filter="done" current={state.filter} label="Done" />
-          </box>
-
-          <scrollview
-            style={{
-              flexGrow: 1,
-              backgroundColor: 'white',
-              borderRadius: 8,
-              borderWidth: 1,
-              borderColor: '#dfe6e9',
-              padding: 6,
-              gap: 2,
-            }}
-          >
-            {visible.map((task) => (
-              <TaskRow key={task.id} task={task} />
-            ))}
-          </scrollview>
-
-          <text style={{ color: '#7f8c8d' }}>
-            {String(remaining)} remaining — click or Tab + Space to toggle,
-            wheel to scroll
-          </text>
+        <box style={{ flexDirection: 'row', gap: 8 }}>
+          <FilterButton filter="all" current={state.filter} label="All" />
+          <FilterButton filter="active" current={state.filter} label="Active" />
+          <FilterButton filter="done" current={state.filter} label="Done" />
         </box>
-      </window>
+
+        <scrollview
+          style={{
+            flexGrow: 1,
+            backgroundColor: 'white',
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: '#dfe6e9',
+            padding: 6,
+            gap: 2,
+          }}
+        >
+          {visible.map((task) => (
+            <TaskRow key={task.id} task={task} />
+          ))}
+        </scrollview>
+
+        <text style={{ color: '#7f8c8d' }}>
+          {String(remaining)} remaining — click or Tab + Space to toggle, wheel
+          to scroll
+        </text>
+      </box>
     </DispatchContext.Provider>
+  );
+}
+
+function App() {
+  return (
+    <window
+      width={420}
+      height={400}
+      title="tasks"
+      style={{ backgroundColor: '#f5f6fa' }}
+    >
+      <TasksPanel />
+    </window>
   );
 }
 

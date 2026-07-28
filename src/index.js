@@ -7,6 +7,8 @@ export {
 export { createStyles, flattenStyle } from './styles.js';
 export {
   Select,
+  Tabs,
+  SplitPane,
   SelectThemeProvider,
   ThemeProvider,
   Button,
