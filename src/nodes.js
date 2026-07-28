@@ -957,47 +957,73 @@ const SCROLLBAR_MIN_THUMB = 20;
 // the visible bar is thin; the pointer target is not
 const SCROLLBAR_SLOP = 4;
 
+const clampScroll = (v, max) => Math.min(Math.max(0, v), max);
+
 /**
- * Geometry of a vertical scrollbar, or null when there is nothing to
- * scroll. Shared by `<scrollview>` and `<textarea>` so what is painted and
- * what the pointer hits cannot drift apart.
+ * Geometry of a scrollbar on either axis, or null when there is nothing to
+ * scroll along it. Shared by `<scrollview>` and `<textarea>` so what is
+ * painted and what the pointer hits cannot drift apart — and written once
+ * for both axes so the two cannot drift from each other either.
+ *
+ * `viewport`/`content`/`scroll` are along the axis; `across`/`crossSize`
+ * place the bar on the other one. `shorten` keeps the two bars out of each
+ * other's corner when both are showing.
  */
 function scrollbarGeometry({
-  x,
-  y,
-  width,
-  height,
-  scroll,
+  axis = 'y',
+  start,
+  viewport,
   content,
+  across: crossStart0,
+  crossSize,
+  scroll,
   inset = 0,
+  shorten = 0,
 }) {
-  if (height <= 0 || !(content > height)) return null;
-  const thumbHeight = Math.max(
+  const length = viewport - shorten;
+  if (length <= 0 || !(content > viewport)) return null;
+  const thumbLength = Math.max(
     SCROLLBAR_MIN_THUMB,
-    (height * height) / content,
+    (length * length) / content,
   );
-  const range = content - height;
-  const travel = height - thumbHeight;
+  const range = content - viewport;
+  const travel = Math.max(0, length - thumbLength);
+  const thumbStart = start + (range > 0 ? (scroll / range) * travel : 0);
+  const crossStart = crossStart0 + crossSize - SCROLLBAR_WIDTH - inset;
   return {
-    x: x + width - SCROLLBAR_WIDTH - inset,
-    width: SCROLLBAR_WIDTH,
-    trackY: y,
-    trackHeight: height,
-    thumbY: y + (range > 0 ? (scroll / range) * travel : 0),
-    thumbHeight,
+    axis,
+    trackStart: start,
+    trackLength: length,
+    thumbStart,
+    thumbLength,
+    crossStart,
     range,
     travel,
+    // the thumb as a rect, for painting
+    x: axis === 'x' ? thumbStart : crossStart,
+    y: axis === 'x' ? crossStart : thumbStart,
+    width: axis === 'x' ? thumbLength : SCROLLBAR_WIDTH,
+    height: axis === 'x' ? SCROLLBAR_WIDTH : thumbLength,
   };
 }
+
+/** The coordinate along a bar's own axis, and across it. */
+const along = (bar, x, y) => (bar.axis === 'x' ? x : y);
+const across = (bar, x, y) => (bar.axis === 'x' ? y : x);
 
 /** Is this point on the bar (with slop), and if so, on the thumb? */
 function scrollbarHit(bar, x, y) {
   if (!bar) return null;
-  if (x < bar.x - SCROLLBAR_SLOP || x > bar.x + bar.width + SCROLLBAR_SLOP) {
+  const c = across(bar, x, y);
+  if (
+    c < bar.crossStart - SCROLLBAR_SLOP ||
+    c > bar.crossStart + SCROLLBAR_WIDTH + SCROLLBAR_SLOP
+  ) {
     return null;
   }
-  if (y < bar.trackY || y > bar.trackY + bar.trackHeight) return null;
-  return y >= bar.thumbY && y <= bar.thumbY + bar.thumbHeight
+  const a = along(bar, x, y);
+  if (a < bar.trackStart || a > bar.trackStart + bar.trackLength) return null;
+  return a >= bar.thumbStart && a <= bar.thumbStart + bar.thumbLength
     ? 'thumb'
     : 'track';
 }
@@ -1006,9 +1032,9 @@ function paintScrollbarThumb(ctx, bar, color) {
   ctx.fillStyle = color || 'rgba(0, 0, 0, 0.25)';
   ctx.beginPath();
   if (typeof ctx.roundRect === 'function') {
-    ctx.roundRect(bar.x, bar.thumbY, bar.width, bar.thumbHeight, 3);
+    ctx.roundRect(bar.x, bar.y, bar.width, bar.height, 3);
   } else {
-    ctx.rect(bar.x, bar.thumbY, bar.width, bar.thumbHeight);
+    ctx.rect(bar.x, bar.y, bar.width, bar.height);
   }
   ctx.fill();
 }
@@ -1023,7 +1049,9 @@ export class ScrollViewNode extends Node {
   constructor(props, app) {
     super('scrollview', props, app);
     this.scrollY = 0;
+    this.scrollX = 0;
     this.contentHeight = 0;
+    this.contentWidth = 0;
     // these defaults fill in for style the author did not set, so they read
     // the resolved style, not the props
     const style = this.style;
@@ -1065,44 +1093,91 @@ export class ScrollViewNode extends Node {
       width: this.yoga.getComputedWidth(),
       height: this.yoga.getComputedHeight(),
     };
-    let bottom = 0;
-    for (const child of this.children) {
-      if (child.yoga && !child.isWindow) {
-        bottom = Math.max(
-          bottom,
-          child.yoga.getComputedTop() + child.yoga.getComputedHeight(),
-        );
-      }
-    }
+    const { right, bottom } = this._measureContent();
     this.contentHeight =
       bottom + this.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
+    this.contentWidth = right + this.yoga.getComputedPadding(Yoga.EDGE_RIGHT);
     this._resolveScrollIntoView();
-    this.scrollY = Math.min(
-      Math.max(0, this.scrollY),
-      Math.max(0, this.contentHeight - this.abs.height),
-    );
+    this.scrollY = Math.min(Math.max(0, this.scrollY), this._maxScroll('y'));
+    this.scrollX = Math.min(Math.max(0, this.scrollX), this._maxScroll('x'));
     for (const child of this.children) {
       if (!child.isWindow) {
-        child.absolutize(this.abs.x, this.abs.y - this.scrollY);
+        child.absolutize(this.abs.x - this.scrollX, this.abs.y - this.scrollY);
       }
     }
   }
 
-  scrollTo(y) {
-    const max = Math.max(0, this.contentHeight - this.abs.height);
-    const next = Math.min(Math.max(0, y), max);
-    if (next === this.scrollY) return;
-    this.scrollY = next;
+  /**
+   * How far the content actually reaches, measured through the subtree
+   * rather than off the direct children. A row that stretches to the
+   * viewport while its own cells overflow it — a table, in other words —
+   * reports the viewport width at the top level and says nothing about the
+   * cells, so a shallow measurement would find nothing to scroll. This is
+   * what `scrollWidth`/`scrollHeight` mean in a browser.
+   *
+   * Anything that clips its own children ends the walk: their overflow is
+   * that node's business, not ours.
+   */
+  _measureContent() {
+    let right = 0;
+    let bottom = 0;
+    const walk = (node, dx, dy) => {
+      for (const child of node.children) {
+        if (child.isWindow || !child.yoga || child.hidden) continue;
+        const x = dx + child.yoga.getComputedLeft();
+        const y = dy + child.yoga.getComputedTop();
+        right = Math.max(right, x + child.yoga.getComputedWidth());
+        bottom = Math.max(bottom, y + child.yoga.getComputedHeight());
+        if (!child.clipsChildren()) walk(child, x, y);
+      }
+    };
+    walk(this, 0, 0);
+    return { right, bottom };
+  }
+
+  _maxScroll(axis) {
+    return axis === 'x'
+      ? Math.max(0, this.contentWidth - this.abs.width)
+      : Math.max(0, this.contentHeight - this.abs.height);
+  }
+
+  /**
+   * `scrollTo(y)` scrolls vertically, as it always has; `scrollTo({x, y})`
+   * moves either axis, leaving out whichever is omitted.
+   */
+  scrollTo(to) {
+    const want = typeof to === 'number' ? { y: to } : { x: to?.x, y: to?.y };
+    const next = {
+      x:
+        want.x == null
+          ? this.scrollX
+          : clampScroll(want.x, this._maxScroll('x')),
+      y:
+        want.y == null
+          ? this.scrollY
+          : clampScroll(want.y, this._maxScroll('y')),
+    };
+    if (next.x === this.scrollX && next.y === this.scrollY) return;
+    this.scrollX = next.x;
+    this.scrollY = next.y;
     this.props.onScroll?.({
-      scrollY: next,
+      scrollX: next.x,
+      scrollY: next.y,
+      contentWidth: this.contentWidth,
       contentHeight: this.contentHeight,
+      viewportWidth: this.abs.width,
       viewportHeight: this.abs.height,
     });
     this.root?.invalidate(true);
   }
 
-  scrollBy(dy) {
-    this.scrollTo(this.scrollY + dy);
+  /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. */
+  scrollBy(by) {
+    if (typeof by === 'number') return this.scrollTo(this.scrollY + by);
+    this.scrollTo({
+      x: by?.x == null ? undefined : this.scrollX + by.x,
+      y: by?.y == null ? undefined : this.scrollY + by.y,
+    });
   }
 
   /**
@@ -1127,37 +1202,56 @@ export class ScrollViewNode extends Node {
     // offset of the target within our content box, summed up the chain so
     // targets nested below a direct child work too
     let top = 0;
+    let left = 0;
     for (let n = target; n && n !== this; n = n.parent) {
       if (!n.yoga) return; // not (or no longer) inside this scrollview
       top += n.yoga.getComputedTop();
+      left += n.yoga.getComputedLeft();
       if (!n.parent) return;
     }
     const bottom = top + target.yoga.getComputedHeight();
-    const viewport = this.abs.height;
-    if (bottom > this.scrollY + viewport) this.scrollY = bottom - viewport;
+    const rightEdge = left + target.yoga.getComputedWidth();
+    if (bottom > this.scrollY + this.abs.height) {
+      this.scrollY = bottom - this.abs.height;
+    }
     if (top < this.scrollY) this.scrollY = top;
+    if (rightEdge > this.scrollX + this.abs.width) {
+      this.scrollX = rightEdge - this.abs.width;
+    }
+    if (left < this.scrollX) this.scrollX = left;
   }
 
   paint(ctx) {
     super.paint(ctx);
-    const bar = this._scrollbar();
-    if (bar) {
+    for (const bar of this._scrollbars()) {
       paintScrollbarThumb(ctx, bar, this.props.scrollbarColor);
     }
   }
 
-  /** null when the bar is switched off or there is nothing to scroll. */
-  _scrollbar() {
+  /** null when the bar is switched off or there is nothing to scroll on
+   * that axis. */
+  _scrollbar(axis = 'y') {
     if (this.props.scrollbar === false) return null;
+    const horizontal = axis === 'x';
+    // when both bars show, each stops short of the other's corner
+    const other = horizontal
+      ? this.contentHeight > this.abs.height
+      : this.contentWidth > this.abs.width;
     return scrollbarGeometry({
-      x: this.abs.x,
-      y: this.abs.y,
-      width: this.abs.width,
-      height: this.abs.height,
-      scroll: this.scrollY,
-      content: this.contentHeight,
+      axis,
+      start: horizontal ? this.abs.x : this.abs.y,
+      viewport: horizontal ? this.abs.width : this.abs.height,
+      content: horizontal ? this.contentWidth : this.contentHeight,
+      across: horizontal ? this.abs.y : this.abs.x,
+      crossSize: horizontal ? this.abs.height : this.abs.width,
+      scroll: horizontal ? this.scrollX : this.scrollY,
       inset: 2,
+      shorten: other ? SCROLLBAR_WIDTH + 2 : 0,
     });
+  }
+
+  _scrollbars() {
+    return [this._scrollbar('y'), this._scrollbar('x')].filter(Boolean);
   }
 
   /**
@@ -1166,30 +1260,38 @@ export class ScrollViewNode extends Node {
    * delivered to whatever child happens to be painted beneath it.
    */
   hitTest(x, y) {
-    if (scrollbarHit(this._scrollbar(), x, y)) return this;
+    for (const bar of this._scrollbars()) {
+      if (scrollbarHit(bar, x, y)) return this;
+    }
     return super.hitTest(x, y);
   }
 
   _defaultMouseDown(ev) {
-    const bar = this._scrollbar();
-    const hit = scrollbarHit(bar, ev.x, ev.y);
-    if (!hit) return;
-    if (hit === 'thumb') {
-      // remember where in the thumb it was grabbed, so it does not jump
-      this._barGrab = ev.y - bar.thumbY;
-      ev.capturePointer();
+    for (const bar of this._scrollbars()) {
+      const hit = scrollbarHit(bar, ev.x, ev.y);
+      if (!hit) continue;
+      const at = along(bar, ev.x, ev.y);
+      if (hit === 'thumb') {
+        // remember where in the thumb it was grabbed, so it does not jump
+        this._barGrab = { axis: bar.axis, offset: at - bar.thumbStart };
+        ev.capturePointer();
+        return;
+      }
+      // a press on the track pages towards it, like PageUp/PageDown
+      const page = bar.axis === 'x' ? this.abs.width : this.abs.height;
+      const delta = at < bar.thumbStart ? -page : page;
+      this.scrollBy(bar.axis === 'x' ? { x: delta } : { y: delta });
       return;
     }
-    // a press on the track pages towards it, like PageUp/PageDown
-    this.scrollBy(ev.y < bar.thumbY ? -this.abs.height : this.abs.height);
   }
 
   _defaultMouseDrag(ev) {
     if (this._barGrab == null) return;
-    const bar = this._scrollbar();
+    const bar = this._scrollbar(this._barGrab.axis);
     if (!bar || bar.travel <= 0) return;
-    const top = ev.y - this._barGrab - bar.trackY;
-    this.scrollTo((top / bar.travel) * bar.range);
+    const at = along(bar, ev.x, ev.y) - this._barGrab.offset - bar.trackStart;
+    const to = (at / bar.travel) * bar.range;
+    this.scrollTo(bar.axis === 'x' ? { x: to } : { y: to });
   }
 
   _defaultMouseUp() {
@@ -1711,12 +1813,12 @@ export class TextAreaNode extends TextInputNode {
     const hit = scrollbarHit(bar, ev.x, ev.y);
     if (!hit) return super._defaultMouseDown(ev);
     if (hit === 'thumb') {
-      this._barGrab = ev.y - bar.thumbY;
+      this._barGrab = ev.y - bar.thumbStart;
       ev.capturePointer();
       return;
     }
     const page = this.contentBox().height;
-    this._scrollTo(this._scrollY + (ev.y < bar.thumbY ? -page : page), bar);
+    this._scrollTo(this._scrollY + (ev.y < bar.thumbStart ? -page : page), bar);
   }
 
   _defaultMouseDrag(ev) {
@@ -1724,7 +1826,7 @@ export class TextAreaNode extends TextInputNode {
     const bar = this._scrollbar();
     if (!bar || bar.travel <= 0) return;
     this._scrollTo(
-      ((ev.y - this._barGrab - bar.trackY) / bar.travel) * bar.range,
+      ((ev.y - this._barGrab - bar.trackStart) / bar.travel) * bar.range,
       bar,
     );
   }
@@ -1897,14 +1999,15 @@ export class TextAreaNode extends TextInputNode {
 
   _scrollbar(layout = this._valueLayout()) {
     if (this.props.scrollbar === false || !layout) return null;
-    const content = this.contentBox();
+    const box = this.contentBox();
     return scrollbarGeometry({
-      x: content.x,
-      y: content.y,
-      width: content.width,
-      height: content.height,
-      scroll: this._scrollY,
+      axis: 'y',
+      start: box.y,
+      viewport: box.height,
       content: layout.height,
+      across: box.x,
+      crossSize: box.width,
+      scroll: this._scrollY,
     });
   }
 
