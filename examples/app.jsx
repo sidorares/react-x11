@@ -14,6 +14,7 @@ import {
   createRoot,
   createStyles,
   SplitPane,
+  Table,
   Tabs,
   Tree,
 } from '../src/index.js';
@@ -76,6 +77,7 @@ const SECTIONS = [
   { id: 'widgets', label: 'Widgets' },
   { id: 'tasks', label: 'Tasks' },
   { id: 'tree', label: 'Tree' },
+  { id: 'table', label: 'Table' },
 ];
 
 // A stand-in project, enough to show nesting, a lazy-looking empty branch
@@ -130,11 +132,51 @@ function TreePanel() {
   );
 }
 
+// Enough rows that building them all would be silly — the table mounts the
+// twenty or so on screen and swaps them as you scroll.
+const ROWS = Array.from({ length: 10000 }, (_, i) => ({
+  id: i,
+  name: `file-${String(i).padStart(5, '0')}.js`,
+  kind: ['source', 'test', 'doc', 'asset'][i % 4],
+  size: (i * 37) % 4096,
+  modified: `2026-07-${String((i % 28) + 1).padStart(2, '0')}`,
+}));
+
+const COLUMNS = [
+  { id: 'name', label: 'Name', width: 200 },
+  { id: 'kind', label: 'Kind', width: 90 },
+  { id: 'size', label: 'Size', width: 90, align: 'right' },
+  { id: 'modified', label: 'Modified', width: 120 },
+];
+
+function TablePanel() {
+  const [picked, setPicked] = useState(null);
+  return (
+    <box style={s.treePanel}>
+      <text style={s.treeHint}>
+        {ROWS.length.toLocaleString()} rows — drag a header edge to resize,
+        click one to sort
+      </text>
+      <Table
+        columns={COLUMNS}
+        rows={ROWS}
+        selected={picked}
+        onSelect={setPicked}
+        style={{ flexGrow: 1 }}
+      />
+      <text style={s.treeHint}>
+        {picked == null ? 'nothing selected' : `selected: ${ROWS[picked].name}`}
+      </text>
+    </box>
+  );
+}
+
 const PANELS = {
   form: () => <FormPanel />,
   widgets: () => <WidgetsPanel />,
   tasks: () => <TasksPanel />,
   tree: () => <TreePanel />,
+  table: () => <TablePanel />,
 };
 
 function App() {

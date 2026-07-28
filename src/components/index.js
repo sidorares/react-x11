@@ -16,5 +16,6 @@ export { ContextMenu, MenuBar } from './Menu.js';
 export { Select } from './Select.js';
 export { Tabs } from './Tabs.js';
 export { Tree } from './Tree.js';
+export { Table } from './Table.js';
 export { SplitPane } from './SplitPane.js';
 export { Canvas3D } from './Canvas3D.js';

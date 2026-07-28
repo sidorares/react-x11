@@ -9,6 +9,7 @@ export {
   Select,
   Tabs,
   Tree,
+  Table,
   SplitPane,
   SelectThemeProvider,
   ThemeProvider,

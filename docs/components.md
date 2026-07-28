@@ -335,6 +335,50 @@ and wrap, Home/End jump to the ends, disabled tabs are skipped. Arrows
 select as they move, the way a desktop notebook behaves; `manual` splits
 focus from selection, which is what you want when a panel is expensive.
 
+## `Table`
+
+A grid with a header that stays put, resizable columns, and only the rows in
+view actually built.
+
+```jsx
+<Table
+  columns={[
+    { id: 'name', label: 'Name', width: 220 },
+    { id: 'size', label: 'Size', width: 90, align: 'right' },
+  ]}
+  rows={files}
+  onSelect={(id, row) => open(row)}
+/>
+```
+
+| prop                           |                                                     |
+| ------------------------------ | --------------------------------------------------- |
+| `columns`                      | `{ id, label, width, align, value, render }[]`      |
+| `rows`                         | `{ id, … }[]` — `id` identifies the row             |
+| `rowHeight`                    | every row is this tall (24 by default)              |
+| `sort` / `defaultSort`         | `{ column, direction }`; reported by `onSortChange` |
+| `selected` / `defaultSelected` | selected row id; reported by `onSelect(id, row)`    |
+| `onActivate(id, row)`          | Enter on the selection                              |
+| `onColumnResize(id, width)`    | after a header drag                                 |
+
+`value(row)` feeds sorting and the default cell text; `render(row)` replaces
+the cell contents entirely.
+
+**Rows must all be `rowHeight` tall.** That is the price of the table only
+building what is on screen: with ten thousand rows it mounts the twenty or
+so in the viewport and swaps them as you scroll, and everything above and
+below is a single spacer box, so the scrollbar still measures the whole
+list. Sorting a hundred thousand rows is still the caller's problem — pass
+`sort` and sort the data yourself when that matters.
+
+The **table** holds the focus, not the row: a row is unmounted as soon as it
+scrolls out of view, and focus would go with it. Up/Down move the selection,
+PageUp/PageDown by a viewport, Home/End to the ends, and the selection is
+kept on screen without building the rows in between.
+
+The header scrolls sideways with the body but never vertically. Dragging the
+grip at a header's right edge resizes that column; the body follows.
+
 ## `Tree`
 
 A disclosure tree: file browsers, outline panes, property inspectors.

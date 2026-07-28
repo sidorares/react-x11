@@ -749,8 +749,31 @@ export class Node {
       this._roundedPath(ctx, this.style.borderRadius ?? 0);
       ctx.clip();
     }
-    for (const child of order) child.paint(ctx);
+    for (const child of order) {
+      if (child._offscreen()) continue;
+      child.paint(ctx);
+    }
     if (clip) ctx.restore();
+  }
+
+  /**
+   * Entirely outside the window, so there is nothing to draw. Worth doing
+   * for its own sake, but it is also a correctness fix: X's render traps
+   * are 16.16 fixed point, so a coordinate past ±32767 overflows the
+   * request. A scrolled list is exactly how you get there — the frame
+   * between a scroll and the re-render that follows it can hold rows
+   * ninety thousand pixels above the viewport.
+   */
+  _offscreen() {
+    const window = this.root?.abs;
+    if (!window) return false;
+    const { x, y, width, height } = this.abs;
+    return (
+      x + width <= 0 ||
+      y + height <= 0 ||
+      x >= window.width ||
+      y >= window.height
+    );
   }
 }
 
@@ -1100,11 +1123,44 @@ export class ScrollViewNode extends Node {
     this._resolveScrollIntoView();
     this.scrollY = Math.min(Math.max(0, this.scrollY), this._maxScroll('y'));
     this.scrollX = Math.min(Math.max(0, this.scrollX), this._maxScroll('x'));
+    this._reportViewport();
     for (const child of this.children) {
       if (!child.isWindow) {
         child.absolutize(this.abs.x - this.scrollX, this.abs.y - this.scrollY);
       }
     }
+  }
+
+  /**
+   * Tell the owner how big the viewport and the content turned out, when
+   * either changes. Layout happens on the frame clock, *after* the commit
+   * that mounted the node, so an effect cannot read this off the ref —
+   * which is exactly what a list needs before it can decide how many rows
+   * are worth building. Fired from layout rather than from scrolling, so
+   * it also arrives for a list nobody has scrolled yet.
+   */
+  _reportViewport() {
+    const next = {
+      width: this.abs.width,
+      height: this.abs.height,
+      contentWidth: this.contentWidth,
+      contentHeight: this.contentHeight,
+    };
+    const last = this._lastViewport;
+    if (
+      last &&
+      last.width === next.width &&
+      last.height === next.height &&
+      last.contentWidth === next.contentWidth &&
+      last.contentHeight === next.contentHeight
+    ) {
+      return;
+    }
+    this._lastViewport = next;
+    // during layout: defer, or a setState from the handler would re-enter
+    // the pass that is still running
+    const notify = this.props.onViewport;
+    if (notify) setImmediate(() => !this.destroyed && notify(next));
   }
 
   /**
