@@ -220,7 +220,7 @@ await scene(async (app) => {
   clickNode(wnd, plus);
   clickNode(wnd, plus);
   clickNode(wnd, labeled(wnd, 'Dark')); // the dark theme photographs better
-  await sleep(50);
+  await sleep(500);
   await shot(wnd, 'dashboard');
 });
 

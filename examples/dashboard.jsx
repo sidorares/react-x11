@@ -20,16 +20,28 @@ import {
 // Styles are declared once, outside render: hoisting is what lets the
 // renderer skip an update with an identity check, and what keeps the JSX
 // below shorter than the flat-prop version it replaced.
+// `$name` reads the nearest `theme` prop, so these can be declared once,
+// outside render, and still follow the Light/Dark toggle — the whole reason
+// the palette does not have to be threaded through every component.
 const s = createStyles({
   root: { flexGrow: 1, padding: 16, gap: 16 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  title: { fontSize: 20 },
+  title: { fontSize: 20, color: '$text' },
   spacer: { flexGrow: 1 },
   row: { flexDirection: 'row', gap: 12 },
   footer: { flexDirection: 'row', gap: 12, justifyContent: 'center' },
-  card: { flexGrow: 1, borderRadius: 8, padding: 14, gap: 6 },
-  cardLabel: { fontSize: 12 },
-  cardValue: { fontSize: 26 },
+  card: {
+    flexGrow: 1,
+    borderRadius: 8,
+    padding: 14,
+    gap: 6,
+    backgroundColor: '$panel',
+    transition: { backgroundColor: 200 },
+  },
+  cardLabel: { fontSize: 12, color: '$dim' },
+  cardValue: { fontSize: 26, color: '$text' },
+  clock: { color: '$dim' },
+  window: { backgroundColor: '$bg', transition: { backgroundColor: 200 } },
 });
 
 const THEMES = {
@@ -85,9 +97,9 @@ function widgetTheme(t) {
 function StatCard({ label, value, progress }) {
   const theme = useContext(ThemeContext);
   return (
-    <box style={[s.card, { backgroundColor: theme.panel }]}>
-      <text style={[s.cardLabel, { color: theme.dim }]}>{label}</text>
-      <text style={[s.cardValue, { color: theme.text }]}>{value}</text>
+    <box style={s.card}>
+      <text style={s.cardLabel}>{label}</text>
+      <text style={s.cardValue}>{value}</text>
       {progress != null && (
         <ProgressBar value={progress} color={theme.accent} />
       )}
@@ -113,15 +125,14 @@ function App() {
           height={340}
           minWidth={360}
           minHeight={240}
-          style={{ backgroundColor: theme.bg }}
+          theme={theme}
+          style={s.window}
         >
           <box style={s.root}>
             <box style={s.header}>
-              <text style={[s.title, { color: theme.text }]}>Dashboard</text>
+              <text style={s.title}>Dashboard</text>
               <box style={s.spacer} />
-              <text style={{ color: theme.dim }}>
-                {now.toLocaleTimeString()}
-              </text>
+              <text style={s.clock}>{now.toLocaleTimeString()}</text>
               <Button
                 label={themeName === 'light' ? 'Dark' : 'Light'}
                 onPress={() =>

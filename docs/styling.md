@@ -107,6 +107,50 @@ its geometry up front — and `ContextMenu` takes `fontSize` because it
 measures labels with it. `Select` and `Slider` used to take `width` purely
 to put it in their own box; that is `style={{ width }}` now.
 
+## Theme tokens
+
+A style value of `'$name'` resolves against the nearest `theme` prop above
+the node. The sigil is what keeps it unambiguous: `'red'` is a CSS colour,
+`'$red'` is a token.
+
+```jsx
+const s = createStyles({
+  card: { backgroundColor: '$panel', padding: '$gutter' },
+  title: { color: '$text', fontSize: 20 },
+});
+
+<window theme={palette} style={{ backgroundColor: '$bg' }}>
+  <box style={s.card}>…</box>
+</window>;
+```
+
+That is the point of tokens: the style is **hoisted** — declared once,
+outside render, with no access to React context — and still follows the
+theme. Without them a palette has to be threaded to every element that
+paints (`style={[s.card, { backgroundColor: theme.panel }]}`).
+
+Tokens are not colour-only; `padding: '$gutter'` resolves a number just as
+well.
+
+A `theme` prop anywhere scopes its subtree, and an inner one merges over the
+outer, so a panel can restate a colour or two without repeating a palette.
+Popups resolve through their place in the **tree**, not their window, so a
+menu inherits the theme of the UI that opened it even though it is a
+separate X window.
+
+Changing the theme restyles the subtree in place. Nodes whose own props did
+not change are still updated — which is why a theme change also drops the
+memoised text layouts under it, or cached text would keep painting the old
+colour.
+
+An unknown token is an error naming what the theme does have. Resolution is
+cached per (style object, theme object), so a hoisted style under one theme
+keeps its identity across renders and the `===` fast path still applies.
+
+Widgets plant their merged palette (`ThemeProvider` + the built-in defaults)
+on their own root node, so `$tokens` work inside a widget subtree — and in a
+style you pass one — even when the app only used `<ThemeProvider>`.
+
 ## Transitions
 
 `transition` names how long a change takes. A number covers every animatable
@@ -159,7 +203,6 @@ way it does not apply to an `<input type>` in the DOM. They report
 
 ## Next
 
-Theme tokens (`backgroundColor="panel"` resolved through `ThemeProvider`) and
-window size queries — the X11 analogue of `@media`, and layout-capable, since
-they are only re-evaluated during a layout pass that resize already triggers
-— are the follow-ons after transitions.
+Window size queries — the X11 analogue of `@media`, and layout-capable,
+since they are only re-evaluated during a layout pass that a resize already
+triggers.

@@ -19,6 +19,8 @@ import {
   interpolate,
   ease,
   isLayoutProp,
+  styleUsesTokens,
+  resolveTokens,
 } from './styles.js';
 import { EventManager } from './events.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
@@ -181,6 +183,15 @@ export class Node {
       validateStyle(flattenStyle(props.style), `<${this.kind} style>`);
     }
     this._baseStyle = this.stylable ? flattenStyle(props.style) : EMPTY_STYLE;
+    this._usesTokens = this.stylable && styleUsesTokens(this._baseStyle);
+    if (this._usesTokens) {
+      this._baseStyle = resolveTokens(
+        this._baseStyle,
+        this.theme,
+        `<${this.kind} style>`,
+        Boolean(this.root),
+      );
+    }
     // `disabled` is a prop, not something the pointer does, so it is read
     // straight off props rather than driven by the event manager
     this.states[':disabled'] = Boolean(props.disabled);
@@ -283,6 +294,41 @@ export class Node {
   }
 
   /**
+   * The theme in force here: the nearest `theme` prop at or above this node,
+   * with an inner one merged over the outer so a panel can restate a colour
+   * or two without repeating a palette. Popups resolve through their place
+   * in the *tree*, not their window, so a menu inherits the theme of the UI
+   * that opened it even though it is a separate X window.
+   */
+  get theme() {
+    if (this._theme !== undefined) return this._theme;
+    const inherited = this.parent?.theme;
+    const own = this.props.theme;
+    this._theme = own
+      ? inherited
+        ? { ...inherited, ...own }
+        : own
+      : (inherited ?? null);
+    return this._theme;
+  }
+
+  /** The theme above or on this node changed: drop the caches and restyle
+   * the subtree, since a token can appear at any depth. */
+  _themeChanged() {
+    this._theme = undefined;
+    if (this._usesTokens) {
+      const before = this.style;
+      this._syncStyle(this.props);
+      // a token change reaches the node without React re-rendering it, so
+      // the invalidation TextNode.applyProps would have done has to happen
+      // here too — otherwise the cached layout keeps painting the old colour
+      if (textStyleChanged(this.style, before)) this._textContentChanged();
+      this.root?.invalidate(true);
+    }
+    for (const child of this.children) child._themeChanged();
+  }
+
+  /**
    * Whether this element is styled at all. The 3D scene elements and the
    * declarative SVG children are not: they carry their own vocabularies —
    * `position`, `color`, `width` mean a transform, a material and a radius
@@ -328,9 +374,11 @@ export class Node {
   insertBefore(child, beforeChild) {
     if (child.isPopup) {
       // popups live anywhere in the JSX tree but are independent
-      // override-redirect windows: bookkeeping only, no yoga, no paint
+      // override-redirect windows: bookkeeping only, no yoga, no paint —
+      // but they do inherit the theme of where they are written
       this._spliceChild(child, beforeChild);
       child.parent = this;
+      if (this.theme || child.props.theme) child._themeChanged();
       return;
     }
     if (child.isWindow) {
@@ -350,6 +398,9 @@ export class Node {
       this.yoga.insertChild(child.yoga, this._yogaIndexAt(index));
     }
     child._setRoot(this.root);
+    // it can see its ancestors now, so any token in its style can resolve.
+    // With no theme anywhere there is nothing to resolve and nothing to walk
+    if (this.theme || child.props.theme) child._themeChanged();
     this._textContentChanged();
     this.root?.invalidate(true);
   }
@@ -393,7 +444,9 @@ export class Node {
   applyProps(newProps, oldProps) {
     const prev = this.props;
     const prevStyle = this.style;
+    const themeChanged = newProps.theme !== prev.theme;
     this.props = newProps;
+    if (themeChanged) this._themeChanged();
     const style = this._syncStyle(newProps);
     let layoutChanged = false;
     // hoisted styles hit the identity check and skip the whole update
@@ -1964,6 +2017,7 @@ export class WindowNode extends Node {
         child.realize(this.window);
         if (child.window) this._xStack.push(child.window.id);
       }
+      if (this.theme || child.props.theme) child._themeChanged();
       // React reorders a keyed list with one insertBefore per moved child;
       // restacking once at the end of the commit skips the intermediate
       // orders, which nobody ever sees.
@@ -2003,7 +2057,9 @@ export class WindowNode extends Node {
   applyProps(newProps, oldProps) {
     const before = oldProps ?? this.props;
     const beforeStyle = this.style;
+    const themeChanged = newProps.theme !== before.theme;
     this.props = newProps;
+    if (themeChanged) this._themeChanged();
     const style = this._syncStyle(newProps);
     if (Boolean(newProps.trapFocus) !== Boolean(before.trapFocus)) {
       this._syncFocusScope();

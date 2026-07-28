@@ -2,7 +2,7 @@
 // support needed. Plain createElement (no JSX) so the library stays
 // build-step-free for consumers.
 
-import React, { useContext, useState } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import { XK_RETURN } from './keys.js';
 
 const h = React.createElement;
@@ -29,9 +29,18 @@ export const ThemeProvider = ThemeContext.Provider;
 
 export const SelectThemeProvider = ThemeContext.Provider; // back-compat alias
 
+/**
+ * The merged palette. Memoised on the context value because identity now
+ * matters: it is planted on each widget's root node as the `theme` prop, and
+ * a fresh object every render would re-resolve every `$token` beneath it and
+ * defeat the resolution cache.
+ */
 export function useTheme() {
   const theme = useContext(ThemeContext);
-  return theme === DefaultTheme ? theme : { ...DefaultTheme, ...theme };
+  return useMemo(
+    () => (theme === DefaultTheme ? theme : { ...DefaultTheme, ...theme }),
+    [theme],
+  );
 }
 
 /**

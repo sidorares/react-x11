@@ -41,6 +41,7 @@ export function Button({
   return h(
     'box',
     {
+      theme,
       ...props,
       ...boxProps,
       style: [

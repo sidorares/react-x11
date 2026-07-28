@@ -47,6 +47,8 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
 - `zIndex` — paint/hit order among siblings (stable sort)
 - `transition` — `120`, or `{ backgroundColor: 120, left: 200 }`: how long a
   change to that property takes ([styling.md](styling.md#transitions))
+- any value may be a **theme token**: `'$panel'` resolves against the nearest
+  `theme` prop above the node ([styling.md](styling.md#theme-tokens))
 - `opacity` is not implemented yet (see NEXT_STEPS.md)
 
 `cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`, resize
@@ -76,6 +78,7 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `onResize(ev)`              | ConfigureNotify — the tree reflows automatically                     |
 | `onExpose(ev)`              | after a repaint was required                                         |
 | `onCloseRequest(ev)`        | WM close button (opts into `WM_DELETE_WINDOW`)                       |
+| `theme`                     | palette that `$token` style values resolve against, for this subtree |
 
 Windows may be nested inside other windows (real X11 child windows).
 **Ref**: the live ntk `Window` — `getContext('2d')`,

@@ -100,7 +100,10 @@ function MenuRow({
   if (item.separator) {
     return h(
       'box',
-      { style: { height: MENU_SEPARATOR_HEIGHT, justifyContent: 'center' } },
+      {
+        theme,
+        style: { height: MENU_SEPARATOR_HEIGHT, justifyContent: 'center' },
+      },
       h('box', { style: { height: 1, backgroundColor: theme.border } }),
     );
   }
@@ -294,6 +297,7 @@ function MenuLevel({
   return h(
     'popup',
     {
+      theme,
       x: rect.x,
       y: rect.y,
       width: rect.width,
@@ -573,6 +577,7 @@ export function MenuBar({
   return h(
     'box',
     {
+      theme,
       ...boxProps,
       style: [
         {

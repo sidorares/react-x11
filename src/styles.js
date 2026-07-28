@@ -339,6 +339,83 @@ export function interpolate(from, to, t) {
 // toolkit defaults to for state changes
 export const ease = (t) => 1 - (1 - t) ** 3;
 
+/**
+ * Theme tokens. A style value of `'$name'` resolves against the nearest
+ * `theme` prop above the node, so a style can be hoisted — declared once,
+ * outside render, with no access to React context — and still follow the
+ * theme. The sigil is what keeps it unambiguous: `'red'` is a CSS colour,
+ * `'$red'` is a token.
+ */
+const isToken = (v) => typeof v === 'string' && v.charCodeAt(0) === 36; /* $ */
+
+export function styleUsesTokens(style) {
+  for (const key of Object.keys(style)) {
+    const v = style[key];
+    if (isToken(v)) return true;
+    if (key.charCodeAt(0) === 58 && v && styleUsesTokens(v)) return true;
+  }
+  return false;
+}
+
+// (style object, theme object) -> resolved style. Two hoisted styles under
+// one theme therefore keep their identity across renders, which is what the
+// `===` fast path in applyProps relies on.
+const resolvedCache = new WeakMap();
+
+/**
+ * Before a node is attached it has no ancestors and so no theme yet — one
+ * commit tick, but long enough for yoga to be handed a `'$gutter'`. Drop
+ * the token-valued properties until the real value is known; the node
+ * restyles on attach.
+ */
+export function stripTokens(style) {
+  const out = {};
+  for (const key of Object.keys(style)) {
+    const v = style[key];
+    if (isToken(v)) continue;
+    out[key] = key.charCodeAt(0) === 58 && v ? stripTokens(v) : v;
+  }
+  return out;
+}
+
+/**
+ * `strict` says the node's ancestry is complete, so a token that does not
+ * resolve is a mistake. While a subtree is still being built its nodes can
+ * see only part of their ancestry — the theme two levels up does not exist
+ * for them yet — so resolution there is provisional: unknown tokens are
+ * dropped and the node restyles when it attaches.
+ */
+export function resolveTokens(style, theme, where = 'style', strict = true) {
+  if (!theme) return stripTokens(style);
+  let byTheme = strict ? resolvedCache.get(style) : null;
+  if (strict && !byTheme) resolvedCache.set(style, (byTheme = new WeakMap()));
+  const hit = byTheme?.get(theme);
+  if (hit) return hit;
+
+  const out = {};
+  for (const key of Object.keys(style)) {
+    const v = style[key];
+    if (isToken(v)) {
+      const name = v.slice(1);
+      if (name in theme) {
+        out[key] = theme[name];
+        continue;
+      }
+      if (!strict) continue;
+      throw new Error(
+        `react-x11: unknown theme token "${v}" in ${where} ` +
+          `(theme has ${Object.keys(theme).join(', ') || 'nothing'})`,
+      );
+    } else if (key.charCodeAt(0) === 58 && v) {
+      out[key] = resolveTokens(v, theme, `${where} ${key}`, strict);
+    } else {
+      out[key] = v;
+    }
+  }
+  byTheme?.set(theme, out);
+  return out;
+}
+
 export { validateStyle };
 
 /**
