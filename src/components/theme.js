@@ -49,7 +49,6 @@ export function useControl(disabled, onActivate, { styled = false } = {}) {
   const [focused, setFocused] = useState(false);
   const activation = {
     focusable: true,
-    cursor: 'pointer',
     onClick: () => onActivate?.(),
     onKeyDown: (ev) => {
       if (ev.codepoint === 32 || ev.keysym === XK_RETURN) onActivate?.();
@@ -70,14 +69,20 @@ export function useControl(disabled, onActivate, { styled = false } = {}) {
     hover: !styled && hover && !disabled,
     focused: !styled && focused && !disabled,
     props,
+    // `cursor` is style, so it travels in the style channel — put it first
+    // in the widget's style array and anything it declares still wins
+    style: disabled ? undefined : POINTER,
   };
 }
 
-/** String/number children become a <text>; elements pass through. */
-export function labelContent(children, textProps) {
+const POINTER = Object.freeze({ cursor: 'pointer' });
+
+/** String/number children become a `<text>` with `style`; elements pass
+ * through untouched. */
+export function labelContent(children, style) {
   return React.Children.map(children, (child) =>
     typeof child === 'string' || typeof child === 'number'
-      ? h('text', textProps, child)
+      ? h('text', { style }, child)
       : child,
   );
 }

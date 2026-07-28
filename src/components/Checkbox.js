@@ -17,40 +17,47 @@ export function Checkbox({
   checked = false,
   onChange,
   disabled = false,
+  style,
   ...boxProps
 }) {
   const theme = useTheme();
-  const { focused, props } = useControl(disabled, () => onChange?.(!checked));
+  const {
+    focused,
+    props,
+    style: controlStyle,
+  } = useControl(disabled, () => onChange?.(!checked));
   const fill = disabled ? theme.dim : theme.accent;
   return h(
     'box',
     {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
       ...props,
       ...boxProps,
+      style: [
+        controlStyle,
+        { flexDirection: 'row', alignItems: 'center', gap: 8 },
+        style,
+      ],
     },
     h(
       'box',
       {
-        width: 16,
-        height: 16,
-        borderRadius: 3,
-        borderWidth: 1,
-        borderColor: checked
-          ? fill
-          : focused
-            ? theme.borderActive
-            : theme.border,
-        backgroundColor: checked ? fill : theme.background,
-        alignItems: 'center',
-        justifyContent: 'center',
+        style: {
+          width: 16,
+          height: 16,
+          borderRadius: 3,
+          borderWidth: 1,
+          borderColor: checked
+            ? fill
+            : focused
+              ? theme.borderActive
+              : theme.border,
+          backgroundColor: checked ? fill : theme.background,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
       },
       checked &&
         h('canvas', {
-          width: 10,
-          height: 8,
           onDraw: (ctx) => {
             ctx.strokeStyle = theme.accentText;
             ctx.lineWidth = 2;
@@ -60,6 +67,7 @@ export function Checkbox({
             ctx.lineTo(9, 1);
             ctx.stroke();
           },
+          style: { width: 10, height: 8 },
         }),
     ),
     labelContent(children ?? label, {

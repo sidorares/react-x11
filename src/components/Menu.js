@@ -100,8 +100,8 @@ function MenuRow({
   if (item.separator) {
     return h(
       'box',
-      { height: MENU_SEPARATOR_HEIGHT, justifyContent: 'center' },
-      h('box', { height: 1, backgroundColor: theme.border }),
+      { style: { height: MENU_SEPARATOR_HEIGHT, justifyContent: 'center' } },
+      h('box', { style: { height: 1, backgroundColor: theme.border } }),
     );
   }
   const dim = item.disabled;
@@ -110,50 +110,60 @@ function MenuRow({
     'box',
     {
       ref: nodeRef,
-      height: MENU_ITEM_HEIGHT,
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingLeft: 8,
-      paddingRight: 8,
-      cursor: dim ? undefined : 'pointer',
-      backgroundColor: active ? theme.hoverBackground : theme.background,
       onMouseEnter: dim ? undefined : onHover,
       onMouseMove: dim ? undefined : onMove,
       onClick: dim ? undefined : () => onSelect(item),
+      style: {
+        height: MENU_ITEM_HEIGHT,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingLeft: 8,
+        paddingRight: 8,
+        cursor: dim ? undefined : 'pointer',
+        backgroundColor: active ? theme.hoverBackground : theme.background,
+      },
     },
     h(
       'box',
-      { width: MENU_GUTTER - 8, alignItems: 'center' },
+      { style: { width: MENU_GUTTER - 8, alignItems: 'center' } },
       item.checked &&
         h('text', {
-          color: active ? theme.hoverText : theme.text,
-          fontSize,
           children: '\u2713',
+          style: {
+            color: active ? theme.hoverText : theme.text,
+            fontSize: fontSize,
+          },
         }),
     ),
     h(
       'text',
       {
-        color: dim ? theme.dim : active ? theme.hoverText : theme.text,
-        fontSize,
+        style: {
+          color: dim ? theme.dim : active ? theme.hoverText : theme.text,
+          fontSize: fontSize,
+        },
       },
       item.label,
     ),
-    h('box', { flexGrow: 1 }),
+    h('box', { style: { flexGrow: 1 } }),
     item.shortcut &&
       h(
         'text',
         {
-          color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
-          fontSize,
+          style: {
+            color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
+            fontSize: fontSize,
+          },
         },
         item.shortcut,
       ),
     hasSubmenu &&
       h('text', {
-        color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
-        fontSize,
         children: '\u25b8',
+        style: {
+          color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
+          fontSize: fontSize,
+        },
       }),
   );
 }
@@ -289,24 +299,21 @@ function MenuLevel({
       width: rect.width,
       height: rect.height,
       windowType: 'popup_menu',
-      backgroundColor: theme.background,
-      // the root level holds the pointer grab for the whole menu: a press
-      // anywhere else — including this app's own window frame, which
-      // belongs to the window manager — closes it instead of vanishing
-      // into whatever was clicked. Submenus need no grab of their own;
-      // owner-events still delivers their presses to them.
       grab: depth === 0,
       onDismiss: depth === 0 ? onDismiss : undefined,
+      style: { backgroundColor: theme.background },
     },
     h(
       'box',
       {
-        flexGrow: 1,
-        flexShrink: 1,
-        padding: MENU_PAD,
-        borderWidth: 1,
-        borderColor: theme.border,
-        backgroundColor: theme.background,
+        style: {
+          flexGrow: 1,
+          flexShrink: 1,
+          padding: MENU_PAD,
+          borderWidth: 1,
+          borderColor: theme.border,
+          backgroundColor: theme.background,
+        },
       },
       items.map((item, index) =>
         h(MenuRow, {
@@ -433,6 +440,7 @@ export function ContextMenu({
   children,
   onSelect,
   fontSize = DEFAULT_LABEL_SIZE,
+  style,
   ...boxProps
 }) {
   const ref = useRef(null);
@@ -492,6 +500,7 @@ export function ContextMenu({
       },
       onBlur: close,
       ...boxProps,
+      style,
     },
     children,
     rect &&
@@ -518,6 +527,7 @@ export function MenuBar({
   menus = [],
   onSelect,
   fontSize = DEFAULT_LABEL_SIZE,
+  style,
   ...boxProps
 }) {
   const theme = useTheme();
@@ -563,10 +573,15 @@ export function MenuBar({
   return h(
     'box',
     {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: theme.surfaceHover,
       ...boxProps,
+      style: [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          backgroundColor: theme.surfaceHover,
+        },
+        style,
+      ],
     },
     menus.map((menu, index) =>
       h(
@@ -577,16 +592,7 @@ export function MenuBar({
             refs.current[index] = node;
           },
           focusable: true,
-          cursor: 'pointer',
-          paddingLeft: 10,
-          paddingRight: 10,
-          paddingTop: 6,
-          paddingBottom: 6,
-          backgroundColor:
-            openIndex === index ? theme.hoverBackground : undefined,
           onClick: () => (openIndex === index ? close() : openMenu(index)),
-          // with a menu already open, hovering the bar switches menus —
-          // standard pull-down behaviour
           onMouseEnter: () => {
             if (openIndex >= 0 && openIndex !== index) openMenu(index);
           },
@@ -616,12 +622,23 @@ export function MenuBar({
             if (ev.keysym === XK_LEFT) moveMenu(-1);
             else if (ev.keysym === XK_RIGHT) moveMenu(1);
           },
+          style: {
+            cursor: 'pointer',
+            paddingLeft: 10,
+            paddingRight: 10,
+            paddingTop: 6,
+            paddingBottom: 6,
+            backgroundColor:
+              openIndex === index ? theme.hoverBackground : undefined,
+          },
         },
         h(
           'text',
           {
-            color: openIndex === index ? theme.hoverText : theme.text,
-            fontSize,
+            style: {
+              color: openIndex === index ? theme.hoverText : theme.text,
+              fontSize: fontSize,
+            },
           },
           menu.label,
         ),

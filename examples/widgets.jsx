@@ -19,10 +19,8 @@ import {
 
 function Row({ label, children, alignItems = 'center' }) {
   return (
-    <box flexDirection="row" alignItems={alignItems} gap={12}>
-      <text color="#7f8c8d" width={90}>
-        {label}
-      </text>
+    <box style={{ flexDirection: 'row', alignItems: alignItems, gap: 12 }}>
+      <text style={{ color: '#7f8c8d', width: 90 }}>{label}</text>
       {children}
     </box>
   );
@@ -51,11 +49,14 @@ function App() {
   }, [notify]);
 
   return (
-    <window width={460} height={720} title="widgets" backgroundColor="#f5f6fa">
-      <box flexGrow={1} padding={16} gap={14}>
-        <text fontSize={20} color="#2d3436">
-          Widget gallery
-        </text>
+    <window
+      width={460}
+      height={720}
+      title="widgets"
+      style={{ backgroundColor: '#f5f6fa' }}
+    >
+      <box style={{ flexGrow: 1, padding: 16, gap: 14 }}>
+        <text style={{ fontSize: 20, color: '#2d3436' }}>Widget gallery</text>
 
         <Row label="Button">
           <Button primary onPress={() => setPresses((n) => n + 1)}>
@@ -65,11 +66,11 @@ function App() {
             <Button onPress={() => setPresses(0)}>Reset</Button>
           </Tooltip>
           <Button disabled>Disabled</Button>
-          <text color="#2d3436">{`${presses}×`}</text>
+          <text style={{ color: '#2d3436' }}>{`${presses}×`}</text>
         </Row>
 
         <Row label="Checkbox">
-          <box gap={6}>
+          <box style={{ gap: 6 }}>
             <Checkbox checked={agreed} onChange={setAgreed}>
               I agree to nothing in particular
             </Checkbox>
@@ -89,7 +90,9 @@ function App() {
 
         <Row label="Switch">
           <Switch checked={notify} onChange={setNotify} />
-          <text color="#2d3436">{notify ? 'notifications on' : 'off'}</text>
+          <text style={{ color: '#2d3436' }}>
+            {notify ? 'notifications on' : 'off'}
+          </text>
         </Row>
 
         <Row label="Slider">
@@ -98,65 +101,73 @@ function App() {
             min={0}
             max={100}
             step={5}
-            width={200}
             onChange={setVolume}
+            style={{ width: 200 }}
           />
-          <text color="#2d3436">{`${volume}`}</text>
+          <text style={{ color: '#2d3436' }}>{`${volume}`}</text>
         </Row>
 
         <Row label="Progress">
-          <box flexGrow={1}>
+          <box style={{ flexGrow: 1 }}>
             <ProgressBar value={progress} />
           </box>
-          <text color="#7f8c8d">{`${Math.round(progress * 100)}%`}</text>
+          <text
+            style={{ color: '#7f8c8d' }}
+          >{`${Math.round(progress * 100)}%`}</text>
         </Row>
 
         <Row label="Select">
           <Select
-            width={160}
             options={['fast', 'faster', 'ludicrous']}
             value={speed}
             onChange={setSpeed}
+            style={{ width: 160 }}
           />
         </Row>
 
         <Row label="Input">
           <textinput
-            flexGrow={1}
             placeholder="Type here…"
-            padding={8}
-            borderRadius={4}
-            borderWidth={1}
-            borderColor="#b2bec3"
-            backgroundColor="white"
+            style={{
+              flexGrow: 1,
+              padding: 8,
+              borderRadius: 4,
+              borderWidth: 1,
+              borderColor: '#b2bec3',
+              backgroundColor: 'white',
+            }}
           />
         </Row>
 
         <Row label="Markdown" alignItems="flex-start">
-          <box flexGrow={1} gap={8}>
+          <box style={{ flexGrow: 1, gap: 8 }}>
             {/* the textarea is the source, the <markdown> element is the
                 preview: every keystroke re-parses through ntk's
                 MarkdownView, which is cheap enough for a document this size */}
             <textarea
-              flexGrow={0}
               rows={4}
               value={note}
               onChange={setNote}
-              padding={8}
-              borderRadius={4}
-              borderWidth={1}
-              borderColor="#b2bec3"
-              backgroundColor="white"
+              style={{
+                flexGrow: 0,
+                padding: 8,
+                borderRadius: 4,
+                borderWidth: 1,
+                borderColor: '#b2bec3',
+                backgroundColor: 'white',
+              }}
             />
             <scrollview
-              height={110}
-              padding={4}
-              borderRadius={4}
-              borderWidth={1}
-              borderColor="#dfe6e9"
-              backgroundColor="white"
+              style={{
+                height: 110,
+                padding: 4,
+                borderRadius: 4,
+                borderWidth: 1,
+                borderColor: '#dfe6e9',
+                backgroundColor: 'white',
+              }}
             >
-              <markdown padding={6}>{note}</markdown>
+              <markdown style={{ padding: 6 }}>{note}</markdown>
             </scrollview>
           </box>
         </Row>

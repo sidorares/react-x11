@@ -48,6 +48,7 @@ export function Switch({
       ...control.props,
       ...boxProps,
       style: [
+        control.style,
         s.track,
         checked ? s.on : s.off,
         {

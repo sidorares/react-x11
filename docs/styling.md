@@ -1,9 +1,8 @@
-# The `style` channel — prototype
+# Styling
 
-Status: **prototype on `feat/style-prop-prototype`**, not the shipped API.
-Both channels work today so the suite and the sixteen unconverted components
-keep running; `REACT_X11_STYLE_ONLY=1` turns on the end state, where a flat
-style prop is an error.
+Style lives in one place: the `style` prop. A style property passed flat is
+an error in development that names the fix, rather than the silent no-op an
+unrecognised prop used to be.
 
 ## The rule
 
@@ -92,14 +91,21 @@ still exists now that its id registry is gone. It also validates keys, which
 a bare object literal cannot: an unknown style property is an error at
 declaration instead of a silent no-op.
 
-## What this replaces in components
+## In components
+
+Every component takes `style` and merges it after its own, so an override
+wins by position instead of clobbering a computed value:
+`style: [control.style, base, checked && on, style]`.
 
 `useControl(disabled, onActivate, { styled: true })` stops holding hover and
 focus in React state: no enter/leave handlers, no re-render on pointer move.
-`Switch` is converted as the worked example. Compare the old forwarding —
-`{...props, ...boxProps}`, where a caller's `backgroundColor` silently
-clobbered the computed one — with `style: [base, checked && on, style]`,
-where precedence is stated.
+`Switch` is the worked example.
+
+A component's own props are never style. `ProgressBar` takes `color`,
+`Dialog` takes `width`/`height` — a dialog is a real popup window and needs
+its geometry up front — and `ContextMenu` takes `fontSize` because it
+measures labels with it. `Select` and `Slider` used to take `width` purely
+to put it in their own box; that is `style={{ width }}` now.
 
 ## Decided
 
@@ -112,11 +118,17 @@ where precedence is stated.
   do, they close the "Switch animation" item in NEXT_STEPS §2, which is
   really a request for this feature.
 
-## Not done here
+## Elements that are not styled
 
-Converting the other fifteen components, the examples beyond `dashboard.jsx`,
-the docs, and deleting the legacy branch in `Node._syncStyle`. Theme tokens
-(`backgroundColor="panel"` resolved through `ThemeProvider`) and window size
-queries — the X11 analogue of `@media`, and layout-capable, since they are
-only re-evaluated during a layout pass that resize already triggers — are the
-follow-ons after transitions.
+The 3D scene elements and the declarative SVG children carry their own
+vocabularies — `position`, `color` and `width` mean a transform, a material
+and a radius there — so the style channel does not apply to them, the same
+way it does not apply to an `<input type>` in the DOM. They report
+`stylable === false` and their props are passed through untouched.
+
+## Next
+
+Theme tokens (`backgroundColor="panel"` resolved through `ThemeProvider`) and
+window size queries — the X11 analogue of `@media`, and layout-capable, since
+they are only re-evaluated during a layout pass that resize already triggers
+— are the follow-ons after transitions.

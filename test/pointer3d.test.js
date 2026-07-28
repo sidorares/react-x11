@@ -70,7 +70,7 @@ async function mount(app, scene, size = { width: 400, height: 300 }) {
     h(
       'window',
       size,
-      h(Canvas3D, { flexGrow: 1, ...scene.canvas }, scene.children),
+      h(Canvas3D, { style: { flexGrow: 1 }, ...scene.canvas }, scene.children),
     ),
     app,
   );
@@ -233,7 +233,7 @@ test('a transform moves what the ray hits', async () => {
         { width: 400, height: 300 },
         h(
           Canvas3D,
-          { flexGrow: 1, camera: { position: [0, 0, 6] } },
+          { style: { flexGrow: 1 }, camera: { position: [0, 0, 6] } },
           CUBE({ position: [-6, 0, 0], onClick: () => hits.push(-6) }),
         ),
       ),

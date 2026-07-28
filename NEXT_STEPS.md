@@ -66,7 +66,7 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   (`transition: { backgroundColor: 150 }`) rather than a hand-rolled
   requestAnimationFrame loop per widget: the same mechanism animates every
   `:hover` tint. Deferred out of the style-channel prototype
-  ([docs/style-prototype.md](docs/style-prototype.md)) so the animation
+  ([docs/styling.md](docs/styling.md)) so the animation
   loop lands as its own change
 - **Tooltip** — DONE: `useAnchor(ref)`/`anchorRect()` extracted from
   `Select` (and now flip at screen edges), `Tooltip` built on them
@@ -115,6 +115,18 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   is the handler's choice); see examples/windows.jsx
 - **Keyboard**: AltGr/compose/IME not handled (ntk TODO), key repeat is
   server-side (works), keymap beyond index 0/1 unhandled
+
+### 3a. Styling — DONE
+
+Style moved out of the flat prop namespace into `style` (object or array,
+flattened left-to-right), with element semantics keeping the props. That is
+what removed the `<window>` `width`/`height` collision and let the WM size
+hints unnest from `sizeHints`. Inline `:hover`/`:focus`/`:active`/`:disabled`
+blocks resolve in the renderer — a repaint, no React render — and are
+restricted to paint properties so a pointer move can never reflow the tree.
+`createStyles` hoists and validates; an unknown style property is an error
+instead of a silent no-op. See [docs/styling.md](docs/styling.md). Left:
+transitions, then theme tokens and window size queries.
 
 ### 4. Ecosystem / DX
 

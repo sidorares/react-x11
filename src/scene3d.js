@@ -72,6 +72,11 @@ const asTriple = (value, fallback) => {
 
 /** Base for anything with a transform: `<mesh>`, `<group>`. */
 export class Object3DNode extends Node {
+  // `position`, `color`, `width`… are the scene graph's vocabulary here
+  get stylable() {
+    return false;
+  }
+
   constructor(kind, props, app) {
     super(kind, props, app, { yoga: false });
     this.surface = null; // owning GlAreaNode

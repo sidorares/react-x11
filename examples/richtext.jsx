@@ -72,7 +72,7 @@ function Logo({ spin }) {
     />
   );
   return (
-    <svg viewBox="0 0 24 24" width={40} height={40}>
+    <svg viewBox="0 0 24 24" style={{ width: 40, height: 40 }}>
       <circle cx={12} cy={12} r={10} fill="#61dafb" opacity={0.25} />
       {orbit(0)}
       {orbit(60)}
@@ -89,46 +89,50 @@ function App() {
       width={560}
       height={640}
       title="rich content"
-      backgroundColor="white"
+      style={{ backgroundColor: 'white' }}
     >
       <box
-        flexDirection="row"
-        alignItems="center"
-        gap={12}
-        padding={12}
-        backgroundColor="#f4f4f4"
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          padding: 12,
+          backgroundColor: '#f4f4f4',
+        }}
       >
         <Logo spin={n * 15} />
         <tex size={26} displayMode>
           {`e^{i\\pi} + 1 = 0 \\qquad x^{${n}}`}
         </tex>
-        <box flexGrow={1} />
+        <box style={{ flexGrow: 1 }} />
         <Button
           primary
           label="bump exponent"
           onPress={() => setN((v) => (v % 9) + 1)}
         />
       </box>
-      <scrollview flexGrow={1}>
+      <scrollview style={{ flexGrow: 1 }}>
         <markdown
-          padding={16}
           onLink={(href) => console.log('link clicked:', href)}
+          style={{ padding: 16 }}
         >
           {MARKDOWN}
         </markdown>
       </scrollview>
 
       <box
-        flexDirection="row"
-        alignItems="center"
-        gap={12}
-        padding={12}
-        backgroundColor="#f4f4f4"
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          padding: 12,
+          backgroundColor: '#f4f4f4',
+        }}
       >
         {/* <image> decodes PNG/JPEG through ntk and uploads once; with only
             one dimension given it keeps the aspect ratio */}
-        <image src={PICTURE} height={64} borderRadius={4} />
-        <text color="#636e72">
+        <image src={PICTURE} style={{ height: 64, borderRadius: 4 }} />
+        <text style={{ color: '#636e72' }}>
           {
             '<image> — PNG/JPEG, sized by the layout, uploaded to the server once'
           }

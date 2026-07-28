@@ -73,7 +73,7 @@ const isEventProp = (name) => /^on[A-Z]/.test(name);
  */
 function windowAttributes(props) {
   const attributes = {};
-  const hints = { ...props.sizeHints };
+  const hints = {};
   for (const key of Object.keys(props)) {
     if (key === 'children' || key === 'style' || isEventProp(key)) continue;
     if (WINDOW_HINT_PROPS.includes(key)) {

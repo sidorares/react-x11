@@ -38,6 +38,7 @@ export function Tooltip({
   placement = 'top',
   delay = 500,
   fontSize = DEFAULT_LABEL_SIZE,
+  style,
   ...boxProps
 }) {
   const theme = useTheme();
@@ -101,13 +102,12 @@ export function Tooltip({
     'box',
     {
       ref,
-      flexDirection: 'row',
-      alignItems: 'center',
       onMouseEnter,
       onMouseMove,
       onMouseLeave,
       onMouseDown: hide,
       ...boxProps,
+      style: [{ flexDirection: 'row', alignItems: 'center' }, style],
     },
     children,
     rect &&
@@ -119,25 +119,29 @@ export function Tooltip({
           width: rect.width,
           height: rect.height,
           windowType: 'tooltip',
-          backgroundColor: theme.text,
+          style: { backgroundColor: theme.text },
         },
         h(
           'box',
           {
-            // the pointer reaching the tooltip keeps it up; leaving it
-            // dismisses, as if the trigger had been left
             onMouseEnter: cancel,
             onMouseLeave: hide,
-            flexGrow: 1,
-            borderWidth: 1,
-            borderColor: theme.text,
-            borderRadius: 3,
-            backgroundColor: theme.text,
-            justifyContent: 'center',
-            paddingLeft: TOOLTIP_PADDING_X,
-            paddingRight: TOOLTIP_PADDING_X,
+            style: {
+              flexGrow: 1,
+              borderWidth: 1,
+              borderColor: theme.text,
+              borderRadius: 3,
+              backgroundColor: theme.text,
+              justifyContent: 'center',
+              paddingLeft: TOOLTIP_PADDING_X,
+              paddingRight: TOOLTIP_PADDING_X,
+            },
           },
-          h('text', { color: theme.background, fontSize }, label),
+          h(
+            'text',
+            { style: { color: theme.background, fontSize: fontSize } },
+            label,
+          ),
         ),
       ),
   );

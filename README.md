@@ -47,17 +47,32 @@ import { createRoot } from 'react-x11';
 function Counter() {
   const [n, setN] = useState(0);
   return (
-    <window width={240} height={120} title="counter" backgroundColor="#f4f4f4">
-      <box flexGrow={1} alignItems="center" justifyContent="center" gap={10}>
-        <text fontSize={24}>{String(n)}</text>
+    <window
+      width={240}
+      height={120}
+      title="counter"
+      style={{ backgroundColor: '#f4f4f4' }}
+    >
+      <box
+        style={{
+          flexGrow: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 10,
+        }}
+      >
+        <text style={{ fontSize: 24 }}>{String(n)}</text>
         <box
-          backgroundColor="#2980b9"
-          borderRadius={6}
-          padding={8}
-          cursor="pointer"
+          style={{
+            backgroundColor: '#2980b9',
+            borderRadius: 6,
+            padding: 8,
+            cursor: 'pointer',
+            ':hover': { backgroundColor: '#1f6693' },
+          }}
           onClick={() => setN(n + 1)}
         >
-          <text color="white">+1</text>
+          <text style={{ color: 'white' }}>+1</text>
         </box>
       </box>
     </window>
@@ -108,7 +123,7 @@ Inside a `<glarea>` (or the `Canvas3D` component) the children are scene
 elements with react-three-fiber's names:
 
 ```jsx
-<Canvas3D flexGrow={1} camera={{ position: [0, 2, 6], fov: 45 }}>
+<Canvas3D style={{ flexGrow: 1 }} camera={{ position: [0, 2, 6], fov: 45 }}>
   <ambientLight intensity={0.35} />
   <pointLight position={[5, 6, 6]} />
   <mesh rotation={[0.5, 0.4, 0]} onClick={() => pick()}>

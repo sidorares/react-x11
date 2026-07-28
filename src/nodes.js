@@ -14,6 +14,7 @@ import {
   resolveStyleStates,
   hasStateStyles,
   isStyleProp,
+  EMPTY_STYLE,
 } from './styles.js';
 import { EventManager } from './events.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
@@ -74,14 +75,14 @@ function textStyleChanged(style, before) {
   return false;
 }
 
-// Prototype switch: with REACT_X11_STYLE_ONLY=1 the flat style props are
-// gone for good and passing one is an error that names the fix, rather than
-// the silent no-op an unrecognised prop is today. Flipping this to always-on
-// is what "finish the migration" means.
-const STYLE_ONLY = process.env.REACT_X11_STYLE_ONLY === '1';
-
+/**
+ * A style property passed flat used to be silently dropped — it was neither
+ * a layout prop, a paint prop nor an `on*` handler, so nothing looked at it
+ * and nothing said so. Now that style has its own channel there is exactly
+ * one place it can go, and the wrong place is an error that names the fix.
+ */
 function assertNoFlatStyleProps(props, kind, semantic) {
-  if (!STYLE_ONLY) return;
+  if (!DEV) return;
   for (const key of Object.keys(props)) {
     if (!isStyleProp(key) || semantic.has(key)) continue;
     throw new Error(
@@ -162,17 +163,11 @@ export class Node {
    * the active state blocks overlaid.
    */
   _syncStyle(props) {
-    const declared = props.style;
-    if (declared === undefined) {
-      // legacy flat props — the prototype keeps them working so the whole
-      // suite and every unconverted component still run; the final change
-      // deletes this branch (see REACT_X11_STYLE_ONLY)
+    if (DEV && this.stylable) {
       assertNoFlatStyleProps(props, this.kind, this.semanticNames);
-      this._baseStyle = props;
-    } else {
-      this._baseStyle = flattenStyle(declared);
-      if (DEV) validateStyle(this._baseStyle, `<${this.kind} style>`);
+      validateStyle(flattenStyle(props.style), `<${this.kind} style>`);
     }
+    this._baseStyle = this.stylable ? flattenStyle(props.style) : EMPTY_STYLE;
     // `disabled` is a prop, not something the pointer does, so it is read
     // straight off props rather than driven by the event manager
     this.states[':disabled'] = Boolean(props.disabled);
@@ -205,6 +200,17 @@ export class Node {
   /** Style names this element claims as its own semantics (see WindowNode). */
   get semanticNames() {
     return NO_SEMANTIC_NAMES;
+  }
+
+  /**
+   * Whether this element is styled at all. The 3D scene elements and the
+   * declarative SVG children are not: they carry their own vocabularies —
+   * `position`, `color`, `width` mean a transform, a material and a radius
+   * there — so the style channel does not apply to them, the same way it
+   * does not apply to an `<input type>` in the DOM.
+   */
+  get stylable() {
+    return true;
   }
 
   /** Number of yoga-bearing children before `index` (window children and
@@ -779,12 +785,15 @@ export class ScrollViewNode extends Node {
     super('scrollview', props, app);
     this.scrollY = 0;
     this.contentHeight = 0;
-    if (props.overflow === undefined) {
+    // these defaults fill in for style the author did not set, so they read
+    // the resolved style, not the props
+    const style = this.style;
+    if (style.overflow === undefined) {
       this.yoga.setOverflow(Yoga.OVERFLOW_SCROLL);
     }
     // yoga's default flexShrink is 0, which would size the viewport to its
     // content; a scroll container must yield to the outer layout instead
-    if (props.flexShrink === undefined) {
+    if (style.flexShrink === undefined) {
       this.yoga.setFlexShrink(1);
     }
     // …and flexShrink alone is not enough. A flex item's base size is its
@@ -796,13 +805,13 @@ export class ScrollViewNode extends Node {
     // and let the content overflow into a scroll. It also fixes the whole
     // ancestor chain at once, since the content no longer counts towards
     // any of their heights.
-    const sized = props.height !== undefined || props.width !== undefined;
-    if (props.flexBasis === undefined && !sized && (props.flexGrow ?? 0) > 0) {
+    const sized = style.height !== undefined || style.width !== undefined;
+    if (style.flexBasis === undefined && !sized && (style.flexGrow ?? 0) > 0) {
       this.yoga.setFlexBasis(0);
     }
     // the CSS `min-height: 0` idiom, for the layouts flex-basis cannot save
-    if (props.minHeight === undefined) this.yoga.setMinHeight(0);
-    if (props.minWidth === undefined) this.yoga.setMinWidth(0);
+    if (style.minHeight === undefined) this.yoga.setMinHeight(0);
+    if (style.minWidth === undefined) this.yoga.setMinWidth(0);
   }
 
   clipsChildren() {
@@ -1725,8 +1734,7 @@ export class WindowNode extends Node {
    * so is the geometry they constrain. They only had to hide inside a
    * `sizeHints` object while yoga style shared this namespace; with style
    * in its own channel the names are free, and `<window minWidth={360}>`
-   * means the one thing it can mean. `sizeHints` still works for a window
-   * written in the legacy flat-prop style.
+   * means the one thing it can mean.
    */
   _applyWindowHints(next, prev) {
     const wnd = this.window;
@@ -1755,35 +1763,13 @@ export class WindowNode extends Node {
     }
   }
 
-  /** Size hints, from flat props on a styled window and from the legacy
-   * `sizeHints` object otherwise. */
+  /** The WM size hints among these props. */
   _sizeHints(props) {
-    if (props.style === undefined) return props.sizeHints;
     const hints = {};
     for (const key of WINDOW_HINT_PROPS) {
       if (props[key] !== undefined) hints[key] = props[key];
     }
     return hints;
-  }
-
-  /**
-   * On a `<window>`, `width`/`height` are the real window's geometry — the
-   * user can drag them and flush() reads them back — so they must never
-   * reach the root yoga node. That used to mean stripping them out of the
-   * style bag, the workaround this whole split exists to delete: a styled
-   * window has no such collision, because its geometry lives in props and
-   * its style lives in `style`.
-   */
-  _yogaProps(props) {
-    if (props.width == null && props.height == null) return props;
-    return { ...props, width: undefined, height: undefined };
-  }
-
-  _syncStyle(props) {
-    const style = super._syncStyle(props);
-    if (props.style !== undefined) return style;
-    this.style = this._baseStyle = this._yogaProps(style);
-    return this.style;
   }
 
   get semanticNames() {

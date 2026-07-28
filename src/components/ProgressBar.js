@@ -15,6 +15,7 @@ export function ProgressBar({
   color,
   trackColor,
   height = 8,
+  style,
   ...boxProps
 }) {
   const theme = useTheme();
@@ -28,21 +29,28 @@ export function ProgressBar({
   return h(
     'box',
     {
-      height,
-      borderRadius: height / 2,
-      backgroundColor: trackColor ?? theme.track,
-      overflow: 'hidden',
-      flexDirection: 'row',
-      minWidth: 0,
       ...boxProps,
+      style: [
+        {
+          height: height,
+          borderRadius: height / 2,
+          backgroundColor: trackColor ?? theme.track,
+          overflow: 'hidden',
+          flexDirection: 'row',
+          minWidth: 0,
+        },
+        style,
+      ],
     },
     h('box', {
-      flexGrow: clamped,
-      flexShrink: 0,
-      flexBasis: 0,
-      borderRadius: height / 2,
-      backgroundColor: color ?? theme.accent,
+      style: {
+        flexGrow: clamped,
+        flexShrink: 0,
+        flexBasis: 0,
+        borderRadius: height / 2,
+        backgroundColor: color ?? theme.accent,
+      },
     }),
-    h('box', { flexGrow: 1 - clamped, flexShrink: 0, flexBasis: 0 }),
+    h('box', { style: { flexGrow: 1 - clamped, flexShrink: 0, flexBasis: 0 } }),
   );
 }

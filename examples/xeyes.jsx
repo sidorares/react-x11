@@ -7,7 +7,6 @@ import { createRoot } from '../src/index.js';
 function Eye({ lookingAt }) {
   return (
     <canvas
-      flexGrow={1}
       onDraw={(ctx, { width, height, node }) => {
         const cx = width / 2;
         const cy = height / 2;
@@ -49,6 +48,7 @@ function Eye({ lookingAt }) {
         );
         ctx.fill();
       }}
+      style={{ flexGrow: 1 }}
     />
   );
 }
@@ -76,7 +76,7 @@ function App({ app }) {
         setLookingAt({ x: ev.nativeEvent.rootx, y: ev.nativeEvent.rooty })
       }
     >
-      <box flexDirection="row" flexGrow={1}>
+      <box style={{ flexDirection: 'row', flexGrow: 1 }}>
         <Eye lookingAt={lookingAt} />
         <Eye lookingAt={lookingAt} />
       </box>

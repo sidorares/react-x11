@@ -57,19 +57,21 @@ function AddTask() {
     setDraft('');
   };
   return (
-    <box flexDirection="row" gap={8} alignItems="center">
+    <box style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
       <textinput
         autoFocus
-        flexGrow={1}
         value={draft}
         placeholder="Add a task…"
         onChange={setDraft}
         onSubmit={add}
-        padding={8}
-        borderRadius={4}
-        borderWidth={1}
-        borderColor="#b2bec3"
-        backgroundColor="white"
+        style={{
+          flexGrow: 1,
+          padding: 8,
+          borderRadius: 4,
+          borderWidth: 1,
+          borderColor: '#b2bec3',
+          backgroundColor: 'white',
+        }}
       />
       <Button primary label="Add" onPress={add} />
     </box>
@@ -86,13 +88,17 @@ function TaskRow({ task }) {
     <Checkbox
       checked={task.done}
       onChange={() => dispatch({ type: 'toggle', id: task.id })}
-      padding={8}
-      borderRadius={4}
-      backgroundColor={hover ? '#eaf2f8' : 'white'}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      style={{
+        padding: 8,
+        borderRadius: 4,
+        backgroundColor: hover ? '#eaf2f8' : 'white',
+      }}
     >
-      <text color={task.done ? '#95a5a6' : '#2d3436'}>{task.label}</text>
+      <text style={{ color: task.done ? '#95a5a6' : '#2d3436' }}>
+        {task.label}
+      </text>
     </Checkbox>
   );
 }
@@ -121,15 +127,18 @@ function App() {
 
   return (
     <DispatchContext.Provider value={dispatch}>
-      <window width={420} height={400} title="tasks" backgroundColor="#f5f6fa">
-        <box flexGrow={1} padding={16} gap={12}>
-          <text fontSize={20} color="#2d3436">
-            Tasks
-          </text>
+      <window
+        width={420}
+        height={400}
+        title="tasks"
+        style={{ backgroundColor: '#f5f6fa' }}
+      >
+        <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
+          <text style={{ fontSize: 20, color: '#2d3436' }}>Tasks</text>
 
           <AddTask />
 
-          <box flexDirection="row" gap={8}>
+          <box style={{ flexDirection: 'row', gap: 8 }}>
             <FilterButton filter="all" current={state.filter} label="All" />
             <FilterButton
               filter="active"
@@ -140,20 +149,22 @@ function App() {
           </box>
 
           <scrollview
-            flexGrow={1}
-            backgroundColor="white"
-            borderRadius={8}
-            borderWidth={1}
-            borderColor="#dfe6e9"
-            padding={6}
-            gap={2}
+            style={{
+              flexGrow: 1,
+              backgroundColor: 'white',
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: '#dfe6e9',
+              padding: 6,
+              gap: 2,
+            }}
           >
             {visible.map((task) => (
               <TaskRow key={task.id} task={task} />
             ))}
           </scrollview>
 
-          <text color="#7f8c8d">
+          <text style={{ color: '#7f8c8d' }}>
             {String(remaining)} remaining — click or Tab + Space to toggle,
             wheel to scroll
           </text>

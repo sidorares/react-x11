@@ -18,10 +18,16 @@ export function Button({
   onPress,
   primary = false,
   disabled = false,
+  style,
   ...boxProps
 }) {
   const theme = useTheme();
-  const { hover, focused, props } = useControl(disabled, onPress);
+  const {
+    hover,
+    focused,
+    props,
+    style: controlStyle,
+  } = useControl(disabled, onPress);
   const background = disabled
     ? theme.surfaceHover
     : primary
@@ -35,28 +41,34 @@ export function Button({
   return h(
     'box',
     {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      paddingTop: 8,
-      paddingBottom: 8,
-      paddingLeft: 16,
-      paddingRight: 16,
-      borderRadius: 4,
-      borderWidth: 1,
-      borderColor: disabled
-        ? theme.border
-        : focused
-          ? primary
-            ? theme.accentHover
-            : theme.borderActive
-          : primary
-            ? theme.accent
-            : theme.border,
-      backgroundColor: background,
       ...props,
       ...boxProps,
+      style: [
+        controlStyle,
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          paddingLeft: 16,
+          paddingRight: 16,
+          borderRadius: 4,
+          borderWidth: 1,
+          borderColor: disabled
+            ? theme.border
+            : focused
+              ? primary
+                ? theme.accentHover
+                : theme.borderActive
+              : primary
+                ? theme.accent
+                : theme.border,
+          backgroundColor: background,
+        },
+        style,
+      ],
     },
     labelContent(children ?? label, { color }),
   );

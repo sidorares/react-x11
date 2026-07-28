@@ -6,10 +6,22 @@ actual parent. Everything else is a retained lightweight node — one
 [yoga-layout](https://www.yogalayout.dev/) node each — painted into the
 owning window's double-buffered 2d context on ntk's frame clock.
 
-## Layout props (all drawn elements + windows)
+## `style` and props
 
-Flat, ink-style props; numbers are pixels, strings like `'50%'` / `'auto'`
-pass through to yoga.
+Everything CSS has a concept for goes in **`style`**; everything else is a
+prop. No name means both, which is why `<window width>` is unambiguously the
+real window's geometry. See [styling.md](styling.md) for arrays, state
+blocks and `createStyles`.
+
+```jsx
+<box style={{ flexDirection: 'row', gap: 8 }} onClick={pick}>
+  <text style={{ fontSize: 14, color: '#2d3436' }}>hello</text>
+</box>
+```
+
+## Layout properties (all drawn elements + windows)
+
+Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
 
 - **Size**: `width`, `height`, `minWidth`, `minHeight`, `maxWidth`,
   `maxHeight`, `aspectRatio`. `<image>` keeps its aspect ratio when only one
@@ -26,7 +38,7 @@ pass through to yoga.
 - **Visibility**: `display` (`flex`, `none`), `overflow` (`visible`,
   `hidden`, `scroll`)
 
-## Paint props
+## Paint properties
 
 - `backgroundColor` — any CSS color string (`'#2980b9'`,
   `'rgba(0,0,0,.5)'`, `'red'`)
@@ -35,15 +47,18 @@ pass through to yoga.
 - `zIndex` — paint/hit order among siblings (stable sort)
 - `opacity` is not implemented yet (see NEXT_STEPS.md)
 
+`cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`, resize
+arrows, … — the ntk cursor name map) and `pointerEvents: 'none'` are style
+too: CSS has both, and React Native has been moving `pointerEvents` the same
+way.
+
 ## Interaction props
 
-`cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`,
-resize arrows, … — the ntk cursor name map), `focusable`, `tabIndex`
-(sequential focus order; `-1` is focusable but not tabbable), `autoFocus`,
-`trapFocus` (own a focus scope — Tab and presses stay inside it, focus is
-restored when it unmounts), `disabled` (never focusable),
-`pointerEvents: 'none'`, and the event handlers listed in
-[events.md](events.md).
+`focusable`, `tabIndex` (sequential focus order; `-1` is focusable but not
+tabbable), `autoFocus`, `trapFocus` (own a focus scope — Tab and presses
+stay inside it, focus is restored when it unmounts), `disabled` (never
+focusable, and the trigger for a `:disabled` style block), and the event
+handlers listed in [events.md](events.md).
 
 ---
 
@@ -86,25 +101,26 @@ request — so their order in the tree carries no stacking meaning. Use
 ### Window manager hints
 
 Properties the window manager reads (ntk ≥ 3.5.0). All work at mount and
-update; unchanged values are not re-sent.
+update; unchanged values are not re-sent. The size hints are flat props like
+the geometry they constrain — with style in its own channel the yoga names
+are free, so no `sizeHints` object is needed.
 
-| prop          |                                                                                                                         |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `resizable`   | `false` pins min and max size to the current size                                                                       |
-| `sizeHints`   | `{minWidth, minHeight, maxWidth, maxHeight, widthInc, heightInc, baseWidth, baseHeight, minAspect, maxAspect, gravity}` |
-| `wmClass`     | `'instance'`, `['instance', 'Class']` or `{instance, class}`                                                            |
-| `windowType`  | `'dialog'`, `'utility'`, `'tooltip'`… or an array of fallbacks                                                          |
-| `alwaysOnTop` | keep above normal windows                                                                                               |
+| prop          |                                                                                                                                           |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `resizable`   | `false` pins min and max size to the current size                                                                                         |
+| size hints    | `minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `widthInc`, `heightInc`, `baseWidth`, `baseHeight`, `minAspect`, `maxAspect`, `gravity` |
+| `wmClass`     | `'instance'`, `['instance', 'Class']` or `{instance, class}`                                                                              |
+| `windowType`  | `'dialog'`, `'utility'`, `'tooltip'`… or an array of fallbacks                                                                            |
+| `alwaysOnTop` | keep above normal windows                                                                                                                 |
 
 ```jsx
 <window width={400} height={300} resizable={false} windowType="dialog" />
-<window sizeHints={{ minWidth: 320, minHeight: 200 }} />
+<window width={400} height={300} minWidth={320} minHeight={200} />
 ```
 
-`sizeHints` is an object rather than flat `minWidth`/`maxWidth` props
-because those names are yoga layout style everywhere else — `<window>`
-already has the wrinkle that `width`/`height` are window state, and
-overloading two more would compound it.
+On a `<window>` these names are the window's, not yoga's: `width`/`height`
+are the real geometry the user can drag, and `minWidth`/`maxHeight` are what
+the WM enforces. A window's _contents_ are laid out by its `style`.
 
 `alwaysOnTop` uses EWMH `_NET_WM_STATE_ABOVE`, falling back to Apple-WM
 window levels on XQuartz, where quartz-wm does not support that state.
@@ -249,7 +265,7 @@ The escape hatch: a retained node whose content you paint.
 
 ```jsx
 <canvas
-  flexGrow={1}
+  style={{ flexGrow: 1 }}
   onDraw={(ctx, { width, height, node }) => {
     ctx.fillStyle = 'tomato';
     ctx.fillRect(0, 0, width / 2, height);
@@ -274,7 +290,7 @@ enabled (`+iglx` / `AllowIndirectGLX` — off by default on many).
 
 ```jsx
 <glarea
-  flexGrow={1}
+  style={{ flexGrow: 1 }}
   clearColor="#0b1021"
   frameLoop="always"
   onCreated={(gl) => gl.Enable(gl.DEPTH_TEST)}
@@ -326,7 +342,7 @@ separate tree with no yoga and no 2D painting, using react-three-fiber's
 names wherever the concept survives the translation to fixed-function GL.
 
 ```jsx
-<Canvas3D flexGrow={1} camera={{ position: [0, 2, 6], fov: 45 }}>
+<Canvas3D style={{ flexGrow: 1 }} camera={{ position: [0, 2, 6], fov: 45 }}>
   <group rotation={[0, angle, 0]}>
     <mesh position={[-1.6, 0, 0]} rotation={[0.5, 0.4, 0]} scale={1.2}>
       <boxGeometry args={[1.4, 1.4, 1.4]} />
@@ -500,7 +516,7 @@ native-camelCase attributes like `viewBox` stay as-is), re-rendered on
 any prop change:
 
 ```jsx
-<svg viewBox="0 0 24 24" width={40} height={40}>
+<svg viewBox="0 0 24 24" style={{ width: 40, height: 40 }}>
   <circle cx={12} cy={12} r={10} fill={active ? '#2980b9' : '#ccc'} />
   <path d="M8 12l3 3 5-6" stroke="white" strokeWidth={2} fill="none" />
 </svg>

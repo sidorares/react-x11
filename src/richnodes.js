@@ -241,6 +241,11 @@ export class SvgChildNode extends Node {
     this.isSvgChild = true;
   }
 
+  // <circle cx r fill>… is SVG's vocabulary, not the style channel's
+  get stylable() {
+    return false;
+  }
+
   _textContentChanged() {
     this.parent?._textContentChanged();
   }
