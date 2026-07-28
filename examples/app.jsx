@@ -40,7 +40,12 @@ const s = createStyles({
   },
   hint: { fontSize: 11, color: '$dim', paddingLeft: 12, paddingRight: 12 },
   spacer: { flexGrow: 1 },
-  content: { flexGrow: 1, minHeight: 0, backgroundColor: '$panel' },
+  content: {
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+    backgroundColor: '$panel',
+  },
   status: {
     flexDirection: 'row',
     alignItems: 'center',

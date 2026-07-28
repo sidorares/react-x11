@@ -136,7 +136,11 @@ export function WidgetsPanel() {
       </Row>
 
       <Row label="Markdown" alignItems="flex-start">
-        <box style={{ flexGrow: 1, gap: 8 }}>
+        {/* `flex: 1` in full — grow *and* a zero basis. yoga defaults
+            flexShrink to 0 (CSS says 1), so with a content-sized basis the
+            markdown's natural width became a floor and pushed the row past
+            the window edge */}
+        <box style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 8 }}>
           {/* the textarea is the source, the <markdown> element is the
               preview: every keystroke re-parses through ntk's
               MarkdownView, which is cheap enough for a document this size */}

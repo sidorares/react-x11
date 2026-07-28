@@ -38,6 +38,14 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
 - **Visibility**: `display` (`flex`, `none`), `overflow` (`visible`,
   `hidden`, `scroll`)
 
+**yoga defaults `flexShrink` to 0, where CSS defaults it to 1.** An item
+whose base size comes from its content therefore refuses to shrink, and
+content wider than the space available pushes the row past its container
+instead of being squeezed into it. Write `flex: 1` in full —
+`{ flexGrow: 1, flexBasis: 0, minWidth: 0 }` — for anything that should take
+the space that is left rather than the space its content wants.
+`<scrollview>` applies exactly that to itself by default.
+
 ## Paint properties
 
 - `backgroundColor` — any CSS color string (`'#2980b9'`,
