@@ -45,6 +45,8 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
 - `borderWidth`, `borderColor`, `borderRadius`, `borderStyle`
   (`'solid'` default, `'dashed'`)
 - `zIndex` — paint/hit order among siblings (stable sort)
+- `transition` — `120`, or `{ backgroundColor: 120, left: 200 }`: how long a
+  change to that property takes ([styling.md](styling.md#transitions))
 - `opacity` is not implemented yet (see NEXT_STEPS.md)
 
 `cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`, resize

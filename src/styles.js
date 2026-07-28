@@ -3,7 +3,7 @@
 // Numbers are pixels; strings like '50%' / 'auto' pass through to yoga.
 // Yoga comes from ntk (>= 3.1.0) so renderer and ntk widgets share one
 // WASM instance and enum set.
-import { Yoga } from 'ntk';
+import { Yoga, cssColor } from 'ntk';
 
 export { Yoga };
 
@@ -167,6 +167,7 @@ const STYLE_PROPS = new Set([
   ...TEXT_LAYOUT_PROPS,
   'color',
   'borderStyle',
+  'transition',
   // CSS concepts even though they read as behaviour; React Native has been
   // moving pointerEvents into style for the same reason
   'cursor',
@@ -269,6 +270,74 @@ export function hasStateStyles(style) {
   for (const key of STATE_KEYS) if (style[key]) return true;
   return false;
 }
+
+/**
+ * Style properties a transition can animate: numbers and colours. Enums
+ * (`flexDirection`), `zIndex` (restacking every frame is not an animation)
+ * and `transition` itself are excluded — a change to those snaps.
+ */
+const NOT_ANIMATABLE = new Set([
+  'transition',
+  'zIndex',
+  'flexDirection',
+  'justifyContent',
+  'alignItems',
+  'alignSelf',
+  'alignContent',
+  'flexWrap',
+  'position',
+  'display',
+  'overflow',
+  'cursor',
+  'pointerEvents',
+  'borderStyle',
+  'fontFamily',
+  'fontWeight',
+  'fontStyle',
+  'textAlign',
+]);
+
+export const isAnimatableProp = (name) =>
+  STYLE_PROPS.has(name) && !NOT_ANIMATABLE.has(name);
+
+/**
+ * `transition: 150` — every animatable property that changes, over 150ms.
+ * `transition: { backgroundColor: 150 }` — only these, with their own
+ * durations. Returns a lookup of prop -> ms, or null.
+ */
+export function transitionFor(style, prop) {
+  const t = style.transition;
+  if (t == null || !isAnimatableProp(prop)) return 0;
+  if (typeof t === 'number') return t;
+  return t[prop] ?? 0;
+}
+
+const rgba = (c) =>
+  c &&
+  `rgba(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)}, ${c[3]})`;
+
+/**
+ * Interpolate one style value. Numbers lerp; colours lerp per channel
+ * through ntk's own CSS colour parser, so anything the paint path accepts
+ * animates. Anything else — a percentage string, `auto`, an enum — has no
+ * meaningful midpoint and returns null, which the caller treats as a snap.
+ */
+export function interpolate(from, to, t) {
+  if (typeof from === 'number' && typeof to === 'number') {
+    return from + (to - from) * t;
+  }
+  if (typeof from === 'string' && typeof to === 'string') {
+    const a = cssColor(from);
+    const b = cssColor(to);
+    if (!a || !b) return null;
+    return rgba(a.map((v, i) => v + (b[i] - v) * t));
+  }
+  return null;
+}
+
+// ease-out cubic: fast to start, settles gently — the shape almost every UI
+// toolkit defaults to for state changes
+export const ease = (t) => 1 - (1 - t) ** 3;
 
 export { validateStyle };
 

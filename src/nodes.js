@@ -15,6 +15,10 @@ import {
   hasStateStyles,
   isStyleProp,
   EMPTY_STYLE,
+  transitionFor,
+  interpolate,
+  ease,
+  isLayoutProp,
 } from './styles.js';
 import { EventManager } from './events.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
@@ -64,6 +68,13 @@ function isPaintedColor(color) {
 }
 
 const DEV = process.env.NODE_ENV !== 'production';
+
+// Frame timestamps for transitions. Indirected so tests can drive the clock
+// instead of sleeping through real animations.
+let now = () => Date.now();
+export function setAnimationClock(fn) {
+  now = fn;
+}
 
 /** Did anything the text stack measures or paints with change? */
 function textStyleChanged(style, before) {
@@ -148,6 +159,8 @@ export class Node {
     this.abs = { x: 0, y: 0, width: 0, height: 0 };
     // node states that style blocks can react to, owned by EventManager
     this.states = { ':hover': false, ':focus': false, ':active': false };
+    // in-flight transitions: prop -> {from, to, start, duration}
+    this._anim = null;
     this._syncStyle(props);
     this.yoga = yoga ? Yoga.Node.create() : null;
     if (this.yoga) {
@@ -172,10 +185,77 @@ export class Node {
     // straight off props rather than driven by the event manager
     this.states[':disabled'] = Boolean(props.disabled);
     this._stateful = hasStateStyles(this._baseStyle);
-    this.style = this._stateful
-      ? resolveStyleStates(this._baseStyle, this.states)
-      : this._baseStyle;
+    return this._retarget(
+      this._stateful
+        ? resolveStyleStates(this._baseStyle, this.states)
+        : this._baseStyle,
+    );
+  }
+
+  /**
+   * Point the node at a new resolved style. Properties with a `transition`
+   * animate there from whatever is on screen right now — which is what makes
+   * an interrupted transition reverse from where it got to, rather than
+   * jumping to the end first. Everything else takes effect immediately.
+   */
+  _retarget(target) {
+    const displayed = this.style;
+    this._targetStyle = target;
+    if (displayed === undefined || this.destroyed) {
+      this.style = target;
+      return this.style;
+    }
+    for (const prop of Object.keys(target)) {
+      const to = target[prop];
+      const from = displayed[prop];
+      if (from === to || from === undefined) continue;
+      const duration = transitionFor(target, prop);
+      if (duration <= 0) continue;
+      if (interpolate(from, to, 0.5) === null) continue; // no midpoint: snap
+      (this._anim ??= new Map()).set(prop, {
+        from,
+        to,
+        duration,
+        start: this.root?.frameTime ?? 0,
+      });
+      this.root?._startAnimating(this);
+    }
+    this.style = this._anim?.size
+      ? { ...target, ...this._animatedValues() }
+      : target;
     return this.style;
+  }
+
+  _animatedValues() {
+    const values = {};
+    for (const [prop, a] of this._anim) values[prop] = a.value ?? a.from;
+    return values;
+  }
+
+  /**
+   * Advance every in-flight transition to `now`. Returns true while any is
+   * still running, so the window keeps asking for frames.
+   */
+  _tickAnimations(now) {
+    if (!this._anim?.size) return false;
+    let layoutChanged = false;
+    const before = this.style;
+    for (const [prop, a] of this._anim) {
+      const t = a.duration > 0 ? Math.min(1, (now - a.start) / a.duration) : 1;
+      a.value = t >= 1 ? a.to : (interpolate(a.from, a.to, ease(t)) ?? a.to);
+      if (t >= 1) this._anim.delete(prop);
+      if (isLayoutProp(prop)) layoutChanged = true;
+    }
+    this.style = this._anim.size
+      ? { ...this._targetStyle, ...this._animatedValues() }
+      : this._targetStyle;
+    if (layoutChanged && this.yoga) {
+      applyLayoutStyle(this.yoga, this.style, before);
+      // a transition on a layout property costs a layout pass per frame —
+      // the author asked for that by transitioning one (docs/styling.md)
+      if (this.root) this.root.needsLayout = true;
+    }
+    return this._anim.size > 0;
   }
 
   /**
@@ -188,9 +268,9 @@ export class Node {
     this.states[name] = on;
     if (!this._stateful || this.destroyed) return;
     const next = resolveStyleStates(this._baseStyle, this.states);
-    const changed = !shallowEqual(next, this.style);
-    this.style = next;
-    if (changed) this.root?.invalidate(false);
+    if (shallowEqual(next, this._targetStyle)) return;
+    this._retarget(next);
+    this.root?.invalidate(false);
   }
 
   get isWindow() {
@@ -1681,6 +1761,10 @@ export class WindowNode extends Node {
     // ids of the child windows in the order the *server* stacks them,
     // bottom to top — see _restackWindowChildren
     this._xStack = [];
+    // nodes with a transition in flight, and the timestamp the current
+    // frame is being rendered for
+    this._animating = new Set();
+    this.frameTime = 0;
   }
 
   /** Create the real X11 window (commit phase only). Children windows are
@@ -1978,6 +2062,28 @@ export class WindowNode extends Node {
     );
   }
 
+  /** A node in this window started a transition. */
+  _startAnimating(node) {
+    this._animating.add(node);
+  }
+
+  /**
+   * Step every in-flight transition to `now`, then keep the frame clock
+   * running while any is unfinished — the animation *is* the repaint loop,
+   * and it stops on its own the frame the last one lands.
+   */
+  _advanceAnimations(now) {
+    this.frameTime = now;
+    if (this._animating.size === 0) return;
+    for (const node of [...this._animating]) {
+      if (node.destroyed || !node._tickAnimations(now)) {
+        this._animating.delete(node);
+      }
+    }
+    this.needsPaint = true;
+    if (this._animating.size > 0) this.invalidate(false);
+  }
+
   setHidden(hidden) {
     if (hidden) this.window?.unmap?.();
     else this.window?.map?.();
@@ -2001,6 +2107,7 @@ export class WindowNode extends Node {
 
   flush() {
     if (this.destroyed || !this.yoga || !this.window) return;
+    this._advanceAnimations(now());
     const width = this.window.width ?? this.props.width ?? 0;
     const height = this.window.height ?? this.props.height ?? 0;
     if (this.needsLayout) {

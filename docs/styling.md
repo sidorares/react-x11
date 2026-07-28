@@ -107,16 +107,47 @@ its geometry up front — and `ContextMenu` takes `fontSize` because it
 measures labels with it. `Select` and `Slider` used to take `width` purely
 to put it in their own box; that is `style={{ width }}` now.
 
+## Transitions
+
+`transition` names how long a change takes. A number covers every animatable
+property; an object picks them individually.
+
+```jsx
+<box
+  style={{
+    backgroundColor: theme.surface,
+    transition: 120, // or { backgroundColor: 120, left: 200 }
+    ':hover': { backgroundColor: theme.surfaceHover },
+  }}
+/>
+```
+
+Numbers lerp and colours lerp per channel through ntk's own CSS colour
+parser, so anything the paint path accepts animates. A value with no
+meaningful midpoint — an enum like `flexDirection`, a percentage, `auto` —
+snaps instead, and `zIndex` is excluded on purpose: restacking every frame is
+not an animation.
+
+The easing is a fixed ease-out cubic. A transition starts from **what is on
+screen**, not from the declared value, so interrupting one reverses from
+where it got to rather than jumping to the end first.
+
+The animation _is_ the repaint loop: the window keeps asking its frame clock
+for frames while any transition is unfinished, and stops the frame the last
+one lands. Nothing polls, and there is no per-widget
+`requestAnimationFrame`.
+
+Transitions may animate layout properties, unlike state blocks. That is not
+an inconsistency: a pointer move must never reflow the tree, but an author
+who writes `transition: { left: 200 }` has asked for animated layout and
+pays a layout pass per frame for it. `Switch` is the worked example — the
+thumb is absolutely positioned and slides on `left`, because
+`justifyContent` would flip between the ends with nothing in between.
+
 ## Decided
 
 - **`':hover'`, not `_hover`.** The CSS spelling costs a pair of quotes and
   buys transfer from every other styling system.
-- **Transitions come later.** They are what turns `:hover` from a
-  nice-to-have into the reason to adopt this — and they are also the one
-  item that puts an animation loop in the renderer, so they land as their
-  own change rather than riding along with the namespace split. When they
-  do, they close the "Switch animation" item in NEXT_STEPS §2, which is
-  really a request for this feature.
 
 ## Elements that are not styled
 

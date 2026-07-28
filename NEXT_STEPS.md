@@ -62,12 +62,11 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Slider** — DONE: `ev.capturePointer()` exposes pointer capture to
   userland, and `Slider` is built on it (drag past the widget bounds,
   arrows/Home/End/PageUp/Down)
-- **Switch animation** — thumb snaps today. Waiting on style transitions
-  (`transition: { backgroundColor: 150 }`) rather than a hand-rolled
-  requestAnimationFrame loop per widget: the same mechanism animates every
-  `:hover` tint. Deferred out of the style-channel prototype
-  ([docs/styling.md](docs/styling.md)) so the animation
-  loop lands as its own change
+- **Switch animation** — DONE via style transitions, not a per-widget
+  requestAnimationFrame loop: the thumb is absolutely positioned and slides
+  on `left`, and the same `transition` declaration eases the track colour.
+  The frame loop runs only while something is unfinished
+  ([docs/styling.md](docs/styling.md))
 - **Tooltip** — DONE: `useAnchor(ref)`/`anchorRect()` extracted from
   `Select` (and now flip at screen edges), `Tooltip` built on them
 - **Dialog** — DONE: a modal over `<popup trapFocus grab>`, centred with
@@ -125,8 +124,10 @@ hints unnest from `sizeHints`. Inline `:hover`/`:focus`/`:active`/`:disabled`
 blocks resolve in the renderer — a repaint, no React render — and are
 restricted to paint properties so a pointer move can never reflow the tree.
 `createStyles` hoists and validates; an unknown style property is an error
-instead of a silent no-op. See [docs/styling.md](docs/styling.md). Left:
-transitions, then theme tokens and window size queries.
+instead of a silent no-op. `transition` animates numbers and colours off the
+window's frame clock, starting from what is on screen so an interrupted
+transition reverses. See [docs/styling.md](docs/styling.md). Left: theme
+tokens, then window size queries.
 
 ### 4. Ecosystem / DX
 
