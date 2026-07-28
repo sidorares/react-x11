@@ -179,7 +179,15 @@ window, valid after layout).
 ## `<scrollview>`
 
 A clipped viewport over its (overflowing) children. Wheel events scroll it
-by default; a scrollbar thumb is drawn when content overflows.
+by default; a scrollbar thumb is drawn when content overflows, and the thumb
+can be dragged.
+
+The bar belongs to the scroller, not to the content painted under it — the
+same rule a browser applies — so a press on the thumb never reaches the row
+behind it. Dragging keeps the grip where it was taken, so the thumb does not
+jump to the pointer, and a press on the track pages towards it, like
+PageUp/PageDown. `<textarea>` behaves the same way, and there a bar press
+never moves the caret.
 
 With `flexGrow` and no explicit size it defaults to **`flex-basis: 0`** —
 what CSS's `flex: 1` means — so it takes the space left over instead of

@@ -907,6 +907,67 @@ export class ImageNode extends Node {
   }
 }
 
+const SCROLLBAR_WIDTH = 6;
+const SCROLLBAR_MIN_THUMB = 20;
+// the visible bar is thin; the pointer target is not
+const SCROLLBAR_SLOP = 4;
+
+/**
+ * Geometry of a vertical scrollbar, or null when there is nothing to
+ * scroll. Shared by `<scrollview>` and `<textarea>` so what is painted and
+ * what the pointer hits cannot drift apart.
+ */
+function scrollbarGeometry({
+  x,
+  y,
+  width,
+  height,
+  scroll,
+  content,
+  inset = 0,
+}) {
+  if (height <= 0 || !(content > height)) return null;
+  const thumbHeight = Math.max(
+    SCROLLBAR_MIN_THUMB,
+    (height * height) / content,
+  );
+  const range = content - height;
+  const travel = height - thumbHeight;
+  return {
+    x: x + width - SCROLLBAR_WIDTH - inset,
+    width: SCROLLBAR_WIDTH,
+    trackY: y,
+    trackHeight: height,
+    thumbY: y + (range > 0 ? (scroll / range) * travel : 0),
+    thumbHeight,
+    range,
+    travel,
+  };
+}
+
+/** Is this point on the bar (with slop), and if so, on the thumb? */
+function scrollbarHit(bar, x, y) {
+  if (!bar) return null;
+  if (x < bar.x - SCROLLBAR_SLOP || x > bar.x + bar.width + SCROLLBAR_SLOP) {
+    return null;
+  }
+  if (y < bar.trackY || y > bar.trackY + bar.trackHeight) return null;
+  return y >= bar.thumbY && y <= bar.thumbY + bar.thumbHeight
+    ? 'thumb'
+    : 'track';
+}
+
+function paintScrollbarThumb(ctx, bar, color) {
+  ctx.fillStyle = color || 'rgba(0, 0, 0, 0.25)';
+  ctx.beginPath();
+  if (typeof ctx.roundRect === 'function') {
+    ctx.roundRect(bar.x, bar.thumbY, bar.width, bar.thumbHeight, 3);
+  } else {
+    ctx.rect(bar.x, bar.thumbY, bar.width, bar.thumbHeight);
+  }
+  ctx.fill();
+}
+
 /**
  * <scrollview>: a clipped viewport over its (overflowing) children. The
  * scroll offset is applied during absolutize, so painting and hit testing
@@ -1034,30 +1095,60 @@ export class ScrollViewNode extends Node {
 
   paint(ctx) {
     super.paint(ctx);
-    this._paintScrollbar(ctx);
+    const bar = this._scrollbar();
+    if (bar) {
+      paintScrollbarThumb(ctx, bar, this.props.scrollbarColor);
+    }
   }
 
-  _paintScrollbar(ctx) {
-    if (this.props.scrollbar === false) return;
-    const viewport = this.abs.height;
-    if (!(this.contentHeight > viewport)) return;
-    const trackWidth = 6;
-    const thumbHeight = Math.max(
-      20,
-      (viewport * viewport) / this.contentHeight,
-    );
-    const range = this.contentHeight - viewport;
-    const thumbY =
-      this.abs.y + (this.scrollY / range) * (viewport - thumbHeight);
-    const thumbX = this.abs.x + this.abs.width - trackWidth - 2;
-    ctx.fillStyle = this.props.scrollbarColor || 'rgba(0, 0, 0, 0.25)';
-    ctx.beginPath();
-    if (typeof ctx.roundRect === 'function') {
-      ctx.roundRect(thumbX, thumbY, trackWidth, thumbHeight, 3);
-    } else {
-      ctx.rect(thumbX, thumbY, trackWidth, thumbHeight);
+  /** null when the bar is switched off or there is nothing to scroll. */
+  _scrollbar() {
+    if (this.props.scrollbar === false) return null;
+    return scrollbarGeometry({
+      x: this.abs.x,
+      y: this.abs.y,
+      width: this.abs.width,
+      height: this.abs.height,
+      scroll: this.scrollY,
+      content: this.contentHeight,
+      inset: 2,
+    });
+  }
+
+  /**
+   * The bar belongs to the scroller, not to the content under it — the same
+   * rule a browser applies. Without this a press on the thumb would be
+   * delivered to whatever child happens to be painted beneath it.
+   */
+  hitTest(x, y) {
+    if (scrollbarHit(this._scrollbar(), x, y)) return this;
+    return super.hitTest(x, y);
+  }
+
+  _defaultMouseDown(ev) {
+    const bar = this._scrollbar();
+    const hit = scrollbarHit(bar, ev.x, ev.y);
+    if (!hit) return;
+    if (hit === 'thumb') {
+      // remember where in the thumb it was grabbed, so it does not jump
+      this._barGrab = ev.y - bar.thumbY;
+      ev.capturePointer();
+      return;
     }
-    ctx.fill();
+    // a press on the track pages towards it, like PageUp/PageDown
+    this.scrollBy(ev.y < bar.thumbY ? -this.abs.height : this.abs.height);
+  }
+
+  _defaultMouseDrag(ev) {
+    if (this._barGrab == null) return;
+    const bar = this._scrollbar();
+    if (!bar || bar.travel <= 0) return;
+    const top = ev.y - this._barGrab - bar.trackY;
+    this.scrollTo((top / bar.travel) * bar.range);
+  }
+
+  _defaultMouseUp() {
+    this._barGrab = null;
   }
 }
 
@@ -1565,6 +1656,49 @@ export class TextInputNode extends Node {
  * caret (wheel scrolls too). `rows` (default 3) sets the preferred height.
  */
 export class TextAreaNode extends TextInputNode {
+  /**
+   * The bar takes the press before the caret does — otherwise grabbing the
+   * thumb would drop the caret into whatever text sits behind it and start
+   * a selection drag.
+   */
+  _defaultMouseDown(ev) {
+    const bar = this._scrollbar();
+    const hit = scrollbarHit(bar, ev.x, ev.y);
+    if (!hit) return super._defaultMouseDown(ev);
+    if (hit === 'thumb') {
+      this._barGrab = ev.y - bar.thumbY;
+      ev.capturePointer();
+      return;
+    }
+    const page = this.contentBox().height;
+    this._scrollTo(this._scrollY + (ev.y < bar.thumbY ? -page : page), bar);
+  }
+
+  _defaultMouseDrag(ev) {
+    if (this._barGrab == null) return super._defaultMouseDrag(ev);
+    const bar = this._scrollbar();
+    if (!bar || bar.travel <= 0) return;
+    this._scrollTo(
+      ((ev.y - this._barGrab - bar.trackY) / bar.travel) * bar.range,
+      bar,
+    );
+  }
+
+  _defaultMouseUp(ev) {
+    if (this._barGrab != null) {
+      this._barGrab = null;
+      return;
+    }
+    super._defaultMouseUp(ev);
+  }
+
+  _scrollTo(y, bar) {
+    const next = Math.min(Math.max(0, y), bar.range);
+    if (next === this._scrollY) return;
+    this._scrollY = next;
+    this.root?.invalidate(false);
+  }
+
   constructor(props, app) {
     super(props, app, 'textarea');
     this._scrollY = 0;
@@ -1712,25 +1846,21 @@ export class TextAreaNode extends TextInputNode {
 
   /** Thumb for the vertical overflow, same look as <scrollview>'s. */
   _paintScrollbar(ctx, layout) {
-    if (this.props.scrollbar === false) return;
+    const bar = this._scrollbar(layout);
+    if (bar) paintScrollbarThumb(ctx, bar, this.props.scrollbarColor);
+  }
+
+  _scrollbar(layout = this._valueLayout()) {
+    if (this.props.scrollbar === false || !layout) return null;
     const content = this.contentBox();
-    const viewport = content.height;
-    const total = layout.height;
-    if (!(total > viewport)) return;
-    const trackWidth = 6;
-    const thumbHeight = Math.max(20, (viewport * viewport) / total);
-    const range = total - viewport;
-    const thumbY =
-      content.y + (this._scrollY / range) * (viewport - thumbHeight);
-    const thumbX = content.x + content.width - trackWidth;
-    ctx.fillStyle = this.props.scrollbarColor || 'rgba(0, 0, 0, 0.25)';
-    ctx.beginPath();
-    if (typeof ctx.roundRect === 'function') {
-      ctx.roundRect(thumbX, thumbY, trackWidth, thumbHeight, 3);
-    } else {
-      ctx.rect(thumbX, thumbY, trackWidth, thumbHeight);
-    }
-    ctx.fill();
+    return scrollbarGeometry({
+      x: content.x,
+      y: content.y,
+      width: content.width,
+      height: content.height,
+      scroll: this._scrollY,
+      content: layout.height,
+    });
   }
 
   _paintContent(ctx) {

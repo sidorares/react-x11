@@ -84,8 +84,10 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Pointer capture for userland** — DONE: `ev.capturePointer()` /
   `ev.releasePointer()` route move/up to the capturing node, released on
   mouseup and on unmount; hover freezes during a capture
-- **Multi-line `<textarea>`** — DONE (#32). Polish left: Ctrl+arrow word
-  movement, PageUp/Down, Shift+click extend, drawn scrollbar
+- **Multi-line `<textarea>`** — DONE (#32), and the polish that was listed
+  here after it (Ctrl+arrow word movement, PageUp/Down, Shift+click extend,
+  the drawn scrollbar) has since landed too. The scrollbar is draggable in
+  both `<textarea>` and `<scrollview>`
 - **Bidi caret polish** — caret positions are bidi-correct now (ntk
   caret API), but arrow keys still move logically; visual-order movement
   - split caret at direction boundaries is a later refinement
