@@ -1,0 +1,193 @@
+// The mock ntk application used by the headless tests: enough of a window,
+// a 2d context and an X connection for the renderer to run with no server.
+import React from 'react';
+
+export { React };
+
+// A minimal stand-in for an ntk application object, so the renderer can be
+// exercised without a running X server.
+export function createMockApp() {
+  const app = {
+    X: {
+      display: { screen: [{ root: 1 }] },
+      keycode2keysyms: {},
+      InternAtom(onlyIfExists, name, cb) {
+        cb(null, name === 'WM_DELETE_WINDOW' ? 999 : 1);
+      },
+      ConfigureWindow(id, options) {
+        app.configureCalls.push([id, options]);
+      },
+    },
+    configureCalls: [],
+    windows: [],
+    createWindow(attributes) {
+      const handlers = {};
+      const ops = [];
+      const ctx = {
+        ops,
+        fillStyle: null,
+        strokeStyle: null,
+        lineWidth: 1,
+        fillRect(x, y, w, h) {
+          ops.push(['fillRect', x, y, w, h, ctx.fillStyle]);
+        },
+        beginPath() {},
+        rect(x, y, w, h) {
+          ops.push(['rect', x, y, w, h]);
+        },
+        roundRect(x, y, w, h, r) {
+          ops.push(['roundRect', x, y, w, h, r]);
+        },
+        fill() {
+          ops.push(['fill', ctx.fillStyle]);
+        },
+        stroke() {
+          ops.push(['stroke', ctx.strokeStyle, ctx.lineWidth]);
+        },
+        clip() {
+          ops.push(['clip']);
+        },
+        save() {
+          ops.push(['save']);
+        },
+        restore() {
+          ops.push(['restore']);
+        },
+        translate(x, y) {
+          ops.push(['translate', x, y]);
+        },
+        setLineDash(segments) {
+          ops.push(['setLineDash', segments]);
+        },
+        moveTo(x, y) {
+          ops.push(['moveTo', x, y]);
+        },
+        lineTo(x, y) {
+          ops.push(['lineTo', x, y]);
+        },
+        closePath() {
+          ops.push(['closePath']);
+        },
+        drawImage(...args) {
+          ops.push(['drawImage']);
+        },
+        // enough of the canvas surface for SvgView.draw to run headlessly
+        scale(sx, sy) {
+          ops.push(['scale', sx, sy]);
+        },
+        transform() {},
+        setTransform() {},
+        getTransform() {
+          return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+        },
+        arc() {},
+        ellipse() {},
+        bezierCurveTo() {},
+        quadraticCurveTo() {},
+        createLinearGradient() {
+          return { addColorStop() {} };
+        },
+        createRadialGradient() {
+          return { addColorStop() {} };
+        },
+      };
+      const wnd = {
+        id: app.windows.length + 100,
+        X: app.X,
+        attributes,
+        x: attributes.x,
+        y: attributes.y,
+        width: attributes.width,
+        height: attributes.height,
+        title: attributes.title,
+        mapped: false,
+        destroyed: false,
+        parent: null,
+        calls: [],
+        ctx,
+        map() {
+          wnd.mapped = true;
+          wnd.calls.push(['map']);
+        },
+        unmap() {
+          wnd.mapped = false;
+          wnd.calls.push(['unmap']);
+        },
+        reparentTo(parent, x, y) {
+          wnd.parent = parent;
+          wnd.calls.push(['reparentTo', parent.id, x, y]);
+        },
+        destroy() {
+          wnd.destroyed = true;
+          wnd.calls.push(['destroy']);
+        },
+        // ntk >= 3.7.0: menus hold a pointer grab while they are up
+        grabPointer(options, cb) {
+          wnd.grabbed = true;
+          wnd.calls.push(['grabPointer']);
+          cb?.(null, 0);
+        },
+        ungrabPointer() {
+          wnd.grabbed = false;
+          wnd.calls.push(['ungrabPointer']);
+        },
+        resize(width, height) {
+          wnd.width = width;
+          wnd.height = height;
+          wnd.calls.push(['resize', width, height]);
+        },
+        move(x, y) {
+          wnd.x = x;
+          wnd.y = y;
+          wnd.calls.push(['move', x, y]);
+        },
+        setTitle(title) {
+          wnd.title = title;
+          wnd.calls.push(['setTitle', title]);
+        },
+        setSizeHints(hints) {
+          wnd.calls.push(['setSizeHints', hints]);
+        },
+        setClass(instance, className) {
+          wnd.calls.push(['setClass', instance, className]);
+        },
+        setWindowType(type) {
+          wnd.calls.push(['setWindowType', type]);
+        },
+        setAlwaysOnTop(on) {
+          wnd.calls.push(['setAlwaysOnTop', on]);
+        },
+        setActions() {
+          wnd.calls.push(['setActions']);
+        },
+        setCursor(name) {
+          wnd.cursor = name;
+          wnd.calls.push(['setCursor', name]);
+        },
+        getContext() {
+          return ctx;
+        },
+        on(name, fn) {
+          (handlers[name] ??= []).push(fn);
+        },
+        emit(name, ev) {
+          for (const fn of handlers[name] ?? []) fn(ev);
+        },
+      };
+      app.windows.push(wnd);
+      return wnd;
+    },
+  };
+  return app;
+}
+
+/** Move the pointer inside a window, in window coordinates. */
+export function moveMouse(wnd, x, y) {
+  wnd.emit('mousemove', { x, y });
+}
+
+/** Press and release button 1 at a point; pass {release:false} to hold. */
+export function pressButton(wnd, x, y, { press = true, release = true } = {}) {
+  if (press) wnd.emit('mousedown', { x, y, keycode: 1 });
+  if (release) wnd.emit('mouseup', { x, y, keycode: 1 });
+}

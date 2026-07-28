@@ -12,9 +12,25 @@ import React, {
 import {
   Button,
   createRoot,
+  createStyles,
   ProgressBar,
   ThemeProvider,
 } from '../src/index.js';
+
+// Styles are declared once, outside render: hoisting is what lets the
+// renderer skip an update with an identity check, and what keeps the JSX
+// below shorter than the flat-prop version it replaced.
+const s = createStyles({
+  root: { flexGrow: 1, padding: 16, gap: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  title: { fontSize: 20 },
+  spacer: { flexGrow: 1 },
+  row: { flexDirection: 'row', gap: 12 },
+  footer: { flexDirection: 'row', gap: 12, justifyContent: 'center' },
+  card: { flexGrow: 1, borderRadius: 8, padding: 14, gap: 6 },
+  cardLabel: { fontSize: 12 },
+  cardValue: { fontSize: 26 },
+});
 
 const THEMES = {
   light: {
@@ -69,19 +85,9 @@ function widgetTheme(t) {
 function StatCard({ label, value, progress }) {
   const theme = useContext(ThemeContext);
   return (
-    <box
-      flexGrow={1}
-      backgroundColor={theme.panel}
-      borderRadius={8}
-      padding={14}
-      gap={6}
-    >
-      <text fontSize={12} color={theme.dim}>
-        {label}
-      </text>
-      <text fontSize={26} color={theme.text}>
-        {value}
-      </text>
+    <box style={[s.card, { backgroundColor: theme.panel }]}>
+      <text style={[s.cardLabel, { color: theme.dim }]}>{label}</text>
+      <text style={[s.cardValue, { color: theme.text }]}>{value}</text>
       {progress != null && (
         <ProgressBar value={progress} color={theme.accent} />
       )}
@@ -102,18 +108,20 @@ function App() {
     <ThemeContext.Provider value={theme}>
       <ThemeProvider value={widgetTheme(theme)}>
         <window
+          title="react-x11 dashboard"
           width={520}
           height={340}
-          title="react-x11 dashboard"
-          backgroundColor={theme.bg}
+          minWidth={360}
+          minHeight={240}
+          style={{ backgroundColor: theme.bg }}
         >
-          <box flexGrow={1} padding={16} gap={16}>
-            <box flexDirection="row" alignItems="center" gap={12}>
-              <text fontSize={20} color={theme.text}>
-                Dashboard
+          <box style={s.root}>
+            <box style={s.header}>
+              <text style={[s.title, { color: theme.text }]}>Dashboard</text>
+              <box style={s.spacer} />
+              <text style={{ color: theme.dim }}>
+                {now.toLocaleTimeString()}
               </text>
-              <box flexGrow={1} />
-              <text color={theme.dim}>{now.toLocaleTimeString()}</text>
               <Button
                 label={themeName === 'light' ? 'Dark' : 'Light'}
                 onPress={() =>
@@ -122,7 +130,7 @@ function App() {
               />
             </box>
 
-            <box flexDirection="row" gap={12}>
+            <box style={s.row}>
               <StatCard
                 label="counter"
                 value={String(count)}
@@ -136,9 +144,9 @@ function App() {
               />
             </box>
 
-            <box flexGrow={1} />
+            <box style={s.spacer} />
 
-            <box flexDirection="row" gap={12} justifyContent="center">
+            <box style={s.footer}>
               <Button
                 primary
                 label="+1"

@@ -9,6 +9,11 @@ import {
   textStyleFrom,
   DEFAULT_TEXT_STYLE,
   TEXT_LAYOUT_PROPS,
+  flattenStyle,
+  validateStyle,
+  resolveStyleStates,
+  hasStateStyles,
+  isStyleProp,
 } from './styles.js';
 import { EventManager } from './events.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
@@ -57,6 +62,61 @@ function isPaintedColor(color) {
   return Boolean(color) && color !== 'transparent';
 }
 
+const DEV = process.env.NODE_ENV !== 'production';
+
+/** Did anything the text stack measures or paints with change? */
+function textStyleChanged(style, before) {
+  if (style === before) return false;
+  if (style.color !== before.color) return true;
+  for (const key of TEXT_LAYOUT_PROPS) {
+    if (style[key] !== before[key]) return true;
+  }
+  return false;
+}
+
+// Prototype switch: with REACT_X11_STYLE_ONLY=1 the flat style props are
+// gone for good and passing one is an error that names the fix, rather than
+// the silent no-op an unrecognised prop is today. Flipping this to always-on
+// is what "finish the migration" means.
+const STYLE_ONLY = process.env.REACT_X11_STYLE_ONLY === '1';
+
+function assertNoFlatStyleProps(props, kind, semantic) {
+  if (!STYLE_ONLY) return;
+  for (const key of Object.keys(props)) {
+    if (!isStyleProp(key) || semantic.has(key)) continue;
+    throw new Error(
+      `react-x11: <${kind} ${key}=…> is a style property — pass it in ` +
+        `style: <${kind} style={{ ${key}: … }} />`,
+    );
+  }
+}
+
+// Names an element owns as semantics, which therefore never mean style on
+// it. `<window width>` is the X window's width; `<box width>` would be yoga
+// style, and there is no element where a name means both.
+const NO_SEMANTIC_NAMES = new Set();
+
+// Everything a <window> owns: the real geometry, and the WM size hints that
+// constrain it. On a <window> these are never style.
+export const WINDOW_HINT_PROPS = [
+  'minWidth',
+  'minHeight',
+  'maxWidth',
+  'maxHeight',
+  'widthInc',
+  'heightInc',
+  'baseWidth',
+  'baseHeight',
+  'minAspect',
+  'maxAspect',
+  'gravity',
+];
+const WINDOW_SEMANTIC_NAMES = new Set([
+  'width',
+  'height',
+  ...WINDOW_HINT_PROPS,
+]);
+
 /** Equality for props that may be a scalar, an array or a plain object
  *  (window hints are all three shapes), so an unchanged inline object
  *  literal does not re-send the property every render. */
@@ -85,14 +145,66 @@ export class Node {
     this.destroyed = false;
     // absolute rect within the owning window, filled by absolutize()
     this.abs = { x: 0, y: 0, width: 0, height: 0 };
+    // node states that style blocks can react to, owned by EventManager
+    this.states = { ':hover': false, ':focus': false, ':active': false };
+    this._syncStyle(props);
     this.yoga = yoga ? Yoga.Node.create() : null;
     if (this.yoga) {
-      applyLayoutStyle(this.yoga, props);
+      applyLayoutStyle(this.yoga, this.style);
     }
+  }
+
+  /**
+   * Everything that paints or lays out reads `this.style`, never `this.props`
+   * — props carry element semantics (`title`, `value`, geometry, handlers)
+   * and style carries the CSS-like vocabulary, with no name shared between
+   * them. `baseStyle` is the flattened `style` prop; `style` is that with
+   * the active state blocks overlaid.
+   */
+  _syncStyle(props) {
+    const declared = props.style;
+    if (declared === undefined) {
+      // legacy flat props — the prototype keeps them working so the whole
+      // suite and every unconverted component still run; the final change
+      // deletes this branch (see REACT_X11_STYLE_ONLY)
+      assertNoFlatStyleProps(props, this.kind, this.semanticNames);
+      this._baseStyle = props;
+    } else {
+      this._baseStyle = flattenStyle(declared);
+      if (DEV) validateStyle(this._baseStyle, `<${this.kind} style>`);
+    }
+    // `disabled` is a prop, not something the pointer does, so it is read
+    // straight off props rather than driven by the event manager
+    this.states[':disabled'] = Boolean(props.disabled);
+    this._stateful = hasStateStyles(this._baseStyle);
+    this.style = this._stateful
+      ? resolveStyleStates(this._baseStyle, this.states)
+      : this._baseStyle;
+    return this.style;
+  }
+
+  /**
+   * A node state changed (hover, focus, press). Only nodes that actually
+   * declare a block for it do anything, and what they do is a repaint —
+   * no React render, no reflow, since state blocks cannot touch layout.
+   */
+  setStyleState(name, on) {
+    if (this.states[name] === on) return;
+    this.states[name] = on;
+    if (!this._stateful || this.destroyed) return;
+    const next = resolveStyleStates(this._baseStyle, this.states);
+    const changed = !shallowEqual(next, this.style);
+    this.style = next;
+    if (changed) this.root?.invalidate(false);
   }
 
   get isWindow() {
     return this.kind === 'window';
+  }
+
+  /** Style names this element claims as its own semantics (see WindowNode). */
+  get semanticNames() {
+    return NO_SEMANTIC_NAMES;
   }
 
   /** Number of yoga-bearing children before `index` (window children and
@@ -194,10 +306,13 @@ export class Node {
 
   applyProps(newProps, oldProps) {
     const prev = this.props;
+    const prevStyle = this.style;
     this.props = newProps;
+    const style = this._syncStyle(newProps);
     let layoutChanged = false;
-    if (this.yoga) {
-      layoutChanged = applyLayoutStyle(this.yoga, newProps, oldProps ?? prev);
+    // hoisted styles hit the identity check and skip the whole update
+    if (this.yoga && style !== prevStyle) {
+      layoutChanged = applyLayoutStyle(this.yoga, style, prevStyle);
     }
     if (Boolean(newProps.trapFocus) !== Boolean((oldProps ?? prev).trapFocus)) {
       this._syncFocusScope();
@@ -209,7 +324,7 @@ export class Node {
     this.hidden = hidden;
     if (this.yoga) {
       this.yoga.setDisplay(
-        hidden || this.props.display === 'none'
+        hidden || this.style.display === 'none'
           ? Yoga.DISPLAY_NONE
           : Yoga.DISPLAY_FLEX,
       );
@@ -280,13 +395,13 @@ export class Node {
       .map((node, i) => ({ node, i }))
       .sort(
         (a, b) =>
-          (a.node.props.zIndex ?? 0) - (b.node.props.zIndex ?? 0) || a.i - b.i,
+          (a.node.style.zIndex ?? 0) - (b.node.style.zIndex ?? 0) || a.i - b.i,
       )
       .map((e) => e.node);
   }
 
   clipsChildren() {
-    return this.props.overflow === 'hidden' || this.props.overflow === 'scroll';
+    return this.style.overflow === 'hidden' || this.style.overflow === 'scroll';
   }
 
   containsPoint(x, y) {
@@ -322,7 +437,7 @@ export class Node {
 
   /** Front-to-back hit test. Returns the deepest hit node or null. */
   hitTest(x, y) {
-    if (this.hidden || this.props.pointerEvents === 'none') return null;
+    if (this.hidden || this.style.pointerEvents === 'none') return null;
     const inside = this.containsPoint(x, y);
     if (!inside && this.clipsChildren()) return null;
     const order = this.paintOrder();
@@ -391,7 +506,7 @@ export class Node {
   }
 
   _paintBackground(ctx) {
-    const { backgroundColor, borderRadius = 0 } = this.props;
+    const { backgroundColor, borderRadius = 0 } = this.style;
     if (!isPaintedColor(backgroundColor)) return;
     ctx.fillStyle = backgroundColor;
     if (borderRadius > 0) {
@@ -403,11 +518,11 @@ export class Node {
   }
 
   _paintBorder(ctx) {
-    const { borderWidth = 0, borderColor, borderRadius = 0 } = this.props;
+    const { borderWidth = 0, borderColor, borderRadius = 0 } = this.style;
     if (!(borderWidth > 0) || !isPaintedColor(borderColor)) return;
     // dashed borders need ntk >= 3.2.0 (setLineDash); solid fallback below
     const dashed =
-      this.props.borderStyle === 'dashed' &&
+      this.style.borderStyle === 'dashed' &&
       typeof ctx.setLineDash === 'function';
     if (dashed) {
       ctx.setLineDash([borderWidth * 2 + 2, borderWidth + 2]);
@@ -447,7 +562,7 @@ export class Node {
     const clip = this.clipsChildren();
     if (clip) {
       ctx.save();
-      this._roundedPath(ctx, this.props.borderRadius ?? 0);
+      this._roundedPath(ctx, this.style.borderRadius ?? 0);
       ctx.clip();
     }
     for (const child of order) child.paint(ctx);
@@ -529,17 +644,13 @@ export class TextNode extends Node {
   }
 
   applyProps(newProps, oldProps) {
-    const before = oldProps ?? this.props;
-    let textChanged = newProps.color !== before.color;
-    for (const key of TEXT_LAYOUT_PROPS) {
-      if (newProps[key] !== before[key]) textChanged = true;
-    }
-    if (textChanged) this._textContentChanged();
+    const before = this.style;
     super.applyProps(newProps, oldProps);
+    if (textStyleChanged(this.style, before)) this._textContentChanged();
   }
 
   collectSpans(inherited, out) {
-    const style = textStyleFrom(this.props, inherited);
+    const style = textStyleFrom(this.style, inherited);
     for (const child of this.children) {
       if (child.kind === 'textchunk') {
         out.push({
@@ -564,11 +675,11 @@ export class TextNode extends Node {
     let layout = this._layouts.get(key);
     if (!layout) {
       const spans = this.collectSpans(DEFAULT_TEXT_STYLE, []);
-      const base = textStyleFrom(this.props, DEFAULT_TEXT_STYLE);
+      const base = textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
       layout = fonts.layout(spans, base, {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
-        align: this.props.textAlign,
-        lineHeight: this.props.lineHeight,
+        align: this.style.textAlign,
+        lineHeight: this.style.lineHeight,
       });
       if (this._layouts.size > 32) this._layouts.clear();
       this._layouts.set(key, layout);
@@ -896,7 +1007,7 @@ export class TextInputNode extends Node {
   }
 
   _textStyle() {
-    return textStyleFrom(this.props, DEFAULT_TEXT_STYLE);
+    return textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
   }
 
   _layoutOf(text) {
@@ -909,7 +1020,7 @@ export class TextInputNode extends Node {
   _lineHeight() {
     const layout = this._layoutOf('Mg');
     if (layout) return layout.height;
-    return (this.props.fontSize ?? DEFAULT_TEXT_STYLE.size) * 1.4;
+    return (this.style.fontSize ?? DEFAULT_TEXT_STYLE.size) * 1.4;
   }
 
   /** Shaped layout of the current value, cached per (value, style).
@@ -1220,6 +1331,7 @@ export class TextInputNode extends Node {
 
   applyProps(newProps, oldProps) {
     const before = oldProps ?? this.props;
+    const beforeStyle = this.style;
     super.applyProps(newProps, oldProps);
     const len = Array.from(
       newProps.value != null ? String(newProps.value) : (this._value ?? ''),
@@ -1228,7 +1340,7 @@ export class TextInputNode extends Node {
     this._anchor = Math.min(this._anchor, len);
     let metricsChanged = false;
     for (const key of TEXT_LAYOUT_PROPS) {
-      if (newProps[key] !== before[key]) metricsChanged = true;
+      if (this.style[key] !== beforeStyle[key]) metricsChanged = true;
     }
     if (metricsChanged) {
       this.yoga.markDirty();
@@ -1609,19 +1721,23 @@ export class WindowNode extends Node {
    * is forwarded there as a creation attribute — so this only has to cover
    * updates.
    *
-   * `sizeHints` is an object rather than flat minWidth/maxWidth props on
-   * purpose: those names are yoga layout style, and a `<window>` already
-   * has the confusing split where width/height are window state instead.
+   * Size hints are flat props — `minWidth`, `maxHeight`, `widthInc`… — and
+   * so is the geometry they constrain. They only had to hide inside a
+   * `sizeHints` object while yoga style shared this namespace; with style
+   * in its own channel the names are free, and `<window minWidth={360}>`
+   * means the one thing it can mean. `sizeHints` still works for a window
+   * written in the legacy flat-prop style.
    */
   _applyWindowHints(next, prev) {
     const wnd = this.window;
 
+    const hints = this._sizeHints(next);
     if (
       next.resizable !== prev.resizable ||
-      !shallowEqual(next.sizeHints, prev.sizeHints)
+      !shallowEqual(hints, this._sizeHints(prev))
     ) {
       wnd.setSizeHints?.({
-        ...next.sizeHints,
+        ...hints,
         ...(next.resizable === false && { resizable: false }),
       });
     }
@@ -1639,12 +1755,39 @@ export class WindowNode extends Node {
     }
   }
 
-  // window geometry props are window state, not yoga style — never feed
-  // width/height into the root yoga node (flush() sets them from the real
-  // window size, which the user may have changed by resizing)
+  /** Size hints, from flat props on a styled window and from the legacy
+   * `sizeHints` object otherwise. */
+  _sizeHints(props) {
+    if (props.style === undefined) return props.sizeHints;
+    const hints = {};
+    for (const key of WINDOW_HINT_PROPS) {
+      if (props[key] !== undefined) hints[key] = props[key];
+    }
+    return hints;
+  }
+
+  /**
+   * On a `<window>`, `width`/`height` are the real window's geometry — the
+   * user can drag them and flush() reads them back — so they must never
+   * reach the root yoga node. That used to mean stripping them out of the
+   * style bag, the workaround this whole split exists to delete: a styled
+   * window has no such collision, because its geometry lives in props and
+   * its style lives in `style`.
+   */
   _yogaProps(props) {
     if (props.width == null && props.height == null) return props;
     return { ...props, width: undefined, height: undefined };
+  }
+
+  _syncStyle(props) {
+    const style = super._syncStyle(props);
+    if (props.style !== undefined) return style;
+    this.style = this._baseStyle = this._yogaProps(style);
+    return this.style;
+  }
+
+  get semanticNames() {
+    return WINDOW_SEMANTIC_NAMES;
   }
 
   _attachWindowListeners() {
@@ -1695,7 +1838,7 @@ export class WindowNode extends Node {
       .map((node, i) => ({ node, i }))
       .sort(
         (a, b) =>
-          (a.node.props.zIndex ?? 0) - (b.node.props.zIndex ?? 0) || a.i - b.i,
+          (a.node.style.zIndex ?? 0) - (b.node.style.zIndex ?? 0) || a.i - b.i,
       )
       .map((e) => e.node);
   }
@@ -1789,7 +1932,9 @@ export class WindowNode extends Node {
 
   applyProps(newProps, oldProps) {
     const before = oldProps ?? this.props;
+    const beforeStyle = this.style;
     this.props = newProps;
+    const style = this._syncStyle(newProps);
     if (Boolean(newProps.trapFocus) !== Boolean(before.trapFocus)) {
       this._syncFocusScope();
     }
@@ -1807,7 +1952,7 @@ export class WindowNode extends Node {
     // under, so its zIndex means nothing — and its parent here may well be
     // a drawn node with no children to stack
     if (
-      (newProps.zIndex ?? 0) !== (before.zIndex ?? 0) &&
+      (style.zIndex ?? 0) !== (beforeStyle.zIndex ?? 0) &&
       !this.isPopup &&
       this.parent?._restackWindowChildren
     ) {
@@ -1840,13 +1985,10 @@ export class WindowNode extends Node {
       }
     }
 
-    const layoutChanged = applyLayoutStyle(
-      this.yoga,
-      this._yogaProps(newProps),
-      this._yogaProps(before),
-    );
+    const layoutChanged =
+      style !== beforeStyle && applyLayoutStyle(this.yoga, style, beforeStyle);
     this.invalidate(
-      layoutChanged || geometryChanged || paintPropsChanged(newProps, before),
+      layoutChanged || geometryChanged || paintPropsChanged(style, beforeStyle),
     );
   }
 
@@ -1892,7 +2034,7 @@ export class WindowNode extends Node {
     // ntk getContext creates a fresh context (with window-event
     // subscriptions) on every call — cache one per window
     const ctx = (this._ctx ??= this.window.getContext('2d'));
-    ctx.fillStyle = this.props.backgroundColor || 'white';
+    ctx.fillStyle = this.style.backgroundColor || 'white';
     ctx.fillRect(0, 0, width, height);
     this._paintChildren(ctx);
     if (process.env.REACT_X11_DEBUG_LAYOUT) {

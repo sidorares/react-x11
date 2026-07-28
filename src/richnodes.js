@@ -430,7 +430,7 @@ export class TexNode extends Node {
     // it needs a real ntk 2d context (headless mock contexts skip)
     if (!box || !ctx.window?.app?.display) return;
     const content = this.contentBox();
-    ctx.fillStyle = this.props.color ?? '#222222';
+    ctx.fillStyle = this.style.color ?? '#222222';
     box.draw(ctx, content.x, content.y);
   }
 }

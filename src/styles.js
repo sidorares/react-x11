@@ -147,6 +147,132 @@ export const isPaintProp = (name) => PAINT_PROPS.has(name);
 export const isEventProp = (name) => /^on[A-Z]/.test(name);
 
 /**
+ * State blocks, lowest precedence first. These are *node* states, not
+ * selectors: each one is something the node itself knows about, so
+ * resolving them needs no cascade, no specificity and no tree walk.
+ * Anything relational (`:hover > child`, `:focus-within`, `:nth-child`)
+ * stays in React, where composition already answers it.
+ */
+export const STATE_KEYS = [':hover', ':focus', ':active', ':disabled'];
+
+// What a state block may change. Deliberately paint-only: a state block that
+// could set `padding` or `fontSize` would reflow the tree on pointer move,
+// which is both a jitter bug and the end of the "hover is a repaint, not a
+// React render" property that makes this worth having at all.
+const STATE_PROPS = new Set([...PAINT_PROPS, 'color']);
+
+const STYLE_PROPS = new Set([
+  ...Object.keys(LAYOUT_APPLIERS),
+  ...PAINT_PROPS,
+  ...TEXT_LAYOUT_PROPS,
+  'color',
+  'borderStyle',
+  // CSS concepts even though they read as behaviour; React Native has been
+  // moving pointerEvents into style for the same reason
+  'cursor',
+  'pointerEvents',
+]);
+
+export const isStyleProp = (name) => STYLE_PROPS.has(name);
+
+const isState = (key) => key.charCodeAt(0) === 58; /* ':' */
+
+function validateStyle(style, where) {
+  for (const key of Object.keys(style)) {
+    if (isState(key)) {
+      if (!STATE_KEYS.includes(key)) {
+        throw new Error(
+          `react-x11: unknown style state "${key}" in ${where} ` +
+            `(expected one of ${STATE_KEYS.join(', ')})`,
+        );
+      }
+      for (const inner of Object.keys(style[key] ?? {})) {
+        if (STATE_PROPS.has(inner)) continue;
+        throw new Error(
+          `react-x11: "${inner}" is not allowed inside "${key}" in ${where}. ` +
+            'State blocks may only change paint properties ' +
+            `(${[...STATE_PROPS].join(', ')}) — anything that reflows the ` +
+            'tree on hover belongs in React state.',
+        );
+      }
+      continue;
+    }
+    if (!STYLE_PROPS.has(key)) {
+      throw new Error(`react-x11: unknown style property "${key}" in ${where}`);
+    }
+  }
+}
+
+/**
+ * Flatten a style prop — an object, or a nested array of them with falsy
+ * entries skipped, later entries winning:
+ *
+ *   style={[styles.card, isWide && styles.wide, { padding: 4 }]}
+ *
+ * This is what replaces the cascade: precedence is written at the call
+ * site instead of being resolved by specificity.
+ */
+export function flattenStyle(style, into) {
+  if (!style) return into ?? EMPTY_STYLE;
+  if (Array.isArray(style)) {
+    const acc = into ?? {};
+    for (const entry of style) flattenStyle(entry, acc);
+    return acc;
+  }
+  // a lone object is returned as-is: no copy, and `===` still identifies a
+  // hoisted style across renders
+  if (!into) return style;
+  for (const key of Object.keys(style)) {
+    // a state block merges with one already collected rather than replacing
+    // it, so [{':hover': {color}}, {':hover': {backgroundColor}}] keeps both
+    into[key] =
+      isState(key) && into[key] ? { ...into[key], ...style[key] } : style[key];
+  }
+  return into;
+}
+
+export const EMPTY_STYLE = Object.freeze({});
+
+/**
+ * Declare styles once, outside render. Identity is the point: a hoisted
+ * style object lets the renderer skip an update with a `===` check, the
+ * same reason RN's StyleSheet.create exists now that its id registry is
+ * gone. It also validates keys, which a bare object literal cannot.
+ */
+export function createStyles(sheet) {
+  for (const name of Object.keys(sheet)) {
+    validateStyle(sheet[name], `styles.${name}`);
+    Object.freeze(sheet[name]);
+  }
+  return Object.freeze(sheet);
+}
+
+/**
+ * Overlay the active state blocks on a flattened style, lowest precedence
+ * first (hover < focus < active < disabled — a disabled control must never
+ * look hovered). Returns the base object itself when no state is active,
+ * so the common case allocates nothing and stays `===`-comparable.
+ */
+export function resolveStyleStates(style, states) {
+  let resolved = style;
+  for (const key of STATE_KEYS) {
+    const block = style[key];
+    if (!block || !states[key]) continue;
+    if (resolved === style) resolved = { ...style };
+    Object.assign(resolved, block);
+  }
+  return resolved;
+}
+
+/** Does this style react to node state at all? */
+export function hasStateStyles(style) {
+  for (const key of STATE_KEYS) if (style[key]) return true;
+  return false;
+}
+
+export { validateStyle };
+
+/**
  * Apply changed layout props to a yoga node.
  * @returns true if any layout-affecting prop changed
  */

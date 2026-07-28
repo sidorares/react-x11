@@ -4,6 +4,7 @@ export {
   unmountComponentAtNode,
   Renderer,
 } from './Reconciler.js';
+export { createStyles, flattenStyle } from './styles.js';
 export {
   Select,
   SelectThemeProvider,

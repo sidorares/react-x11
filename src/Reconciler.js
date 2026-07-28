@@ -27,7 +27,9 @@ import {
   TextInputNode,
   TextAreaNode,
   flushWindowRestacks,
+  WINDOW_HINT_PROPS,
 } from './nodes.js';
+import { flattenStyle } from './styles.js';
 import { GlAreaNode } from './glnodes.js';
 import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
 import {
@@ -63,11 +65,29 @@ const isEventProp = (name) => /^on[A-Z]/.test(name);
 // Props forwarded to ntk createWindow. Event handlers are dispatched by the
 // EventManager from current props (never registered at creation, so they
 // cannot go stale) and children are handled by the tree.
+/**
+ * ntk's Window constructor takes every creation attribute up front. The
+ * user-facing shape and ntk's differ in two places: size hints are flat
+ * props here and a `sizeHints` object there, and the window background is
+ * a style property here and a creation attribute there.
+ */
 function windowAttributes(props) {
   const attributes = {};
+  const hints = { ...props.sizeHints };
   for (const key of Object.keys(props)) {
-    if (key === 'children' || isEventProp(key)) continue;
+    if (key === 'children' || key === 'style' || isEventProp(key)) continue;
+    if (WINDOW_HINT_PROPS.includes(key)) {
+      hints[key] = props[key];
+      continue;
+    }
     attributes[key] = props[key];
+  }
+  if (Object.keys(hints).length > 0) attributes.sizeHints = hints;
+  if (props.style !== undefined) {
+    const style = flattenStyle(props.style);
+    if (style.backgroundColor !== undefined) {
+      attributes.backgroundColor = style.backgroundColor;
+    }
   }
   return attributes;
 }
