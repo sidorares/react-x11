@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import ReactX11 from '../src/index.js';
-import { createStyles, flattenStyle } from '../src/styles.js';
+import { createStyles, flattenStyle, resolveTokens } from '../src/styles.js';
 import { createMockApp, pressButton, moveMouse } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -521,4 +521,206 @@ test('Switch: the thumb slides between the ends instead of snapping', async () =
   } finally {
     setAnimationClock(() => Date.now());
   }
+});
+
+// --- theme tokens ----------------------------------------------------------
+
+const THEME = {
+  panel: '#ffffff',
+  ink: '#2d3436',
+  gutter: 12,
+  accent: '#2980b9',
+};
+
+test('a hoisted style resolves $tokens against the nearest theme', async () => {
+  const app = createMockApp();
+  const s = createStyles({
+    card: { backgroundColor: '$panel', padding: '$gutter', flexGrow: 1 },
+  });
+  ReactX11.render(
+    h(
+      'window',
+      { width: 100, height: 100, theme: THEME },
+      h(
+        'box',
+        { style: s.card },
+        h('text', { style: { color: '$ink' } }, 'hi'),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  const box = nodeOf(app).children[0];
+  assert.strictEqual(box.style.backgroundColor, '#ffffff');
+  assert.strictEqual(box.style.padding, 12, 'tokens are not colour-only');
+  assert.strictEqual(box.children[0].style.color, '#2d3436');
+  assert.strictEqual(
+    box.abs.width,
+    100 - 0,
+    'the resolved padding reached yoga',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a nested theme merges over the outer one', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    h(
+      'window',
+      { width: 100, height: 100, theme: THEME },
+      h(
+        'box',
+        { theme: { panel: '#000000' }, style: { backgroundColor: '$panel' } },
+        h('text', { style: { color: '$ink' } }, 'hi'),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  const box = nodeOf(app).children[0];
+  assert.strictEqual(box.style.backgroundColor, '#000000', 'inner wins');
+  assert.strictEqual(
+    box.children[0].style.color,
+    '#2d3436',
+    'and the rest of the outer palette still applies',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('changing the theme restyles the subtree', async () => {
+  const app = createMockApp();
+  const s = createStyles({ card: { backgroundColor: '$panel', flexGrow: 1 } });
+  const render = (theme) =>
+    ReactX11.render(
+      h(
+        'window',
+        { width: 100, height: 100, theme },
+        h(
+          'box',
+          { style: s.card },
+          h('text', { style: { color: '$ink' } }, 'x'),
+        ),
+      ),
+      null,
+      app,
+    );
+
+  render(THEME);
+  await tick();
+  const box = nodeOf(app).children[0];
+  assert.strictEqual(box.style.backgroundColor, '#ffffff');
+
+  render({ ...THEME, panel: '#1e272e', ink: '#f5f6fa' });
+  await tick();
+  assert.strictEqual(box.style.backgroundColor, '#1e272e');
+  assert.strictEqual(box.children[0].style.color, '#f5f6fa', 'deep nodes too');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a popup inherits the theme of where it is written, not its window', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    h(
+      'window',
+      { width: 200, height: 200, theme: THEME },
+      h(
+        'box',
+        { theme: { panel: '#111111' } },
+        h(
+          'popup',
+          { x: 0, y: 0, width: 50, height: 50 },
+          h('box', { style: { backgroundColor: '$panel', flexGrow: 1 } }),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  const popup = app.windows[1]._reactX11Node;
+  assert.strictEqual(
+    popup.children[0].style.backgroundColor,
+    '#111111',
+    'a menu follows the UI that opened it, across the window boundary',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('an unknown token is an error naming what the theme has', async () => {
+  const app = createMockApp();
+  const errors = [];
+  const orig = console.error;
+  console.error = (...a) => errors.push(a.join(' '));
+  try {
+    ReactX11.render(
+      h(
+        'window',
+        { width: 100, height: 100, theme: THEME },
+        h('box', { style: { backgroundColor: '$pannel' } }),
+      ),
+      null,
+      app,
+    );
+    await tick();
+  } finally {
+    console.error = orig;
+  }
+  assert.match(errors.join('\n'), /unknown theme token "\$pannel"/);
+  assert.match(errors.join('\n'), /theme has panel, ink, gutter, accent/);
+});
+
+test('tokens keep the identity fast path: same style, same theme, same object', () => {
+  const s = createStyles({ card: { backgroundColor: '$panel' } });
+  const a = resolveTokens(s.card, THEME);
+  const b = resolveTokens(s.card, THEME);
+  assert.strictEqual(a, b, 'resolution is cached per (style, theme)');
+  assert.notStrictEqual(a, resolveTokens(s.card, { ...THEME }));
+});
+
+test('a token change invalidates cached text, not just the style object', async () => {
+  const app = createMockApp();
+  const s = createStyles({ title: { fontSize: 20, color: '$ink' } });
+  const render = (theme) =>
+    ReactX11.render(
+      h(
+        'window',
+        { width: 200, height: 80, theme },
+        h(
+          'box',
+          { style: { flexGrow: 1 } },
+          h('text', { style: s.title }, 'Dashboard'),
+        ),
+      ),
+      null,
+      app,
+    );
+
+  render(THEME);
+  await tick();
+  const text = nodeOf(app).children[0].children[0];
+  text._layouts.set('stale', { width: 1, height: 1 });
+
+  // the <text> element's own props do not change — only the theme above it —
+  // so nothing re-renders it and the cached layout would otherwise survive
+  // with the old colour baked in
+  render({ ...THEME, ink: '#ffffff' });
+  await tick();
+
+  assert.strictEqual(text.style.color, '#ffffff');
+  assert.strictEqual(
+    text._layouts.size,
+    0,
+    'the memoised text layout was dropped, so the repaint uses the new colour',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
 });

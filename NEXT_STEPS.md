@@ -126,8 +126,9 @@ restricted to paint properties so a pointer move can never reflow the tree.
 `createStyles` hoists and validates; an unknown style property is an error
 instead of a silent no-op. `transition` animates numbers and colours off the
 window's frame clock, starting from what is on screen so an interrupted
-transition reverses. See [docs/styling.md](docs/styling.md). Left: theme
-tokens, then window size queries.
+transition reverses. `$token` style values resolve against the nearest
+`theme` prop, so a hoisted style can follow the palette with no React
+context. See [docs/styling.md](docs/styling.md). Left: window size queries.
 
 ### 4. Ecosystem / DX
 

@@ -68,6 +68,7 @@ export function Radio({ value, children, label, disabled = false }) {
   return h(
     'box',
     {
+      theme,
       ...props,
       style: [
         controlStyle,

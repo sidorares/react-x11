@@ -61,6 +61,7 @@ export function Switch({
   return h(
     'box',
     {
+      theme,
       ...control.props,
       ...boxProps,
       style: [

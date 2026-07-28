@@ -121,6 +121,7 @@ export function Slider({
   return h(
     'box',
     {
+      theme,
       ref: trackRef,
       ...controlProps,
       ...boxProps,

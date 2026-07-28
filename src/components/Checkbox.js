@@ -30,6 +30,7 @@ export function Checkbox({
   return h(
     'box',
     {
+      theme,
       ...props,
       ...boxProps,
       style: [

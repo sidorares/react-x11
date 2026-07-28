@@ -29,6 +29,7 @@ export function ProgressBar({
   return h(
     'box',
     {
+      theme,
       ...boxProps,
       style: [
         {

@@ -101,6 +101,7 @@ export function Tooltip({
   return h(
     'box',
     {
+      theme,
       ref,
       onMouseEnter,
       onMouseMove,

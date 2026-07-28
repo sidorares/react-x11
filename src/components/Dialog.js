@@ -80,7 +80,11 @@ export function Dialog({
   return h(
     'box',
     // out of flow: an anchor for the window geometry, never part of layout
-    { ref: anchor, style: { position: 'absolute', width: 0, height: 0 } },
+    {
+      theme,
+      ref: anchor,
+      style: { position: 'absolute', width: 0, height: 0 },
+    },
     rect &&
       h(
         'popup',

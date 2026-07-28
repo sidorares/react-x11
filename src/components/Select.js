@@ -36,6 +36,7 @@ function Option({ option, selected, active, onPick, onHover, nodeRef }) {
   return h(
     'box',
     {
+      theme,
       ref: nodeRef,
       onMouseEnter: () => onHover?.(),
       onClick: () => onPick(option),
@@ -185,6 +186,7 @@ export function Select({
   return h(
     'box',
     {
+      theme,
       ref: triggerRef,
       focusable: true,
       onClick: toggle,
