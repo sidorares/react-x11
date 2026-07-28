@@ -193,6 +193,18 @@ Two more debugging aids:
   elements, or the live [ntk](https://github.com/sidorares/ntk) window for
   `<window>`/`<popup>` — the whole ntk API is a ref away.
 
+## Click to component
+
+```sh
+REACT_X11_EDITOR=code npm run examples:tasks
+```
+
+Alt+Click any rendered element (Option+Click on macOS/XQuartz) to open the
+JSX line that created it in your editor. `REACT_X11_EDITOR` picks the CLI
+and enables the feature in one go; `REACT_X11_CLICK_TO_COMPONENT=1` does
+the same with the default editor
+(`cursor`). See [docs/click-to-component.md](docs/click-to-component.md).
+
 ## Developing
 
 ```sh
