@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "examples:app": "tsx examples/app.jsx",
     "examples:simple": "tsx examples/simple.jsx",
     "examples:simple-nojsx": "node examples/simple-nojsx.js",
     "examples:xeyes": "tsx examples/xeyes.jsx",

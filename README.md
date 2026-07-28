@@ -113,9 +113,11 @@ and [docs/](docs/README.md) for the full API reference.
 
 Widget **components** (plain React on top of the primitives, themable via
 `ThemeProvider`): `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch`,
-`Slider`, `ProgressBar`, `Select`, `Tooltip`, `MenuBar`/`ContextMenu` and
+`Slider`, `ProgressBar`, `Select`, `Tooltip`, `MenuBar`/`ContextMenu`,
 `Dialog` — a modal built on `<popup trapFocus>`, which traps Tab and
-restores focus when it closes. See [docs/components.md](docs/components.md).
+restores focus when it closes — plus the two containers an application
+window is built from: `Tabs` and `SplitPane`. See
+[docs/components.md](docs/components.md).
 
 ### 3D
 
@@ -157,6 +159,7 @@ All need an X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation):
 
 ```sh
 npm run examples:simple        # hello world (JSX via tsx)
+npm run examples:app           # the showcase: Tabs + SplitPane hosting the rest
 npm run examples:simple-nojsx  # the same, plain node — no build step
 npm run examples:xeyes         # canvas drawing + hooks
 npm run examples:dashboard     # context theming, custom hooks, components

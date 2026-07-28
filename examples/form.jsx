@@ -26,7 +26,9 @@ const COLORS = [
 
 const WEIGHTS = ['normal', 'bold'];
 
-function App() {
+/** The form itself, without a window round it — so examples/app.jsx can
+ * show it in a tab. */
+export function FormPanel() {
   const [name, setName] = useState('');
   const [color, setColor] = useState('#2980b9');
   const [size, setSize] = useState(20);
@@ -52,107 +54,111 @@ function App() {
   };
 
   return (
+    <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
+      <text style={{ fontSize: 20, color: '#2d3436' }}>Sign the guestbook</text>
+
+      <textinput
+        autoFocus
+        value={name}
+        placeholder="Your name"
+        onChange={setName}
+        onSubmit={submit}
+        style={{
+          padding: 8,
+          borderRadius: 4,
+          borderWidth: 1,
+          borderColor: '#b2bec3',
+          backgroundColor: 'white',
+        }}
+      />
+
+      <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Select
+          options={COLORS}
+          value={color}
+          onChange={setColor}
+          style={{ flexGrow: 1 }}
+        />
+        <RadioGroup
+          value={weight}
+          onChange={setWeight}
+          style={{ flexDirection: 'row', gap: 12 }}
+        >
+          {WEIGHTS.map((w) => (
+            <Radio key={w} value={w} label={w} />
+          ))}
+        </RadioGroup>
+      </box>
+
+      <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <text style={{ color: '#636e72' }}>size</text>
+        <Slider
+          min={12}
+          max={32}
+          value={size}
+          onChange={setSize}
+          style={{ flexGrow: 1 }}
+        />
+        <text style={{ color: '#636e72' }}>{String(size)}</text>
+      </box>
+
+      <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        <Checkbox checked={shout} onChange={setShout} label="Shout it" />
+        <box style={{ flexGrow: 1 }} />
+        <Button label="Clear" onPress={() => setConfirming(true)} />
+        <Button primary label="Sign" onPress={submit} />
+      </box>
+
+      <Dialog
+        open={confirming}
+        title="Clear the form?"
+        onClose={() => setConfirming(false)}
+        width={320}
+        height={150}
+        actions={
+          <>
+            <Button label="Cancel" onPress={() => setConfirming(false)} />
+            <Button primary autoFocus label="Clear" onPress={clear} />
+          </>
+        }
+      >
+        The name and the greeting below it will be discarded.
+      </Dialog>
+
+      <box
+        style={{
+          flexGrow: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
+        {greeting && (
+          <text
+            style={{
+              fontSize: greeting.size,
+              fontWeight: greeting.weight,
+              color: greeting.color,
+            }}
+          >
+            {greeting.shout
+              ? `HELLO, ${greeting.name.toUpperCase()}!`
+              : `Hello, ${greeting.name}!`}
+          </text>
+        )}
+      </box>
+    </box>
+  );
+}
+
+function App() {
+  return (
     <window
       width={420}
       height={380}
       title="form"
       style={{ backgroundColor: '#f5f6fa' }}
     >
-      <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
-        <text style={{ fontSize: 20, color: '#2d3436' }}>
-          Sign the guestbook
-        </text>
-
-        <textinput
-          autoFocus
-          value={name}
-          placeholder="Your name"
-          onChange={setName}
-          onSubmit={submit}
-          style={{
-            padding: 8,
-            borderRadius: 4,
-            borderWidth: 1,
-            borderColor: '#b2bec3',
-            backgroundColor: 'white',
-          }}
-        />
-
-        <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <Select
-            options={COLORS}
-            value={color}
-            onChange={setColor}
-            style={{ flexGrow: 1 }}
-          />
-          <RadioGroup
-            value={weight}
-            onChange={setWeight}
-            style={{ flexDirection: 'row', gap: 12 }}
-          >
-            {WEIGHTS.map((w) => (
-              <Radio key={w} value={w} label={w} />
-            ))}
-          </RadioGroup>
-        </box>
-
-        <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <text style={{ color: '#636e72' }}>size</text>
-          <Slider
-            min={12}
-            max={32}
-            value={size}
-            onChange={setSize}
-            style={{ flexGrow: 1 }}
-          />
-          <text style={{ color: '#636e72' }}>{String(size)}</text>
-        </box>
-
-        <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <Checkbox checked={shout} onChange={setShout} label="Shout it" />
-          <box style={{ flexGrow: 1 }} />
-          <Button label="Clear" onPress={() => setConfirming(true)} />
-          <Button primary label="Sign" onPress={submit} />
-        </box>
-
-        <Dialog
-          open={confirming}
-          title="Clear the form?"
-          onClose={() => setConfirming(false)}
-          width={320}
-          height={150}
-          actions={
-            <>
-              <Button label="Cancel" onPress={() => setConfirming(false)} />
-              <Button primary autoFocus label="Clear" onPress={clear} />
-            </>
-          }
-        >
-          The name and the greeting below it will be discarded.
-        </Dialog>
-
-        <box
-          style={{
-            flexGrow: 1,
-            justifyContent: 'center',
-            alignItems: 'center',
-          }}
-        >
-          {greeting && (
-            <text
-              style={{
-                fontSize: greeting.size,
-                fontWeight: greeting.weight,
-                color: greeting.color,
-              }}
-            >
-              {greeting.shout
-                ? `HELLO, ${greeting.name.toUpperCase()}!`
-                : `Hello, ${greeting.name}!`}
-            </text>
-          )}
-        </box>
-      </box>
+      <FormPanel />
     </window>
   );
 }
