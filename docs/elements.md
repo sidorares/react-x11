@@ -188,9 +188,9 @@ window, valid after layout).
 
 ## `<scrollview>`
 
-A clipped viewport over its (overflowing) children. Wheel events scroll it
-by default; a scrollbar thumb is drawn when content overflows, and the thumb
-can be dragged.
+A clipped viewport over its (overflowing) children, on **both axes**. Wheel
+events scroll it by default; a scrollbar thumb is drawn on each axis that
+overflows, and the thumb can be dragged.
 
 The bar belongs to the scroller, not to the content painted under it — the
 same rule a browser applies — so a press on the thumb never reaches the row
@@ -206,14 +206,30 @@ grows past its own bounds as rows are added and the footer is pushed out of
 view. `flexShrink` defaults to `1` and `minHeight`/`minWidth` to `0` for the
 same reason. Pass any of them explicitly to opt out.
 
-| prop                                                 |                          |
-| ---------------------------------------------------- | ------------------------ |
-| `onScroll({scrollY, contentHeight, viewportHeight})` | after scrolling          |
-| `scrollbar={false}`                                  | hide the drawn scrollbar |
-| `scrollbarColor`                                     | thumb color              |
+| prop                |                                                                                  |
+| ------------------- | -------------------------------------------------------------------------------- |
+| `onScroll(ev)`      | `{scrollX, scrollY, contentWidth, contentHeight, viewportWidth, viewportHeight}` |
+| `scrollbar={false}` | hide the drawn scrollbars                                                        |
+| `scrollbarColor`    | thumb color                                                                      |
 
-**Ref**: the node, plus `scrollTo(y)` / `scrollBy(dy)` /
-`scrollIntoView(node)` and `scrollY` / `contentHeight`.
+**Ref**: the node, plus `scrollTo` / `scrollBy` / `scrollIntoView(node)` and
+`scrollX` / `scrollY` / `contentWidth` / `contentHeight`.
+
+`scrollTo(y)` takes a number for the vertical axis, as it always has;
+`scrollTo({x, y})` moves either, leaving alone whichever you omit.
+`scrollBy` matches. `scrollIntoView(node)` scrolls the minimum amount on
+both axes.
+
+Horizontal content comes from children that will not shrink — a row of
+fixed-width cells, say. The extent is measured **through the subtree**, the
+way `scrollWidth` is in a browser: a row that stretches to the viewport
+while its own cells overflow it still reports something to scroll. Anything
+that clips its own children ends that measurement, since their overflow
+belongs to them.
+
+X sends buttons 6 and 7 for a horizontal wheel; **Shift + vertical wheel**
+scrolls sideways too, for mice and touchpads that have none. When both bars
+show, each stops short of the other's corner.
 
 `scrollIntoView(node)` scrolls the minimum amount that makes a descendant
 node fully visible, and is safe to call from an effect right after that

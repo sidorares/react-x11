@@ -85,10 +85,15 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   resizable, clamped against the live container size). `examples/app.jsx`
   hosts `form`, `widgets` and `tasks` as tabs by importing the panel each
   now exports — new controls get demonstrated there rather than in yet
-  another example. Still missing, roughly in order: horizontal scrolling in
-  `<scrollview>` (which Table needs first), Table with virtualization,
-  undo/redo in the text controls, a generic Popover, and a file open/save
-  dialog
+  another example. Still missing, roughly in order: Table with
+  virtualization, undo/redo in the text controls, a generic Popover, and a
+  file open/save dialog
+- **Horizontal scrolling — DONE.** `<scrollview>` scrolls on both axes:
+  `scrollX`/`contentWidth`, a second draggable bar, `scrollTo({x, y})`,
+  horizontal wheel and Shift+wheel, and `scrollIntoView` on both axes. The
+  extent is measured through the subtree the way `scrollWidth` is, so a row
+  stretched to the viewport with overflowing cells — a table — still has
+  something to scroll
 - **`Select`/menu keyboard — DONE.** Arrows, Home/End, PageUp/PageDown,
   type-ahead, submenus. Keyboard navigation
   is done (#34: Up/Down/Home/End/Enter/Escape, shared pointer+keyboard

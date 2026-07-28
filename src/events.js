@@ -235,15 +235,24 @@ export class EventManager {
       const wheel = WHEEL_BUTTONS[native.keycode];
       const target = this._hit(native);
       if (wheel) {
+        const shift = Boolean(native.buttons & 1);
+        // X sends buttons 6/7 for a horizontal wheel; Shift+vertical is the
+        // convention for mice and touchpads that have none
+        const [dx, dy] =
+          shift && wheel[0] === 0 ? [wheel[1], 0] : [wheel[0], wheel[1]];
         const ev = this.dispatch('Wheel', target, native, {
-          deltaX: wheel[0],
-          deltaY: wheel[1],
+          deltaX: dx,
+          deltaY: dy,
         });
         if (!ev.defaultPrevented) {
           // default action: scroll the nearest enclosing <scrollview>
           for (let n = target; n; n = n.parent) {
-            if (n.kind === 'scrollview' || n.kind === 'textarea') {
-              n.scrollBy(ev.deltaY);
+            if (n.kind === 'scrollview') {
+              n.scrollBy({ x: ev.deltaX, y: ev.deltaY });
+              break;
+            }
+            if (n.kind === 'textarea') {
+              n.scrollBy(ev.deltaY); // one axis only: it wraps
               break;
             }
             if (n === this.node) break;

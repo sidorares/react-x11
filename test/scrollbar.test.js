@@ -51,12 +51,12 @@ test('dragging the thumb scrolls in proportion to the pointer', async () => {
   // grab the middle of the thumb and take it half way down the travel
   wnd.emit('mousedown', {
     x: bar.x + 2,
-    y: bar.thumbY + bar.thumbHeight / 2,
+    y: bar.thumbStart + bar.thumbLength / 2,
     keycode: 1,
   });
   wnd.emit('mousemove', {
     x: bar.x + 2,
-    y: bar.thumbY + bar.thumbHeight / 2 + bar.travel / 2,
+    y: bar.thumbStart + bar.thumbLength / 2 + bar.travel / 2,
   });
   assert.ok(
     Math.abs(sv.scrollY - bar.range / 2) < 1,
@@ -81,11 +81,11 @@ test('the drag keeps its grip on the thumb, without jumping', async () => {
   // happen — a jump-to-pointer implementation would scroll here
   wnd.emit('mousedown', {
     x: bar.x + 2,
-    y: bar.thumbY + bar.thumbHeight - 1,
+    y: bar.thumbStart + bar.thumbLength - 1,
     keycode: 1,
   });
   assert.strictEqual(sv.scrollY, 0, 'grabbing the thumb does not move it');
-  wnd.emit('mouseup', { x: bar.x + 2, y: bar.thumbY, keycode: 1 });
+  wnd.emit('mouseup', { x: bar.x + 2, y: bar.thumbStart, keycode: 1 });
 
   ReactX11.unmountComponentAtNode(app);
 });
@@ -98,13 +98,13 @@ test('a press on the track pages towards the pointer', async () => {
 
   wnd.emit('mousedown', {
     x: bar.x + 2,
-    y: bar.trackY + bar.trackHeight - 2,
+    y: bar.trackStart + bar.trackLength - 2,
     keycode: 1,
   });
   assert.strictEqual(sv.scrollY, 100, 'one viewport down');
-  wnd.emit('mouseup', { x: bar.x + 2, y: bar.trackY, keycode: 1 });
+  wnd.emit('mouseup', { x: bar.x + 2, y: bar.trackStart, keycode: 1 });
 
-  wnd.emit('mousedown', { x: bar.x + 2, y: bar.trackY + 1, keycode: 1 });
+  wnd.emit('mousedown', { x: bar.x + 2, y: bar.trackStart + 1, keycode: 1 });
   assert.strictEqual(sv.scrollY, 0, 'and back up again');
 
   ReactX11.unmountComponentAtNode(app);
@@ -138,8 +138,8 @@ test('the bar takes the press even with content painted under it', async () => {
 
   drag(
     app.windows[0],
-    { x: bar.x + 2, y: bar.thumbY + 2 },
-    { x: bar.x + 2, y: bar.thumbY + 2 },
+    { x: bar.x + 2, y: bar.thumbStart + 2 },
+    { x: bar.x + 2, y: bar.thumbStart + 2 },
   );
   assert.deepStrictEqual(clicks, [], 'the row under the bar was not clicked');
 
@@ -166,7 +166,12 @@ test('a <textarea> bar drag scrolls it, and never moves the caret', async () => 
   const area = app.windows[0]._reactX11Node.children[0];
   // the mock has no font metrics, so stand in for the laid-out text: all
   // the bar needs from it is a height
-  area._valueLayout = () => ({ height: 600 });
+  area._valueLayout = () => ({
+    height: 600,
+    // enough of a layout for the bar; painting asks for the caret too
+    caretPosition: () => ({ x: 0, y: 0, height: 12 }),
+    lines: [],
+  });
 
   const bar = area._scrollbar();
   assert.ok(bar, 'text taller than the box gets a thumb');
@@ -174,10 +179,13 @@ test('a <textarea> bar drag scrolls it, and never moves the caret', async () => 
 
   area._defaultMouseDown({
     x: bar.x + 2,
-    y: bar.thumbY + 2,
+    y: bar.thumbStart + 2,
     capturePointer() {},
   });
-  area._defaultMouseDrag({ x: bar.x + 2, y: bar.thumbY + 2 + bar.travel / 2 });
+  area._defaultMouseDrag({
+    x: bar.x + 2,
+    y: bar.thumbStart + 2 + bar.travel / 2,
+  });
   assert.strictEqual(area._caret, caretBefore, 'the caret stayed put');
   assert.ok(
     Math.abs(area._scrollY - bar.range / 2) < 1,
@@ -198,6 +206,178 @@ test('a <textarea> bar drag scrolls it, and never moves the caret', async () => 
   };
   area._defaultMouseDown({ x: content.x + 5, y: content.y + 5, detail: 1 });
   assert.ok(placed, 'a press away from the bar still places the caret');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+// --- horizontal ------------------------------------------------------------
+
+/** A row of fixed-width cells: wider than the viewport, and unable to
+ * shrink, which is what a table of columns looks like. */
+function mountWide() {
+  const app = createMockApp();
+  const ref = React.createRef();
+  ReactX11.render(
+    h(
+      'window',
+      { width: 200, height: 100 },
+      h(
+        'scrollview',
+        { ref, style: { flexGrow: 1 } },
+        h(
+          'box',
+          { style: { flexDirection: 'row', flexShrink: 0 } },
+          ...Array.from({ length: 6 }, (_, i) =>
+            h('box', {
+              key: i,
+              style: { width: 100, height: 40, flexShrink: 0 },
+            }),
+          ),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  return { app, wnd: app.windows[0], ref };
+}
+
+test('content wider than the viewport scrolls sideways', async () => {
+  const { app, wnd } = mountWide();
+  await tick();
+  const sv = scroller(app);
+
+  assert.strictEqual(sv.contentWidth, 600, 'six 100px cells');
+  const bar = sv._scrollbar('x');
+  assert.ok(bar, 'a horizontal bar appears');
+  assert.strictEqual(bar.axis, 'x');
+  assert.strictEqual(bar.range, 600 - 200);
+
+  wnd.emit('mousedown', {
+    x: bar.thumbStart + bar.thumbLength / 2,
+    y: bar.crossStart + 2,
+    keycode: 1,
+  });
+  wnd.emit('mousemove', {
+    x: bar.thumbStart + bar.thumbLength / 2 + bar.travel / 2,
+    y: bar.crossStart + 2,
+  });
+  assert.ok(
+    Math.abs(sv.scrollX - bar.range / 2) < 1,
+    `half the travel is half the range, got ${sv.scrollX}`,
+  );
+  wnd.emit('mouseup', { x: 0, y: 0, keycode: 1 });
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a sideways scroll moves the content, not just the number', async () => {
+  const { app, ref } = mountWide();
+  await tick();
+  const sv = scroller(app);
+  const firstCell = sv.children[0].children[0];
+  const before = firstCell.abs.x;
+
+  ref.current.scrollTo({ x: 150 });
+  await tick();
+  assert.strictEqual(
+    firstCell.abs.x,
+    before - 150,
+    'children are laid out shifted by the scroll',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('scrollTo takes a number for y, or an object for either axis', async () => {
+  const { app, ref } = mountWide();
+  await tick();
+  const sv = scroller(app);
+
+  ref.current.scrollTo(10); // the shape that existed before
+  await tick();
+  assert.strictEqual(sv.scrollY, 0, 'nothing to scroll vertically here');
+  ref.current.scrollTo({ x: 1000 });
+  await tick();
+  assert.strictEqual(sv.scrollX, 400, 'clamped to the range');
+  ref.current.scrollBy({ x: -50 });
+  await tick();
+  assert.strictEqual(sv.scrollX, 350);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('the horizontal wheel scrolls sideways, and Shift+wheel does too', async () => {
+  const { app, wnd } = mountWide();
+  await tick();
+  const sv = scroller(app);
+
+  // X button 7 is a wheel-right
+  wnd.emit('mousedown', { x: 50, y: 50, keycode: 7 });
+  await tick();
+  assert.ok(sv.scrollX > 0, `wheel-right scrolled to ${sv.scrollX}`);
+
+  const after = sv.scrollX;
+  // Shift + wheel-down, for mice with no horizontal wheel (buttons bit 1)
+  wnd.emit('mousedown', { x: 50, y: 50, keycode: 5, buttons: 1 });
+  await tick();
+  assert.ok(sv.scrollX > after, 'Shift turned a vertical wheel sideways');
+  assert.strictEqual(sv.scrollY, 0, 'and did not scroll down as well');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('scrollIntoView brings a node in from either side', async () => {
+  const { app, ref } = mountWide();
+  await tick();
+  const sv = scroller(app);
+  const last = sv.children[0].children[5];
+
+  ref.current.scrollIntoView(last);
+  await tick();
+  assert.strictEqual(sv.scrollX, 400, 'scrolled right the minimum amount');
+
+  ref.current.scrollIntoView(sv.children[0].children[0]);
+  await tick();
+  assert.strictEqual(sv.scrollX, 0, 'and back left again');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('with both bars showing, neither runs into the other corner', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    h(
+      'window',
+      { width: 200, height: 100 },
+      h(
+        'scrollview',
+        { style: { flexGrow: 1 } },
+        ...Array.from({ length: 5 }, (_, i) =>
+          h('box', {
+            key: i,
+            style: { width: 400, height: 40, flexShrink: 0 },
+          }),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const sv = scroller(app);
+
+  const vertical = sv._scrollbar('y');
+  const horizontal = sv._scrollbar('x');
+  assert.ok(vertical && horizontal, 'both axes overflow');
+  assert.ok(
+    vertical.trackLength < sv.abs.height,
+    'the vertical track stops short of the corner',
+  );
+  assert.ok(
+    horizontal.trackLength < sv.abs.width,
+    'and so does the horizontal one',
+  );
 
   ReactX11.unmountComponentAtNode(app);
 });
