@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/sidorares/react-x11/compare/v1.1.0...v1.2.0) (2026-07-28)
+
+
+### Features
+
+* child window stacking follows JSX order and zIndex ([#66](https://github.com/sidorares/react-x11/issues/66)) ([557d446](https://github.com/sidorares/react-x11/commit/557d44659567ad54eeed728489a6bd46a8a1e784))
+
 ## [1.1.0](https://github.com/sidorares/react-x11/compare/v1.0.0...v1.1.0) (2026-07-28)
 
 
