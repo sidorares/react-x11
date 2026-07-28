@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0](https://github.com/sidorares/react-x11/compare/v1.0.0...v1.1.0) (2026-07-28)
+
+
+### Features
+
+* click-to-component — Alt/Option+Click opens the source in your editor ([#65](https://github.com/sidorares/react-x11/issues/65)) ([cf4bfa2](https://github.com/sidorares/react-x11/commit/cf4bfa294a12152613749125d941e96c69ba639a))
+* **examples:** hot reloading with React Fast Refresh for the tasks example ([#62](https://github.com/sidorares/react-x11/issues/62)) ([cb94f5e](https://github.com/sidorares/react-x11/commit/cb94f5e3dce587c2e2d331a4e6baf0cdcc939326))
+
 ## 1.0.0 (2026-07-27)
 
 
