@@ -506,8 +506,12 @@ menus/tooltips.
 - DevTools: highlight-on-hover from the DevTools tree to the window
   (we own hit rects, so this is easy), inspect computed yoga layout.
 - Hot reload example (react-refresh + a file watcher), widget-gallery
-  example, window-manager example via SubstructureRedirect
-  (`child-event`/`map_request` support already exists in ntk) — issue #3.
+  example — both done. Window-manager example via SubstructureRedirect —
+  **done** (`examples/wm.jsx`, issue #3). ntk's `child-event` turned out to
+  drop the event payload, so a ConfigureRequest arrived without the
+  geometry needed to answer it; fixed upstream along with property reads
+  and the rest of the WM surface (ntk 3.9.0), over substructure redirect in
+  node-x11's in-process server (3.2.0) so it can be tested headlessly.
 - npm publish with the examples runnable via `npx`.
 
 ## 10. Open questions

@@ -26,6 +26,7 @@
     "examples:gl": "tsx examples/gl.jsx",
     "examples:three": "tsx examples/three.jsx",
     "examples:windows": "tsx examples/windows.jsx",
+    "examples:wm": "tsx examples/wm.jsx",
     "screenshots": "tsx scripts/screenshots.jsx",
     "screenshots:framed": "tsx scripts/screenshots-framed.jsx",
     "bench": "tsx scripts/bench/protocol.js"
@@ -47,7 +48,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^3.7.2",
+    "ntk": "^3.9.0",
     "react-reconciler": "^0.33.0"
   },
   "peerDependencies": {
