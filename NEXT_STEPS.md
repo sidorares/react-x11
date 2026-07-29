@@ -93,9 +93,13 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   resizable, clamped against the live container size). `examples/app.jsx`
   hosts `form`, `widgets` and `tasks` as tabs by importing the panel each
   now exports — new controls get demonstrated there rather than in yet
-  another example. Still missing, roughly in order: Table with
-  virtualization, undo/redo in the text controls, a generic Popover, and a
-  file open/save dialog
+  another example. Table with virtualization is DONE (built on
+  `onViewport`), and undo/redo in the text controls is DONE (#84:
+  coalescing runs, snapshot history, `undo()`/`redo()`/`canUndo`/`canRedo`
+  on the node). Still missing, roughly in order: a **right-click menu for
+  the text controls** (issue #88 — and right-click currently collapses the
+  selection, which is a bug on its own), a generic Popover, and a file
+  open/save dialog
 - **Horizontal scrolling — DONE.** `<scrollview>` scrolls on both axes:
   `scrollX`/`contentWidth`, a second draggable bar, `scrollTo({x, y})`,
   horizontal wheel and Shift+wheel, and `scrollIntoView` on both axes. The
@@ -143,7 +147,12 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   WM_DELETE_WINDOW and dispatches at discrete priority (unmount/hide/quit
   is the handler's choice); see examples/windows.jsx
 - **Keyboard**: AltGr/compose/IME not handled (ntk TODO), key repeat is
-  server-side (works), keymap beyond index 0/1 unhandled
+  server-side (works), keymap beyond index 0/1 unhandled — that last one is
+  **issue #85**, and it costs more than it looks: index 0/1 is group 1, so
+  a non-Latin layout can never be typed. Linux carries the active group in
+  bits 13–14 of the event state; XQuartz has no groups at all and rewrites
+  the keymap instead, so both mechanisms are needed. No `onContextMenu`
+  either (#88)
 
 ### 3a. Styling — DONE
 
@@ -164,17 +173,18 @@ already required. See [docs/styling.md](docs/styling.md).
 
 ### 4. Ecosystem / DX
 
-- npm publish (merge release-please #17 → 1.0.0, then examples via
-  `npx`?), CHANGELOG is automated
+- npm publish — DONE, `react-x11` is on npm (1.2.0 latest) and CHANGELOG is
+  automated; release-please keeps a release PR open for the next version.
+  Still open: running the examples via `npx`?
 - README screenshots are now committed under `docs/img/` and regenerated
   by script (see AGENTS.md Pull requests section for the rule: PR-only
   images go to GitHub attachments, committed images only when globally
   useful — README qualifies)
 - API docs live in `docs/` (elements/components/events/devtools)
-- window-manager example (#3) — SubstructureRedirect is plumbed in ntk
-  (`child-event`); would exercise `<foreign>`-style window wrapping
+- window-manager example (#3) — DONE, `examples/wm.jsx` + `examples/wm-core.js`
+  on ntk 3.9.0 / node-x11 3.2.0, with `test/wm.test.js` driving it headlessly
 - react-native-dom-like packaging (#13) and mylittledom reuse (#10) are
-  superseded by the native architecture; consider closing those issues
+  superseded by the native architecture — both closed, along with #4
 
 Goal: **react-like ergonomics on top of ntk** — good enough to develop and debug
 real GUI apps. This document records the current state, what we learned from
