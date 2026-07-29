@@ -18,13 +18,16 @@
 import React, {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useSyncExternalStore,
 } from 'react';
+import { Image } from 'ntk';
 import { createRoot, createStyles } from '../src/index.js';
 
 import {
   BORDER,
+  ICON_SIZE,
   TASKBAR_H,
   TITLE_H,
   WindowManager,
@@ -79,11 +82,13 @@ const s = createStyles({
     gap: 6,
   },
   taskbarItem: {
-    paddingLeft: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingLeft: 8,
     paddingRight: 10,
     height: 22,
     borderRadius: 4,
-    justifyContent: 'center',
     backgroundColor: theme.taskbarItem,
     cursor: 'pointer',
     ':hover': { backgroundColor: '#57606f' },
@@ -170,6 +175,25 @@ function useDrag(frameRef, onMove) {
   return { onMouseDown, onMouseMove, onMouseUp };
 }
 
+/**
+ * The application's icon, whatever size it gave us, scaled into `size` by
+ * the server: ntk uploads the pixels once as a picture and XRender does the
+ * rest, so a 48x48 icon in a 16px slot costs one composite per repaint.
+ * Renders nothing when the window has no icon — plenty do not.
+ */
+function Icon({ icon, size = ICON_SIZE }) {
+  // the same icon object rides along in every snapshot, so this uploads once
+  const image = useMemo(() => (icon ? new Image(icon) : null), [icon]);
+  useEffect(() => () => image?.destroy(), [image]);
+  if (!image) return null;
+  return (
+    <canvas
+      style={{ width: size, height: size }}
+      onDraw={(ctx) => ctx.drawImage(image, 0, 0, size, size)}
+    />
+  );
+}
+
 function TitleButton({ glyph, onPress, close }) {
   return (
     <box
@@ -242,6 +266,7 @@ function Frame({ wm, client }) {
         onMouseMove={move.onMouseMove}
         onMouseUp={move.onMouseUp}
       >
+        <Icon icon={client.icon} />
         <text style={[s.title, client.focused && s.titleActive]}>
           {client.title}
         </text>
@@ -320,6 +345,7 @@ function Taskbar({ wm, clients }) {
               client.minimized ? wm.restore(client.id) : wm.focus(client.id)
             }
           >
+            <Icon icon={client.icon} />
             <text style={s.taskbarLabel}>
               {client.minimized ? `· ${client.title}` : client.title}
             </text>

@@ -14,6 +14,7 @@ import {
   WindowManager,
   frameHeight,
   frameWidth,
+  parseNetWmIcon,
   resizeRect,
 } from '../examples/wm-core.js';
 
@@ -112,6 +113,36 @@ test('resizeRect stops moving when the size hits its limit', () => {
   assert.equal(north.y + north.height, 170, 'bottom edge still pinned');
 });
 
+// _NET_WM_ICON packs every size the application offers into one property,
+// each as [width, height, width*height ARGB pixels].
+const iconBlock = (size, argb) => [
+  size,
+  size,
+  ...Array(size * size).fill(argb),
+];
+
+test('parseNetWmIcon picks a size and converts ARGB to RGBA', () => {
+  const words = [...iconBlock(8, 0xff112233), ...iconBlock(32, 0xff445566)];
+
+  // the smallest one that is still big enough for what we draw
+  assert.equal(parseNetWmIcon(words, 16).width, 32);
+  assert.equal(parseNetWmIcon(words, 8).width, 8);
+  // nothing is big enough: take the largest there is rather than nothing
+  assert.equal(parseNetWmIcon(words, 64).width, 32);
+
+  const icon = parseNetWmIcon(iconBlock(2, 0x80aabbcc), 2);
+  assert.equal(icon.width, 2);
+  assert.equal(icon.data.length, 2 * 2 * 4);
+  assert.deepEqual([...icon.data.subarray(0, 4)], [0xaa, 0xbb, 0xcc, 0x80]);
+});
+
+test('parseNetWmIcon rejects a truncated or empty property', () => {
+  assert.equal(parseNetWmIcon([], 16), null);
+  assert.equal(parseNetWmIcon([0, 0], 16), null);
+  // claims 4x4 but carries three pixels
+  assert.equal(parseNetWmIcon([4, 4, 1, 2, 3], 16), null);
+});
+
 // --- against a real server --------------------------------------------------
 
 test('a mapped client is framed, reparented and focused', async () => {
@@ -144,6 +175,56 @@ test('a mapped client is framed, reparented and focused', async () => {
     'the client lives inside the frame',
   );
   assert.equal(wm.focused, app.id, 'and takes the focus once it is viewable');
+
+  await wmApp.close();
+  await clientApp.close();
+});
+
+test("a client's _NET_WM_ICON is read, and re-read when it changes", async () => {
+  const { wmApp, clientApp } = await headlessPair();
+  const { wm } = await startWM(wmApp);
+
+  const app = clientApp.createWindow({ width: 200, height: 150 });
+  await app.setProperty('_NET_WM_ICON', iconBlock(16, 0xff203040), {
+    type: 'CARDINAL',
+  });
+  app.map();
+  await until(wmApp, () => wm.clients.size === 1, 'the client to be managed');
+
+  const id = [...wm.clients.keys()][0];
+  assert.equal(wm.clients.get(id).icon?.width, 16, 'icon read at manage time');
+  assert.deepEqual(
+    [...wm.clients.get(id).icon.data.subarray(0, 4)],
+    [0x20, 0x30, 0x40, 0xff],
+  );
+
+  // swapping the icon arrives as a PropertyNotify naming _NET_WM_ICON
+  await app.setProperty('_NET_WM_ICON', iconBlock(8, 0xffaabbcc), {
+    type: 'CARDINAL',
+  });
+  await until(
+    wmApp,
+    () => wm.clients.get(id).icon?.width === 8,
+    'the new icon to be picked up',
+  );
+  assert.deepEqual(
+    [...wm.clients.get(id).icon.data.subarray(0, 4)],
+    [0xaa, 0xbb, 0xcc, 0xff],
+  );
+
+  await wmApp.close();
+  await clientApp.close();
+});
+
+test('a client with no icon is managed all the same', async () => {
+  const { wmApp, clientApp } = await headlessPair();
+  const { wm } = await startWM(wmApp);
+
+  const app = clientApp.createWindow({ width: 200, height: 150 });
+  app.map();
+  await until(wmApp, () => wm.clients.size === 1, 'the client to be managed');
+
+  assert.equal(wm.clients.get(app.id).icon, null, 'no icon, not an error');
 
   await wmApp.close();
   await clientApp.close();

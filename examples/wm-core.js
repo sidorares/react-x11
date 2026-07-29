@@ -22,6 +22,7 @@ const MOD2 = 16;
 export const BORDER = 4;
 export const TITLE_H = 26;
 export const TASKBAR_H = 32;
+export const ICON_SIZE = 16;
 
 export const frameWidth = (clientWidth) => clientWidth + 2 * BORDER;
 export const frameHeight = (clientHeight) =>
@@ -34,6 +35,97 @@ const CW_WIDTH = 0x04;
 const CW_HEIGHT = 0x08;
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+// ---------------------------------------------------------------------------
+// Application icons
+//
+// There are two standards and clients use one or the other. EWMH
+// `_NET_WM_ICON` is the modern one: ARGB pixels in a property, in as many
+// sizes as the application cares to offer, which is what GTK and Qt set.
+// ICCCM `WM_HINTS` is what came before it: a pointer to a pixmap living on
+// the server, which is what xterm and the rest of the classic clients still
+// set. A window manager that only reads one of them shows blanks for half
+// the windows on a normal desktop.
+//
+// (A third route exists on Linux desktops — match `WM_CLASS` against a
+// freedesktop .desktop file and look the name up in an icon theme — which is
+// how applications that ship no icon at all still get one. That is a
+// filesystem convention rather than an X one, so it is out of scope here.)
+// ---------------------------------------------------------------------------
+
+const ICON_PIXMAP_HINT = 0x04; // WM_HINTS flags
+const ICON_MASK_HINT = 0x20;
+
+/** Prefer the smallest icon that is still at least `wanted` across. */
+function betterFit(candidate, current, wanted) {
+  if (!current) return true;
+  const fits = candidate >= wanted;
+  const fitted = current >= wanted;
+  if (fits !== fitted) return fits;
+  return fits ? candidate < current : candidate > current;
+}
+
+/**
+ * `_NET_WM_ICON`: a run of [width, height, width*height ARGB pixels] blocks,
+ * repeated once per size the application offers.
+ */
+export function parseNetWmIcon(words, wanted) {
+  let best = null;
+  for (let i = 0; i + 2 <= words.length;) {
+    const width = words[i];
+    const height = words[i + 1];
+    const count = width * height;
+    if (!width || !height || i + 2 + count > words.length) break;
+    if (betterFit(width, best?.width, wanted)) {
+      best = { width, height, pixels: words.slice(i + 2, i + 2 + count) };
+    }
+    i += 2 + count;
+  }
+  if (!best) return null;
+  const data = Buffer.alloc(best.width * best.height * 4);
+  for (let n = 0; n < best.pixels.length; n++) {
+    const argb = best.pixels[n];
+    data[n * 4] = (argb >>> 16) & 0xff;
+    data[n * 4 + 1] = (argb >>> 8) & 0xff;
+    data[n * 4 + 2] = argb & 0xff;
+    data[n * 4 + 3] = (argb >>> 24) & 0xff;
+  }
+  return { width: best.width, height: best.height, data };
+}
+
+/** Bit (x, y) of a depth-1 image: rows padded to 32 bits, LSB leftmost. */
+function bitAt(image, width, x, y) {
+  const stride = Math.ceil(width / 32) * 4;
+  return (image.data[y * stride + (x >> 3)] >> (x & 7)) & 1;
+}
+
+/**
+ * Read a drawable as RGBA. A depth-1 icon is a stencil rather than a
+ * picture — it carries no colour of its own, so it is drawn in the
+ * titlebar's foreground with the unset bits left transparent, which is what
+ * makes xlogo's outline read on a dark frame instead of arriving as a black
+ * square. Deeper icons come back as four bytes per pixel, BGRX.
+ */
+function drawableToRgba(image, width, height) {
+  const data = Buffer.alloc(width * height * 4);
+  if (image.depth === 1) {
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const n = (y * width + x) * 4;
+        data[n] = data[n + 1] = data[n + 2] = 0xff;
+        data[n + 3] = bitAt(image, width, x, y) ? 0xff : 0x00;
+      }
+    }
+    return data;
+  }
+  for (let n = 0; n < width * height; n++) {
+    data[n * 4] = image.data[n * 4 + 2];
+    data[n * 4 + 1] = image.data[n * 4 + 1];
+    data[n * 4 + 2] = image.data[n * 4];
+    data[n * 4 + 3] = 0xff;
+  }
+  return data;
+}
 
 /**
  * Where a resize drag leaves the window. `edges` is which sides the handle
@@ -134,6 +226,7 @@ export class WindowManager {
     this.root.on('configure_request', (ev) => this.onConfigureRequest(ev));
 
     await this.announce();
+    await this.internWatchedAtoms();
     this.paintDesktop();
     this.watchClientClicks();
 
@@ -177,6 +270,22 @@ export class WindowManager {
       ].map((name) => this.root.atom(name)),
     );
     await this.root.setProperty('_NET_SUPPORTED', supported, { type: 'ATOM' });
+  }
+
+  /**
+   * The properties worth reacting to when a client changes one. A
+   * PropertyNotify names the atom that changed, so knowing these ids up
+   * front turns "something changed, re-read everything" into one targeted
+   * read — and applications change properties a lot.
+   */
+  async internWatchedAtoms() {
+    const [wmName, netWmName, netWmIcon, wmHints] = await Promise.all(
+      ['WM_NAME', '_NET_WM_NAME', '_NET_WM_ICON', 'WM_HINTS'].map((name) =>
+        this.root.atom(name),
+      ),
+    );
+    this._titleAtoms = new Set([wmName, netWmName]);
+    this._iconAtoms = new Set([netWmIcon, wmHints]);
   }
 
   /**
@@ -306,6 +415,7 @@ export class WindowManager {
         .getProperty('WM_TRANSIENT_FOR', { as: 'numbers' })
         .catch(() => null)
     )?.[0];
+    const icon = await this.readIcon(window).catch(() => null);
 
     const minWidth = Math.max(hints.minWidth ?? 0, 80);
     const minHeight = Math.max(hints.minHeight ?? 0, 40);
@@ -327,6 +437,7 @@ export class WindowManager {
       id: window.id,
       window,
       title,
+      icon,
       ...this.placeWindow(width, height),
       width,
       height,
@@ -356,7 +467,12 @@ export class WindowManager {
     // a client unmapping itself is withdrawing (ICCCM); ours stay mapped
     // while minimized, because minimizing unmaps the frame instead
     window.on('unmap', () => this.forget(window.id, { gone: false }));
-    window.on('property', () => this.refreshTitle(window.id));
+    // a client may retitle itself or swap its icon at any time; re-read only
+    // the property that actually changed
+    window.on('property', (ev) => {
+      if (this._titleAtoms?.has(ev.atom)) this.refreshTitle(window.id);
+      else if (this._iconAtoms?.has(ev.atom)) this.refreshIcon(window.id);
+    });
 
     // no focus yet: the client is still unmapped and unframed, and
     // SetInputFocus on a window that is not viewable is a BadMatch.
@@ -382,6 +498,86 @@ export class WindowManager {
       this.focusTopmost();
     }
     this._changed();
+  }
+
+  /** GetImage as a promise. */
+  _getImage(drawable, width, height) {
+    return new Promise((resolve, reject) =>
+      this.X.GetImage(
+        2,
+        drawable,
+        0,
+        0,
+        width,
+        height,
+        0xffffffff,
+        (err, image) => (err ? reject(err) : resolve(image)),
+      ),
+    );
+  }
+
+  _getGeometry(drawable) {
+    return new Promise((resolve, reject) =>
+      this.X.GetGeometry(drawable, (err, geometry) =>
+        err ? reject(err) : resolve(geometry),
+      ),
+    );
+  }
+
+  /**
+   * The application's icon as RGBA, at whatever size it offers closest to
+   * `wanted`. `_NET_WM_ICON` first, then the ICCCM pixmap, then nothing —
+   * plenty of windows have no icon at all and that is not an error.
+   */
+  async readIcon(window, wanted = ICON_SIZE) {
+    const words = await window
+      .getProperty('_NET_WM_ICON', { as: 'numbers' })
+      .catch(() => null);
+    const modern = words?.length ? parseNetWmIcon(words, wanted) : null;
+    if (modern) return modern;
+    return this.readPixmapIcon(window).catch(() => null);
+  }
+
+  /**
+   * The ICCCM route: WM_HINTS names a pixmap, and optionally a 1-bit mask
+   * saying which of its pixels count. Both live on the server, so this is a
+   * read back rather than a property parse.
+   */
+  async readPixmapIcon(window) {
+    const hints = await window
+      .getProperty('WM_HINTS', { as: 'numbers' })
+      .catch(() => null);
+    if (!hints || hints.length < 9 || !(hints[0] & ICON_PIXMAP_HINT))
+      return null;
+
+    const { width, height } = await this._getGeometry(hints[3]);
+    const image = await this._getImage(hints[3], width, height);
+    const data = drawableToRgba(image, width, height);
+
+    // A separate mask says which pixels of a colour icon count. A depth-1
+    // icon needs none — its own bits already are the shape — and a client
+    // that names one anyway points it back at the icon itself.
+    const maskId = hints[0] & ICON_MASK_HINT ? hints[7] : 0;
+    if (image.depth > 1 && maskId && maskId !== hints[3]) {
+      const mask = await this._getImage(maskId, width, height).catch(
+        () => null,
+      );
+      if (mask?.depth === 1) {
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            if (!bitAt(mask, width, x, y)) data[(y * width + x) * 4 + 3] = 0;
+          }
+        }
+      }
+    }
+    return { width, height, data };
+  }
+
+  async refreshIcon(id) {
+    const client = this.clients.get(id);
+    if (!client) return;
+    const icon = await this.readIcon(client.window).catch(() => null);
+    if (icon !== client.icon) this._update(id, { icon });
   }
 
   async refreshTitle(id) {

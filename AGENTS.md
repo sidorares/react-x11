@@ -164,6 +164,13 @@ that are easy to get wrong, all of which cost time here:
 - **Drags need a real pointer grab.** react-x11's `capturePointer()` only
   routes events that already arrived at the window; the X grab is what
   keeps the server sending them once the pointer leaves the frame.
+- **Icons come from two places.** `_NET_WM_ICON` (EWMH) is ARGB pixels in a
+  property, what GTK and Qt set; `WM_HINTS` (ICCCM) points at a server-side
+  pixmap plus an optional 1-bit mask, what xterm and the other classic
+  clients still set. Reading only one leaves half the windows blank. A
+  depth-1 icon is a stencil, not a picture — draw the set bits in the
+  frame's foreground and leave the rest transparent, or it arrives as a
+  black square.
 
 ## Framed screenshots
 

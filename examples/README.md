@@ -80,6 +80,27 @@ double-clicking the titlebar also maximizes. Click anywhere in a window to
 focus and raise it, or alt+tab to cycle. Minimized windows go to the
 taskbar and come back when you click them there.
 
+#### Where the icons come from
+
+The icon in each titlebar and taskbar entry is the application's own, and
+there are two standards for finding it — clients use one or the other, so a
+window manager that reads only one shows blanks for half of them:
+
+- **`_NET_WM_ICON`** (EWMH, modern) — ARGB pixels in a property, in as many
+  sizes as the application cares to offer. This is what GTK and Qt set, and
+  the window manager picks the smallest size that is still big enough.
+- **`WM_HINTS`** (ICCCM, older) — the property names a _pixmap_ living on
+  the server, optionally with a 1-bit mask saying which of its pixels count.
+  This is what xterm, xclock and xlogo still set, so it is the one you can
+  see working locally. A 1-bit icon carries no colour of its own and is
+  drawn as a stencil in the titlebar's foreground.
+
+A third route exists on Linux desktops and is deliberately not implemented
+here: match `WM_CLASS` against a freedesktop `.desktop` file and look the
+`Icon=` name up in an icon theme. That is how applications that ship no icon
+at all still get one, but it is a filesystem convention rather than anything
+X knows about.
+
 **Only one window manager may run on a display at a time**, so it cannot
 just be started alongside the one you already have — it will exit with
 `another window manager is already running on this display`. Pick one of the
