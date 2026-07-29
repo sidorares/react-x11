@@ -1,0 +1,235 @@
+// Theming and the style engine, end to end: three demo themes in light and
+// dark, switched at runtime, plus a window size query that changes the
+// layout as you resize.
+//
+// Nothing below reaches for a colour or a corner radius. Every widget reads
+// the palette it is given, the panel's own styles name it with `$tokens`,
+// and switching theme replaces one object.
+// Run with: npm run examples:theming  (needs an X server / DISPLAY)
+import React, { useState } from 'react';
+import {
+  Button,
+  Checkbox,
+  createRoot,
+  createStyles,
+  ProgressBar,
+  RadioGroup,
+  Radio,
+  Select,
+  Slider,
+  Switch,
+  Tabs,
+  ThemeProvider,
+} from '../src/index.js';
+import { THEME_OPTIONS, themeFor } from './themes.js';
+
+const s = createStyles({
+  root: {
+    flexGrow: 1,
+    padding: 16,
+    gap: 14,
+    backgroundColor: '$canvas',
+    transition: { backgroundColor: 180 },
+  },
+  bar: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
+  title: { fontSize: 18, color: '$text' },
+  // below 520 the window has no room for the explanation, so it goes
+  spacerHide: { flexGrow: 1, '@width < 520': { display: 'none' } },
+  caption: {
+    fontSize: 11,
+    color: '$dim',
+    '@width < 520': { display: 'none' },
+  },
+  // one column when narrow, two side by side once there is room for them
+  gallery: {
+    flexGrow: 1,
+    minHeight: 0,
+    gap: 14,
+    flexDirection: 'column',
+    '@width >= 620': { flexDirection: 'row' },
+  },
+  column: { flexGrow: 1, minWidth: 0, gap: 12 },
+  card: {
+    padding: 12,
+    gap: 10,
+    borderRadius: 8,
+    backgroundColor: '$panel',
+    transition: { backgroundColor: 180 },
+  },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  label: { width: 74, fontSize: 12, color: '$dim' },
+  heading: { fontSize: 12, color: '$dim' },
+  icon: { width: 16, height: 16 },
+  note: { fontSize: 11, color: '$dim' },
+});
+
+/** Sun and moon, drawn as declarative SVG so they take the theme's ink. */
+function ModeIcon({ mode, color }) {
+  const stroke = { stroke: color, strokeWidth: 2, fill: 'none' };
+  return mode === 'dark' ? (
+    <svg viewBox="0 0 24 24" style={s.icon}>
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" {...stroke} />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" style={s.icon}>
+      <circle cx="12" cy="12" r="4.5" {...stroke} />
+      <line x1="12" y1="1.5" x2="12" y2="4" {...stroke} />
+      <line x1="12" y1="20" x2="12" y2="22.5" {...stroke} />
+      <line x1="1.5" y1="12" x2="4" y2="12" {...stroke} />
+      <line x1="20" y1="12" x2="22.5" y2="12" {...stroke} />
+      <line x1="4.6" y1="4.6" x2="6.4" y2="6.4" {...stroke} />
+      <line x1="17.6" y1="17.6" x2="19.4" y2="19.4" {...stroke} />
+      <line x1="4.6" y1="19.4" x2="6.4" y2="17.6" {...stroke} />
+      <line x1="17.6" y1="6.4" x2="19.4" y2="4.6" {...stroke} />
+    </svg>
+  );
+}
+
+export function ThemingPanel() {
+  const [name, setName] = useState('github');
+  const [mode, setMode] = useState('light');
+  const [agreed, setAgreed] = useState(true);
+  const [notify, setNotify] = useState(false);
+  const [flavour, setFlavour] = useState('vanilla');
+  const [volume, setVolume] = useState(55);
+  const [tab, setTab] = useState('one');
+  const [presses, setPresses] = useState(0);
+
+  const theme = themeFor(name, mode);
+
+  return (
+    // the palette lands twice on purpose: ThemeProvider is how the widgets
+    // read it, `theme` is how `$canvas` and `$panel` below resolve
+    <ThemeProvider value={theme}>
+      <box theme={theme} style={s.root}>
+        <box style={s.bar}>
+          <text style={s.title}>Theme</text>
+          <Select
+            value={name}
+            options={THEME_OPTIONS}
+            onChange={setName}
+            style={{ width: 150 }}
+          />
+          <Button
+            onPress={() => setMode(mode === 'dark' ? 'light' : 'dark')}
+            aria-label="toggle light and dark"
+          >
+            <ModeIcon mode={mode} color={theme.text} />
+          </Button>
+          <box style={s.spacerHide} />
+          <text style={s.caption}>
+            resize me: the gallery splits in two past 620px
+          </text>
+        </box>
+
+        <box style={s.gallery}>
+          <box style={s.column}>
+            <box style={s.card}>
+              <text style={s.heading}>Buttons</text>
+              <box style={s.row}>
+                <Button
+                  primary
+                  label="Primary"
+                  onPress={() => setPresses(presses + 1)}
+                />
+                <Button
+                  label="Default"
+                  onPress={() => setPresses(presses + 1)}
+                />
+                <Button disabled label="Disabled" />
+              </box>
+              <text style={s.note}>{presses} presses</text>
+            </box>
+
+            <box style={s.card}>
+              <text style={s.heading}>Toggles</text>
+              <Checkbox
+                checked={agreed}
+                onChange={setAgreed}
+                label="Checkbox"
+              />
+              <box style={s.row}>
+                <Switch checked={notify} onChange={setNotify} />
+                <text style={s.note}>Switch</text>
+              </box>
+              <RadioGroup value={flavour} onChange={setFlavour}>
+                <Radio value="vanilla" label="Vanilla" />
+                <Radio value="pistachio" label="Pistachio" />
+              </RadioGroup>
+            </box>
+          </box>
+
+          <box style={s.column}>
+            <box style={s.card}>
+              <text style={s.heading}>Ranges</text>
+              <box style={s.row}>
+                <text style={s.label}>Slider</text>
+                <Slider
+                  value={volume}
+                  min={0}
+                  max={100}
+                  onChange={setVolume}
+                  style={{ flexGrow: 1 }}
+                />
+                <text style={s.note}>{String(volume)}</text>
+              </box>
+              <box style={s.row}>
+                <text style={s.label}>Progress</text>
+                <ProgressBar value={volume / 100} style={{ flexGrow: 1 }} />
+              </box>
+            </box>
+
+            <box style={[s.card, { flexGrow: 1, minHeight: 0 }]}>
+              <text style={s.heading}>Tabs and input</text>
+              <Tabs
+                value={tab}
+                onChange={setTab}
+                items={[
+                  {
+                    id: 'one',
+                    label: 'First',
+                    content: (
+                      <textinput
+                        placeholder="Type here…"
+                        style={{
+                          borderWidth: theme.borderWidth,
+                          borderColor: theme.border,
+                          borderRadius: theme.radius,
+                          backgroundColor: theme.background,
+                          color: theme.text,
+                          padding: 8,
+                          marginTop: 8,
+                        }}
+                      />
+                    ),
+                  },
+                  {
+                    id: 'two',
+                    label: 'Second',
+                    content: <text style={s.note}>Second panel</text>,
+                  },
+                  { id: 'three', label: 'Disabled', disabled: true },
+                ]}
+              />
+            </box>
+          </box>
+        </box>
+      </box>
+    </ThemeProvider>
+  );
+}
+
+function App() {
+  return (
+    <window title="theming" width={720} height={480} minWidth={360}>
+      <ThemingPanel />
+    </window>
+  );
+}
+
+export default App;
+
+if (!process.env.REACT_X11_NO_AUTORUN) {
+  const root = await createRoot();
+  root.render(<App />);
+}

@@ -21,6 +21,7 @@ import {
 import { FormPanel } from './form.jsx';
 import { WidgetsPanel } from './widgets.jsx';
 import { TasksPanel } from './tasks.jsx';
+import { ThemingPanel } from './theming.jsx';
 
 const PALETTE = {
   bg: '#f5f6fa',
@@ -78,6 +79,7 @@ const SECTIONS = [
   { id: 'tasks', label: 'Tasks' },
   { id: 'tree', label: 'Tree' },
   { id: 'table', label: 'Table' },
+  { id: 'theming', label: 'Theming' },
 ];
 
 // A stand-in project, enough to show nesting, a lazy-looking empty branch
@@ -177,6 +179,7 @@ const PANELS = {
   tasks: () => <TasksPanel />,
   tree: () => <TreePanel />,
   table: () => <TablePanel />,
+  theming: () => <ThemingPanel />,
 };
 
 function App() {

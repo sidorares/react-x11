@@ -111,7 +111,7 @@ export function Dialog({
                 flexGrow: 1,
                 padding: 16,
                 gap: 12,
-                borderWidth: 1,
+                borderWidth: theme.borderWidth,
                 borderColor: theme.border,
                 backgroundColor: theme.background,
               },

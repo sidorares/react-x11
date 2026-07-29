@@ -82,7 +82,7 @@ export function Radio({ value, children, label, disabled = false }) {
           width: 16,
           height: 16,
           borderRadius: 8,
-          borderWidth: 1,
+          borderWidth: theme.borderWidth,
           borderColor: selected
             ? fill
             : focused
