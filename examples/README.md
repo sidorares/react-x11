@@ -46,6 +46,24 @@ by default nearly everywhere. Xorg takes `+iglx` on the command line or
 defaults write org.xquartz.X11 enable_iglx -bool true   # then restart XQuartz
 ```
 
+### Fonts on macOS
+
+If the demos come up in what looks like a Japanese system font — and Cyrillic
+in particular renders spread out, one full-width advance per letter, while
+Latin looks fine — the wrong `fc-match` is first on your `PATH`. ntk resolves
+font families by shelling out to it, and Homebrew's fontconfig ships no macOS
+system-font aliases, so its idea of `sans-serif` is close to arbitrary: it
+answers Hiragino Sans, with Comic Sans as the runner-up. XQuartz's fontconfig
+is the one whose configuration matches the server you are drawing to.
+
+```sh
+PATH=/opt/X11/bin:$PATH npm run examples:theming
+```
+
+`fc-match sans-serif` from each of them shows the difference. Tracked in
+[#86](https://github.com/sidorares/react-x11/issues/86) — nothing in the
+source works around it yet.
+
 ## Hot reloading
 
 ```sh

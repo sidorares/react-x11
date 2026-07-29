@@ -283,6 +283,15 @@ the diff records the cost.
   `yoga.markDirty()`. The mock app in smoke tests has no `fonts`, so text
   measures 0×0 headlessly — pixel-level text assertions live in the
   integration test (StaticFontSource + KaTeX's bundled font, no fontconfig).
+- **Font family resolution shells out to `fc-match`**, so it follows `PATH`.
+  On macOS that usually finds Homebrew's fontconfig before XQuartz's, and
+  Homebrew's ships no macOS system-font aliases: `sans-serif` resolves to
+  Hiragino Sans, whose Cyrillic sits on full-width advances while its Latin
+  stays proportional — so the wrong font is easy to miss until someone types
+  a non-Latin script. Put `/opt/X11/bin` first on `PATH`. This is also why
+  `scripts/screenshots.jsx` names Arial / Liberation / DejaVu explicitly
+  instead of asking for `sans-serif`. Nothing in the source works around it
+  yet — issue #86.
 - Painting is a full-window repaint scheduled through
   `window.requestAnimationFrame` (ntk frame clock: coalescing + server
   fence). Presentation/damage is ntk's job; dirty-rect painting is a future
