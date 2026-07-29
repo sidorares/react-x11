@@ -352,9 +352,19 @@ overlay (`REACT_X11_DEBUG_LAYOUT=1`). Element default actions (textinput
 editing, scrollview wheel) run via `_default*` hooks on nodes AFTER user
 prop handlers, skipped on `preventDefault()`. The window-manager example
 (issue #3) is done — on ntk 3.9.0 and node-x11 3.2.0, which grew the
-substructure-redirect support it needed. Next: `<select>`/menus as
-components, DevTools highlight-on-hover, npm publish. Open GitHub issues:
-#4 top-down rendering, #13 react-native-dom-like architecture.
+substructure-redirect support it needed. Also done since: the widget set
+including `Select`, `Menu`/`MenuBar`/`ContextMenu`, `Tabs`, `Tree`,
+`SplitPane` and a virtualized `Table`; DevTools highlight-on-hover (the
+DOM-ish host-instance contract, `getClientRects` + `ownerDocument`);
+TypeScript declarations; and undo/redo in `<textinput>`/`<textarea>`.
+`react-x11` is published on npm, with release-please keeping a release PR
+open for the next version.
+
+Next: a right-click menu for the text controls, a generic Popover, a file
+open/save dialog. Open GitHub issues: **#85** keyboard layout switching is
+ignored (non-Latin layouts always type Latin), **#86** `sans-serif`
+resolves to a CJK font on macOS, **#88** no right-click menu in the text
+controls — and right-click collapses the selection.
 
 ## Pull requests
 
