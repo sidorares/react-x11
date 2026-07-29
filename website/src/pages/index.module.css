@@ -70,10 +70,17 @@
   width: 100%;
 }
 
+/* Infima's .row gutters are horizontal only, so the six cards wrap onto a
+   second flex line with nothing between them. The gap belongs here and not
+   on .featureCard: the card is height:100% of its stretched column, so a
+   margin-bottom overflows past the column instead of separating the lines. */
+.features :global(.row) {
+  row-gap: 1.5rem;
+}
+
 .featureCard {
   height: 100%;
   padding: 1.25rem;
-  margin-bottom: 1rem;
   border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: var(--ifm-card-border-radius);
 }
