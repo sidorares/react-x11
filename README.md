@@ -155,7 +155,9 @@ User handlers run before element default actions and can
 
 ## Examples
 
-All need an X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation):
+All need an X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation).
+[`examples/README.md`](examples/README.md) describes each one and how to
+explore them:
 
 ```sh
 npm run examples:simple        # hello world (JSX via tsx)
@@ -184,17 +186,18 @@ resizes, focuses and closes them. The frames are ordinary react-x11
 components with `onMouseDown` handlers, and the application is a foreign X
 window reparented inside.
 
-It has to own the display, so run it against a nested server rather than
-the one managing your desktop:
+Only one window manager may own a display, so run it against a nested
+server rather than the one managing your desktop:
 
 ```sh
 Xephyr :10 -screen 1200x800 &
-DISPLAY=unix/:10 npm run examples:wm
+DISPLAY=:10 npm run examples:wm
 DISPLAY=:10 xterm &                    # give it something to manage
 ```
 
-(`unix/:10` rather than `:10` because node-x11 on macOS only takes the unix
-socket when the display name asks for it; on Linux `:10` is enough.)
+To have it manage your real session instead — including replacing
+`quartz-wm` on macOS, which XQuartz has a hook for — see
+[`examples/README.md`](examples/README.md#the-window-manager).
 
 ### Hot reloading
 
