@@ -30,7 +30,10 @@
     "examples:wm": "tsx examples/wm.jsx",
     "screenshots": "tsx scripts/screenshots.jsx",
     "screenshots:framed": "tsx scripts/screenshots-framed.jsx",
-    "bench": "tsx scripts/bench/protocol.js"
+    "bench": "tsx scripts/bench/protocol.js",
+    "docs:dev": "npm --prefix website start",
+    "docs:build": "npm --prefix website run build",
+    "docs:test": "npm --prefix website test"
   },
   "repository": {
     "type": "git",

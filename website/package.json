@@ -1,0 +1,54 @@
+{
+  "name": "react-x11-website",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "docusaurus": "docusaurus",
+    "sync-docs": "node scripts/sync-docs.mjs",
+    "build-demo-bundles": "node scripts/build-demo-bundles.mjs",
+    "check-demos": "node scripts/check-demos.mjs",
+    "check-bundle": "node scripts/check-bundle.mjs",
+    "check-share": "node scripts/check-share.mjs",
+    "start": "npm run sync-docs && npm run build-demo-bundles && docusaurus start",
+    "prebuild": "npm run sync-docs && npm run build-demo-bundles",
+    "build": "docusaurus build",
+    "pretest": "npm run build-demo-bundles",
+    "test": "npm run check-bundle && npm run check-demos && npm run check-share",
+    "serve": "docusaurus serve",
+    "clear": "docusaurus clear"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@docusaurus/core": "^3.10.2",
+    "@docusaurus/preset-classic": "^3.10.2",
+    "@mdx-js/react": "^3.0.0",
+    "@uiw/react-codemirror": "^4.25.11",
+    "clsx": "^2.0.0",
+    "prism-react-renderer": "^2.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "browserslist": {
+    "production": [
+      ">0.5%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 3 chrome version",
+      "last 3 firefox version",
+      "last 5 safari version"
+    ]
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "devDependencies": {
+    "buffer": "^6.0.3",
+    "dejavu-fonts-ttf": "^2.37.3",
+    "esbuild": "^0.28.1",
+    "events": "^3.3.0",
+    "process": "^0.11.10",
+    "sucrase": "^3.35.0"
+  }
+}

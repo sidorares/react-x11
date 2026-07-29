@@ -1,0 +1,18 @@
+# Dependencies
+node_modules
+
+# Production build
+build
+
+# Generated files
+.docusaurus
+.cache-loader
+
+# Generated API reference (synced from the repo's docs/ by scripts/sync-docs.mjs)
+docs/reference
+static/img/docs
+
+# Generated playground runtime (built by scripts/build-demo-bundles.mjs)
+static/demo/*.js
+static/demo/package.json
+static/demo/fonts

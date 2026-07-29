@@ -4,6 +4,9 @@
   `<box>`, `<scrollview>`, `<text>`, `<textinput>`, `<textarea>`, `<image>`, `<canvas>`,
   and the rich-content wrappers `<markdown>`, `<html>`, `<svg>`, `<tex>`,
   their props and refs.
+- [styling.md](styling.md) — the `style` prop: layout and paint properties,
+  `:hover`/`:focus`/`:active`/`:disabled` blocks, transitions, theme tokens,
+  window size queries, `createStyles`.
 - [components.md](components.md) — widget components built on the
   primitives: theming, `Select`, `Slider`, `Tooltip`, `Dialog`,
   `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `Tree`, `SplitPane`,
