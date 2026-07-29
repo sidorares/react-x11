@@ -246,7 +246,11 @@ export class Node {
         from,
         to,
         duration,
-        start: this.root?.frameTime ?? 0,
+        // *now*, not the last frame's timestamp: between two user actions
+        // the window is idle and draws nothing, so the previous frame can
+        // be seconds old — and the first tick would then find the
+        // transition already over and jump straight to the end
+        start: now(),
       });
       this.root?._startAnimating(this);
     }
@@ -2148,10 +2152,8 @@ export class WindowNode extends Node {
     // ids of the child windows in the order the *server* stacks them,
     // bottom to top — see _restackWindowChildren
     this._xStack = [];
-    // nodes with a transition in flight, and the timestamp the current
-    // frame is being rendered for
+    // nodes with a transition in flight
     this._animating = new Set();
-    this.frameTime = 0;
     // nodes with `@width`/`@height` blocks, and the size they last matched
     // against
     this._sizeQueryNodes = new Set();
@@ -2488,7 +2490,6 @@ export class WindowNode extends Node {
    * and it stops on its own the frame the last one lands.
    */
   _advanceAnimations(now) {
-    this.frameTime = now;
     if (this._animating.size === 0) return;
     for (const node of [...this._animating]) {
       if (node.destroyed || !node._tickAnimations(now)) {

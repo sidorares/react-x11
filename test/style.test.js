@@ -356,6 +356,56 @@ test('a transition eases a colour instead of snapping to it', async () => {
   }
 });
 
+test('a transition after an idle spell still runs', async () => {
+  const { setAnimationClock } = await import('../src/nodes.js');
+  let clock = 1000;
+  setAnimationClock(() => clock);
+  try {
+    const app = createMockApp();
+    ReactX11.render(
+      h(
+        'window',
+        { width: 100, height: 100 },
+        h('box', {
+          style: {
+            width: 40,
+            height: 40,
+            backgroundColor: '#000000',
+            transition: 100,
+            ':hover': { backgroundColor: '#ffffff' },
+          },
+        }),
+      ),
+      null,
+      app,
+    );
+    await tick();
+    const window = nodeOf(app);
+    const box = window.children[0];
+
+    // nothing happens for five seconds — a window with no animation running
+    // draws no frames, so this is the normal state of any idle UI
+    clock = 6000;
+    moveMouse(app.windows[0], 20, 20);
+
+    clock = 6050; // half way through the transition
+    window._advanceAnimations(clock);
+    const mid = box.style.backgroundColor;
+    assert.match(
+      mid,
+      /^rgba\(/,
+      'the transition is mid-flight; it used to measure its start from the ' +
+        'last frame drawn, so an idle gap made it finish before its first tick',
+    );
+
+    clock = 6200;
+    window._advanceAnimations(clock);
+    assert.strictEqual(box.style.backgroundColor, '#ffffff');
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
 test('an interrupted transition reverses from where it got to', async () => {
   const { setAnimationClock } = await import('../src/nodes.js');
   let clock = 0;
