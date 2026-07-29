@@ -68,12 +68,22 @@ no override-redirect staging (issue #4).
 - `test/wm.test.js` — the window-manager example against that same server,
   two connections: one plays the WM, the other an application. Needs
   x11 >= 3.2.0, which is where substructure redirect landed.
+- `src/index.d.ts` + `src/types/*.d.ts` — hand-written TypeScript
+  declarations for the public API, and `src/jsx-runtime.{js,d.ts}` (plus the
+  dev variant) so a project can set `jsxImportSource: "react-x11"` and have
+  JSX check against the X11 elements. See
+  [docs/typescript.md](docs/typescript.md) and the note below.
+- `test/types/api.tsx` — compiled, not run: the type tests.
 
 ## Commands
 
 - `npm test` — node:test. **Headless: no X server needed.** Primary feedback
   loop; keep it green and extend it when touching the host config.
 - `npm run lint` / `npm run format` — ESLint 9 (flat config) + Prettier.
+- `npm run typecheck` — `tsc` over the declarations and `test/types/api.tsx`.
+  Runs in CI beside lint. **A prop change is not done until the `.d.ts` and a
+  line in the type test change with it** — hand-written declarations drift
+  silently otherwise, and nothing else catches it.
 - `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,windows,wm}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). `examples:app` is the showcase: it hosts `form`, `widgets`
@@ -124,6 +134,25 @@ no override-redirect staging (issue #4).
   they are generated on demand, not committed). Needs a real `DISPLAY`
   with a **reparenting** WM; `npm run screenshots` has no WM at all and
   therefore no frames. See "Framed screenshots" below.
+
+## TypeScript declarations
+
+The types are hand-written against the JavaScript, so the only thing keeping
+them true is `npm run typecheck` plus the cases in `test/types/api.tsx`.
+Two things about the shape that are not obvious:
+
+- **JSX comes from `react-x11/jsx-runtime`, not from augmenting React.**
+  Augmentation was tried and does not compile: `text`, `image`, `canvas`,
+  `html` and `svg` are DOM element names too, already declared by
+  `@types/react` with incompatible props, and declaration merging cannot
+  replace an existing member. Owning the namespace also makes `<div>` an
+  error, which augmenting could never do.
+- **`createStyles` takes a mapped parameter**, `{ [K in keyof T]: Style }`,
+  not a bare `T extends Record<string, Style>`. With the bare form the
+  object literal loses freshness during inference and TypeScript stops
+  reporting unknown properties — the mapped form keeps `Style` as each
+  value's contextual type, so a typo in a style key is caught the way the
+  runtime validation catches it.
 
 ## Writing a window manager
 
