@@ -1,0 +1,36 @@
+/**
+ * Global overrides on top of Docusaurus' Infima defaults.
+ * The palette is generated from #087ea4 — React's own link blue, which sits
+ * next to ntk's window-title blue without being it.
+ */
+
+:root {
+  --ifm-color-primary: #087ea4;
+  --ifm-color-primary-dark: #077294;
+  --ifm-color-primary-darker: #076c8b;
+  --ifm-color-primary-darkest: #065973;
+  --ifm-color-primary-light: #098ab4;
+  --ifm-color-primary-lighter: #0990bd;
+  --ifm-color-primary-lightest: #0aa3d5;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #58c4dc;
+  --ifm-color-primary-dark: #3fbbd6;
+  --ifm-color-primary-darker: #32b5d2;
+  --ifm-color-primary-darkest: #2895ad;
+  --ifm-color-primary-light: #71cde2;
+  --ifm-color-primary-lighter: #7ed2e5;
+  --ifm-color-primary-lightest: #a5e0ee;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+/* Screenshots in the docs are of real X11 windows: keep them from washing
+   out against the page, and let the reader see the pixels. */
+.markdown img {
+  border-radius: 6px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  image-rendering: crisp-edges;
+}

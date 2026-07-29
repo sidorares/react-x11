@@ -2,6 +2,11 @@
 
 [![CI](https://github.com/sidorares/react-x11/actions/workflows/ci.yml/badge.svg)](https://github.com/sidorares/react-x11/actions/workflows/ci.yml)
 
+**[Documentation](https://sidorares.github.io/react-x11/)** ·
+**[Playground](https://sidorares.github.io/react-x11/playground)** — edit
+react-x11 and watch it render, in your browser, against a JavaScript X server
+running on the page.
+
 React custom rendering where side effects are communication with an [X11
 server](https://www.x.org/wiki/Documentation/): react-like ergonomics on top
 of [ntk](https://github.com/sidorares/ntk). Build small GUI programs for the
@@ -302,6 +307,7 @@ npm run typecheck    # tsc over the declarations and the type tests
 npm run lint         # ESLint
 npm run format       # Prettier
 npm run screenshots  # regenerate docs/img/*.png headlessly (no X server)
+npm run docs:dev     # the documentation site (npm install in website/ first)
 ```
 
 `docs/img/three.png` is the exception: the headless path has no GL, so the
@@ -311,6 +317,11 @@ with indirect GLX.
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
 guidance, [docs/](docs/README.md) for API documentation, and
 [NEXT_STEPS.md](NEXT_STEPS.md) for the roadmap.
+
+The [documentation site](https://sidorares.github.io/react-x11/) lives in
+[`website/`](website/) and renders `docs/` rather than repeating it — edit
+`docs/` and the site follows. Its playground bundles this repo's `src/` for
+the browser, so `npm run docs:test` fails when a demo stops matching the API.
 
 ## Known issues
 

@@ -74,6 +74,9 @@ no override-redirect staging (issue #4).
   JSX check against the X11 elements. See
   [docs/typescript.md](docs/typescript.md) and the note below.
 - `test/types/api.tsx` — compiled, not run: the type tests.
+- `website/` — the documentation site (Docusaurus, deployed to GitHub
+  Pages). It **renders `docs/`, it does not restate it** — see "The
+  documentation site" below before writing anything there.
 
 ## Commands
 
@@ -134,6 +137,69 @@ no override-redirect staging (issue #4).
   they are generated on demand, not committed). Needs a real `DISPLAY`
   with a **reparenting** WM; `npm run screenshots` has no WM at all and
   therefore no frames. See "Framed screenshots" below.
+- `npm run docs:dev` / `npm run docs:build` — the documentation site in
+  `website/` (needs `npm install` in `website/` once). See below.
+
+## The documentation site
+
+`website/` is a Docusaurus site published to
+<https://sidorares.github.io/react-x11/> by `.github/workflows/deploy-docs.yml`
+on every push to master. Two rules keep it from drifting away from the code,
+and both are enforced rather than asked for:
+
+- **The API reference is not written there.** `website/scripts/sync-docs.mjs`
+  copies `docs/*.md` into `website/docs/reference/` at build time — adding
+  front matter, rewriting links, copying images — and that directory is
+  gitignored. Edit `docs/`; the site follows. A new file in `docs/` appears
+  in the sidebar on its own (unlisted files trail alphabetically after the
+  ones named in `ORDER`), and a deleted one disappears, because the output
+  tree is rebuilt from scratch. **Never** hand-edit `website/docs/reference/`.
+  Only `intro.md` and `getting-started.md` are the site's own prose, and they
+  narrate rather than specify — anything normative belongs in `docs/`.
+- **The playground runs the real renderer**, so it fails when the API moves.
+  `website/scripts/build-demo-bundles.mjs` bundles `src/` together with
+  React, ntk, node-x11, its pure-JS X server and its GLX-over-WebGL2
+  emulator into one ESM module; `static/demo/runner/index.html` boots that in
+  an iframe and compiles editor JSX with sucrase. `npm test` in `website/`
+  runs all three gates: `check-bundle.mjs` (the bundle loads, renders a
+  tree, reads pixels back), `check-demos.mjs` (every demo in
+  `website/src/demos/` mounts, paints, and responds to injected input) and
+  `check-share.mjs` (the share-link codec round-trips every demo). The
+  `docs` job in `.github/workflows/ci.yml` runs them on every PR. **A prop
+  or component rename is not done until the demos that use it still pass.**
+
+Share links (`?code=…`, `website/src/lib/share.mjs`) carry the whole snippet
+in the URL — DEFLATE, then base64url, with a one-character scheme prefix.
+There is no server and no stored snippet, so **the format is permanent**: a
+link someone pasted into an issue two years ago still has to decode. Add a
+new scheme letter rather than changing what `d` or `p` mean. Code that
+arrives that way does not auto-run, and says so above the editor, because it
+is a stranger's JavaScript running in the page.
+
+Things that were awkward to get right, so they don't get re-broken:
+
+- The bundle is **ESM, not an IIFE**: ntk's module graph and yoga-layout's
+  WASM loader both use top-level await, which esbuild only emits in that
+  format.
+- **One React.** The entry resolves `react` from `website/node_modules` and
+  `src/` resolves it from the repo root; two instances share no hook
+  dispatcher, so the build aliases `react` to the repo's copy.
+- The bundle ships a `Buffer` polyfill it installs only when there is no
+  global one — true in a browser, false in node. Both check scripts
+  `delete globalThis.Buffer` before importing it, or the x11 client builds
+  packets node's `Buffer.isBuffer` then rejects.
+- `DevToolsIntegration.js` and `ClickToComponent.js` are replaced by a stub
+  at bundle time (an esbuild resolver plugin): they are dynamically imported
+  behind environment variables the playground never sets, but bundling them
+  would drag in `ws` and `node:child_process`.
+- The demo exercises in `check-demos.mjs` locate their click targets **by
+  the colour they are painted in**, not by coordinates, so moving a demo's
+  layout cannot silently turn its assertion into a click on empty
+  background.
+- react-x11 caches its ntk App at module scope, so the runner keeps **one**
+  server and one connection for the page's lifetime and unmounts between
+  runs. Rebuilding the server per run would leave the second `createRoot()`
+  holding a dead socket.
 
 ## TypeScript declarations
 
