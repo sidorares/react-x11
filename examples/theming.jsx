@@ -24,14 +24,24 @@ import {
 import { THEME_OPTIONS, themeFor } from './themes.js';
 
 const s = createStyles({
+  // no horizontal padding out here: the scroll container spans the full
+  // width so its scrollbar sits by the window edge, the way an application
+  // window's does. The padding goes on the header and the content instead.
   root: {
     flexGrow: 1,
-    padding: 16,
+    paddingTop: 16,
     gap: 14,
     backgroundColor: '$canvas',
     transition: { backgroundColor: 180 },
   },
-  bar: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexShrink: 0,
+    paddingLeft: 16,
+    paddingRight: 16,
+  },
   title: { fontSize: 18, color: '$text' },
   // below 520 the window has no room for the explanation, so it goes
   spacerHide: { flexGrow: 1, '@width < 520': { display: 'none' } },
@@ -48,6 +58,9 @@ const s = createStyles({
     gap: 14,
     flexDirection: 'column',
     flexShrink: 0,
+    paddingLeft: 16,
+    paddingRight: 16,
+    paddingBottom: 16,
     '@width >= 620': { flexDirection: 'row' },
   },
   column: { flexGrow: 1, minWidth: 0, gap: 12 },
