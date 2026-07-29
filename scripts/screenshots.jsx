@@ -8,6 +8,28 @@
 // Text is set in a system sans-serif (UI text in a small serif looks like
 // a LaTeX document, not a UI): Arial on macOS, Liberation Sans / DejaVu
 // Sans on Linux, with ntk's bundled KaTeX fonts as a last resort.
+// `dashboard` renders a live clock and this process's heap usage, so
+// without pinning both its PNG differs on every run and `npm run
+// screenshots` leaves the tree dirty whether or not anything changed —
+// which makes the diff useless as a signal that a change was visible.
+process.env.TZ = 'UTC';
+const realMemoryUsage = process.memoryUsage.bind(process);
+process.memoryUsage = () => ({
+  ...realMemoryUsage(),
+  heapUsed: 42 * 1024 * 1024,
+  heapTotal: 64 * 1024 * 1024,
+});
+const FROZEN_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
+const RealDate = Date;
+globalThis.Date = class extends RealDate {
+  constructor(...args) {
+    super(...(args.length ? args : [FROZEN_MS]));
+  }
+  static now() {
+    return FROZEN_MS;
+  }
+};
+
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -19,6 +41,7 @@ import { createClient, StaticFontSource } from 'ntk';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 const ReactX11 = (await import('../src/index.js')).default;
+const { editMenuGeometry } = await import('../src/editmenu.js');
 const Dashboard = (await import('../examples/dashboard.jsx')).default;
 const Tasks = (await import('../examples/tasks.jsx')).default;
 const Form = (await import('../examples/form.jsx')).default;
@@ -180,8 +203,7 @@ async function typeText(app, wnd, text) {
   }
 }
 
-async function shot(wnd, name) {
-  await sleep(250); // let the frame clock paint
+async function capture(wnd) {
   const { width, height } = wnd;
   const ctx = wnd.getContext('2d');
   const data = await new Promise((resolve, reject) =>
@@ -189,16 +211,53 @@ async function shot(wnd, name) {
       err ? reject(err) : resolve(d),
     ),
   );
-  const png = new PNG({ width, height });
-  for (let i = 0; i < width * height; i++) {
-    png.data[i * 4 + 0] = data.data[i * 4 + 2]; // BGRA -> RGBA
-    png.data[i * 4 + 1] = data.data[i * 4 + 1];
-    png.data[i * 4 + 2] = data.data[i * 4 + 0];
-    png.data[i * 4 + 3] = 255;
+  return { data: data.data, width, height };
+}
+
+/** Blit a capture into a PNG at (ox, oy), converting BGRA to RGBA. */
+function blit(png, src, ox, oy) {
+  for (let y = 0; y < src.height; y++) {
+    for (let x = 0; x < src.width; x++) {
+      const dx = ox + x;
+      const dy = oy + y;
+      if (dx < 0 || dy < 0 || dx >= png.width || dy >= png.height) continue;
+      const s = (y * src.width + x) * 4;
+      const d = (dy * png.width + dx) * 4;
+      png.data[d + 0] = src.data[s + 2];
+      png.data[d + 1] = src.data[s + 1];
+      png.data[d + 2] = src.data[s + 0];
+      png.data[d + 3] = 255;
+    }
   }
+}
+
+function write(png, name) {
   const file = join(outDir, `${name}.png`);
   writeFileSync(file, PNG.sync.write(png));
-  console.log(`wrote ${file} (${width}x${height})`);
+  console.log(`wrote ${file} (${png.width}x${png.height})`);
+}
+
+async function shot(wnd, name) {
+  await sleep(250); // let the frame clock paint
+  const base = await capture(wnd);
+  const png = new PNG({ width: base.width, height: base.height });
+  blit(png, base, 0, 0);
+  write(png, name);
+}
+
+/**
+ * A popup over the window it belongs to. A popup is its own X window, so
+ * `GetImage` on the owner never contains it — the two are read separately
+ * and composited at the popup's position.
+ */
+async function shotOver(wnd, popup, x, y, name) {
+  await sleep(250);
+  const base = await capture(wnd);
+  const over = await capture(popup);
+  const png = new PNG({ width: base.width, height: base.height });
+  blit(png, base, 0, 0);
+  blit(png, over, x, y);
+  write(png, name);
 }
 
 async function scene(fn) {
@@ -313,6 +372,57 @@ await scene(async (app) => {
   const content = input.contentBox();
   click(wnd, content.x + input._prefixWidth(6), content.y + 5);
   await shot(wnd, 'textinput');
+});
+
+// The built-in edit menu, over the field it belongs to — the point being
+// that the selection survives the right-click and the menu acts on it.
+await scene(async (app) => {
+  const wnd = await render(
+    <window width={420} height={230} style={{ backgroundColor: '#f5f6fa' }}>
+      <box style={{ flexGrow: 1, padding: 16, gap: 10 }}>
+        <text style={{ fontSize: 13, color: '#57606f' }}>
+          right-click a &lt;textinput&gt; — no wiring
+        </text>
+        <textinput
+          defaultValue="select me and right-click"
+          style={{
+            padding: 8,
+            fontSize: 15,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: '#b2bec3',
+            backgroundColor: 'white',
+          }}
+        />
+      </box>
+    </window>,
+    app,
+  );
+  await sleep(100);
+  const input = findNode(wnd._reactX11Node, (n) => n.kind === 'textinput');
+  clickNode(wnd, input);
+
+  app.X.keycode2keysyms[254] = [0x61];
+  wnd.emit('keydown', { keycode: 254, codepoint: 0x61, buttons: 4 }); // ctrl+a
+  await sleep(50);
+
+  // right-click *inside* the selection: it has to survive
+  const x = input.abs.x + 60;
+  const y = input.abs.y + input.abs.height / 2;
+  wnd.emit('mousedown', { x, y, keycode: 3, rootx: x, rooty: y });
+  await sleep(150);
+
+  // hover Copy, found by geometry rather than a guessed offset
+  const menu = app.popups.at(-1);
+  const geometry = editMenuGeometry(
+    input._editMenuItems(),
+    (text) => input._layoutOf(text)?.width,
+  );
+  const copy = geometry.rows.find((r) => r.id === 'copy');
+  menu.emit('mousemove', { x: 20, y: copy.y + copy.height / 2 });
+  await sleep(50);
+
+  await shotOver(wnd, menu, x, y, 'textinput-menu');
 });
 
 process.exit(0);

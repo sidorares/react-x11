@@ -285,6 +285,8 @@ the built-in editing behavior.
 
 ### The right-click menu
 
+![the built-in edit menu](img/textinput-menu.png)
+
 Right-clicking gives Undo / Redo / Cut / Copy / Paste / Select All with no
 wiring, the way a browser gives `<input>` one — each row live only when it
 would do something, and every row running the same code the keyboard
