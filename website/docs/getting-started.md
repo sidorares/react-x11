@@ -59,7 +59,14 @@ const root = await createRoot();
 root.render(<App />);
 ```
 
-JSX needs a loader — [`tsx`](https://tsx.is/) is the shortest route:
+JSX needs a loader. [Bun](https://bun.com/) transforms it natively, so there
+is nothing to add:
+
+```bash
+bun hello.jsx
+```
+
+Under Node, [`tsx`](https://tsx.is/) is the shortest route:
 
 ```bash
 npx tsx hello.jsx
@@ -134,6 +141,15 @@ at module top level (those bindings become `let`s initialised in a
 microtask — use the default import, `React.createContext`), and identity
 that must survive a reload (contexts, stores) belongs in its own module that
 the reload does not touch.
+
+`bun --hot` is not a substitute. Its `import.meta.hot` API belongs to the
+bundler and dev server, not the CLI runtime, where the property is
+`undefined` — so there is no way to declare an accept boundary, and a reload
+re-instantiates every module including `react`. The reconciler that is still
+mounted then holds a different React than the reloaded components call, and
+the first hook throws `resolveDispatcher(...) is null`. `bun --watch` works,
+but it restarts the process: new connection, new window, no state. Fast
+Refresh needs the loader hooks above.
 
 ## React DevTools
 

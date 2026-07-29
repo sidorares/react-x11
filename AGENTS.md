@@ -392,6 +392,23 @@ the diff records the cost.
   resized the window).
 - Windows cannot be nested inside `<box>` (throws); raw strings are only
   legal inside `<text>` (throws otherwise).
+- **Bun honours `tsconfig.json`'s `compilerOptions.paths` at runtime**, and
+  ours maps `react-x11` at the declarations for the type tests. So inside
+  this repo `bun` resolves the bare specifier to `src/index.d.ts` and dies
+  on `The constant "Renderer" must be initialized`; Node ignores `paths` and
+  resolves `src/index.js`. The examples import `../src/index.js` relatively,
+  so they run fine under `bun` — but a script here that uses the package
+  name will not. Outside the repo (a normal install) there is no such
+  mapping and `bun hello.jsx` just works, which is what
+  `website/docs/getting-started.md` documents.
+- `bun --hot` cannot drive Fast Refresh for this renderer: `import.meta.hot`
+  is `undefined` in the CLI runtime (that API is the bundler's), so no accept
+  boundary can be declared, and a reload re-instantiates every module —
+  `react` included. The mounted reconciler then holds a different React than
+  the reloaded components call and the first hook throws
+  `resolveDispatcher(...) is null`. Hot reloading stays on
+  `examples/hmr-register.mjs`, which deliberately keeps `node_modules` and
+  `src/` out of the hot graph for exactly this reason.
 
 ## Style
 
