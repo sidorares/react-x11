@@ -142,6 +142,12 @@ function Elements() {
         disabled={!inputRef.current?.canUndo}
         onPress={() => void inputRef.current?.undo()}
       />
+      <textinput
+        contextMenu={false}
+        onContextMenu={(ev: MouseEvent<TextInputNode>) => {
+          if (ev.button === 3) ev.preventDefault();
+        }}
+      />
       <textarea rows={4} defaultValue="multi" />
       <image src="./logo.png" style={{ width: 32, height: 32 }} />
       <canvas

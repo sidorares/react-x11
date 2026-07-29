@@ -151,6 +151,12 @@ export interface TextInputProps extends DrawnProps<TextInputNode> {
   maxLength?: number;
   selectionColor?: Color;
   caretColor?: Color;
+  /**
+   * `false` turns off the built-in right-click edit menu (Undo/Redo, Cut,
+   * Copy, Paste, Select All). `onContextMenu` still fires, so this is how
+   * you replace it with your own rather than suppressing it per-event.
+   */
+  contextMenu?: false;
 }
 
 export interface TextAreaProps extends TextInputProps {

@@ -45,6 +45,7 @@ props — they can never go stale.
 | `onMouseDown` / `onMouseUp` / `onMouseMove` | move is coalesced to once per frame by ntk                                            |
 | `onMouseEnter` / `onMouseLeave`             | do not propagate; synthesized by hover-path diffing                                   |
 | `onWheel`                                   | X buttons 4–7; default action scrolls the nearest `<scrollview>`                      |
+| `onContextMenu`                             | right-click (button 3), after `onMouseDown`; default action opens the element's menu  |
 | `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus in `tabIndex` order   |
 | `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal              |
 

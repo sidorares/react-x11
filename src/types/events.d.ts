@@ -111,6 +111,14 @@ export interface PointerHandlers<T = DrawnNode> {
   onMouseLeave?: (ev: MouseEvent<T>) => void;
   onWheel?: (ev: WheelEvent<T>) => void;
   onWheelCapture?: (ev: WheelEvent<T>) => void;
+  /**
+   * Right-click (button 3), dispatched after `onMouseDown` — so suppressing
+   * the menu does not also give up whatever mousedown did. `preventDefault()`
+   * skips the element's own menu, which today means the edit menu on
+   * `<textinput>` and `<textarea>`.
+   */
+  onContextMenu?: (ev: MouseEvent<T>) => void;
+  onContextMenuCapture?: (ev: MouseEvent<T>) => void;
 }
 
 export interface KeyboardHandlers<T = DrawnNode> {

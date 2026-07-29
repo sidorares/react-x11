@@ -3744,6 +3744,273 @@ test('textarea: undo restores across lines, Enter is its own step', async () => 
   ReactX11.unmountComponentAtNode(app);
 });
 
+// --- right-click / the built-in edit menu ----------------------------------
+
+// A focused <textinput> with everything selected, plus a working clipboard.
+async function mountSelected(props = {}) {
+  const app = createMockApp();
+  const writes = [];
+  app.clipboard = {
+    write(text, opts) {
+      writes.push([text, opts?.selection ?? 'CLIPBOARD']);
+      return Promise.resolve();
+    },
+    read: () => Promise.resolve('pasted'),
+  };
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 80 },
+      React.createElement('textinput', {
+        defaultValue: 'hello world',
+        ...props,
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+  pressKey(app, wnd, { keysym: 0x61, codepoint: 0x61, buttons: CTRL }); // ctrl+a
+  return { app, wnd, input, writes };
+}
+
+const rightClick = (wnd, x = 40, y = 10) =>
+  wnd.emit('mousedown', { x, y, keycode: 3 });
+
+test('textinput: right-click keeps the selection it lands inside', async () => {
+  const { app, wnd, input } = await mountSelected();
+  assert.deepStrictEqual(input._selection(), [0, 11]);
+
+  rightClick(wnd);
+  assert.deepStrictEqual(
+    input._selection(),
+    [0, 11],
+    'the menu is about to act on it — it must survive the click',
+  );
+  assert.strictEqual(input._dragging, false, 'and no drag was started');
+  assert.strictEqual(
+    input._showsSelection(),
+    true,
+    'still painted while the menu holds the keyboard',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: right-click outside the selection moves the caret', async () => {
+  const { app, wnd, input } = await mountSelected();
+  input._indexAtPoint = () => 3; // stub: headless text measures 0x0
+  input._caret = 6;
+  input._anchor = 8; // a selection of [6, 8] — the click at 3 is outside it
+
+  rightClick(wnd);
+  assert.deepStrictEqual(input._selection(), [3, 3], 'caret follows the click');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: right-click opens a menu whose rows match the state', async () => {
+  const { app, wnd, input } = await mountSelected();
+  const before = app.windows.length;
+
+  rightClick(wnd);
+  assert.ok(input._editMenu, 'a popup is open');
+  assert.strictEqual(app.windows.length, before + 1, 'and it is a real window');
+
+  const rows = Object.fromEntries(
+    input
+      ._editMenuItems()
+      .filter((i) => !i.separator)
+      .map((i) => [i.id, i.enabled]),
+  );
+  assert.deepStrictEqual(rows, {
+    undo: false, // nothing has been edited yet
+    redo: false,
+    cut: true, // there is a selection
+    copy: true,
+    paste: true, // there is a clipboard to ask
+    selectAll: false, // everything is already selected
+  });
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: choosing Copy closes the menu and copies', async () => {
+  const { app, wnd, input, writes } = await mountSelected();
+  rightClick(wnd);
+
+  input._chooseEditMenu('copy');
+  assert.strictEqual(input._editMenu, null, 'the menu closes');
+  assert.deepStrictEqual(writes.at(-1), ['hello world', 'CLIPBOARD']);
+  assert.deepStrictEqual(input._selection(), [0, 11], 'selection survives');
+  assert.strictEqual(input._focused, true, 'focus comes back to the field');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: Cut through the menu is one undoable step', async () => {
+  const { app, wnd, input } = await mountSelected();
+  rightClick(wnd);
+  input._chooseEditMenu('cut');
+
+  assert.strictEqual(input.value, '');
+  assert.strictEqual(input.canUndo, true);
+  input.undo();
+  assert.strictEqual(input.value, 'hello world', 'one undo brings it back');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: Escape closes the menu, leaving the text alone', async () => {
+  const { app, wnd, input } = await mountSelected();
+  rightClick(wnd);
+  const popup = input._editMenu;
+  const canvas = popup.children[0];
+
+  canvas.props.onKeyDown({ keysym: 0xff1b }); // Escape
+  assert.strictEqual(input._editMenu, null);
+  assert.strictEqual(input.value, 'hello world');
+  assert.strictEqual(input._focused, true);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: arrows walk the menu, skipping disabled rows', async () => {
+  const { app, wnd, input } = await mountSelected();
+  rightClick(wnd);
+  const canvas = input._editMenu.children[0];
+  const items = input._editMenuItems();
+
+  // Undo and Redo are disabled and Select All is too, so Down from nothing
+  // lands on Cut — the first row that would actually do something
+  canvas.props.onKeyDown({ keysym: 0xff54 }); // Down
+  canvas.props.onKeyDown({ keysym: 0xff0d }); // Enter
+  assert.strictEqual(input._editMenu, null, 'Enter chose a row and closed');
+  assert.strictEqual(input.value, '', 'and the row it chose was Cut');
+  assert.strictEqual(items[3].id, 'cut');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: onContextMenu fires, and preventDefault suppresses the menu', async () => {
+  const seen = [];
+  const { app, wnd, input } = await mountSelected({
+    onContextMenu: (ev) => {
+      seen.push(ev.button);
+      ev.preventDefault();
+    },
+  });
+
+  rightClick(wnd);
+  assert.deepStrictEqual(seen, [3], 'the handler ran');
+  assert.strictEqual(
+    input._editMenu,
+    null,
+    'and the built-in menu stayed shut',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: contextMenu={false} opts out of the built-in menu', async () => {
+  const { app, wnd, input } = await mountSelected({ contextMenu: false });
+  rightClick(wnd);
+  assert.strictEqual(input._editMenu, null);
+  assert.deepStrictEqual(
+    input._selection(),
+    [0, 11],
+    'opting out still must not eat the selection',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: a press outside dismisses the menu', async () => {
+  const { app, wnd, input } = await mountSelected();
+  rightClick(wnd);
+  const popup = input._editMenu;
+
+  popup.props.onDismiss({});
+  assert.strictEqual(input._editMenu, null);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('ContextMenu around a textinput replaces the built-in menu', async () => {
+  const { ContextMenu } = await import('../src/index.js');
+  const findKind = (node, kind) =>
+    node.kind === kind
+      ? node
+      : node.children.reduce((f, c) => f ?? findKind(c, kind), null);
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 120 },
+      React.createElement(
+        ContextMenu,
+        {
+          items: [{ id: 'app', label: 'App action' }],
+          style: { flexGrow: 1 },
+        },
+        React.createElement('textinput', { defaultValue: 'hello' }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = findKind(wnd._reactX11Node, 'textinput');
+  const before = app.windows.length;
+
+  // land the press on the textinput itself, so both menus are in play
+  wnd.emit('mousedown', { x: 20, y: 8, keycode: 3, rootx: 300, rooty: 200 });
+  await tick();
+
+  assert.strictEqual(
+    input._editMenu,
+    null,
+    'the built-in menu defers to the one wrapped around it',
+  );
+  assert.strictEqual(
+    app.windows.length,
+    before + 1,
+    'exactly one popup, not two stacked on each other',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textarea: right-click gets the same menu', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement('textarea', { defaultValue: 'a\nb', rows: 3 }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const area = wnd._reactX11Node.children[0];
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+
+  rightClick(wnd, 20, 20);
+  assert.ok(area._editMenu, 'the editing core is shared, so the menu is too');
+  area._chooseEditMenu('selectAll');
+  assert.deepStrictEqual(area._selection(), [0, 3]);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('textarea: PageDown/PageUp move by a viewport of lines', async () => {
   const app = createMockApp();
   ReactX11.render(

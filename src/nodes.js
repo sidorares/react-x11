@@ -26,6 +26,13 @@ import {
 } from './styles.js';
 import { EventManager } from './events.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
+import {
+  editMenuColors,
+  editMenuGeometry,
+  editMenuIndexAt,
+  editMenuStep,
+  paintEditMenu,
+} from './editmenu.js';
 
 const DRAWN_KINDS = new Set([
   'box',
@@ -1418,6 +1425,7 @@ const XK_PAGE_UP = 0xff55;
 const XK_PAGE_DOWN = 0xff56;
 const XK_END = 0xff57;
 const XK_DELETE = 0xffff;
+const XK_ESCAPE = 0xff1b;
 
 /** Undo entries kept per input. Snapshots of a single field are small; the
  * cap is what stops a long-lived form from growing without bound. */
@@ -1466,6 +1474,8 @@ export class TextInputNode extends Node {
     this._historyIndex = 0;
     this._historyValue = this.value;
     this._undoRun = null;
+    // the open built-in edit menu, if any (see _openEditMenu)
+    this._editMenu = null;
     this.yoga.setMeasureFunc((width, widthMode) => {
       const preferred = 150;
       const w =
@@ -1885,6 +1895,22 @@ export class TextInputNode extends Node {
   _defaultMouseDown(ev) {
     // wherever the caret lands, editing resumes as a new undo entry
     this._breakUndoRun();
+    if (ev.button === 3) {
+      // A right-click is about to open a menu that acts on the selection,
+      // so it must not be the thing that throws the selection away: a click
+      // inside one keeps it, and only a click outside moves the caret. Both
+      // GTK and Qt behave this way, and it is why this cannot fall through
+      // to the caret placement below — that also started a drag nobody
+      // asked for.
+      const i = this._indexAtPoint(ev);
+      const [a, b] = this._selection();
+      if (i < a || i > b) {
+        this._caret = i;
+        this._anchor = i;
+        this._repaint();
+      }
+      return;
+    }
     if (ev.button === 2) {
       // X11 middle-click: paste the PRIMARY selection at the click position
       const i = this._indexAtPoint(ev);
@@ -1926,6 +1952,13 @@ export class TextInputNode extends Node {
     if (this._caret !== this._anchor) this._copySelection('PRIMARY');
   }
 
+  /** The selection stays lit while its own menu is up: the popup holds the
+   * keyboard, so `_focused` is false, but the text the menu is about to act
+   * on has to stay visibly selected. */
+  _showsSelection() {
+    return this._focused || Boolean(this._editMenu);
+  }
+
   _defaultMouseDrag(ev) {
     if (!this._dragging) return;
     this._caret = this._indexAtPoint(ev);
@@ -1936,6 +1969,192 @@ export class TextInputNode extends Node {
     if (!this._dragging) return;
     this._dragging = false;
     if (this._caret !== this._anchor) this._copySelection('PRIMARY');
+  }
+
+  // --- the built-in edit menu -----------------------------------------
+  //
+  // Right-click gets Undo/Cut/Copy/Paste with no wiring, the way a browser
+  // gives `<input>` one. The rows cannot be `Menu` components — those are
+  // React over the nodes, and a node cannot mount one — so the menu is a
+  // `<popup>` built here with a `<canvas>` child that paints the rows
+  // (src/editmenu.js) and handles its own pointer and key events. That
+  // reuses the popup's pointer grab, dismissal and focus rather than
+  // reinventing them. `contextMenu={false}` opts out, as does
+  // `preventDefault()` in an `onContextMenu` handler.
+
+  /** The rows, with each one enabled only when it would do something. */
+  _editMenuItems() {
+    const [a, b] = this._selection();
+    const hasSelection = a !== b;
+    const length = this._chars().length;
+    return [
+      { id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z', enabled: this.canUndo },
+      {
+        id: 'redo',
+        label: 'Redo',
+        shortcut: 'Ctrl+Shift+Z',
+        enabled: this.canRedo,
+      },
+      { separator: true },
+      { id: 'cut', label: 'Cut', shortcut: 'Ctrl+X', enabled: hasSelection },
+      { id: 'copy', label: 'Copy', shortcut: 'Ctrl+C', enabled: hasSelection },
+      {
+        id: 'paste',
+        label: 'Paste',
+        shortcut: 'Ctrl+V',
+        // whether CLIPBOARD holds anything is an async round trip, so the
+        // row stays live whenever there is a clipboard to ask
+        enabled: Boolean(this._clipboardApi()),
+      },
+      { separator: true },
+      {
+        id: 'selectAll',
+        label: 'Select All',
+        shortcut: 'Ctrl+A',
+        enabled: length > 0 && !(a === 0 && b === length),
+      },
+    ];
+  }
+
+  /** Run a row. Everything here is the keyboard path's own entry point, so
+   * the menu can never drift from what the shortcuts do. */
+  _runEditAction(id) {
+    const [a, b] = this._selection();
+    if (id === 'undo') this.undo();
+    else if (id === 'redo') this.redo();
+    else if (id === 'copy') this._copySelection();
+    else if (id === 'cut') {
+      this._copySelection();
+      if (a !== b) this._deleteRange(a, b);
+    } else if (id === 'paste') this._pasteFrom();
+    else if (id === 'selectAll') {
+      this._anchor = 0;
+      this._caret = this._chars().length;
+      this._breakUndoRun();
+      this._repaint();
+    }
+  }
+
+  _defaultContextMenu(ev) {
+    if (this.props.contextMenu === false) return;
+    this._openEditMenu(ev);
+  }
+
+  /** Where the popup goes: at the pointer in root coordinates, pulled back
+   * inside the screen when it would hang off the right or bottom edge. */
+  _editMenuOrigin(ev, size) {
+    const owner = this.root;
+    const native = ev.nativeEvent;
+    let x = native?.rootx;
+    let y = native?.rooty;
+    if (x == null || y == null) {
+      // no native event (synthesized, or a test): fall back to the node's
+      // own position within its window plus wherever that window is
+      const origin = owner?.window?._screenOrigin ?? { x: 0, y: 0 };
+      x = origin.x + (ev.x ?? this.abs.x);
+      y = origin.y + (ev.y ?? this.abs.y);
+    }
+    const screen = this.app?.X?.display?.screen?.[0];
+    if (screen?.pixel_width) {
+      x = Math.max(0, Math.min(x, screen.pixel_width - size.width));
+      y = Math.max(0, Math.min(y, screen.pixel_height - size.height));
+    }
+    return { x, y };
+  }
+
+  _openEditMenu(ev) {
+    this._closeEditMenu();
+    const items = this._editMenuItems();
+    const geometry = editMenuGeometry(
+      items,
+      (text) => this._layoutOf(text)?.width,
+    );
+    const { x, y } = this._editMenuOrigin(ev, geometry);
+    const colors = editMenuColors(this.theme);
+    const style = this._textStyle();
+    const state = { active: -1 };
+
+    const canvas = new CanvasNode(
+      {
+        focusable: true,
+        style: { flexGrow: 1 },
+        onDraw: (ctx) =>
+          paintEditMenu(ctx, {
+            geometry,
+            active: state.active,
+            colors,
+            radius: this.theme?.radius ?? 4,
+            layoutOf: (text, color) =>
+              this.app?.fonts?.layout([{ text, ...style, color }], style),
+          }),
+        onMouseMove: (mv) => {
+          const next = editMenuIndexAt(geometry, mv.y);
+          if (next === state.active) return;
+          state.active = next;
+          popup.invalidate(false);
+        },
+        onMouseUp: (mv) => {
+          const i = editMenuIndexAt(geometry, mv.y);
+          if (i !== -1) this._chooseEditMenu(geometry.rows[i].id);
+          else this._closeEditMenu();
+        },
+        onKeyDown: (k) => {
+          if (k.keysym === XK_ESCAPE) return this._closeEditMenu();
+          if (k.keysym === XK_UP || k.keysym === XK_DOWN) {
+            state.active = editMenuStep(
+              geometry,
+              state.active,
+              k.keysym === XK_DOWN ? 1 : -1,
+            );
+            popup.invalidate(false);
+            return;
+          }
+          if (k.keysym === XK_RETURN || k.keysym === XK_KP_ENTER) {
+            const row = geometry.rows[state.active];
+            if (row && !row.separator) this._chooseEditMenu(row.id);
+          }
+        },
+      },
+      this.app,
+    );
+
+    const popup = new PopupNode(
+      this.app,
+      {
+        x,
+        y,
+        width: geometry.width,
+        height: geometry.height,
+        windowType: 'popup_menu',
+      },
+      {
+        grab: true,
+        // a press outside the menu closes it and goes no further, which is
+        // what the grab is for
+        onDismiss: () => this._closeEditMenu(),
+      },
+    );
+    popup.insertBefore(canvas, null);
+    this.insertBefore(popup, null);
+    popup.realize(null);
+    this._editMenu = popup;
+    // the menu takes the keyboard so arrows and Escape reach it rather than
+    // editing the text behind it
+    popup.events?.focus?.(canvas);
+  }
+
+  _chooseEditMenu(id) {
+    this._closeEditMenu();
+    if (id) this._runEditAction(id);
+  }
+
+  _closeEditMenu() {
+    const popup = this._editMenu;
+    if (!popup) return;
+    this._editMenu = null;
+    this.removeChild(popup);
+    // focus goes back to the field, so typing carries on where it left off
+    if (!this.destroyed) this.focus();
   }
 
   _defaultFocus() {
@@ -1962,6 +2181,9 @@ export class TextInputNode extends Node {
   destroySubtree() {
     clearInterval(this._blinkTimer);
     this._blinkTimer = null;
+    // the popup is a child, so the walk below destroys it — just drop the
+    // handle so a later close does not try to remove it twice
+    this._editMenu = null;
     super.destroySubtree();
   }
 
@@ -2034,7 +2256,7 @@ export class TextInputNode extends Node {
     const originX = content.x - this._scrollX;
 
     const [a, b] = this._selection();
-    if (this._focused && a !== b && !isEmpty) {
+    if (this._showsSelection() && a !== b && !isEmpty) {
       const selStart = this._prefixWidth(a);
       const selEnd = this._prefixWidth(b);
       ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
@@ -2303,7 +2525,7 @@ export class TextAreaNode extends TextInputNode {
     const originY = content.y - this._scrollY;
 
     const [a, b] = this._selection();
-    if (this._focused && a !== b && !isEmpty) {
+    if (this._showsSelection() && a !== b && !isEmpty) {
       const posA = layout.caretPosition(a);
       const posB = layout.caretPosition(b);
       ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
