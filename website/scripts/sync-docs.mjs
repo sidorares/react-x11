@@ -178,7 +178,7 @@ const ORDER = [
   'typescript.md',
   'devtools.md',
   'click-to-component.md',
-  'glx-plan.md',
+  'glx.md',
 ];
 
 syncFile('README.md', 'index.md', {

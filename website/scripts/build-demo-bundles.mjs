@@ -43,6 +43,7 @@ const outFile = path.join(websiteDir, 'static', 'demo', 'react-x11-runtime.js');
 
 const x11Dir = path.join(repoRoot, 'node_modules', 'x11');
 const hasGlx = fs.existsSync(path.join(x11Dir, 'browser', 'glx', 'index.js'));
+const profiling = !!process.env.REACT_X11_DEMO_PROFILE;
 
 // Virtual entry. resolveDir is website/scripts so ./demo-fonts.js and the
 // website's own devDependencies (dejavu-fonts-ttf, sucrase) resolve there,
@@ -91,8 +92,11 @@ await esbuild.build({
   format: 'esm',
   platform: 'browser',
   target: ['es2022'],
-  minify: true,
-  sourcemap: false,
+  // REACT_X11_DEMO_PROFILE=1 keeps names and emits a source map, so a V8
+  // CPU profile of the playground names real functions instead of `mO`.
+  // Never set in CI or on the deploy path.
+  minify: !profiling,
+  sourcemap: profiling ? 'inline' : false,
   logLevel: 'info',
   plugins: [nodeOnlyModules],
   // Development React: the playground is a place to learn the API, and the

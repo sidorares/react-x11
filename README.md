@@ -7,10 +7,14 @@
 react-x11 and watch it render, in your browser, against a JavaScript X server
 running on the page.
 
-React custom rendering where side effects are communication with an [X11
-server](https://www.x.org/wiki/Documentation/): react-like ergonomics on top
-of [ntk](https://github.com/sidorares/ntk). Build small GUI programs for the
-X Window environment (a linux desktop, or macOS +
+A React renderer whose host environment is an [X11
+server](https://www.x.org/wiki/Documentation/). React's job in a renderer is
+to compute what changed; the renderer's job is to turn that into side effects
+on some host — in react-dom those are DOM mutations, here they are **X11
+protocol requests** written to a socket. There is no DOM, no HTML and no
+browser engine underneath: this is not Electron with a different skin, and
+`<div>` is not an element that exists. Build GUI programs for the X Window
+environment (a linux desktop, or macOS +
 [XQuartz](https://www.xquartz.org/)) with your React / React Native
 experience — flexbox layout, components, hooks, synthetic events.
 
@@ -23,6 +27,25 @@ anything — and `npm test` doesn't even need an X server (node-x11 ships an
 in-process pure-JS X server that the tests render into and read pixels back
 from; every screenshot below was rendered that way too, by driving the real
 examples through the real event pipeline).
+
+### The wire carries drawing, not pixels
+
+react-x11 does not rasterize a frame on the client and ship the buffer
+across. React reconciles the component tree, the renderer turns that diff
+into **drawing operations** — rounded rectangles, composited gradients, clip
+regions, runs of glyph indices — and the X server executes them. The server
+owns the pixels; the client never had them.
+
+That is what X's RENDER extension is for. Text is shaped once and its glyphs
+uploaded once, so drawing a line afterwards names them by index, about a byte
+per glyph; gradients, scaling, alpha compositing and clipping are single
+server-side requests rather than loops over a pixel array; nothing is read
+back. An update costs what the _drawing_ costs, not what the window's area
+costs — which is why this stays comfortable on a display forwarded over ssh.
+
+Because that is the design it is measured rather than assumed: `npm run
+bench` reports requests, bytes, replies, RENDER composites and the pixel area
+those composites touch, against a checked-in baseline.
 
 | `examples/dashboard.jsx` — context theming, hooks | `examples/tasks.jsx` — useReducer, textinput, scrollview |
 | ------------------------------------------------- | -------------------------------------------------------- |
@@ -148,7 +171,7 @@ matrices plus one `CallList` per mesh whatever the triangle count. What the
 protocol cannot do — shaders, instancing, post-processing, shadows — throws
 with the reason rather than half-working. See
 [docs/elements.md](docs/elements.md#3d-scene-mesh-group-geometries-materials)
-and [docs/glx-plan.md](docs/glx-plan.md).
+and [docs/glx.md](docs/glx.md).
 
 Events are synthetic with capture/bubble phases and hit testing over the
 drawn tree: `onClick` (with DOM-style `detail` click counting),

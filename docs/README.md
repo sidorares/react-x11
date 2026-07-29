@@ -8,9 +8,10 @@
   `:hover`/`:focus`/`:active`/`:disabled` blocks, transitions, theme tokens,
   window size queries, `createStyles`.
 - [components.md](components.md) — widget components built on the
-  primitives: theming, `Select`, `Slider`, `Tooltip`, `Dialog`,
-  `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `Tree`, `SplitPane`,
-  `Canvas3D`, and the `useAnchor` popup placement hook.
+  primitives: theming, the basic controls (`Button`, `Checkbox`,
+  `Radio`/`RadioGroup`, `Switch`, `ProgressBar`), `Select`, `Slider`,
+  `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `Tree`,
+  `SplitPane`, `Canvas3D`, and the `useAnchor` popup placement hook.
 - [events.md](events.md) — the synthetic event system: dispatch phases,
   event object shape, focus, cursors, default actions.
 - [typescript.md](typescript.md) — the bundled types: one tsconfig option,
@@ -65,4 +66,5 @@ on ntk's frame clock.
 | `REACT_X11_CLICK_TO_COMPONENT=1` | Alt+Click opens the clicked element's source, using `cursor` (see click-to-component.md) |
 | `REACT_X11_EDITOR`               | editor CLI for click-to-component — setting this alone also enables it                   |
 
-- [glx-plan.md](glx-plan.md) — plan for 3D components over indirect GLX
+- [glx.md](glx.md) — how the 3D scene works over indirect GLX: what the
+  protocol encodes, why display lists are mandatory, and what can never work

@@ -43,6 +43,95 @@ style you pass one resolves against it — see
 each in light and dark — and `npm run examples:theming` switches between
 them at runtime.
 
+`SelectThemeProvider` is the same component under an older name, kept as a
+back-compat alias from when the palette only reached `Select`.
+
+## Basic controls
+
+`Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch` and `ProgressBar` share
+one piece of plumbing, `useControl(disabled, onActivate)`: it makes the
+control focusable, activates it on click or Space (Enter as well, for
+`Button`), sets the pointer cursor, and expresses hover and focus feedback as
+`:hover`/`:focus` style blocks rather than React state — so moving the
+pointer over a control repaints one node instead of rendering.
+
+`Button`, `Checkbox`, `Switch` and `ProgressBar` take `style`, merged after
+their own so an override wins by position, and forward any remaining props
+to the host box. `Radio` is the exception: it takes only the props listed
+below, and the group around it carries the layout.
+
+```jsx
+import { Button, Checkbox, RadioGroup, Radio, Switch, ProgressBar } from 'react-x11';
+
+<Button primary onPress={save}>
+  Save
+</Button>
+<Checkbox checked={wrap} onChange={setWrap}>Wrap lines</Checkbox>
+<Switch checked={live} onChange={setLive} />
+<ProgressBar value={0.4} style={{ width: 200 }} />
+
+<RadioGroup value={size} onChange={setSize}>
+  <Radio value="s">Small</Radio>
+  <Radio value="m">Medium</Radio>
+</RadioGroup>;
+```
+
+Label text is the children (or a `label` prop); a bare string is wrapped in
+a `<text>` for you, so `<Button>Save</Button>` needs no `<text>`.
+
+### `Button`
+
+| prop                 |                                           |
+| -------------------- | ----------------------------------------- |
+| `children` / `label` | the label                                 |
+| `onPress()`          | click, Space or Enter                     |
+| `primary`            | accent fill instead of the surface colour |
+| `disabled`           | inert, dimmed, not focusable              |
+
+### `Checkbox`
+
+| prop                 |                                            |
+| -------------------- | ------------------------------------------ |
+| `checked`            | current value (controlled)                 |
+| `onChange(next)`     | receives the **next** value, not the event |
+| `children` / `label` | label to the right of the 16px check well  |
+| `disabled`           | inert, dimmed                              |
+
+### `Radio` / `RadioGroup`
+
+`RadioGroup` takes `value`, `onChange(value)`, `style` and any box props;
+each `Radio` takes the `value` it selects, plus `children`/`label` and
+`disabled` — and nothing else, so per-radio styling goes on the group. A
+`Radio` outside a `RadioGroup` throws rather than silently doing nothing.
+
+Arrow keys move the selection through the group in **mount order**,
+wrapping — Up/Left back, Down/Right forward — which is how a native radio
+group behaves; click or Space selects the focused one.
+
+### `Switch`
+
+`checked`, `onChange(next)` and `disabled`, the same semantics as
+`Checkbox` in a sliding pill. The thumb is absolutely positioned and
+animates on `left` (`transition: { left: 120 }`) because `justifyContent`
+would flip between the ends with nothing in between to animate — the worked
+example in [styling.md](styling.md#transitions).
+
+### `ProgressBar`
+
+Determinate progress only.
+
+| prop         |                                                        |
+| ------------ | ------------------------------------------------------ |
+| `value`      | 0 to 1, clamped                                        |
+| `color`      | fill colour (defaults to the theme accent)             |
+| `trackColor` | the groove (defaults to the theme track)               |
+| `height`     | bar thickness, default 8; the corner radius follows it |
+
+The fill is expressed as flex ratios rather than a percentage width. A
+percentage child resolves against space that is still being measured, which
+fed back into the track's intrinsic width — a card with a fuller bar came
+out wider than one with an empty bar.
+
 ## `Select`
 
 A dropdown whose menu is a real override-redirect `<popup>` window anchored

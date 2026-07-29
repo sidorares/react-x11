@@ -17,7 +17,7 @@
 >
 > 1. **3D components over indirect GLX** — the one large feature going in
 >    before 1.0.0; plan and phase status in
->    [docs/glx-plan.md](docs/glx-plan.md). Phases 0-3 are merged: ntk 3.6.0
+>    [docs/glx.md](docs/glx.md). Phases 0-3 are merged: ntk 3.6.0
 >    for the protocol blockers, then `<glarea>`, the `<mesh>` scene tree on
 >    a display-list compiler, and lights. Left: textures, mesh pointer
 >    events, README screenshots.
