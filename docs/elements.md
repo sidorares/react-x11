@@ -278,9 +278,30 @@ across kerning, shaping boundaries and trailing whitespace.
 Interactions: click/drag selection, double-click word select, triple-click
 select all, Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,
 Ctrl+C/X/V on CLIPBOARD, middle-click paste from PRIMARY, selections own
-PRIMARY (X11 conventions). Focusable by default; shows the text cursor.
+PRIMARY (X11 conventions), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
+and redo. Focusable by default; shows the text cursor.
 `ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses the
 built-in editing behavior.
+
+**Ref**: the node, plus `value`, `undo()` / `redo()` and `canUndo` /
+`canRedo` — enough for a toolbar button beside the field.
+
+### Undo
+
+Consecutive typing coalesces into one undo step, so Ctrl+Z takes back a
+word rather than a keystroke; a run of Backspaces coalesces the same way.
+A run ends at whitespace, at anything that moves the caret (arrows,
+Home/End, a click, focus leaving the field), and around edits that are
+their own step whatever surrounds them: a paste, a cut, a replaced
+selection, Ctrl+Backspace, and a `<textarea>` newline. Undo restores the
+selection and puts the caret back where the undone edit started.
+
+Undo is a stack of snapshots of the states the control has shown, capped
+at 200. A **controlled** `value` reports the restored text through
+`onChange` and waits for the prop to come back, exactly as typing does —
+so a parent that filters or rejects a value gets the same say over an undo
+that it has over an edit. A value changed from outside (a form reset)
+becomes its own entry, and undoing steps back through it.
 
 ## `<textarea>`
 

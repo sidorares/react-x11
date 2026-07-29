@@ -42,6 +42,7 @@ import type {
   ScrollViewNode,
   Style,
   StyleProp,
+  TextInputNode,
   WheelEvent,
 } from '../../src/index.js';
 
@@ -88,6 +89,7 @@ function Elements() {
   const boxRef = useRef<DrawnNode>(null);
   const scrollRef = useRef<ScrollViewNode>(null);
   const winRef = useRef<NtkWindow>(null);
+  const inputRef = useRef<TextInputNode>(null);
   const [text, setText] = useState('');
 
   return (
@@ -126,6 +128,7 @@ function Elements() {
       </scrollview>
 
       <textinput
+        ref={inputRef}
         value={text}
         onChange={setText}
         onSubmit={(value) => void value.length}
@@ -133,6 +136,11 @@ function Elements() {
         maxLength={40}
         focusable
         tabIndex={0}
+      />
+      <Button
+        label="Undo"
+        disabled={!inputRef.current?.canUndo}
+        onPress={() => void inputRef.current?.undo()}
       />
       <textarea rows={4} defaultValue="multi" />
       <image src="./logo.png" style={{ width: 32, height: 32 }} />

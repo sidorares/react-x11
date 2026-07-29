@@ -51,6 +51,16 @@ export interface ScrollViewNode extends DrawnNode {
 /** `<textinput>` / `<textarea>`. */
 export interface TextInputNode extends DrawnNode {
   readonly value: string;
+  /**
+   * Step back one edit, as Ctrl+Z does. False when there is nothing to
+   * undo. Controlled inputs report the restored value through `onChange`,
+   * so the display follows the same round trip typing does.
+   */
+  undo(): boolean;
+  /** Step forward one undone edit, as Ctrl+Shift+Z does. */
+  redo(): boolean;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
 }
 
 /**
