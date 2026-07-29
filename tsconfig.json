@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react-x11",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "types": [],
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "react-x11": ["./src/index.d.ts"],
+      "react-x11/jsx-runtime": ["./src/jsx-runtime.d.ts"],
+      "react-x11/jsx-dev-runtime": ["./src/jsx-dev-runtime.d.ts"]
+    }
+  },
+  "include": ["src/**/*.d.ts", "test/types/**/*.tsx", "test/types/**/*.ts"]
+}

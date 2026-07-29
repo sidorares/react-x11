@@ -249,10 +249,56 @@ and enables the feature in one go; `REACT_X11_CLICK_TO_COMPONENT=1` does
 the same with the default editor
 (`cursor`). See [docs/click-to-component.md](docs/click-to-component.md).
 
+## TypeScript
+
+Types ship with the package — no `@types/react-x11` to install. Point JSX at
+react-x11 and the X11 elements type-check:
+
+```jsonc
+// tsconfig.json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react-x11",
+  },
+}
+```
+
+```tsx
+import { createRoot, createStyles, Button } from 'react-x11';
+import type { MouseEvent } from 'react-x11';
+
+const s = createStyles({
+  root: { flexGrow: 1, padding: 12, gap: 8 },
+  //          ^ flexDirection: 'sideways' would not compile,
+  //            and neither would a layout property inside ':hover'
+});
+
+<window title="hi" width={320} height={200} style={s.root}>
+  <box onClick={(ev: MouseEvent) => console.log(ev.detail)}>
+    <text style={{ fontSize: 18 }}>hello</text>
+  </box>
+  <Button primary onPress={() => {}}>
+    ok
+  </Button>
+</window>;
+```
+
+`jsxImportSource` is what makes `<div>` an error rather than something that
+compiles and then throws at runtime: react-x11 owns the JSX namespace
+instead of adding to React's, which it could not do anyway — `text`,
+`image`, `canvas`, `html` and `svg` are all DOM element names too, with
+incompatible props.
+
+Style props, element props, event objects, ref types and every widget are
+typed; `style` accepts the same nested arrays with falsy entries the runtime
+does. See [docs/typescript.md](docs/typescript.md).
+
 ## Developing
 
 ```sh
 npm test             # hermetic: mock smoke tests + in-process X server pixels
+npm run typecheck    # tsc over the declarations and the type tests
 npm run lint         # ESLint
 npm run format       # Prettier
 npm run screenshots  # regenerate docs/img/*.png headlessly (no X server)

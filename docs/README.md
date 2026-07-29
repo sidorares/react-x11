@@ -8,6 +8,9 @@
   primitives: `Select`.
 - [events.md](events.md) — the synthetic event system: dispatch phases,
   event object shape, focus, cursors, default actions.
+- [typescript.md](typescript.md) — the bundled types: one tsconfig option,
+  why JSX comes from `react-x11/jsx-runtime` rather than an augmentation,
+  and how the declarations are kept from drifting.
 - [devtools.md](devtools.md) — React DevTools integration and other
   debugging aids.
 - [click-to-component.md](click-to-component.md) — Alt+Click a rendered
