@@ -279,9 +279,25 @@ Interactions: click/drag selection, double-click word select, triple-click
 select all, Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,
 Ctrl+C/X/V on CLIPBOARD, middle-click paste from PRIMARY, selections own
 PRIMARY (X11 conventions), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
-and redo. Focusable by default; shows the text cursor.
-`ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses the
-built-in editing behavior.
+and redo, and a **right-click menu**. Focusable by default; shows the text
+cursor. `ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses
+the built-in editing behavior.
+
+### The right-click menu
+
+Right-clicking gives Undo / Redo / Cut / Copy / Paste / Select All with no
+wiring, the way a browser gives `<input>` one — each row live only when it
+would do something, and every row running the same code the keyboard
+shortcut does. Right-clicking **inside** a selection keeps it (the menu is
+about to act on it); outside one, the caret moves there first.
+
+Arrows walk the rows, skipping the disabled ones, Enter chooses, Escape or
+a press anywhere outside closes. The selection stays visibly highlighted
+while the menu is up, even though the popup holds the keyboard.
+
+To replace it with your own, set `contextMenu={false}` and render a
+`ContextMenu` — `onContextMenu` still fires. To suppress it for one event,
+call `ev.preventDefault()` in an `onContextMenu` handler.
 
 **Ref**: the node, plus `value`, `undo()` / `redo()` and `canUndo` /
 `canRedo` — enough for a toolbar button beside the field.

@@ -10,6 +10,7 @@ import {
 
 const XK_TAB = 0xff09;
 const WHEEL_BUTTONS = { 4: [0, -48], 5: [0, 48], 6: [-48, 0], 7: [48, 0] };
+const RIGHT_BUTTON = 3;
 // X11 KeyButMask bit for Mod1 (Alt on virtually every layout), same bitmask
 // `shiftKey`/`ctrlKey` above already read `buttons` from.
 const MOD1_MASK = 8;
@@ -269,6 +270,18 @@ export class EventManager {
       });
       if (!ev.defaultPrevented) {
         target._defaultMouseDown?.(ev);
+      }
+      // Right-click is two events, as in the DOM: mousedown, then a
+      // separate contextmenu whose default action opens the element's own
+      // menu. Handlers that only want to suppress the menu can do it
+      // without also giving up the caret placement mousedown just did.
+      if (native.keycode === RIGHT_BUTTON) {
+        const menuEv = this.dispatch('ContextMenu', target, native, {
+          button: native.keycode,
+        });
+        if (!menuEv.defaultPrevented) {
+          target?._defaultContextMenu?.(menuEv);
+        }
       }
     });
   }

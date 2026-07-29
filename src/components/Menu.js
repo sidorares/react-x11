@@ -488,8 +488,14 @@ export function ContextMenu({
       ref,
       focusable: true,
       onMouseDown: (ev) => {
-        if (ev.button === 3) openAt(ev);
-        else if (rect) close();
+        if (ev.button !== 3 && rect) close();
+      },
+      onContextMenu: (ev) => {
+        // this menu replaces whatever the element under the pointer would
+        // have opened on its own — without the preventDefault a
+        // <textinput> in here would show its edit menu underneath ours
+        ev.preventDefault();
+        openAt(ev);
       },
       onKeyDown: (ev) => {
         if (!rect) return;
