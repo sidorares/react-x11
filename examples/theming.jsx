@@ -40,12 +40,14 @@ const s = createStyles({
     color: '$dim',
     '@width < 520': { display: 'none' },
   },
+  // the gallery scrolls when the window is too short for it, which is easy
+  // to arrange once the columns stack
+  scroller: { flexGrow: 1, minHeight: 0 },
   // one column when narrow, two side by side once there is room for them
   gallery: {
-    flexGrow: 1,
-    minHeight: 0,
     gap: 14,
     flexDirection: 'column',
+    flexShrink: 0,
     '@width >= 620': { flexDirection: 'row' },
   },
   column: { flexGrow: 1, minWidth: 0, gap: 12 },
@@ -122,98 +124,100 @@ export function ThemingPanel() {
           </text>
         </box>
 
-        <box style={s.gallery}>
-          <box style={s.column}>
-            <box style={s.card}>
-              <text style={s.heading}>Buttons</text>
-              <box style={s.row}>
-                <Button
-                  primary
-                  label="Primary"
-                  onPress={() => setPresses(presses + 1)}
-                />
-                <Button
-                  label="Default"
-                  onPress={() => setPresses(presses + 1)}
-                />
-                <Button disabled label="Disabled" />
+        <scrollview style={s.scroller}>
+          <box style={s.gallery}>
+            <box style={s.column}>
+              <box style={s.card}>
+                <text style={s.heading}>Buttons</text>
+                <box style={s.row}>
+                  <Button
+                    primary
+                    label="Primary"
+                    onPress={() => setPresses(presses + 1)}
+                  />
+                  <Button
+                    label="Default"
+                    onPress={() => setPresses(presses + 1)}
+                  />
+                  <Button disabled label="Disabled" />
+                </box>
+                <text style={s.note}>{presses} presses</text>
               </box>
-              <text style={s.note}>{presses} presses</text>
+
+              <box style={s.card}>
+                <text style={s.heading}>Toggles</text>
+                <Checkbox
+                  checked={agreed}
+                  onChange={setAgreed}
+                  label="Checkbox"
+                />
+                <box style={s.row}>
+                  <Switch checked={notify} onChange={setNotify} />
+                  <text style={s.note}>Switch</text>
+                </box>
+                <RadioGroup value={flavour} onChange={setFlavour}>
+                  <Radio value="vanilla" label="Vanilla" />
+                  <Radio value="pistachio" label="Pistachio" />
+                </RadioGroup>
+              </box>
             </box>
 
-            <box style={s.card}>
-              <text style={s.heading}>Toggles</text>
-              <Checkbox
-                checked={agreed}
-                onChange={setAgreed}
-                label="Checkbox"
-              />
-              <box style={s.row}>
-                <Switch checked={notify} onChange={setNotify} />
-                <text style={s.note}>Switch</text>
+            <box style={s.column}>
+              <box style={s.card}>
+                <text style={s.heading}>Ranges</text>
+                <box style={s.row}>
+                  <text style={s.label}>Slider</text>
+                  <Slider
+                    value={volume}
+                    min={0}
+                    max={100}
+                    onChange={setVolume}
+                    style={{ flexGrow: 1 }}
+                  />
+                  <text style={s.note}>{String(volume)}</text>
+                </box>
+                <box style={s.row}>
+                  <text style={s.label}>Progress</text>
+                  <ProgressBar value={volume / 100} style={{ flexGrow: 1 }} />
+                </box>
               </box>
-              <RadioGroup value={flavour} onChange={setFlavour}>
-                <Radio value="vanilla" label="Vanilla" />
-                <Radio value="pistachio" label="Pistachio" />
-              </RadioGroup>
+
+              <box style={[s.card, { flexGrow: 1, minHeight: 0 }]}>
+                <text style={s.heading}>Tabs and input</text>
+                <Tabs
+                  value={tab}
+                  onChange={setTab}
+                  items={[
+                    {
+                      id: 'one',
+                      label: 'First',
+                      content: (
+                        <textinput
+                          placeholder="Type here…"
+                          style={{
+                            borderWidth: theme.borderWidth,
+                            borderColor: theme.border,
+                            borderRadius: theme.radius,
+                            backgroundColor: theme.background,
+                            color: theme.text,
+                            padding: 8,
+                            marginTop: 8,
+                          }}
+                        />
+                      ),
+                    },
+                    {
+                      id: 'two',
+                      label: 'Second',
+                      content: <text style={s.note}>Second panel</text>,
+                    },
+                    { id: 'three', label: 'Disabled', disabled: true },
+                  ]}
+                />
+              </box>
             </box>
           </box>
-
-          <box style={s.column}>
-            <box style={s.card}>
-              <text style={s.heading}>Ranges</text>
-              <box style={s.row}>
-                <text style={s.label}>Slider</text>
-                <Slider
-                  value={volume}
-                  min={0}
-                  max={100}
-                  onChange={setVolume}
-                  style={{ flexGrow: 1 }}
-                />
-                <text style={s.note}>{String(volume)}</text>
-              </box>
-              <box style={s.row}>
-                <text style={s.label}>Progress</text>
-                <ProgressBar value={volume / 100} style={{ flexGrow: 1 }} />
-              </box>
-            </box>
-
-            <box style={[s.card, { flexGrow: 1, minHeight: 0 }]}>
-              <text style={s.heading}>Tabs and input</text>
-              <Tabs
-                value={tab}
-                onChange={setTab}
-                items={[
-                  {
-                    id: 'one',
-                    label: 'First',
-                    content: (
-                      <textinput
-                        placeholder="Type here…"
-                        style={{
-                          borderWidth: theme.borderWidth,
-                          borderColor: theme.border,
-                          borderRadius: theme.radius,
-                          backgroundColor: theme.background,
-                          color: theme.text,
-                          padding: 8,
-                          marginTop: 8,
-                        }}
-                      />
-                    ),
-                  },
-                  {
-                    id: 'two',
-                    label: 'Second',
-                    content: <text style={s.note}>Second panel</text>,
-                  },
-                  { id: 'three', label: 'Disabled', disabled: true },
-                ]}
-              />
-            </box>
-          </box>
-        </box>
+        </scrollview>
       </box>
     </ThemeProvider>
   );
