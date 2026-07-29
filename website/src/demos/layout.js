@@ -64,7 +64,10 @@ function App() {
       <box style={{
         position: 'absolute', right: 18, top: 16,
         width: 74, height: 26, borderRadius: 13,
-        backgroundColor: '#00000022',
+        // rgba() rather than '#00000022': ntk parses colours with parse-color,
+        // which does not understand CSS hex alpha and hands back the raw alpha
+        // byte, so the 8-digit form renders fully opaque.
+        backgroundColor: 'rgba(0, 0, 0, 0.13)',
         alignItems: 'center', justifyContent: 'center',
       }}>
         <text style={{ fontSize: 11, color: '#334' }}>absolute</text>
