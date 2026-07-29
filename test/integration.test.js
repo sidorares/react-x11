@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
 import ReactX11 from '../src/index.js';
+import { anchorRect } from '../src/components/anchor.js';
 
 // End-to-end test: react-x11 -> real ntk client -> node-x11's pure-JS
 // in-process X server. No $DISPLAY needed (see ntk docs/xserver.md).
@@ -274,6 +275,59 @@ test('popup is override-redirect on the server and paints', async () => {
 
     const ctx = popupWindow.getContext('2d');
     await waitForPixel(ctx, 60, 40, 30, 20, [255, 0, 0], 'popup content red');
+
+    ReactX11.unmountComponentAtNode(app);
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a popup anchors to the window even once a WM has reframed it', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    const ref = React.createRef();
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 200, height: 120, x: 0, y: 0 },
+        React.createElement('box', {
+          ref,
+          style: { marginTop: 30, marginLeft: 20, width: 80, height: 20 },
+        }),
+      ),
+      app,
+    );
+    await settle(app);
+
+    const root = app.X.display.screen[0].root;
+    // Stand in for a reparenting window manager: a frame at (150, 90) with
+    // the client inside it, offset by a titlebar. After this the client's
+    // ConfigureNotify coordinates are relative to the frame, which is
+    // exactly the case that put popups in the corner of the screen.
+    const frame = app.X.AllocID();
+    app.X.CreateWindow(frame, root, 150, 90, 220, 150);
+    app.X.ReparentWindow(wnd.id, frame, 10, 25);
+    app.X.MapWindow(frame);
+    await settle(app);
+
+    wnd._reactX11Node._refreshScreenOrigin();
+    await settle(app);
+
+    const node = ref.current;
+    const rect = anchorRect(node, { placement: 'bottom', height: 40 });
+    // frame at 150,90 + client at 10,25 inside it + the box at 20,30
+    assert.strictEqual(rect.x, 150 + 10 + 20, 'x is measured from the root');
+    assert.strictEqual(
+      rect.y,
+      90 + 25 + 30 + 20 + 2,
+      'and y clears the trigger, in root coordinates',
+    );
+    assert.deepStrictEqual(
+      wnd._screenOrigin,
+      { x: 160, y: 115 },
+      'the origin came from the server, not from ConfigureNotify',
+    );
 
     ReactX11.unmountComponentAtNode(app);
     await settle(app);

@@ -30,9 +30,13 @@ export function anchorRect(node, options = {}) {
     height = 0,
   } = options;
 
+  // `_screenOrigin` is what the server says; `x`/`y` are frame-relative
+  // under a reparenting WM and are only a fallback (the headless mock has
+  // no server to ask)
   const win = node.root?.window;
-  const ax = (win?.x ?? 0) + node.abs.x;
-  const ay = (win?.y ?? 0) + node.abs.y;
+  const origin = win?._screenOrigin ?? { x: win?.x ?? 0, y: win?.y ?? 0 };
+  const ax = origin.x + node.abs.x;
+  const ay = origin.y + node.abs.y;
   const aw = node.abs.width;
   const ah = node.abs.height;
 
