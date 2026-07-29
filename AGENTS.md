@@ -35,7 +35,7 @@ no override-redirect staging (issue #4).
 - `src/glnodes.js` — `<glarea>`: the GL surface. A child X window on a
   GLX visual (ntk's `chooseGLXConfig`), positioned by the parent's yoga
   rect, drawing `onDraw` frames on its own frame clock. First step of
-  docs/glx-plan.md.
+  docs/glx.md.
 - `src/scene3d.js` — the 3D scene tree inside a `<glarea>`: `<mesh>`,
   `<group>`, geometry/material nodes and the renderer that compiles each
   geometry into a server-side **display list** (a frame is matrices +

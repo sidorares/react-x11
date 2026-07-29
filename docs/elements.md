@@ -530,8 +530,9 @@ world space, so a light inside a rotating `<group>` moves with it.
 Not implemented, and failing with an error naming the reason:
 `<shaderMaterial>` (the protocol encodes no shaders), `<instancedMesh>`,
 `<points>`, `<line>`, post-processing — and no shadows, which need
-framebuffer objects. Camera elements are the one r3f concept still missing
-— the `camera` prop covers it for now. See [glx-plan.md](glx-plan.md).
+framebuffer objects. There are no camera _elements_ either: the `camera`
+prop is the whole camera API. See [glx.md](glx.md) for why the transport
+forces all of this.
 
 ---
 
