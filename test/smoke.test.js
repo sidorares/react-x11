@@ -3491,6 +3491,259 @@ test('textinput: shift+click extends the selection from the anchor', async () =>
   ReactX11.unmountComponentAtNode(app);
 });
 
+// --- undo/redo -------------------------------------------------------------
+
+// Mounts a focused <textinput> and returns helpers for driving it.
+async function mountInput(props = {}) {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 80 },
+      React.createElement('textinput', props),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+  await tick();
+  return {
+    app,
+    wnd,
+    input,
+    type: (text) => {
+      for (const ch of text) {
+        const cp = ch.codePointAt(0);
+        pressKey(app, wnd, { keysym: cp, codepoint: cp });
+      }
+    },
+    key: (keysym, buttons = 0) => pressKey(app, wnd, { keysym, buttons }),
+    unmount: () => ReactX11.unmountComponentAtNode(app),
+  };
+}
+
+const XK_z = 0x7a;
+const XK_y = 0x79;
+const XK_END = 0xff57;
+const CTRL = 4;
+const SHIFT = 1;
+
+test('textinput: Ctrl+Z undoes a run of typing, Ctrl+Shift+Z redoes it', async () => {
+  const { input, type, key, unmount } = await mountInput({ defaultValue: '' });
+
+  type('hi');
+  assert.strictEqual(input.value, 'hi');
+
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, '', 'a run of typing undoes as one step');
+  assert.strictEqual(input._caret, 0, 'caret goes back where the run started');
+  assert.strictEqual(input.canUndo, false);
+
+  key(XK_z, CTRL | SHIFT);
+  assert.strictEqual(input.value, 'hi');
+  assert.strictEqual(input._caret, 2, 'redo restores the caret it ended at');
+
+  // Ctrl+Y redoes too, for the Windows-shaped muscle memory
+  key(XK_z, CTRL);
+  key(XK_y, CTRL);
+  assert.strictEqual(input.value, 'hi');
+  assert.strictEqual(input.canRedo, false);
+
+  unmount();
+});
+
+test('textinput: undo works a word at a time', async () => {
+  const { input, type, key, unmount } = await mountInput({ defaultValue: '' });
+
+  type('hello world');
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, 'hello ', 'the space ends the run it joins');
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, '');
+
+  unmount();
+});
+
+test('textinput: caret moves and deletes break the undo run', async () => {
+  const { input, type, key, unmount } = await mountInput({ defaultValue: '' });
+
+  type('ab');
+  key(XK.Left); // moving the caret starts a new edit
+  type('X');
+  assert.strictEqual(input.value, 'aXb');
+
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, 'ab', 'only the second run comes back off');
+  assert.strictEqual(input._caret, 1, 'caret where the undone insert happened');
+
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, '');
+
+  // backspaces coalesce with each other, not with the typing before them
+  key(XK_y, CTRL);
+  key(XK_y, CTRL);
+  assert.strictEqual(input.value, 'aXb');
+  key(XK_END);
+  key(XK.BackSpace);
+  key(XK.BackSpace);
+  assert.strictEqual(input.value, 'a');
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, 'aXb', 'both backspaces undo together');
+  assert.strictEqual(input._caret, 3, 'caret back where deleting started');
+
+  unmount();
+});
+
+test('textinput: a fresh edit drops the redo tail', async () => {
+  const { input, type, key, unmount } = await mountInput({ defaultValue: '' });
+
+  type('one ');
+  type('two');
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, 'one ');
+  assert.strictEqual(input.canRedo, true);
+
+  type('six');
+  assert.strictEqual(input.value, 'one six');
+  assert.strictEqual(input.canRedo, false, '"two" is no longer reachable');
+
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, 'one ');
+
+  unmount();
+});
+
+test('textinput: a paste is its own undo step', async () => {
+  const { app, wnd, input, type, key, unmount } = await mountInput({
+    defaultValue: '',
+  });
+  app.clipboard = {
+    write: () => Promise.resolve(),
+    read: () => Promise.resolve('pasted'),
+  };
+
+  type('ab');
+  pressKey(app, wnd, { keysym: 0x76, codepoint: 0x76, buttons: CTRL }); // ctrl+v
+  await tick();
+  assert.strictEqual(input.value, 'abpasted');
+
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, 'ab', 'the paste undoes without the typing');
+  key(XK_z, CTRL);
+  assert.strictEqual(input.value, '');
+
+  unmount();
+});
+
+test('textinput: undo in controlled mode reports through onChange', async () => {
+  const app = createMockApp();
+  const changes = [];
+  const render = (value) =>
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 300, height: 80 },
+        React.createElement('textinput', {
+          value,
+          onChange: (v) => {
+            changes.push(v);
+            render(v);
+          },
+        }),
+      ),
+      null,
+      app,
+    );
+  render('');
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+
+  pressKey(app, wnd, { keysym: 0x68, codepoint: 0x68 }); // h
+  pressKey(app, wnd, { keysym: 0x69, codepoint: 0x69 }); // i
+  assert.strictEqual(input.value, 'hi');
+
+  pressKey(app, wnd, { keysym: XK_z, buttons: CTRL });
+  assert.deepStrictEqual(
+    changes,
+    ['h', 'hi', ''],
+    'undo asks for the old value',
+  );
+  assert.strictEqual(input.value, '', 'and the display follows the prop back');
+
+  pressKey(app, wnd, { keysym: XK_z, buttons: CTRL | SHIFT });
+  assert.strictEqual(input.value, 'hi');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textinput: a value changed from outside becomes its own undo step', async () => {
+  const app = createMockApp();
+  const render = (value) =>
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 300, height: 80 },
+        React.createElement('textinput', { value }),
+      ),
+      null,
+      app,
+    );
+  render('typed');
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+
+  render(''); // the form was reset behind the control's back
+  assert.strictEqual(input.canUndo, true);
+  assert.strictEqual(input.undo(), true, 'undo asks for the pre-reset value');
+  assert.strictEqual(input._historyValue, 'typed');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textarea: undo restores across lines, Enter is its own step', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement('textarea', { defaultValue: '', rows: 4 }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const area = wnd._reactX11Node.children[0];
+  wnd.emit('mousedown', { x: 5, y: 5, keycode: 1 });
+  wnd.emit('mouseup', { x: 5, y: 5, keycode: 1 });
+
+  for (const cp of [0x61, 0x62])
+    pressKey(app, wnd, { keysym: cp, codepoint: cp });
+  pressKey(app, wnd, { keysym: XK.Return });
+  for (const cp of [0x63, 0x64])
+    pressKey(app, wnd, { keysym: cp, codepoint: cp });
+  assert.strictEqual(area.value, 'ab\ncd');
+
+  pressKey(app, wnd, { keysym: XK_z, buttons: CTRL });
+  assert.strictEqual(area.value, 'ab\n');
+  pressKey(app, wnd, { keysym: XK_z, buttons: CTRL });
+  assert.strictEqual(area.value, 'ab', 'the newline undoes on its own');
+  pressKey(app, wnd, { keysym: XK_z, buttons: CTRL });
+  assert.strictEqual(area.value, '');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('textarea: PageDown/PageUp move by a viewport of lines', async () => {
   const app = createMockApp();
   ReactX11.render(

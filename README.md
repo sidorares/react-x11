@@ -95,21 +95,21 @@ Everything else is laid out by yoga and drawn client-side into the window's
 double-buffered 2d context — see [NEXT_STEPS.md](NEXT_STEPS.md) for the architecture rationale
 and [docs/](docs/README.md) for the full API reference.
 
-| element        | what it is                                                                                                           |
-| -------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `<window>`     | a real X11 window; the flex, paint and event root                                                                    |
-| `<popup>`      | an override-redirect window at screen coordinates — menus, tooltips, dropdowns                                       |
-| `<box>`        | flex container: layout props → yoga, plus backgrounds, borders (solid/dashed, radius), overflow clipping, zIndex     |
-| `<scrollview>` | clipped, wheel-scrollable viewport with a drawn scrollbar                                                            |
-| `<text>`       | shaped, wrapped text (bidi, ligatures, font fallback); nested `<text>` elements are style spans                      |
-| `<textinput>`  | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select |
-| `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                              |
-| `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)              |
-| `<markdown>`   | ntk MarkdownView: headings, tables, highlighted fences, math, mermaid; `onLink`                                      |
-| `<html>`       | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                       |
-| `<svg>`        | static SVG through ntk SvgView, sized like `<image>`                                                                 |
-| `<tex>`        | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                               |
-| `<glarea>`     | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                              |
+| element        | what it is                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `<window>`     | a real X11 window; the flex, paint and event root                                                                               |
+| `<popup>`      | an override-redirect window at screen coordinates — menus, tooltips, dropdowns                                                  |
+| `<box>`        | flex container: layout props → yoga, plus backgrounds, borders (solid/dashed, radius), overflow clipping, zIndex                |
+| `<scrollview>` | clipped, wheel-scrollable viewport with a drawn scrollbar                                                                       |
+| `<text>`       | shaped, wrapped text (bidi, ligatures, font fallback); nested `<text>` elements are style spans                                 |
+| `<textinput>`  | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select, undo/redo |
+| `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                                         |
+| `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                         |
+| `<markdown>`   | ntk MarkdownView: headings, tables, highlighted fences, math, mermaid; `onLink`                                                 |
+| `<html>`       | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                                  |
+| `<svg>`        | static SVG through ntk SvgView, sized like `<image>`                                                                            |
+| `<tex>`        | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                                          |
+| `<glarea>`     | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                                         |
 
 Widget **components** (plain React on top of the primitives, themable via
 `ThemeProvider`): `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch`,
