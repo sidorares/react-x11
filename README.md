@@ -155,7 +155,9 @@ User handlers run before element default actions and can
 
 ## Examples
 
-All need an X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation):
+All need an X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation).
+[`examples/README.md`](examples/README.md) describes each one and how to
+explore them:
 
 ```sh
 npm run examples:simple        # hello world (JSX via tsx)
@@ -169,10 +171,33 @@ npm run examples:menu          # right-click context menu via <popup>
 npm run examples:form          # <textinput> + Select dropdowns
 npm run examples:gl            # raw GL in a <glarea> (display-list cube)
 npm run examples:three         # <Canvas3D> scene: meshes, lights, textures
+npm run examples:wm            # a reparenting window manager (see below)
 ```
 
 The two GL examples additionally need a server with **indirect GLX**
 enabled (`+iglx` / `AllowIndirectGLX` — off by default on many).
+
+### Window manager
+
+`examples:wm` is a real reparenting window manager: it takes over the root
+window, puts every application's window inside a frame it draws, and moves,
+resizes, focuses and closes them. The frames are ordinary react-x11
+`<window>`s — the titlebar, the buttons and the eight resize handles are
+components with `onMouseDown` handlers, and the application is a foreign X
+window reparented inside.
+
+Only one window manager may own a display, so run it against a nested
+server rather than the one managing your desktop:
+
+```sh
+Xephyr :10 -screen 1200x800 &
+DISPLAY=:10 npm run examples:wm
+DISPLAY=:10 xterm &                    # give it something to manage
+```
+
+To have it manage your real session instead — including replacing
+`quartz-wm` on macOS, which XQuartz has a hook for — see
+[`examples/README.md`](examples/README.md#the-window-manager).
 
 ### Hot reloading
 

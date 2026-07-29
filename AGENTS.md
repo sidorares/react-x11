@@ -65,18 +65,28 @@ no override-redirect staging (issue #4).
 - `test/smoke.test.js` — headless tests over a mock ntk app object.
 - `test/integration.test.js` — end-to-end against node-x11's in-process
   pure-JS X server with pixel-readback assertions. No `$DISPLAY` needed.
+- `test/wm.test.js` — the window-manager example against that same server,
+  two connections: one plays the WM, the other an application. Needs
+  x11 >= 3.2.0, which is where substructure redirect landed.
 
 ## Commands
 
 - `npm test` — node:test. **Headless: no X server needed.** Primary feedback
   loop; keep it green and extend it when touching the host config.
 - `npm run lint` / `npm run format` — ESLint 9 (flat config) + Prettier.
-- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,windows}`
+- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,windows,wm}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). `examples:app` is the showcase: it hosts `form`, `widgets`
   and `tasks` as tabs by importing the panel each of them exports, so a new
   control gets demonstrated there rather than in yet another example. All examples export their App and skip auto-running under
   `REACT_X11_NO_AUTORUN=1` so scripts/tests can import them.
+- `npm run examples:wm` — the reparenting **window manager** (issue #3). It
+  claims the root window, so it needs a display no other WM owns: run
+  `Xephyr :10 -screen 1200x800` and point it there. `examples/wm-core.js`
+  is the protocol half (claim the root, answer map/configure requests, keep
+  the client list, EWMH, alt+tab) and `examples/wm.jsx` is the React half —
+  each frame is a `<window>` whose titlebar, buttons and eight resize
+  handles are components. Notes below under "Writing a window manager".
 - `npm run examples:tasks:hot` — the tasks example with hot reloading via
   React **Fast Refresh**: edit `examples/tasks.jsx` while it runs and the
   edited components update in place — connection, window, and component
@@ -114,6 +124,53 @@ no override-redirect staging (issue #4).
   they are generated on demand, not committed). Needs a real `DISPLAY`
   with a **reparenting** WM; `npm run screenshots` has no WM at all and
   therefore no frames. See "Framed screenshots" below.
+
+## Writing a window manager
+
+`examples/wm.jsx` is the other side of everything above: instead of being a
+client the window manager decorates, it _is_ the window manager. The things
+that are easy to get wrong, all of which cost time here:
+
+- **Frames must not unmount while they hold a client.** The client is
+  reparented _into_ the frame, and X destroys children with their parent —
+  so minimizing unmaps the frame rather than removing it from the tree, and
+  a client that withdraws is reparented back to the root before its frame
+  goes away. `addToSaveSet` covers only the case where the WM itself exits.
+- **ConfigureRequest carries a value mask.** The geometry fields that the
+  mask does not name hold the window's _current_ values, not a request.
+  Honour the mask or you will "move" windows to where they already are.
+- **Redirect the frame too, before reparenting into it.** A window's
+  requests go to whoever holds SubstructureRedirect on its _parent_, and
+  after the reparent that is the frame, not the root. Miss this and a
+  client that resizes itself does it behind the WM's back, leaving the
+  window a different size from the frame drawn around it.
+- **Answer requests you refuse** (ICCCM 4.1.5). A reparented client's own
+  ConfigureNotify has frame-relative coordinates, and a refused request
+  produces none at all — clients that resize themselves then hang. Both are
+  answered with `sendConfigureNotify` in root coordinates.
+- **Do not select `ButtonPress` on a client window.** Only one client at a
+  time may hold it and the application already does, so it fails with
+  BadAccess. Click-to-focus uses a synchronous `grabButton` plus
+  `app.allowEvents('replay')`, which hands the same click back to the app.
+- **Focus only viewable windows.** `SetInputFocus` on a window that is not
+  yet mapped is a BadMatch, so focus is taken after the frame is attached
+  and both are mapped, not when the client is first seen.
+- **Resolve keycodes from `GetKeyboardMapping`,** not from ntk's
+  `keycode2keysyms`: that copy is filled from a reply that may not have
+  landed, and a keycode guessed from a half-built map grabs a key nobody
+  presses. Grab every keycode that carries the keysym, and every
+  combination of CapsLock/NumLock — a passive grab only fires on an exact
+  modifier match.
+- **Drags need a real pointer grab.** react-x11's `capturePointer()` only
+  routes events that already arrived at the window; the X grab is what
+  keeps the server sending them once the pointer leaves the frame.
+- **Icons come from two places.** `_NET_WM_ICON` (EWMH) is ARGB pixels in a
+  property, what GTK and Qt set; `WM_HINTS` (ICCCM) points at a server-side
+  pixmap plus an optional 1-bit mask, what xterm and the other classic
+  clients still set. Reading only one leaves half the windows blank. A
+  depth-1 icon is a stencil, not a picture — draw the set bits in the
+  frame's foreground and leave the rest transparent, or it arrives as a
+  black square.
 
 ## Framed screenshots
 
@@ -255,10 +312,11 @@ phase 2 (events, `<scrollview>`), phase 3's `<popup>` and `<textinput>`
 (on ntk 3.2.0: clipboard, cursors, setLineDash), and the layout debug
 overlay (`REACT_X11_DEBUG_LAYOUT=1`). Element default actions (textinput
 editing, scrollview wheel) run via `_default*` hooks on nodes AFTER user
-prop handlers, skipped on `preventDefault()`. Next: `<select>`/menus as
+prop handlers, skipped on `preventDefault()`. The window-manager example
+(issue #3) is done — on ntk 3.9.0 and node-x11 3.2.0, which grew the
+substructure-redirect support it needed. Next: `<select>`/menus as
 components, DevTools highlight-on-hover, npm publish. Open GitHub issues:
-#3 window manager example, #4 top-down rendering, #13
-react-native-dom-like architecture.
+#4 top-down rendering, #13 react-native-dom-like architecture.
 
 ## Pull requests
 
