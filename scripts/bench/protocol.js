@@ -70,7 +70,27 @@ async function measure(name, fn) {
     replies: stats.replies,
     composites: stats.composites.length,
   };
-  await fn(app);
+  // A scenario that throws used to be reported as a very fast scenario:
+  // React swallows the render error, the renderer logs it, and what lands
+  // in the table is the cost of drawing nothing. Saved as a baseline, that
+  // then reads as "no regressions" forever. Fail the run instead.
+  let failure = null;
+  const onUncaught = (err) => {
+    failure ??= err;
+  };
+  process.on('uncaughtException', onUncaught);
+  try {
+    await fn(app);
+  } catch (err) {
+    failure ??= err;
+  } finally {
+    process.off('uncaughtException', onUncaught);
+  }
+  if (failure) {
+    console.error(`\nscenario "${name}" failed — it is measuring nothing:`);
+    console.error(failure);
+    process.exit(1);
+  }
   await settle(app);
 
   const after = compositePixels(stats, app.display.Render.majorOpcode);
@@ -159,21 +179,27 @@ const SCENARIOS = [
         ReactX11.render(
           React.createElement(
             'window',
-            { width: W, height: H, backgroundColor: '#f5f6fa' },
+            { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
             React.createElement(
               'box',
-              { flexGrow: 1, padding: 8, gap: 2 },
+              { style: { flexGrow: 1, padding: 8, gap: 2 } },
               Array.from({ length: 40 }, (_, i) =>
                 React.createElement(
                   'box',
                   {
                     key: i,
-                    flexDirection: 'row',
-                    gap: 6,
-                    padding: 2,
-                    backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+                    style: {
+                      flexDirection: 'row',
+                      gap: 6,
+                      padding: 2,
+                      backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+                    },
                   },
-                  React.createElement('text', { fontSize: 11 }, `row ${i}`),
+                  React.createElement(
+                    'text',
+                    { style: { fontSize: 11 } },
+                    `row ${i}`,
+                  ),
                 ),
               ),
             ),

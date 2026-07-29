@@ -5,7 +5,9 @@
   and the rich-content wrappers `<markdown>`, `<html>`, `<svg>`, `<tex>`,
   their props and refs.
 - [components.md](components.md) — widget components built on the
-  primitives: `Select`.
+  primitives: theming, `Select`, `Slider`, `Tooltip`, `Dialog`,
+  `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `Tree`, `SplitPane`,
+  `Canvas3D`, and the `useAnchor` popup placement hook.
 - [events.md](events.md) — the synthetic event system: dispatch phases,
   event object shape, focus, cursors, default actions.
 - [typescript.md](typescript.md) — the bundled types: one tsconfig option,
