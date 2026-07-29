@@ -66,7 +66,7 @@ is nothing to add:
 bun hello.jsx
 ```
 
-Under Node, [`tsx`](https://tsx.is/) is the shortest route:
+Under Node, [`tsx`](https://tsx.hirok.io/) is the shortest route:
 
 ```bash
 npx tsx hello.jsx
