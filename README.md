@@ -95,21 +95,21 @@ Everything else is laid out by yoga and drawn client-side into the window's
 double-buffered 2d context — see [NEXT_STEPS.md](NEXT_STEPS.md) for the architecture rationale
 and [docs/](docs/README.md) for the full API reference.
 
-| element        | what it is                                                                                                                      |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `<window>`     | a real X11 window; the flex, paint and event root                                                                               |
-| `<popup>`      | an override-redirect window at screen coordinates — menus, tooltips, dropdowns                                                  |
-| `<box>`        | flex container: layout props → yoga, plus backgrounds, borders (solid/dashed, radius), overflow clipping, zIndex                |
-| `<scrollview>` | clipped, wheel-scrollable viewport with a drawn scrollbar                                                                       |
-| `<text>`       | shaped, wrapped text (bidi, ligatures, font fallback); nested `<text>` elements are style spans                                 |
-| `<textinput>`  | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select, undo/redo |
-| `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                                         |
-| `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                         |
-| `<markdown>`   | ntk MarkdownView: headings, tables, highlighted fences, math, mermaid; `onLink`                                                 |
-| `<html>`       | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                                  |
-| `<svg>`        | static SVG through ntk SvgView, sized like `<image>`                                                                            |
-| `<tex>`        | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                                          |
-| `<glarea>`     | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                                         |
+| element        | what it is                                                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<window>`     | a real X11 window; the flex, paint and event root                                                                                                 |
+| `<popup>`      | an override-redirect window at screen coordinates — menus, tooltips, dropdowns                                                                    |
+| `<box>`        | flex container: layout props → yoga, plus backgrounds, borders (solid/dashed, radius), overflow clipping, zIndex                                  |
+| `<scrollview>` | clipped, wheel-scrollable viewport with a drawn scrollbar                                                                                         |
+| `<text>`       | shaped, wrapped text (bidi, ligatures, font fallback); nested `<text>` elements are style spans                                                   |
+| `<textinput>`  | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select, undo/redo, right-click menu |
+| `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                                                           |
+| `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                                           |
+| `<markdown>`   | ntk MarkdownView: headings, tables, highlighted fences, math, mermaid; `onLink`                                                                   |
+| `<html>`       | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                                                    |
+| `<svg>`        | static SVG through ntk SvgView, sized like `<image>`                                                                                              |
+| `<tex>`        | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                                                            |
+| `<glarea>`     | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                                                           |
 
 Widget **components** (plain React on top of the primitives, themable via
 `ThemeProvider`): `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch`,
@@ -311,6 +311,24 @@ with indirect GLX.
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent
 guidance, [docs/](docs/README.md) for API documentation, and
 [NEXT_STEPS.md](NEXT_STEPS.md) for the roadmap.
+
+## Known issues
+
+Two that are worth knowing before you hit them, both predating the current
+release and both tracked:
+
+- **Non-Latin keyboard layouts type Latin**
+  ([#85](https://github.com/sidorares/react-x11/issues/85)). Keysyms are
+  resolved from index 0/1 of the keymap, which is XKB group 1 — so
+  switching to a Cyrillic or Greek layout has no effect on Linux. macOS
+  and XQuartz need a second, different mechanism, since XQuartz has no
+  groups and rewrites the keymap instead.
+- **`sans-serif` can resolve to a CJK font on macOS**
+  ([#86](https://github.com/sidorares/react-x11/issues/86)). Font families
+  are resolved by shelling out to `fc-match`, which follows `PATH`;
+  Homebrew's fontconfig ships no macOS system-font aliases and answers
+  Hiragino Sans. Latin looks fine, Cyrillic comes out on full-width
+  advances. Put `/opt/X11/bin` first on `PATH` until this is fixed.
 
 # See also
 
