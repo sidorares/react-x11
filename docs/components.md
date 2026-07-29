@@ -543,3 +543,9 @@ The `Select` source (`src/components/Select.js`) is the reference for building
 your own: hover/focus state with `useState`, a `<popup>` for anything that
 must escape the window bounds, and a ref to the trigger node for anchoring
 (`node.abs` + `node.root.window.x/y`).
+
+The window's screen position comes from the server (`TranslateCoordinates`),
+refreshed when the window is realized and whenever it is configured — not
+from `window.x`/`y`. Once a reparenting window manager has put the window
+inside its frame, those are relative to the _frame_, and a popup placed with
+them lands near the corner of the screen instead of under its trigger.

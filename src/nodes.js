@@ -2204,7 +2204,34 @@ export class WindowNode extends Node {
     // <glarea>s mounted before the window existed own a child X window too
     this._realizeGlAreas(this);
     wnd.map?.();
+    // ask before anything can be anchored to it, so the first popup is
+    // placed as well as the second
+    this._refreshScreenOrigin();
     this.invalidate(true);
+  }
+
+  /**
+   * Where this window's top-left corner actually is on the screen, cached
+   * on the ntk window for `anchorRect` to read.
+   *
+   * It cannot be taken from `window.x`/`y`. Those come from ConfigureNotify,
+   * and once a reparenting window manager has put the window inside its
+   * frame — which is every WM worth the name — those coordinates are
+   * relative to the *frame*, not the root. A popup anchored with them lands
+   * near the corner of the screen instead of under its trigger. The server
+   * will translate for us, and its answer is right whatever the WM did.
+   */
+  _refreshScreenOrigin() {
+    const wnd = this.window;
+    const X = this.app?.X;
+    const root = X?.display?.screen?.[0]?.root;
+    if (!wnd || root == null || typeof X.TranslateCoordinates !== 'function') {
+      return;
+    }
+    X.TranslateCoordinates(wnd.id, root, 0, 0, (err, res) => {
+      if (err || this.destroyed || !this.window) return;
+      this.window._screenOrigin = { x: res.destX, y: res.destY };
+    });
   }
 
   /** Walk the drawn subtree and give every <glarea> its child X window. */
@@ -2274,6 +2301,9 @@ export class WindowNode extends Node {
     wnd.on('resize', (ev) => {
       this.needsLayout = true;
       this.invalidate(true);
+      // a move or a reparent arrives the same way, and either changes where
+      // popups anchored to this window belong
+      this._refreshScreenOrigin();
       this.props.onResize?.(ev);
     });
     // the frame clock emits 'draw' when the backing store content is invalid
