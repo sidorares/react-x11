@@ -576,8 +576,17 @@ export class Node {
 
   /** Drawn, visible children in paint order (stable sort by zIndex). */
   paintOrder() {
+    // `display: 'none'` takes a node out of the layout, and it has to leave
+    // the paint with it. They were separate before because the only way to
+    // hide something was the `hidden` flag, which does both — until a size
+    // query started setting `display` from a style block, and the hidden
+    // node carried on painting at the position it no longer had.
     const drawn = this.children.filter(
-      (c) => DRAWN_KINDS.has(c.kind) && c.yoga && !c.hidden,
+      (c) =>
+        DRAWN_KINDS.has(c.kind) &&
+        c.yoga &&
+        !c.hidden &&
+        c.style.display !== 'none',
     );
     return drawn
       .map((node, i) => ({ node, i }))
@@ -625,7 +634,13 @@ export class Node {
 
   /** Front-to-back hit test. Returns the deepest hit node or null. */
   hitTest(x, y) {
-    if (this.hidden || this.style.pointerEvents === 'none') return null;
+    if (
+      this.hidden ||
+      this.style.display === 'none' ||
+      this.style.pointerEvents === 'none'
+    ) {
+      return null;
+    }
     const inside = this.containsPoint(x, y);
     if (!inside && this.clipsChildren()) return null;
     const order = this.paintOrder();

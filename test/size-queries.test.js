@@ -169,3 +169,42 @@ test('a node mounted after a resize matches the size the window is now', async (
 
   ReactX11.unmountComponentAtNode(app);
 });
+
+test('a query that hides a node takes it out of the paint too', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    h(
+      'window',
+      { width: 400, height: 200 },
+      h(
+        'box',
+        { style: { flexDirection: 'row', flexGrow: 1 } },
+        h('box', { style: { width: 20, height: 20, backgroundColor: 'red' } }),
+        h('box', {
+          style: {
+            width: 20,
+            height: 20,
+            backgroundColor: 'blue',
+            '@width < 520': { display: 'none' },
+          },
+        }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  const row = nodeOf(app).children[0];
+  const hidden = row.children[1];
+  assert.strictEqual(hidden.style.display, 'none', 'the query matched');
+  assert.strictEqual(
+    row.paintOrder().length,
+    1,
+    'display:none leaves the paint as well as the layout — it used to keep ' +
+      'painting at the position it no longer had',
+  );
+  assert.strictEqual(hidden.hitTest(5, 5), null, 'and takes no pointer input');
+
+  ReactX11.unmountComponentAtNode(app);
+});

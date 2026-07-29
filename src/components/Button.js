@@ -51,12 +51,12 @@ export function Button({
           alignItems: 'center',
           justifyContent: 'center',
           gap: 8,
-          paddingTop: 8,
-          paddingBottom: 8,
-          paddingLeft: 16,
-          paddingRight: 16,
-          borderRadius: 4,
-          borderWidth: 1,
+          paddingTop: theme.paddingY,
+          paddingBottom: theme.paddingY,
+          paddingLeft: theme.paddingX,
+          paddingRight: theme.paddingX,
+          borderRadius: theme.radius,
+          borderWidth: theme.borderWidth,
           borderColor: disabled
             ? theme.border
             : focused

@@ -45,8 +45,8 @@ export function Checkbox({
         style: {
           width: 16,
           height: 16,
-          borderRadius: 3,
-          borderWidth: 1,
+          borderRadius: theme.radiusSmall,
+          borderWidth: theme.borderWidth,
           borderColor: checked
             ? fill
             : focused

@@ -74,6 +74,14 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
 - **Menu/MenuBar, ContextMenu** — DONE: built on `useAnchor`, with
   separators, disabled items, shortcuts, checkmarks, nested submenus and
   full keyboard navigation; `examples/menu.jsx` rewritten on them
+- **Demo themes — DONE.** `examples/themes.js` carries GitHub, macOS and
+  Windows in light and dark, switched at runtime by
+  `npm run examples:theming`, which also demonstrates a window size query.
+  The palette grew shape tokens (`radius`, `radiusSmall`, `borderWidth`,
+  `fontSize`, `paddingX`, `paddingY`) — without them a theme is only a
+  recolour. Exercising it turned up a paint bug: `display: 'none'` left a
+  node out of the layout but kept painting it, which never showed while
+  `hidden` was the only way to hide anything
 - **Tree — DONE.** Disclosure rows with the keyboard model a file browser
   has: Up/Down over the visible rows, Right/Left to open and step in or
   close and step out, type-ahead by prefix, and a twisty that opens a

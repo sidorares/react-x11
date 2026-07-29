@@ -129,9 +129,9 @@ export function Tooltip({
             onMouseLeave: hide,
             style: {
               flexGrow: 1,
-              borderWidth: 1,
+              borderWidth: theme.borderWidth,
               borderColor: theme.text,
-              borderRadius: 3,
+              borderRadius: theme.radiusSmall,
               backgroundColor: theme.text,
               justifyContent: 'center',
               paddingLeft: TOOLTIP_PADDING_X,

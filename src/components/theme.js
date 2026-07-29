@@ -7,7 +7,17 @@ import { XK_RETURN } from './keys.js';
 
 const h = React.createElement;
 
+/**
+ * The palette every widget reads, and the shape of the controls with it.
+ * A theme overrides what it cares about and inherits the rest, so the
+ * defaults here are the look the widgets have always had.
+ *
+ * The shape tokens are what let a theme be more than a recolour: corner
+ * radius, border weight, text size and the padding inside a control are
+ * most of what separates one platform's buttons from another's.
+ */
 const DefaultTheme = {
+  // colour
   border: '#b2bec3',
   borderActive: '#2980b9',
   background: 'white',
@@ -20,6 +30,13 @@ const DefaultTheme = {
   accentText: 'white',
   surfaceHover: '#f1f2f6',
   track: '#dfe6e9',
+  // shape
+  radius: 4,
+  radiusSmall: 3,
+  borderWidth: 1,
+  fontSize: 14,
+  paddingX: 16,
+  paddingY: 8,
 };
 
 const ThemeContext = React.createContext(DefaultTheme);

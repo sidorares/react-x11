@@ -19,6 +19,30 @@ with it). Everything else is forwarded to the host box. See
 Widget components are plain React built on the host elements — no
 reconciler support involved. They live in the package root export.
 
+## Theming
+
+`<ThemeProvider value={palette}>` gives every widget beneath it a palette,
+and a partial one merges over the defaults. It carries **shape as well as
+colour** — corner radius, border weight, text size and the padding inside a
+control are most of what separates one platform's controls from another's:
+
+| token                                 |                                   |
+| ------------------------------------- | --------------------------------- |
+| `background` `text` `dim` `border`    | the surface a control sits on     |
+| `accent` `accentHover` `accentText`   | primary buttons, checks, fills    |
+| `hoverBackground` `hoverText`         | selected rows, menu highlights    |
+| `surfaceHover` `track` `borderActive` | hover fills, slider tracks, focus |
+| `radius` `radiusSmall` `borderWidth`  | control shape                     |
+| `fontSize` `paddingX` `paddingY`      | control size                      |
+
+Widgets plant the merged palette on their own root node, so a `$token` in a
+style you pass one resolves against it — see
+[styling.md](styling.md#theme-tokens).
+
+`examples/themes.js` has three worked palettes — GitHub, macOS and Windows,
+each in light and dark — and `npm run examples:theming` switches between
+them at runtime.
+
 ## `Select`
 
 A dropdown whose menu is a real override-redirect `<popup>` window anchored
