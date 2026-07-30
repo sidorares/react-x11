@@ -8,20 +8,20 @@
     "compositePixels": 160000
   },
   "text: paragraph, inside a rect clip": {
-    "requests": 40,
-    "bytesOut": 6040,
+    "requests": 43,
+    "bytesOut": 6064,
     "bytesIn": 32,
     "replies": 1,
     "composites": 1,
     "compositePixels": 160000
   },
   "clips: 40 nested rect clips with text": {
-    "requests": 517,
-    "bytesOut": 101884,
+    "requests": 277,
+    "bytesOut": 97884,
     "bytesIn": 32,
     "replies": 1,
-    "composites": 41,
-    "compositePixels": 6560000
+    "composites": 1,
+    "compositePixels": 160000
   },
   "shapes: 50 filled rounded boxes": {
     "requests": 169,

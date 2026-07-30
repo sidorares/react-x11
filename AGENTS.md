@@ -404,10 +404,26 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   allocated a full-surface a8 pixmap, rasterized into it and composited the
   whole surface — per clip, and a frame nests them constantly. 3412 of 3900
   Composite requests over twenty wheel notches came from there. Fixed upstream
-  in sidorares/ntk#107; `scripts/bench/protocol.js` now has a nested-clip
-  scenario, which is the shape no scenario had before, which is why nothing
-  caught it. Client-side work is not the bottleneck for scrolling: layout and
-  paint together were 0.0ms next to what the server then had to redraw.
+  in sidorares/ntk#107, shipped in **ntk 3.10.1**, which is the floor this
+  package now depends on. Per wheel notch on the 50,000-row table, same
+  harness, only the ntk clip code differing:
+
+  |                 | 3.10.0 | 3.10.1 |
+  | --------------- | ------ | ------ |
+  | requests        | 2542   | 1242   |
+  | Composite calls | 242    | 25     |
+  | Composite Mpx   | 153.8  | 2.1    |
+
+  `scripts/bench/protocol.js` now has a nested-clip scenario, which is the
+  shape no scenario had before, which is why nothing caught it. Client-side
+  work is not the bottleneck for scrolling: layout and paint together were
+  0.0ms next to what the server then had to redraw.
+
+  Beware that `text: paragraph, inside a rect clip` **flaps by three
+  requests** between runs — 43/40/43 on identical code. `--check`'s tolerance
+  absorbs it, but it means a small real regression there would not be caught,
+  and a baseline saved on a lucky run can look like a regression on the next.
+  Not diagnosed; suspect glyph-page upload batching.
 
   Two traps when measuring this by hand (both hit while building
   `examples/stress/`):
