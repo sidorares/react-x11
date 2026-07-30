@@ -55,6 +55,14 @@ console.error = (...args) => failures.push(args.map(String).join(' '));
 
 // --- harness ---------------------------------------------------------------
 
+// `--wide` sets the UI face to a monospace one, which is far wider per
+// character than the default. A desktop app cannot know its font's metrics in
+// advance — the user's `sans-serif` is whatever fontconfig says — so a layout
+// that only survives the metrics it was written against is a latent bug. Three
+// buttons that sat comfortably in a 250px card here ran off the edge of it on
+// a real system font, and this pass is what would have caught that.
+const WIDE = process.argv.includes('--wide');
+
 function fontSource() {
   const source = new StaticFontSource();
   // Bold, italic and monospace all resolve to distinct faces, because the
@@ -62,9 +70,13 @@ function fontSource() {
   // regression in font selection.
   const add = (file, attrs) =>
     source.add(readFileSync(join(fontDir, file)), attrs);
-  add('KaTeX_Main-Regular.ttf', { family: 'Check Sans' });
-  add('KaTeX_Main-Bold.ttf', { family: 'Check Sans', weight: 700 });
-  add('KaTeX_Main-Italic.ttf', { family: 'Check Sans', style: 'italic' });
+  const ui = WIDE ? 'KaTeX_Typewriter-Regular.ttf' : 'KaTeX_Main-Regular.ttf';
+  add(ui, { family: 'Check Sans' });
+  add(WIDE ? ui : 'KaTeX_Main-Bold.ttf', { family: 'Check Sans', weight: 700 });
+  add(WIDE ? ui : 'KaTeX_Main-Italic.ttf', {
+    family: 'Check Sans',
+    style: 'italic',
+  });
   add('KaTeX_Typewriter-Regular.ttf', { family: 'Check Mono' });
   source.alias('sans-serif', 'Check Sans');
   source.alias('monospace', 'Check Mono');
@@ -182,6 +194,45 @@ function writePng(name, data) {
   return out;
 }
 
+/**
+ * Every node that overflows an ancestor whose width was pinned explicitly.
+ *
+ * A child spilling out of an auto-sized box is normal — the box grows. A child
+ * spilling out of a box the author gave a fixed `width` is the bug: Yoga
+ * defaults `flexShrink` to 0, so a row of things sized by their own text does
+ * not compress to fit, it runs off the edge and gets clipped. That is
+ * invisible until the font changes, which is why it took a screenshot from a
+ * real desktop to find.
+ */
+function overflows() {
+  const out = [];
+  const walk = (node, pinned) => {
+    const style = node.style ?? {};
+    const box = node.abs;
+    if (pinned && box && box.width > 0) {
+      const right = pinned.abs.x + pinned.abs.width;
+      const over = box.x + box.width - right;
+      // a pixel of slop: borders and rounding land on half pixels
+      if (over > 1) {
+        out.push({
+          kind: node.kind,
+          text: textOf(node) || (node.props?.label ?? ''),
+          over: Math.round(over),
+          box: `${Math.round(box.width)}x${Math.round(box.height)}`,
+          within: Math.round(pinned.abs.width),
+        });
+      }
+    }
+    // a node with its own pinned width becomes the frame for its subtree
+    const next = typeof style.width === 'number' ? node : pinned;
+    for (const child of node.children ?? []) {
+      if (!child.isWindow) walk(child, next);
+    }
+  };
+  walk(root, null);
+  return out;
+}
+
 const check = (ok, what) => {
   if (!ok) failures.push(what);
   return ok;
@@ -228,7 +279,9 @@ async function frameAfter(node) {
 
 const TABS = ['Typography', 'Charts', 'Data', 'Controls', 'Damage', 'Mixed'];
 
-realError(`\n  panel         nodes     ink${WRITE_PNG ? '   png' : ''}`);
+realError(
+  `\n  panel         nodes     ink${WRITE_PNG ? '   png' : ''}${WIDE ? '   [wide font]' : ''}`,
+);
 realError(`  ${'-'.repeat(WRITE_PNG ? 52 : 30)}`);
 
 await settle();
@@ -252,6 +305,19 @@ for (const tab of TABS) {
   check(
     ink > W * H * 0.02,
     `"${tab}" rendered almost nothing (${ink}px of ink)`,
+  );
+  const spills = overflows();
+  check(
+    spills.length === 0,
+    `"${tab}" has ${spills.length} node(s) overflowing a fixed-width box: ` +
+      spills
+        .slice(0, 4)
+        .map(
+          (o) =>
+            `${o.kind}${o.text ? ` "${o.text}"` : ''} ${o.box} is ${o.over}px ` +
+            `past its ${o.within}px container`,
+        )
+        .join('; '),
   );
 }
 

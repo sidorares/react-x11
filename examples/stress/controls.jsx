@@ -46,6 +46,18 @@ const s = createStyles({
   },
   title: { fontSize: 12, color: '#2d3436' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // A row of things sized by their own text — buttons, chips — has to wrap.
+  // Yoga defaults flexShrink to 0, so without this they do not compress to
+  // fit, they overflow: three buttons that sit comfortably in a 250px card in
+  // one font run off the edge of it in a wider one. Anything laid out against
+  // the metrics of the font you happened to test with is a latent bug, and a
+  // desktop app cannot know the metrics in advance.
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   label: { fontSize: 11, color: '#7f8c8d', width: 74 },
   inner: {
@@ -249,7 +261,7 @@ export function ControlsPanel() {
                 <text style={s.label}>Progress</text>
                 <ProgressBar value={level / 100} style={{ flexGrow: 1 }} />
               </box>
-              <box style={s.row}>
+              <box style={s.buttonRow}>
                 <Tooltip label="Counts presses, nothing more">
                   <Button primary onPress={() => setPresses((n) => n + 1)}>
                     Press me

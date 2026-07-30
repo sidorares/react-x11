@@ -517,6 +517,9 @@ export class Node {
           'windows may only appear at the root or inside another <window>.',
       );
     }
+    // captured before the child joins, so it covers the arrangement that is
+    // about to be replaced (see _childListChanged)
+    const before = this.paintBounds();
     // a move has to leave the yoga tree too — yoga aborts on insertChild of
     // a node that still has a parent
     if (this.children.includes(child) && this._joinsYoga(child)) {
@@ -533,12 +536,53 @@ export class Node {
     // With no theme anywhere there is nothing to resolve and nothing to walk
     if (this.theme || child.props.theme) child._themeChanged();
     this._textContentChanged();
-    this.root?.invalidate(true);
+    this._childListChanged(before);
+  }
+
+  /**
+   * True when this node's own box cannot change size, so a reflow of its
+   * children cannot move anything outside it. Both axes have to be pinned: a
+   * node with an explicit width but an auto height still grows downwards when
+   * a child appears, which moves its siblings.
+   */
+  _sizePinned() {
+    return (
+      typeof this.style?.width === 'number' &&
+      typeof this.style?.height === 'number'
+    );
+  }
+
+  /**
+   * A child was inserted or removed. `before` is this node's paint bounds from
+   * *before* the mutation, which the caller has to capture while the departing
+   * child is still attached.
+   *
+   * A child list change is a layout change, and a layout change with no bound
+   * repaints the window — which is what made toggling a `Checkbox` or a
+   * `Radio` cost a full repaint: the tick and the dot are children that mount
+   * and unmount. But when this node's own size is pinned, the reflow is
+   * confined to its subtree, so the damage is that subtree before the mutation
+   * unioned with the same subtree after layout. The second half is not
+   * measurable yet — an inserted child has no rect until layout runs — so the
+   * node is queued for the root to re-measure once it has.
+   */
+  _childListChanged(before) {
+    const root = this.root;
+    if (!root) return;
+    if (!this._sizePinned()) {
+      root.invalidate(true);
+      return;
+    }
+    root.invalidate(true, before);
+    root._reflowed.add(this);
   }
 
   removeChild(child) {
     const index = this.children.indexOf(child);
     if (index === -1) return;
+    // captured while the child is still attached, so it covers the rect the
+    // child is about to stop occupying
+    const before = this.paintBounds();
     this.children.splice(index, 1);
     if (this._joinsYoga(child)) {
       this.yoga.removeChild(child.yoga);
@@ -550,7 +594,7 @@ export class Node {
       child.yoga = null;
     }
     this._textContentChanged();
-    this.root?.invalidate(true);
+    this._childListChanged(before);
   }
 
   /** Destroy real resources (X windows) in this subtree. Yoga nodes are
@@ -929,10 +973,43 @@ export class Node {
 
   _paintContent(ctx) {}
 
+  /**
+   * Whether anything in this subtree actually reaches outside the clip box.
+   *
+   * A clip that clips nothing is far from free: each one rebuilds an a8 mask
+   * server-side, which is a FillRectangles plus trapezoid rasterization, and
+   * ntk brackets every glyph run under a clip with a SetPictureClipRectangles
+   * pair. A table sets `overflow: hidden` on every cell so that *long* text
+   * truncates, and then almost every cell's text fits — 191 clips a frame, of
+   * which a handful do anything.
+   *
+   * Rounded corners are never skipped: the clip is not a rectangle then, and
+   * the rounding can cut a child that a rect test says fits. The one-pixel
+   * inset is for antialiasing, which can put ink just outside a glyph's box.
+   */
+  _childrenCanOverflow() {
+    if (this.style?.borderRadius) return true;
+    const box = this.abs;
+    for (const child of this.children) {
+      if (child.isWindow || !child.yoga || child.hidden) continue;
+      if (child.style?.display === 'none') continue;
+      const b = child._subtreeBounds();
+      if (
+        b.x < box.x + 1 ||
+        b.y < box.y + 1 ||
+        b.x + b.width > box.x + box.width - 1 ||
+        b.y + b.height > box.y + box.height - 1
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   _paintChildren(ctx) {
     const order = this.paintOrder();
     if (order.length === 0) return;
-    const clip = this.clipsChildren();
+    const clip = this.clipsChildren() && this._childrenCanOverflow();
     if (clip) {
       ctx.save();
       this._roundedPath(ctx, this.style.borderRadius ?? 0);
@@ -2791,6 +2868,10 @@ export class WindowNode extends Node {
     // nodes with `@width`/`@height` blocks, and the size they last matched
     // against
     this._sizeQueryNodes = new Set();
+    // nodes whose child list changed and whose own size is pinned: their new
+    // arrangement is only measurable once layout has run (see
+    // Node._childListChanged)
+    this._reflowed = new Set();
     this.querySize = null;
   }
 
@@ -3233,7 +3314,12 @@ export class WindowNode extends Node {
     if (layoutChanged && !damage) this._damage = FULL_DAMAGE;
     else if (!layoutChanged && !damage) this._damage = FULL_DAMAGE;
     else if (this._damage !== FULL_DAMAGE) {
-      this._damage = unionDamage(this._damage, damage.paintBounds());
+      // a node, or a bare rect for a caller that has a region rather than a
+      // node — a subtree that is about to be removed, say
+      this._damage = unionDamage(
+        this._damage,
+        damage.paintBounds ? damage.paintBounds() : damage,
+      );
     }
     this.needsPaint = true;
     if (this._scheduled) return;
@@ -3264,6 +3350,20 @@ export class WindowNode extends Node {
       }
       this.needsLayout = false;
       this.needsPaint = true;
+      // The other half of a contained reflow: the pre-mutation arrangement was
+      // claimed when the child list changed, and this is the arrangement that
+      // replaced it. Claimed after layout because an inserted child has no
+      // rect before it.
+      for (const node of this._reflowed) {
+        if (!node.destroyed)
+          this._damage =
+            this._damage === FULL_DAMAGE
+              ? FULL_DAMAGE
+              : unionDamage(this._damage, node.paintBounds());
+      }
+      this._reflowed.clear();
+    } else if (this._reflowed.size) {
+      this._reflowed.clear();
     }
     if (!this.needsPaint) return;
     this.needsPaint = false;

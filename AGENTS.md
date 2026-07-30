@@ -425,6 +425,20 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   and a baseline saved on a lucky run can look like a regression on the next.
   Not diagnosed; suspect glyph-page upload batching.
 
+  **A clip that clips nothing is not free.** Each one rebuilds an a8 mask
+  server-side — a `FillRectangles` plus trapezoid rasterization — and ntk
+  brackets every glyph run under a clip with a `SetPictureClipRectangles`
+  pair. `Table` sets `overflow: hidden` on every cell so that _long_ text
+  truncates, and then almost every cell's text fits: 191 clips a frame, a
+  handful of which do anything. `_paintChildren` now skips a clip when
+  `_childrenCanOverflow()` says nothing reaches outside it, which took a
+  scroll frame from 1242 requests and 1098ms to 1014 and 692ms in the
+  in-process server. Rounded corners are never skipped — the clip is not a
+  rectangle then — and the test is inset by a pixel because antialiasing puts
+  ink just outside a glyph's box. `test/integration.test.js` checks that a
+  child which really does overflow is still cut; it fails if clipping is
+  disabled.
+
   Two traps when measuring this by hand (both hit while building
   `examples/stress/`):
 
@@ -477,6 +491,14 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   the scheduler would have run. `test/dirty-rect.test.js` and
   `scripts/check-stress.jsx` both do this.
 
+- **Layouts sized against one font break in another.** `sans-serif` is
+  whatever fontconfig hands you, and a row of things sized by their own text
+  does not compress to fit (see the `flexShrink` note below) — it overflows and
+  gets clipped. Three buttons that sat comfortably in a 250px card under the
+  test fonts ran off the edge of it on a real desktop. Rows of buttons or chips
+  want `flexWrap: 'wrap'`. `npm run stress:check -- --wide` renders the whole
+  app in a monospace UI face and fails on any node overflowing a pinned-width
+  ancestor, which is the pass that would have caught it.
 - **Yoga defaults `flexShrink` to 0**, where CSS defaults it to 1. A box with
   `flexGrow: 1` and the default `flexBasis: auto` therefore takes its
   content's max-content size as its base and **cannot shrink back** to the

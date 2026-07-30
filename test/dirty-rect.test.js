@@ -695,3 +695,96 @@ test('an animated transition stays bounded, including its last frame', async () 
     await app.close();
   }
 });
+
+test('mounting a child inside a fixed-size box repaints only that box', async () => {
+  const app = await headlessApp();
+  try {
+    // A `Checkbox`'s tick and a `Radio`'s dot are children that mount and
+    // unmount, and a child list change is a layout change — which with no
+    // bound repaints the window. But when the container's own size is pinned
+    // the reflow cannot move anything outside it, so the damage is that
+    // subtree before the mutation unioned with the same subtree after layout.
+    const WELL = 16;
+    const { root, setState } = await mountStateful(app, (state) => [
+      React.createElement('box', {
+        key: 'filler',
+        style: { height: ROW_H, backgroundColor: '#dfe6e9' },
+      }),
+      React.createElement(
+        'box',
+        {
+          key: 'well',
+          style: {
+            width: WELL,
+            height: WELL,
+            backgroundColor: '#ffffff',
+            borderWidth: 1,
+            borderColor: '#0984e3',
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+        },
+        // the tick: present only when checked, exactly as Checkbox does it
+        state
+          ? React.createElement('box', {
+              key: 'tick',
+              style: { width: 8, height: 8, backgroundColor: '#0984e3' },
+            })
+          : null,
+      ),
+      React.createElement('box', {
+        key: 'after',
+        style: { height: ROW_H, backgroundColor: '#e6e9ef' },
+      }),
+    ]);
+
+    const regions = await framesDuring(root, app, () => setState(1));
+    assert.strictEqual(regions.length, 1, 'one repaint');
+    const damage = regions[0];
+    assert.ok(damage, 'mounting the tick must not repaint the whole window');
+    assert.ok(
+      damage.width <= WELL + 2 * SLOP + 1 &&
+        damage.height <= WELL + 2 * SLOP + 1,
+      `damage ${damage.width}x${damage.height} should be the ${WELL}px well ` +
+        'plus slop',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a child mounting in an auto-sized box still repaints in full', async () => {
+  const app = await headlessApp();
+  try {
+    // The counterpart, and the reason the rule checks *both* axes: a box with
+    // no pinned height grows when a child appears, which moves its siblings —
+    // so there is nothing safe to bound the repaint to. If this came back
+    // bounded, the test above would prove nothing about the pinned case.
+    const { root, setState } = await mountStateful(app, (state) => [
+      React.createElement(
+        'box',
+        { key: 'auto', style: { backgroundColor: '#ffffff' } },
+        state
+          ? React.createElement('box', {
+              key: 'grown',
+              style: { height: ROW_H, backgroundColor: '#0984e3' },
+            })
+          : null,
+      ),
+      React.createElement('box', {
+        key: 'below',
+        style: { height: ROW_H, backgroundColor: '#e6e9ef' },
+      }),
+    ]);
+
+    const regions = await framesDuring(root, app, () => setState(1));
+    assert.strictEqual(regions.length, 1, 'one repaint');
+    assert.strictEqual(
+      regions[0],
+      null,
+      'an unpinned box grows, moving its siblings, so the frame is unbounded',
+    );
+  } finally {
+    await app.close();
+  }
+});

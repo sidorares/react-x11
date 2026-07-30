@@ -1081,3 +1081,67 @@ test('window hints reach the X server as real properties', async () => {
     await app.close();
   }
 });
+
+test('overflow: hidden still clips a child that really does overflow', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    // A clip that clips nothing is skipped, because each one costs a
+    // server-side mask rebuild and a table sets `overflow: hidden` on every
+    // cell so that *long* text truncates — almost all of which fits. The
+    // skipping is only sound if a child that genuinely overflows is still cut,
+    // which is what this checks: a 60px-wide child inside a 30px box, on a
+    // white page, must leave the pixels past the box white.
+    const W = 120;
+    const H = 40;
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: 'white' } },
+        React.createElement(
+          'box',
+          {
+            style: {
+              width: 30,
+              height: 20,
+              marginLeft: 10,
+              marginTop: 10,
+              overflow: 'hidden',
+            },
+          },
+          React.createElement('box', {
+            style: { width: 60, height: 20, backgroundColor: 'black' },
+          }),
+        ),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    const root = wnd._reactX11Node;
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setImmediate(r));
+      root._scheduled = false;
+      root.flush();
+      await new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+    }
+
+    const image = await readPixels(ctx, W, H);
+    const dark = (x, y) => {
+      const [r, g, b] = px(image, W, x, y);
+      return r < 128 && g < 128 && b < 128;
+    };
+    // inside the 30px box: painted
+    assert.ok(dark(20, 20), 'the child paints inside the box');
+    assert.ok(dark(38, 20), 'and right up to the box edge');
+    // past the box's right edge at x=40: the child wanted to reach x=70
+    for (const x of [42, 50, 60, 68]) {
+      assert.ok(
+        !dark(x, 20),
+        `the child must be clipped at the box edge, but x=${x} is painted`,
+      );
+    }
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
