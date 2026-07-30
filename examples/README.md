@@ -70,15 +70,21 @@ carry a live step counter until the counter's own re-measure turned every
 step into a full repaint. Read the log next to the window:
 
 ```
-  frame  damage rect                area      paint
-     14  82x63 @ 210,404            5.2kpx    0.8ms
+  frame  damage rect                            area      paint
+     14  82x63 @ 210,404                        5.2kpx    0.8ms
      15  … ×4
-     16  FULL WINDOW                700.0kpx  9.1ms
+     16  FULL WINDOW                            700.0kpx  9.1ms
+     17  40x26 @ 8,96 + 40x26 @ 941,632  [box +9186%]  2.1kpx  0.6ms
 ```
 
 `FULL WINDOW` is correct for a resize, a tab switch or anything that changes
 layout — text that re-measures makes the frame full by definition. It is a
 regression anywhere else.
+
+A frame that changed things far apart from each other paints a rect each rather
+than the box around them, and prints them all. `[box +N%]` is how much bigger a
+single box would have been — the Damage panel's "scattered" mode is there to
+produce large numbers for it on purpose.
 
 Wire-level numbers (requests, bytes, `Composite` pixels) are not here on
 purpose: `npm run bench` drives the same paths against an in-process server

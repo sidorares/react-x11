@@ -387,8 +387,21 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     means adding it to `paintPropsChanged`, which is why `borderStyle` is
     named there explicitly alongside `color`.
 
-  Presentation is still ntk's job and still a full-window `CopyArea` — that
-  costs server-side blit time, not wire traffic (NEXT_STEPS §8 item 4).
+  Damage is a **list of rects, capped at four**, not the box around them, so
+  two changes at opposite corners no longer repaint everything between them.
+  The frame paints a pass per rect and clips each pass to that one rect —
+  deliberately, because ntk's server-side clip fast path only recognises a
+  single rectangle and a multi-rect clip path falls back to rasterizing a
+  full-surface mask. Rects that overlap are merged rather than kept, since a
+  node inside two of them would otherwise be painted twice, which is wrong for
+  anything translucent. And a list whose rects nearly fill their box collapses
+  back to the box, because a pass is not free: `SPLIT_SAVING` is the threshold.
+
+  Presentation is ntk's job. Up to and including 3.10.1 it is a full-window
+  `CopyArea` — server-side blit time, not wire traffic. From 3.10.2 it copies
+  only the rects the drawing reported (NEXT_STEPS §8 item 4), which is what
+  makes the renderer-side region list visible on screen rather than just
+  cheaper to compute.
 
   A scroll is the one layout change that carries a damage bound:
   `invalidate(true, node)` asserts the reflow is confined to that node's

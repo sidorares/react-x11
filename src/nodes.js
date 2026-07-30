@@ -76,7 +76,22 @@ const NO_DAMAGE = Symbol('no-damage');
 // against it.
 const DAMAGE_SLOP = 1;
 
-function unionDamage(a, b) {
+// How many rectangles a frame's damage is allowed to hold.
+//
+// Kept much smaller than the equivalent cap in ntk, because a rectangle costs
+// more here: ntk pays one extra CopyArea per rectangle, while this pays a whole
+// extra pass over the tree — `paintOrder()` allocates and sorts per node — plus
+// a clip. Four is enough for the shapes that actually occur (a ticker and a
+// table row; a control and the status line it updates) and cheap enough that
+// the worst case is not worth avoiding.
+const MAX_DAMAGE_RECTS = 4;
+
+// How much of the box around them several rectangles have to save to be worth
+// painting separately. Two adjacent tab headers describe nearly the same area
+// either way and are better off as one pass; two corners of the window are not.
+const SPLIT_SAVING = 0.75;
+
+function unionRect(a, b) {
   if (!b) return a ?? null;
   if (!a) return { ...b };
   const x = Math.min(a.x, b.x);
@@ -89,6 +104,17 @@ function unionDamage(a, b) {
   };
 }
 
+function rectArea(r) {
+  return Math.max(0, r.width) * Math.max(0, r.height);
+}
+
+/** The box around a non-empty list of rects. */
+function rectsBounds(rects) {
+  let out = rects[0];
+  for (let i = 1; i < rects.length; i++) out = unionRect(out, rects[i]);
+  return out;
+}
+
 /** Do two rects share any area? Touching edges do not count. */
 function rectsOverlap(a, b) {
   return (
@@ -97,6 +123,87 @@ function rectsOverlap(a, b) {
     a.y < b.y + b.height &&
     b.y < a.y + a.height
   );
+}
+
+/**
+ * Merge overlapping rects until none of them overlap.
+ *
+ * Disjointness is not tidiness here, it is correctness. Each rect gets its own
+ * pass over the tree, and a node inside two of them would be painted twice —
+ * harmless for opaque drawing, wrong for anything translucent, which would
+ * blend over itself. Merging removes the question and saves the duplicated
+ * pass at the same time.
+ */
+function coalesceRects(rects) {
+  const out = [];
+  for (const rect of rects) {
+    let merged = rect;
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (!rectsOverlap(out[i], merged)) continue;
+      merged = unionRect(merged, out[i]);
+      out.splice(i, 1);
+      // start the scan again: having grown, the rect can now reach ones
+      // already passed over
+      i = out.length;
+    }
+    out.push(merged);
+  }
+  return out;
+}
+
+/**
+ * Add one rect to a capped, disjoint damage list, returning a new list.
+ *
+ * Over the cap, the pair whose merge wastes the least area is merged — waste
+ * being the area the merged rect covers that neither of the two did, so
+ * neighbours go first and far-apart rects last. That merge can itself overlap a
+ * third rect, so the result is coalesced again.
+ */
+function addDamageRect(rects, add) {
+  let out = coalesceRects(
+    (rects ?? []).concat([
+      { x: add.x, y: add.y, width: add.width, height: add.height },
+    ]),
+  );
+  while (out.length > MAX_DAMAGE_RECTS) {
+    let bestI = 0;
+    let bestJ = 1;
+    let bestWaste = Infinity;
+    for (let i = 0; i < out.length; i++) {
+      for (let j = i + 1; j < out.length; j++) {
+        const waste =
+          rectArea(unionRect(out[i], out[j])) -
+          rectArea(out[i]) -
+          rectArea(out[j]);
+        if (waste < bestWaste) {
+          bestWaste = waste;
+          bestI = i;
+          bestJ = j;
+        }
+      }
+    }
+    const merged = unionRect(out[bestI], out[bestJ]);
+    out = coalesceRects(
+      out.filter((_, k) => k !== bestI && k !== bestJ).concat([merged]),
+    );
+  }
+  return out;
+}
+
+/**
+ * The rects a frame actually paints, given the ones that were claimed.
+ *
+ * Each one costs a pass over the tree and a clip, so a list whose pieces nearly
+ * fill the box around them is better served by one pass over that box. Both
+ * answers cover every claimed pixel, so this is a cost decision and never a
+ * correctness one.
+ */
+function damageToPaint(rects) {
+  if (rects.length < 2) return rects;
+  const box = rectsBounds(rects);
+  let sum = 0;
+  for (const r of rects) sum += rectArea(r);
+  return sum > rectArea(box) * SPLIT_SAVING ? [box] : rects;
 }
 
 /**
@@ -873,7 +980,7 @@ export class Node {
     for (const child of this.children) {
       if (child.isWindow || !child.yoga || child.hidden) continue;
       if (child.style?.display === 'none') continue;
-      bounds = unionDamage(bounds, child._subtreeBounds());
+      bounds = unionRect(bounds, child._subtreeBounds());
     }
     return bounds;
   }
@@ -3315,8 +3422,11 @@ export class WindowNode extends Node {
     else if (!layoutChanged && !damage) this._damage = FULL_DAMAGE;
     else if (this._damage !== FULL_DAMAGE) {
       // a node, or a bare rect for a caller that has a region rather than a
-      // node — a subtree that is about to be removed, say
-      this._damage = unionDamage(
+      // node — a subtree that is about to be removed, say. Claims accumulate
+      // as a list of rects rather than one box around them all, so two changes
+      // at opposite corners of the window no longer repaint everything
+      // between them.
+      this._damage = addDamageRect(
         this._damage,
         damage.paintBounds ? damage.paintBounds() : damage,
       );
@@ -3359,7 +3469,7 @@ export class WindowNode extends Node {
           this._damage =
             this._damage === FULL_DAMAGE
               ? FULL_DAMAGE
-              : unionDamage(this._damage, node.paintBounds());
+              : addDamageRect(this._damage, node.paintBounds());
       }
       this._reflowed.clear();
     } else if (this._reflowed.size) {
@@ -3372,6 +3482,18 @@ export class WindowNode extends Node {
     // ntk getContext creates a fresh context (with window-event
     // subscriptions) on every call — cache one per window
     const ctx = (this._ctx ??= this.window.getContext('2d'));
+    // One pass per damage rect, and a single pass over the whole window when
+    // there is no bound. Each pass clips to one rect rather than to all of
+    // them at once, which is what keeps ntk's server-side rectangular-clip
+    // fast path: a clip path holding several rects is not a rectangle, and
+    // falls back to rasterizing a full-surface mask.
+    for (const rect of damage ?? [null]) {
+      this._paintRegion(ctx, rect, width, height);
+    }
+  }
+
+  /** Repaint one damage rect, or the whole window when `damage` is null. */
+  _paintRegion(ctx, damage, width, height) {
     if (damage) {
       // The clip is belt to the culling's braces: it bounds the server-side
       // mask work for whatever *does* paint, and it contains any node that
@@ -3409,7 +3531,7 @@ export class WindowNode extends Node {
   }
 
   /**
-   * The region this frame will repaint, or null for the whole window.
+   * The rects this frame will repaint, or null for the whole window.
    *
    * Clamped to the window: damage is recorded when a node invalidates, and
    * the window may have been resized since. A region that no longer
@@ -3421,9 +3543,31 @@ export class WindowNode extends Node {
     const damage = this._damage;
     this._damage = null;
     // what the frame about to run settled on, for the tests and for
-    // REACT_X11_DEBUG_LAYOUT to report; null means it repainted everything
+    // REACT_X11_DEBUG_LAYOUT to report; null means it repainted everything.
+    // `_lastDamage` is the box around the rects, which is what a caller
+    // wanting one number for "where did this frame paint" means by it.
     this._lastDamage = null;
+    this._lastDamageRects = null;
     if (damage === FULL_DAMAGE || !damage) return null;
+    const rects = [];
+    for (const claimed of damage) {
+      const clamped = this._clampDamage(claimed, width, height);
+      // one claim covering the window makes the whole frame unbounded, so
+      // there is nothing to learn from the rest of the list
+      if (clamped === FULL_DAMAGE) return null;
+      if (clamped) rects.push(clamped);
+    }
+    if (!rects.length) return null;
+    this._lastDamageRects = damageToPaint(rects);
+    this._lastDamage = rectsBounds(this._lastDamageRects);
+    return this._lastDamageRects;
+  }
+
+  /**
+   * One claimed rect snapped to whole pixels inside the window: null when
+   * nothing of it is left, `FULL_DAMAGE` when it covers the window.
+   */
+  _clampDamage(damage, width, height) {
     const x = Math.max(0, Math.floor(damage.x));
     const y = Math.max(0, Math.floor(damage.y));
     const right = Math.min(width, Math.ceil(damage.x + damage.width));
@@ -3431,9 +3575,10 @@ export class WindowNode extends Node {
     if (right <= x || bottom <= y) return null;
     // covering the window is the same as not being bounded at all, and the
     // full path is one fill instead of a clip plus a fill
-    if (x === 0 && y === 0 && right >= width && bottom >= height) return null;
-    this._lastDamage = { x, y, width: right - x, height: bottom - y };
-    return this._lastDamage;
+    if (x === 0 && y === 0 && right >= width && bottom >= height) {
+      return FULL_DAMAGE;
+    }
+    return { x, y, width: right - x, height: bottom - y };
   }
 
   /** DevTools hover highlight: tint a node's rect on the next paint. */

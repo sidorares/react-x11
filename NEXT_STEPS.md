@@ -505,10 +505,23 @@ File these as ntk issues; react-x11 should not work around them long-term.
    repaint of two tab headers went from 4.20 Mpx copied to 0.03. Scrolling
    barely moved — those frames repaint most of the window anyway.
 
-   Still coarse in one way: the region is a bounding box, not a list of rects,
-   so two small changes at opposite corners copy everything between them. That
-   is the same limitation the renderer's own damage tracking has, and the two
-   would want fixing together.
+   The box that was left — two small changes at opposite corners copying
+   everything between them — is gone too, on both sides at once
+   (sidorares/ntk#112, and the renderer half in this repo). Damage is a short
+   list of rectangles
+   rather than the box around them: the renderer paints a pass per rectangle,
+   each clipped to just that one so ntk's server-side rectangular-clip fast
+   path still applies, and ntk accumulates the reported clips into a list and
+   copies each. Both lists are capped — 4 rectangles in the renderer, where one
+   costs a whole pass over the tree, 8 in ntk, where one costs a CopyArea — and
+   both collapse back to the surrounding box when splitting would not save at
+   least a quarter of it, so nothing changes for the common case of changes near
+   each other. Measured through the stress app's Damage panel, "scattered" mode
+   (four cells at the corners of a 24x16 grid): **2508 kpx painted and copied
+   per five frames, down to 51 kpx** — 49x. "every cell" is unchanged at 2508
+   kpx, which is what makes that number mean something, and hovering two
+   adjacent tab headers is unchanged at 33 kpx because the collapse rule
+   declines to split it.
 
 5. **Clipboard/selection helper** — DONE (sidorares/ntk#69). ntk owns
    CLIPBOARD/PRIMARY acquisition, TARGETS negotiation and string transfer,

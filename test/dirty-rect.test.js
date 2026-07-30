@@ -54,6 +54,12 @@ const readPixels = (ctx, w, h) =>
     ),
   );
 
+// Wait for the server to work through everything sent so far. A test that
+// closes the app with a paint still in flight gets "client is in closing
+// state" out of the blit that follows it.
+const settled = (app) =>
+  new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+
 /**
  * Mount `element` and hand back the root WindowNode plus the refs given.
  * A ref is the way in: `getPublicInstance` returns the ntk window for
@@ -80,8 +86,9 @@ function differences(a, b) {
 
 /**
  * Apply `change`, paint the frame it asked for, then paint a full frame of
- * the same tree and compare. `damage` is the region the first frame used —
- * null when it repainted everything.
+ * the same tree and compare. `damage` is the box around the region the first
+ * frame used and `rects` the rectangles it actually painted — both null when
+ * it repainted everything.
  */
 async function paintBothWays(app, root, change) {
   const ctx = (root._ctx ??= root.window.getContext('2d'));
@@ -92,6 +99,7 @@ async function paintBothWays(app, root, change) {
   root.flush();
   await settle();
   const damage = root._lastDamage;
+  const rects = root._lastDamageRects;
   const partial = await readPixels(ctx, W, H);
 
   root.needsPaint = true;
@@ -100,7 +108,7 @@ async function paintBothWays(app, root, change) {
   await settle();
   const full = await readPixels(ctx, W, H);
 
-  return { damage, partial, full, diff: differences(partial, full) };
+  return { damage, rects, partial, full, diff: differences(partial, full) };
 }
 
 // Styles are hoisted so a `:hover` block is the only thing that can change
@@ -158,23 +166,168 @@ test('a hover state repaints only that row, with identical pixels', async () => 
   }
 });
 
-test('two hovered rows accumulate into one region spanning both', async () => {
+// --- damage is a list of rects, not the box around them --------------------
+//
+// Two changes far apart used to be claimed as the one rect containing both, so
+// hovering the first and last row of a list repainted the list. They are now
+// kept separate and painted in a pass each, and the rows between them are not
+// touched at all. The list is capped and collapsed back to its box when
+// splitting would not save enough to pay for the extra passes, so the common
+// case — changes near each other — is unchanged.
+
+test('two rows far apart are painted as two rects, not the box around them', async () => {
   const app = await headlessApp();
   try {
     const refs = Array.from({ length: 8 }, () => React.createRef());
     await mount(app, rowsElement(refs));
     const root = refs[0].current.root;
 
-    const { damage, diff } = await paintBothWays(app, root, () => {
+    const { damage, rects, diff } = await paintBothWays(app, root, () => {
       refs[1].current.setStyleState(':hover', true);
       refs[6].current.setStyleState(':hover', true);
     });
 
     assert.ok(damage, 'two paint-only changes still bound the repaint');
+    assert.equal(rects.length, 2, 'one rect per row, not one spanning both');
+    for (const rect of rects) {
+      assert.ok(
+        rect.height <= ROW_H + 2 * SLOP,
+        `each rect is one row tall, got ${rect.height}`,
+      );
+    }
+    // the box around them spans rows 1..6; the rects together are a third of it
     assert.ok(
       damage.height > 4 * ROW_H,
-      `union should span rows 1..6, got height ${damage.height}`,
+      `the box should span rows 1..6, got height ${damage.height}`,
     );
+    const painted = rects.reduce((sum, r) => sum + r.width * r.height, 0);
+    assert.ok(
+      painted < damage.width * damage.height * 0.5,
+      `painted ${painted}px of a ${damage.width * damage.height}px box`,
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+  } finally {
+    await app.close();
+  }
+});
+
+test('the rows between two far-apart changes are not painted', async () => {
+  const app = await headlessApp();
+  try {
+    // The pixel comparisons cannot show this: repainting a row that did not
+    // change produces the same pixels, just at a cost. So count the paints.
+    const refs = Array.from({ length: 8 }, () => React.createRef());
+    await mount(app, rowsElement(refs));
+    const root = refs[0].current.root;
+
+    const painted = new Set();
+    for (const [i, ref] of refs.entries()) {
+      const node = ref.current;
+      const original = node.paint.bind(node);
+      node.paint = (ctx) => {
+        painted.add(i);
+        return original(ctx);
+      };
+    }
+
+    refs[1].current.setStyleState(':hover', true);
+    refs[6].current.setStyleState(':hover', true);
+    root.flush();
+    await settled(app);
+
+    assert.deepEqual(
+      [...painted].sort(),
+      [1, 6],
+      'only the two changed rows should have painted',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('two rows near each other collapse into one rect', async () => {
+  const app = await headlessApp();
+  try {
+    const refs = Array.from({ length: 8 }, () => React.createRef());
+    await mount(app, rowsElement(refs));
+    const root = refs[0].current.root;
+
+    // Adjacent rows: two rects of ~20px separated by a 3px gap describe 40px
+    // of the 43px box around them, so a second pass would buy nothing.
+    const { rects, diff } = await paintBothWays(app, root, () => {
+      refs[3].current.setStyleState(':hover', true);
+      refs[4].current.setStyleState(':hover', true);
+    });
+
+    assert.equal(rects.length, 1, 'not worth splitting');
+    assert.ok(
+      rects[0].height <= 2 * ROW_H + 3 + 2 * SLOP,
+      `both rows and the gap, got ${rects[0].height}`,
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+  } finally {
+    await app.close();
+  }
+});
+
+test('overlapping claims are merged, so no node is painted twice', async () => {
+  const app = await headlessApp();
+  try {
+    // Two rects sharing area would put a node in the overlap through two
+    // passes. That is invisible for opaque drawing and wrong for anything
+    // translucent, which would blend over itself — so they have to merge.
+    const refs = Array.from({ length: 8 }, () => React.createRef());
+    await mount(app, rowsElement(refs));
+    const root = refs[0].current.root;
+
+    root.invalidate(false, { x: 20, y: 20, width: 60, height: 60 });
+    root.invalidate(false, { x: 50, y: 50, width: 60, height: 60 });
+
+    assert.equal(root._damage.length, 1, 'the two claims merged');
+    assert.deepEqual(root._damage[0], { x: 20, y: 20, width: 90, height: 90 });
+    root.flush(); // consume the frame these claims scheduled, before closing
+    await settled(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('the number of rects stays capped, however many rows change', async () => {
+  const app = await headlessApp();
+  try {
+    const refs = Array.from({ length: 8 }, () => React.createRef());
+    await mount(app, rowsElement(refs));
+    const root = refs[0].current.root;
+
+    // every other row: more separate regions than the cap allows
+    const { rects, diff } = await paintBothWays(app, root, () => {
+      for (const i of [0, 2, 4, 6])
+        refs[i].current.setStyleState(':hover', true);
+      refs[7].current.setStyleState(':hover', true);
+    });
+
+    assert.ok(rects, 'still bounded');
+    assert.ok(rects.length <= 4, `at most the cap, got ${rects.length}`);
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a claim covering the window gives up the bound entirely', async () => {
+  const app = await headlessApp();
+  try {
+    const refs = Array.from({ length: 8 }, () => React.createRef());
+    await mount(app, rowsElement(refs));
+    const root = refs[0].current.root;
+
+    const { damage, rects, diff } = await paintBothWays(app, root, () => {
+      refs[2].current.setStyleState(':hover', true);
+      root.invalidate(false, { x: -10, y: -10, width: W + 20, height: H + 20 });
+    });
+
+    assert.equal(damage, null, 'no point clipping to the whole window');
+    assert.equal(rects, null);
     assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
   } finally {
     await app.close();

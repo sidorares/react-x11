@@ -12,16 +12,37 @@
 // come from `npm run bench`, which drives the same paths against an
 // in-process server where a byte count means something reproducible.
 
-const fmt = (damage) =>
-  damage
-    ? `${damage.width}x${damage.height} @ ${damage.x},${damage.y}`
-    : 'FULL WINDOW';
+const fmt = (rects) => {
+  if (!rects) return 'FULL WINDOW';
+  const one = (r) => `${r.width}x${r.height} @ ${r.x},${r.y}`;
+  // A frame paints a list of rects, and the whole point of the list is that it
+  // can be smaller than the box around it — so when there is more than one,
+  // say how much smaller. `+N%` is what a single box would have cost on top.
+  if (rects.length === 1) return one(rects[0]);
+  const area = rects.reduce((sum, r) => sum + r.width * r.height, 0);
+  const box = boxOf(rects);
+  const over = ((box.width * box.height) / area - 1) * 100;
+  return `${rects.map(one).join(' + ')}  [box +${over.toFixed(0)}%]`;
+};
+
+function boxOf(rects) {
+  let { x, y } = rects[0];
+  let right = x + rects[0].width;
+  let bottom = y + rects[0].height;
+  for (const r of rects.slice(1)) {
+    x = Math.min(x, r.x);
+    y = Math.min(y, r.y);
+    right = Math.max(right, r.x + r.width);
+    bottom = Math.max(bottom, r.y + r.height);
+  }
+  return { x, y, width: right - x, height: bottom - y };
+}
 
 /**
  * Wrap a WindowNode's `flush()` to log what each painted frame cost.
  *
  * `flush()` is the whole frame: it runs layout if needed, calls
- * `_takeDamage()` (which leaves the region it settled on in `_lastDamage`,
+ * `_takeDamage()` (which leaves the rects it settled on in `_lastDamageRects`,
  * null meaning "repainted everything") and then paints. Wrapping it catches
  * every repaint however it was triggered — a React commit, a hover, a caret
  * blink — without the app having to cooperate.
@@ -74,22 +95,22 @@ export function watchFrames(root, { label = '', quiet = 0 } = {}) {
     // A headless window has no getContext, so flush bailed before painting.
     if (typeof root.window?.getContext !== 'function') return result;
 
-    const damage = root._lastDamage;
+    const rects = root._lastDamageRects;
     const full = {
       width: root.window.width ?? 0,
       height: root.window.height ?? 0,
     };
-    const area = damage
-      ? damage.width * damage.height
+    const area = rects
+      ? rects.reduce((sum, r) => sum + r.width * r.height, 0)
       : full.width * full.height;
 
     frames += 1;
-    if (!damage) fullFrames += 1;
+    if (!rects) fullFrames += 1;
     totalArea += area;
     totalMs += ms;
 
     if (area >= quiet) {
-      const line = `${fmt(damage)}  ${(area / 1000).toFixed(1)}kpx  ${ms.toFixed(1)}ms`;
+      const line = `${fmt(rects)}  ${(area / 1000).toFixed(1)}kpx  ${ms.toFixed(1)}ms`;
       if (line === lastLine) repeats += 1;
       else {
         flushRepeats();
