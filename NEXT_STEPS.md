@@ -496,9 +496,20 @@ File these as ntk issues; react-x11 should not work around them long-term.
    `_NET_WM_STATE_ABOVE` but exposes no fullscreen / maximize / minimize.
 3. **Re-export the Yoga instance** so renderer and HtmlView share one WASM
    module and version — DONE (sidorares/ntk#58), `import { Yoga } from 'ntk'`.
-4. **Rect-level presentation.** `_presentNow` blits the full window; accept
-   dirty rects from the renderer and `CopyArea` only those. Coarse full-window
-   blit is fine at first but wasteful for caret blink / hover highlights.
+4. **Rect-level presentation** — DONE (sidorares/ntk#110). A drawing operation
+   reports its clip rectangle through `_markDirty`, the window accumulates the
+   union, and the present copies that instead of the surface. No caller API:
+   an operation that was not clipped reports nothing and the frame falls back
+   to a full blit, and that fallback absorbs, so one unbounded operation keeps
+   the whole frame unbounded rather than copying less than was drawn. A hover
+   repaint of two tab headers went from 4.20 Mpx copied to 0.03. Scrolling
+   barely moved — those frames repaint most of the window anyway.
+
+   Still coarse in one way: the region is a bounding box, not a list of rects,
+   so two small changes at opposite corners copy everything between them. That
+   is the same limitation the renderer's own damage tracking has, and the two
+   would want fixing together.
+
 5. **Clipboard/selection helper** — DONE (sidorares/ntk#69). ntk owns
    CLIPBOARD/PRIMARY acquisition, TARGETS negotiation and string transfer,
    including INCR for large payloads; this is what `<textinput>` cut/paste
