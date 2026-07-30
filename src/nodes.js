@@ -3341,6 +3341,13 @@ export class WindowNode extends Node {
   /** A node in this window started a transition. */
   _startAnimating(node) {
     this._animating.add(node);
+    // The transition has to schedule its own first frame: it starts at the
+    // *old* value, so to whoever caused it the displayed style hasn't changed
+    // and their damage test contributes nothing. `setStyleState` happens to
+    // invalidate anyway, but a React prop change does not — and a transition
+    // no one schedules only runs when something else dirties the window,
+    // by which time its start is stale and it snaps to the end.
+    this.invalidate(false, damageForAnimation(node));
   }
 
   /**

@@ -575,6 +575,69 @@ test('transitions cover layout too, and relayout as they run', async () => {
   }
 });
 
+test('a transition started by a prop change schedules its own frames', async () => {
+  const { setAnimationClock } = await import('../src/nodes.js');
+  let clock = 1000;
+  setAnimationClock(() => clock);
+  try {
+    const app = createMockApp();
+    const ui = (backgroundColor) =>
+      h(
+        'window',
+        { width: 100, height: 100 },
+        h('box', {
+          style: { flexGrow: 1, backgroundColor, transition: 200 },
+        }),
+      );
+    ReactX11.render(ui('#000000'), null, app);
+    await tick();
+    const root = nodeOf(app);
+    const box = root.children[0];
+    const ops = app.windows[0].ctx.ops;
+    const opsBefore = ops.length;
+
+    // No hover, no focus, no other damage: the colour change is the whole
+    // update. The commit's own damage test cannot see it — the first
+    // displayed frame of a transition equals the previous style — so the
+    // transition must schedule its first frame itself, or it only runs
+    // when something else happens to dirty the window.
+    ReactX11.render(ui('#ffffff'), null, app);
+
+    clock = 1100; // half way
+    await tick();
+    await tick();
+    const mid = box.style.backgroundColor;
+    assert.match(
+      mid,
+      /^rgba\(/,
+      'the transition ticked with nothing else waking the window',
+    );
+    const channel = Number(mid.slice(5).split(',')[0]);
+    assert.ok(
+      channel > 0 && channel < 255,
+      `midpoint should be grey, got ${mid}`,
+    );
+    assert.ok(
+      ops.slice(opsBefore).some((op) => op[0] === 'fillRect' && op[5] === mid),
+      'the intermediate value actually painted',
+    );
+
+    clock = 1300; // past the end
+    await tick();
+    await tick();
+    assert.strictEqual(box.style.backgroundColor, '#ffffff');
+    assert.strictEqual(root._animating.size, 0, 'and stops asking for frames');
+    assert.ok(
+      ops
+        .slice(opsBefore)
+        .some((op) => op[0] === 'fillRect' && op[5] === '#ffffff'),
+      'the final value painted too',
+    );
+  } finally {
+    setAnimationClock(() => Date.now());
+  }
+});
+
 test('a property with no midpoint snaps rather than animating', async () => {
   const app = createMockApp();
   ReactX11.render(
