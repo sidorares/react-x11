@@ -491,6 +491,14 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   the scheduler would have run. `test/dirty-rect.test.js` and
   `scripts/check-stress.jsx` both do this.
 
+- **Request count is not a proxy for cost here; pixel work is.** ntk brackets
+  every glyph run under a clip with a `SetPictureClipRectangles` pair, which is
+  379 requests a scroll notch — 37% of all of them. Deleting every one of them
+  changed the frame time by _nothing_, 681ms either way: they are 8-byte
+  requests with no server pixel work behind them. The change that did move the
+  needle was skipping clips nobody needed, because each of those rebuilt an a8
+  mask. Measure a change in wall clock or in Composite pixels before optimising
+  a request count — `npm run bench` reports both for that reason.
 - **Interpolate colours premultiplied.** `transparent` is _black_ at zero
   alpha, so lerping the four straight channels drags every fade-in towards
   black on the way: half way from `transparent` to a near-white hover fill
