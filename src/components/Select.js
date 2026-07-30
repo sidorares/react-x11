@@ -4,7 +4,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useTheme } from './theme.js';
-import { useAnchor } from './anchor.js';
+import { measureLabel, screenOf, useAnchor } from './anchor.js';
+import { DEFAULT_TEXT_STYLE } from '../styles.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
   XK_DOWN,
@@ -23,10 +24,55 @@ const ITEM_HEIGHT = 28;
 
 const MAX_MENU_HEIGHT = 220;
 
+// The menu's chrome, named rather than inline because the width calculation
+// and the layout have to agree: a measurement that drifts from the padding it
+// is measuring for clips the very labels it exists to fit.
+const ITEM_PAD_LEFT = 10;
+const ITEM_PAD_RIGHT = 10;
+const MENU_PAD = 4; // the scrollview's own padding
+const MENU_BORDER = 1;
+// the scrollbar is drawn *over* the content rather than insetting it
+// (`nodes.js`, SCROLLBAR_WIDTH), so a menu that scrolls reserves the room
+const SCROLLBAR_WIDTH = 6;
+
 function normalizeOption(option) {
   return typeof option === 'object' && option !== null
     ? option
     : { value: option, label: String(option) };
+}
+
+/**
+ * How wide the menu has to be to show its **longest** option, not merely the
+ * selected one. Sizing it to the trigger — which is only ever as wide as the
+ * current value — left every longer label to wrap inside a fixed 28px row and
+ * overlap the option under it.
+ *
+ * Labels are measured at the size they are painted: a `<text>` resolves its
+ * style against `DEFAULT_TEXT_STYLE` rather than inheriting from the boxes
+ * around it, so the option rows are 14px whatever the trigger is set to. The
+ * selected one is measured bold, which is how `Option` draws it.
+ *
+ * The result is never narrower than the trigger it hangs off, and never wider
+ * than the screen it has to open on — `anchorRect` can slide a popup left to
+ * fit, but nothing can rescue one that is wider than the display.
+ */
+function menuWidth(node, options, value, scrolls) {
+  let widest = 0;
+  for (const option of options) {
+    const { width } = measureLabel(node, option.label, {
+      size: DEFAULT_TEXT_STYLE.size,
+      weight: option.value === value ? 'bold' : 'normal',
+    });
+    if (width > widest) widest = width;
+  }
+  const chrome =
+    (MENU_BORDER + MENU_PAD) * 2 +
+    ITEM_PAD_LEFT +
+    ITEM_PAD_RIGHT +
+    (scrolls ? SCROLLBAR_WIDTH : 0);
+  const width = Math.max(node.abs.width, Math.ceil(widest) + chrome);
+  const screen = screenOf(node);
+  return screen ? Math.min(width, screen.pixel_width) : width;
 }
 
 function Option({ option, selected, active, onPick, onHover, nodeRef }) {
@@ -43,7 +89,8 @@ function Option({ option, selected, active, onPick, onHover, nodeRef }) {
       style: {
         height: ITEM_HEIGHT,
         justifyContent: 'center',
-        paddingLeft: 10,
+        paddingLeft: ITEM_PAD_LEFT,
+        paddingRight: ITEM_PAD_RIGHT,
         cursor: 'pointer',
         backgroundColor: active ? theme.hoverBackground : theme.background,
       },
@@ -96,18 +143,22 @@ export function Select({
 
   const normalized = options.map(normalizeOption);
   const current = normalized.find((o) => o.value === value);
-  const menuHeight = Math.min(
-    normalized.length * ITEM_HEIGHT + 8,
-    MAX_MENU_HEIGHT,
-  );
+  const contentHeight = normalized.length * ITEM_HEIGHT + MENU_PAD * 2;
+  const menuHeight = Math.min(contentHeight, MAX_MENU_HEIGHT);
+  const scrolls = contentHeight > MAX_MENU_HEIGHT;
 
   const close = () => setOpen(false);
   const openMenu = () => {
     const node = triggerRef.current;
     if (!node) return;
     // shared anchoring: also flips the menu above the trigger when there is
-    // no room below, instead of opening off the bottom of the screen
-    const rect = measureAnchor({ placement: 'bottom', height: menuHeight + 2 });
+    // no room below, and slides it left when the menu is wider than the
+    // trigger and would otherwise open off the right edge
+    const rect = measureAnchor({
+      placement: 'bottom',
+      height: menuHeight + 2,
+      width: menuWidth(node, normalized, value, scrolls),
+    });
     if (!rect) return;
     setAnchor(rect);
     const selected = normalized.findIndex((o) => o.value === value);
@@ -251,14 +302,14 @@ export function Select({
             style: {
               flexGrow: 1,
               flexShrink: 1,
-              borderWidth: 1,
+              borderWidth: MENU_BORDER,
               borderColor: theme.border,
               backgroundColor: theme.background,
             },
           },
           h(
             'scrollview',
-            { ref: scrollRef, style: { flexGrow: 1, padding: 4 } },
+            { ref: scrollRef, style: { flexGrow: 1, padding: MENU_PAD } },
             normalized.map((option, index) =>
               h(Option, {
                 key: String(option.value),
