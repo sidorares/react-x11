@@ -1285,6 +1285,129 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
   ReactX11.unmountComponentAtNode(app);
 });
 
+// The menu used to take the trigger's width, and the trigger is only ever as
+// wide as the *selected* value — so picking a short option made every longer
+// one wrap inside a fixed 28px row and overlap the option beneath it.
+test('Select: the menu fits its longest option, not the selected one', async () => {
+  const { Select } = await import('../src/index.js');
+  const { measureLabel } = await import('../src/components/anchor.js');
+  const { DEFAULT_TEXT_STYLE } = await import('../src/styles.js');
+
+  const LONGEST = 'a considerably longer option than the trigger';
+  const options = ['S', 'medium one', LONGEST];
+
+  const openWith = async (selected) => {
+    const app = createMockApp();
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 400, height: 200 },
+        React.createElement(
+          'box',
+          { style: { flexGrow: 1, padding: 10 } },
+          React.createElement(Select, {
+            options,
+            value: selected,
+            style: { width: 60 },
+          }),
+        ),
+      ),
+      null,
+      app,
+    );
+    await tick();
+    const wnd = app.windows[0];
+    const findFocusable = (node) => {
+      if (node.props?.focusable) return node;
+      for (const child of node.children) {
+        if (child.isWindow) continue;
+        const hit = findFocusable(child);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const trigger = findFocusable(wnd._reactX11Node);
+    const x = trigger.abs.x + 10;
+    const y = trigger.abs.y + trigger.abs.height / 2;
+    wnd.emit('mousedown', { x, y, keycode: 1 });
+    wnd.emit('mouseup', { x, y, keycode: 1 });
+    await tick();
+    return { app, trigger, popup: app.windows[1] };
+  };
+
+  const { app, trigger, popup } = await openWith('S');
+  assert.ok(
+    popup.attributes.width > trigger.abs.width,
+    `menu (${popup.attributes.width}) should outgrow the trigger (${trigger.abs.width})`,
+  );
+
+  // the longest label plus the row's own left padding has to fit, or the text
+  // wraps into the row below it — which is the bug
+  const longest = measureLabel(trigger, LONGEST, {
+    size: DEFAULT_TEXT_STYLE.size,
+  }).width;
+  assert.ok(
+    popup.attributes.width >= Math.ceil(longest) + 10,
+    `menu (${popup.attributes.width}) should fit the longest label (${Math.ceil(longest)})`,
+  );
+  ReactX11.unmountComponentAtNode(app);
+
+  // and it does not depend on which option is selected: the widest one is
+  // measured bold, the way Option paints it, so that case is the wider one
+  const withLongSelected = await openWith(LONGEST);
+  assert.ok(
+    withLongSelected.popup.attributes.width >= popup.attributes.width,
+    'selecting the longest option must not shrink the menu',
+  );
+  ReactX11.unmountComponentAtNode(withLongSelected.app);
+});
+
+test('Select: the menu is never narrower than the trigger', async () => {
+  const { Select } = await import('../src/index.js');
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 400, height: 200 },
+      React.createElement(
+        'box',
+        { style: { flexGrow: 1, padding: 10 } },
+        React.createElement(Select, {
+          options: ['a', 'b'],
+          value: 'a',
+          style: { width: 240 },
+        }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const findFocusable = (node) => {
+    if (node.props?.focusable) return node;
+    for (const child of node.children) {
+      if (child.isWindow) continue;
+      const hit = findFocusable(child);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const trigger = findFocusable(wnd._reactX11Node);
+  const x = trigger.abs.x + 10;
+  const y = trigger.abs.y + trigger.abs.height / 2;
+  wnd.emit('mousedown', { x, y, keycode: 1 });
+  wnd.emit('mouseup', { x, y, keycode: 1 });
+  await tick();
+
+  assert.strictEqual(
+    app.windows[1].attributes.width,
+    trigger.abs.width,
+    'two one-letter options still open a menu the width of the trigger',
+  );
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('text spans collect nested styles', () => {
   const app = createMockApp();
   ReactX11.render(
