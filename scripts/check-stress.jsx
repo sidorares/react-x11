@@ -12,11 +12,13 @@
 // swallows a render error and the renderer reports it through console.error,
 // so a broken panel looks like an empty panel.
 //
-// The last two checks are the ones with teeth. The Damage panel exists to
-// demonstrate that a commit touching one cell of several hundred repaints one
-// cell; that is checkable here rather than by eye. And "every cell" is checked
-// too, because if *that* also came back bounded the one-cell result would
-// prove nothing.
+// The damage checks at the end are the ones with teeth. The Damage panel exists
+// to demonstrate that a commit touching one cell of several hundred repaints one
+// cell; that is checkable here rather than by eye. "scattered" is checked too,
+// because four cells at the grid's corners are only bounded usefully by a list
+// of rects and this is what notices if that ever collapses back to one box. And
+// "every cell" is checked because if *that* also came back small the other two
+// would prove nothing.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -266,14 +268,37 @@ async function settle(rounds = 4) {
 }
 
 /** Click, let React commit, then paint exactly one frame and report the
- * region it repainted. This is the damage measurement. */
+ * rects it repainted. This is the damage measurement. */
 async function frameAfter(node) {
   click(node);
   await sleep(30);
   root._scheduled = false;
   root.flush();
-  return root._lastDamage;
+  return root._lastDamageRects;
 }
+
+const rectsArea = (rects) =>
+  rects ? rects.reduce((sum, r) => sum + r.width * r.height, 0) : W * H;
+
+const rectsBox = (rects) => {
+  if (!rects) return { width: W, height: H };
+  let x = Infinity;
+  let y = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const r of rects) {
+    x = Math.min(x, r.x);
+    y = Math.min(y, r.y);
+    right = Math.max(right, r.x + r.width);
+    bottom = Math.max(bottom, r.y + r.height);
+  }
+  return { width: right - x, height: bottom - y };
+};
+
+const describe = (rects) =>
+  rects
+    ? rects.map((r) => `${r.width}x${r.height}`).join(' + ')
+    : 'FULL WINDOW';
 
 // --- walk the panels -------------------------------------------------------
 
@@ -350,17 +375,55 @@ if (
   // cell change alone.
   await frameAfter(step);
   const one = await frameAfter(step);
-  const oneArea = one ? one.width * one.height : W * H;
+  const oneArea = rectsArea(one);
   realError(
-    `\n  one cell    ${one ? `${one.width}x${one.height}` : 'FULL WINDOW'} — ${(oneArea / 1000).toFixed(1)}kpx`,
+    `\n  one cell    ${describe(one)} — ${(oneArea / 1000).toFixed(1)}kpx`,
   );
   check(
     one && oneArea < (W * H) / 8,
-    `a one-cell change should bound its damage, got ${
-      one ? `${one.width}x${one.height}` : 'FULL WINDOW'
-    } of a ${W}x${H} window`,
+    `a one-cell change should bound its damage, got ${describe(one)} of a ` +
+      `${W}x${H} window`,
   );
 
+  // "scattered" recolours the four corner cells, so the box around them is the
+  // whole grid and only a list of rects can bound the frame usefully. This is
+  // the assertion that a region list is still a region list: if damage ever
+  // collapses back to one box, this frame's area jumps by two orders of
+  // magnitude while every other check in this file still passes.
+  const scattered = labeled('scattered');
+  if (
+    check(
+      scattered,
+      `the "scattered" button is missing; on screen: ${JSON.stringify(
+        labelsOnScreen().slice(0, 20),
+      )}`,
+    )
+  ) {
+    click(scattered);
+    await settle();
+    await frameAfter(labeled('step'));
+    const four = await frameAfter(labeled('step'));
+    const fourArea = rectsArea(four);
+    const box = rectsBox(four);
+    const boxArea = box.width * box.height;
+    realError(
+      `  scattered   ${describe(four)} — ${(fourArea / 1000).toFixed(1)}kpx ` +
+        `(one box would be ${(boxArea / 1000).toFixed(1)}kpx)`,
+    );
+    check(
+      four && four.length > 1,
+      `four cells at the grid's corners should claim several rects, got ` +
+        `${describe(four)}`,
+    );
+    check(
+      fourArea < boxArea / 4,
+      `the rects should be a fraction of the box around them, got ` +
+        `${(fourArea / 1000).toFixed(1)}kpx of ${(boxArea / 1000).toFixed(1)}kpx`,
+    );
+  }
+
+  click(labeled('one cell'));
+  await settle();
   const all = labeled('every cell');
   if (
     check(
@@ -373,9 +436,9 @@ if (
     click(all);
     await settle();
     const every = await frameAfter(labeled('step'));
-    const everyArea = every ? every.width * every.height : W * H;
+    const everyArea = rectsArea(every);
     realError(
-      `  every cell  ${every ? `${every.width}x${every.height}` : 'FULL WINDOW'} — ${(everyArea / 1000).toFixed(1)}kpx`,
+      `  every cell  ${describe(every)} — ${(everyArea / 1000).toFixed(1)}kpx`,
     );
     // The counterpart assertion: if recolouring all 384 cells also came back
     // small, the one-cell number would prove nothing about narrowing.
