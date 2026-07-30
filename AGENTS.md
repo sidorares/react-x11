@@ -443,11 +443,15 @@ TypeScript declarations; and undo/redo in `<textinput>`/`<textarea>`.
 `react-x11` is published on npm, with release-please keeping a release PR
 open for the next version.
 
-Next: a right-click menu for the text controls, a generic Popover, a file
-open/save dialog. Open GitHub issues: **#85** keyboard layout switching is
-ignored (non-Latin layouts always type Latin), **#86** `sans-serif`
-resolves to a CJK font on macOS, **#88** no right-click menu in the text
-controls — and right-click collapses the selection.
+The right-click edit menu for the text controls is done too (#90,
+`src/editmenu.js`), which closed **#88** — including its second half, where
+right-click used to collapse the selection.
+
+Next: a generic Popover, a file open/save dialog, and the AT-SPI
+accessibility work (NEXT_STEPS §11.3), which the focus work has unblocked.
+Open GitHub issues, both real: **#85** keyboard layout switching is ignored
+(non-Latin layouts always type Latin), **#86** `sans-serif` resolves to a
+CJK font on macOS.
 
 ## Pull requests
 
