@@ -26,11 +26,12 @@ props — they can never go stale.
   x, y,                             // window coordinates
   localX, localY,                   // target-relative
   nativeEvent,                      // the raw ntk/X11 event
+  shiftKey, ctrlKey,                // on every event, not just keys
   preventDefault(), stopPropagation(),
   capturePointer(), releasePointer(),   // see Pointer capture below
   // mouse: button, detail (DOM-style click count: 2 = double, 3 = triple)
   // wheel: deltaX, deltaY
-  // keyboard: keycode, keysym, codepoint, key, shiftKey, ctrlKey
+  // keyboard: keycode, keysym, codepoint, key
 }
 ```
 
