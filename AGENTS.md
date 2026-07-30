@@ -390,6 +390,25 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   Presentation is still ntk's job and still a full-window `CopyArea` — that
   costs server-side blit time, not wire traffic (NEXT_STEPS §8 item 4).
 
+  A scroll is the one layout change that carries a damage bound:
+  `invalidate(true, node)` asserts the reflow is confined to that node's
+  subtree _and_ that the node clips its children, so both the old and the new
+  position of anything that moved are inside the bound. `ScrollViewNode` is the
+  only caller. Everything else still passes no node and repaints in full.
+  `_subtreeBounds()` stops at a node that `clipsChildren()` for the same
+  reason: a scrollview's content extent is not what reaches the surface, and
+  mid-scroll it can be ninety thousand pixels away.
+
+  **Where scrolling actually spent its time was neither of those.** Profiling a
+  50,000-row table found the cost in ntk's `clip()`: intersecting a clip
+  allocated a full-surface a8 pixmap, rasterized into it and composited the
+  whole surface — per clip, and a frame nests them constantly. 3412 of 3900
+  Composite requests over twenty wheel notches came from there. Fixed upstream
+  in sidorares/ntk#107; `scripts/bench/protocol.js` now has a nested-clip
+  scenario, which is the shape no scenario had before, which is why nothing
+  caught it. Client-side work is not the bottleneck for scrolling: layout and
+  paint together were 0.0ms next to what the server then had to redraw.
+
   Two traps when measuring this by hand (both hit while building
   `examples/stress/`):
 
@@ -402,6 +421,34 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     button also changes its own hover and active styling, so that frame
     legitimately covers the button as well as whatever the press did. Warm up
     with one click and measure the next.
+  - **An animation frame arrives with `needsPaint` still false.**
+    `_advanceAnimations` sets it from _inside_ `flush`, so instrumentation that
+    samples the flags on entry counts every other frame and misses a transition
+    entirely. Test `root._animating.size > 0` as well.
+
+  Three routes to an unbounded repaint, all found by hovering controls in
+  `examples/stress/` and watching the log say `FULL WINDOW`, all now tested in
+  `test/dirty-rect.test.js`:
+
+  - **`NO_DAMAGE` must not mark the window dirty.** Contributing "no region" is
+    not the same as contributing "unknown": a commit in which every node says
+    so has genuinely nothing to repaint and should schedule no frame at all.
+    Falling through to `needsPaint` left the window dirty with no region
+    recorded, which repaints everything — so an identical re-render, which is
+    what hovering a control that ignores its own hover state produces, cost a
+    full-window repaint.
+  - **`onDraw` matches `/^on[A-Z]/`,** so `_paintChanged` skips it as an event
+    handler and `CanvasNode.applyProps` is the only thing that notices a new
+    closure. It has to claim damage, and it has to claim it _bounded_ — every
+    re-render of a component drawing through `<canvas>`, which is what a
+    `Checkbox` tick and a `Select` chevron are, otherwise repainted the window.
+  - **An animation must claim a region per frame, including its last.** A
+    transition is a repaint every frame for its duration. Nodes that _finish_
+    on a tick need claiming too, and the claim has to be decided _before_
+    ticking, because a finished tick clears `_anim` and with it any way to tell
+    a layout animation from a paint-only one. See `damageForAnimation`: an
+    out-of-flow node animating a layout property is bounded by its parent,
+    which contains both where it was and where it is going.
 
 - **A stalled frame clock under synthetic input.** ntk paces
   `requestAnimationFrame` behind a fence (a `GetInputFocus` whose reply

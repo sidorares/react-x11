@@ -375,6 +375,67 @@ test('textinput renders its value through the ntk text stack', async () => {
   }
 });
 
+test('an unfocused field shows the start of its value, not the caret', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    // The caret starts at the *end* of the value, and the paint used to chase
+    // it whether or not the field had ever been focused — so a field holding
+    // more text than fits opened scrolled past its own first characters, and a
+    // textarea opened below its first lines. Both read as a rendering bug
+    // rather than as a scroll position.
+    const input = React.createRef();
+    const area = React.createRef();
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 200, height: 140, style: { backgroundColor: 'white' } },
+        React.createElement('textinput', {
+          ref: input,
+          // comfortably wider than the 120px box at this size
+          value: 'a value far too long to fit inside the box it is in',
+          style: { width: 120, fontSize: 13 },
+        }),
+        React.createElement('textarea', {
+          ref: area,
+          value: 'one\ntwo\nthree\nfour\nfive\nsix',
+          rows: 2,
+          style: { width: 120, fontSize: 13 },
+        }),
+      ),
+      app,
+    );
+
+    // paint at least once: the offsets are settled during _paintContent
+    const root = wnd._reactX11Node;
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setImmediate(r));
+      root._scheduled = false;
+      root.flush();
+      await new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+    }
+
+    assert.ok(
+      input.current._prefixWidth(input.current.value.length) > 120,
+      'the premise: the value must overflow its box, or there is nothing to ' +
+        'scroll and the test proves nothing',
+    );
+    assert.strictEqual(
+      input.current._scrollX,
+      0,
+      'an unfocused textinput is scrolled to the start of its value',
+    );
+    assert.strictEqual(
+      area.current._scrollY,
+      0,
+      'an unfocused textarea shows its first lines',
+    );
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
 test('textinput caret advances past trailing spaces', async () => {
   const { app } = await createHeadlessApp();
   try {

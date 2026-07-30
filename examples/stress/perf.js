@@ -58,8 +58,13 @@ export function watchFrames(root, { label = '', quiet = 0 } = {}) {
   };
 
   root.flush = () => {
-    // needsLayout implies a paint (flush sets needsPaint after laying out)
-    const willPaint = root.needsPaint || root.needsLayout;
+    // needsLayout implies a paint — flush sets needsPaint after laying out —
+    // and so does a running animation, which is the case worth spelling out:
+    // `_advanceAnimations` sets needsPaint from *inside* flush, so an
+    // animation frame arrives here with both flags still false and would go
+    // uncounted if this only looked at them.
+    const willPaint =
+      root.needsPaint || root.needsLayout || root._animating?.size > 0;
     if (!willPaint) return original();
 
     const started = process.hrtime.bigint();
