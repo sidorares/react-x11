@@ -3,7 +3,7 @@
 // Numbers are pixels; strings like '50%' / 'auto' pass through to yoga.
 // Yoga comes from ntk (>= 3.1.0) so renderer and ntk widgets share one
 // WASM instance and enum set.
-import { Yoga, cssColor } from 'ntk';
+import { Yoga, cssColorStraight } from 'ntk';
 
 export { Yoga };
 
@@ -390,14 +390,20 @@ const rgba = (c) =>
  * through ntk's own CSS colour parser, so anything the paint path accepts
  * animates. Anything else — a percentage string, `auto`, an enum — has no
  * meaningful midpoint and returns null, which the caller treats as a snap.
+ *
+ * The colours are parsed **straight**, not premultiplied. The result is
+ * formatted back into an `rgba()` string, and that round trip only closes on
+ * unassociated components: premultiplied ones get scaled by alpha a second
+ * time when the paint path parses the string again, so a midpoint of a
+ * translucent colour would come out darker than either end.
  */
 export function interpolate(from, to, t) {
   if (typeof from === 'number' && typeof to === 'number') {
     return from + (to - from) * t;
   }
   if (typeof from === 'string' && typeof to === 'string') {
-    const a = cssColor(from);
-    const b = cssColor(to);
+    const a = cssColorStraight(from);
+    const b = cssColorStraight(to);
     if (!a || !b) return null;
     return rgba(a.map((v, i) => v + (b[i] - v) * t));
   }

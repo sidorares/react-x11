@@ -297,6 +297,44 @@ test('REACT_X11_STYLE_ONLY: a flat style prop is an error that names the fix', a
 
 // --- transitions -----------------------------------------------------------
 
+test('interpolating a translucent colour does not darken it', async () => {
+  const { interpolate } = await import('../src/styles.js');
+
+  // Interpolating a colour with itself must return itself. This is the whole
+  // bug in one line: the components are parsed, lerped, and formatted back
+  // into an rgba() string, so they have to be *straight*. Premultiplied ones
+  // get scaled by alpha again when the paint path re-parses the string, and
+  // half-alpha red comes back as rgba(128, 0, 0, 0.5) — the same alpha at
+  // half the brightness.
+  assert.strictEqual(
+    interpolate('rgba(255, 0, 0, 0.5)', 'rgba(255, 0, 0, 0.5)', 0.5),
+    'rgba(255, 0, 0, 0.5)',
+  );
+
+  // both endpoints, too
+  assert.strictEqual(
+    interpolate('rgba(0, 0, 255, 0.25)', 'rgba(255, 0, 0, 0.75)', 0),
+    'rgba(0, 0, 255, 0.25)',
+  );
+  assert.strictEqual(
+    interpolate('rgba(0, 0, 255, 0.25)', 'rgba(255, 0, 0, 0.75)', 1),
+    'rgba(255, 0, 0, 0.75)',
+  );
+
+  // and the midpoint moves both colour and alpha
+  assert.strictEqual(
+    interpolate('rgba(0, 0, 0, 0)', 'rgba(255, 255, 255, 1)', 0.5),
+    'rgba(128, 128, 128, 0.5)',
+  );
+
+  // opaque colours are unaffected either way, which is why the existing
+  // transition test never caught this
+  assert.strictEqual(
+    interpolate('#000000', '#ffffff', 0.5),
+    'rgba(128, 128, 128, 1)',
+  );
+});
+
 test('a transition eases a colour instead of snapping to it', async () => {
   const { setAnimationClock } = await import('../src/nodes.js');
   let clock = 1000;
