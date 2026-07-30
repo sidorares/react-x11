@@ -148,13 +148,21 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   pins the invariant by painting each case twice — bounded, then full — and
   comparing the readbacks.
 
-  Still full-window: **arbitrary React updates**. `applyProps` names the node
-  it changed, but React rebuilds sibling style objects on every render, so a
-  commit typically updates every node it touched and the union covers the
-  container. Narrowing that means asking each node whether its _own_ paint
-  actually changed, which `paintPropsChanged` answers for boxes but not for
-  the content of `<text>`/`<image>`/`<canvas>` — those repaint through their
-  own paths. Worth doing next; it is the case the bench measures.
+  **Arbitrary React updates are bounded too.** A commit calls `applyProps` on
+  every node it walked, and React rebuilds sibling style objects on every
+  render, so the union used to cover the container. Now a node only claims
+  damage if something it _draws_ changed: paint-relevant style compared by
+  value, plus any non-style prop, since that is where a subclass's content
+  lives — `<image src>`, `<canvas onDraw>`, a `value`, a `placeholder`.
+  `children`, event handlers and `style` are skipped, the first because child
+  mutations invalidate through their own paths. One row of forty recoloured
+  through `setState`: 5160 -> 732 bytes out, 45 -> 4 composites, 0.297 ->
+  0.015 Mpx, damaging 386x14 instead of the window.
+
+  The fallback is safe by construction: if no node claims damage, the frame
+  repaints everything. That is worth knowing when writing tests here — a
+  single changed prop cannot demonstrate a missed repaint, because nothing
+  bounds the region. It takes a second change that _does_ bound it.
 
 - **Stacking of real windows** — DONE for child `<window>`s: JSX order
   (and `zIndex`) is the stacking order, applied with ConfigureWindow

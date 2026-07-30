@@ -14,6 +14,7 @@ import {
   resolveStyleStates,
   hasStateStyles,
   isStyleProp,
+  isEventProp,
   EMPTY_STYLE,
   transitionFor,
   interpolate,
@@ -559,8 +560,49 @@ export class Node {
     // This is how every React update arrives, so it is where partial
     // painting pays for itself. `applyLayoutStyle` has just told us whether
     // anything can have *moved*: if not, this node's own region bounds what
-    // changed — a new colour, a new label, a different border.
-    this.root?.invalidate(layoutChanged, layoutChanged ? null : this);
+    // changed — a new colour, a new label, a different border. And if
+    // nothing it draws changed at all, it contributes no damage, which is
+    // what keeps a commit from widening the region to every node it touched.
+    this.root?.invalidate(
+      layoutChanged,
+      layoutChanged
+        ? null
+        : this._paintChanged(newProps, prev, style, prevStyle)
+          ? this
+          : NO_DAMAGE,
+    );
+  }
+
+  /**
+   * Did anything this node *draws* change?
+   *
+   * Deliberately conservative, because the cost of a wrong "no" is a stale
+   * pixel that nothing will come back to fix. Paint-relevant style is asked
+   * about by value, so a style object React rebuilt with the same contents
+   * costs nothing — that is the whole point, since React rebuilds sibling
+   * styles on every render and a commit would otherwise damage every node it
+   * walked.
+   *
+   * Everything else falls back to "yes it changed", which is what makes this
+   * safe without knowing about subclasses: `<image src>`, `<canvas onDraw>`,
+   * a `value`, a `placeholder`, a `caretColor` — any prop a subclass paints
+   * from is a prop, so a change to it lands here as an inequality and damages
+   * the node. Three kinds are skipped because they cannot affect this node's
+   * own drawing:
+   *
+   *  - `children`, which the reconciler mutates through appendChild /
+   *    removeChild / commitTextUpdate, each of which invalidates on its own;
+   *  - event handlers, rebuilt every render and never painted;
+   *  - `style`, already compared by value above.
+   */
+  _paintChanged(newProps, prev, style, prevStyle) {
+    if (style !== prevStyle && paintPropsChanged(style, prevStyle)) return true;
+    const keys = new Set([...Object.keys(newProps), ...Object.keys(prev)]);
+    for (const key of keys) {
+      if (key === 'children' || key === 'style' || isEventProp(key)) continue;
+      if (newProps[key] !== prev[key]) return true;
+    }
+    return false;
   }
 
   setHidden(hidden) {

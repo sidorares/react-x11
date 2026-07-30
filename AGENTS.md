@@ -377,6 +377,15 @@ the diff records the cost.
   - **cull on `_subtreeBounds()`, never `abs`.** A child of a non-clipping
     parent can be drawn outside it, so a parent whose own rect misses the
     damage may still own a node inside it.
+  - **a node only claims damage if something it _draws_ changed.** Paint
+    style is compared by value, so a style object React rebuilt with the same
+    contents costs nothing; every non-style prop is compared too, because
+    that is where a subclass's content lives — `<image src>`, `<canvas
+onDraw>`, `value`, `placeholder`. `children` and event handlers are
+    skipped, child mutations having their own invalidation paths. Adding a
+    prop that affects paint needs nothing; adding paint-relevant _style_
+    means adding it to `paintPropsChanged`, which is why `borderStyle` is
+    named there explicitly alongside `color`.
 
   Presentation is still ntk's job and still a full-window `CopyArea` — that
   costs server-side blit time, not wire traffic (NEXT_STEPS §8 item 4).
@@ -427,6 +436,13 @@ the diff records the cost.
   `src/styles.js` use the straight parser for exactly that reason. Note that
   opaque colours are identical either way, so a test with `#000000` and
   `#ffffff` cannot tell the two apart.
+- **A frame that claims no damage repaints everything**, deliberately — the
+  safe default when nothing can say what changed. It also means a test that
+  changes one thing cannot demonstrate a missed repaint: with nothing bounding
+  the region, the fallback covers the bug and the test passes either way. Pair
+  it with a second change that _does_ bound the frame. Three tests in
+  `test/dirty-rect.test.js` passed with the bug planted before their premises
+  were tightened, so each now asserts its own premise.
 - **Bun honours `tsconfig.json`'s `compilerOptions.paths` at runtime**, and
   ours maps `react-x11` at the declarations for the type tests. So inside
   this repo `bun` resolves the bare specifier to `src/index.d.ts` and dies
