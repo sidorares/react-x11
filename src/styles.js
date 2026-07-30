@@ -405,7 +405,21 @@ export function interpolate(from, to, t) {
     const a = cssColorStraight(from);
     const b = cssColorStraight(to);
     if (!a || !b) return null;
-    return rgba(a.map((v, i) => v + (b[i] - v) * t));
+    // Interpolate *premultiplied*, then divide the alpha back out, which is
+    // what CSS does and for the same reason. `transparent` is black at zero
+    // alpha, so lerping straight channels drags the colour towards black on
+    // the way: half way from `transparent` to a near-white hover fill lands on
+    // mid grey — 0.736 against 0.973 — and the curve is not even monotonic,
+    // it darkens and then lightens again. That is the rectangle that flashes
+    // when hover crosses two adjacent tabs, one fading out as the other fades
+    // in, both passing through grey together.
+    const alpha = a[3] + (b[3] - a[3]) * t;
+    if (alpha <= 0) return 'rgba(0, 0, 0, 0)';
+    const channel = (i) => {
+      const from0 = a[i] * a[3];
+      return (from0 + (b[i] * b[3] - from0) * t) / alpha;
+    };
+    return rgba([channel(0), channel(1), channel(2), alpha]);
   }
   return null;
 }

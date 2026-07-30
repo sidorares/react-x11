@@ -513,3 +513,278 @@ test('a non-style prop the node paints from still damages it', async () => {
     await app.close();
   }
 });
+
+// --- frames that should not happen, and frames that must stay bounded ------
+//
+// Three ways a repaint used to escape its bounds, all found by hovering
+// controls in examples/stress/ and watching the frame log say FULL WINDOW.
+// None was visible to the tests above, because each needs a *second* commit
+// after the tree has settled.
+
+// Mirrors DAMAGE_SLOP in src/nodes.js: paintBounds inflates a claimed region
+// by a pixel, so a node that inks slightly outside its rect is still covered.
+const SLOP = 1;
+
+/**
+ * Record every frame that paints between now and when `act` has settled.
+ *
+ * Reading `_lastDamage` after the fact is not enough here: a scheduled frame
+ * may have run during the wait, and for the animation case several will have.
+ * Wrapping `flush` catches each one — including the animation frames, which
+ * arrive with `needsPaint` still false because `_advanceAnimations` sets it
+ * from inside flush.
+ */
+async function framesDuring(root, app, act, { rounds = 6, delay = 0 } = {}) {
+  const settle = () =>
+    new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+  const regions = [];
+  const original = root.flush.bind(root);
+  root.flush = () => {
+    const painting =
+      root.needsPaint || root.needsLayout || root._animating.size > 0;
+    const result = original();
+    if (painting) regions.push(root._lastDamage);
+    return result;
+  };
+  try {
+    await act();
+    for (let i = 0; i < rounds; i++) {
+      if (delay) await new Promise((r) => setTimeout(r, delay));
+      await new Promise((r) => setImmediate(r));
+      await settle();
+      root._scheduled = false;
+      root.flush();
+      await settle();
+    }
+  } finally {
+    delete root.flush;
+  }
+  return regions;
+}
+
+test('a commit that changes nothing visible paints no frame at all', async () => {
+  const app = await headlessApp();
+  try {
+    // The state reaches no prop at all, so the re-render produces exactly the
+    // tree already on screen — new element objects, so React really does walk
+    // it and call applyProps on every node, but nothing to draw differently.
+    // (State carried on *any* prop would not do: props are compared by
+    // identity, so a changed one is a real claim, which is deliberate — that
+    // is where a subclass's content lives.)
+    const { root, setState } = await mountStateful(app, () =>
+      Array.from({ length: 6 }, (_, i) =>
+        React.createElement(
+          'box',
+          {
+            key: i,
+            // a fresh style object every render, identical contents
+            style: { height: ROW_H, backgroundColor: '#dfe6e9' },
+          },
+          React.createElement('text', { style: { fontSize: 10 } }, `row ${i}`),
+        ),
+      ),
+    );
+
+    const regions = await framesDuring(root, app, () => setState(1));
+    assert.deepStrictEqual(
+      regions,
+      [],
+      `an identical re-render painted ${regions.length} frame(s); it should ` +
+        'paint none, and certainly not the whole window',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a canvas whose onDraw changed repaints the canvas, not the window', async () => {
+  const app = await headlessApp();
+  try {
+    // onDraw matches /^on[A-Z]/, so the base class skips it as an event
+    // handler and CanvasNode is the only thing that notices. It used to claim
+    // damage unbounded, which made every re-render of a component that draws
+    // through <canvas> — a Checkbox tick, a Select chevron — repaint the whole
+    // window.
+    const { root, setState } = await mountStateful(app, (state) => [
+      React.createElement('box', {
+        key: 'filler',
+        style: { height: ROW_H, backgroundColor: '#dfe6e9' },
+      }),
+      React.createElement('canvas', {
+        key: 'c',
+        // a new closure every render, the way a component body produces one
+        onDraw: (ctx) => {
+          ctx.fillStyle = state ? '#e17055' : '#0984e3';
+          ctx.fillRect(0, 0, 12, 8);
+        },
+        style: { width: 12, height: 8 },
+      }),
+    ]);
+
+    const regions = await framesDuring(root, app, () => setState(1));
+    assert.strictEqual(regions.length, 1, 'exactly one repaint');
+    const damage = regions[0];
+    assert.ok(damage, 'the canvas repaint must be bounded, got FULL WINDOW');
+    assert.ok(
+      damage.width <= 12 + 2 * SLOP + 1 && damage.height <= 8 + 2 * SLOP + 1,
+      `damage ${damage.width}x${damage.height} should be the canvas plus ` +
+        'slop, not the window',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('an animated transition stays bounded, including its last frame', async () => {
+  const app = await headlessApp();
+  try {
+    // An absolutely-positioned thumb sliding on `left` is the Switch's
+    // arrangement. Every frame of it used to repaint the whole window — and so
+    // did the frame the animation *landed* on, because the node was dropped
+    // from the animating set before anything claimed its region.
+    const TRACK = { width: 36, height: 20 };
+    const { root, setState } = await mountStateful(app, (state) =>
+      React.createElement(
+        'box',
+        {
+          key: 'track',
+          style: { ...TRACK, backgroundColor: '#dfe6e9' },
+        },
+        React.createElement('box', {
+          key: 'thumb',
+          style: {
+            position: 'absolute',
+            top: 2,
+            left: state ? 18 : 2,
+            width: 16,
+            height: 16,
+            backgroundColor: '#0984e3',
+            transition: { left: 120 },
+          },
+        }),
+      ),
+    );
+
+    // 120ms of animation: the rounds need real time between them, or the loop
+    // spins through faster than the transition advances and never sees it land
+    const regions = await framesDuring(root, app, () => setState(1), {
+      rounds: 16,
+      delay: 16,
+    });
+
+    assert.ok(
+      regions.length >= 2,
+      `the transition should span several frames, got ${regions.length}`,
+    );
+    const unbounded = regions.filter((r) => r === null).length;
+    assert.strictEqual(
+      unbounded,
+      0,
+      `${unbounded} of ${regions.length} animation frames repainted the ` +
+        'whole window',
+    );
+    for (const r of regions) {
+      assert.ok(
+        r.width <= TRACK.width + 2 * SLOP + 1,
+        `an animation frame claimed ${r.width}x${r.height}, wider than the ` +
+          'track it slides inside',
+      );
+    }
+    assert.strictEqual(root._animating.size, 0, 'the animation finished');
+  } finally {
+    await app.close();
+  }
+});
+
+test('mounting a child inside a fixed-size box repaints only that box', async () => {
+  const app = await headlessApp();
+  try {
+    // A `Checkbox`'s tick and a `Radio`'s dot are children that mount and
+    // unmount, and a child list change is a layout change — which with no
+    // bound repaints the window. But when the container's own size is pinned
+    // the reflow cannot move anything outside it, so the damage is that
+    // subtree before the mutation unioned with the same subtree after layout.
+    const WELL = 16;
+    const { root, setState } = await mountStateful(app, (state) => [
+      React.createElement('box', {
+        key: 'filler',
+        style: { height: ROW_H, backgroundColor: '#dfe6e9' },
+      }),
+      React.createElement(
+        'box',
+        {
+          key: 'well',
+          style: {
+            width: WELL,
+            height: WELL,
+            backgroundColor: '#ffffff',
+            borderWidth: 1,
+            borderColor: '#0984e3',
+            alignItems: 'center',
+            justifyContent: 'center',
+          },
+        },
+        // the tick: present only when checked, exactly as Checkbox does it
+        state
+          ? React.createElement('box', {
+              key: 'tick',
+              style: { width: 8, height: 8, backgroundColor: '#0984e3' },
+            })
+          : null,
+      ),
+      React.createElement('box', {
+        key: 'after',
+        style: { height: ROW_H, backgroundColor: '#e6e9ef' },
+      }),
+    ]);
+
+    const regions = await framesDuring(root, app, () => setState(1));
+    assert.strictEqual(regions.length, 1, 'one repaint');
+    const damage = regions[0];
+    assert.ok(damage, 'mounting the tick must not repaint the whole window');
+    assert.ok(
+      damage.width <= WELL + 2 * SLOP + 1 &&
+        damage.height <= WELL + 2 * SLOP + 1,
+      `damage ${damage.width}x${damage.height} should be the ${WELL}px well ` +
+        'plus slop',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a child mounting in an auto-sized box still repaints in full', async () => {
+  const app = await headlessApp();
+  try {
+    // The counterpart, and the reason the rule checks *both* axes: a box with
+    // no pinned height grows when a child appears, which moves its siblings —
+    // so there is nothing safe to bound the repaint to. If this came back
+    // bounded, the test above would prove nothing about the pinned case.
+    const { root, setState } = await mountStateful(app, (state) => [
+      React.createElement(
+        'box',
+        { key: 'auto', style: { backgroundColor: '#ffffff' } },
+        state
+          ? React.createElement('box', {
+              key: 'grown',
+              style: { height: ROW_H, backgroundColor: '#0984e3' },
+            })
+          : null,
+      ),
+      React.createElement('box', {
+        key: 'below',
+        style: { height: ROW_H, backgroundColor: '#e6e9ef' },
+      }),
+    ]);
+
+    const regions = await framesDuring(root, app, () => setState(1));
+    assert.strictEqual(regions.length, 1, 'one repaint');
+    assert.strictEqual(
+      regions[0],
+      null,
+      'an unpinned box grows, moving its siblings, so the frame is unbounded',
+    );
+  } finally {
+    await app.close();
+  }
+});

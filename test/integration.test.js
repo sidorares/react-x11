@@ -375,6 +375,67 @@ test('textinput renders its value through the ntk text stack', async () => {
   }
 });
 
+test('an unfocused field shows the start of its value, not the caret', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    // The caret starts at the *end* of the value, and the paint used to chase
+    // it whether or not the field had ever been focused — so a field holding
+    // more text than fits opened scrolled past its own first characters, and a
+    // textarea opened below its first lines. Both read as a rendering bug
+    // rather than as a scroll position.
+    const input = React.createRef();
+    const area = React.createRef();
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 200, height: 140, style: { backgroundColor: 'white' } },
+        React.createElement('textinput', {
+          ref: input,
+          // comfortably wider than the 120px box at this size
+          value: 'a value far too long to fit inside the box it is in',
+          style: { width: 120, fontSize: 13 },
+        }),
+        React.createElement('textarea', {
+          ref: area,
+          value: 'one\ntwo\nthree\nfour\nfive\nsix',
+          rows: 2,
+          style: { width: 120, fontSize: 13 },
+        }),
+      ),
+      app,
+    );
+
+    // paint at least once: the offsets are settled during _paintContent
+    const root = wnd._reactX11Node;
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setImmediate(r));
+      root._scheduled = false;
+      root.flush();
+      await new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+    }
+
+    assert.ok(
+      input.current._prefixWidth(input.current.value.length) > 120,
+      'the premise: the value must overflow its box, or there is nothing to ' +
+        'scroll and the test proves nothing',
+    );
+    assert.strictEqual(
+      input.current._scrollX,
+      0,
+      'an unfocused textinput is scrolled to the start of its value',
+    );
+    assert.strictEqual(
+      area.current._scrollY,
+      0,
+      'an unfocused textarea shows its first lines',
+    );
+
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    await app.close();
+  }
+});
+
 test('textinput caret advances past trailing spaces', async () => {
   const { app } = await createHeadlessApp();
   try {
@@ -1016,6 +1077,70 @@ test('window hints reach the X server as real properties', async () => {
 
     ReactX11.unmountComponentAtNode(app);
     await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('overflow: hidden still clips a child that really does overflow', async () => {
+  const { app } = await createHeadlessApp();
+  try {
+    // A clip that clips nothing is skipped, because each one costs a
+    // server-side mask rebuild and a table sets `overflow: hidden` on every
+    // cell so that *long* text truncates — almost all of which fits. The
+    // skipping is only sound if a child that genuinely overflows is still cut,
+    // which is what this checks: a 60px-wide child inside a 30px box, on a
+    // white page, must leave the pixels past the box white.
+    const W = 120;
+    const H = 40;
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: 'white' } },
+        React.createElement(
+          'box',
+          {
+            style: {
+              width: 30,
+              height: 20,
+              marginLeft: 10,
+              marginTop: 10,
+              overflow: 'hidden',
+            },
+          },
+          React.createElement('box', {
+            style: { width: 60, height: 20, backgroundColor: 'black' },
+          }),
+        ),
+      ),
+      app,
+    );
+    const ctx = wnd.getContext('2d');
+    const root = wnd._reactX11Node;
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setImmediate(r));
+      root._scheduled = false;
+      root.flush();
+      await new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+    }
+
+    const image = await readPixels(ctx, W, H);
+    const dark = (x, y) => {
+      const [r, g, b] = px(image, W, x, y);
+      return r < 128 && g < 128 && b < 128;
+    };
+    // inside the 30px box: painted
+    assert.ok(dark(20, 20), 'the child paints inside the box');
+    assert.ok(dark(38, 20), 'and right up to the box edge');
+    // past the box's right edge at x=40: the child wanted to reach x=70
+    for (const x of [42, 50, 60, 68]) {
+      assert.ok(
+        !dark(x, 20),
+        `the child must be clipped at the box edge, but x=${x} is painted`,
+      );
+    }
+
+    ReactX11.unmountComponentAtNode(app);
   } finally {
     await app.close();
   }

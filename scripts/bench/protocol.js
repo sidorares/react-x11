@@ -155,6 +155,31 @@ const SCENARIOS = [
     },
   ],
   [
+    // Nested clips, which every real frame has and no scenario above had: the
+    // window clips to the damaged region, a <scrollview> clips to its
+    // viewport, and each cell clips its own content. Intersecting clips used
+    // to allocate a full-surface a8 pixmap, rasterize into it and Composite
+    // the whole surface *per clip*, so this scenario is where that shows up.
+    'clips: 40 nested rect clips with text',
+    async (app) => {
+      const ctx = pixmapCtx(app);
+      const layout = paragraphLayout(app);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(2, 2, 396, 396);
+      ctx.clip(); // the "damage" clip
+      for (let i = 0; i < 40; i++) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(4, 4 + i * 9, 380, 8);
+        ctx.clip(); // a row, inside the damage clip
+        layout.draw(ctx, 5, 4 + i * 9);
+        ctx.restore();
+      }
+      ctx.restore();
+    },
+  ],
+  [
     'shapes: 50 filled rounded boxes',
     async (app) => {
       const ctx = pixmapCtx(app);

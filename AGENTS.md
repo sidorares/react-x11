@@ -390,6 +390,137 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   Presentation is still ntk's job and still a full-window `CopyArea` — that
   costs server-side blit time, not wire traffic (NEXT_STEPS §8 item 4).
 
+  A scroll is the one layout change that carries a damage bound:
+  `invalidate(true, node)` asserts the reflow is confined to that node's
+  subtree _and_ that the node clips its children, so both the old and the new
+  position of anything that moved are inside the bound. `ScrollViewNode` is the
+  only caller. Everything else still passes no node and repaints in full.
+  `_subtreeBounds()` stops at a node that `clipsChildren()` for the same
+  reason: a scrollview's content extent is not what reaches the surface, and
+  mid-scroll it can be ninety thousand pixels away.
+
+  **Where scrolling actually spent its time was neither of those.** Profiling a
+  50,000-row table found the cost in ntk's `clip()`: intersecting a clip
+  allocated a full-surface a8 pixmap, rasterized into it and composited the
+  whole surface — per clip, and a frame nests them constantly. 3412 of 3900
+  Composite requests over twenty wheel notches came from there. Fixed upstream
+  in sidorares/ntk#107, shipped in **ntk 3.10.1**, which is the floor this
+  package now depends on. Per wheel notch on the 50,000-row table, same
+  harness, only the ntk clip code differing:
+
+  |                 | 3.10.0 | 3.10.1 |
+  | --------------- | ------ | ------ |
+  | requests        | 2542   | 1242   |
+  | Composite calls | 242    | 25     |
+  | Composite Mpx   | 153.8  | 2.1    |
+
+  `scripts/bench/protocol.js` now has a nested-clip scenario, which is the
+  shape no scenario had before, which is why nothing caught it. Client-side
+  work is not the bottleneck for scrolling: layout and paint together were
+  0.0ms next to what the server then had to redraw.
+
+  Beware that `text: paragraph, inside a rect clip` **flaps by three
+  requests** between runs — 43/40/43 on identical code. `--check`'s tolerance
+  absorbs it, but it means a small real regression there would not be caught,
+  and a baseline saved on a lucky run can look like a regression on the next.
+  Not diagnosed; suspect glyph-page upload batching.
+
+  **A clip that clips nothing is not free.** Each one rebuilds an a8 mask
+  server-side — a `FillRectangles` plus trapezoid rasterization — and ntk
+  brackets every glyph run under a clip with a `SetPictureClipRectangles`
+  pair. `Table` sets `overflow: hidden` on every cell so that _long_ text
+  truncates, and then almost every cell's text fits: 191 clips a frame, a
+  handful of which do anything. `_paintChildren` now skips a clip when
+  `_childrenCanOverflow()` says nothing reaches outside it, which took a
+  scroll frame from 1242 requests and 1098ms to 1014 and 692ms in the
+  in-process server. Rounded corners are never skipped — the clip is not a
+  rectangle then — and the test is inset by a pixel because antialiasing puts
+  ink just outside a glyph's box. `test/integration.test.js` checks that a
+  child which really does overflow is still cut; it fails if clipping is
+  disabled.
+
+  Two traps when measuring this by hand (both hit while building
+  `examples/stress/`):
+
+  - **Never put a live counter next to what you are measuring.** A changing
+    number re-measures its `<text>`, a re-measure is a layout change, and a
+    layout change is a full repaint by definition — so the readout makes
+    every frame report `FULL WINDOW` and destroys the thing it was reporting
+    on. Log to stdout instead; `examples/stress/perf.js` wraps `flush()`.
+  - **The first click on a control is not a clean measurement.** Pressing a
+    button also changes its own hover and active styling, so that frame
+    legitimately covers the button as well as whatever the press did. Warm up
+    with one click and measure the next.
+  - **An animation frame arrives with `needsPaint` still false.**
+    `_advanceAnimations` sets it from _inside_ `flush`, so instrumentation that
+    samples the flags on entry counts every other frame and misses a transition
+    entirely. Test `root._animating.size > 0` as well.
+
+  Three routes to an unbounded repaint, all found by hovering controls in
+  `examples/stress/` and watching the log say `FULL WINDOW`, all now tested in
+  `test/dirty-rect.test.js`:
+
+  - **`NO_DAMAGE` must not mark the window dirty.** Contributing "no region" is
+    not the same as contributing "unknown": a commit in which every node says
+    so has genuinely nothing to repaint and should schedule no frame at all.
+    Falling through to `needsPaint` left the window dirty with no region
+    recorded, which repaints everything — so an identical re-render, which is
+    what hovering a control that ignores its own hover state produces, cost a
+    full-window repaint.
+  - **`onDraw` matches `/^on[A-Z]/`,** so `_paintChanged` skips it as an event
+    handler and `CanvasNode.applyProps` is the only thing that notices a new
+    closure. It has to claim damage, and it has to claim it _bounded_ — every
+    re-render of a component drawing through `<canvas>`, which is what a
+    `Checkbox` tick and a `Select` chevron are, otherwise repainted the window.
+  - **An animation must claim a region per frame, including its last.** A
+    transition is a repaint every frame for its duration. Nodes that _finish_
+    on a tick need claiming too, and the claim has to be decided _before_
+    ticking, because a finished tick clears `_anim` and with it any way to tell
+    a layout animation from a paint-only one. See `damageForAnimation`: an
+    out-of-flow node animating a layout property is bounded by its parent,
+    which contains both where it was and where it is going.
+
+- **A stalled frame clock under synthetic input.** ntk paces
+  `requestAnimationFrame` behind a fence (a `GetInputFocus` whose reply
+  confirms the server consumed the last frame). Driving events with
+  `wnd.emit()` rather than through the server can leave a frame scheduled and
+  never run, so a fixed sleep returns with the tree committed but **not laid
+  out** — every `abs` still `0,0,0,0`, which makes a synthesized click land at
+  the window origin and hit whatever is in the corner. Call `root.flush()`
+  (clearing `root._scheduled` first) instead of sleeping: it is the same frame
+  the scheduler would have run. `test/dirty-rect.test.js` and
+  `scripts/check-stress.jsx` both do this.
+
+- **Interpolate colours premultiplied.** `transparent` is _black_ at zero
+  alpha, so lerping the four straight channels drags every fade-in towards
+  black on the way: half way from `transparent` to a near-white hover fill
+  lands on mid grey, and the brightness curve is not even monotonic — it dips
+  dark and comes back. `Tabs` and `Tree` transition `backgroundColor` between
+  `transparent` and a hover fill, so moving hover between two adjacent items
+  faded one out as the other faded in and flashed a grey rectangle across both
+  before settling. Measured off the window: `#c0c0c2` mid-transition against
+  endpoints of `#ffffff` and `#f1f2f6`. `interpolate` premultiplies, lerps and
+  divides the alpha back out, which is what CSS specifies for this exact
+  reason. The endpoints are identical either way, which is why only a
+  monotonicity test catches it.
+- **Layouts sized against one font break in another.** `sans-serif` is
+  whatever fontconfig hands you, and a row of things sized by their own text
+  does not compress to fit (see the `flexShrink` note below) — it overflows and
+  gets clipped. Three buttons that sat comfortably in a 250px card under the
+  test fonts ran off the edge of it on a real desktop. Rows of buttons or chips
+  want `flexWrap: 'wrap'`. `npm run stress:check -- --wide` renders the whole
+  app in a monospace UI face and fails on any node overflowing a pinned-width
+  ancestor, which is the pass that would have caught it.
+- **Yoga defaults `flexShrink` to 0**, where CSS defaults it to 1. A box with
+  `flexGrow: 1` and the default `flexBasis: auto` therefore takes its
+  content's max-content size as its base and **cannot shrink back** to the
+  space actually available — a wrapping row inside it never wraps and
+  overflows instead. Use `flexBasis: 0` for "take whatever is left"; that is
+  what `SplitPane`'s second pane does, with a regression test in
+  `test/tabs-splitpane.test.js`. Note also that `flexBasis` wins over `width`
+  on the main axis, so spreading a `flexBasis: 0` style into a fixed-width
+  box collapses it to nothing.
+
 - **No X11 side effects in the render phase.** Window nodes are handles
   until `realize(parentWindow)` runs in the commit phase
   (`appendChildToContainer` for top-levels, parent `realize` recursion or

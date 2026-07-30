@@ -99,6 +99,36 @@ function rectsOverlap(a, b) {
   );
 }
 
+/**
+ * The node whose bounds cover where an animating node will be next frame, or
+ * `null` when that cannot be known and the frame has to repaint everything.
+ *
+ * Three cases, and the middle one is the interesting one:
+ *
+ *  - **paint-only** (a colour, an opacity): the node stays put, so its own
+ *    bounds are the damage.
+ *  - **a layout property on an out-of-flow node** (`position: absolute`, the
+ *    arrangement a sliding thumb uses): the node moves, so its own bounds
+ *    cover where it is going but not where it has been. Its *parent* covers
+ *    both — an absolute child is laid out inside its parent and, being out of
+ *    flow, moves nothing else when it shifts. This is what keeps a `Switch`
+ *    from repainting the window on every frame of its 120ms slide.
+ *  - **a layout property in flow**: a reflow can move any node in the tree,
+ *    including ones that leave stale pixels outside every bound we could name
+ *    here. Nothing to do but repaint in full.
+ */
+function damageForAnimation(node) {
+  let movesInLayout = false;
+  for (const prop of node._anim?.keys() ?? []) {
+    if (isLayoutProp(prop)) movesInLayout = true;
+  }
+  if (!movesInLayout) return node;
+  if (node.style?.position !== 'absolute') return null;
+  // A window parent bounds nothing useful — its own rect is the whole surface.
+  const parent = node.parent;
+  return parent && !parent.isWindow ? parent : null;
+}
+
 /** Apply any child-window stacking changes the commit produced, once. */
 export function flushWindowRestacks() {
   const nodes = [...pendingRestack];
@@ -487,6 +517,9 @@ export class Node {
           'windows may only appear at the root or inside another <window>.',
       );
     }
+    // captured before the child joins, so it covers the arrangement that is
+    // about to be replaced (see _childListChanged)
+    const before = this.paintBounds();
     // a move has to leave the yoga tree too — yoga aborts on insertChild of
     // a node that still has a parent
     if (this.children.includes(child) && this._joinsYoga(child)) {
@@ -503,12 +536,53 @@ export class Node {
     // With no theme anywhere there is nothing to resolve and nothing to walk
     if (this.theme || child.props.theme) child._themeChanged();
     this._textContentChanged();
-    this.root?.invalidate(true);
+    this._childListChanged(before);
+  }
+
+  /**
+   * True when this node's own box cannot change size, so a reflow of its
+   * children cannot move anything outside it. Both axes have to be pinned: a
+   * node with an explicit width but an auto height still grows downwards when
+   * a child appears, which moves its siblings.
+   */
+  _sizePinned() {
+    return (
+      typeof this.style?.width === 'number' &&
+      typeof this.style?.height === 'number'
+    );
+  }
+
+  /**
+   * A child was inserted or removed. `before` is this node's paint bounds from
+   * *before* the mutation, which the caller has to capture while the departing
+   * child is still attached.
+   *
+   * A child list change is a layout change, and a layout change with no bound
+   * repaints the window — which is what made toggling a `Checkbox` or a
+   * `Radio` cost a full repaint: the tick and the dot are children that mount
+   * and unmount. But when this node's own size is pinned, the reflow is
+   * confined to its subtree, so the damage is that subtree before the mutation
+   * unioned with the same subtree after layout. The second half is not
+   * measurable yet — an inserted child has no rect until layout runs — so the
+   * node is queued for the root to re-measure once it has.
+   */
+  _childListChanged(before) {
+    const root = this.root;
+    if (!root) return;
+    if (!this._sizePinned()) {
+      root.invalidate(true);
+      return;
+    }
+    root.invalidate(true, before);
+    root._reflowed.add(this);
   }
 
   removeChild(child) {
     const index = this.children.indexOf(child);
     if (index === -1) return;
+    // captured while the child is still attached, so it covers the rect the
+    // child is about to stop occupying
+    const before = this.paintBounds();
     this.children.splice(index, 1);
     if (this._joinsYoga(child)) {
       this.yoga.removeChild(child.yoga);
@@ -520,7 +594,7 @@ export class Node {
       child.yoga = null;
     }
     this._textContentChanged();
-    this.root?.invalidate(true);
+    this._childListChanged(before);
   }
 
   /** Destroy real resources (X windows) in this subtree. Yoga nodes are
@@ -781,8 +855,21 @@ export class Node {
     };
   }
 
+  /**
+   * How far this node's drawing actually reaches, itself and its descendants.
+   *
+   * A node that clips its children ends the walk at its own rect: whatever
+   * they do beyond it never reaches the surface, so counting it would inflate
+   * every bound built from here. That matters most for `<scrollview>`, whose
+   * content is routinely thousands of pixels taller than the viewport — and
+   * can be ninety thousand pixels away mid-scroll (see `_offscreen`). Without
+   * this, damage claimed for a scrolled subtree covers the content extent
+   * instead of the viewport, and culling tests against a rect that misses
+   * almost nothing.
+   */
   _subtreeBounds() {
     let bounds = this.abs;
+    if (this.clipsChildren()) return bounds;
     for (const child of this.children) {
       if (child.isWindow || !child.yoga || child.hidden) continue;
       if (child.style?.display === 'none') continue;
@@ -886,10 +973,43 @@ export class Node {
 
   _paintContent(ctx) {}
 
+  /**
+   * Whether anything in this subtree actually reaches outside the clip box.
+   *
+   * A clip that clips nothing is far from free: each one rebuilds an a8 mask
+   * server-side, which is a FillRectangles plus trapezoid rasterization, and
+   * ntk brackets every glyph run under a clip with a SetPictureClipRectangles
+   * pair. A table sets `overflow: hidden` on every cell so that *long* text
+   * truncates, and then almost every cell's text fits — 191 clips a frame, of
+   * which a handful do anything.
+   *
+   * Rounded corners are never skipped: the clip is not a rectangle then, and
+   * the rounding can cut a child that a rect test says fits. The one-pixel
+   * inset is for antialiasing, which can put ink just outside a glyph's box.
+   */
+  _childrenCanOverflow() {
+    if (this.style?.borderRadius) return true;
+    const box = this.abs;
+    for (const child of this.children) {
+      if (child.isWindow || !child.yoga || child.hidden) continue;
+      if (child.style?.display === 'none') continue;
+      const b = child._subtreeBounds();
+      if (
+        b.x < box.x + 1 ||
+        b.y < box.y + 1 ||
+        b.x + b.width > box.x + box.width - 1 ||
+        b.y + b.height > box.y + box.height - 1
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   _paintChildren(ctx) {
     const order = this.paintOrder();
     if (order.length === 0) return;
-    const clip = this.clipsChildren();
+    const clip = this.clipsChildren() && this._childrenCanOverflow();
     if (clip) {
       ctx.save();
       this._roundedPath(ctx, this.style.borderRadius ?? 0);
@@ -1385,7 +1505,13 @@ export class ScrollViewNode extends Node {
       viewportWidth: this.abs.width,
       viewportHeight: this.abs.height,
     });
-    this.root?.invalidate(true);
+    // A scroll reflows this viewport's contents and nothing else, and the
+    // viewport clips them, so the damage is this node's own rect. It is a
+    // layout change all the same — children's absolute positions move — hence
+    // both arguments. Unbounded, every wheel notch repainted the whole window,
+    // which is the whole cost of scrolling: the client work is negligible next
+    // to what the server then has to redraw.
+    this.root?.invalidate(true, this);
   }
 
   /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. */
@@ -1523,9 +1649,16 @@ export class CanvasNode extends Node {
   }
 
   applyProps(newProps, oldProps) {
+    const before = oldProps ?? this.props;
     super.applyProps(newProps, oldProps);
-    // onDraw is read at paint time; a new closure means new content
-    this.root?.invalidate(false);
+    // onDraw is read at paint time, so a new closure means new content — but
+    // it also matches /^on[A-Z]/, which is how the base class recognises an
+    // event handler, so `_paintChanged` skips it and this is the only place
+    // that notices. Damage is bounded to this canvas: an unbounded call here
+    // made every re-render of a component that draws through <canvas> repaint
+    // the whole window, which is what a Checkbox's tick and a Select's chevron
+    // both do.
+    if (newProps.onDraw !== before.onDraw) this.root?.invalidate(false, this);
   }
 
   _paintContent(ctx) {
@@ -2372,14 +2505,23 @@ export class TextInputNode extends Node {
     const markY = textY - markPad;
     const markHeight = inkHeight + markPad * 2;
 
-    // keep the caret inside the viewport
+    // Keep the caret inside the viewport — but only while the field is being
+    // edited. The caret starts at the *end* of the value, so chasing it
+    // unconditionally meant a field whose text is wider than its box rendered
+    // scrolled to the end before anyone had touched it: the first characters
+    // were simply missing, which reads as a rendering bug rather than as a
+    // scroll position. An unfocused field shows the beginning of its value,
+    // the way a DOM input does.
     const caretX = this._prefixWidth(this._caret);
     const textWidth = isEmpty ? 0 : layout.width;
-    if (caretX - this._scrollX > content.width - 2) {
-      this._scrollX = caretX - content.width + 2;
-    }
-    if (caretX - this._scrollX < 0) {
-      this._scrollX = caretX;
+    if (!this._focused) this._scrollX = 0;
+    else {
+      if (caretX - this._scrollX > content.width - 2) {
+        this._scrollX = caretX - content.width + 2;
+      }
+      if (caretX - this._scrollX < 0) {
+        this._scrollX = caretX;
+      }
     }
     this._scrollX = Math.min(
       this._scrollX,
@@ -2640,13 +2782,20 @@ export class TextAreaNode extends TextInputNode {
     if (content.width <= 0 || content.height <= 0) return;
     const isEmpty = this.value.length === 0;
 
-    // keep the caret line inside the viewport
+    // Keep the caret line inside the viewport, and only while focused — the
+    // caret starts at the end of the value, so chasing it unconditionally
+    // opened a textarea already scrolled past its first lines. Unlike
+    // <textinput> this does not reset the offset when focus leaves: a
+    // textarea scrolls on the wheel and has a scrollbar, so where an
+    // unfocused one is scrolled to is the reader's business.
     const pos = layout.caretPosition(this._caret);
-    if (pos.y + pos.height - this._scrollY > content.height) {
-      this._scrollY = pos.y + pos.height - content.height;
-    }
-    if (pos.y - this._scrollY < 0) {
-      this._scrollY = pos.y;
+    if (this._focused) {
+      if (pos.y + pos.height - this._scrollY > content.height) {
+        this._scrollY = pos.y + pos.height - content.height;
+      }
+      if (pos.y - this._scrollY < 0) {
+        this._scrollY = pos.y;
+      }
     }
     this._scrollY = Math.min(
       this._scrollY,
@@ -2719,6 +2868,10 @@ export class WindowNode extends Node {
     // nodes with `@width`/`@height` blocks, and the size they last matched
     // against
     this._sizeQueryNodes = new Set();
+    // nodes whose child list changed and whose own size is pinned: their new
+    // arrangement is only measurable once layout has run (see
+    // Node._childListChanged)
+    this._reflowed = new Set();
     this.querySize = null;
   }
 
@@ -3090,13 +3243,28 @@ export class WindowNode extends Node {
    */
   _advanceAnimations(now) {
     if (this._animating.size === 0) return;
+    const claims = [];
     for (const node of [...this._animating]) {
-      if (node.destroyed || !node._tickAnimations(now)) {
+      if (node.destroyed) {
         this._animating.delete(node);
+        continue;
       }
+      // Decided *before* the tick, deliberately: a tick that finishes deletes
+      // the property from `_anim`, and after that there is no way to tell a
+      // layout animation from a paint-only one — the node's own bounds would
+      // be claimed for something that just moved, leaving a trail behind it.
+      claims.push(damageForAnimation(node));
+      if (!node._tickAnimations(now)) this._animating.delete(node);
     }
     this.needsPaint = true;
-    if (this._animating.size > 0) this.invalidate(false);
+    // Claim a region rather than leaving the frame unbounded: an animation is
+    // a repaint every frame for its whole duration, so this is the difference
+    // between a 120ms transition costing eight full-window repaints and eight
+    // repaints of the thing that moved. Nodes that *finished* on this tick are
+    // claimed too — one just landed on its final value and that last frame
+    // still has to paint it, which is why every transition used to end with a
+    // full-window repaint.
+    for (const claim of claims) this.invalidate(false, claim);
   }
 
   setHidden(hidden) {
@@ -3122,13 +3290,36 @@ export class WindowNode extends Node {
    */
   invalidate(layoutChanged, damage = null) {
     if (this.destroyed || !this.window) return;
+    if (!layoutChanged && damage === NO_DAMAGE) {
+      // Nothing this node draws changed, so it contributes no region — and
+      // contributing *nothing* is not the same as contributing "unknown".
+      // Returning before `needsPaint` is what makes the difference: a commit
+      // in which every node says this schedules no frame at all, where
+      // falling through would have marked the window dirty with no region
+      // recorded and so repainted all of it. That is the common case for a
+      // React re-render whose output is identical — hovering a control whose
+      // hover state it does not actually use, for instance. Whoever did
+      // change records its own region and schedules its own frame.
+      return;
+    }
     if (layoutChanged) this.needsLayout = true;
-    if (layoutChanged) this._damage = FULL_DAMAGE;
-    else if (damage === NO_DAMAGE) {
-      // contributes nothing; whoever did change has recorded its own region
-    } else if (!damage) this._damage = FULL_DAMAGE;
+    // A layout change with no bound named repaints everything, because a
+    // reflow can move any node and one that moved leaves stale pixels at a
+    // rect its new position does not cover. Naming a node alongside
+    // `layoutChanged` is an assertion by the caller that the change is
+    // confined to that node's subtree *and* that the node clips its children,
+    // so both the old and the new position of anything that moved are inside
+    // the bound. Scrolling is the case that matters: it reflows a viewport's
+    // contents and nothing else, and it happens at input rate.
+    if (layoutChanged && !damage) this._damage = FULL_DAMAGE;
+    else if (!layoutChanged && !damage) this._damage = FULL_DAMAGE;
     else if (this._damage !== FULL_DAMAGE) {
-      this._damage = unionDamage(this._damage, damage.paintBounds());
+      // a node, or a bare rect for a caller that has a region rather than a
+      // node — a subtree that is about to be removed, say
+      this._damage = unionDamage(
+        this._damage,
+        damage.paintBounds ? damage.paintBounds() : damage,
+      );
     }
     this.needsPaint = true;
     if (this._scheduled) return;
@@ -3159,6 +3350,20 @@ export class WindowNode extends Node {
       }
       this.needsLayout = false;
       this.needsPaint = true;
+      // The other half of a contained reflow: the pre-mutation arrangement was
+      // claimed when the child list changed, and this is the arrangement that
+      // replaced it. Claimed after layout because an inserted child has no
+      // rect before it.
+      for (const node of this._reflowed) {
+        if (!node.destroyed)
+          this._damage =
+            this._damage === FULL_DAMAGE
+              ? FULL_DAMAGE
+              : unionDamage(this._damage, node.paintBounds());
+      }
+      this._reflowed.clear();
+    } else if (this._reflowed.size) {
+      this._reflowed.clear();
     }
     if (!this.needsPaint) return;
     this.needsPaint = false;
