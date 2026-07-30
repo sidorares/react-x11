@@ -411,6 +411,22 @@ the diff records the cost.
   resized the window).
 - Windows cannot be nested inside `<box>` (throws); raw strings are only
   legal inside `<text>` (throws otherwise).
+- **Never test an unreleased ntk by symlinking the checkout into
+  `node_modules`.** ntk then resolves `x11` from _its own_ `node_modules`
+  while the tests import `x11/lib/xserver` from this one, so the client and
+  the in-process server are different module instances and property work
+  fails with `Bad atom` on ChangeProperty/GetProperty — deterministically,
+  and with nothing in the message pointing at the cause. `npm pack` in the
+  ntk checkout and `npm install --no-save /tmp/ntk-<version>.tgz` instead;
+  that resolves one `x11` and the suite passes.
+- ntk's `cssColor` returns **premultiplied** components (right for XRender,
+  since 3.9.1). Anything heading for **GL** or for **interpolation** wants
+  `cssColorStraight` — `glClearColor` and material colours take unassociated
+  alpha, and a lerp that formats its result back into an `rgba()` string only
+  round-trips on straight values. `src/glnodes.js`, `src/scene3d.js` and
+  `src/styles.js` use the straight parser for exactly that reason. Note that
+  opaque colours are identical either way, so a test with `#000000` and
+  `#ffffff` cannot tell the two apart.
 - **Bun honours `tsconfig.json`'s `compilerOptions.paths` at runtime**, and
   ours maps `react-x11` at the declarations for the type tests. So inside
   this repo `bun` resolves the bare specifier to `src/index.d.ts` and dies

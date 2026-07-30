@@ -8,7 +8,7 @@
 // frame, so every geometry is compiled into a **server-side display list**
 // once and replayed with a single CallList. A frame is then matrices +
 // material state + one CallList per mesh, whatever the triangle count.
-import { cssColor } from 'ntk';
+import { cssColorStraight } from 'ntk';
 
 import {
   GEOMETRY_BUILDERS,
@@ -290,10 +290,13 @@ export function cameraMatrices(spec, { width, height }) {
   };
 }
 
+// Material and light colours, straight alpha — these become GL state, and GL
+// takes unassociated components. ntk's `cssColor` premultiplies for XRender,
+// which would render a translucent material dark.
 const rgba = (color, fallback = [1, 1, 1, 1]) => {
   if (!color) return fallback;
   if (Array.isArray(color)) return color.length === 4 ? color : [...color, 1];
-  return cssColor(color) ?? fallback;
+  return cssColorStraight(color) ?? fallback;
 };
 
 /** Lights with their world matrices, in tree order. */

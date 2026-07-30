@@ -5,7 +5,7 @@
 // (NEXT_STEPS §4), sized and positioned by the parent's yoga layout like any
 // other drawn node. Everything about the surface is here; the scene graph
 // that draws into it comes later (docs/glx-plan.md).
-import { cssColor } from 'ntk';
+import { cssColorStraight } from 'ntk';
 
 import { Node } from './nodes.js';
 import { ScenePointer, sceneWantsPointer } from './pointer3d.js';
@@ -34,11 +34,17 @@ export function glxConfig(app, spec) {
   return promise;
 }
 
-/** clearColor as a CSS string or an [r, g, b, a] float tuple. */
+/**
+ * clearColor as a CSS string or an [r, g, b, a] float tuple.
+ *
+ * Straight alpha, not premultiplied: this goes to `glClearColor`, and GL
+ * takes unassociated components. ntk's `cssColor` premultiplies for XRender,
+ * which would darken any translucent clear colour.
+ */
 function clearColorOf(props) {
   const value = props.clearColor ?? 'black';
   if (Array.isArray(value)) return value.length === 4 ? value : [...value, 1];
-  const parsed = cssColor(value);
+  const parsed = cssColorStraight(value);
   return parsed ?? [0, 0, 0, 1];
 }
 
