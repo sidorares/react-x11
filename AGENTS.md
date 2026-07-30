@@ -397,11 +397,16 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   anything translucent. And a list whose rects nearly fill their box collapses
   back to the box, because a pass is not free: `SPLIT_SAVING` is the threshold.
 
-  Presentation is ntk's job. Up to and including 3.10.1 it is a full-window
-  `CopyArea` — server-side blit time, not wire traffic. From 3.10.2 it copies
-  only the rects the drawing reported (NEXT_STEPS §8 item 4), which is what
-  makes the renderer-side region list visible on screen rather than just
-  cheaper to compute.
+  Presentation is ntk's job, and the two halves have to match to be worth
+  anything: **ntk >= 3.10.2** copies just the rects the drawing reported, where
+  earlier versions blit the whole window however little changed. That is the
+  floor in `package.json` for this reason, not for an API — against 3.10.1 the
+  region list still computes and paints correctly, it just does not reach the
+  screen any faster (NEXT_STEPS §8 item 4). The reporting channel is the clip:
+  ntk takes each operation's clip rectangle as the region it might have touched,
+  so a pass that is not clipped reports nothing and gives up the bound for the
+  whole frame — which is why the frame clips per rect even though culling
+  already skips the work.
 
   A scroll is the one layout change that carries a damage bound:
   `invalidate(true, node)` asserts the reflow is confined to that node's
@@ -417,9 +422,8 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   allocated a full-surface a8 pixmap, rasterized into it and composited the
   whole surface — per clip, and a frame nests them constantly. 3412 of 3900
   Composite requests over twenty wheel notches came from there. Fixed upstream
-  in sidorares/ntk#107, shipped in **ntk 3.10.1**, which is the floor this
-  package now depends on. Per wheel notch on the 50,000-row table, same
-  harness, only the ntk clip code differing:
+  in sidorares/ntk#107, shipped in **ntk 3.10.1**. Per wheel notch on the
+  50,000-row table, same harness, only the ntk clip code differing:
 
   |                 | 3.10.0 | 3.10.1 |
   | --------------- | ------ | ------ |

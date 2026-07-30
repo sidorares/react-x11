@@ -506,9 +506,9 @@ File these as ntk issues; react-x11 should not work around them long-term.
    barely moved — those frames repaint most of the window anyway.
 
    The box that was left — two small changes at opposite corners copying
-   everything between them — is gone too, on both sides at once
-   (sidorares/ntk#112, and the renderer half in this repo). Damage is a short
-   list of rectangles
+   everything between them — is gone too, on both sides at once: DONE
+   (sidorares/ntk#112, released as **3.10.2**, plus the renderer half in this
+   repo). Damage is a short list of rectangles
    rather than the box around them: the renderer paints a pass per rectangle,
    each clipped to just that one so ntk's server-side rectangular-clip fast
    path still applies, and ntk accumulates the reported clips into a list and
