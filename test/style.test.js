@@ -321,10 +321,15 @@ test('interpolating a translucent colour does not darken it', async () => {
     'rgba(255, 0, 0, 0.75)',
   );
 
-  // and the midpoint moves both colour and alpha
+  // The midpoint moves alpha, and the *hue does not travel*. This assertion
+  // used to read rgba(128, 128, 128, 0.5) — lerping the four straight channels
+  // — and that was wrong in a way nothing here noticed, because `transparent`
+  // is black at zero alpha and so a straight lerp drags every fade-in towards
+  // black on the way. Interpolation happens premultiplied, which is what CSS
+  // specifies for exactly this reason: white at half alpha, not grey.
   assert.strictEqual(
     interpolate('rgba(0, 0, 0, 0)', 'rgba(255, 255, 255, 1)', 0.5),
-    'rgba(128, 128, 128, 0.5)',
+    'rgba(255, 255, 255, 0.5)',
   );
 
   // opaque colours are unaffected either way, which is why the existing
@@ -332,6 +337,42 @@ test('interpolating a translucent colour does not darken it', async () => {
   assert.strictEqual(
     interpolate('#000000', '#ffffff', 0.5),
     'rgba(128, 128, 128, 1)',
+  );
+});
+
+test('fading in from transparent never darkens on the way', async () => {
+  const { interpolate } = await import('../src/styles.js');
+
+  // The user-visible bug: `Tabs` transitions `backgroundColor` between
+  // `transparent` and a near-white hover fill, and hover moving between two
+  // adjacent tabs fades one out while the other fades in. Lerping straight
+  // channels sent both through mid grey — brightness over white went
+  // 1.000, 0.809, 0.736, 0.782, 0.945, which is not even monotonic — and a
+  // grey rectangle flashed across both tabs before the colours settled.
+  //
+  // So the property to hold is monotonicity, not any single value: a fade from
+  // transparent to a lighter-than-background fill must only ever approach it.
+  const overWhite = (s) => {
+    const m = /^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/.exec(s);
+    assert.ok(m, `unparseable colour: ${s}`);
+    const alpha = Number(m[4]);
+    return (alpha * (Number(m[1]) / 255) + (1 - alpha)) * 255;
+  };
+
+  let previous = 256;
+  for (const t of [0, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 1]) {
+    const grey = overWhite(interpolate('transparent', '#f1f2f6', t));
+    assert.ok(
+      grey <= previous + 1e-6,
+      `at t=${t} the fade brightened back to ${grey.toFixed(1)} from ` +
+        `${previous.toFixed(1)} — it is dipping dark and coming back`,
+    );
+    previous = grey;
+  }
+  // and it lands exactly on the target
+  assert.strictEqual(
+    interpolate('transparent', '#f1f2f6', 1),
+    'rgba(241, 242, 246, 1)',
   );
 });
 

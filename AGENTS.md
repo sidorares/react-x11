@@ -491,6 +491,18 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   the scheduler would have run. `test/dirty-rect.test.js` and
   `scripts/check-stress.jsx` both do this.
 
+- **Interpolate colours premultiplied.** `transparent` is _black_ at zero
+  alpha, so lerping the four straight channels drags every fade-in towards
+  black on the way: half way from `transparent` to a near-white hover fill
+  lands on mid grey, and the brightness curve is not even monotonic — it dips
+  dark and comes back. `Tabs` and `Tree` transition `backgroundColor` between
+  `transparent` and a hover fill, so moving hover between two adjacent items
+  faded one out as the other faded in and flashed a grey rectangle across both
+  before settling. Measured off the window: `#c0c0c2` mid-transition against
+  endpoints of `#ffffff` and `#f1f2f6`. `interpolate` premultiplies, lerps and
+  divides the alpha back out, which is what CSS specifies for this exact
+  reason. The endpoints are identical either way, which is why only a
+  monotonicity test catches it.
 - **Layouts sized against one font break in another.** `sans-serif` is
   whatever fontconfig hands you, and a row of things sized by their own text
   does not compress to fit (see the `flexShrink` note below) — it overflows and
