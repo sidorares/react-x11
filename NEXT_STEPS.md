@@ -9,10 +9,11 @@
 > Since then: a **documentation site** with react-x11 running in the browser
 > (#92), and a right-click edit menu for the text controls (#90).
 >
-> Upstream, all released: **ntk 3.9.0** on **node-x11 (x11) 3.3.0**. Between
+> Upstream, all released: **ntk 4.0.0** on **node-x11 (x11) 3.3.0**. Between
 > them they carry the window-manager surface, focus events, clipboard,
-> cursors, the ~10x faster software RENDER compositor, and the RENDER colour
-> guard.
+> cursors, the ~10x faster software RENDER compositor, the RENDER colour
+> guard, and region-based damage. ntk 4 dropped mermaid — see
+> [sidorares/ntk#106](https://github.com/sidorares/ntk/issues/106).
 >
 > **Published npm version is 1.2.0**; release-please **PR #69 is 2.0.0**,
 > holding the breaking change from #68 (style is the only style channel).

@@ -140,13 +140,7 @@ await esbuild.build({
     'node:module': path.join(shimsDir, 'module.js'),
     // keysym reads its JSON tables with fs at load time; this build inlines them
     keysym: path.join(shimsDir, 'keysym.js'),
-    // heavy optional ntk deps no demo needs. mermaid, dompurify and dagre go
-    // when the ntk floor moves past sidorares/ntk#113, which deletes the
-    // fence that reaches them — until then dropping the aliases bundles the
-    // real mermaid and the runtime goes from 2.3 MB to 5.6 MB.
-    mermaid: path.join(stubsDir, 'mermaid.js'),
-    dompurify: path.join(stubsDir, 'dompurify.js'),
-    '@dagrejs/dagre': path.join(stubsDir, 'dagre.js'),
+    // heavy optional ntk dep no demo needs
     pngjs: path.join(stubsDir, 'pngjs.js'),
   },
 });

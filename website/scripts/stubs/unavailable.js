@@ -1,5 +1,5 @@
-// Factory for inert module stubs: heavy optional dependencies (yoga-layout,
-// mermaid, …) are aliased to modules built from this so the playground
+// Factory for inert module stubs: heavy optional dependencies (pngjs, …)
+// are aliased to modules built from this so the playground
 // bundle stays small. Importing the stub is free; *using* it throws with a
 // clear message. The proxy answers the interop probes esbuild's ESM<->CJS
 // helpers make (`__esModule`, `default`, symbols) without throwing.

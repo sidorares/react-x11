@@ -545,8 +545,9 @@ participates in flex layout and scrolls naturally inside a `<scrollview>`.
 Spacing comes from the box model (`padding` prop), not a widget page margin.
 
 Async content — an `<img>` inside `<html>` — reflows when it arrives via
-ntk's `onInvalidate` widget hook (ntk ≥ 3.4.0 — the declared dependency).
-`<markdown>` lays out synchronously and never needs a second pass.
+ntk's `onInvalidate` widget hook (added in ntk 3.4.0; the declared
+dependency is ntk 4). `<markdown>` lays out synchronously and never needs a
+second pass.
 
 `<markdown>`, `<html>` and `<tex>` take their content as a **string
 child** (the react-markdown convention) or a `source` prop; the child
