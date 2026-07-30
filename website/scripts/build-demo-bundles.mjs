@@ -140,10 +140,7 @@ await esbuild.build({
     'node:module': path.join(shimsDir, 'module.js'),
     // keysym reads its JSON tables with fs at load time; this build inlines them
     keysym: path.join(shimsDir, 'keysym.js'),
-    // heavy optional ntk deps: only <markdown> mermaid fences need these
-    mermaid: path.join(stubsDir, 'mermaid.js'),
-    dompurify: path.join(stubsDir, 'dompurify.js'),
-    '@dagrejs/dagre': path.join(stubsDir, 'dagre.js'),
+    // heavy optional ntk dep no demo needs
     pngjs: path.join(stubsDir, 'pngjs.js'),
   },
 });

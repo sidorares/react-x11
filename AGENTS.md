@@ -46,7 +46,8 @@ no override-redirect staging (issue #4).
   `<svg>`, `<tex>`) wrapping ntk's document widgets in standalone mode:
   the widget's `layout(width)`/`contentHeight` feeds a yoga measure
   function, `draw(ctx, x, y)` paints, `onInvalidate` (ntk ≥ 3.4.0)
-  reflows on async content (mermaid, images).
+  reflows on async content (HtmlView images and SVGs; MarkdownView is
+  synchronous).
 - `src/components/` — the widget set, plain React over the host
   primitives (no reconciler support needed). One module per widget, with
   the shared plumbing in `theme.js` (palette, `useTheme`, `useControl`),

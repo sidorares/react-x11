@@ -837,43 +837,29 @@ test('<tex> lays out and draws a formula', async () => {
   }
 });
 
-test('<markdown> mermaid fence reflows into a diagram (ntk onInvalidate)', async () => {
+test('<html> repaints when async content arrives (ntk onInvalidate)', async () => {
   const { app } = await createHeadlessApp();
   try {
+    // an <img> decodes off the render pass, so the first paint has nothing to
+    // draw there; HtmlView then fires onInvalidate, which is the only thing
+    // that gets the element re-measured and painted again
+    const svg =
+      'data:image/svg+xml,' +
+      encodeURIComponent(
+        '<svg viewBox="0 0 4 4"><rect width="4" height="4" fill="#0000ff"/></svg>',
+      );
     const wnd = await render(
       React.createElement(
         'window',
-        { width: 300, height: 200, style: { backgroundColor: 'white' } },
-        React.createElement('markdown', {
-          source: '```mermaid\nflowchart LR\n  A[Hello] --> B[World]\n```',
+        { width: 200, height: 120, style: { backgroundColor: 'white' } },
+        React.createElement('html', {
+          source: `<div style="margin:0;padding:0"><img width="40" height="40" src="${svg}"></div>`,
         }),
       ),
       app,
     );
     const ctx = wnd.getContext('2d');
-
-    // the fence first paints as a code block; when the async mermaid model
-    // arrives the widget fires onInvalidate and the element reflows into
-    // diagram node boxes (theme fill #ececff). The grammar loads lazily,
-    // so allow more time than the default waitForInk deadline.
-    const isNodeFill = ([r, g, b]) =>
-      r > 220 && g > 220 && b > 245 && b > r + 8;
-    const deadline = Date.now() + 10000;
-    for (;;) {
-      const image = await readPixels(ctx, 300, 200);
-      let hits = 0;
-      for (let y = 0; y < 120; y++) {
-        for (let x = 0; x < 300; x++) {
-          if (isNodeFill(px(image, 300, x, y))) hits++;
-        }
-      }
-      if (hits > 50) break;
-      if (Date.now() > deadline) {
-        assert.fail(`mermaid diagram never painted (${hits} fill pixels)`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
+    await waitForPixel(ctx, 200, 120, 20, 20, [0, 0, 255], 'html svg img blue');
     ReactX11.unmountComponentAtNode(app);
   } finally {
     await app.close();

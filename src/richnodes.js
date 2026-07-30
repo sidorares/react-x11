@@ -1,7 +1,7 @@
 // Rich-content elements: thin retained-node wrappers over ntk's document
 // widgets in standalone mode (`layout(width)` + `draw(ctx, x, y)` +
 // `contentHeight`). One yoga measure function per node feeds the widget's
-// own layout into flexbox; async content (mermaid models, images) arrives
+// own layout into flexbox; async content (HtmlView images and SVGs) arrives
 // through the widget's `onInvalidate` hook (ntk >= 3.4.0).
 import { MarkdownView, HtmlView, SvgView, layoutTex } from 'ntk';
 
@@ -54,8 +54,9 @@ class DocumentViewNode extends Node {
     if (this.view || !this.app?.fonts) return this.view;
     this.view = this._createView();
     if (this.view) {
-      // ntk >= 3.4.0 notifies here when async content (a mermaid model, an
-      // image) invalidates the widget layout; harmless no-op before that
+      // ntk >= 3.4.0 notifies here when async content (an HtmlView image or
+      // SVG) invalidates the widget layout; MarkdownView never fires it —
+      // its layout is synchronous — and the assignment is a harmless no-op
       this.view.onInvalidate = () => this._contentInvalidated();
       this._setSource(this.view);
     }
@@ -136,7 +137,7 @@ class DocumentViewNode extends Node {
 
 /**
  * <markdown source>: ntk MarkdownView — headings, emphasis, lists, quotes,
- * tables, syntax-highlighted fences, math fences, async mermaid fences.
+ * tables, syntax-highlighted fences, math fences.
  * Props: source, theme, onLink(href, ev). Spacing comes from the box model
  * (padding prop), not the widget's own page padding.
  */

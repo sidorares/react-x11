@@ -1,4 +1,4 @@
-// Rich content elements: <markdown> (with mermaid + math fences) in a
+// Rich content elements: <markdown> (with highlighted + math fences) in a
 // scrollview, a live-updating <tex> formula, a declarative JSX <svg> and an
 // <image> — all drawn client-side through ntk's document widgets and image
 // pipeline. Run with: npm run examples:richtext  (needs an X server)
@@ -29,18 +29,6 @@ root.render(<markdown onLink={openBrowser}>{README}</markdown>);
 
 \`\`\`math
 \\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}
-\`\`\`
-
-## Mermaid
-
-Parses asynchronously; the element reflows when the model arrives
-(ntk's \`onInvalidate\` hook):
-
-\`\`\`mermaid
-flowchart LR
-  A[React tree] --> B[retained nodes]
-  B --> C[yoga layout]
-  C --> D((XRender))
 \`\`\`
 
 ## Tables & links
