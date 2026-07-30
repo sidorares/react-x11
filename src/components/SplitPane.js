@@ -15,7 +15,13 @@ const KEY_STEP = 16;
 const s = createStyles({
   root: { flexGrow: 1, minHeight: 0, minWidth: 0 },
   pane: { minHeight: 0, minWidth: 0 },
-  grow: { flexGrow: 1, minHeight: 0, minWidth: 0 },
+  // `flexBasis: 0` is load-bearing, not tidying. Yoga defaults flexShrink to
+  // 0 (CSS defaults it to 1), so with the default `flexBasis: auto` this pane
+  // takes its content's max-content size as a base and then cannot shrink
+  // back to the space actually left over. A second pane holding a wrapping
+  // row would lay out at its unwrapped width and overflow the window instead
+  // of wrapping. Basing it at 0 makes it exactly "whatever is left".
+  grow: { flexGrow: 1, flexBasis: 0, minHeight: 0, minWidth: 0 },
   divider: {
     flexShrink: 0,
     alignItems: 'center',

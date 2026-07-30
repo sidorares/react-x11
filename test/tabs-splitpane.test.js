@@ -237,6 +237,63 @@ test('SplitPane sizes the first pane and gives the rest to the second', async ()
   ReactX11.unmountComponentAtNode(app);
 });
 
+test('the second pane does not grow to fit content wider than it', async () => {
+  // Yoga defaults flexShrink to 0 where CSS defaults it to 1, so a pane left
+  // at `flexBasis: auto` takes its content's max-content width as a base and
+  // then cannot shrink back to the space actually available. The symptom is a
+  // wrapping row that never wraps and overflows the window instead, which is
+  // invisible in the empty-pane test above: with no content there is no
+  // natural width for the basis to pick up.
+  const app = createMockApp();
+  ReactX11.render(
+    h(
+      'window',
+      { width: 400, height: 200 },
+      h(
+        SplitPane,
+        { defaultSize: 100 },
+        h('box', null),
+        // three 100px cards: 300 of content in the 294 the pane actually has,
+        // so two fit on a line and the third has to wrap
+        h(
+          'box',
+          { style: { flexDirection: 'row', flexWrap: 'wrap' } },
+          [0, 1, 2].map((i) =>
+            h('box', { key: i, style: { width: 100, height: 30 } }),
+          ),
+        ),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  const [, , second] = root(app).children[0].children;
+  assert.strictEqual(
+    second.abs.width,
+    400 - 100 - 6,
+    'the pane is the space left over, not its content width',
+  );
+
+  const cards = [];
+  find(root(app), (n) => {
+    if (n.abs?.width === 100 && n.abs?.height === 30) cards.push(n.abs);
+    return false;
+  });
+  assert.strictEqual(cards.length, 3);
+  const lines = new Set(cards.map((c) => c.y));
+  assert.strictEqual(lines.size, 2, 'the third card wrapped to a second line');
+  for (const card of cards) {
+    assert.ok(
+      card.x + card.width <= 400,
+      `card at x=${card.x} stays inside the 400px window`,
+    );
+  }
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('dragging the divider resizes, and clamps at both minimums', async () => {
   const sizes = [];
   const app = mountSplit({

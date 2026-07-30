@@ -32,11 +32,57 @@ Roughly in the order worth reading them:
 | [`app.jsx`](app.jsx)                 | the showcase: `SplitPane` + `Tabs` hosting `form`, `widgets` and `tasks` as panels           |
 | [`gl.jsx`](gl.jsx)                   | raw GL in a `<glarea>`, compiled to a server-side display list                               |
 | [`three.jsx`](three.jsx)             | a react-three-fiber-shaped `<Canvas3D>` scene: meshes, lights, textures                      |
+| [`stress/`](stress/index.jsx)        | **the big one**: six panels to poke at by hand, with a frame log — see below                 |
 | [`wm.jsx`](wm.jsx)                   | **a reparenting window manager** — see below                                                 |
 
 `app.jsx` is where a new control should get demonstrated: it imports the
 panel each of `form`, `widgets` and `tasks` exports, so adding a widget
 there shows it off without yet another example file.
+
+## The stress app
+
+```sh
+npm run examples:stress            # the app, with a frame log per repaint
+npm run examples:stress -- --quiet # only frames over 50kpx
+npm run stress:check               # headless: does it still all render?
+npm run stress:check -- --png      # ...and write a PNG per panel to /tmp
+```
+
+Six panels, built to be poked at by hand for correctness **and** for
+performance:
+
+| panel      |                                                                            |
+| ---------- | -------------------------------------------------------------------------- |
+| Typography | every text style axis on one paragraph, plus `<markdown>`/`<html>`/`<tex>` |
+| Charts     | four SVG drawings whose geometry is recomputed from sliders                |
+| Data       | a windowed 50,000-row table beside a table that ticks on a timer           |
+| Controls   | every component, in deliberately awkward nestings                          |
+| Damage     | a cell grid with a chosen number of changes per commit                     |
+| Mixed      | all of it at once, animating, for the worst case                           |
+
+Each panel's file opens with a "what to look for" list — the things that are
+easy to get subtly wrong and easy to miss unless you know to check.
+
+**The frame log goes to the terminal, not into the window.** A HUD drawn in
+the window would claim damage every frame and so change the very number it
+was reporting; the same trap caught the Damage panel itself, which used to
+carry a live step counter until the counter's own re-measure turned every
+step into a full repaint. Read the log next to the window:
+
+```
+  frame  damage rect                area      paint
+     14  82x63 @ 210,404            5.2kpx    0.8ms
+     15  … ×4
+     16  FULL WINDOW                700.0kpx  9.1ms
+```
+
+`FULL WINDOW` is correct for a resize, a tab switch or anything that changes
+layout — text that re-measures makes the frame full by definition. It is a
+regression anywhere else.
+
+Wire-level numbers (requests, bytes, `Composite` pixels) are not here on
+purpose: `npm run bench` drives the same paths against an in-process server
+where a byte count is reproducible.
 
 The two GL examples need a server with **indirect GLX** enabled — it is off
 by default nearly everywhere. Xorg takes `+iglx` on the command line or

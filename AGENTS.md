@@ -390,6 +390,40 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   Presentation is still ntk's job and still a full-window `CopyArea` — that
   costs server-side blit time, not wire traffic (NEXT_STEPS §8 item 4).
 
+  Two traps when measuring this by hand (both hit while building
+  `examples/stress/`):
+
+  - **Never put a live counter next to what you are measuring.** A changing
+    number re-measures its `<text>`, a re-measure is a layout change, and a
+    layout change is a full repaint by definition — so the readout makes
+    every frame report `FULL WINDOW` and destroys the thing it was reporting
+    on. Log to stdout instead; `examples/stress/perf.js` wraps `flush()`.
+  - **The first click on a control is not a clean measurement.** Pressing a
+    button also changes its own hover and active styling, so that frame
+    legitimately covers the button as well as whatever the press did. Warm up
+    with one click and measure the next.
+
+- **A stalled frame clock under synthetic input.** ntk paces
+  `requestAnimationFrame` behind a fence (a `GetInputFocus` whose reply
+  confirms the server consumed the last frame). Driving events with
+  `wnd.emit()` rather than through the server can leave a frame scheduled and
+  never run, so a fixed sleep returns with the tree committed but **not laid
+  out** — every `abs` still `0,0,0,0`, which makes a synthesized click land at
+  the window origin and hit whatever is in the corner. Call `root.flush()`
+  (clearing `root._scheduled` first) instead of sleeping: it is the same frame
+  the scheduler would have run. `test/dirty-rect.test.js` and
+  `scripts/check-stress.jsx` both do this.
+
+- **Yoga defaults `flexShrink` to 0**, where CSS defaults it to 1. A box with
+  `flexGrow: 1` and the default `flexBasis: auto` therefore takes its
+  content's max-content size as its base and **cannot shrink back** to the
+  space actually available — a wrapping row inside it never wraps and
+  overflows instead. Use `flexBasis: 0` for "take whatever is left"; that is
+  what `SplitPane`'s second pane does, with a regression test in
+  `test/tabs-splitpane.test.js`. Note also that `flexBasis` wins over `width`
+  on the main axis, so spreading a `flexBasis: 0` style into a fixed-width
+  box collapses it to nothing.
+
 - **No X11 side effects in the render phase.** Window nodes are handles
   until `realize(parentWindow)` runs in the commit phase
   (`appendChildToContainer` for top-levels, parent `realize` recursion or

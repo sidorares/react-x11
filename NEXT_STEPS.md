@@ -570,6 +570,11 @@ menus/tooltips.
   from the render list for free.
 - Should the widget set (Phase 2/3) live in this package or a
   `@react-x11/widgets` sibling once primitives stabilize?
+- Where do the rich-content formats belong — ntk, here, or their own module?
+  ANSWERED in [RICH_CONTENT.md](RICH_CONTENT.md): mostly stay in ntk, mermaid
+  extracts (89 MB of the 116 MB dependency closure), and selectable text needs
+  one read-only ntk accessor rather than a rewrite. That doc supersedes the
+  "left for later" note in §1 and adds three ntk items to §8.
 - ESM migration here (ntk is ESM-with-TLA; the dynamic-import dance in
   `src/Reconciler.js` disappears if react-x11 goes ESM).
 
