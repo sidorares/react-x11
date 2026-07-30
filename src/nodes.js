@@ -56,6 +56,48 @@ const STACK_BELOW = 1;
 // in progress; drained by flushWindowRestacks from resetAfterCommit.
 const pendingRestack = new Set();
 
+// --- damage -------------------------------------------------------------
+//
+// A frame either repaints the whole window or a bounded region of it. The
+// sentinel is deliberately not a rect: "the whole window" has to stay
+// distinguishable from "a rect that happens to cover it", because the
+// window can be resized between the invalidation and the paint.
+const FULL_DAMAGE = Symbol('full-damage');
+
+// "I need a frame, but nothing I own changed appearance." Distinct from
+// passing no node, which means "something changed and I cannot say where" —
+// the safe reading, and the one that repaints everything.
+const NO_DAMAGE = Symbol('no-damage');
+
+// Painting is not perfectly bounded by a node's rect — an antialiased
+// rounded corner or glyph edge puts coverage a fraction of a pixel outside
+// it — so damage grows by a pixel on each side before anything is culled
+// against it.
+const DAMAGE_SLOP = 1;
+
+function unionDamage(a, b) {
+  if (!b) return a ?? null;
+  if (!a) return { ...b };
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    width: Math.max(a.x + a.width, b.x + b.width) - x,
+    height: Math.max(a.y + a.height, b.y + b.height) - y,
+  };
+}
+
+/** Do two rects share any area? Touching edges do not count. */
+function rectsOverlap(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    b.x < a.x + a.width &&
+    a.y < b.y + b.height &&
+    b.y < a.y + a.height
+  );
+}
+
 /** Apply any child-window stacking changes the commit produced, once. */
 export function flushWindowRestacks() {
   const nodes = [...pendingRestack];
@@ -311,7 +353,9 @@ export class Node {
     const next = resolveStyleStates(this._baseStyle, this.states);
     if (shallowEqual(next, this._targetStyle)) return;
     this._retarget(next);
-    this.root?.invalidate(false);
+    // a state block may only set paint properties, so the node's own region
+    // is the whole of what changed
+    this.root?.invalidate(false, this);
   }
 
   get isWindow() {
@@ -512,7 +556,11 @@ export class Node {
     if (Boolean(newProps.trapFocus) !== Boolean((oldProps ?? prev).trapFocus)) {
       this._syncFocusScope();
     }
-    this.root?.invalidate(layoutChanged);
+    // This is how every React update arrives, so it is where partial
+    // painting pays for itself. `applyLayoutStyle` has just told us whether
+    // anything can have *moved*: if not, this node's own region bounds what
+    // changed — a new colour, a new label, a different border.
+    this.root?.invalidate(layoutChanged, layoutChanged ? null : this);
   }
 
   setHidden(hidden) {
@@ -671,6 +719,36 @@ export class Node {
     }
   }
 
+  /**
+   * The region this node can put ink in: its own rect unioned with every
+   * descendant's. Not the same as `abs` — a child of a node that does not
+   * clip may stick out of it (absolute positioning, a negative margin), and
+   * culling a subtree by the parent's rect alone would drop that child's
+   * paint. Recomputed on demand rather than cached in `absolutize`, because
+   * it is only ever asked for on the handful of nodes that invalidate.
+   */
+  paintBounds() {
+    const bounds = this._subtreeBounds();
+    // inflated once, here — doing it inside the recursion would compound the
+    // slop by one pixel per level of nesting
+    return {
+      x: bounds.x - DAMAGE_SLOP,
+      y: bounds.y - DAMAGE_SLOP,
+      width: bounds.width + DAMAGE_SLOP * 2,
+      height: bounds.height + DAMAGE_SLOP * 2,
+    };
+  }
+
+  _subtreeBounds() {
+    let bounds = this.abs;
+    for (const child of this.children) {
+      if (child.isWindow || !child.yoga || child.hidden) continue;
+      if (child.style?.display === 'none') continue;
+      bounds = unionDamage(bounds, child._subtreeBounds());
+    }
+    return bounds;
+  }
+
   contentBox() {
     const padL =
       this.yoga.getComputedPadding(Yoga.EDGE_LEFT) +
@@ -777,9 +855,24 @@ export class Node {
     }
     for (const child of order) {
       if (child._offscreen()) continue;
+      if (child._outsideDamage()) continue;
       child.paint(ctx);
     }
     if (clip) ctx.restore();
+  }
+
+  /**
+   * Nothing this subtree draws lands in the region being repainted, so its
+   * drawing does not need to be sent at all. This is where the protocol
+   * saving comes from — the clip alone would still put every request on the
+   * wire for the server to throw away.
+   *
+   * Tested against the subtree's bounds, not `abs`: see `paintBounds`.
+   */
+  _outsideDamage() {
+    const damage = this.root?._paintDamage;
+    if (!damage) return false;
+    return !rectsOverlap(this._subtreeBounds(), damage);
   }
 
   /**
@@ -1550,7 +1643,7 @@ export class TextInputNode extends Node {
 
   _repaint() {
     this._caretOn = true;
-    this.root?.invalidate(false);
+    this.root?.invalidate(false, this);
   }
 
   /**
@@ -2162,10 +2255,12 @@ export class TextInputNode extends Node {
     this._caretOn = true;
     this._blinkTimer = setInterval(() => {
       this._caretOn = !this._caretOn;
-      this.root?.invalidate(false);
+      // twice a second, forever, for as long as a field has focus: the one
+      // repaint that most wants to cost only the field it happens in
+      this.root?.invalidate(false, this);
     }, 530);
     this._blinkTimer.unref?.();
-    this.root?.invalidate(false);
+    this.root?.invalidate(false, this);
   }
 
   _defaultBlur() {
@@ -2175,7 +2270,7 @@ export class TextInputNode extends Node {
     this._breakUndoRun();
     clearInterval(this._blinkTimer);
     this._blinkTimer = null;
-    this.root?.invalidate(false);
+    this.root?.invalidate(false, this);
   }
 
   destroySubtree() {
@@ -2908,8 +3003,15 @@ export class WindowNode extends Node {
 
     const layoutChanged =
       style !== beforeStyle && applyLayoutStyle(this.yoga, style, beforeStyle);
+    // The window's own paint is its background, which covers the whole
+    // window — so a change to it is unbounded, and `this` is the right
+    // damage. A commit that only changed children reaches here too, though
+    // (React updates the parent whenever its child list is rebuilt), and
+    // that must not widen the damage those children just recorded.
+    const ownPaintChanged = paintPropsChanged(style, beforeStyle);
     this.invalidate(
-      layoutChanged || geometryChanged || paintPropsChanged(style, beforeStyle),
+      layoutChanged || geometryChanged,
+      ownPaintChanged ? this : NO_DAMAGE,
     );
   }
 
@@ -2960,9 +3062,32 @@ export class WindowNode extends Node {
     else this.window?.map?.();
   }
 
-  invalidate(layoutChanged) {
+  /**
+   * Mark the window as needing work before the next frame.
+   *
+   * `damage` is an optional node whose *appearance* changed, and it is what
+   * turns a full-window repaint into a partial one: the frame then repaints
+   * only the region that node covers, and skips emitting drawing for
+   * everything outside it. Two rules keep that safe:
+   *
+   *  - a layout change gets no damage bound. Layout can move anything, and
+   *    a node that moved leaves stale pixels behind at its old rect, which
+   *    the new rect does not cover;
+   *  - a caller that names no node means "something, somewhere", so it also
+   *    repaints in full. Partial painting is therefore opt-in per call
+   *    site, and forgetting to pass a node costs speed rather than
+   *    correctness.
+   */
+  invalidate(layoutChanged, damage = null) {
     if (this.destroyed || !this.window) return;
     if (layoutChanged) this.needsLayout = true;
+    if (layoutChanged) this._damage = FULL_DAMAGE;
+    else if (damage === NO_DAMAGE) {
+      // contributes nothing; whoever did change has recorded its own region
+    } else if (!damage) this._damage = FULL_DAMAGE;
+    else if (this._damage !== FULL_DAMAGE) {
+      this._damage = unionDamage(this._damage, damage.paintBounds());
+    }
     this.needsPaint = true;
     if (this._scheduled) return;
     this._scheduled = true;
@@ -2995,24 +3120,73 @@ export class WindowNode extends Node {
     }
     if (!this.needsPaint) return;
     this.needsPaint = false;
+    const damage = this._takeDamage(width, height);
     if (typeof this.window.getContext !== 'function') return; // headless mock
     // ntk getContext creates a fresh context (with window-event
     // subscriptions) on every call — cache one per window
     const ctx = (this._ctx ??= this.window.getContext('2d'));
+    if (damage) {
+      // The clip is belt to the culling's braces: it bounds the server-side
+      // mask work for whatever *does* paint, and it contains any node that
+      // inks slightly outside its own rect. Rectangular clips take ntk's
+      // server-side fast path, so this is cheap.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(damage.x, damage.y, damage.width, damage.height);
+      ctx.clip();
+    }
     ctx.fillStyle = this.style.backgroundColor || 'white';
-    ctx.fillRect(0, 0, width, height);
-    this._paintChildren(ctx);
-    if (process.env.REACT_X11_DEBUG_LAYOUT) {
-      this._paintDebugOverlay(ctx, this, 0);
+    // repainting the background only where it is about to be drawn over is
+    // the other half of the win: a full-window fill is a full-window
+    // composite however little changed
+    if (damage) ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
+    else ctx.fillRect(0, 0, width, height);
+    this._paintDamage = damage;
+    try {
+      this._paintChildren(ctx);
+      if (process.env.REACT_X11_DEBUG_LAYOUT) {
+        this._paintDebugOverlay(ctx, this, 0);
+      }
+      const highlight = this._highlight;
+      if (highlight && !highlight.destroyed) {
+        const r = highlight.abs?.width
+          ? highlight.abs
+          : { x: 0, y: 0, width, height };
+        ctx.fillStyle = 'rgba(41, 128, 185, 0.35)';
+        ctx.fillRect(r.x, r.y, r.width, r.height);
+      }
+    } finally {
+      this._paintDamage = null;
+      if (damage) ctx.restore();
     }
-    const highlight = this._highlight;
-    if (highlight && !highlight.destroyed) {
-      const r = highlight.abs?.width
-        ? highlight.abs
-        : { x: 0, y: 0, width, height };
-      ctx.fillStyle = 'rgba(41, 128, 185, 0.35)';
-      ctx.fillRect(r.x, r.y, r.width, r.height);
-    }
+  }
+
+  /**
+   * The region this frame will repaint, or null for the whole window.
+   *
+   * Clamped to the window: damage is recorded when a node invalidates, and
+   * the window may have been resized since. A region that no longer
+   * intersects the window means there is nothing to do, but the frame still
+   * has to clear the flag, so it degrades to a full repaint rather than
+   * painting nothing.
+   */
+  _takeDamage(width, height) {
+    const damage = this._damage;
+    this._damage = null;
+    // what the frame about to run settled on, for the tests and for
+    // REACT_X11_DEBUG_LAYOUT to report; null means it repainted everything
+    this._lastDamage = null;
+    if (damage === FULL_DAMAGE || !damage) return null;
+    const x = Math.max(0, Math.floor(damage.x));
+    const y = Math.max(0, Math.floor(damage.y));
+    const right = Math.min(width, Math.ceil(damage.x + damage.width));
+    const bottom = Math.min(height, Math.ceil(damage.y + damage.height));
+    if (right <= x || bottom <= y) return null;
+    // covering the window is the same as not being bounded at all, and the
+    // full path is one fill instead of a clip plus a fill
+    if (x === 0 && y === 0 && right >= width && bottom >= height) return null;
+    this._lastDamage = { x, y, width: right - x, height: bottom - y };
+    return this._lastDamage;
   }
 
   /** DevTools hover highlight: tint a node's rect on the next paint. */

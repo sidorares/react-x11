@@ -471,7 +471,7 @@ export class EventManager {
       old.props.onBlur?.(this._makeEvent('blur', null, old));
       // the ring/caret it was drawing has to go, and it may be in another
       // window than the new focus (owner window ↔ its popup)
-      old.root?.invalidate(false);
+      old.root?.invalidate(false, old);
     }
     if (node) {
       // keys only reach a node whose window has the X focus
@@ -480,7 +480,7 @@ export class EventManager {
       this._scrollIntoView(node);
       if (this.windowFocused) node._defaultFocus?.();
       node.props.onFocus?.(this._makeEvent('focus', null, node));
-      node.root?.invalidate(false);
+      node.root?.invalidate(false, node);
     }
   }
 
