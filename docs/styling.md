@@ -91,6 +91,16 @@ still exists now that its id registry is gone. It also validates keys, which
 a bare object literal cannot: an unknown style property is an error at
 declaration instead of a silent no-op.
 
+## `flattenStyle`
+
+`flattenStyle(style)` collapses whatever the `style` prop accepts — an
+object, an array, nested arrays, holes — into one plain object, which is what
+the reconciler itself does before applying props. Two details are worth
+knowing if you call it: a lone object is returned **as-is**, not copied, so
+`===` still identifies a hoisted style; and a state block merges with one
+already collected rather than replacing it, so
+`[{ ':hover': { color } }, { ':hover': { backgroundColor } }]` keeps both.
+
 ## In components
 
 Every component takes `style` and merges it after its own, so an override

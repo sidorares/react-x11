@@ -43,8 +43,9 @@ style you pass one resolves against it — see
 each in light and dark — and `npm run examples:theming` switches between
 them at runtime.
 
-`SelectThemeProvider` is the same component under an older name, kept as a
-back-compat alias from when the palette only reached `Select`.
+`SelectThemeProvider` is the same export under an older name — a back-compat
+alias from when the palette only reached `Select`. It themes every widget
+just the same; prefer `ThemeProvider`.
 
 ## Basic controls
 
@@ -189,23 +190,11 @@ single letter cycles through the options starting with it.
 
 ### Theming
 
-```jsx
-import { SelectThemeProvider } from 'react-x11';
-
-<SelectThemeProvider
-  value={{
-    border: '#444',
-    borderActive: '#f39c12',
-    background: '#2f3640',
-    text: '#f5f6fa',
-    dim: '#95a5a6',
-    hoverBackground: '#f39c12',
-    hoverText: '#1e272e',
-  }}
->
-  <Select … />
-</SelectThemeProvider>;
-```
+`Select` has no provider of its own — it reads the palette from
+[`ThemeProvider`](#theming) like every other widget. The trigger is
+`background`/`text` in a `border` box that turns `borderActive` on focus or
+while open, the chevron and the placeholder text are `dim`, and the menu
+highlight is `hoverBackground`/`hoverText`.
 
 ## `Slider`
 
@@ -224,12 +213,12 @@ import { Slider } from 'react-x11';
 />;
 ```
 
-| prop                       |                                                        |
-| -------------------------- | ------------------------------------------------------ |
-| `value`, `onChange(value)` | current value (controlled)                             |
-| `min`, `max`, `step`       | range and quantisation (defaults 0, 100, 1)            |
-| `width`, `height`          | track width; `height` is the bar thickness (default 4) |
-| `disabled`                 | inert, dimmed                                          |
+| prop                       |                                                         |
+| -------------------------- | ------------------------------------------------------- |
+| `value`, `onChange(value)` | current value (controlled)                              |
+| `min`, `max`, `step`       | range and quantisation (defaults 0, 100, 1)             |
+| `height`                   | the bar thickness (default 4); width comes from `style` |
+| `disabled`                 | inert, dimmed                                           |
 
 Dragging uses [pointer capture](events.md#pointer-capture): the press
 captures, so the thumb keeps following a pointer that has wandered far
