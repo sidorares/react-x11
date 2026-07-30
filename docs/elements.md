@@ -544,9 +544,9 @@ offers, the element reports the document's content height — so rich content
 participates in flex layout and scrolls naturally inside a `<scrollview>`.
 Spacing comes from the box model (`padding` prop), not a widget page margin.
 
-Async content (a ` ```mermaid ` fence, an `<img>`) reflows when it
-arrives via ntk's `onInvalidate` widget hook (ntk ≥ 3.4.0 — the declared
-dependency).
+Async content — an `<img>` inside `<html>` — reflows when it arrives via
+ntk's `onInvalidate` widget hook (ntk ≥ 3.4.0 — the declared dependency).
+`<markdown>` lays out synchronously and never needs a second pass.
 
 `<markdown>`, `<html>` and `<tex>` take their content as a **string
 child** (the react-markdown convention) or a `source` prop; the child
@@ -564,8 +564,7 @@ Some *markdown*.
 ### `<markdown>`
 
 ntk `MarkdownView`: headings, emphasis, lists, quotes, tables,
-syntax-highlighted code fences, `math`/`latex` fences (KaTeX), `mermaid`
-fences (flowchart/sequence, async).
+syntax-highlighted code fences, `math`/`latex` fences (KaTeX).
 
 | prop               |                                                                                 |
 | ------------------ | ------------------------------------------------------------------------------- |

@@ -254,8 +254,8 @@ const check = (ok, what) => {
  *
  * The sleep before it is for React, not for the frame: a click's setState
  * commits on a task, so the tree has to exist before there is anything to lay
- * out. Async content (a mermaid model, an HTML image) invalidates again later,
- * hence more than one round.
+ * out. Async content (an HTML image) invalidates again later, hence more than
+ * one round.
  */
 async function settle(rounds = 4) {
   for (let i = 0; i < rounds; i++) {

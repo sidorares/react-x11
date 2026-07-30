@@ -133,7 +133,7 @@ and [docs/](docs/README.md) for the full API reference.
 | `<textinput>`  | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select, undo/redo, right-click menu |
 | `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                                                           |
 | `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                                           |
-| `<markdown>`   | ntk MarkdownView: headings, tables, highlighted fences, math, mermaid; `onLink`                                                                   |
+| `<markdown>`   | ntk MarkdownView: headings, tables, highlighted fences, math; `onLink`                                                                            |
 | `<html>`       | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                                                    |
 | `<svg>`        | static SVG through ntk SvgView, sized like `<image>`                                                                                              |
 | `<tex>`        | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                                                            |

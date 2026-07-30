@@ -1,5 +1,17 @@
 # Where rich content belongs: ntk, react-x11, or a module of its own
 
+> **Status: this is the analysis, not the decision.** The decision and the
+> staged plan live in
+> [sidorares/ntk#106](https://github.com/sidorares/ntk/issues/106). It
+> diverges from the recommendation below on three points: **mermaid is
+> dropped outright** rather than extracted to a module, `<html>` and
+> `<markdown>` **do move here** behind subpath exports once the provider
+> weight is gone, and `<tex>` and `<svg>` stay in ntk. The measurements in
+> this document still hold, and re-measuring in isolated install trees put
+> mermaid's own closure at 155 MB rather than the 89 MB reported here — the
+> difference is what npm hoisting hides. Mermaid removal shipped as
+> sidorares/ntk#113.
+
 `<tex>`, `<svg>`, `<markdown>`, `<html>` and mermaid fences are all
 implemented in ntk today and wrapped by `src/richnodes.js`. This document
 weighs three outcomes for each — **(1)** leave in ntk, **(2)** reimplement

@@ -44,12 +44,11 @@ Shipped in `src/richnodes.js`: `<markdown>`,
 mode — `layout(width)`/`contentHeight` feed a yoga measure function,
 `draw(ctx, x, y)` paints into the window context, `linkAt` is wired into
 the mousedown default action (`onLink` prop), and `<scrollview>` wrapping
-works via the normal measured-height path. Async content (mermaid models,
-HTML images) reflows through the widgets' `onInvalidate` hook —
-implemented upstream as sidorares/ntk#75, released in **ntk 3.4.0**
-(the dependency is bumped). `<mermaid>` needs no dedicated element
-(markdown fences cover it); `<paragraph>` stays out (see below —
-maxLines/ellipsis would be a TextLayout feature first).
+works via the normal measured-height path. Async content (HTML images)
+reflows through the widgets' `onInvalidate` hook — implemented upstream as
+sidorares/ntk#75, released in **ntk 3.4.0** (the dependency is bumped).
+`<paragraph>` stays out (see below — maxLines/ellipsis would be a
+TextLayout feature first).
 
 Left for later: per-link pointer cursor (cursor is per-node today),
 `<tex>` baseline alignment with surrounding `<text>`.
@@ -250,8 +249,8 @@ react-nodegui, react-native-gtk4, React Native Fabric, react-three-fiber,
   - Per-window frame clock: event coalescing (mousemove=last, expose=union),
     fence-based server sync, `requestAnimationFrame`, double-buffered backing
     store — `lib/window.js`.
-  - Document widgets: `HtmlView`, `MarkdownView`, `SvgView`, `TexView`,
-    mermaid — all windowless, with a standalone `layout(width)` +
+  - Document widgets: `HtmlView`, `MarkdownView`, `SvgView`, `TexView` —
+    all windowless, with a standalone `layout(width)` +
     `draw(ctx, x, y)` mode that makes them embeddable.
   - An in-process pure-JS X server (in node-x11) with XRender — hermetic
     tests with pixel readback, no `$DISPLAY` (already used by
@@ -469,7 +468,7 @@ primitives — they need no reconciler support once focus/hover/events exist):
   over ntk's widgets in standalone mode (`layout(width)` +
   `draw(ctx, x, y)` + `contentHeight` slots directly into a yoga measure
   function). Needs `onInvalidate` (already in ntk's source repo for
-  markdown/mermaid async content — must be in the next published version).
+  HtmlView async content — must be in the next published version).
 
 Deliberately out of scope for now: accessibility (AT-SPI), IME/compose input,
 Wayland.
@@ -595,10 +594,13 @@ menus/tooltips.
 - Should the widget set (Phase 2/3) live in this package or a
   `@react-x11/widgets` sibling once primitives stabilize?
 - Where do the rich-content formats belong — ntk, here, or their own module?
-  ANSWERED in [RICH_CONTENT.md](RICH_CONTENT.md): mostly stay in ntk, mermaid
-  extracts (89 MB of the 116 MB dependency closure), and selectable text needs
-  one read-only ntk accessor rather than a rewrite. That doc supersedes the
-  "left for later" note in §1 and adds three ntk items to §8.
+  Analysed in [RICH_CONTENT.md](RICH_CONTENT.md); the decision and the staged
+  plan live in [sidorares/ntk#106](https://github.com/sidorares/ntk/issues/106).
+  Mermaid is **dropped outright** rather than extracted — it was 155 MB of
+  install closure for a grammar. html and markdown move here behind subpath
+  exports; svg and tex stay in ntk. Selectable text still needs one read-only
+  ntk accessor rather than a rewrite. That supersedes the "left for later"
+  note in §1 and adds items to §8.
 - ESM migration here (ntk is ESM-with-TLA; the dynamic-import dance in
   `src/Reconciler.js` disappears if react-x11 goes ESM).
 
