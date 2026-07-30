@@ -1,34 +1,37 @@
 # NEXT_STEPS.md — making react-x11 actually usable
 
-> **Status (2026-07-27):** Phases 0–5 are done and merged: the widget set
-> (#30), examples overhaul + `<window onCloseRequest>` (#31), multi-line
-> `<textarea>` (#32), `Select` keyboard navigation + `scrollview`
-> `scrollIntoView` (#34), framed screenshots via the real WM (#36), and
-> window-manager hints as `<window>` props (#37). Pointer capture
-> (`ev.capturePointer()`) and `Slider` are the newest.
+> **Status (2026-07-30, audited against the tree):** Phases 0–5 are done and
+> merged, and so is the **3D work over indirect GLX** in full — `<glarea>`,
+> the `<mesh>` scene tree on a display-list compiler, lights, textures and
+> mesh pointer events. [docs/glx.md](docs/glx.md) is no longer a plan: #93
+> turned it into the design document behind the shipped API.
 >
-> Upstream, all released: ntk **3.5.0** — `WM_NORMAL_HINTS`, `WM_CLASS`,
-> `_NET_WM_WINDOW_TYPE`, always-on-top (ntk#77) — on node-x11 **3.1.2**,
-> which carries the Apple-WM `FrameHitTest` fix (node-x11#229).
+> Since then: a **documentation site** with react-x11 running in the browser
+> (#92), and a right-click edit menu for the text controls (#90).
 >
-> npm publish still waits on release-please **PR #17 (1.0.0)**.
+> Upstream, all released: **ntk 3.9.0** on **node-x11 (x11) 3.3.0**. Between
+> them they carry the window-manager surface, focus events, clipboard,
+> cursors, the ~10x faster software RENDER compositor, and the RENDER colour
+> guard.
+>
+> **Published npm version is 1.2.0**; release-please **PR #69 is 2.0.0**,
+> holding the breaking change from #68 (style is the only style channel).
+> Everything above — the site included — is unreleased until it merges.
 >
 > **Plan (next session):**
 >
-> 1. **3D components over indirect GLX** — the one large feature going in
->    before 1.0.0; plan and phase status in
->    [docs/glx.md](docs/glx.md). Phases 0-3 are merged: ntk 3.6.0
->    for the protocol blockers, then `<glarea>`, the `<mesh>` scene tree on
->    a display-list compiler, and lights. Left: textures, mesh pointer
->    events, README screenshots.
-> 2. **Queued behind it (§11):** the menu/tooltip **safe polygon** (done)
->    and the **focus-state** gaps (done: window focus, the public focus API,
->    `tabIndex` ordering, focus scopes/modals and focus restore) — next in
->    §11 is the AT-SPI accessibility work the research in §11.3 scopes out.
-> 3. Then merge release-please #17 and publish 1.0.0.
+> 1. Decide on **2.0.0** and merge #69.
+> 2. **§11 accessibility (AT-SPI)** is next and now unblocked: it depended on
+>    window-level focus, which shipped. §11.3 scopes it out; a
+>    `@react-x11/a11y` sibling package is the likely shape.
+> 3. The two open issues, both real and both mine to fix: **#86**
+>    (`sans-serif` resolves to a CJK font on macOS) and **#85** (keyboard
+>    layout switching ignored — needs the Linux group bits _and_ XQuartz's
+>    keymap rewrite).
 > 4. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
->    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>`.
+>    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>` (neither
+>    exists in `src/` yet).
 
 ---
 
@@ -96,10 +99,12 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   another example. Table with virtualization is DONE (built on
   `onViewport`), and undo/redo in the text controls is DONE (#84:
   coalescing runs, snapshot history, `undo()`/`redo()`/`canUndo`/`canRedo`
-  on the node). Still missing, roughly in order: a **right-click menu for
-  the text controls** (issue #88 — and right-click currently collapses the
-  selection, which is a bug on its own), a generic Popover, and a file
-  open/save dialog
+  on the node). The **right-click menu for the text controls** is DONE too
+  (#90, issue #88): `src/editmenu.js` builds it from the node's own
+  capabilities, and the selection-collapse half of that issue went with it —
+  a right-click inside a selection keeps it, only one outside moves the
+  caret (`_defaultMouseDown`), which is what GTK and Qt do. Still missing:
+  a generic Popover, and a file open/save dialog
 - **Horizontal scrolling — DONE.** `<scrollview>` scrolls on both axes:
   `scrollX`/`contentWidth`, a second draggable bar, `scrollTo({x, y})`,
   horizontal wheel and Shift+wheel, and `scrollIntoView` on both axes. The
@@ -151,8 +156,9 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   **issue #85**, and it costs more than it looks: index 0/1 is group 1, so
   a non-Latin layout can never be typed. Linux carries the active group in
   bits 13–14 of the event state; XQuartz has no groups at all and rewrites
-  the keymap instead, so both mechanisms are needed. No `onContextMenu`
-  either (#88)
+  the keymap instead, so both mechanisms are needed. `onContextMenu` is
+  done (#90) — dispatched from button 3, `preventDefault()` suppresses the
+  built-in edit menu
 
 ### 3a. Styling — DONE
 
@@ -173,9 +179,13 @@ already required. See [docs/styling.md](docs/styling.md).
 
 ### 4. Ecosystem / DX
 
-- npm publish — DONE, `react-x11` is on npm (1.2.0 latest) and CHANGELOG is
-  automated; release-please keeps a release PR open for the next version.
-  Still open: running the examples via `npx`?
+- npm publish — DONE, `react-x11` is on npm and CHANGELOG is automated;
+  release-please keeps a release PR open for the next version. Note that
+  **1.2.0 is still the published version** while the open release PR is
+  **2.0.0** — it carries the breaking change from #68 (style is the only
+  style channel), so everything since, the documentation site included, is
+  unreleased. Still open: running the examples via `npx`? (there is no `bin`
+  field yet)
 - README screenshots are now committed under `docs/img/` and regenerated
   by script (see AGENTS.md Pull requests section for the rule: PR-only
   images go to GitHub attachments, committed images only when globally
@@ -444,11 +454,11 @@ Wayland.
 
 File these as ntk issues; react-x11 should not work around them long-term.
 
-1. **Bug: `createWindow` drops window attributes.** `CreateWindow` hardcodes
-   `{bitGravity, eventMask}`; `overrideRedirect`, `cursor`, `backgroundPixel`,
-   `saveUnder`, input-only class are all silently ignored (`lib/window.js`).
-   react-x11 passes `overrideRedirect: true` today and it does nothing.
-   Blocking `<popup>`.
+1. **Bug: `createWindow` drops window attributes** — DONE (sidorares/ntk#56).
+   `CreateWindow` used to hardcode `{bitGravity, eventMask}` and silently
+   ignore `overrideRedirect`, `cursor`, `backgroundPixel`, `saveUnder` and
+   the input-only class; `lib/window.js` now passes the full attribute set
+   through, which is what unblocked `<popup>`.
 2. **UTF-8 window titles + EWMH** — DONE. `_NET_WM_NAME` shipped in ntk
    3.3.0; `WM_NORMAL_HINTS`, `WM_CLASS`, `_NET_WM_WINDOW_TYPE` and
    always-on-top in **ntk 3.5.0** (sidorares/ntk#77), surfaced here as
@@ -457,38 +467,40 @@ File these as ntk issues; react-x11 should not work around them long-term.
    _additive_, not a replacement for override-redirect: the spec asks for it
    on override-redirect windows so compositors can style menus consistently,
    while override-redirect is still what stops the WM repositioning them.
-   Still missing upstream: `_NET_WM_ICON`, `_NET_WM_STATE` (fullscreen /
-   maximize / minimize), `_NET_WM_PID`.
+   Still missing upstream: `_NET_WM_ICON` and `_NET_WM_PID` (neither appears
+   in ntk's `lib/`), and `_NET_WM_STATE` beyond always-on-top — ntk sets
+   `_NET_WM_STATE_ABOVE` but exposes no fullscreen / maximize / minimize.
 3. **Re-export the Yoga instance** so renderer and HtmlView share one WASM
-   module and version.
+   module and version — DONE (sidorares/ntk#58), `import { Yoga } from 'ntk'`.
 4. **Rect-level presentation.** `_presentNow` blits the full window; accept
    dirty rects from the renderer and `CopyArea` only those. Coarse full-window
    blit is fine at first but wasteful for caret blink / hover highlights.
-5. **Clipboard/selection helper.** Raw `selection_request`/`selection_clear`
-   events exist; ntk should own CLIPBOARD/PRIMARY acquisition, TARGETS
-   negotiation, and string transfer. Prerequisite for `<textinput>`.
-6. **Cursor support** (cursor font or Xcursor) — pointer feedback for
-   buttons/inputs/resize handles.
+5. **Clipboard/selection helper** — DONE (sidorares/ntk#69). ntk owns
+   CLIPBOARD/PRIMARY acquisition, TARGETS negotiation and string transfer,
+   including INCR for large payloads; this is what `<textinput>` cut/paste
+   runs on.
+6. **Cursor support** — DONE (sidorares/ntk#68), surfaced here as the
+   `cursor` style property.
 7. **2D context gaps that widget painting will hit:** `setLineDash` (focus
-   rings), round line caps/joins (currently degraded to square/bevel),
-   `strokeText` or outline-text helper; document that `clearRect` fills
-   opaque white. ARGB/depth-32 window visuals for translucent popups
-   (`createPixmap` already hardcodes depth 32 with a TODO — windows don't).
-8. **Publish ntk 3.x to npm** (currently consumed from git) and include the
-   `onInvalidate` MarkdownView API already present in the source repo.
+   rings) and round line caps/joins are DONE (sidorares/ntk#70). Still open:
+   `strokeText` or an outline-text helper (nothing in ntk's `lib/`), a note
+   that `clearRect` fills opaque white, and ARGB/depth-32 window visuals for
+   translucent popups (`createPixmap` hardcodes depth 32 — windows don't).
+8. **Publish ntk 3.x to npm** — DONE, ntk is on npm (3.9.0 latest) with
+   release-please, and the `onInvalidate` API shipped in 3.4.0.
 9. (Nice-to-have) `queryPointer` promise variants and any other cb-only APIs
    used by examples.
-10. **Focus events and `SetInputFocus`.** `lib/events_map.js` has no entry
-    for X `FocusIn`/`FocusOut` (events 9/10) and no `FocusChange` mask, so a
-    client cannot tell when its window gains or loses keyboard focus, and
-    ntk exposes no wrapper for `SetInputFocus` even though node-x11 has the
-    request. Both are prerequisites for §11.2 here.
+10. **Focus events and `SetInputFocus`** — DONE (sidorares/ntk#89).
+    `FocusIn`/`FocusOut` and the `FocusChange` mask are mapped, and
+    `window.focus(revertTo)` wraps `SetInputFocus`. This is what §11.2 was
+    waiting on.
 
 ## 9. Phased plan
 
-**Phase 0 — unblock (small PRs):**
-ntk items 1–3 and 8; `createRoot` API here; `commitUpdate` via
-`wnd.setState`.
+**Phase 0 — unblock (small PRs):** DONE. ntk items 1–3 and 8 have all
+shipped, along with 5, 6 and 10; `createRoot` and `commitUpdate` via
+`wnd.setState` are in. What is left of §8 is items 4, 7 and 9, plus the
+EWMH remainder in item 2 — none of it blocking.
 
 **Phase 1 — the drawn layer:**
 retained node tree + yoga per node; `<box>`, `<text>`, `<image>`;
@@ -688,7 +700,9 @@ protocol at all.
   third mapping, onto AT-SPI roles and states.
 - **Dependency on §11.2**: AT-SPI's focus notion is what a screen reader
   follows, so `focus:` / `state-changed:focused` events can only be emitted
-  once window-level focus is tracked properly. Do the focus work first.
+  once window-level focus is tracked properly. That prerequisite is now
+  met — §11.2 is done, on ntk's focus events (sidorares/ntk#89) — so this
+  is unblocked rather than waiting.
 - Size: a live D-Bus service (tree + `Component` geometry from `node.abs`,
   `Text` from the text nodes, state changes on prop updates) is a sizeable
   project on its own — a `@react-x11/a11y` sibling package is probably the
