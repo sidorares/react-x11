@@ -513,7 +513,12 @@ export function paintPropsChanged(props, oldProps = {}) {
   for (const key of PAINT_PROPS) {
     if (props[key] !== oldProps[key]) return true;
   }
-  return props.color !== oldProps.color;
+  // `color` and `borderStyle` paint but are deliberately not in PAINT_PROPS:
+  // that set also decides what a state block is allowed to set, and widening
+  // it would change validation rather than just this comparison
+  return (
+    props.color !== oldProps.color || props.borderStyle !== oldProps.borderStyle
+  );
 }
 
 /** Resolved text style (TextLayout base style) from props + inherited. */

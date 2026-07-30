@@ -338,3 +338,178 @@ test('a layout change is never painted partially', async () => {
     await app.close();
   }
 });
+
+// --- React-driven updates --------------------------------------------------
+//
+// The cases above drive the renderer's own paint-only entry points. These go
+// through React instead, which is harder: a commit calls applyProps on every
+// node it walked, and React rebuilds sibling style objects on every render.
+// Damage stays bounded only because a node whose drawing did not actually
+// change contributes none.
+
+/** Mount `body(state)` under a component and return a state setter. */
+async function mountStateful(app, body) {
+  const ref = React.createRef();
+  let setState;
+  function App() {
+    const [state, set] = React.useState(0);
+    setState = set;
+    return React.createElement(
+      'window',
+      { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+      React.createElement(
+        'box',
+        { ref, style: { flexGrow: 1, padding: 6, gap: 3 } },
+        body(state),
+      ),
+    );
+  }
+  await new Promise((resolve) =>
+    ReactX11.render(React.createElement(App), resolve, app),
+  );
+  await new Promise((r) => setImmediate(r));
+  return { root: ref.current.root, setState: (v) => setState(v) };
+}
+
+test('a React update bounds the repaint to the row that changed', async () => {
+  const app = await headlessApp();
+  try {
+    // styles built inline every render, the way an app really writes them:
+    // all eight rows get a fresh style object, only one differs in value
+    const { root, setState } = await mountStateful(app, (state) =>
+      Array.from({ length: 8 }, (_, i) =>
+        React.createElement(
+          'box',
+          {
+            key: i,
+            style: {
+              height: ROW_H,
+              backgroundColor:
+                i === 4 && state ? '#ffd479' : i % 2 ? '#ffffff' : '#e6e9ef',
+            },
+          },
+          React.createElement('text', { style: { fontSize: 10 } }, `row ${i}`),
+        ),
+      ),
+    );
+
+    const ctx = (root._ctx ??= root.window.getContext('2d'));
+    const settle = () =>
+      new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+
+    setState(1);
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setImmediate(r));
+      await settle();
+    }
+    root.flush();
+    await settle();
+    const damage = root._lastDamage;
+    const partial = await readPixels(ctx, W, H);
+
+    root.needsPaint = true;
+    root._damage = null;
+    root.flush();
+    await settle();
+    const full = await readPixels(ctx, W, H);
+    const diff = differences(partial, full);
+
+    assert.ok(damage, 'the commit did not widen the region to everything');
+    assert.ok(
+      damage.height <= ROW_H + 4,
+      `one row expected, got ${damage.width}x${damage.height} — the seven ` +
+        'rows whose style objects were rebuilt unchanged must contribute none',
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a non-style prop the node paints from still damages it', async () => {
+  const app = await headlessApp();
+  try {
+    // Two things change in ONE commit: a row's colour, which bounds the
+    // damage to a thin strip, and the field's `placeholder`, which is a prop
+    // painted whenever the value is empty. TextInputNode's own applyProps
+    // does not invalidate for `placeholder` — it only reacts to text metrics
+    // and to `value` — so the base class has to notice the changed prop.
+    //
+    // Both halves are load-bearing. Changing the placeholder alone proves
+    // nothing: with no node claiming damage the frame falls back to a full
+    // repaint, which is correct by construction and hides the bug. It is
+    // only when something *else* bounds the region that a node failing to
+    // claim its own is left with stale pixels. <canvas> would not test this
+    // either — CanvasNode invalidates unconditionally on any update.
+    const fieldRef = React.createRef();
+    let setState;
+    function App() {
+      const [state, set] = React.useState(0);
+      setState = set;
+      return React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+        React.createElement(
+          'box',
+          { style: { flexGrow: 1, padding: 6, gap: 3 } },
+          [
+            React.createElement('box', {
+              key: 'row',
+              style: {
+                height: ROW_H,
+                backgroundColor: state ? '#ffd479' : '#e6e9ef',
+              },
+            }),
+            React.createElement('textinput', {
+              key: 'field',
+              ref: fieldRef,
+              value: '',
+              placeholder: state ? 'changed placeholder' : 'first',
+              style: { height: 22, backgroundColor: '#ffffff' },
+            }),
+          ],
+        ),
+      );
+    }
+    await new Promise((resolve) =>
+      ReactX11.render(React.createElement(App), resolve, app),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    const root = fieldRef.current.root;
+    const ctx = (root._ctx ??= root.window.getContext('2d'));
+    const settle = () =>
+      new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+
+    setState(1);
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setImmediate(r));
+      await settle();
+    }
+    root.flush();
+    await settle();
+    const damage = root._lastDamage;
+    const partial = await readPixels(ctx, W, H);
+
+    root.needsPaint = true;
+    root._damage = null;
+    root.flush();
+    await settle();
+    const full = await readPixels(ctx, W, H);
+    const diff = differences(partial, full);
+
+    // the premise: the frame really was bounded, so a node that failed to
+    // claim damage would have been culled
+    assert.ok(
+      damage,
+      'the frame must be bounded for this test to mean anything',
+    );
+    assert.equal(
+      diff,
+      0,
+      `the field kept its old placeholder: ${diff} pixels differ from a full repaint`,
+    );
+  } finally {
+    await app.close();
+  }
+});
