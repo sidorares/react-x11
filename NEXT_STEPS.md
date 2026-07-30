@@ -138,8 +138,24 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   and react-x11 repaints the whole window per frame (§8.4 below).
 - **`opacity`** — needs offscreen composition (pixmap + Composite);
   ntk can do it, renderer needs a group-opacity paint path
-- **Dirty-rect painting** — still full-window repaint per frame
-  (NEXT_STEPS §8.4 below); fine so far, measure before optimizing
+- **Dirty-rect painting** — done for the paint-only paths. A node that
+  changes appearance without moving records its region, and the frame then
+  clips to it, refills only that much background, and skips emitting drawing
+  for any subtree that does not reach into it. Hovering one row of forty:
+  4500 -> 644 bytes out, 41 -> 4 composites, 0.283 -> 0.015 Mpx. Layout
+  changes still repaint in full, and deliberately: a node that moved leaves
+  stale pixels at a rect the new one does not cover. `test/dirty-rect.test.js`
+  pins the invariant by painting each case twice — bounded, then full — and
+  comparing the readbacks.
+
+  Still full-window: **arbitrary React updates**. `applyProps` names the node
+  it changed, but React rebuilds sibling style objects on every render, so a
+  commit typically updates every node it touched and the union covers the
+  container. Narrowing that means asking each node whether its _own_ paint
+  actually changed, which `paintPropsChanged` answers for boxes but not for
+  the content of `<text>`/`<image>`/`<canvas>` — those repaint through their
+  own paths. Worth doing next; it is the case the bench measures.
+
 - **Stacking of real windows** — DONE for child `<window>`s: JSX order
   (and `zIndex`) is the stacking order, applied with ConfigureWindow
   `sibling`+`stackMode` once per commit. The same fix made `insertBefore`

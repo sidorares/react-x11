@@ -358,10 +358,29 @@ the diff records the cost.
   `scripts/screenshots.jsx` names Arial / Liberation / DejaVu explicitly
   instead of asking for `sans-serif`. Nothing in the source works around it
   yet — issue #86.
-- Painting is a full-window repaint scheduled through
-  `window.requestAnimationFrame` (ntk frame clock: coalescing + server
-  fence). Presentation/damage is ntk's job; dirty-rect painting is a future
-  optimization (NEXT_STEPS §8.4).
+- Painting is scheduled through `window.requestAnimationFrame` (ntk frame
+  clock: coalescing + server fence) and is **bounded by damage** when the
+  invalidation can name a region. `root.invalidate(layoutChanged, node)`
+  takes the node whose appearance changed; the frame clips to its
+  `paintBounds()`, refills only that much background, and `_outsideDamage()`
+  skips any subtree that does not reach into it — that cull is where the
+  protocol saving comes from, since the clip alone would still put every
+  request on the wire. Three rules, and breaking any of them shows up as a
+  pixel diff in `test/dirty-rect.test.js`:
+  - **a layout change is never bounded** (`invalidate(true, ...)` ignores the
+    node): a node that moved leaves stale pixels at a rect the new one does
+    not cover;
+  - **passing no node means the whole window.** Partial painting is opt-in
+    per call site, so forgetting costs speed, not correctness. `NO_DAMAGE` is
+    the third state — "I need a frame but changed nothing myself" — which is
+    what `WindowNode.applyProps` passes when only its children changed;
+  - **cull on `_subtreeBounds()`, never `abs`.** A child of a non-clipping
+    parent can be drawn outside it, so a parent whose own rect misses the
+    damage may still own a node inside it.
+
+  Presentation is still ntk's job and still a full-window `CopyArea` — that
+  costs server-side blit time, not wire traffic (NEXT_STEPS §8 item 4).
+
 - **No X11 side effects in the render phase.** Window nodes are handles
   until `realize(parentWindow)` runs in the commit phase
   (`appendChildToContainer` for top-levels, parent `realize` recursion or
