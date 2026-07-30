@@ -100,11 +100,15 @@ this layer does:
   glyph pages — is cached instead of asked for again.
 
 The consequence is that an update's cost tracks the _drawing it implies_,
-not the window's area. Repaints today are whole-window, coalesced onto ntk's
-frame clock (dirty-rect painting is on the roadmap), but a whole-window
-repaint of a real UI is a few dozen batched operations, not a framebuffer —
-which is why a react-x11 program stays comfortable on a display forwarded
-over ssh, where shipping frames would not be.
+not the window's area. Repaints are coalesced onto ntk's frame clock and
+bounded to the region that changed — a short list of rectangles, so two
+changes at opposite corners of the window do not drag everything between them
+along — and any subtree that does not reach into that region is skipped
+before a single request goes out. A layout change is still a full repaint,
+because a node that moved leaves stale pixels where it used to be; even then a
+whole-window repaint of a real UI is a few dozen batched operations, not a
+framebuffer, which is why a react-x11 program stays comfortable on a display
+forwarded over ssh, where shipping frames would not be.
 
 Because that is the design, it is also measured rather than assumed:
 `npm run bench` reports requests, bytes, replies, RENDER composites and

@@ -12,12 +12,11 @@
 //                 narrowing has regressed.
 //   "one row"     a wide, short rect.
 //   "one column"  a narrow, tall rect.
-//   "scattered"   the *union* of the changed cells, which for cells at
-//                 opposite corners is legitimately the whole grid — that is
-//                 the union being coarse, not a bug. One rect per frame is
-//                 the model (`_damage` is a single rect); a region list is a
-//                 possible future change and this is the case that would
-//                 justify it.
+//   "scattered"   four rects, one per corner cell — not the box around them,
+//                 which would be the whole grid. This mode is what justified
+//                 making `_damage` a list of rects rather than one box; the
+//                 frame log prints each rect and how much bigger a single box
+//                 would have been.
 //   "every cell"  FULL WINDOW, and it should be, which is what makes the
 //                 other rows meaningful.
 //
@@ -74,8 +73,8 @@ function hotCells(mode, n, rows, cols) {
   else if (mode === 'column')
     for (let i = 0; i < rows; i++) hot.add(`${i}:${c}`);
   else if (mode === 'scattered') {
-    // four cells spread to the corners, so the union is close to the grid —
-    // the case that makes a single damage rect look bad, honestly
+    // four cells spread to the corners, so the box around them is the whole
+    // grid and only a list of rects can bound this frame usefully
     hot.add(`0:0`);
     hot.add(`${rows - 1}:${cols - 1}`);
     hot.add(`0:${cols - 1}`);

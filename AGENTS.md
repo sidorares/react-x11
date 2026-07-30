@@ -387,8 +387,26 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     means adding it to `paintPropsChanged`, which is why `borderStyle` is
     named there explicitly alongside `color`.
 
-  Presentation is still ntk's job and still a full-window `CopyArea` — that
-  costs server-side blit time, not wire traffic (NEXT_STEPS §8 item 4).
+  Damage is a **list of rects, capped at four**, not the box around them, so
+  two changes at opposite corners no longer repaint everything between them.
+  The frame paints a pass per rect and clips each pass to that one rect —
+  deliberately, because ntk's server-side clip fast path only recognises a
+  single rectangle and a multi-rect clip path falls back to rasterizing a
+  full-surface mask. Rects that overlap are merged rather than kept, since a
+  node inside two of them would otherwise be painted twice, which is wrong for
+  anything translucent. And a list whose rects nearly fill their box collapses
+  back to the box, because a pass is not free: `SPLIT_SAVING` is the threshold.
+
+  Presentation is ntk's job, and the two halves have to match to be worth
+  anything: **ntk >= 3.10.2** copies just the rects the drawing reported, where
+  earlier versions blit the whole window however little changed. That is the
+  floor in `package.json` for this reason, not for an API — against 3.10.1 the
+  region list still computes and paints correctly, it just does not reach the
+  screen any faster (NEXT_STEPS §8 item 4). The reporting channel is the clip:
+  ntk takes each operation's clip rectangle as the region it might have touched,
+  so a pass that is not clipped reports nothing and gives up the bound for the
+  whole frame — which is why the frame clips per rect even though culling
+  already skips the work.
 
   A scroll is the one layout change that carries a damage bound:
   `invalidate(true, node)` asserts the reflow is confined to that node's
@@ -404,9 +422,8 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   allocated a full-surface a8 pixmap, rasterized into it and composited the
   whole surface — per clip, and a frame nests them constantly. 3412 of 3900
   Composite requests over twenty wheel notches came from there. Fixed upstream
-  in sidorares/ntk#107, shipped in **ntk 3.10.1**, which is the floor this
-  package now depends on. Per wheel notch on the 50,000-row table, same
-  harness, only the ntk clip code differing:
+  in sidorares/ntk#107, shipped in **ntk 3.10.1**. Per wheel notch on the
+  50,000-row table, same harness, only the ntk clip code differing:
 
   |                 | 3.10.0 | 3.10.1 |
   | --------------- | ------ | ------ |
