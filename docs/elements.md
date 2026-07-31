@@ -88,6 +88,10 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `onResize(ev)`              | ConfigureNotify — the tree reflows automatically                     |
 | `onExpose(ev)`              | after a repaint was required                                         |
 | `onCloseRequest(ev)`        | WM close button (opts into `WM_DELETE_WINDOW`)                       |
+| `states`                    | EWMH `_NET_WM_STATE` — controlled, see below                         |
+| `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                |
+| `decorations`               | `false` asks the WM for no titlebar or border                        |
+| `onStatesChange(states)`    | what the window manager actually did                                 |
 | `theme`                     | palette that `$token` style values resolve against, for this subtree |
 
 Windows may be nested inside other windows (real X11 child windows).
@@ -126,7 +130,7 @@ are free, so no `sizeHints` object is needed.
 | size hints    | `minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `widthInc`, `heightInc`, `baseWidth`, `baseHeight`, `minAspect`, `maxAspect`, `gravity` |
 | `wmClass`     | `'instance'`, `['instance', 'Class']` or `{instance, class}`                                                                              |
 | `windowType`  | `'dialog'`, `'utility'`, `'tooltip'`… or an array of fallbacks                                                                            |
-| `alwaysOnTop` | keep above normal windows                                                                                                                 |
+| `decorations` | `false` asks for no titlebar or border                                                                                                    |
 
 ```jsx
 <window width={400} height={300} resizable={false} windowType="dialog" />
@@ -137,8 +141,61 @@ On a `<window>` these names are the window's, not yoga's: `width`/`height`
 are the real geometry the user can drag, and `minWidth`/`maxHeight` are what
 the WM enforces. A window's _contents_ are laid out by its `style`.
 
-`alwaysOnTop` uses EWMH `_NET_WM_STATE_ABOVE`, falling back to Apple-WM
-window levels on XQuartz, where quartz-wm does not support that state.
+`decorations={false}` writes `_MOTIF_WM_HINTS` — honoured by Mutter, KWin,
+Xfwm, Openbox and i3. A window manager that ignores it simply decorates the
+window; there is no way to force the matter.
+
+### Window state
+
+`states` is EWMH `_NET_WM_STATE`: `modal`, `sticky`, `maximized` (or
+`maximized_vert`/`maximized_horz` individually), `shaded`, `skip_taskbar`,
+`skip_pager`, `hidden`, `fullscreen`, `above`, `below`, `demands_attention`,
+`focused`. `fullscreen` and `alwaysOnTop` are boolean sugar for the two
+everyone reaches for — `fullscreen` and `above` — and they union with
+`states` rather than competing with it.
+
+```jsx
+<window
+  states={['skip_taskbar']}
+  fullscreen={isFullscreen}
+  onStatesChange={(states) => setFullscreen(states.includes('fullscreen'))}
+/>
+```
+
+**These are controlled props, and the reason is not React convention.** On X
+the window manager changes state behind the app's back constantly: the user
+hits maximize, a global hotkey leaves fullscreen, a tiling WM has its own
+opinion. react-x11 therefore diffs `states` against the _previous props_,
+never against what the window currently has — so a prop is re-sent only when
+the app changes its mind, and a WM that disagreed is not fought on the next
+commit. `onStatesChange` is the other half: it reports what the WM actually
+did, and subscribing to it is what makes react-x11 watch the property, so a
+window without a handler costs nothing.
+
+States are applied **before the window is mapped**, which is what EWMH 7.7
+requires and the only way to open already fullscreen instead of flashing at
+the normal size first.
+
+`alwaysOnTop` falls back to Apple-WM window levels on XQuartz, where
+quartz-wm does not support `_NET_WM_STATE_ABOVE`.
+
+### Kiosk
+
+There is no `kiosk` prop, because it is not one thing — it is a window with
+no decoration, no taskbar entry, nothing above it, and no pointer:
+
+```jsx
+<window
+  fullscreen
+  decorations={false}
+  states={['above', 'skip_taskbar', 'skip_pager']}
+  style={{ cursor: 'none', flexGrow: 1 }}
+/>
+```
+
+`cursor: 'none'` hides the pointer outright (ntk ≥ 4.2.0). It is not the
+same as leaving `cursor` unset, which inherits whatever the root window's
+cursor is — see [styling.md](styling.md).
 
 ## `<popup>`
 

@@ -101,13 +101,60 @@ export interface WindowProps
   wmClass?: string | [string, string] | { instance: string; class?: string };
   /** EWMH `_NET_WM_WINDOW_TYPE`, or a list of fallbacks. */
   windowType?: WindowType | WindowType[];
+  /**
+   * EWMH `_NET_WM_STATE`. **Controlled**: this is what the window is asked
+   * to be, and {@link WindowProps.onStatesChange} is what it actually is —
+   * on X the window manager changes state behind the app's back, so the two
+   * diverge and react-x11 does not force reality back to the prop.
+   *
+   * Applied before the window is mapped, which is the only way to open
+   * already fullscreen rather than flashing at the normal size first.
+   */
+  states?: WindowState[];
+  /** Sugar for `states={['fullscreen']}`; they union. */
+  fullscreen?: boolean;
+  /** Sugar for `states={['above']}`; they union. */
   alwaysOnTop?: boolean;
+  /**
+   * `false` asks for no titlebar or border, via `_MOTIF_WM_HINTS`. Honoured
+   * by Mutter, KWin, Xfwm, Openbox and i3; a WM that ignores the hint
+   * simply decorates the window.
+   */
+  decorations?: boolean;
   /** ConfigureNotify — the tree reflows on its own. */
   onResize?: (ev: SyntheticEvent<NtkWindow>) => void;
   onExpose?: (ev: SyntheticEvent<NtkWindow>) => void;
+  /**
+   * The states the window manager now has on the window. Subscribing is
+   * what makes react-x11 watch `_NET_WM_STATE`, so a window with no handler
+   * costs nothing.
+   */
+  onStatesChange?: (states: WindowState[]) => void;
   /** The WM close button; opts the window into `WM_DELETE_WINDOW`. */
   onCloseRequest?: (ev: SyntheticEvent<NtkWindow>) => void;
 }
+
+/**
+ * `_NET_WM_STATE` names, lower-cased without the atom prefix. `'maximized'`
+ * is the one that is not an atom: EWMH maximizes an axis at a time, and it
+ * expands to the vert/horz pair.
+ */
+export type WindowState =
+  | 'modal'
+  | 'sticky'
+  | 'maximized'
+  | 'maximized_vert'
+  | 'maximized_horz'
+  | 'shaded'
+  | 'skip_taskbar'
+  | 'skip_pager'
+  | 'hidden'
+  | 'fullscreen'
+  | 'above'
+  | 'below'
+  | 'demands_attention'
+  | 'focused'
+  | (string & {});
 
 export interface PopupProps extends WindowProps {
   /**

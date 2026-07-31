@@ -723,19 +723,26 @@ test('window manager hints pass through at creation and on update', () => {
     ['setSizeHints', { minWidth: 300, maxWidth: 900, resizable: false }],
   ]);
 
-  // alwaysOnTop toggles both ways
+  // alwaysOnTop toggles both ways. It is sugar for the 'above' state now,
+  // so it goes out through the same _NET_WM_STATE path as everything else
   wnd.calls.length = 0;
   render({ alwaysOnTop: true });
   assert.ok(
-    wnd.calls.some(([name, on]) => name === 'setAlwaysOnTop' && on === true),
-    'setAlwaysOnTop(true) on enable',
+    wnd.calls.some(
+      ([name, s, action]) =>
+        name === 'setWmState' && s === 'above' && action === 'add',
+    ),
+    "alwaysOnTop adds 'above'",
   );
 
   wnd.calls.length = 0;
   render({ alwaysOnTop: false });
   assert.ok(
-    wnd.calls.some(([name, on]) => name === 'setAlwaysOnTop' && on === false),
-    'setAlwaysOnTop(false) on disable',
+    wnd.calls.some(
+      ([name, s, action]) =>
+        name === 'setWmState' && s === 'above' && action === 'remove',
+    ),
+    "dropping alwaysOnTop removes 'above'",
   );
 
   ReactX11.unmountComponentAtNode(app);
@@ -4452,4 +4459,167 @@ test('injectIntoDevTools registers the renderer metadata from the host config', 
     undefined,
     'extraDevToolsConfig is null, so no rendererConfig is advertised',
   );
+});
+
+// --- window states (#122) ---------------------------------------------------
+
+const stateCalls = (wnd) =>
+  wnd.calls.filter(([name]) => name === 'setWmState').map(([, s, a]) => [s, a]);
+
+test('window states are declared before the map, so a window can open fullscreen', async () => {
+  // EWMH 7.7: an unmapped window *declares* its state by writing the
+  // property; a mapped one has to *ask* the WM. Only the first can open
+  // already fullscreen instead of flashing at the normal size first.
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement('window', { width: 100, height: 80, fullscreen: true }),
+    null,
+    app,
+  );
+  await tick();
+
+  const wnd = app.windows[0];
+  const names = wnd.calls.map(([name]) => name);
+  assert.ok(names.includes('setWmState'), 'the state was asked for');
+  assert.ok(
+    names.indexOf('setWmState') < names.indexOf('map'),
+    'and asked for before the map, which is what makes it the initial state',
+  );
+  assert.deepStrictEqual(stateCalls(wnd), [['fullscreen', 'add']]);
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('states, fullscreen and alwaysOnTop union rather than compete', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement('window', {
+      width: 100,
+      height: 80,
+      states: ['skip_taskbar', 'skip_pager'],
+      fullscreen: true,
+      alwaysOnTop: true,
+    }),
+    null,
+    app,
+  );
+  await tick();
+
+  assert.deepStrictEqual(
+    stateCalls(app.windows[0])
+      .map(([s]) => s)
+      .sort(),
+    ['above', 'fullscreen', 'skip_pager', 'skip_taskbar'],
+    'the booleans are sugar over the same set, not a second channel',
+  );
+  // one message per name: EWMH carries two states per ClientMessage and
+  // 'maximized' already uses both slots, so splitting by name is the only
+  // chunking that cannot land a pair across a boundary
+  for (const [name] of stateCalls(app.windows[0])) {
+    assert.strictEqual(typeof name, 'string', 'one state per message');
+  }
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a state change sends only the difference, and only when props change', async () => {
+  const app = createMockApp();
+  const render = (states) =>
+    ReactX11.render(
+      React.createElement('window', { width: 100, height: 80, states }),
+      null,
+      app,
+    );
+  render(['fullscreen', 'skip_taskbar']);
+  await tick();
+  const wnd = app.windows[0];
+
+  // a re-render with an equal-but-fresh array must not re-send anything:
+  // re-asserting every commit is exactly how a controlled prop would fight
+  // a window manager that changed the state behind our back
+  wnd.calls.length = 0;
+  render(['fullscreen', 'skip_taskbar']);
+  await tick();
+  assert.deepStrictEqual(
+    stateCalls(wnd),
+    [],
+    'unchanged states are not re-sent',
+  );
+
+  wnd.calls.length = 0;
+  render(['fullscreen', 'above']);
+  await tick();
+  assert.deepStrictEqual(
+    stateCalls(wnd).sort(),
+    [
+      ['above', 'add'],
+      ['skip_taskbar', 'remove'],
+    ],
+    'only the difference, in both directions',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('onStatesChange reports what the window manager actually did', async () => {
+  const app = createMockApp();
+  const seen = [];
+  ReactX11.render(
+    React.createElement('window', {
+      width: 100,
+      height: 80,
+      fullscreen: true,
+      onStatesChange: (states) => seen.push(states),
+    }),
+    null,
+    app,
+  );
+  await tick();
+
+  // the user hit the WM's un-fullscreen hotkey: reality diverges from the
+  // prop, and the app hears about it rather than react-x11 forcing it back
+  app.windows[0].emit('statechange', ['above']);
+  await tick();
+  assert.deepStrictEqual(seen, [['above']]);
+
+  // and react-x11 does not re-assert 'fullscreen' in response
+  const wnd = app.windows[0];
+  wnd.calls.length = 0;
+  await tick();
+  assert.deepStrictEqual(stateCalls(wnd), [], 'the WM is not fought');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('decorations={false} writes _MOTIF_WM_HINTS with its own type atom', async () => {
+  const app = createMockApp();
+  const render = (decorations) =>
+    ReactX11.render(
+      React.createElement('window', { width: 100, height: 80, decorations }),
+      null,
+      app,
+    );
+  render(false);
+  await tick();
+
+  const wnd = app.windows[0];
+  const motif = wnd.calls.find(([name]) => name === 'setProperty');
+  assert.ok(motif, 'the hint was written');
+  assert.deepStrictEqual(motif[1], '_MOTIF_WM_HINTS');
+  assert.deepStrictEqual(motif[2], [2, 0, 0, 0, 0], 'flags=2, decorations=0');
+  assert.strictEqual(
+    motif[3].type,
+    '_MOTIF_WM_HINTS',
+    'the type atom is the property itself, not CARDINAL — a WM that checks ' +
+      'the type ignores the hint otherwise',
+  );
+  assert.strictEqual(motif[3].format, 32);
+
+  wnd.calls.length = 0;
+  render(true);
+  await tick();
+  const back = wnd.calls.find(([name]) => name === 'setProperty');
+  assert.deepStrictEqual(back[2], [2, 0, 1, 0, 0], 'decorations back on');
+
+  ReactX11.unmountComponentAtNode(app);
 });
