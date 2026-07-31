@@ -25,14 +25,27 @@
 > 2. **§11 accessibility (AT-SPI)** is next and now unblocked: it depended on
 >    window-level focus, which shipped. §11.3 scopes it out; a
 >    `@react-x11/a11y` sibling package is the likely shape.
-> 3. The two open issues, both real and both mine to fix: **#86**
+> 3. The two oldest open issues, both real and both mine to fix: **#86**
 >    (`sans-serif` resolves to a CJK font on macOS) and **#85** (keyboard
 >    layout switching ignored — needs the Linux group bits _and_ XQuartz's
->    keymap rewrite).
+>    keymap rewrite; §15 has the wider version of that problem). The rest of
+>    the backlog is now filed too — #113–#130 here, and the upstream half as
+>    sidorares/ntk#115–#126, sidorares/node-x11#243–#247 and
+>    sidorares/dbus-native#389–#392.
 > 4. Upstream (ntk): distribute half-leading inside TextLayout itself
 >    (makes the #29 paint shift a no-op) + an opt-in cap-height trim
 >    (`text-box-trim` analog); `maxLines`/ellipsis for `<text>` (neither
 >    exists in `src/` yet).
+> 5. **Write the pages that do not exist** (#128): remote display — the
+>    case the architecture is actually for, and the only one with no page
+>    at all — security (X11 has no client isolation, and the `-X`/`-Y`
+>    decision), and packaging (§13). The ecosystem half of that list is
+>    answered: [docs/ecosystem.md](docs/ecosystem.md) and a page per
+>    category beside it say which npm libraries work here, which need an
+>    adapter and which cannot. None of the three left is engineering, all
+>    three are load-bearing, and the first two are an afternoon each.
+> 6. **Decide the §12 list before merging #69.** Every rename in it is one
+>    commit while 2.0.0 is unreleased and a deprecation cycle afterwards.
 
 ---
 
@@ -184,6 +197,34 @@ merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
   done (#90) — dispatched from button 3, `preventDefault()` suppresses the
   built-in edit menu
 
+  The "(ntk TODO)" parenthetical is doing too much work. Text entry today is
+  **one keysym per key event, committed straight into the field**:
+  `src/events.js:435` takes `keycode2keysyms[keycode][0]` and ntk's
+  `lib/window.js:340` picks `syms[capital ? 1 : 0]`, so levels 2–4 are
+  unreachable. Three consequences, in increasing order of severity:
+
+  - **AltGr is dead.** `@` on a German layout, `€` on most European ones,
+    `ł` on Polish, `ã` on US-International — none of them can be typed.
+    Same line as #85, and fixing it properly means resolving the group
+    _and_ the shift / lock / level3 / level5 modifiers, applying caps only
+    to alphabetic keysyms — the current rule applies it to everything, so
+    **Caps Lock turns `1` into `!`**.
+  - **No Compose and no dead keys.** `dead_acute` then `e` produces two
+    nothings rather than `é`. That is a trie over the system Compose table
+    plus `$XCOMPOSEFILE`/`~/.XCompose` when present — pure data, no
+    protocol.
+  - **No input method at all.** No preedit string, no candidate window, no
+    commit event. `<textinput>` has a caret, a selection, an undo stack and
+    a clipboard, and **nowhere for uncommitted composition text to live**.
+    CJK is not partially working; it is structurally absent.
+
+  Staged in §15; the level rule and the Compose engine are
+  sidorares/ntk#116. Stage 1 is entirely inside ntk and is worth more than
+  any widget polish left on this list — it is the difference between "works
+  for English" and "works". Stage 0, saying so in `README.md` and under
+  `<textinput>` in [docs/elements.md](docs/elements.md), costs nothing and
+  should not wait for stage 1.
+
 ### 3a. Styling — DONE
 
 Style moved out of the flat prop namespace into `style` (object or array,
@@ -215,6 +256,36 @@ already required. See [docs/styling.md](docs/styling.md).
   images go to GitHub attachments, committed images only when globally
   useful — README qualifies)
 - API docs live in `docs/` (elements/components/events/devtools)
+- **`docs/` is reference-only** (#128). Every page is either a feature tour
+  or an API listing: no tutorial, no troubleshooting page, no FAQ. That
+  works for a reader already sold. The one who has not decided yet gets
+  intro → getting-started → the reference pages → "read `examples/`", and
+  the errors they will actually hit have no page at all:
+  `Cannot open display` with no `$DISPLAY` (XQuartz needs a _fresh_
+  terminal after install, which nothing says);
+  `fontconfig matching needs node (fc-match CLI)` in a container;
+  `sans-serif` resolving to a CJK font on macOS (#86, a filed bug with no
+  troubleshooting entry); `SyntaxError: Unexpected token '<'` from a `.jsx`
+  under plain `node`; and
+  `react-x11: <box height=…> is a style property`, which is a deliberately
+  good error that deserves a page explaining the model. A
+  `docs/troubleshooting.md` keyed by the **exact error text**, so a search
+  engine lands on it, is the highest ratio of usefulness to effort in the
+  documentation. The library half of that gap is closed —
+  [docs/ecosystem.md](docs/ecosystem.md) plus a page per category beside it
+- **The site has an in-page X server and the docs do not use it.** Every
+  runnable snippet in `docs/` could carry an "open in playground" link with
+  its source; the bundle and the share/permalink machinery already exist
+  (`website/scripts/check-share.mjs`). "Click to run this in your browser,
+  against a real X server implementation" is a documentation experience
+  approximately no systems library has, and it is already built
+- **A `bin` field** (the open question above) plus `examples` in `files`,
+  so `npx react-x11 examples <name>` works. Scoped as the _demo_ runner,
+  not an app runner: the examples already export their `App` and honour
+  `REACT_X11_NO_AUTORUN`, so it is a switch statement. The app runner —
+  `react-x11 app.jsx` setting up the JSX loader — is worth it separately,
+  because it deletes the "JSX needs a loader, here are three options"
+  paragraph from the first-run experience
 - window-manager example (#3) — DONE, `examples/wm.jsx` + `examples/wm-core.js`
   on ntk 3.9.0 / node-x11 3.2.0, with `test/wm.test.js` driving it headlessly
 - react-native-dom-like packaging (#13) and mylittledom reuse (#10) are
@@ -542,6 +613,74 @@ File these as ntk issues; react-x11 should not work around them long-term.
     `FocusIn`/`FocusOut` and the `FocusChange` mask are mapped, and
     `window.focus(revertTo)` wraps `SetInputFocus`. This is what §11.2 was
     waiting on.
+11. **One PR for the property writers, not seven** (sidorares/ntk#118, with
+    the `_NET_WM_STATE` half as sidorares/ntk#117 and the react-x11 props
+    as #122). `setProperty(name, value, {type, format})` and `atom(name)`
+    already exist in `lib/window.js`, so most of the missing window
+    properties are three-line methods over machinery that is already there.
+    Batch them: `addProtocol` (read-modify-write — the current
+    `WM_PROTOCOLS` write **clobbers**, so every protocol added after the
+    first silently erases the one before it), `sendClientMessage`,
+    `setWmHints` (the `input`/`WM_TAKE_FOCUS` model — this is the "keyboard
+    sometimes doesn't work under a reparenting WM" bug), `setPid` +
+    `WM_CLIENT_MACHINE` + `_NET_WM_PING`, `setIcon` (`_NET_WM_ICON`),
+    `setState` for the thirteen `_NET_WM_STATE` atoms rather than only
+    `ABOVE`, `setMotifHints` for an undecorated window, `setTransientFor`
+    (sidorares/ntk#126, which is what #130 needs) and the
+    `USPosition`/`PPosition` hints. Each of these on its own is a
+    three-repo release chain — node-x11 → ntk → here — and batching is what
+    makes that survivable.
+
+    **Trap on all of them:** `setProperty` is `async` and its two
+    `InternAtom` awaits can reject while the connection is closing, while
+    `WindowNode._applyWindowHints` calls the hint setters synchronously and
+    drops the promises. Every new property setter inherits that
+    unhandled-rejection hazard until they are wrapped the way `setTitle`
+    wraps its deferred chain (the `safeRelease` + serial-guard pattern in
+    `lib/window.js`).
+
+    The two that unblock a whole persona each: `_NET_WM_STATE_FULLSCREEN`
+    plus `_MOTIF_WM_HINTS` with `decorations=0`, which is
+    `<window fullscreen undecorated>` and is the entire ask of anyone
+    shipping a kiosk or an appliance; and `_NET_WM_ICON`, which is a short
+    writer and is the difference between "a program" and "an app" in the
+    taskbar and the alt-tab list. `examples/wm-core.js` already _reads_
+    `_NET_WM_ICON`; nothing writes it.
+
+12. **Delete the `keysym` dependency** (sidorares/ntk#115). ntk uses
+    exactly one thing from it — `keysym.fromKeysym(sym).unicode` in
+    `lib/window.js` — and the package reads its JSON tables with
+    `fs.readFileSync(__dirname + …)` at module load, which is why nothing
+    importing ntk can be bundled or put in a Node SEA (§13). The rule it
+    implements is small: keysyms `0x01000000..0x0110FFFF` map to
+    `sym & 0xFFFFFF`, Latin-1 keysyms map to themselves, and the remainder
+    is a table. Inline it as `lib/text/keysym-unicode.js`, a plain object
+    literal, zero I/O. That unblocks bundling, SEA and the browser build at
+    once and drops a 2013 unmaintained transitive off the dependency
+    surface. The website has already written the replacement —
+    `website/scripts/browser-shims/keysym.js`, whose comment says exactly
+    this — so the knowledge exists and is trapped in the docs site.
+13. **The XKB level rule and a Compose engine** (sidorares/ntk#116, §15
+    stage 1). Replace `symInd = capital ? 1 : 0` with the real level
+    resolution, then a Compose/dead-key trie, and emit through a new event
+    that carries a **string** rather than a codepoint —
+    `wnd.on('textinput', ({ text, preedit, cursor }) => …)` — so the
+    renderer never has to know which backend produced it. node-x11 ships
+    `lib/ext/xkb.js` and nothing uses it.
+14. **Buffer the output stream** (sidorares/node-x11#244, §14). This one is
+    node-x11 rather than ntk: `xcore.js` does `pack_stream.put(packet)`
+    then `pack_stream.flush()` per request unconditionally, and
+    `framebuffer.js`'s `flush()` walks the queue writing each buffer with
+    no `writev` and no concatenation, so the 86 requests of the mount bench
+    scenario are 86 writes for 3652 bytes. Add an explicit flush policy —
+    accumulate, and force a flush when a reply-expecting request is queued
+    (`xcore.js` already knows which those are), when the buffer crosses
+    16 KB, when the loop is about to idle, or on an explicit `X.flush()` —
+    and concatenate the queue into one write. **The right high-level flush
+    point is ntk's `_present()`: one write per frame**, which is
+    sidorares/ntk#125. Then `setNoDelay(true)` on TCP connections, exposed
+    as `createClient({ tcpNoDelay })`, which is only safe once the
+    buffering lands.
 
 ## 9. Phased plan
 
@@ -593,7 +732,19 @@ menus/tooltips.
   stackMode) — matters once `<popup>` exists; drawn nodes get correct order
   from the render list for free.
 - Should the widget set (Phase 2/3) live in this package or a
-  `@react-x11/widgets` sibling once primitives stabilize?
+  `@react-x11/widgets` sibling once primitives stabilize? **Answered, and
+  worth writing down rather than leaving open: the widgets stay in core,
+  and the siblings that do get split out live in this repo as npm
+  workspaces.** The widgets are plain React over the primitives with no
+  extra dependency, so splitting them buys nothing and costs a
+  peer-version matrix. The packages that genuinely want to be separate are
+  the ones with dependencies core must not take — `@react-x11/desktop`
+  (D-Bus: portals, notifications, tray, global menu, #129) and
+  `@react-x11/a11y` (AT-SPI, §11.3) — and each of those in its own
+  repository turns every change into another land-release-bump chain on
+  top of the node-x11 → ntk → here one that already exists. Workspaces
+  with release-please's manifest mode, versioned in lockstep, keeps it to
+  one release.
 - Where do the rich-content formats belong — ntk, here, or their own module?
   Analysed in [RICH_CONTENT.md](RICH_CONTENT.md); the decision and the staged
   plan live in [sidorares/ntk#106](https://github.com/sidorares/ntk/issues/106).
@@ -603,7 +754,22 @@ menus/tooltips.
   ntk accessor rather than a rewrite. That supersedes the "left for later"
   note in §1 and adds items to §8.
 - ESM migration here (ntk is ESM-with-TLA; the dynamic-import dance in
-  `src/Reconciler.js` disappears if react-x11 goes ESM).
+  `src/Reconciler.js` disappears if react-x11 goes ESM). **Stale on both
+  halves.** `package.json` already declares `"type": "module"`, and there
+  is no top-level await anywhere in ntk's `lib` — the TLA is in
+  `yoga-layout`'s `wrapAssembly(await loadYoga())`, which ntk re-exports,
+  so going ESM would not have removed it either. The dynamic imports in
+  `src/Reconciler.js` are env-gated feature loading for
+  `REACT_X11_DEVTOOLS` and `REACT_X11_CLICK_TO_COMPONENT`, not an ESM
+  workaround; they are themselves top-level awaits and are not going
+  anywhere. What replaces the question is a stated runner support matrix,
+  to go in the testing page §16 asks for: `node --test` and Vitest with
+  `environment: 'node'` are supported (**not** jsdom — a jsdom environment
+  defines `window` and `document` and silently changes how several
+  libraries behave); Jest works with `--experimental-vm-modules` and is
+  unsupported; Jest with a CJS transform **cannot** work, because the
+  transform cannot represent yoga's top-level await. Write the negative
+  result down and do not build a Jest preset.
 
 ## 11. Queued after the 3D work
 
@@ -763,3 +929,496 @@ protocol at all.
   `Text` from the text nodes, state changes on prop updates) is a sizeable
   project on its own — a `@react-x11/a11y` sibling package is probably the
   right shape, kept out of the core render path.
+
+## 12. Before 2.0.0 freezes the API
+
+1.2.0 is what is published; #69 is 2.0.0 and unreleased. Every rename in
+this section costs one commit while that is true, and costs a deprecation
+cycle, a codemod and a migration guide afterwards. Several of them are not
+judgement calls at all — the types, the docs and the implementation already
+disagree, and the only question is which of the three wins.
+
+### 12.1 `createRoot` takes options, and a root owns its connection
+
+Today `createRoot(container?)` takes an ntk App, and the connection is made
+by `connectApp()`, which calls ntk's `createClient()` **with no arguments**
+and memoises the result in a module-level `cachedNtkApp`. `createClient`
+takes an options object — `fontSource`, `glxVisual`, `onXError`, and which
+display to connect to — and none of it is reachable (#114). In order of
+severity:
+
+- You cannot render to a display other than `$DISPLAY`. Not awkwardly —
+  there is no parameter.
+- You cannot supply a `fontSource`, so #86 has no user-side workaround.
+- `onXError` is unset, so ntk warns instead and protocol errors that no
+  request callback claims are effectively invisible.
+- **Two `createRoot()` calls with no argument silently share one fiber
+  root**, because `roots` is keyed by container and both resolve the same
+  memoised app. The second `render()` replaces the first tree with no
+  warning.
+- `Root.unmount()` goes through `unmountComponentAtNode` and never closes
+  the app, so the socket stays open and the process does not exit.
+- Nothing listens for the connection ending. A server going away is
+  silence.
+
+So: `createRoot(options?)` with `display`, `app` (borrow a connection you
+already have — what the tests actually mean today), `fonts`, `scale`
+(§12.5), `screen`, `onXError`, the three React error callbacks, and
+`onDisconnect`. Delete `cachedNtkApp`; each root without `app` opens its own
+connection and closes it, a root given `app` borrows and must not. Key
+`roots` off the root object.
+
+**Trap:** `onDisconnect` invites a reconnect loop, and a reconnect is not a
+reconnect — every window id, pixmap, glyph set and font is invalidated with
+the connection. Do not promise reconnection; document the pattern (tear the
+root down, build a new one, re-render) and stop there.
+
+Fold in a `react-x11/ntk` subpath re-exporting `createClient`,
+`StaticFontSource` and `Clipboard`, so a user who needs a font source does
+not `npm install ntk` separately and hope the version matches the one we
+resolved. Also worth surfacing there: node-x11's `seq2stack` debug mode,
+which maps a protocol error back to the JS stack that sent the request. It
+is the most useful debugging facility in the stack and it is currently
+unreachable.
+
+### 12.2 Errors have to survive
+
+Three separate holes, one options bag (#113):
+
+- `src/Reconciler.js` passes React three arrow stubs that each take only
+  `(error)`. React 19 calls them with `(error, errorInfo)`, and
+  `errorInfo.componentStack` — the entire reason error boundaries are
+  debuggable — is dropped on the floor. Forward both, make all three
+  overridable, and run the stack through the frame-stripping already
+  written for `src/ClickToComponent.js` so the top of the trace is the
+  user's component and not eight frames of react-reconciler.
+- **The default uncaught printer must set `process.exitCode = 1`.** A GUI
+  process that crashed its tree and exits 0 lies to CI and to systemd.
+- `src/events.js` dispatches capture and bubble in two loops and calls
+  `handler(ev)` **bare**. A throwing `onClick` unwinds through the
+  dispatcher into ntk's socket data handler, where there is no error
+  boundary because React is not on the stack — the handler was called from
+  an X event, not from a render. Same for `onDismiss` and
+  `onCloseRequest`. Wrap each invocation, route the throw to the root's
+  reporter with the node's element type and handler name attached. The
+  default should log and continue dispatching — one bad tooltip handler
+  should not kill the frame loop — but it must be overridable, because for
+  a kiosk "crash loudly" is the correct policy.
+
+### 12.3 The naming sweep
+
+Every widget invented its own callback name: `Button.onPress`,
+`Slider.onChange(value)`, `Tree.onSelect`/`onActivate`,
+`Menu.onSelect(item)`, `Dialog.onClose`, against the host elements'
+`<popup onDismiss>` and `<window onCloseRequest>`. One rule, applied
+everywhere: **`onChange(value)`** for a controlled value,
+**`onSelect(id)`** for a selection change, **`onActivate(id)`** for "the
+user chose this thing", **`onClick(ev)`** for a control with no value, and
+**`onRequestClose(ev)`** for "the user asked to dismiss this; you decide
+whether it closes" on `<window>`, `<popup>` and `Dialog`.
+
+In the same pass: several widgets accept flat style props (`Dialog width`
+and `height`, `ProgressBar height`, `Slider height`, `Tooltip fontSize`,
+`Menu fontSize`) while host elements throw on exactly that. It is not a
+rule violation — widgets are plain components and `assertNoFlatStyleProps`
+only runs on host elements — but it teaches the opposite of what we enforce
+one level down. Move them into `style`.
+
+And a real bug hiding in the same area: `Button` spreads
+`{ theme, ...props, ...boxProps, style }`, so a caller-supplied `onClick`
+**clobbers** `useControl`'s activation handler. Space and Enter keep working
+while the mouse silently does something else. Compose the two handlers
+rather than letting one overwrite the other.
+
+### 12.4 `<textinput onChange>` hands you a raw string
+
+`this.props.onChange?.(next)` — a bare string, where every other event in
+the system is a synthetic event object, and `src/events.js` already builds
+that shape. Make it one, put the value on both `ev.value` and
+`ev.target.value`, and add the `name` prop that does not exist today
+(#115). This is what stands between us and every DOM form library:
+`react-hook-form` and `formik` both read `e.target.name` and
+`e.target.value`, and the distance from "real adapter" to "fifty-line
+adapter" is exactly this change. Same treatment for `onSubmit`, whose
+declared signature is `(text: string, ev: unknown)` — the `unknown` is an
+admission.
+
+### 12.5 HiDPI — pick the mechanism before anything freezes
+
+There is no notion of a pixel scale anywhere in react-x11, ntk or the app
+(#116). `src/nodes.js` creates yoga nodes on the default Config
+(pointScaleFactor 1); `src/styles.js` passes `fontSize` straight through as
+a device-pixel size; nothing reads `Xft.dpi`, `GDK_SCALE`/`QT_SCALE_FACTOR`,
+or the RandR per-output mm/pixel ratio. **On a 4K panel at `Xft.dpi=192` —
+the default GNOME/KDE 2× setup — every widget and every glyph renders at
+exactly half the size of every GTK and Qt app on the same desktop.** That is
+not cosmetic; the app is unreadable, and it is the state on a large share of
+the machines people actually run.
+
+Scale is a **root** concern, not a style concern, because it has to multiply
+layout, font sizes and the paint transform together. Three wiring points,
+all small: one `Yoga.Config` per root with `setPointScaleFactor(scale)`;
+multiply the resolved font pixel size in `src/styles.js`; and
+`ctx.scale(scale, scale)` once at the top of `WindowNode.flush`, with the
+`<window width/height>` props multiplied on the way to `createWindow`.
+`node.abs` and `getClientRects()` stay in **logical** units, so `anchorRect`
+and everything built on it need no change. Yoga's point scale is exactly the
+answer to the objection that a float scale breaks the integer dirty-rect
+math: layout stays logical, computed edges snap to physical pixels so
+borders stay crisp, and rounding damage rects outward at the paint boundary
+holds the invariant.
+
+`'auto'` resolves the way GTK4 and Qt6 do: `GDK_SCALE`/`QT_SCALE_FACTOR` →
+`Xft.dpi` parsed out of the root window's `RESOURCE_MANAGER` property → the
+RandR primary output's `pixel_width / (mm_width / 25.4) / 96` rounded to the
+nearest 0.25 → 1. Plus `REACT_X11_SCALE` to override. Static at startup is
+an acceptable v1 — a mid-session DPI change is rare and we do not select
+root-window events today — but say so rather than leaving it to be
+discovered.
+
+**Separately, and do not confuse the two:** the hardcoded component
+constants (`DefaultTheme.fontSize`, `paddingX`/`paddingY`, the Checkbox and
+Radio wells, `SLIDER_THUMB`, the Switch geometry) should move into the theme
+regardless, as `theme.controlSize`, `theme.thumbSize` and friends. That is a
+user-facing accessibility knob — scale type and controls independently of
+the display — where root `scale` is a display-correctness mechanism.
+Shipping both without distinguishing them double-scales everything.
+
+### 12.6 The smaller breaking items
+
+- **Refs.** A ref on a drawn element gives the react-x11 node; a ref on
+  `<window>`/`<popup>` gives the raw ntk `Window`, so there is no way to
+  reach the `WindowNode` — its children, its theme, its layout root, its
+  screen origin. Invert it: the ref is the react-x11 node in both cases,
+  with `node.ntk` as the escape hatch. One rule instead of two.
+- **`DrawnNode.type`.** The declaration says `readonly type: string`; the
+  implementation sets `this.kind` and there is no `get type()` anywhere.
+  Add the getter — `type` is the right public name (#120).
+- **`node.screenRect()`.** `getClientRects()` is in window coordinates and
+  the screen origin lives on `window._screenOrigin`, so everything needing
+  screen coordinates re-derives it by reaching into a private field —
+  `src/components/anchor.js` already does, with a comment explaining why.
+  Anchoring, drag-and-drop, accessibility and IME candidate placement all
+  want this.
+- **`AnchorOptions` is wrong in four places** (#120). It declares
+  `{ placement, gap, width, height, flip }`; `anchor.js` destructures
+  `{ placement, align, offset, width, height }`. `gap` and `flip` are
+  inert, `align` is undeclared, and `anchorRect()` returns `null` for a
+  node with no `.abs` while the type says `Rect`. Fix the implementation
+  where the declaration is right and the declaration where the
+  implementation is right.
+- **`<window onResize|onExpose|onCloseRequest>` forward the raw ntk event**
+  while the types declare `SyntheticEvent<NtkWindow>`. Wrap them, since
+  every other handler in the system receives a synthetic event.
+- **`<image width|height>` and `<svg width|height>`** are documented, read
+  by the measure code, and **throw** in development because neither node
+  declares `semanticNames` (#118). Reachable only in production, where they
+  are silently accepted — the worst possible split. `style={{ width }}`
+  already works, so delete the branches and the doc lines.
+- **Delete the legacy entry points.** The three-way overloaded
+  `render(element, callback?, container?)` and its partner
+  `unmountComponentAtNode` both exist for familiarity with an API React
+  itself removed in 18. The default export goes with them.
+- **`SelectThemeProvider`** is a back-compat alias with nothing to be
+  compatible with.
+- **`ThemeProvider` is two theming systems wearing one name** (#119). It is
+  literally `ThemeContext.Provider` — it puts no node in the tree — while
+  [docs/styling.md](docs/styling.md) documents the **`theme` prop** as the
+  scope `$token` values resolve against. Widgets bridge them by hand, each
+  planting `theme={theme}` on its own root box. A user who writes
+  `<ThemeProvider value={dark}>` and then `<box style={{ color: '$text' }}>`
+  gets nothing and nothing tells them why. Make it a real component that
+  supplies the context _and_ the prop scope.
+- **Export the hooks every app writes by hand.** The package exports
+  exactly one, `useAnchor`. `useTheme` exists in `src/components/theme.js`
+  and is not exported from any index, so every consumer either
+  re-implements it or deep-imports. Add `useTheme`, `useApp`, `useWindow`,
+  `useWindowSize`, `useScreen` and `useClipboard` — the last of which wraps
+  a feature that ships today, is reachable only through an internal
+  `node._clipboardApi()`, and is documented in zero pages.
+- **A `screen` option on `createRoot`.** Multiple X _screens_ (`:0.0`,
+  `:0.1`) are separate root windows that no window can move between —
+  Zaphod multihead, and more usefully multi-GPU signage and control rooms.
+  `display.screen` is an array and every consumer hardcodes `[0]`.
+  Constrain a root to one screen and let a program open two roots; do
+  **not** build a migration abstraction, because X does not allow it and an
+  API that mostly throws is worse than none. This is here only because the
+  option is free this week.
+
+### 12.7 Then say what stability means
+
+Write a short stability page and ship it with the release, then hold it:
+exported functions and components, host element names and their props, and
+style property names are covered by semver; node classes, `Renderer` and
+anything reached through `root.app` are escape hatches that may change in a
+minor; **exact pixel output is not covered**, because text shaping and
+layout follow fontkit and yoga and a patch bump to either can move a glyph.
+Pin them if you snapshot. Adopt React's `experimental_` prefix so the
+ambitious things can ship before their shape is frozen, and add
+`warnOnce(oldName, newName, since)` in DEV — without it every future rename
+is a hard break.
+
+One structural hazard to write down now: `files: ["src"]` publishes every
+internal module, and the `exports` map is the only thing keeping them
+private. The moment a `./test` or `./offscreen` subpath is added, someone
+will add `"./*": "./src/*"` for convenience and the entire internal tree
+becomes API by accident. Add a test asserting the `exports` key set equals
+an expected list, so that cannot happen without a decision.
+
+## 13. Distribution
+
+Nothing in this document has ever asked how an end user ships the result,
+and the answer, reproduced from a clean directory, is that they cannot.
+
+1. **A single-file bundle fails.** Bundling with
+   `esbuild --bundle --platform=node --format=esm` produces a bundle that
+   throws at load: `Dynamic require of "events" is not supported`, from
+   node-x11's `xcore.js`. node-x11 is CJS and esbuild's interop cannot
+   resolve `require('events')`. Workaroundable with a `--banner:js` that
+   reconstructs `require` from `node:module`, and not discoverable —
+   sidorares/node-x11#246.
+2. **With that worked around it fails again, and this one is a hard stop.**
+   `keysym@0.0.6` does `fs.readFileSync(__dirname + '/data/keysyms.json')`
+   at module load. It is imported by ntk's `lib/window.js` and sits on the
+   critical path of every keypress. It cannot be bundled, cannot go in a
+   Node SEA — the SEA documentation is explicit that module loading does
+   not read from the file system — and cannot go in an AppImage without
+   shipping `node_modules`. §8 item 12 deletes it (sidorares/ntk#115).
+3. **The default font source shells out to a CLI.** `FontconfigFontSource`
+   calls `fc-match` through `child_process` and then opens font _files_
+   from host paths. A slim container, a kiosk image, a SEA or an AppImage
+   has neither. No document mentions this, and the error when it happens
+   names fontconfig rather than the packaging decision that caused it —
+   sidorares/ntk#121.
+4. **No `.desktop` entry, no icon install, no autostart.** A Linux GUI app
+   without one has no launcher entry, no MIME associations, no
+   `DBusActivatable` and no autostart.
+
+The cruel part is that the hard bit is already solved, for the browser:
+`website/scripts/browser-shims/keysym.js` is a drop-in replacement whose
+comment says precisely why the original cannot be bundled, and
+`website/scripts/build-demo-bundles.mjs` bundles the whole stack with
+esbuild. That knowledge needs to come out of the docs site.
+
+Fix the two blockers upstream, then productize as a packaging page (#128)
+with four tiers and a working configuration for each:
+
+| tier                      | what it is                                      | what it needs                                          |
+| ------------------------- | ----------------------------------------------- | ------------------------------------------------------ |
+| `npm i` + `node app.js`   | the default                                     | nothing                                                |
+| one `.mjs`                | `esbuild --bundle --platform=node --format=esm` | the keysym fix, an ESM entry for node-x11              |
+| SEA binary                | `node --experimental-sea-config`                | the above, `mainFormat: "module"`, fonts as SEA assets |
+| AppImage / flatpak / .deb | desktop distribution                            | the above, plus `.desktop` and icons                   |
+
+Worth saying explicitly in that page: **yoga-layout is already
+bundler-safe** — its WASM is base64-inlined in
+`dist/binaries/yoga-wasm-base64-esm.js`, so there is no `.wasm` file to ship
+alongside the binary. That is a real differentiator against every
+native-canvas alternative and nobody knows it.
+
+Two API pieces belong with it. `createRoot({ fonts: 'system' | 'bundled' |
+FontSource })`, where `'bundled'` is a `StaticFontSource` over a font subset
+shipped in the package — the website already does exactly this
+(`website/scripts/demo-fonts.js`) — because `'bundled'` is the only correct
+default for a container, a SEA or a kiosk, **and it makes rendering
+deterministic**, which sidesteps #86 for anyone who opts in and is what an
+image-diff test harness needs. And a `.desktop` generator rather than prose,
+`writeDesktopEntry({ id, name, exec, icon, categories, mimeTypes,
+startupWmClass })`, with the icon PNGs generated from a React component
+through the offscreen renderer (#124) so the app icon, `_NET_WM_ICON` and
+the launcher icon all come from one source.
+
+Finally, a CI `bundle` job that runs the esbuild build and executes the
+result against Xvfb. It is the only way the two blockers stay fixed; both
+were introduced silently by transitive dependencies and neither was noticed
+for years.
+
+## 14. Remote display, and the protocol ceiling
+
+The central architectural claim in the README is that the wire carries
+drawing rather than pixels, which is worth the most exactly when the display
+is somewhere else. There is no page about that. `ssh -X` appears once in the
+entire docs tree, as one row of the "you need an X server" table in
+`website/docs/getting-started.md`. Nothing anywhere mentions latency, `-X`
+versus `-Y`, `ForwardX11Timeout`, when `-C` helps, Xvnc, Xpra, or what
+actually costs a round trip.
+
+The bench has the raw material for the argument. Mounting a window with 40
+boxes and labels is 86 requests, 3652 bytes and **3 replies**; every
+paint-only scenario in `scripts/bench/baseline.json` costs exactly one.
+Replies are what a link charges for — bytes are nearly free at these sizes
+and round trips are not — and `replies` is the only column that tracks them.
+What is missing is the latency half: nothing in the repo measures what those
+replies cost at a realistic RTT, so the page cannot yet be written with
+numbers rather than adjectives. Three pieces of work follow:
+
+1. **A remote-display page** (#128). The measurements below once they
+   exist; `-X` versus `-Y` and why we should be the toolkit that works
+   under `-X`; the twenty-minute `ForwardX11Timeout` and the fact that
+   several distributions ship `ForwardX11Trusted yes` and quietly turn `-X`
+   into `-Y`; why `-C` is usually the wrong lever here and where it is the
+   right one; XQuartz, Xvnc, containers, multi-seat; Xwayland yes for app
+   windows and no for shell components. And, honestly, where VNC still wins
+   — video, and an existing app you cannot rewrite — because the comparison
+   is only credible with that in it.
+2. **An RTT mode in the bench, and `replies` as a gate.**
+   `scripts/bench/protocol.js` already collects and prints `replies`, and
+   the `--check` loop asserts on requests, bytes, composites and composite
+   pixels — everything except the one metric that predicts how the app
+   feels on a link. Add it, with a _tighter_ tolerance than the others
+   (round trips should be near-constant per scenario), and add
+   `npm run bench -- --rtt 80`, which is a delaying `Transform` around the
+   stream pair `test/integration.test.js` already builds. Then a code path
+   that adds a round trip fails CI instead of failing a user's WAN link.
+3. **The unmeasured ceiling: one socket write per request.** §8 item 14.
+   One write per request, no `writev`, no concatenation, and no
+   `setNoDelay` anywhere in the tree — so TCP X connections run with Nagle
+   on, which is invisible on the Unix socket where all the benchmarking
+   happens and is not invisible on a WAN. Turn it off without buffering
+   first and you trade a stall for packet amplification, which is worse on
+   lossy links. Buffer, flush per frame, then disable Nagle. Add `writes`
+   and `flushes` to `baseline.json` while doing it — `xcount.js` already
+   wraps `write`, so it is one line — and the 277-request clips scenario
+   should collapse to a handful of writes.
+
+One more remote-specific cost, worth a paragraph in the page and then a fix
+(sidorares/ntk#122): `<image src>` uploads raw BGRA through `PutImage` with
+no compression, so a 1920x1080 photograph is 8.3 MB on the wire. It is
+uploaded **once** and cached as a server-side pixmap, which is the right
+design, but there is no downscale-before-upload path — scaling with
+`style={{ width, height }}` scales on the server, after you have paid for
+the full-resolution transfer. Decoding, box-filtering in JS and uploading
+the size actually drawn is a small change and a bigger remote win than any
+protocol micro-optimisation on this list.
+
+## 15. Keyboard levels, Compose, and input methods
+
+§7's "deliberately out of scope for now: accessibility (AT-SPI),
+IME/compose input, Wayland" was written before the widget set,
+`<textinput>`, `<textarea>`, undo/redo and the edit menu shipped. It has not
+aged well: a text-editing toolkit that cannot type Japanese, Chinese,
+Korean, Thai, or a French `é` on a US-International layout is an
+English-only toolkit, and nothing currently says so while i18next is
+documented as working and ntk shapes bidi text.
+
+Being pure JS does not block any of this, which is why it ranks where it
+does. XIM is an X11 protocol carried over ClientMessages and window
+properties, implementable directly on node-x11. ibus exposes
+`org.freedesktop.IBus.InputContext` on the session bus with
+`ProcessKeyEvent(keyval, keycode, state)` plus `UpdatePreeditText` and
+`CommitText` signals; fcitx5 speaks D-Bus too, and both implement XIM as a
+fallback.
+
+**Stage 0 — say it, today.** A paragraph in `README.md` under Known issues
+and one under `<textinput>` in [docs/elements.md](docs/elements.md). A user
+who discovers this by typing into a demo concludes the project is broken; a
+user who reads it concludes it is honest. Costs nothing, blocks nothing.
+
+**Stage 1 — fix key→text in ntk** (§8 item 13, sidorares/ntk#116). The XKB
+level rule plus a Compose engine, emitting a string rather than a codepoint.
+**This alone makes every European layout work and needs no D-Bus.** It also
+closes half of #85.
+
+**Stage 2 — a preedit model in the renderer, backend-agnostic.**
+`onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` on the
+text controls, using react-dom's names because they are the names people
+know. `TextInputNode` keeps `_preedit` next to `_caret`, draws it at the
+caret with an underline run, and reports the caret's **screen rect** back so
+a candidate window lands in the right place — which is what
+`node.screenRect()` (§12.6) is for, and is the one change the core needs.
+
+**Stage 3 — the backends**, in `@react-x11/desktop/im` for ibus and fcitx
+over D-Bus, and `react-x11/xim` for XIM. Keep XIM: it works with any XIM
+server, and it works **over a forwarded display where the remote box has no
+session bus**, which is precisely the deployment this project is best at.
+XIM is ClientMessage and properties, so it belongs next to the protocol, not
+in the D-Bus package.
+
+## 16. Testing as something users can have
+
+The substrate here is unusually good and the product is unusually absent.
+`node --test` runs about ten thousand lines across fifteen files with no X
+server, and seven of those files drive node-x11's in-process pure-JS X
+server and read real pixels back with `GetImage`. None of it is reachable by
+anyone who installs the package: `exports` lists exactly `.`,
+`./jsx-runtime` and `./jsx-dev-runtime`, and `files` is `["src"]`. Meanwhile
+seven test files each rebuild `createServer` + `createStreamPair` +
+`StaticFontSource` from scratch and seven others import a hand-rolled
+193-line mock 2d context.
+
+Ship `react-x11/test` (#123). `x11` and `pngjs` are already in the install
+closure through ntk, so the dependency cost is genuinely zero.
+
+- `renderX11(<App/>, { width, height, backend, fonts, rtt, trace })`
+  returning the real `WindowNode` root, not an opaque handle — every
+  existing test reaches into `root._ctx`, `root._lastDamage`,
+  `root._lastDamageRects` and `root.flush()`, and a shipped harness weaker
+  than the private one is not worth shipping. Make those four supported
+  names and keep the underscored ones as aliases for a major.
+- `act()` that owns all three phases. `await React.act(...)` works today —
+  the claim that `act` is broken is wrong, and the real defect is narrower:
+  the documented `render(el, cb, app)` path resolves its callback before
+  passive effects run, so a mount effect that calls `setState` has not
+  landed when the test asserts. Every existing test works around it with an
+  ad-hoc `setImmediate` or the `settle()` round-trip helper. React's `act`
+  flushes React, not the frame; this renderer paints on ntk's frame clock,
+  and the server has seen nothing until a reply round-trips. The helper has
+  to flush React, then the frame clock, then drain the connection.
+
+  While in there: `warnsIfNotActing: false` in the host config is **dead
+  configuration** — react-reconciler 0.33 reads it as a bare expression
+  statement and discards it; the warning is gated on
+  `globalThis.IS_REACT_ACT_ENVIRONMENT`. Delete the key or comment it as
+  inert.
+
+- **Real input, through the real translation layer.** Tests currently do
+  `wnd.emit('mousedown', …)`, which skips keycode→keysym lookup, modifier
+  masks, wheel-button mapping, click-detail timing, pointer capture and
+  grabs — i.e. most of `src/events.js`. node-x11's server already has
+  `injectPointerMove`, `injectButton` and `injectKey` in
+  `lib/xserver/input.js`, plus a real US keymap with `keycodeForKeysym`,
+  and **nothing in this repo uses any of it.** Build
+  `fireEvent`/`userEvent` on those. Budget for fixing real bugs when it
+  lands: injected input goes through the server's grab and focus state
+  machine, so `<popup grab>` dismissal, `trapFocus` scopes and pointer
+  capture become testable for the first time, and some of them will fail on
+  first contact.
+- **Pixel and snapshot helpers**, which `test/integration.test.js` has
+  already written and debugged: `readPixels`, BGRA→RGB, a tolerance
+  compare, a `waitForPixel` poll. Ship them, and drop the default tolerance
+  from 40 to something honest once fonts are pinned — 40 will not notice a
+  wrong colour token.
+- **Pin the fonts, and write down why.** Glyph _indices_ travel on the wire
+  here, so font resolution is a determinism hazard in a way it is not for a
+  DOM renderer. `scripts/screenshots.jsx` already freezes `TZ`, `Date` and
+  `process.memoryUsage` with exactly the right rationale, and then resolves
+  the font family through fontconfig anyway. `test/integration.test.js`
+  does it correctly with a `StaticFontSource`. The rule: **no test or
+  snapshot script resolves a family through `FontconfigFontSource`** — with
+  one deliberately unpinned smoke test that asserts the resolved family
+  _name_, since pinning otherwise makes #86 undetectable.
+- `withFrameClock(clock => …)`, because `setAnimationClock` exists at
+  `src/nodes.js:266` precisely so tests can drive transitions and is
+  unreachable from the package — `test/style.test.js` reaches it through
+  `await import('../src/nodes.js')` and hand-restores it in six places,
+  each of which would leak if the test threw.
+
+The cheapest real win in this section is not the harness though — it is that
+`test/dirty-rect.test.js` already contains a **differential oracle**,
+`paintBothWays`, which paints a change bounded and then in full and compares
+the readbacks. It is applied to a hand-written list of scenarios. Randomise
+the input with a seeded generator over a small tree grammar and it becomes a
+property test with an oracle that cannot lie: partial paint ≡ full paint for
+any tree and any mutation; `mount(B)` ≡ `mount(A)` then `update(A→B)`, which
+is the property that catches `commitUpdate` bugs and which nothing currently
+tests; permuted `insertBefore`/`removeChild` sequences producing the same
+child list must produce the same paint; and the same mutations must produce
+an identical opcode histogram, because non-determinism there means something
+is keyed on iteration order or a timer. A small seeded generator, no new
+dependency.
+
+And the CI gaps, which are cheap and currently total: `npm run bench --
+--check` is not run by anything, despite the baseline being checked in;
+neither is `stress:check`; there is no xvfb job, so nothing ever runs
+against a real X server; and `npm run screenshots` regenerates
+`docs/img/*.png` with nothing comparing them.

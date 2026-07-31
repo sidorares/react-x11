@@ -8,8 +8,12 @@
 // page deleted from docs/ disappears here too (the output tree is rebuilt
 // from scratch).
 //
-// react-x11's docs/ is flat: README.md (the index) plus one .md per topic,
-// with images in docs/img/. For each markdown file this script:
+// react-x11's docs/ is README.md (the index) plus one .md per topic, with
+// images in docs/img/. A topic that grew into a section keeps its pages in a
+// subdirectory (docs/ecosystem/), which becomes a Docusaurus category —
+// drop a `_category_.json` next to them to label it, and it is copied
+// through with the other non-markdown assets. For each markdown file this
+// script:
 //   - adds Docusaurus front matter (title from the first `# heading`,
 //     sidebar_position following the section order below, and a
 //     custom_edit_url pointing at the real source file in the repo, since
@@ -179,6 +183,22 @@ const ORDER = [
   'devtools.md',
   'click-to-component.md',
   'glx.md',
+  'ecosystem.md',
+  // docs/ecosystem/ — same order as the compatibility tables on the landing
+  // page. Matched by basename, and sorting happens per directory, so these
+  // never collide with the top-level names above.
+  'state.md',
+  'data-fetching.md',
+  'forms.md',
+  'icons.md',
+  'theming.md',
+  'animation.md',
+  'headless.md',
+  'layout.md',
+  'routing.md',
+  'i18n.md',
+  'testing.md',
+  'dev-tooling.md',
 ];
 
 syncFile('README.md', 'index.md', {
@@ -187,20 +207,36 @@ syncFile('README.md', 'index.md', {
   slug: '/reference',
 });
 
-const topicFiles = fs
-  .readdirSync(srcDir)
-  .filter((f) => f.endsWith('.md') && f !== 'README.md')
-  .sort((a, b) => {
-    const ia = ORDER.indexOf(a);
-    const ib = ORDER.indexOf(b);
-    return (
-      (ia === -1 ? ORDER.length : ia) - (ib === -1 ? ORDER.length : ib) ||
-      a.localeCompare(b)
-    );
+const byOrder = (a, b) => {
+  const ia = ORDER.indexOf(a);
+  const ib = ORDER.indexOf(b);
+  return (
+    (ia === -1 ? ORDER.length : ia) - (ib === -1 ? ORDER.length : ib) ||
+    a.localeCompare(b)
+  );
+};
+
+// Sync one directory's markdown, then recurse. sidebar_position restarts per
+// directory because Docusaurus only compares positions within one category.
+function syncDir(dir = '') {
+  const entries = fs.readdirSync(path.join(srcDir, dir), {
+    withFileTypes: true,
   });
-topicFiles.forEach((file, i) => {
-  syncFile(file, file, { sidebarPosition: i + 2 });
-});
+  const files = entries
+    .filter((e) => e.isFile() && e.name.endsWith('.md'))
+    .map((e) => e.name)
+    .filter((name) => !(dir === '' && name === 'README.md'))
+    .sort(byOrder);
+  files.forEach((name, i) => {
+    const rel = path.join(dir, name);
+    syncFile(rel, rel, { sidebarPosition: i + 2 });
+  });
+  return entries
+    .filter((e) => e.isDirectory())
+    .reduce((n, e) => n + syncDir(path.join(dir, e.name)), files.length);
+}
+
+const topicCount = syncDir();
 
 const assets = copyAssets();
 
@@ -214,6 +250,6 @@ fs.rmSync(imgOut, { recursive: true, force: true });
 fs.cpSync(imgSrc, imgOut, { recursive: true });
 
 console.log(
-  `sync-docs: wrote ${1 + topicFiles.length} reference pages ` +
+  `sync-docs: wrote ${1 + topicCount} reference pages ` +
     `(+ ${assets} assets) to ${path.relative(websiteDir, outDir)}`,
 );
