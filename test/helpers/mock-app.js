@@ -7,6 +7,8 @@ export { React };
 // A minimal stand-in for an ntk application object, so the renderer can be
 // exercised without a running X server.
 export function createMockApp() {
+  // enough of an emitter for the connection watch in createRoot
+  const listeners = {};
   const app = {
     X: {
       display: { screen: [{ root: 1 }] },
@@ -17,8 +19,19 @@ export function createMockApp() {
       ConfigureWindow(id, options) {
         app.configureCalls.push([id, options]);
       },
+      on(event, fn) {
+        (listeners[event] ??= []).push(fn);
+      },
+      emit(event, ...args) {
+        for (const fn of listeners[event] ?? []) fn(...args);
+      },
     },
     configureCalls: [],
+    closed: 0,
+    close() {
+      app.closed++;
+      return Promise.resolve();
+    },
     windows: [],
     createWindow(attributes) {
       const handlers = {};

@@ -357,7 +357,18 @@ async function main() {
   root.render(<Elements />);
   root.render(<Widgets />, () => {});
   void root.app.X;
-  root.unmount();
+  await root.unmount();
+
+  // the option bag, and a root that borrows a connection rather than owning
+  const other = await createRoot({
+    display: ':1',
+    onXError: (err) => void err.message,
+    onUncaughtError: (error, info) => void [error, info.componentStack],
+    onDisconnect: (reason, err) => void [reason, err?.message],
+  });
+  await other.unmount();
+  const borrowing = await createRoot({ app: root.app });
+  await borrowing.unmount();
 
   await render(<Scene />);
   render(<RawGl />, undefined, root.app);

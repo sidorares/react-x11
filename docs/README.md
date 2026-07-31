@@ -39,24 +39,49 @@
 import { createRoot, render, unmountComponentAtNode, Select } from 'react-x11';
 ```
 
-### `await createRoot(container?)` → `{ app, render(element), unmount() }`
+### `await createRoot(options?)` → `{ app, render(element), unmount() }`
 
-The modern entry point. Without a `container` it connects to the X server
-named by `$DISPLAY` (the returned `app` is the [ntk](https://github.com/sidorares/ntk)
-App — one X connection). Pass an existing ntk App (or a mock) to render
-into it — that's how the hermetic tests drive the renderer against
-node-x11's in-process X server:
+The entry point. With no options it connects to the X server named by
+`$DISPLAY`; the returned `app` is the [ntk](https://github.com/sidorares/ntk)
+App, one X connection.
+
+**Every root without `app` opens its own connection and owns it**, so two
+roots are two independent trees, and `await root.unmount()` closes what it
+opened — without which the socket stays up and the process does not exit.
+A root given an `app` borrows it and never closes it: that connection
+belongs to whoever made it.
+
+| option                                                 |                                                         |
+| ------------------------------------------------------ | ------------------------------------------------------- |
+| `display`                                              | `':1'`, `'host:0.0'`, a socket path. Default `$DISPLAY` |
+| `app`                                                  | render into a connection you already have               |
+| `stream`                                               | an already-connected duplex stream                      |
+| `fontSource`                                           | pluggable system-font lookup — ntk's docs/fonts.md      |
+| `glxVisual`                                            | visual id for `getContext('opengl')`                    |
+| `onXError`                                             | X protocol errors nothing claimed. Default warns        |
+| `onUncaughtError` `onCaughtError` `onRecoverableError` | React's error channels; default log                     |
+| `onDisconnect(reason, err)`                            | the connection ended — `'closed'` or `'error'`          |
+
+`display`, `stream`, `fontSource`, `glxVisual` and `onXError` go straight
+to ntk's `createClient`. Anything else it understands, build the client
+yourself and pass it as `app` — which is also how the hermetic tests drive
+the renderer against node-x11's in-process X server:
 
 ```js
 import xserver from 'x11/lib/xserver/index.js';
-import { createClient } from 'ntk';
 
 const server = xserver.createServer({ width: 640, height: 480 });
 const [serverEnd, clientEnd] = xserver.createStreamPair();
 server.addClientStream(serverEnd);
-const app = await createClient({ stream: clientEnd });
-const root = await createRoot(app); // no $DISPLAY needed
+const root = await createRoot({ stream: clientEnd }); // no $DISPLAY needed
 ```
+
+`onDisconnect` fires when the connection ends without being asked to —
+server exit, ssh drop, kill — and not for one this root closed. It invites
+a reconnect loop, so: **a reconnect is not a reconnect.** Every window id,
+pixmap, glyph set and font is invalidated with the connection. Tear the
+root down and build a new one; nothing survives, and react-x11 promises
+nothing more than telling you it happened.
 
 ### `render(element, callback?, container?)`
 
