@@ -104,8 +104,18 @@ const HostConfig = {
   isPrimaryRenderer: true,
   warnsIfNotActing: false,
 
+  // What DevTools shows for this renderer. These are the whole story in
+  // react-reconciler 0.33: `injectIntoDevTools()` takes no arguments and
+  // reads them from here.
   rendererVersion: packageJson.version,
   rendererPackageName: packageJson.name,
+  // Surfaces as `internals.rendererConfig`, which is where a renderer puts
+  // things only its own DevTools integration understands — React Native's
+  // `getInspectorDataForViewTag` is the archetype. Nothing in the standalone
+  // DevTools reads it for a renderer like this one, so there is nothing
+  // honest to put here. In particular `findFiberByHostInstance` does not
+  // belong here: 0.33 dropped it, and DevTools 7 only ever tested it for
+  // *presence*, to tell a fiber renderer from the pre-fiber kind.
   extraDevToolsConfig: null,
 
   scheduleTimeout: setTimeout,

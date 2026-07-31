@@ -25,7 +25,9 @@ What you get:
 - **props, hooks and state** when selecting a component;
 - **highlight-on-hover** — hovering an element in the tree tints its rect
   in the X11 window;
-- the Profiler tab.
+- the Profiler's commit list and flamegraph. **Not** its Timeline view,
+  which needs `injectProfilingHooks` — this reconciler build does not
+  expose it, so there is nothing to enable.
 
 `REACT_X11_DEVTOOLS_HOST` / `REACT_X11_DEVTOOLS_PORT` point the backend at
 a non-default standalone (e.g. devtools on another machine — handy when the
@@ -40,6 +42,13 @@ the renderer via `injectIntoDevTools`.
 
 Notes for maintainers:
 
+- **`injectIntoDevTools()` takes no arguments** in react-reconciler 0.33.
+  What it reports comes from the host config — `rendererPackageName`,
+  `rendererVersion`, `extraDevToolsConfig` — and an argument passed here is
+  ignored without a word, which is how react-x11 shipped for a while with
+  its renderer name and version quietly missing (#121). A test in
+  `test/smoke.test.js` asserts what reaches the hook, so the next
+  reconciler bump cannot repeat it.
 - react-devtools-core v7 requires `initialize()` before
   `connectToDevTools`, exposes its API on the **default export** under
   node ESM interop, and expects browser-ish globals (`self`, `window`) —

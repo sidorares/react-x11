@@ -4410,3 +4410,46 @@ test('menu: PageDown/PageUp land on a selectable row, never a separator', async 
 
   ReactX11.unmountComponentAtNode(app);
 });
+
+test('injectIntoDevTools registers the renderer metadata from the host config', async () => {
+  // react-reconciler 0.33 dropped injectIntoDevTools' parameter; the config
+  // that used to be passed there was silently discarded, taking the
+  // renderer's name and version with it (#121). What the hook receives is
+  // the only observable, so assert on that rather than on the call.
+  const { Renderer } = await import('../src/index.js');
+  const { readFileSync } = await import('node:fs');
+  const pkg = JSON.parse(
+    readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+  );
+
+  const injected = [];
+  const previous = global.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  global.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    supportsFiber: true,
+    inject: (internals) => {
+      injected.push(internals);
+      return 1;
+    },
+  };
+  try {
+    Renderer.injectIntoDevTools();
+  } finally {
+    if (previous === undefined) delete global.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+    else global.__REACT_DEVTOOLS_GLOBAL_HOOK__ = previous;
+  }
+
+  assert.strictEqual(injected.length, 1, 'the hook was injected into');
+  const internals = injected[0];
+  assert.strictEqual(internals.rendererPackageName, pkg.name);
+  assert.strictEqual(internals.version, pkg.version);
+  assert.strictEqual(
+    typeof internals.currentDispatcherRef,
+    'object',
+    'the field DevTools 7 actually keys off to pick the fiber renderer',
+  );
+  assert.strictEqual(
+    internals.rendererConfig,
+    undefined,
+    'extraDevToolsConfig is null, so no rendererConfig is advertised',
+  );
+});
