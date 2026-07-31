@@ -41,11 +41,53 @@ uploaded once, so drawing a line afterwards names them by index, about a byte
 per glyph; gradients, scaling, alpha compositing and clipping are single
 server-side requests rather than loops over a pixel array; nothing is read
 back. An update costs what the _drawing_ costs, not what the window's area
-costs — which is why this stays comfortable on a display forwarded over ssh.
+costs. Going full-screen on a 4K panel does not multiply your bandwidth,
+because you were not sending pixels at 1080p either — which is why this
+stays comfortable on a display forwarded over ssh. Mounting a window with
+forty rows and their labels is 86 requests and 3.6 KB on the wire.
 
 Because that is the design it is measured rather than assumed: `npm run
 bench` reports requests, bytes, replies, RENDER composites and the pixel area
 those composites touch, against a checked-in baseline.
+
+### Where this fits
+
+X11 is the wire protocol, which means the display can be somewhere the
+program is not, and the program can be somewhere a browser engine cannot go.
+That is the shape of the problem this is good at:
+
+- **the display is elsewhere** — a headless server over `ssh -X`, a
+  container pointed at the host, a thin client, an X terminal, a
+  deliberately dumb workstation;
+- **the machine cannot afford a browser engine** — a kiosk, an appliance, an
+  instrument panel, an ARM board with 512 MB, a locked-down box where
+  installing must not compile anything and root is not on offer;
+- **you want the UI in the same process as the rest of your program** —
+  `fs`, `serialport`, `pg` and your components in one heap, one event loop,
+  no IPC bridge and no second bundler;
+- **you want GUI tests that run in CI with no display server** — `npm test`
+  here renders real pixels through the real protocol into node-x11's
+  in-process X server, on a machine with no `$DISPLAY`, on macOS.
+
+And the shape it is not good at, so you can stop here rather than in week
+three:
+
+- **three platforms.** X11 only. macOS means XQuartz — a separate install, a
+  non-native look and no menu bar integration. Windows is out; if you need
+  Windows, use Electron or Tauri.
+- **native Wayland.** There is no Wayland backend and there is not going to
+  be one; that would be a different renderer, not a flag. Ordinary
+  application windows work fine on a Wayland desktop through Xwayland, which
+  is not going away — but the desktop-shell half of X11 (panel struts,
+  global key grabs, screen capture, and the window-manager example below)
+  needs a real X session.
+- **reusing web components.** There is no DOM. Your MUI, your Tailwind and
+  your `recharts` do not come with you; the state, data-fetching, validation
+  and math libraries mostly do. [docs/ecosystem.md](docs/ecosystem.md) says
+  which is which, and what the failure looks like when it is the wrong one.
+- **60 fps, video, or a webview.** `<html>` renders a subset through ntk's
+  own layout engine and is not a browser.
+- **text entry outside Latin.** See [Known issues](#known-issues).
 
 | `examples/dashboard.jsx` — context theming, hooks | `examples/tasks.jsx` — useReducer, textinput, scrollview |
 | ------------------------------------------------- | -------------------------------------------------------- |
@@ -183,7 +225,10 @@ User handlers run before element default actions and can
 
 ## Examples
 
-All need an X server (`DISPLAY` set; XQuartz on macOS, Xvfb for automation).
+All need an X server — but "an X server" is a broader thing than it sounds:
+your Linux desktop, XQuartz on macOS, `Xvfb` for automation, `Xephyr` for a
+disposable screen, a VNC server, or your own display reached over `ssh -X`
+from wherever the program actually runs.
 [`examples/README.md`](examples/README.md) describes each one and how to
 explore them:
 
@@ -348,8 +393,8 @@ the browser, so `npm run docs:test` fails when a demo stops matching the API.
 
 ## Known issues
 
-Two that are worth knowing before you hit them, both predating the current
-release and both tracked:
+Three that are worth knowing before you hit them, all predating the current
+release and all tracked:
 
 - **Non-Latin keyboard layouts type Latin**
   ([#85](https://github.com/sidorares/react-x11/issues/85)). Keysyms are
@@ -363,7 +408,38 @@ release and both tracked:
   Homebrew's fontconfig ships no macOS system-font aliases and answers
   Hiragino Sans. Latin looks fine, Cyrillic comes out on full-width
   advances. Put `/opt/X11/bin` first on `PATH` until this is fixed.
+- **Text entry is one codepoint per key event.** A key press is resolved to
+  a single keysym and committed straight into the field, with no composition
+  stage anywhere in the stack. So AltGr levels do not work (`@` on a German
+  layout, `€`, `ł`, `ã` on US-International), dead keys and Compose
+  sequences do not work (`dead_acute` then `e` produces nothing, not `é`),
+  and there is no input method integration, so CJK is not partially working
+  — it is structurally absent. The text controls have a caret, a selection,
+  an undo stack and a clipboard, and nowhere for uncommitted composition
+  text to live. Fixing the level rule is an ntk change that also closes half
+  of [#85](https://github.com/sidorares/react-x11/issues/85); a preedit
+  model and an ibus/fcitx/XIM backend are the rest.
 
-# See also
+## Security
 
-https://github.com/chentsulin/awesome-react-renderer
+X11 has no isolation between clients: any program on a display can read any
+other program's window contents, grab the keyboard, and synthesize or record
+input. That is the 1987 design, not a gap in this library, and it cuts both
+ways — do not run untrusted programs on a display you use, and do not treat
+a react-x11 window as a confidential surface. Your `$XAUTHORITY` cookie is a
+bearer token; treat it like a password.
+
+`ssh -X` runs your app as an untrusted client and restricts most of the
+above; `ssh -Y` turns the restrictions off. **Prefer `-X` — react-x11 should
+work under it, and if it does not, that is a bug worth filing.**
+
+## See also
+
+- [awesome-react-renderer](https://github.com/chentsulin/awesome-react-renderer)
+  — the catalogue of React renderers, which is how most people find things
+  like this.
+- [ntk](https://github.com/sidorares/ntk) — the toolkit underneath: windows,
+  the XRender-backed 2d context, the text stack, the frame clock.
+- [node-x11](https://github.com/sidorares/node-x11) — the X11 protocol in
+  JavaScript, including the in-process X server the tests and the playground
+  run against.

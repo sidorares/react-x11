@@ -21,6 +21,17 @@
   debugging aids.
 - [click-to-component.md](click-to-component.md) — Alt+Click a rendered
   element to open its JSX source line in your editor.
+- [ecosystem.md](ecosystem.md) — which npm packages work with react-x11 and
+  which do not: the rule that decides it, a compatibility table across 12
+  categories, and a register of the verbatim errors the incompatible ones
+  produce. Per-category pages:
+  [state](ecosystem/state.md), [data fetching](ecosystem/data-fetching.md),
+  [forms](ecosystem/forms.md), [icons](ecosystem/icons.md),
+  [theming](ecosystem/theming.md), [animation](ecosystem/animation.md),
+  [headless components](ecosystem/headless.md),
+  [layout](ecosystem/layout.md), [routing](ecosystem/routing.md),
+  [i18n](ecosystem/i18n.md), [testing](ecosystem/testing.md),
+  [dev tooling](ecosystem/dev-tooling.md).
 
 ## Entry points
 
