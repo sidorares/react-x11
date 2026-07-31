@@ -119,9 +119,10 @@ to put it in their own box; that is `style={{ width }}` now.
 
 ## Theme tokens
 
-A style value of `'$name'` resolves against the nearest `theme` prop above
-the node. The sigil is what keeps it unambiguous: `'red'` is a CSS colour,
-`'$red'` is a token.
+A style value of `'$name'` resolves against the nearest theme above the node
+— `<ThemeProvider value={palette}>`, or a `theme` prop on any element. The
+sigil is what keeps it unambiguous: `'red'` is a CSS colour, `'$red'` is a
+token.
 
 ```jsx
 const s = createStyles({
@@ -153,13 +154,20 @@ not change are still updated — which is why a theme change also drops the
 memoised text layouts under it, or cached text would keep painting the old
 colour.
 
-An unknown token is an error naming what the theme does have. Resolution is
-cached per (style object, theme object), so a hoisted style under one theme
-keeps its identity across renders and the `===` fast path still applies.
+An unknown token is an error naming what the theme does have, and a token
+with **no** theme above it at all warns in dev — that one is otherwise
+silent, since the whole style is stripped rather than one value failing.
+Resolution is cached per (style object, theme object), so a hoisted style
+under one theme keeps its identity across renders and the `===` fast path
+still applies.
 
-Widgets plant their merged palette (`ThemeProvider` + the built-in defaults)
-on their own root node, so `$tokens` work inside a widget subtree — and in a
-style you pass one — even when the app only used `<ThemeProvider>`.
+Resolution walks the node tree, not React context, so a palette has to reach
+the tree to be seen. `<ThemeProvider>` puts it in both places — the context
+widgets read with `useTheme()`, and a `theme` prop on a node — which is what
+makes provider and token one mechanism rather than two
+([components.md](components.md#theming)). Widgets plant their own merged
+palette on their root node as well, so `$tokens` work inside a widget
+subtree — and in a style you pass one — with no provider anywhere.
 
 ## Transitions
 

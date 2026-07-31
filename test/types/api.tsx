@@ -32,6 +32,7 @@ import {
   Tree,
   unmountComponentAtNode,
   useAnchor,
+  useTheme,
 } from '../../src/index.js';
 import type {
   DrawnNode,
@@ -256,13 +257,24 @@ function RawGl() {
 
 // --- components ------------------------------------------------------------
 
+function Themed() {
+  // a complete palette, whatever the provider above set
+  const theme = useTheme();
+  const _radius: number = theme.radius;
+  return <box style={{ backgroundColor: theme.accent }} />;
+}
+
+// @ts-expect-error — the palette is Partial<Theme>, not arbitrary keys
+const _badTheme = <ThemeProvider value={{ accnet: '#fff' }} />;
+
 function Widgets() {
   const anchorRef = useRef<DrawnNode>(null);
   const anchor = useAnchor(anchorRef);
   const [checked, setChecked] = useState(false);
 
   return (
-    <ThemeProvider value={{ accent: '#2980b9', radius: 6 }}>
+    <ThemeProvider value={{ accent: '#2980b9', radius: 6 }} style={s.row}>
+      <Themed />
       <box ref={anchorRef} style={s.row}>
         <Button primary onPress={() => void anchor()}>
           press

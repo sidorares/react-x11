@@ -71,7 +71,7 @@ Left for later: per-link pointer cursor (cursor is per-node today),
 
 Mostly DONE (PR #30): `Button`, `Checkbox`, `Radio`/`RadioGroup`,
 `Switch`, `ProgressBar` shipped in `src/components/` with a shared
-merged theme (`ThemeProvider`; `SelectThemeProvider` is an alias) and a
+merged theme (`ThemeProvider`, `useTheme`) and a
 `useControl` hook (hover/focus, click + Space/Enter, disabled). Gallery:
 `examples/widgets.jsx`. Still open:
 
@@ -1119,21 +1119,21 @@ Shipping both without distinguishing them double-scales everything.
   `render(element, callback?, container?)` and its partner
   `unmountComponentAtNode` both exist for familiarity with an API React
   itself removed in 18. The default export goes with them.
-- **`SelectThemeProvider`** is a back-compat alias with nothing to be
-  compatible with.
-- **`ThemeProvider` is two theming systems wearing one name** (#119). It is
-  literally `ThemeContext.Provider` — it puts no node in the tree — while
-  [docs/styling.md](docs/styling.md) documents the **`theme` prop** as the
-  scope `$token` values resolve against. Widgets bridge them by hand, each
-  planting `theme={theme}` on its own root box. A user who writes
-  `<ThemeProvider value={dark}>` and then `<box style={{ color: '$text' }}>`
-  gets nothing and nothing tells them why. Make it a real component that
-  supplies the context _and_ the prop scope.
-- **Export the hooks every app writes by hand.** The package exports
-  exactly one, `useAnchor`. `useTheme` exists in `src/components/theme.js`
-  and is not exported from any index, so every consumer either
-  re-implements it or deep-imports. Add `useTheme`, `useApp`, `useWindow`,
-  `useWindowSize`, `useScreen` and `useClipboard` — the last of which wraps
+- **`SelectThemeProvider`** — DONE: deleted, a back-compat alias with
+  nothing to be compatible with.
+- **`ThemeProvider` is two theming systems wearing one name** (#119) —
+  DONE: it is a real component now, supplying the context _and_ the prop
+  scope from one merged palette, so `<ThemeProvider value={dark}>` over
+  `<box style={{ color: '$text' }}>` paints. It plants the prop on a box it
+  renders (`style` overrides that box's `{ flexGrow: 1 }`), or on the
+  window itself above a `<window>`, which may not sit inside a box. A
+  `$token` with no theme anywhere above it now warns in dev — the one
+  theming mistake that was otherwise silent, since the whole style is
+  stripped rather than one value failing.
+- **Export the hooks every app writes by hand.** `useAnchor` and (since
+  #119) `useTheme` are exported; the rest are not. Add `useApp`,
+  `useWindow`, `useWindowSize`, `useScreen` and `useClipboard` — the last
+  of which wraps
   a feature that ships today, is reachable only through an internal
   `node._clipboardApi()`, and is documented in zero pages.
 - **A `screen` option on `createRoot`.** Multiple X _screens_ (`:0.0`,
