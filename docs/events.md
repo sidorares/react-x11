@@ -201,7 +201,13 @@ a window manager is free to refuse.
 
 ## Cursors
 
-The `cursor` prop (`'pointer'`, `'text'`, `'wait'`, `'move'`,
+The `cursor` style property (`'pointer'`, `'text'`, `'wait'`, `'move'`,
 `'crosshair'`, `'ew-resize'`, `'ns-resize'`, `'grab'`, `'not-allowed'`, …)
 applies the deepest hovered node's cursor to the window, via ntk's cursor
 cache over the standard X cursor font.
+
+`cursor: 'none'` hides the pointer (ntk ≥ 4.2.0) — the kiosk case. It is
+the one name that is not a glyph in that font, so ntk builds it from an
+empty 1×1 mask. Note it is **not** the same as setting no cursor at all:
+with none of a node's ancestors naming one, the window inherits the root
+window's cursor and the pointer stays visible.

@@ -170,6 +170,19 @@ export function createMockApp() {
         setAlwaysOnTop(on) {
           wnd.calls.push(['setAlwaysOnTop', on]);
         },
+        // ntk >= 4.1: the general _NET_WM_STATE surface. Resolves to whether
+        // the WM advertises the state; the mock says yes.
+        setWmState(names, action = 'add') {
+          wnd.calls.push(['setWmState', names, action]);
+          return Promise.resolve(true);
+        },
+        getWmStates() {
+          return Promise.resolve(wnd.wmStates ?? []);
+        },
+        setProperty(name, value, options) {
+          wnd.calls.push(['setProperty', name, value, options]);
+          return Promise.resolve(wnd);
+        },
         setActions() {
           wnd.calls.push(['setActions']);
         },

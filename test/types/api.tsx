@@ -103,6 +103,10 @@ function Elements() {
       resizable={false}
       windowType="dialog"
       wmClass={['app', 'App']}
+      states={['skip_taskbar', 'maximized']}
+      fullscreen={false}
+      decorations={false}
+      onStatesChange={(states) => void states.includes('fullscreen')}
       style={s.root}
       onCloseRequest={() => {}}
       onResize={(ev) => void ev.nativeEvent.rootx}

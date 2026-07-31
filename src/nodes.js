@@ -335,6 +335,52 @@ export const WINDOW_HINT_PROPS = [
   'maxAspect',
   'gravity',
 ];
+/**
+ * The `_NET_WM_STATE` names these props ask for. `states` is the general
+ * mechanism; `fullscreen` and `alwaysOnTop` are sugar for the two everyone
+ * reaches for, and they union rather than compete with `states`.
+ */
+export function windowStates(props) {
+  const states = new Set(props.states ?? []);
+  if (props.fullscreen) states.add('fullscreen');
+  if (props.alwaysOnTop) states.add('above');
+  return states;
+}
+
+/**
+ * One state per message. EWMH gives a `_NET_WM_STATE` ClientMessage two
+ * state slots — which is what `'maximized'` uses, expanding to the
+ * vert/horz pair — so anything longer has to be several messages, and
+ * splitting by name is the only chunking that cannot land a pair across a
+ * boundary. These are rare, deliberate calls; the round trips do not matter.
+ */
+function applyWindowStates(wnd, names, action) {
+  if (typeof wnd?.setWmState !== 'function') return;
+  for (const name of names) {
+    // an unsupported state resolves false rather than throwing; a window
+    // that went away mid-flight is not worth an unhandled rejection
+    Promise.resolve(wnd.setWmState(name, action)).catch(() => {});
+  }
+}
+
+// _MOTIF_WM_HINTS: flags, functions, decorations, input_mode, status.
+// flags = 2 is MWM_HINTS_DECORATIONS, i.e. "only the decorations field
+// here means anything". The property's type atom is the property's own
+// name, not CARDINAL — the one thing that is easy to get wrong, and a WM
+// that reads the type will ignore the hint if it is.
+const MOTIF_HINTS = '_MOTIF_WM_HINTS';
+const MOTIF_DECORATIONS = (on) => [2, 0, on ? 1 : 0, 0, 0];
+
+function applyDecorations(wnd, on) {
+  if (typeof wnd?.setProperty !== 'function') return;
+  Promise.resolve(
+    wnd.setProperty(MOTIF_HINTS, MOTIF_DECORATIONS(on), {
+      type: MOTIF_HINTS,
+      format: 32,
+    }),
+  ).catch(() => {});
+}
+
 const WINDOW_SEMANTIC_NAMES = new Set([
   'width',
   'height',
@@ -3054,6 +3100,14 @@ export class WindowNode extends Node {
     this._restackWindowChildren();
     // <glarea>s mounted before the window existed own a child X window too
     this._realizeGlAreas(this);
+    // Before the map, deliberately. EWMH 7.7 gives an unmapped window a
+    // different mechanism — it *declares* its initial state by writing the
+    // property, where a mapped one has to *ask* the window manager — and
+    // declaring is the only way to open already fullscreen rather than
+    // flashing at the normal size first. Same for the Motif hint: a WM
+    // reads decorations when it frames the window, which is at map time.
+    if (this.props.decorations === false) applyDecorations(wnd, false);
+    applyWindowStates(wnd, [...windowStates(this.props)], 'add');
     wnd.map?.();
     // ask before anything can be anchored to it, so the first popup is
     // placed as well as the second
@@ -3128,8 +3182,27 @@ export class WindowNode extends Node {
     if (!shallowEqual(next.windowType, prev.windowType) && next.windowType) {
       wnd.setWindowType?.(next.windowType);
     }
-    if (Boolean(next.alwaysOnTop) !== Boolean(prev.alwaysOnTop)) {
-      wnd.setAlwaysOnTop?.(Boolean(next.alwaysOnTop));
+    // Diffed against the *previous props*, never against what the window
+    // manager currently has. That is what makes these controlled: on X the
+    // WM changes state behind the app's back all the time — the user hits
+    // maximize, a hotkey leaves fullscreen — and a prop re-asserted every
+    // commit would fight it. React only hears about reality through
+    // `onStatesChange`, and only re-asks when the app itself changes its
+    // mind.
+    const before = windowStates(prev);
+    const now = windowStates(next);
+    applyWindowStates(
+      wnd,
+      [...now].filter((s) => !before.has(s)),
+      'add',
+    );
+    applyWindowStates(
+      wnd,
+      [...before].filter((s) => !now.has(s)),
+      'remove',
+    );
+    if (next.decorations !== prev.decorations) {
+      applyDecorations(wnd, next.decorations !== false);
     }
   }
 
@@ -3165,6 +3238,21 @@ export class WindowNode extends Node {
     wnd.on('expose', (ev) => {
       this.props.onExpose?.(ev);
     });
+    // What the window manager actually did, which is the other half of the
+    // controlled pair — the props say what to ask for, this says what is
+    // true. Subscribing is what makes ntk select PropertyChange and watch
+    // `_NET_WM_STATE`, so it is opt-in: a window with no handler pays
+    // nothing. Read at realize time like onCloseRequest, since the
+    // subscription is a property of the X window, not of a render.
+    if (this.props.onStatesChange && typeof wnd.getWmStates === 'function') {
+      wnd.on('statechange', (states) => {
+        // a WM state change is something the user did to the window, so it
+        // carries the same priority a click would
+        runWithPriority(DiscreteEventPriority, () => {
+          this.props.onStatesChange?.(states);
+        });
+      });
+    }
     // WM close button: with an onCloseRequest prop the window opts into the
     // WM_DELETE_WINDOW protocol and the handler decides what happens
     // (unmount, hide, quit). Without it the WM default stands (the server
