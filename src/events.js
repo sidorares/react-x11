@@ -7,6 +7,7 @@ import {
   DiscreteEventPriority,
   ContinuousEventPriority,
 } from './priority.js';
+import { callHandler } from './errors.js';
 
 const XK_TAB = 0xff09;
 const WHEEL_BUTTONS = { 4: [0, -48], 5: [0, 48], 6: [-48, 0], 7: [48, 0] };
@@ -187,11 +188,15 @@ export class EventManager {
       target,
       extra,
     );
+    // Each handler is called inside callHandler: a throw here has no React
+    // on the stack to catch it, so bare it would unwind into ntk's socket
+    // handler and take the process. Reported and stepped over instead —
+    // one bad handler must not stop the ones after it, or the frame loop.
     for (const n of path) {
       const handler = n.props[`on${name}Capture`];
       if (handler) {
         ev.currentTarget = this._public(n);
-        handler(ev);
+        callHandler(n, `on${name}Capture`, handler, ev);
         if (ev.propagationStopped) return ev;
       }
     }
@@ -199,7 +204,7 @@ export class EventManager {
       const handler = path[i].props[`on${name}`];
       if (handler) {
         ev.currentTarget = this._public(path[i]);
-        handler(ev);
+        callHandler(path[i], `on${name}`, handler, ev);
         if (ev.propagationStopped) return ev;
       }
     }
@@ -226,9 +231,15 @@ export class EventManager {
     }
     if (this._pressOutside(native)) {
       runWithPriority(DiscreteEventPriority, () => {
-        this.node.props.onDismiss?.(
-          this._makeEvent('dismiss', native, this.node),
-        );
+        const onDismiss = this.node.props.onDismiss;
+        if (onDismiss) {
+          callHandler(
+            this.node,
+            'onDismiss',
+            onDismiss,
+            this._makeEvent('dismiss', native, this.node),
+          );
+        }
       });
       return;
     }

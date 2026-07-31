@@ -31,6 +31,7 @@ import {
   WINDOW_HINT_PROPS,
 } from './nodes.js';
 import { flattenStyle } from './styles.js';
+import { defaultRootHandlers, setErrorHandler } from './errors.js';
 import { GlAreaNode } from './glnodes.js';
 import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
 import {
@@ -492,12 +493,7 @@ const CONNECT_OPTIONS = [
   'onXError',
 ];
 
-const DEFAULT_ERROR_HANDLERS = {
-  onUncaughtError: (error) => console.error('react-x11: uncaught error', error),
-  onCaughtError: (error) => console.error('react-x11: caught error', error),
-  onRecoverableError: (error) =>
-    console.error('react-x11: recoverable error', error),
-};
+const DEFAULT_ERROR_HANDLERS = defaultRootHandlers;
 
 /**
  * The connection ended without us asking. `end` is the stream closing —
@@ -608,6 +604,11 @@ export async function createRoot(options = {}) {
     null,
   );
 
+  // A throw from an event handler has no React on the stack, so it never
+  // reaches the container above — the root's handler is reached through the
+  // container instead, which is what the nodes carry.
+  if (rest.onUncaughtError) setErrorHandler(app, rest.onUncaughtError);
+
   let unmounted = false;
   if (onDisconnect) watchConnection(app, onDisconnect, () => unmounted);
 
@@ -625,6 +626,7 @@ export async function createRoot(options = {}) {
       unmounted = true;
       Renderer.updateContainerSync(null, container, null, null);
       Renderer.flushSyncWork();
+      if (rest.onUncaughtError) setErrorHandler(app, null);
       if (owned) await app.close();
     },
   };
