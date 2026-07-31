@@ -21,12 +21,9 @@ import RefreshRuntime from 'react-refresh/runtime';
 RefreshRuntime.injectIntoGlobalHook(globalThis);
 
 const ReactX11 = await import('../src/index.js');
-ReactX11.Renderer.injectIntoDevTools({
-  bundleType: 1, // dev
-  version: '0.0.1', // display metadata only
-  rendererPackageName: 'react-x11',
-  findFiberByHostInstance: (instance) => instance._reactFiber,
-});
+// no argument: react-reconciler 0.33 takes none, and the renderer metadata
+// comes from the host config in src/Reconciler.js
+ReactX11.Renderer.injectIntoDevTools();
 
 export function performReactRefresh() {
   // null = nothing pending (no component re-registered with new code)

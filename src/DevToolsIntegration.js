@@ -2,10 +2,6 @@
 // the environment; requires the `react-devtools-core` and `ws` dev
 // dependencies. Start the standalone UI first (`npx react-devtools`), then
 // run the app: REACT_X11_DEVTOOLS=1 npm run examples:dashboard
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-
 let api = null;
 let connected = false;
 
@@ -48,12 +44,11 @@ export function connect(renderer) {
     port: Number(process.env.REACT_X11_DEVTOOLS_PORT) || 8097,
   });
 
-  renderer.injectIntoDevTools({
-    bundleType: 1,
-    version: require('../package.json').version,
-    rendererPackageName: 'react-x11',
-    findFiberByHostInstance: (instance) => instance._reactFiber,
-  });
+  // No argument: react-reconciler 0.33 takes none, and the object this used
+  // to pass was discarded in silence. The renderer's name and version now
+  // come from the host config, where Reconciler.js already sets them
+  // (`rendererPackageName`, `rendererVersion`).
+  renderer.injectIntoDevTools();
 
   watchForAgent();
 }

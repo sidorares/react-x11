@@ -36,8 +36,10 @@ custom URI scheme.
 babel/jsx-source plugin, no build-time instrumentation:
 
 - every host node already carries a reference to the fiber that created it
-  (`node._reactFiber`, set in `createInstance` — the same reference
-  DevTools' `findFiberByHostInstance` uses);
+  (`node._reactFiber`, set in `createInstance`). It is this feature's own
+  back-reference, not a DevTools one: `findFiberByHostInstance` is gone
+  from react-reconciler 0.33, and click-to-component works with DevTools
+  absent;
 - React 19 captures a real `Error` at every JSX call site in development
   mode (`fiber._debugStack`) and tracks who rendered what
   (`fiber._debugOwner`) — no `__source`/`__self` babel transform needed;
