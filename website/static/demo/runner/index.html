@@ -121,11 +121,11 @@ function setupGlx(srv) {
 
 // --- running one edit ------------------------------------------------------
 
-// The X connection and the server outlive a single Run: react-x11 caches
-// its ntk App at module scope, so tearing the server down between runs
-// would leave the next `await createRoot()` holding a dead socket. Instead
-// the previous tree is unmounted — which destroys its X windows through the
-// same path a real app's shutdown takes.
+// The server outlives a single Run; the connection does not. Every
+// `createRoot()` dials DISPLAY afresh through the 'demo' protocol above and
+// owns what it opened, so unmounting the previous tree destroys its X
+// windows *and* closes its stream — the same path a real app's shutdown
+// takes. The server keeps running and hands the next Run a new one.
 const mounted = new Set();
 let timers = { intervals: [], timeouts: [] };
 
@@ -168,7 +168,11 @@ function teardown() {
   timers.timeouts.forEach(clearTimeout);
   timers = { intervals: [], timeouts: [] };
   for (const root of mounted) {
-    try { root.unmount(); } catch { /* already gone */ }
+    // unmount() brings the tree down synchronously and closes the socket
+    // after; the promise is not awaited here because teardown must stay
+    // synchronous, but it has to be handled or a dead connection becomes an
+    // unhandled rejection in the middle of the next Run
+    try { root.unmount()?.catch(() => {}); } catch { /* already gone */ }
   }
   mounted.clear();
 }

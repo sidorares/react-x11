@@ -258,7 +258,10 @@ async function runDemo(demo) {
     timers.timeouts.forEach(clearTimeout);
     for (const root of roots) {
       try {
-        root.unmount();
+        // async since #114: the tree comes down synchronously, the socket
+        // closes after. Handle the promise — an unhandled rejection here
+        // would be reported as a demo failure by the uncaught handler above
+        await root.unmount();
       } catch {
         /* already gone */
       }

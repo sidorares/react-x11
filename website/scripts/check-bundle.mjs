@@ -84,7 +84,7 @@ const [clientEnd, serverEnd] = rx.createStreamPair();
 server.addClientStream(serverEnd);
 
 const app = await rx.ntk.createClient({ stream: clientEnd });
-const root = await rx.reactX11.createRoot(app);
+const root = await rx.reactX11.createRoot({ app });
 const React = rx.React;
 
 function Demo() {
