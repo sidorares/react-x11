@@ -17,25 +17,65 @@ export * from './types/nodes.js';
 export * from './types/elements.js';
 export * from './types/components.js';
 
+/** What React reports alongside an error it caught. */
+export interface ErrorInfo {
+  componentStack?: string;
+}
+
+export interface RootOptions {
+  /** `':1'`, `'host:0.0'`, or a unix socket path. Defaults to `$DISPLAY`. */
+  display?: string;
+  /**
+   * Render into a connection you already have — tests, embedding, a client
+   * built with options this bag does not carry. A borrowed connection is
+   * never closed by {@link Root.unmount}.
+   */
+  app?: NtkApp;
+  /** An already-connected duplex stream, instead of dialling `$DISPLAY`. */
+  stream?: unknown;
+  /** Pluggable system-font lookup; see ntk's docs/fonts.md. */
+  fontSource?: unknown;
+  /** A visual id for `getContext('opengl')`, instead of querying for one. */
+  glxVisual?: unknown;
+  /** X protocol errors no request callback claimed. Default warns. */
+  onXError?: (err: Error) => void;
+  onUncaughtError?: (error: unknown, errorInfo: ErrorInfo) => void;
+  onCaughtError?: (error: unknown, errorInfo: ErrorInfo) => void;
+  onRecoverableError?: (error: unknown, errorInfo: ErrorInfo) => void;
+  /**
+   * The X connection ended without being asked to — server exit, ssh drop,
+   * kill. Not called for a connection this root closed itself.
+   *
+   * A reconnect is not a reconnect: every window id, pixmap, glyph set and
+   * font is invalidated with the connection. Tear the root down and build a
+   * new one; nothing survives.
+   */
+  onDisconnect?: (reason: 'closed' | 'error', err?: Error) => void;
+}
+
 /** A mounted tree, as returned by {@link createRoot}. */
 export interface Root {
   /** The ntk `App` this root renders through. */
   readonly app: NtkApp;
   render(element: ReactNode, callback?: () => void): void;
-  unmount(): void;
+  /** Unmounts, then closes the connection unless `app` was passed in. */
+  unmount(): Promise<void>;
 }
 
 /**
  * Connect to the X server and make a root:
  *
  * ```tsx
- * const root = await createRoot();   // connects via $DISPLAY
+ * const root = await createRoot();                 // connects via $DISPLAY
+ * const other = await createRoot({ display: ':1' });
  * root.render(<App />);
+ * await root.unmount();
  * ```
  *
- * Pass an ntk `App` to render into a connection you already have.
+ * Each root without `app` opens its own connection and owns it, so two
+ * roots are two independent trees.
  */
-export function createRoot(container?: NtkApp): Promise<Root>;
+export function createRoot(options?: RootOptions): Promise<Root>;
 
 /**
  * Legacy entry point. Without a container it connects to the X server and

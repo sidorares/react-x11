@@ -453,19 +453,69 @@ if (process.env.REACT_X11_CLICK_TO_COMPONENT || process.env.REACT_X11_EDITOR) {
 const roots = new Map();
 let cachedNtkApp = null;
 
-async function connectApp() {
-  if (cachedNtkApp) return cachedNtkApp;
+/**
+ * Open a connection this process owns. The wrapper is here for one reason:
+ * to say what is wrong when there is no server, which is the first thing
+ * anyone hits and the least self-explanatory failure in the library.
+ */
+async function connect(options) {
   try {
-    cachedNtkApp = await createClient();
+    return await createClient(options);
   } catch (err) {
+    const display = options.display ?? process.env.DISPLAY ?? '<unset>';
     throw new Error(
       'react-x11: could not connect to the X server. Is an X server running ' +
-        `and DISPLAY set (DISPLAY=${process.env.DISPLAY || '<unset>'})? ` +
-        'Original error: ' +
+        `and DISPLAY set (DISPLAY=${display})? Original error: ` +
         err.message,
     );
   }
+}
+
+async function connectApp() {
+  if (cachedNtkApp) return cachedNtkApp;
+  cachedNtkApp = await connect({});
   return cachedNtkApp;
+}
+
+/** An ntk App, told apart from an options bag by what only an App has. */
+const isNtkApp = (v) =>
+  Boolean(v) && typeof v.createWindow === 'function' && typeof v.X === 'object';
+
+// What a root that opens its own connection forwards to ntk. `stream` is
+// how you reach a server that is not on the other end of $DISPLAY — an
+// in-process one, a tunnel — and is what the tests connect through.
+const CONNECT_OPTIONS = [
+  'display',
+  'stream',
+  'fontSource',
+  'glxVisual',
+  'onXError',
+];
+
+const DEFAULT_ERROR_HANDLERS = {
+  onUncaughtError: (error) => console.error('react-x11: uncaught error', error),
+  onCaughtError: (error) => console.error('react-x11: caught error', error),
+  onRecoverableError: (error) =>
+    console.error('react-x11: recoverable error', error),
+};
+
+/**
+ * The connection ended without us asking. `end` is the stream closing —
+ * server exit, ssh drop, kill. An `error` may be either a transport failure
+ * or an X protocol error ntk already reports through `onXError`; only the
+ * former ends the connection, and only it carries no `majorOpcode`.
+ */
+function watchConnection(app, onDisconnect, deliberate) {
+  let done = false;
+  const fire = (reason, err) => {
+    if (done || deliberate()) return;
+    done = true;
+    onDisconnect(reason, err);
+  };
+  app.X.on('end', () => fire('closed'));
+  app.X.on('error', (err) => {
+    if (err?.majorOpcode === undefined) fire('error', err);
+  });
 }
 
 function renderIntoContainer(element, container, callback) {
@@ -509,22 +559,73 @@ export function render(element, callback, container) {
 }
 
 /**
- * Modern entry point:
+ * The entry point:
  *
- *   const root = await createRoot();       // connects via DISPLAY
+ *   const root = await createRoot();                 // connects via $DISPLAY
+ *   const root = await createRoot({ display: ':1' });
+ *   const root = await createRoot({ app });          // a connection you have
  *   root.render(<App />);
+ *   await root.unmount();
  *
- * Pass an ntk App (or a mock) to render into an existing connection.
+ * Every root without `app` opens **its own** connection and owns it, so two
+ * roots are two independent trees; `unmount()` closes what it opened. A root
+ * given an `app` borrows it and never closes it — that connection belongs to
+ * whoever made it.
+ *
+ * `display`, `fontSource`, `glxVisual` and `onXError` go straight to ntk.
+ * Anything else ntk understands, build the client yourself and pass `app`.
  */
-export async function createRoot(container) {
-  const app = container ?? (await connectApp());
+export async function createRoot(options = {}) {
+  if (isNtkApp(options)) {
+    throw new Error(
+      'react-x11: createRoot takes an options object — pass the connection ' +
+        'as createRoot({ app }).',
+    );
+  }
+  const { app: borrowed, onDisconnect, ...rest } = options;
+  const owned = borrowed === undefined;
+  const app = owned
+    ? await connect(
+        Object.fromEntries(
+          CONNECT_OPTIONS.filter((k) => rest[k] !== undefined).map((k) => [
+            k,
+            rest[k],
+          ]),
+        ),
+      )
+    : borrowed;
+
+  const container = Renderer.createContainer(
+    app,
+    ConcurrentRoot,
+    null,
+    false,
+    null,
+    '',
+    rest.onUncaughtError ?? DEFAULT_ERROR_HANDLERS.onUncaughtError,
+    rest.onCaughtError ?? DEFAULT_ERROR_HANDLERS.onCaughtError,
+    rest.onRecoverableError ?? DEFAULT_ERROR_HANDLERS.onRecoverableError,
+    null,
+  );
+
+  let unmounted = false;
+  if (onDisconnect) watchConnection(app, onDisconnect, () => unmounted);
+
   return {
     app,
     render(element, callback) {
-      renderIntoContainer(element, app, callback);
+      Renderer.updateContainerSync(element, container, null, () => {
+        callback?.(Renderer.getPublicRootInstance(container), app);
+      });
+      Renderer.flushSyncWork();
     },
-    unmount() {
-      unmountComponentAtNode(app);
+    /** Unmounts, then closes the connection unless `app` was passed in. */
+    async unmount() {
+      if (unmounted) return;
+      unmounted = true;
+      Renderer.updateContainerSync(null, container, null, null);
+      Renderer.flushSyncWork();
+      if (owned) await app.close();
     },
   };
 }
