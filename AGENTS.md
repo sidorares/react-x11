@@ -426,6 +426,26 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   reason: a scrollview's content extent is not what reaches the surface, and
   mid-scroll it can be ninety thousand pixels away.
 
+  On top of that bound sits the **scroll-blit fast path** (issue #138,
+  `_applyScrollBlits`): when a frame is a _pure_ single-axis scroll of one
+  viewport, the surviving band is `CopyArea`'d inside ntk's backing pixmap
+  (`Window.scrollRegion`, ntk >= 4.3, feature-detected) and the frame's
+  damage narrows to the exposed strip plus the scrollbar repair rects — per
+  wheel notch on a 500-row list that is 44 requests and 0.065 Mpx of
+  Composite work instead of 89 and 0.33. Everything about it is a gate that
+  falls back to the plain repaint: too-small viewports and page-sized jumps
+  are not worth the bookkeeping (`SCROLL_BLIT_MIN_AREA`,
+  `SCROLL_BLIT_MIN_KEEP`), fractional offsets and diagonal deltas cannot
+  blit, any other claim near the viewport (checked at `invalidate` time,
+  _before_ rects coalesce and hide it), a border/borderRadius on the
+  scrollview, an overlapping non-descendant, a debug overlay or DevTools
+  highlight all bail. The invariant, pinned by a pixel test in
+  `test/scroll-blit.test.js`, is that a blitted frame is byte-identical to
+  the repaint it replaced; `REACT_X11_NO_SCROLL_BLIT=1` turns the path off
+  for A/B measurement and as field first aid. The bench's scroll scenario
+  measures the _fallback_ (CI installs ntk from npm) — re-save the baseline
+  when the ntk floor gains `scrollRegion`, so the diff records the win.
+
   **Where scrolling actually spent its time was neither of those.** Profiling a
   50,000-row table found the cost in ntk's `clip()`: intersecting a clip
   allocated a full-surface a8 pixmap, rasterized into it and composited the

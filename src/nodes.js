@@ -112,6 +112,72 @@ const INVALIDATE_REASONS = new Set([
 // property write.
 const EMPTY_REASONS = Object.freeze([]);
 
+// --- scroll blitting (issue #138) ---------------------------------------
+//
+// A pure-scroll frame does not have to repaint the viewport: the band that
+// stays visible is already in ntk's backing pixmap, one CopyArea away from
+// its new position (ntk >= 4.3, Window.scrollRegion). The frame then only
+// repaints the strip the scroll exposed, plus the scrollbar tracks. The
+// gates below decide when that is safe *and* worth it; every failure falls
+// back to today's full-viewport repaint, so the fast path can cost
+// correctness nothing — the worst mistake it can make is not firing.
+
+// Below this viewport area a repaint is one cheap pass and the blit's
+// bookkeeping (a safety walk over the tree, extra damage rects, an extra
+// request) costs more than it saves.
+const SCROLL_BLIT_MIN_AREA = 48 * 1024;
+
+// Escape hatch, read once like the other switches: for measuring the blit
+// against the plain path on the same build, and as first aid if a scroll
+// ever misrenders in the field.
+const NO_SCROLL_BLIT = Boolean(process.env.REACT_X11_NO_SCROLL_BLIT);
+
+// If less than this fraction of the viewport survives the shift, the
+// exposed strip is most of a repaint anyway.
+const SCROLL_BLIT_MIN_KEEP = 0.5;
+
+const rectContains = (outer, inner) =>
+  outer.x <= inner.x &&
+  outer.y <= inner.y &&
+  outer.x + outer.width >= inner.x + inner.width &&
+  outer.y + outer.height >= inner.y + inner.height;
+
+const isIntegerRect = (r) =>
+  Number.isInteger(r.x) &&
+  Number.isInteger(r.y) &&
+  Number.isInteger(r.width) &&
+  Number.isInteger(r.height);
+
+/** `rect` shrunk by `by` on every side. */
+function insetRect(rect, by) {
+  return {
+    x: rect.x + by,
+    y: rect.y + by,
+    width: rect.width - 2 * by,
+    height: rect.height - 2 * by,
+  };
+}
+
+/** The full track strip a scrollbar occupies (thumb travel included), with
+ * a pixel of slop for the thumb's antialiased corners. */
+function scrollbarTrackRect(bar) {
+  const rect =
+    bar.axis === 'x'
+      ? {
+          x: bar.trackStart,
+          y: bar.crossStart,
+          width: bar.trackLength,
+          height: SCROLLBAR_WIDTH,
+        }
+      : {
+          x: bar.crossStart,
+          y: bar.trackStart,
+          width: SCROLLBAR_WIDTH,
+          height: bar.trackLength,
+        };
+  return insetRect(rect, -1);
+}
+
 // REACT_X11_DEBUG_PAINT: each frame strokes its damage rects in the next of
 // these, so a region repainting every frame strobes visibly.
 const FLASH_COLORS = [
@@ -1740,6 +1806,18 @@ export class ScrollViewNode extends Node {
           : clampScroll(want.y, this._maxScroll('y')),
     };
     if (next.x === this.scrollX && next.y === this.scrollY) return;
+    const root = this.root;
+    if (root) {
+      // The offsets whose pixels are on screen, captured before the first
+      // change of the frame: the frame's blit fast path (issue #138) shifts
+      // from *these* to wherever layout settles, however many scrollTo
+      // calls land in between.
+      this._pendingBlitFrom ??= { x: this.scrollX, y: this.scrollY };
+      (root._pendingScrolls ??= new Set()).add(this);
+      // ... and the claim about to be recorded is the scroll itself, not a
+      // reason to un-blit it
+      root._scrollClaim = this;
+    }
     this.scrollX = next.x;
     this.scrollY = next.y;
     this.props.onScroll?.({
@@ -1755,8 +1833,11 @@ export class ScrollViewNode extends Node {
     // layout change all the same — children's absolute positions move — hence
     // both arguments. Unbounded, every wheel notch repainted the whole window,
     // which is the whole cost of scrolling: the client work is negligible next
-    // to what the server then has to redraw.
+    // to what the server then has to redraw. (When the frame turns out to be
+    // a *pure* scroll, _applyScrollBlits later narrows this claim to the
+    // exposed strip and blits the rest — see WindowNode.)
     this.root?.invalidate(true, this, 'scroll');
+    if (root) root._scrollClaim = null;
   }
 
   /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. */
@@ -3632,6 +3713,29 @@ export class WindowNode extends Node {
         stack: new Error('invalidated here').stack,
       };
     }
+    // A claim near a viewport that is waiting to blit makes that frame no
+    // longer a pure scroll — checked here, at claim time, because once the
+    // rects coalesce a change inside the viewport is indistinguishable from
+    // the scroll's own claim. (Unbounded claims need no check: FULL_DAMAGE
+    // fails the blit's damage gate by itself.)
+    const pendingScrolls = this._pendingScrolls;
+    if (
+      pendingScrolls?.size &&
+      damage &&
+      damage !== NO_DAMAGE &&
+      this._scrollClaim !== damage
+    ) {
+      const rect = damage.paintBounds ? damage.paintBounds() : damage;
+      for (const sv of [...pendingScrolls]) {
+        if (
+          !sv.abs ||
+          rectsOverlap(rect, insetRect(sv.abs, -(DAMAGE_SLOP * 2 + 1)))
+        ) {
+          pendingScrolls.delete(sv);
+          sv._pendingBlitFrom = null;
+        }
+      }
+    }
     if (layoutChanged && !damage) this._damage = FULL_DAMAGE;
     else if (!layoutChanged && !damage) this._damage = FULL_DAMAGE;
     else if (this._damage !== FULL_DAMAGE) {
@@ -3689,6 +3793,10 @@ export class WindowNode extends Node {
     } else if (this._reflowed.size) {
       this._reflowed.clear();
     }
+    // after layout (the claims above included), before the damage is taken:
+    // a frame that turns out to be a pure scroll blits the surviving band
+    // and narrows its claim to the exposed strip
+    this._applyScrollBlits(width, height);
     if (!this.needsPaint) return;
     this.needsPaint = false;
     const damage = this._takeDamage(width, height);
@@ -3729,6 +3837,198 @@ export class WindowNode extends Node {
         end: performance.now(),
       });
     }
+  }
+
+  /**
+   * The scroll-blit fast path (issue #138): when the frame is a *pure*
+   * scroll of one viewport, ask ntk to CopyArea the band that stays visible
+   * into its new place inside the backing store, and narrow this frame's
+   * damage from the whole viewport to the strip the scroll exposed (plus
+   * the scrollbar tracks, whose pixels the blit dragged along).
+   *
+   * Everything here is a gate, cheapest first, and every gate falls back to
+   * the claim scrollTo already recorded — the full-viewport repaint that
+   * has always been the behavior. The fast path can therefore cost
+   * correctness nothing: the worst mistake it can make is not firing.
+   */
+  _applyScrollBlits(width, height) {
+    const pending = this._pendingScrolls;
+    if (!pending?.size) return;
+    const nodes = [...pending];
+    pending.clear();
+    const from = nodes[0]._pendingBlitFrom;
+    for (const n of nodes) n._pendingBlitFrom = null;
+    // two viewports scrolling in one frame is rare enough that sorting out
+    // whether their regions interact is not worth it
+    if (nodes.length !== 1) return;
+    const node = nodes[0];
+    if (NO_SCROLL_BLIT || !from || node.destroyed || node.root !== this) return;
+    const wnd = this.window;
+    if (typeof wnd?.scrollRegion !== 'function') return; // ntk without #139
+    // the debug overlays and the DevTools highlight draw over the whole
+    // window; a blit would drag shifted copies of them along
+    if (debugPaint || process.env.REACT_X11_DEBUG_LAYOUT || this._highlight) {
+      return;
+    }
+    if (!Array.isArray(this._damage)) return; // unbounded frame already
+    // children clip to the border box, so a border ring or rounded corner
+    // would be shifted like content
+    if (node.style.borderWidth > 0 || node.style.borderRadius > 0) return;
+    const vp = node.abs;
+    // fractional geometry or offsets change every pixel; only a whole-pixel
+    // shift is a copy
+    if (!isIntegerRect(vp)) return;
+    if (!Number.isInteger(from.x) || !Number.isInteger(from.y)) return;
+    const dx = node.scrollX - from.x;
+    const dy = node.scrollY - from.y;
+    if (!Number.isInteger(dx) || !Number.isInteger(dy)) return;
+    if (dx === 0 && dy === 0) return;
+    // one axis at a time: a diagonal scroll needs an L of strips whose
+    // pieces overlap the bar rects, and overlapping damage rects merge into
+    // their box (translucent paint must not run twice) — the merges balloon
+    // toward the whole viewport and the blit stops paying. Wheels scroll
+    // one axis per event, so this costs almost nothing real.
+    if (dx !== 0 && dy !== 0) return;
+    if (Math.abs(dx) >= vp.width || Math.abs(dy) >= vp.height) return;
+    // the worth-it heuristics: below these, the plain repaint is one cheap
+    // pass and the blit's bookkeeping outweighs it
+    const area = vp.width * vp.height;
+    if (area < SCROLL_BLIT_MIN_AREA) return;
+    const kept = (vp.width - Math.abs(dx)) * (vp.height - Math.abs(dy));
+    if (kept < area * SCROLL_BLIT_MIN_KEEP) return;
+    // the band shifts in from inside the window; a viewport poking out of
+    // it has nothing there to shift
+    if (
+      vp.x < 0 ||
+      vp.y < 0 ||
+      vp.x + vp.width > width ||
+      vp.y + vp.height > height
+    ) {
+      return;
+    }
+    // A pure scroll and nothing else: the frame's only claim touching the
+    // viewport must be the viewport claim itself (scrollTo's, with its
+    // slop). Any other rect reaching in — a virtualized table's row swap, a
+    // hover restyle mid-scroll — means content changed, and changed pixels
+    // must not be blitted around.
+    const keep = [];
+    let sawClaim = false;
+    const slopped = insetRect(vp, -(DAMAGE_SLOP + 1));
+    for (const rect of this._damage) {
+      if (!rectsOverlap(rect, vp)) {
+        keep.push(rect);
+        continue;
+      }
+      if (rectContains(rect, vp) && rectContains(slopped, rect)) {
+        sawClaim = true;
+        continue;
+      }
+      return;
+    }
+    if (!sawClaim) return;
+    if (!this._scrollBlitSafe(node, vp)) return;
+    // scroll offsets grow down/right; the pixels move the other way
+    // (0 - x rather than -x: negating +0 yields -0, which survives into
+    // request buffers and test comparisons)
+    if (!wnd.scrollRegion({ ...vp }, 0 - dx, 0 - dy)) return;
+    let rects = keep;
+    // the strip the shift exposed, full breadth — it also covers the corner
+    // gutter beside the bars, whose old pixels the blit did not overwrite
+    const axis = dy !== 0 ? 'y' : 'x';
+    const delta = dy !== 0 ? dy : dx;
+    rects = addDamageRect(
+      rects,
+      axis === 'y'
+        ? {
+            x: vp.x,
+            y: delta > 0 ? vp.y + vp.height - delta : vp.y,
+            width: vp.width,
+            height: Math.abs(delta),
+          }
+        : {
+            x: delta > 0 ? vp.x + vp.width - delta : vp.x,
+            y: vp.y,
+            width: Math.abs(delta),
+            height: vp.height,
+          },
+    );
+    // Scrollbar repair. The scrolled axis's thumb moved *and* the blit
+    // dragged a copy of the old thumb along: repaint the dragged copy's
+    // rect and the new thumb's rect — small rects, where the full track
+    // would run the viewport's whole length and merge with the strip into
+    // most of the viewport. The cross-axis bar did not move, but its band's
+    // pixels were shifted like everything else, so its track repaints
+    // whole; it lies along the strip, so their merge stays a band.
+    const scrolledBar = node._scrollbar(axis);
+    if (scrolledBar) {
+      const savedX = node.scrollX;
+      const savedY = node.scrollY;
+      node.scrollX = from.x;
+      node.scrollY = from.y;
+      const oldBar = node._scrollbar(axis);
+      node.scrollX = savedX;
+      node.scrollY = savedY;
+      if (oldBar) {
+        rects = addDamageRect(rects, {
+          x: oldBar.x - 1 - dx,
+          y: oldBar.y - 1 - dy,
+          width: oldBar.width + 2,
+          height: oldBar.height + 2,
+        });
+      }
+      rects = addDamageRect(rects, {
+        x: scrolledBar.x - 1,
+        y: scrolledBar.y - 1,
+        width: scrolledBar.width + 2,
+        height: scrolledBar.height + 2,
+      });
+    }
+    const crossBar = node._scrollbar(axis === 'y' ? 'x' : 'y');
+    if (crossBar) rects = addDamageRect(rects, scrollbarTrackRect(crossBar));
+    this._damage = rects;
+  }
+
+  /**
+   * May the viewport's pixels be moved wholesale? Only if every pixel in it
+   * belongs to the scrolled content (or to a plain solid fill behind it):
+   * any node outside the scrollview's subtree whose drawing reaches into
+   * the viewport — an overlapping sibling, an ancestor's border ring or
+   * rounded corner, an enclosing scrollview's scrollbar — would have its
+   * pixels dragged along by the blit, so any of them is a no.
+   */
+  _scrollBlitSafe(scrollview, vp) {
+    const ancestors = new Set();
+    for (let n = scrollview.parent; n && n !== this; n = n.parent) {
+      ancestors.add(n);
+    }
+    const check = (parent) => {
+      for (const child of parent.children) {
+        if (child === scrollview) continue; // the scrolled content itself
+        if (child.isWindow || !child.yoga || child.hidden) continue;
+        if (child.style?.display === 'none') continue;
+        if (ancestors.has(child)) {
+          // on the path down: its solid background under the viewport is
+          // translation-invariant, its border ring and corners are not
+          const inset = Math.max(
+            child.style?.borderWidth ?? 0,
+            child.style?.borderRadius ?? 0,
+          );
+          if (inset > 0 && !rectContains(insetRect(child.abs, inset), vp)) {
+            return false;
+          }
+          if (typeof child._scrollbars === 'function') {
+            for (const bar of child._scrollbars()) {
+              if (rectsOverlap(scrollbarTrackRect(bar), vp)) return false;
+            }
+          }
+          if (!check(child)) return false;
+          continue;
+        }
+        if (rectsOverlap(child._subtreeBounds(), vp)) return false;
+      }
+      return true;
+    };
+    return check(this);
   }
 
   /** Repaint one damage rect, or the whole window when `damage` is null. */

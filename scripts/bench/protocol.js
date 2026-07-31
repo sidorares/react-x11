@@ -59,10 +59,18 @@ async function connect() {
 const settle = (app) =>
   new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
 
-/** Run `fn`, measuring only what it causes (setup is drained first). */
+/** Run `fn`, measuring only what it causes (setup is drained first). A
+ * scenario may be `{ prepare, run }`: `prepare` builds state — a mounted
+ * tree, say — whose cost is drained and *not* measured, so `run` can time
+ * an interaction rather than a mount. */
 async function measure(name, fn) {
   const { app, stats } = await connect();
   await settle(app);
+  if (typeof fn !== 'function') {
+    await fn.prepare(app);
+    await settle(app);
+    fn = fn.run;
+  }
   const mark = {
     requests: stats.requests,
     bytesOut: stats.bytesOut,
@@ -235,6 +243,72 @@ const SCENARIOS = [
       );
       await new Promise((r) => setImmediate(r));
     },
+  ],
+  [
+    // Ten wheel notches over a long list, mounted and settled beforehand so
+    // only the scrolling is measured. This is the scenario the scroll-blit
+    // fast path (issue #138) exists for: with an ntk that has
+    // Window.scrollRegion the surviving band is CopyArea'd and only the
+    // exposed strip repaints; without one it falls back to repainting the
+    // viewport each notch. The committed baseline is the fallback (CI
+    // installs ntk from npm) — re-save it when the ntk floor gains
+    // scrollRegion, so the diff records the win.
+    'scroll: 10 notches over 500 rows',
+    (() => {
+      let root;
+      const frame = () => {
+        root._scheduled = false;
+        root.flush();
+      };
+      return {
+        prepare: async (app) => {
+          const instance = await new Promise((resolve) =>
+            ReactX11.render(
+              React.createElement(
+                'window',
+                { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+                React.createElement(
+                  'scrollview',
+                  { style: { flexGrow: 1 } },
+                  Array.from({ length: 500 }, (_, i) =>
+                    React.createElement(
+                      'box',
+                      {
+                        key: i,
+                        style: {
+                          flexDirection: 'row',
+                          flexShrink: 0,
+                          gap: 6,
+                          padding: 4,
+                          backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+                        },
+                      },
+                      React.createElement(
+                        'text',
+                        { style: { fontSize: 11 } },
+                        `row ${i}: the quick brown fox`,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              resolve,
+              app,
+            ),
+          );
+          root = instance._reactX11Node;
+          frame();
+        },
+        run: async (app) => {
+          const scroller = root.children[0];
+          for (let i = 0; i < 10; i++) {
+            scroller.scrollBy(48);
+            frame();
+            await new Promise((resolve) => app.X.GetInputFocus(resolve));
+          }
+        },
+      };
+    })(),
   ],
 ];
 

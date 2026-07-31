@@ -193,6 +193,13 @@ export function createMockApp() {
         getContext() {
           return ctx;
         },
+        // ntk >= 4.3 (sidorares/ntk#139): the scroll-blit fast path. Records
+        // and accepts; a test wanting the fallback deletes the method or
+        // replaces it with one returning false.
+        scrollRegion(rect, dx, dy) {
+          wnd.calls.push(['scrollRegion', rect, dx, dy]);
+          return true;
+        },
         on(name, fn) {
           (handlers[name] ??= []).push(fn);
         },

@@ -32,11 +32,19 @@
     "compositePixels": 224800
   },
   "mount: window with 40 boxes and labels": {
-    "requests": 86,
-    "bytesOut": 3652,
-    "bytesIn": 160,
-    "replies": 3,
+    "requests": 89,
+    "bytesOut": 3752,
+    "bytesIn": 192,
+    "replies": 4,
     "composites": 21,
     "compositePixels": 298240
+  },
+  "scroll: 10 notches over 500 rows": {
+    "requests": 887,
+    "bytesOut": 40772,
+    "bytesIn": 704,
+    "replies": 22,
+    "composites": 211,
+    "compositePixels": 3282640
   }
 }
