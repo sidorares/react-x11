@@ -18,6 +18,33 @@ events dispatched over the drawn node tree with DOM-like semantics.
 `ev.stopPropagation()` stops the walk. Handlers always read from current
 props — they can never go stale.
 
+### When a handler throws
+
+**No error boundary can catch it.** A boundary only sees throws React
+itself invoked, and a handler runs from an X event, so React is not on the
+stack. react-x11 therefore catches it at the dispatcher: the error is
+reported with the element, the handler name and the component that rendered
+the node, `process.exitCode` is set to 1 so the crash is still visible to CI
+and to a supervisor, and **dispatch continues** — one bad tooltip handler
+must not stop the handlers after it, or the frame loop.
+
+```
+react-x11: onClick on <box> in Panel threw. It ran from an X event rather
+than a render, so no error boundary could catch it; dispatch continues.
+```
+
+`createRoot({ onUncaughtError })` takes it over completely, which is the
+point of it being overridable: for a kiosk, crashing loudly is correct.
+
+```js
+const root = await createRoot({
+  onUncaughtError: (error, info) => {
+    telemetry.report(error, info.componentStack);
+    process.exit(1);
+  },
+});
+```
+
 ## Event object
 
 ```

@@ -27,6 +27,7 @@ import {
   resolveSizeQueries,
 } from './styles.js';
 import { EventManager } from './events.js';
+import { callHandler } from './errors.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import {
   editMenuColors,
@@ -3180,7 +3181,8 @@ export class WindowNode extends Node {
         if (this._wmDeleteAtom != null && ev.data?.[0] === this._wmDeleteAtom) {
           // a WM close is a user action: discrete priority, like clicks
           runWithPriority(DiscreteEventPriority, () => {
-            this.props.onCloseRequest?.(ev);
+            const handler = this.props.onCloseRequest;
+            if (handler) callHandler(this, 'onCloseRequest', handler, ev);
           });
         }
       });

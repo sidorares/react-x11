@@ -59,7 +59,7 @@ belongs to whoever made it.
 | `fontSource`                                           | pluggable system-font lookup — ntk's docs/fonts.md      |
 | `glxVisual`                                            | visual id for `getContext('opengl')`                    |
 | `onXError`                                             | X protocol errors nothing claimed. Default warns        |
-| `onUncaughtError` `onCaughtError` `onRecoverableError` | React's error channels; default log                     |
+| `onUncaughtError` `onCaughtError` `onRecoverableError` | `(error, errorInfo)`; default logs the component stack  |
 | `onDisconnect(reason, err)`                            | the connection ended — `'closed'` or `'error'`          |
 
 `display`, `stream`, `fontSource`, `glxVisual` and `onXError` go straight
@@ -75,6 +75,11 @@ const [serverEnd, clientEnd] = xserver.createStreamPair();
 server.addClientStream(serverEnd);
 const root = await createRoot({ stream: clientEnd }); // no $DISPLAY needed
 ```
+
+`onUncaughtError` covers one channel React does not: a throw from an **event
+handler**, which no error boundary can catch because the handler ran from an
+X event rather than a render. See
+[events.md](events.md#when-a-handler-throws).
 
 `onDisconnect` fires when the connection ends without being asked to —
 server exit, ssh drop, kill — and not for one this root closed. It invites
