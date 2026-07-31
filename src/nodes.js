@@ -28,6 +28,7 @@ import {
 } from './styles.js';
 import { EventManager } from './events.js';
 import { callHandler } from './errors.js';
+import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import {
   editMenuColors,
@@ -84,6 +85,43 @@ const NO_DAMAGE = Symbol('no-damage');
 // it — so damage grows by a pixel on each side before anything is culled
 // against it.
 const DAMAGE_SLOP = 1;
+
+// What an invalidate() may name as its reason — a small closed set, so the
+// frame log, the tracer and the full-repaint warning can print "why" next
+// to "where". A typo'd reason would silently vanish from every report, so
+// DEV validates against this list.
+const INVALIDATE_REASONS = new Set([
+  'props', // a React commit changed what a node draws
+  'style-state', // :hover/:focus/:active/:disabled restyle
+  'theme', // a theme/token change restyled a subtree
+  'animation', // a transition frame
+  'scroll', // scrollTo/scrollBy/scrollIntoView, textarea/textinput panning
+  'text', // text content, input value or caret editing
+  'content', // async content arrived (image decode, rich-content reflow)
+  'child-list', // children were added, removed or reordered
+  'focus', // focus moved: ring/caret handover between nodes
+  'caret', // the caret blink timer
+  'resize', // the window changed size
+  'mount', // the window was just realized; its first frame
+  'expose', // ntk asked for a redraw (backing store invalidated)
+  'highlight', // DevTools hover highlight
+]);
+
+// A frame with no recorded reasons shares one frozen empty list, so the
+// per-frame cost of the reason machinery when nothing is reading it is a
+// property write.
+const EMPTY_REASONS = Object.freeze([]);
+
+// REACT_X11_DEBUG_PAINT: each frame strokes its damage rects in the next of
+// these, so a region repainting every frame strobes visibly.
+const FLASH_COLORS = [
+  '#e6194b',
+  '#3cb44b',
+  '#ffe119',
+  '#4363d8',
+  '#f58231',
+  '#911eb4',
+];
 
 // How many rectangles a frame's damage is allowed to hold.
 //
@@ -286,6 +324,15 @@ const DEV = process.env.NODE_ENV !== 'production';
 let now = () => Date.now();
 export function setAnimationClock(fn) {
   now = fn;
+}
+
+// REACT_X11_DEBUG_PAINT, read once: a process.env read is a real
+// environment lookup, and this switch sits on invalidate() and the paint
+// loop — the diagnostics must cost nothing when they are off. Indirected
+// like the animation clock so tests can flip it without a subprocess.
+let debugPaint = process.env.REACT_X11_DEBUG_PAINT || '';
+export function setDebugPaint(mode) {
+  debugPaint = mode || '';
 }
 
 /** Did anything the text stack measures or paints with change? */
@@ -562,7 +609,7 @@ export class Node {
     this._retarget(next);
     // a state block may only set paint properties, so the node's own region
     // is the whole of what changed
-    this.root?.invalidate(false, this);
+    this.root?.invalidate(false, this, 'style-state');
   }
 
   get isWindow() {
@@ -650,7 +697,7 @@ export class Node {
       // the invalidation TextNode.applyProps would have done has to happen
       // here too — otherwise the cached layout keeps painting the old colour
       if (textStyleChanged(this.style, before)) this._textContentChanged();
-      this.root?.invalidate(true);
+      this.root?.invalidate(true, null, 'theme');
     }
     for (const child of this.children) child._themeChanged();
   }
@@ -767,10 +814,10 @@ export class Node {
     const root = this.root;
     if (!root) return;
     if (!this._sizePinned()) {
-      root.invalidate(true);
+      root.invalidate(true, null, 'child-list');
       return;
     }
-    root.invalidate(true, before);
+    root.invalidate(true, before, 'child-list');
     root._reflowed.add(this);
   }
 
@@ -841,6 +888,7 @@ export class Node {
         : this._paintChanged(newProps, prev, style, prevStyle)
           ? this
           : NO_DAMAGE,
+      'props',
     );
   }
 
@@ -885,7 +933,7 @@ export class Node {
           : Yoga.DISPLAY_FLEX,
       );
     }
-    this.root?.invalidate(true);
+    this.root?.invalidate(true, null, 'props');
   }
 
   /**
@@ -1286,7 +1334,7 @@ export class TextChunkNode extends Node {
   setText(text) {
     this.text = String(text);
     this.parent?._textContentChanged();
-    this.root?.invalidate(true);
+    this.root?.invalidate(true, null, 'text');
   }
 
   _textContentChanged() {
@@ -1423,7 +1471,7 @@ export class ImageNode extends Node {
       this.image = image;
       if (this.yoga) {
         this.yoga.markDirty?.();
-        this.root?.invalidate(true);
+        this.root?.invalidate(true, null, 'content');
       }
     } catch (err) {
       console.error(`react-x11: failed to load image ${src}:`, err.message);
@@ -1708,7 +1756,7 @@ export class ScrollViewNode extends Node {
     // both arguments. Unbounded, every wheel notch repainted the whole window,
     // which is the whole cost of scrolling: the client work is negligible next
     // to what the server then has to redraw.
-    this.root?.invalidate(true, this);
+    this.root?.invalidate(true, this, 'scroll');
   }
 
   /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. */
@@ -1731,7 +1779,7 @@ export class ScrollViewNode extends Node {
   scrollIntoView(node) {
     if (!node) return;
     this._scrollIntoViewTarget = node;
-    this.root?.invalidate(true);
+    this.root?.invalidate(true, null, 'scroll');
   }
 
   _resolveScrollIntoView() {
@@ -1855,7 +1903,9 @@ export class CanvasNode extends Node {
     // made every re-render of a component that draws through <canvas> repaint
     // the whole window, which is what a Checkbox's tick and a Select's chevron
     // both do.
-    if (newProps.onDraw !== before.onDraw) this.root?.invalidate(false, this);
+    if (newProps.onDraw !== before.onDraw) {
+      this.root?.invalidate(false, this, 'props');
+    }
   }
 
   _paintContent(ctx) {
@@ -2015,7 +2065,7 @@ export class TextInputNode extends Node {
 
   _repaint() {
     this._caretOn = true;
-    this.root?.invalidate(false, this);
+    this.root?.invalidate(false, this, 'text');
   }
 
   /**
@@ -2556,7 +2606,7 @@ export class TextInputNode extends Node {
           const next = editMenuIndexAt(geometry, mv.y);
           if (next === state.active) return;
           state.active = next;
-          popup.invalidate(false);
+          popup.invalidate(false, null, 'style-state');
         },
         onMouseUp: (mv) => {
           const i = editMenuIndexAt(geometry, mv.y);
@@ -2571,7 +2621,7 @@ export class TextInputNode extends Node {
               state.active,
               k.keysym === XK_DOWN ? 1 : -1,
             );
-            popup.invalidate(false);
+            popup.invalidate(false, null, 'style-state');
             return;
           }
           if (k.keysym === XK_RETURN || k.keysym === XK_KP_ENTER) {
@@ -2629,10 +2679,10 @@ export class TextInputNode extends Node {
       this._caretOn = !this._caretOn;
       // twice a second, forever, for as long as a field has focus: the one
       // repaint that most wants to cost only the field it happens in
-      this.root?.invalidate(false, this);
+      this.root?.invalidate(false, this, 'caret');
     }, 530);
     this._blinkTimer.unref?.();
-    this.root?.invalidate(false, this);
+    this.root?.invalidate(false, this, 'focus');
   }
 
   _defaultBlur() {
@@ -2642,7 +2692,7 @@ export class TextInputNode extends Node {
     this._breakUndoRun();
     clearInterval(this._blinkTimer);
     this._blinkTimer = null;
-    this.root?.invalidate(false, this);
+    this.root?.invalidate(false, this, 'focus');
   }
 
   destroySubtree() {
@@ -2670,9 +2720,9 @@ export class TextInputNode extends Node {
     }
     if (metricsChanged) {
       this.yoga.markDirty();
-      this.root?.invalidate(true);
+      this.root?.invalidate(true, null, 'props');
     } else if (newProps.value !== before.value) {
-      this.root?.invalidate(false);
+      this.root?.invalidate(false, null, 'text');
     }
   }
 
@@ -2798,7 +2848,7 @@ export class TextAreaNode extends TextInputNode {
     const next = Math.min(Math.max(0, y), bar.range);
     if (next === this._scrollY) return;
     this._scrollY = next;
-    this.root?.invalidate(false);
+    this.root?.invalidate(false, null, 'scroll');
   }
 
   constructor(props, app) {
@@ -2856,7 +2906,7 @@ export class TextAreaNode extends TextInputNode {
     super.applyProps(newProps, oldProps);
     if (newProps.rows !== before.rows) {
       this.yoga.markDirty();
-      this.root?.invalidate(true);
+      this.root?.invalidate(true, null, 'props');
     }
   }
 
@@ -2874,7 +2924,7 @@ export class TextAreaNode extends TextInputNode {
     const next = Math.min(Math.max(0, this._scrollY + dy), max);
     if (next === this._scrollY) return;
     this._scrollY = next;
-    this.root?.invalidate(false);
+    this.root?.invalidate(false, null, 'scroll');
   }
 
   /** Visual lines that fit in the viewport — one Page keypress worth. */
@@ -3112,7 +3162,7 @@ export class WindowNode extends Node {
     // ask before anything can be anchored to it, so the first popup is
     // placed as well as the second
     this._refreshScreenOrigin();
-    this.invalidate(true);
+    this.invalidate(true, null, 'mount');
   }
 
   /**
@@ -3224,7 +3274,7 @@ export class WindowNode extends Node {
     if (typeof wnd.on !== 'function') return;
     wnd.on('resize', (ev) => {
       this.needsLayout = true;
-      this.invalidate(true);
+      this.invalidate(true, null, 'resize');
       // a move or a reparent arrives the same way, and either changes where
       // popups anchored to this window belong
       this._refreshScreenOrigin();
@@ -3232,6 +3282,7 @@ export class WindowNode extends Node {
     });
     // the frame clock emits 'draw' when the backing store content is invalid
     wnd.on('draw', () => {
+      (this._frameReasons ??= new Set()).add('expose');
       this.needsPaint = true;
       this.flush();
     });
@@ -3447,6 +3498,7 @@ export class WindowNode extends Node {
     this.invalidate(
       layoutChanged || geometryChanged,
       ownPaintChanged ? this : NO_DAMAGE,
+      'props',
     );
   }
 
@@ -3480,7 +3532,7 @@ export class WindowNode extends Node {
     // invalidate anyway, but a React prop change does not — and a transition
     // no one schedules only runs when something else dirties the window,
     // by which time its start is stale and it snaps to the end.
-    this.invalidate(false, damageForAnimation(node));
+    this.invalidate(false, damageForAnimation(node), 'animation');
   }
 
   /**
@@ -3511,7 +3563,7 @@ export class WindowNode extends Node {
     // claimed too — one just landed on its final value and that last frame
     // still has to paint it, which is why every transition used to end with a
     // full-window repaint.
-    for (const claim of claims) this.invalidate(false, claim);
+    for (const claim of claims) this.invalidate(false, claim, 'animation');
   }
 
   setHidden(hidden) {
@@ -3534,8 +3586,13 @@ export class WindowNode extends Node {
    *    repaints in full. Partial painting is therefore opt-in per call
    *    site, and forgetting to pass a node costs speed rather than
    *    correctness.
+   *
+   * `reason` is one word from INVALIDATE_REASONS saying *why* — purely
+   * diagnostic, collected per frame into `_lastReasons` so the frame log,
+   * REACT_X11_DEBUG_PAINT=full and the tracer can attribute a repaint.
+   * Omitting it costs nothing but attribution.
    */
-  invalidate(layoutChanged, damage = null) {
+  invalidate(layoutChanged, damage = null, reason = null) {
     if (this.destroyed || !this.window) return;
     if (!layoutChanged && damage === NO_DAMAGE) {
       // Nothing this node draws changed, so it contributes no region — and
@@ -3549,6 +3606,14 @@ export class WindowNode extends Node {
       // change records its own region and schedules its own frame.
       return;
     }
+    if (reason) {
+      if (DEV && !INVALIDATE_REASONS.has(reason)) {
+        console.warn(
+          `react-x11: invalidate() got unknown reason ${JSON.stringify(reason)}`,
+        );
+      }
+      (this._frameReasons ??= new Set()).add(reason);
+    }
     if (layoutChanged) this.needsLayout = true;
     // A layout change with no bound named repaints everything, because a
     // reflow can move any node and one that moved leaves stale pixels at a
@@ -3558,6 +3623,15 @@ export class WindowNode extends Node {
     // so both the old and the new position of anything that moved are inside
     // the bound. Scrolling is the case that matters: it reflows a viewport's
     // contents and nothing else, and it happens at input rate.
+    if (!damage && this._damage !== FULL_DAMAGE && debugPaint === 'full') {
+      // This call is what makes the coming frame unbounded, so this stack —
+      // not flush's — is the one that answers "who repainted the window".
+      // Captured only under the debug switch: stacks are not free.
+      this._fullRepaintCause = {
+        reason: reason ?? '(no reason given)',
+        stack: new Error('invalidated here').stack,
+      };
+    }
     if (layoutChanged && !damage) this._damage = FULL_DAMAGE;
     else if (!layoutChanged && !damage) this._damage = FULL_DAMAGE;
     else if (this._damage !== FULL_DAMAGE) {
@@ -3618,10 +3692,26 @@ export class WindowNode extends Node {
     if (!this.needsPaint) return;
     this.needsPaint = false;
     const damage = this._takeDamage(width, height);
+    if (debugPaint === 'full' && !damage && width > 0 && height > 0) {
+      // Silent full-window repaints are the perf bug class this renderer
+      // actually has (see AGENTS.md); this is what surfaces them. The stack
+      // is the invalidate() call that made the frame unbounded, not this
+      // flush — flush is always the same place.
+      const cause = this._fullRepaintCause;
+      console.warn(
+        `react-x11: full-window repaint (${width}x${height}) ` +
+          `reasons=${this._lastReasons?.join('+') || '(none)'}` +
+          (cause ? `\n${cause.stack}` : ''),
+      );
+    }
+    this._fullRepaintCause = null;
     if (typeof this.window.getContext !== 'function') return; // headless mock
     // ntk getContext creates a fresh context (with window-event
     // subscriptions) on every call — cache one per window
     const ctx = (this._ctx ??= this.window.getContext('2d'));
+    const frameHook = traceHooks.frame;
+    const started = frameHook ? performance.now() : 0;
+    if (debugPaint) this._flashTick = (this._flashTick ?? 0) + 1;
     // One pass per damage rect, and a single pass over the whole window when
     // there is no bound. Each pass clips to one rect rather than to all of
     // them at once, which is what keeps ntk's server-side rectangular-clip
@@ -3629,6 +3719,15 @@ export class WindowNode extends Node {
     // falls back to rasterizing a full-surface mask.
     for (const rect of damage ?? [null]) {
       this._paintRegion(ctx, rect, width, height);
+    }
+    if (frameHook) {
+      frameHook({
+        root: this,
+        rects: damage,
+        reasons: this._lastReasons,
+        start: started,
+        end: performance.now(),
+      });
     }
   }
 
@@ -3664,6 +3763,19 @@ export class WindowNode extends Node {
         ctx.fillStyle = 'rgba(41, 128, 185, 0.35)';
         ctx.fillRect(r.x, r.y, r.width, r.height);
       }
+      if (debugPaint) {
+        // Stroke the pass's rect in this frame's colour ("repaint rainbow"):
+        // a region repainting every frame strobes, one that repaints once
+        // leaves a single outline behind. Inset a pixel so the stroke
+        // survives the clip on all four sides.
+        const r = damage ?? { x: 0, y: 0, width, height };
+        ctx.strokeStyle =
+          FLASH_COLORS[(this._flashTick ?? 0) % FLASH_COLORS.length];
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.rect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
+        ctx.stroke();
+      }
     } finally {
       this._paintDamage = null;
       if (damage) ctx.restore();
@@ -3686,8 +3798,17 @@ export class WindowNode extends Node {
     // REACT_X11_DEBUG_LAYOUT to report; null means it repainted everything.
     // `_lastDamage` is the box around the rects, which is what a caller
     // wanting one number for "where did this frame paint" means by it.
+    // `_lastReasons` is why: every reason invalidate() was given since the
+    // previous frame, for the frame log and the full-repaint warning.
     this._lastDamage = null;
     this._lastDamageRects = null;
+    const reasons = this._frameReasons;
+    if (reasons?.size) {
+      this._lastReasons = [...reasons];
+      reasons.clear();
+    } else {
+      this._lastReasons = EMPTY_REASONS;
+    }
     if (damage === FULL_DAMAGE || !damage) return null;
     const rects = [];
     for (const claimed of damage) {
@@ -3725,7 +3846,7 @@ export class WindowNode extends Node {
   setHighlight(node) {
     if (this._highlight === node) return;
     this._highlight = node;
-    this.invalidate(false);
+    this.invalidate(false, null, 'highlight');
   }
 
   /** REACT_X11_DEBUG_LAYOUT=1: outline every drawn node, color by depth. */

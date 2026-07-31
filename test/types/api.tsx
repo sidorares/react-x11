@@ -7,6 +7,7 @@
  * thing that keeps hand-written declarations honest.
  */
 import React, { useRef, useState } from 'react';
+import { startTrace } from 'react-x11/debug';
 import {
   Button,
   Canvas3D,
@@ -391,6 +392,17 @@ async function main() {
   render(<Popup />, () => {}, root.app);
   render(<Events />, () => {}, root.app);
   unmountComponentAtNode(root.app);
+
+  // react-x11/debug — the protocol tracer
+  const trace = startTrace({ sink: 'chrome', path: '/tmp/t.json' });
+  const everything = startTrace();
+  const one = startTrace({ app: root.app, seq2stack: true });
+  const stats = trace.stop();
+  const n: number = stats.requests + stats.bytesOut + stats.replies;
+  const perOpcode: Map<string, number> = everything.stop().byOpcode;
+  // @ts-expect-error — not a sink
+  startTrace({ sink: 'xml' });
+  void [n, perOpcode, one.stats.errors, one.stop()];
 }
 
 void main;

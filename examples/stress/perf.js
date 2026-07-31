@@ -110,7 +110,11 @@ export function watchFrames(root, { label = '', quiet = 0 } = {}) {
     totalMs += ms;
 
     if (area >= quiet) {
-      const line = `${fmt(rects)}  ${(area / 1000).toFixed(1)}kpx  ${ms.toFixed(1)}ms`;
+      // why the frame happened, from invalidate()'s reason argument
+      const why = root._lastReasons?.length
+        ? `  [${root._lastReasons.join('+')}]`
+        : '';
+      const line = `${fmt(rects)}  ${(area / 1000).toFixed(1)}kpx  ${ms.toFixed(1)}ms${why}`;
       if (line === lastLine) repeats += 1;
       else {
         flushRepeats();
