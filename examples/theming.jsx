@@ -113,125 +113,123 @@ export function ThemingPanel() {
   const theme = themeFor(name, mode);
 
   return (
-    // the palette lands twice on purpose: ThemeProvider is how the widgets
-    // read it, `theme` is how `$canvas` and `$panel` below resolve
-    <ThemeProvider value={theme}>
-      <box theme={theme} style={s.root}>
-        <box style={s.bar}>
-          <text style={s.title}>Theme</text>
-          <Select
-            value={name}
-            options={THEME_OPTIONS}
-            onChange={setName}
-            style={{ width: 150 }}
-          />
-          <Button
-            onPress={() => setMode(mode === 'dark' ? 'light' : 'dark')}
-            aria-label="toggle light and dark"
-          >
-            <ModeIcon mode={mode} color={theme.text} />
-          </Button>
-          <box style={s.spacerHide} />
-          <text style={s.caption}>
-            resize me: the gallery splits in two past 620px
-          </text>
-        </box>
+    // one provider, both channels: the widgets read it with useTheme() and
+    // `$canvas`/`$panel` below resolve against the same palette
+    <ThemeProvider value={theme} style={s.root}>
+      <box style={s.bar}>
+        <text style={s.title}>Theme</text>
+        <Select
+          value={name}
+          options={THEME_OPTIONS}
+          onChange={setName}
+          style={{ width: 150 }}
+        />
+        <Button
+          onPress={() => setMode(mode === 'dark' ? 'light' : 'dark')}
+          aria-label="toggle light and dark"
+        >
+          <ModeIcon mode={mode} color={theme.text} />
+        </Button>
+        <box style={s.spacerHide} />
+        <text style={s.caption}>
+          resize me: the gallery splits in two past 620px
+        </text>
+      </box>
 
-        <scrollview style={s.scroller}>
-          <box style={s.gallery}>
-            <box style={s.column}>
-              <box style={s.card}>
-                <text style={s.heading}>Buttons</text>
-                <box style={s.row}>
-                  <Button
-                    primary
-                    label="Primary"
-                    onPress={() => setPresses(presses + 1)}
-                  />
-                  <Button
-                    label="Default"
-                    onPress={() => setPresses(presses + 1)}
-                  />
-                  <Button disabled label="Disabled" />
-                </box>
-                <text style={s.note}>{presses} presses</text>
-              </box>
-
-              <box style={s.card}>
-                <text style={s.heading}>Toggles</text>
-                <Checkbox
-                  checked={agreed}
-                  onChange={setAgreed}
-                  label="Checkbox"
+      <scrollview style={s.scroller}>
+        <box style={s.gallery}>
+          <box style={s.column}>
+            <box style={s.card}>
+              <text style={s.heading}>Buttons</text>
+              <box style={s.row}>
+                <Button
+                  primary
+                  label="Primary"
+                  onPress={() => setPresses(presses + 1)}
                 />
-                <box style={s.row}>
-                  <Switch checked={notify} onChange={setNotify} />
-                  <text style={s.note}>Switch</text>
-                </box>
-                <RadioGroup value={flavour} onChange={setFlavour}>
-                  <Radio value="vanilla" label="Vanilla" />
-                  <Radio value="pistachio" label="Pistachio" />
-                </RadioGroup>
+                <Button
+                  label="Default"
+                  onPress={() => setPresses(presses + 1)}
+                />
+                <Button disabled label="Disabled" />
               </box>
+              <text style={s.note}>{presses} presses</text>
             </box>
 
-            <box style={s.column}>
-              <box style={s.card}>
-                <text style={s.heading}>Ranges</text>
-                <box style={s.row}>
-                  <text style={s.label}>Slider</text>
-                  <Slider
-                    value={volume}
-                    min={0}
-                    max={100}
-                    onChange={setVolume}
-                    style={{ flexGrow: 1 }}
-                  />
-                  <text style={s.note}>{String(volume)}</text>
-                </box>
-                <box style={s.row}>
-                  <text style={s.label}>Progress</text>
-                  <ProgressBar value={volume / 100} style={{ flexGrow: 1 }} />
-                </box>
+            <box style={s.card}>
+              <text style={s.heading}>Toggles</text>
+              <Checkbox
+                checked={agreed}
+                onChange={setAgreed}
+                label="Checkbox"
+              />
+              <box style={s.row}>
+                <Switch checked={notify} onChange={setNotify} />
+                <text style={s.note}>Switch</text>
               </box>
-
-              <box style={[s.card, { flexGrow: 1, minHeight: 0 }]}>
-                <text style={s.heading}>Tabs and input</text>
-                <Tabs
-                  value={tab}
-                  onChange={setTab}
-                  items={[
-                    {
-                      id: 'one',
-                      label: 'First',
-                      content: (
-                        <textinput
-                          placeholder="Type here…"
-                          style={{
-                            borderWidth: theme.borderWidth,
-                            borderColor: theme.border,
-                            borderRadius: theme.radius,
-                            backgroundColor: theme.background,
-                            color: theme.text,
-                            padding: 8,
-                            marginTop: 8,
-                          }}
-                        />
-                      ),
-                    },
-                    {
-                      id: 'two',
-                      label: 'Second',
-                      content: <text style={s.note}>Second panel</text>,
-                    },
-                    { id: 'three', label: 'Disabled', disabled: true },
-                  ]}
-                />
-              </box>
+              <RadioGroup value={flavour} onChange={setFlavour}>
+                <Radio value="vanilla" label="Vanilla" />
+                <Radio value="pistachio" label="Pistachio" />
+              </RadioGroup>
             </box>
           </box>
-        </scrollview>
-      </box>
+
+          <box style={s.column}>
+            <box style={s.card}>
+              <text style={s.heading}>Ranges</text>
+              <box style={s.row}>
+                <text style={s.label}>Slider</text>
+                <Slider
+                  value={volume}
+                  min={0}
+                  max={100}
+                  onChange={setVolume}
+                  style={{ flexGrow: 1 }}
+                />
+                <text style={s.note}>{String(volume)}</text>
+              </box>
+              <box style={s.row}>
+                <text style={s.label}>Progress</text>
+                <ProgressBar value={volume / 100} style={{ flexGrow: 1 }} />
+              </box>
+            </box>
+
+            <box style={[s.card, { flexGrow: 1, minHeight: 0 }]}>
+              <text style={s.heading}>Tabs and input</text>
+              <Tabs
+                value={tab}
+                onChange={setTab}
+                items={[
+                  {
+                    id: 'one',
+                    label: 'First',
+                    content: (
+                      <textinput
+                        placeholder="Type here…"
+                        style={{
+                          borderWidth: theme.borderWidth,
+                          borderColor: theme.border,
+                          borderRadius: theme.radius,
+                          backgroundColor: theme.background,
+                          color: theme.text,
+                          padding: 8,
+                          marginTop: 8,
+                        }}
+                      />
+                    ),
+                  },
+                  {
+                    id: 'two',
+                    label: 'Second',
+                    content: <text style={s.note}>Second panel</text>,
+                  },
+                  { id: 'three', label: 'Disabled', disabled: true },
+                ]}
+              />
+            </box>
+          </box>
+        </box>
+      </scrollview>
     </ThemeProvider>
   );
 }

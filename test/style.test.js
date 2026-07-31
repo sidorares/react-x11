@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import ReactX11, { ThemeProvider, useTheme } from '../src/index.js';
 import { createStyles, flattenStyle, resolveTokens } from '../src/styles.js';
 import { createMockApp, pressButton, moveMouse } from './helpers/mock-app.js';
 
@@ -913,6 +913,172 @@ test('a token change invalidates cached text, not just the style object', async 
     0,
     'the memoised text layout was dropped, so the repaint uses the new colour',
   );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+// --- ThemeProvider ---------------------------------------------------------
+//
+// There are two consumers of a palette and they are not the same mechanism:
+// widgets read React context, and `$token` resolution walks the *node* tree
+// looking for a `theme` prop. `ThemeProvider` has to feed both, or the
+// obvious first thing anyone writes silently paints nothing (#119).
+
+test('ThemeProvider feeds both channels: useTheme and $token read one palette', async () => {
+  const app = createMockApp();
+  const s = createStyles({ card: { backgroundColor: '$accent', flexGrow: 1 } });
+  let fromContext;
+  const Probe = () => {
+    fromContext = useTheme();
+    return h('box', { style: s.card });
+  };
+  ReactX11.render(
+    h(
+      'window',
+      { width: 100, height: 100 },
+      h(ThemeProvider, { value: { accent: '#ff0000' } }, h(Probe)),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  const provided = nodeOf(app).children[0];
+  assert.strictEqual(
+    provided.children[0].style.backgroundColor,
+    '#ff0000',
+    'the provider reached the node tree, not just the context',
+  );
+  assert.strictEqual(fromContext.accent, '#ff0000');
+  assert.strictEqual(
+    fromContext.text,
+    '#2d3436',
+    'a partial palette inherits the rest from the defaults',
+  );
+  assert.strictEqual(
+    provided.props.theme,
+    fromContext,
+    'both channels carry the same object, so the resolution cache holds',
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a nested ThemeProvider merges over the outer one, as a nested theme prop does', async () => {
+  const app = createMockApp();
+  let inner;
+  const Probe = () => {
+    inner = useTheme();
+    return h('box', { style: { backgroundColor: '$accent', flexGrow: 1 } });
+  };
+  ReactX11.render(
+    h(
+      'window',
+      { width: 100, height: 100 },
+      h(
+        ThemeProvider,
+        { value: { accent: '#111111', text: '#222222' } },
+        h(ThemeProvider, { value: { accent: '#333333' } }, h(Probe)),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  assert.strictEqual(inner.accent, '#333333', 'the inner provider wins');
+  assert.strictEqual(inner.text, '#222222', 'and keeps what it did not set');
+  const box = nodeOf(app).children[0].children[0].children[0];
+  assert.strictEqual(box.style.backgroundColor, '#333333', 'tokens agree');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a ThemeProvider above a <window> plants the palette on the window', async () => {
+  // a <window> may not sit inside a box, so the provider cannot wrap one —
+  // it puts the prop on the window instead of coming between them
+  const app = createMockApp();
+  ReactX11.render(
+    h(
+      ThemeProvider,
+      { value: { accent: '#abcdef' } },
+      h(
+        'window',
+        { width: 100, height: 100 },
+        h('box', { style: { backgroundColor: '$accent', flexGrow: 1 } }),
+      ),
+    ),
+    null,
+    app,
+  );
+  await tick();
+
+  const win = nodeOf(app);
+  assert.strictEqual(win.kind, 'window', 'no box came between them');
+  assert.strictEqual(win.children[0].style.backgroundColor, '#abcdef');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a $token with no theme anywhere is reported once, not silently dropped', async () => {
+  const app = createMockApp();
+  const warnings = [];
+  const orig = console.warn;
+  console.warn = (...a) => warnings.push(a.join(' '));
+  try {
+    const render = (color) =>
+      ReactX11.render(
+        h(
+          'window',
+          { width: 100, height: 100 },
+          h('box', {
+            style: { backgroundColor: '$panel', color, flexGrow: 1 },
+          }),
+        ),
+        null,
+        app,
+      );
+    render('red');
+    await tick();
+    render('blue'); // a re-render must not warn again
+    await tick();
+  } finally {
+    console.warn = orig;
+  }
+
+  assert.strictEqual(warnings.length, 1, 'once per node, not once per render');
+  assert.match(warnings[0], /<box> uses \$panel but no theme is in force/);
+  assert.match(warnings[0], /ThemeProvider/, 'it names the fix');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('a popup written under a theme does not trip the no-theme warning', async () => {
+  // a <popup> is its own root from birth and only learns where it was
+  // written when it attaches, so the check has to wait for the commit
+  const app = createMockApp();
+  const warnings = [];
+  const orig = console.warn;
+  console.warn = (...a) => warnings.push(a.join(' '));
+  try {
+    ReactX11.render(
+      h(
+        'window',
+        { width: 200, height: 200, theme: THEME },
+        h(
+          'popup',
+          { x: 0, y: 0, width: 50, height: 50 },
+          h('box', { style: { backgroundColor: '$panel', flexGrow: 1 } }),
+        ),
+      ),
+      null,
+      app,
+    );
+    await tick();
+  } finally {
+    console.warn = orig;
+  }
+  assert.deepStrictEqual(warnings, []);
 
   ReactX11.unmountComponentAtNode(app);
 });

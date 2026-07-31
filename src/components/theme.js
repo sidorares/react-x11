@@ -39,25 +39,72 @@ const DefaultTheme = {
   paddingY: 8,
 };
 
+// Always a complete palette: the context default is the full DefaultTheme
+// and `ThemeProvider` merges before it publishes, so nothing downstream has
+// to merge again.
 const ThemeContext = React.createContext(DefaultTheme);
 
-/** Themes all widgets; partial palettes merge over the defaults. */
-export const ThemeProvider = ThemeContext.Provider;
-
-export const SelectThemeProvider = ThemeContext.Provider; // back-compat alias
+// The provider's box fills its parent, which is what an app-level provider
+// wants; `style` is there for the ones that wrap a single control.
+const FILL = Object.freeze({ flexGrow: 1 });
 
 /**
- * The merged palette. Memoised on the context value because identity now
- * matters: it is planted on each widget's root node as the `theme` prop, and
- * a fresh object every render would re-resolve every `$token` beneath it and
- * defeat the resolution cache.
+ * <ThemeProvider value={palette}> — the palette everything below reads, by
+ * both routes at once. A partial palette merges over the defaults, and over
+ * an outer provider, exactly as a nested `theme` prop merges in the tree.
+ *
+ * There are two consumers and they are not the same mechanism: widgets read
+ * React context through `useTheme()`, while a `$token` in a style resolves
+ * against the nearest `theme` **prop** above the node — resolution walks the
+ * node tree and knows nothing about React. So the provider feeds both: the
+ * merged palette goes on the context *and* onto a real node in the tree.
+ * Skip the second and `<ThemeProvider value={dark}>` over
+ * `<box style={{ color: '$text' }}>` silently paints nothing (#119).
+ */
+export function ThemeProvider({ value, style, children }) {
+  const outer = useContext(ThemeContext);
+  const theme = useMemo(
+    () => (value ? { ...outer, ...value } : outer),
+    [outer, value],
+  );
+  const boxStyle = useMemo(() => (style ? [FILL, style] : FILL), [style]);
+  return h(
+    ThemeContext.Provider,
+    { value: theme },
+    planted(children, theme, boxStyle),
+  );
+}
+
+/**
+ * The node that carries the palette into the tree. Normally a box — but a
+ * `<window>` may only be a root child or nested in another window, never
+ * inside a box, so a provider above one plants the prop on the windows
+ * themselves instead of coming between them. An explicit `theme` on a child
+ * still wins, since that is what it means everywhere else.
+ */
+function planted(children, theme, style) {
+  const kids = React.Children.toArray(children);
+  if (kids.some((k) => React.isValidElement(k) && k.type === 'window')) {
+    return kids.map((k) =>
+      React.isValidElement(k)
+        ? React.cloneElement(k, { theme: k.props.theme ?? theme })
+        : k,
+    );
+  }
+  return h('box', { theme, style }, children);
+}
+
+/**
+ * The palette in force here — already merged over the defaults and over any
+ * outer provider, and the same object the provider planted in the tree, so
+ * `useTheme()` and a `$token` always read one palette.
+ *
+ * Identity matters: widgets plant what this returns on their own root node,
+ * and a fresh object every render would re-resolve every `$token` beneath it
+ * and defeat the resolution cache.
  */
 export function useTheme() {
-  const theme = useContext(ThemeContext);
-  return useMemo(
-    () => (theme === DefaultTheme ? theme : { ...DefaultTheme, ...theme }),
-    [theme],
-  );
+  return useContext(ThemeContext);
 }
 
 /**

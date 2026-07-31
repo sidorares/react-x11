@@ -446,6 +446,17 @@ export function styleUsesTokens(style) {
   return false;
 }
 
+/** Every `$name` a style mentions, for the DEV report when none of them
+ * had a theme to resolve against. */
+export function tokenNames(style, out = new Set()) {
+  for (const key of Object.keys(style)) {
+    const v = style[key];
+    if (isToken(v)) out.add(v);
+    else if (key.charCodeAt(0) === 58 && v) tokenNames(v, out);
+  }
+  return out;
+}
+
 // (style object, theme object) -> resolved style. Two hoisted styles under
 // one theme therefore keep their identity across renders, which is what the
 // `===` fast path in applyProps relies on.

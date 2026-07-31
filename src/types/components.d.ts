@@ -3,7 +3,7 @@
  * `ThemeProvider`. See docs/components.md.
  */
 
-import type { ComponentType, Provider, ReactNode, RefObject } from 'react';
+import type { ComponentType, ReactNode, RefObject } from 'react';
 import type { Color, StyleProp } from './style.js';
 import type { BoxProps, GlAreaProps, Vec3 } from './elements.js';
 import type { DrawnNode, Rect } from './nodes.js';
@@ -35,10 +35,29 @@ export interface Theme {
   paddingY: number;
 }
 
-/** Themes every widget below it; partial palettes merge over the defaults. */
-export const ThemeProvider: Provider<Partial<Theme>>;
-/** Back-compat alias of {@link ThemeProvider}. */
-export const SelectThemeProvider: Provider<Partial<Theme>>;
+export interface ThemeProviderProps {
+  /** Merges over the defaults, and over an outer provider. */
+  value?: Partial<Theme>;
+  /**
+   * Style for the box the provider renders to carry the palette into the
+   * node tree. Defaults to `{ flexGrow: 1 }` — an app-level provider fills
+   * its parent. No box is rendered above a `<window>`, which may not sit
+   * inside one; the palette goes on the window itself.
+   */
+  style?: StyleProp;
+  children?: ReactNode;
+}
+
+/**
+ * Themes everything below it, by both routes at once: widgets read the
+ * palette through {@link useTheme}, and a `$token` in a style resolves
+ * against the `theme` prop the provider plants in the node tree.
+ */
+export const ThemeProvider: ComponentType<ThemeProviderProps>;
+
+/** The palette in force: merged over the defaults and over any outer
+ * provider, and the same object `$token` resolution sees. */
+export function useTheme(): Theme;
 
 /** Props a widget passes through to the `<box>` it renders. */
 type WidgetProps = Omit<BoxProps, 'children' | 'style' | 'ref'>;

@@ -35,17 +35,43 @@ control are most of what separates one platform's controls from another's:
 | `radius` `radiusSmall` `borderWidth`  | control shape                     |
 | `fontSize` `paddingX` `paddingY`      | control size                      |
 
-Widgets plant the merged palette on their own root node, so a `$token` in a
-style you pass one resolves against it — see
-[styling.md](styling.md#theme-tokens).
+There are two consumers of a palette, and one provider feeds both. Widgets
+read it as React context through `useTheme()`; a `$token` in a style
+resolves against the nearest `theme` **prop** in the node tree, which knows
+nothing about React ([styling.md](styling.md#theme-tokens)). `ThemeProvider`
+puts the merged palette on the context _and_ plants it in the tree, so
+
+```jsx
+<ThemeProvider value={dark}>
+  <box style={{ backgroundColor: '$background' }}>…</box>
+</ThemeProvider>
+```
+
+paints the palette rather than nothing. Nesting works the same either way:
+an inner provider merges over the outer, as an inner `theme` prop does.
+
+`useTheme()` returns the palette in force — complete, whatever the provider
+above set — and is the same object token resolution sees:
+
+```jsx
+function Panel() {
+  const theme = useTheme();
+  return <box style={{ borderColor: theme.border }} />;
+}
+```
+
+The palette reaches the tree on a `<box>` the provider renders, styled
+`{ flexGrow: 1 }` so an app-level provider fills its parent; pass `style` to
+change that (`style={{ flexGrow: 0 }}` around a single control). A `<window>`
+may not sit inside a box, so a provider above one plants the prop on the
+window itself and renders no box.
+
+Widgets plant the merged palette on their own root node too, so a `$token`
+in a style you pass one resolves even with no provider anywhere.
 
 `examples/themes.js` has three worked palettes — GitHub, macOS and Windows,
 each in light and dark — and `npm run examples:theming` switches between
 them at runtime.
-
-`SelectThemeProvider` is the same export under an older name — a back-compat
-alias from when the palette only reached `Select`. It themes every widget
-just the same; prefer `ThemeProvider`.
 
 ## Basic controls
 

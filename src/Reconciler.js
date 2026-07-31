@@ -27,6 +27,7 @@ import {
   TextInputNode,
   TextAreaNode,
   flushWindowRestacks,
+  flushTokenChecks,
   WINDOW_HINT_PROPS,
 } from './nodes.js';
 import { flattenStyle } from './styles.js';
@@ -146,9 +147,11 @@ const HostConfig = {
   },
 
   // child <window>s that moved in the tree restack here, so a reorder costs
-  // one pass instead of one per insertBefore
+  // one pass instead of one per insertBefore. The tree is settled here, so
+  // it is also where DEV reports a `$token` that found no theme.
   resetAfterCommit() {
     flushWindowRestacks();
+    flushTokenChecks();
   },
 
   createInstance(type, props, rootContainer, hostContext, internalHandle) {

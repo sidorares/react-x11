@@ -21,6 +21,7 @@ import {
   ease,
   isLayoutProp,
   styleUsesTokens,
+  tokenNames,
   resolveTokens,
   styleHasSizeQueries,
   resolveSizeQueries,
@@ -56,6 +57,13 @@ const STACK_BELOW = 1;
 // Windows whose child stacking order may have gone stale during the commit
 // in progress; drained by flushWindowRestacks from resetAfterCommit.
 const pendingRestack = new Set();
+
+// DEV: nodes that found no theme to resolve their `$tokens` against. The
+// verdict has to wait for the end of the commit, because a node's ancestry
+// is not complete before it — a <popup> is its own root from the moment it
+// is created, and only learns where in the tree it was written when it is
+// attached. Drained by flushTokenChecks from resetAfterCommit.
+const pendingTokenChecks = new Set();
 
 // --- damage -------------------------------------------------------------
 //
@@ -243,6 +251,18 @@ export function flushWindowRestacks() {
   for (const node of nodes) node._restackWindowChildren();
 }
 
+/** DEV: the commit is over, so every node knows its ancestors — a node that
+ * still has no theme never had one, and its tokens went nowhere. */
+export function flushTokenChecks() {
+  const nodes = [...pendingTokenChecks];
+  pendingTokenChecks.clear();
+  for (const node of nodes) {
+    if (!node.destroyed && node.root && node._usesTokens && !node.theme) {
+      node._warnTokensWithoutTheme();
+    }
+  }
+}
+
 // DevTools' measureHostInstance dereferences instance.ownerDocument
 // unconditionally once getClientRects exists; a null documentElement and
 // defaultView give it zero scroll offsets and no crash.
@@ -374,9 +394,11 @@ export class Node {
     this._baseStyle = this.stylable ? flattenStyle(props.style) : EMPTY_STYLE;
     this._usesTokens = this.stylable && styleUsesTokens(this._baseStyle);
     if (this._usesTokens) {
+      const theme = this.theme;
+      if (DEV && !theme) pendingTokenChecks.add(this);
       this._baseStyle = resolveTokens(
         this._baseStyle,
-        this.theme,
+        theme,
         `<${this.kind} style>`,
         Boolean(this.root),
       );
@@ -547,6 +569,27 @@ export class Node {
     if (this.yoga && this.style !== before) {
       applyLayoutStyle(this.yoga, this.style, before);
     }
+  }
+
+  /**
+   * A `$token` with no theme anywhere above it. That is the one theming
+   * mistake nothing else reports: a token the theme does not *have* throws,
+   * but with no theme at all the whole style is quietly stripped and the
+   * node paints its defaults. Once per node — the style stays wrong until
+   * it is edited, and a warning per render would bury it.
+   */
+  _warnTokensWithoutTheme() {
+    if (this._warnedNoTheme) return;
+    this._warnedNoTheme = true;
+    const names = [...tokenNames(flattenStyle(this.props.style))];
+    if (!names.length) return;
+    const [was, they] = names.length > 1 ? ['were', 'they'] : ['was', 'it'];
+    console.warn(
+      `react-x11: <${this.kind}> uses ${names.join(', ')} but no theme is ` +
+        `in force here, so ${they} ${was} dropped. Wrap the tree in ` +
+        '<ThemeProvider value={palette}>, or put a `theme` prop on an ' +
+        'ancestor.',
+    );
   }
 
   /** The theme above or on this node changed: drop the caches and restyle
