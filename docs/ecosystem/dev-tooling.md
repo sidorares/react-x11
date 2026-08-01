@@ -40,9 +40,10 @@ npx react-devtools
 REACT_X11_DEVTOOLS=1 npm run examples:dashboard
 ```
 
-`src/Reconciler.js` checks `REACT_X11_DEVTOOLS` at module load and, via
-top-level await, installs the DevTools global hook _before the first commit_
-— that ordering is what makes mounted roots visible.
+`src/Reconciler.js` checks `REACT_X11_DEVTOOLS` when you first call
+`render()`/`createRoot()`, and installs the DevTools global hook _before the
+first commit_ — that ordering is what makes mounted roots visible, and it
+holds because a commit can only follow a root.
 `REACT_X11_DEVTOOLS_HOST` and `REACT_X11_DEVTOOLS_PORT` point the backend at
 a UI elsewhere, which is useful when the app runs on a headless box next to
 the X server.

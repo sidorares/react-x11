@@ -47,8 +47,21 @@ import {
   TexNode,
 } from './richnodes.js';
 
-const require = createRequire(import.meta.url);
-const packageJson = require('../package.json');
+// The renderer name and version DevTools shows. Read from package.json so
+// they cannot drift — but **guarded**, because a single-file bundle has no
+// package.json beside it to read: `import.meta.url` is then the bundle's,
+// `'../package.json'` resolves to something else or to nothing, and an
+// unguarded require takes the whole app down at import time with
+// `Cannot find module '../package.json'`. Losing the version string in a
+// bundle costs a line in the DevTools panel; throwing costs the app. See
+// docs/packaging.md.
+const PACKAGE_NAME = 'react-x11';
+let PACKAGE_VERSION = '0.0.0-bundled';
+try {
+  PACKAGE_VERSION = createRequire(import.meta.url)('../package.json').version;
+} catch {
+  // bundled, or installed somewhere without the manifest beside us
+}
 
 const HOST_TYPES = [
   'window',
@@ -123,8 +136,8 @@ const HostConfig = {
   // What DevTools shows for this renderer. These are the whole story in
   // react-reconciler 0.33: `injectIntoDevTools()` takes no arguments and
   // reads them from here.
-  rendererVersion: packageJson.version,
-  rendererPackageName: packageJson.name,
+  rendererVersion: PACKAGE_VERSION,
+  rendererPackageName: PACKAGE_NAME,
   // Surfaces as `internals.rendererConfig`, which is where a renderer puts
   // things only its own DevTools integration understands — React Native's
   // `getInspectorDataForViewTag` is the archetype. Nothing in the standalone
@@ -452,29 +465,66 @@ const HostConfig = {
 
 export const Renderer = ReactReconciler(HostConfig);
 
-if (process.env.REACT_X11_DEVTOOLS) {
-  // Install the DevTools hook before any React commit (top-level await:
-  // module evaluation finishes before app code can call render) and
-  // register the renderer with the standalone DevTools app.
-  const devtools = await import('./DevToolsIntegration.js');
-  await devtools.prepare();
-  devtools.connect(Renderer);
-}
+let integrations = null;
+let integrationsSettled = false;
 
-if (process.env.REACT_X11_CLICK_TO_COMPONENT || process.env.REACT_X11_EDITOR) {
-  // Naming an editor already means you want the feature on — no need to
-  // also set REACT_X11_CLICK_TO_COMPONENT=1 just to pick one.
-  const clickToComponent = await import('./ClickToComponent.js');
-  clickToComponent.install();
-}
+/**
+ * The opt-in integrations, each behind its environment variable and each
+ * dynamically imported so a bundle only carries what it is asked for.
+ *
+ * This runs from `render()`/`createRoot()` rather than at module scope: a
+ * top-level await here would be inherited by every bundle containing
+ * react-x11, and esbuild cannot emit CommonJS for a graph that has one —
+ * which is what a Node single executable needs (see docs/packaging.md).
+ * The ordering guarantee is unchanged, because a React commit can only
+ * follow a root, and there is no way to obtain one without going through
+ * here first.
+ *
+ * Returns `null` when there is nothing to install — which is the normal
+ * case, and keeps `render(element, callback, container)` synchronous, as
+ * callers that read the tree straight after it expect.
+ */
+function loadIntegrations() {
+  if (integrationsSettled) return null;
+  if (
+    !process.env.REACT_X11_DEVTOOLS &&
+    !process.env.REACT_X11_CLICK_TO_COMPONENT &&
+    !process.env.REACT_X11_EDITOR &&
+    !process.env.REACT_X11_TRACE
+  ) {
+    return null;
+  }
+  if (integrations) return integrations;
+  integrations = (async () => {
+    if (process.env.REACT_X11_DEVTOOLS) {
+      // Install the DevTools hook before any React commit, and register the
+      // renderer with the standalone DevTools app.
+      const devtools = await import('./DevToolsIntegration.js');
+      await devtools.prepare();
+      devtools.connect(Renderer);
+    }
 
-if (process.env.REACT_X11_TRACE) {
-  // Protocol tracing (docs/debugging.md). Dynamic import like DevTools
-  // above: debug.js writes files, which the playground bundle must not
-  // drag in. The trace itself attaches per connection, as each root
-  // registers the app it connected (or borrowed).
-  const debug = await import('./debug.js');
-  debug.startEnvTrace(process.env.REACT_X11_TRACE);
+    if (
+      process.env.REACT_X11_CLICK_TO_COMPONENT ||
+      process.env.REACT_X11_EDITOR
+    ) {
+      // Naming an editor already means you want the feature on — no need to
+      // also set REACT_X11_CLICK_TO_COMPONENT=1 just to pick one.
+      const clickToComponent = await import('./ClickToComponent.js');
+      clickToComponent.install();
+    }
+
+    if (process.env.REACT_X11_TRACE) {
+      // Protocol tracing (docs/debugging.md). debug.js writes files, which
+      // the playground bundle must not drag in. The trace itself attaches
+      // per connection, as each root registers the app it connected (or
+      // borrowed).
+      const debug = await import('./debug.js');
+      debug.startEnvTrace(process.env.REACT_X11_TRACE);
+    }
+    integrationsSettled = true;
+  })();
+  return integrations;
 }
 
 const roots = new Map();
@@ -573,9 +623,16 @@ function renderIntoContainer(element, container, callback) {
  * (returns a promise in that case).
  */
 export function render(element, callback, container) {
+  const pending = loadIntegrations();
   if (!container) {
-    return connectApp().then((app) =>
-      renderIntoContainer(element, app, callback),
+    return Promise.resolve(pending)
+      .then(connectApp)
+      .then((app) => renderIntoContainer(element, app, callback));
+  }
+  // synchronous unless an integration has to be installed first
+  if (pending) {
+    return pending.then(() =>
+      renderIntoContainer(element, container, callback),
     );
   }
   return renderIntoContainer(element, container, callback);
@@ -599,6 +656,7 @@ export function render(element, callback, container) {
  * Anything else ntk understands, build the client yourself and pass `app`.
  */
 export async function createRoot(options = {}) {
+  await loadIntegrations(); // null when there is nothing to install
   if (isNtkApp(options)) {
     throw new Error(
       'react-x11: createRoot takes an options object — pass the connection ' +

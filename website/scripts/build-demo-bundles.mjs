@@ -14,9 +14,12 @@
 //     of the bundle)
 //   - transformJsx(): sucrase, so the editor can hold real JSX
 //
-// Output is **ESM**, not an IIFE: ntk's module graph and yoga-layout's WASM
-// loader both use top-level await, which esbuild can only emit in that
-// format. The runner loads it with <script type="module">.
+// Output is **ESM**, and the runner loads it with <script type="module">.
+// It used to have no choice: ntk's graph carried yoga-layout's top-level
+// await, which esbuild only emits in that format. ntk 5 and react-x11 both
+// dropped theirs (that is what makes a CommonJS bundle, and so a single
+// executable, possible — see the repo's docs/packaging.md), so this is now a
+// choice rather than a constraint.
 //
 // Note the two things that are NOT stubbed out here but are in ntk's own
 // playground bundle: yoga-layout (react-x11's layout engine — react-x11

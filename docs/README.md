@@ -20,6 +20,15 @@
 - [testing.md](testing.md) — `react-x11/test`: render, query, drive and
   assert on real pixels, against a real X server in your test process. No
   display, no xvfb.
+- [remote.md](remote.md) — the flagship case: running the app on one
+  machine and drawing to a display on another. `ssh -X` vs `-Y`, what the
+  protocol costs on a link, the other X servers, and why Xwayland works
+  where native Wayland structurally cannot.
+- [security.md](security.md) — the threat model, plainly: X11 has no
+  isolation between clients, `$XAUTHORITY` is a password, and what
+  react-x11 does and does not defend against.
+- [packaging.md](packaging.md) — four ways to ship an app, with the two
+  esbuild flags that are load-bearing and the one tier that does not work.
 - [devtools.md](devtools.md) — React DevTools integration and other
   debugging aids.
 - [debugging.md](debugging.md) — runtime diagnostics: protocol tracing

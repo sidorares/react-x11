@@ -57,9 +57,22 @@ assert.ok(globalThis.Buffer, 'Buffer global installed by the bundle');
 assert.notStrictEqual(globalThis.Buffer, nodeBuffer, "it is the bundle's own");
 assert.ok(globalThis.process?.env, 'process global installed by the bundle');
 
-// yoga is what react-x11 lays out with, and it is WASM behind a top-level
-// await — if the ESM output format ever regressed to IIFE this is what breaks
-assert.strictEqual(typeof rx.ntk.Yoga?.Node?.create, 'function', 'ntk.Yoga');
+// yoga is what react-x11 lays out with. Since ntk 5 its enums are there on
+// import and the WebAssembly arrives with loadLayout() — which createClient()
+// calls, and which is what keeps top-level await out of the bundle (see the
+// repo's docs/packaging.md). Both halves are checked: constants first, then
+// the assembly, which is what breaks if the WASM ever fails to load here.
+assert.strictEqual(
+  typeof rx.ntk.Yoga?.FLEX_DIRECTION_ROW,
+  'number',
+  'ntk.Yoga enums on import',
+);
+await rx.ntk.loadLayout();
+assert.strictEqual(
+  typeof rx.ntk.Yoga?.Node?.create,
+  'function',
+  'ntk.Yoga assembly after loadLayout()',
+);
 
 // --- JSX transform ---------------------------------------------------------
 const compiled = rx.transformJsx(
