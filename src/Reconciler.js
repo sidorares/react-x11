@@ -108,10 +108,17 @@ const HostConfig = {
   supportsHydration: false,
   supportsResources: false,
   supportsSingletons: false,
+  // Queries live in `react-x11/test` and walk the retained node tree
+  // directly, which keeps the failure messages ours and keeps them off
+  // react-reconciler's internal host-config contract. React's own selectors
+  // would need eight more functions to answer the same questions.
   supportsTestSelectors: false,
   supportsMicrotasks: true,
   isPrimaryRenderer: true,
-  warnsIfNotActing: false,
+  // (`warnsIfNotActing` used to sit here. react-reconciler 0.33 reads it as
+  // a bare expression statement and discards it — the act warning is gated
+  // on `globalThis.IS_REACT_ACT_ENVIRONMENT`, which `react-x11/test`'s `act`
+  // sets. A flag that does nothing is worse than no flag.)
 
   // What DevTools shows for this renderer. These are the whole story in
   // react-reconciler 0.33: `injectIntoDevTools()` takes no arguments and

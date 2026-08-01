@@ -97,6 +97,14 @@
     "./debug": {
       "types": "./src/debug.d.ts",
       "default": "./src/debug.js"
+    },
+    "./test": {
+      "types": "./src/testing/index.d.ts",
+      "default": "./src/testing/index.js"
+    },
+    "./keysyms": {
+      "types": "./src/keysyms.d.ts",
+      "default": "./src/keysyms.js"
     }
   },
   "types": "./src/index.d.ts"

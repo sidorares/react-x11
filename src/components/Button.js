@@ -42,6 +42,7 @@ export function Button({
     'box',
     {
       theme,
+      role: 'button',
       ...props,
       ...boxProps,
       style: [

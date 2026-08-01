@@ -31,6 +31,7 @@ export function Checkbox({
     'box',
     {
       theme,
+      role: 'checkbox',
       ...props,
       ...boxProps,
       style: [

@@ -1,0 +1,211 @@
+# Testing
+
+`react-x11/test` renders your app through a **real X11 protocol connection
+to a real X server, in this process** — no `$DISPLAY`, no Xvfb, no native
+dependency, works on macOS. So a test can read pixels back with `GetImage`
+and inject input through the server's own grab and focus machinery, which
+means a passing test has exercised the path a user actually takes.
+
+That server is node-x11's `lib/xserver`, written in JavaScript. It arrives
+with ntk, so there is nothing new to install.
+
+```js
+import { test, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  renderX11,
+  cleanup,
+  screen,
+  userEvent,
+  expectPixel,
+} from 'react-x11/test';
+
+afterEach(cleanup);
+
+test('adding a task', async () => {
+  const { ctx } = await renderX11(<Tasks />, {
+    fonts: { 'sans-serif': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf' },
+  });
+
+  await userEvent.type(screen.getByRole('textbox'), 'buy milk\n');
+
+  screen.getByText('buy milk');
+  await expectPixel(ctx, 12, 40, '#2980b9', { tolerance: 8 });
+});
+```
+
+The vocabulary is Testing Library's, because that is the one React
+developers already have. It is not Testing Library — there is no document
+for it to query — but `getByRole` / `userEvent.click` / `waitFor` mean here
+what they mean there.
+
+## `renderX11(element, options)`
+
+Mounts the tree and returns a handle **plus the queries bound to it**, so
+`const { getByText } = await renderX11(<App />)` reads the familiar way.
+
+| option            |                                                                       |
+| ----------------- | --------------------------------------------------------------------- |
+| `width`, `height` | the window (default 640×480)                                          |
+| `screen`          | the display (defaults comfortably larger than the window — see below) |
+| `backend`         | `'xserver'` (default) or `'mock'`                                     |
+| `fonts`           | `{ family: '/path/to.ttf' }` — **required for text pixels**           |
+| `wrap`            | wrap in a `<window>`; default true unless the element is one          |
+| `app`             | render into a connection you already have                             |
+
+| on the result         |                                                                       |
+| --------------------- | --------------------------------------------------------------------- |
+| `ctx`                 | the window's 2d context — what the pixel helpers read                 |
+| `window`              | the live ntk `Window`                                                 |
+| `windowNode`          | the `WindowNode`: the paint, layout and event root                    |
+| `server`, `app`       | the X server and the connection, for anything this API does not cover |
+| `rerender`, `unmount` | re-render into the same root; take it down                            |
+
+**`fonts` is not optional for pixel assertions involving text.** Family
+resolution otherwise shells out to `fc-match`, which gives a different answer
+on every machine and no answer at all in a container — see the `sans-serif`
+note in [AGENTS.md](../AGENTS.md).
+
+**The screen is bigger than the window on purpose**, because on a real
+display it is. A press "outside the application" is what dismisses a menu,
+and it needs somewhere to land.
+
+## Queries
+
+`getBy*` (exactly one, or throw), `queryBy*` (one or null — the way to
+assert absence), `getAllBy*`, and `findBy*` (retried until it appears).
+Four of each: `ByText`, `ByRole`, `ByTestName`, `ByPlaceholder`.
+
+```js
+getByText(/guestbook/); // substring, case-insensitive
+getByText('Save', { exact: true });
+getByRole('button', { name: 'Save' });
+getByTestName('name-field'); // matches a `data-testname` prop
+getByPlaceholder('Your name');
+```
+
+- `screen` is the same queries bound to the most recent render, **popups
+  included** — a `<popup>` is a child node of the window that opened it, so a
+  menu or a dialog is queryable without any special casing.
+- `within(node)` scopes them to a subtree.
+- A miss prints the tree it searched, rather than leaving you with
+  `undefined is not an object`.
+
+**About roles.** There is no accessibility tree yet (NEXT_STEPS §11.3), so
+`roleOf` is the honest subset: an explicit `role` prop if there is one, else
+the element kind — `textinput` and `textarea` report `textbox`, `popup`
+reports `dialog`. The widgets set their own: `Button` is `button`,
+`Checkbox` `checkbox`, `Switch` `switch`, `Radio` `radio`, `RadioGroup`
+`radiogroup`, `Select` `combobox` (its options `option`), `Slider` `slider`,
+`ProgressBar` `progressbar`. When AT-SPI lands, these are the names it will
+publish.
+
+## Driving it
+
+`userEvent` is the layer to reach for: each call injects input **and**
+flushes what it caused, so it is async and there is nothing to remember.
+`fireEvent` is the synchronous half, for when a test needs one side of a
+gesture — wrap it in `act()` yourself.
+
+```js
+await userEvent.click(getByRole('button'));
+await userEvent.click(node, { modifiers: ['Shift'], button: 3 });
+await userEvent.hover(node);
+await userEvent.type(input, 'héllo\n'); // \n is Return
+await userEvent.tab({ shift: true });
+await userEvent.key(XK_ESCAPE); // react-x11/keysyms
+await userEvent.wheel(list, { deltaY: 3 });
+await userEvent.clickOutside(); // dismisses a menu — see below
+```
+
+Two things this buys that emitting on the ntk window never could:
+
+**Grabs are real.** A `<popup grab>` is dismissed by a real press outside
+it. But note _where_ outside: react-x11's popups grab with **owner events**,
+so a press on one of the client's own windows is delivered normally — that is
+what keeps submenus and the owner window working. Only a press somewhere the
+client does not own reaches the grab holder. `userEvent.clickOutside()` is
+how a test says that; clicking another widget and expecting the menu to close
+is testing the wrong thing.
+
+**Focus is real**, so `trapFocus`, `autoFocus` and Tab traversal are
+exercised rather than simulated. Deciding which window gets the keyboard is a
+window manager's job and there is no window manager, so `renderX11` plays the
+part with one `SetInputFocus` at mount — otherwise keys would go to whatever
+the pointer happened to be over, which is a rule nobody should have to learn.
+
+**Typing works for text the layout does not have.** `userEvent.type(input,
+'héllo')` binds a spare keycode for `é` on both the server's keymap and the
+client's cache, so a test can type real text without owning a keymap.
+
+## `act`, and the three clocks
+
+`act(fn)` flushes everything between a state update and a pixel. There are
+three separate clocks in the way, and a wrapper that drives only the first
+stays flaky on pixel assertions:
+
+1. **React's** — `React.act` with `IS_REACT_ACT_ENVIRONMENT` set.
+2. **The wire** — events the injection produced are not in the tree yet.
+   The server writes them asynchronously, so a round trip on its own can
+   overtake them and `act` would return before the pointer move had been
+   dispatched at all, which looks exactly like a hover that does not work.
+3. **ntk's frame clock** — painting is scheduled through
+   `requestAnimationFrame`, paced behind a server fence. Synthetic input can
+   leave a frame scheduled and never run, so `act` runs the frame directly
+   rather than waiting for it, then round-trips so the server has actually
+   processed the drawing.
+
+`waitFor(fn)` retries until `fn` stops throwing, `act`-ing between attempts —
+so waiting also _advances_. Reach for it whenever the thing you are asserting
+arrives through more than one of those stages (a `Button`'s hover is React
+state, so its repaint is an event, a re-render and a frame).
+
+## Pixels
+
+```js
+await expectPixel(ctx, 10, 10, '#2980b9', { tolerance: 8 });
+await waitForPixel(ctx, 10, 10, '#c0392b', { timeout: 2000 });
+const [r, g, b] = await pixelAt(ctx, 10, 10);
+const n = await countPixels(ctx, { width: 80, height: 40 }, '#c0392b');
+await toPNG(ctx, '/tmp/shot.png', { width: 320, height: 240 });
+```
+
+A pixel proves the tree, the layout, the clip, the paint order, the colour
+parsing and the wire encoding at once — and it is the only assertion that
+catches the class of bug where everything commits correctly and nothing
+reaches the screen. Two details it demands: the readback is **BGRA**, which
+the helpers handle, and antialiasing means every comparison takes a
+**tolerance**.
+
+`toPNG` is also how a pull request gets a screenshot rendered by its own
+code, which this repo asks for ([AGENTS.md](../AGENTS.md), "Pull requests").
+
+## Animations
+
+```js
+const clock = withFrameClock(); // install it BEFORE the render
+await rerender(<Fading on />);
+clock.advance(100);
+await act(); // part way
+clock.advance(200);
+await act(); // arrived
+clock.restore();
+```
+
+Install it **before** the render. Every timestamp in the tree has to come
+from the same clock: mixing a real start time with a frozen `now` gives a
+transition that never progresses, which is a confusing way to spend an hour.
+
+## The mock backend
+
+`backend: 'mock'` swaps the server for a fake 2d context that records draw
+operations. No server, no connection, much faster, and no pixels — good for
+asserting on layout and on the node tree, which is most tests. Input
+injection is not available and says so.
+
+## Testing Library itself
+
+It does not work here and no shim will fix it: its queries are built on a
+document. The five failure modes are recorded in the
+[negative-results register](ecosystem.md#render-time). This page is the
+replacement, not a workaround for it.

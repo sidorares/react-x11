@@ -17,6 +17,9 @@
 - [typescript.md](typescript.md) — the bundled types: one tsconfig option,
   why JSX comes from `react-x11/jsx-runtime` rather than an augmentation,
   and how the declarations are kept from drifting.
+- [testing.md](testing.md) — `react-x11/test`: render, query, drive and
+  assert on real pixels, against a real X server in your test process. No
+  display, no xvfb.
 - [devtools.md](devtools.md) — React DevTools integration and other
   debugging aids.
 - [debugging.md](debugging.md) — runtime diagnostics: protocol tracing

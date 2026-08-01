@@ -6,15 +6,18 @@ tree behind react-x11 today. All five failure modes are recorded in the
 [negative-results register](../ecosystem.md#render-time); do not spend an
 afternoon on a jsdom shim, because it only makes the query fail differently.
 
-What replaces it is more direct and, for a renderer, more useful: mount into
-a real X connection with no display, then assert on the node tree, on the
-recorded paint operations, or on actual pixels.
+What replaces it ships in the box: **[`react-x11/test`](../testing.md)** —
+`renderX11`, `screen`, `userEvent`, `waitFor` and pixel assertions, over a
+real X server running in your test process. Read that page first; everything
+below is the hand-rolled version it replaces, kept because it is still the
+right thing to reach for when you want the connection itself.
 
-## The harness {#harness}
+## The harness, by hand {#harness}
 
 node-x11 ships a pure-JS X server that runs in your test process, so a
 react-x11 test needs no `$DISPLAY`, no Xvfb, and no native dependency. This
-is the same harness the renderer's own integration tests use.
+is what `renderX11` does for you; here it is spelled out, for a test that
+needs to hold the pieces directly.
 
 ```jsx
 // helpers/harness.jsx

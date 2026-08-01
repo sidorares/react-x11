@@ -30,6 +30,7 @@ export function ProgressBar({
     'box',
     {
       theme,
+      role: 'progressbar',
       ...boxProps,
       style: [
         {
