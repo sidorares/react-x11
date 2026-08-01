@@ -47,8 +47,21 @@ import {
   TexNode,
 } from './richnodes.js';
 
-const require = createRequire(import.meta.url);
-const packageJson = require('../package.json');
+// The renderer name and version DevTools shows. Read from package.json so
+// they cannot drift — but **guarded**, because a single-file bundle has no
+// package.json beside it to read: `import.meta.url` is then the bundle's,
+// `'../package.json'` resolves to something else or to nothing, and an
+// unguarded require takes the whole app down at import time with
+// `Cannot find module '../package.json'`. Losing the version string in a
+// bundle costs a line in the DevTools panel; throwing costs the app. See
+// docs/packaging.md.
+const PACKAGE_NAME = 'react-x11';
+let PACKAGE_VERSION = '0.0.0-bundled';
+try {
+  PACKAGE_VERSION = createRequire(import.meta.url)('../package.json').version;
+} catch {
+  // bundled, or installed somewhere without the manifest beside us
+}
 
 const HOST_TYPES = [
   'window',
@@ -123,8 +136,8 @@ const HostConfig = {
   // What DevTools shows for this renderer. These are the whole story in
   // react-reconciler 0.33: `injectIntoDevTools()` takes no arguments and
   // reads them from here.
-  rendererVersion: packageJson.version,
-  rendererPackageName: packageJson.name,
+  rendererVersion: PACKAGE_VERSION,
+  rendererPackageName: PACKAGE_NAME,
   // Surfaces as `internals.rendererConfig`, which is where a renderer puts
   // things only its own DevTools integration understands — React Native's
   // `getInspectorDataForViewTag` is the archetype. Nothing in the standalone

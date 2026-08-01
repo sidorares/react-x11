@@ -58,7 +58,9 @@ That is the shape of the problem this is good at:
 
 - **the display is elsewhere** — a headless server over `ssh -X`, a
   container pointed at the host, a thin client, an X terminal, a
-  deliberately dumb workstation;
+  deliberately dumb workstation. A whole window appears for under four
+  kilobytes, because what crosses the link is drawing rather than pixels
+  ([docs/remote.md](docs/remote.md));
 - **the machine cannot afford a browser engine** — a kiosk, an appliance, an
   instrument panel, an ARM board with 512 MB, a locked-down box where
   installing must not compile anything and root is not on offer;
@@ -67,7 +69,9 @@ That is the shape of the problem this is good at:
   no IPC bridge and no second bundler;
 - **you want GUI tests that run in CI with no display server** — `npm test`
   here renders real pixels through the real protocol into node-x11's
-  in-process X server, on a machine with no `$DISPLAY`, on macOS.
+  in-process X server, on a machine with no `$DISPLAY`, on macOS. That
+  harness is published as `react-x11/test`
+  ([docs/testing.md](docs/testing.md)).
 
 And the shape it is not good at, so you can stop here rather than in week
 three:
@@ -228,7 +232,9 @@ User handlers run before element default actions and can
 All need an X server — but "an X server" is a broader thing than it sounds:
 your Linux desktop, XQuartz on macOS, `Xvfb` for automation, `Xephyr` for a
 disposable screen, a VNC server, or your own display reached over `ssh -X`
-from wherever the program actually runs.
+from wherever the program actually runs — see
+[docs/remote.md](docs/remote.md), which is the case this architecture is
+categorically better at.
 [`examples/README.md`](examples/README.md) describes each one and how to
 explore them:
 
@@ -432,6 +438,10 @@ bearer token; treat it like a password.
 `ssh -X` runs your app as an untrusted client and restricts most of the
 above; `ssh -Y` turns the restrictions off. **Prefer `-X` — react-x11 should
 work under it, and if it does not, that is a bug worth filing.**
+
+The full threat model, including what react-x11 does and does not defend
+against, is [docs/security.md](docs/security.md). To report something,
+[SECURITY.md](SECURITY.md).
 
 ## See also
 
