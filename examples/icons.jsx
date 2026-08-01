@@ -2,13 +2,14 @@
 //
 //   npm run examples:icons                    400 icons from `source` strings
 //   npm run examples:icons -- --mode=jsx      the same icons as JSX children
-//   npm run examples:icons -- --mode=text     the same grid, one glyph per cell
 //   npm run examples:icons -- --count=800 --size=16
 //   npm run examples:icons -- --quiet         log only frames over 50kpx
 //
-// Press 1 / 2 / 3 in the window to switch mode live; the grid and the cell
-// count stay identical across all three, so the frame log is directly
-// comparable. Drag the window edge to reflow.
+// Everything is drivable from the window: the **glyph control** switch swaps
+// every cell between its `<svg>` and one cached glyph, and the two sliders
+// set count and size. Press 1 / 2 for the two SVG modes. Drag the window
+// edge to reflow. The grid and the cell count stay identical throughout, so
+// frame logs from either side of the switch are directly comparable.
 //
 // Why this shape: `<svg>` has no cached rasterization, so `SvgView.draw`
 // re-walks the parsed document on every repaint — Path2D, flatten, stroke
@@ -17,15 +18,15 @@
 // moves, and all 400 icons redraw with unchanged *content*. That is exactly
 // the frame a rasterization cache would turn into 400 Composites.
 //
-// `--mode=text` is the control. It draws one cached glyph per cell instead of
-// one SVG, through the machinery that already does what we would want the
-// icons to do — a byte per cell inside one CompositeGlyphs. The gap between
-// mode 1 and mode 3 in the ms column is the size of the prize.
+// The glyph control is the baseline. It draws one cached glyph per cell
+// instead of one SVG, through the machinery that already does what we would
+// want the icons to do — a byte per cell inside one CompositeGlyphs. The gap
+// across that switch, in the ms column, is the size of the prize.
 //
 // The frame log goes to stdout, not into the window: a HUD would claim damage
 // every frame and change the number it was reporting. See stress/perf.js.
 import React, { useEffect, useRef, useState } from 'react';
-import { createRoot, createStyles, Slider } from '../src/index.js';
+import { createRoot, createStyles, Slider, Switch } from '../src/index.js';
 
 // --- the icons -------------------------------------------------------------
 //
@@ -278,6 +279,12 @@ function App({
   const shell = useRef(null);
   const cell = size + 18;
 
+  // Which SVG mode the glyph switch returns to. Kept in a ref rather than
+  // state because changing it must never itself cause a render — it is only
+  // read at the moment the switch is flipped back off.
+  const svgMode = useRef(mode === 'text' ? 'source' : mode);
+  if (mode !== 'text') svgMode.current = mode;
+
   useEffect(() => {
     const root = shell.current?.root;
     if (root) onRoot?.({ root, count, size, mode });
@@ -304,9 +311,11 @@ function App({
       minWidth={520}
       minHeight={320}
       style={s.window}
+      // 1 and 2 pick between the two SVG routes, which the switch does not
+      // cover — it toggles the glyph control, not which SVG mode is behind it
       onKeyDown={(ev) => {
-        const n = Number(ev.key);
-        if (n >= 1 && n <= MODES.length) setMode(MODES[n - 1]);
+        if (ev.key === '1') setMode('source');
+        if (ev.key === '2') setMode('jsx');
       }}
     >
       <box ref={shell} style={{ flexGrow: 1 }}>
@@ -317,7 +326,20 @@ function App({
             measurement it was describing. Dragging a slider is itself a useful
             stress — every step rebuilds and relays out the whole grid. */}
         <box style={s.head}>
-          <text style={s.title}>mode {mode}</text>
+          {/* The comparison the whole example exists for, one flip away:
+              off draws each cell as an <svg>, on draws one cached glyph in
+              its place. Same grid, same cell count, same damage — only the
+              drawing primitive changes, so the two frame logs are directly
+              comparable without restarting. */}
+          <box style={s.ctl}>
+            <Switch
+              name="glyphs"
+              checked={mode === 'text'}
+              onChange={(ev) => setMode(ev.value ? 'text' : svgMode.current)}
+            />
+            <text style={s.ctlLabel}>glyph control</text>
+          </box>
+          <text style={s.title}>{mode}</text>
           <Control
             label="count"
             name="count"
@@ -336,9 +358,7 @@ function App({
             step={2}
             onChange={setSize}
           />
-          <text style={s.hint}>
-            drag an edge to reflow · 1 source · 2 jsx · 3 text
-          </text>
+          <text style={s.hint}>drag an edge to reflow · 1 source · 2 jsx</text>
         </box>
         <box style={s.grid}>{cells}</box>
       </box>
@@ -502,8 +522,8 @@ if (!process.env.REACT_X11_NO_AUTORUN) {
         if (watcher) return;
         watcher = watchPaint(node, { quiet });
         process.stdout.write(
-          `\n  drag an edge to reflow · sliders change count and size` +
-            ` · 1/2/3 switch mode\n\n` +
+          `\n  drag an edge to reflow · the switch swaps svg for the glyph` +
+            ` control · sliders change count and size\n\n` +
             `  frame  damage    area    client   server    total  why\n` +
             `  ${'-'.repeat(64)}\n`,
         );
