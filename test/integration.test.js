@@ -57,10 +57,10 @@ const readPixels = (ctx, w, h) =>
     ),
   );
 
-// BGRA readback -> [r, g, b]
+// getImageData is straight RGBA, like canvas -> [r, g, b]
 const px = (image, w, x, y) => {
   const i = (y * w + x) * 4;
-  return [image.data[i + 2], image.data[i + 1], image.data[i]];
+  return [image.data[i], image.data[i + 1], image.data[i + 2]];
 };
 
 const isNear = (rgb, want, tol = 40) =>

@@ -9,9 +9,11 @@
 //
 // Two details the readback demands:
 //
-// - **BGRA, not RGBA.** X hands back the server's native byte order, so
-//   `[i+2], [i+1], [i]` is red, green, blue. Getting this wrong swaps red
-//   and blue, which looks like a colour bug in the code under test.
+// - **Straight RGBA.** `getImageData` normalizes the server's native byte
+//   order and premultiplication away, so `[i], [i+1], [i+2]` is red, green,
+//   blue — the canvas contract. This used to be a raw BGRA readback the
+//   caller had to un-swizzle, and reading it the old way now swaps red and
+//   blue, which looks like a colour bug in the code under test.
 // - **Antialiasing means tolerance.** A glyph edge or a rounded corner is
 //   never exactly the fill colour, so every comparison here takes one.
 
@@ -46,7 +48,9 @@ function readImage(ctx, x, y, width, height) {
 /** `[r, g, b]` at a window coordinate. */
 export async function pixelAt(ctx, x, y) {
   const image = await readImage(ctx, x, y, 1, 1);
-  return [image.data[2], image.data[1], image.data[0]];
+  // ntk's getImageData speaks straight RGBA, like canvas — the server's own
+  // byte order is its business, not ours
+  return [image.data[0], image.data[1], image.data[2]];
 }
 
 /** Whether two colours are the same within a tolerance. */
@@ -108,9 +112,9 @@ export async function countPixels(
   let n = 0;
   for (let i = 0; i < width * height; i++) {
     const rgb = [
-      image.data[i * 4 + 2],
-      image.data[i * 4 + 1],
       image.data[i * 4],
+      image.data[i * 4 + 1],
+      image.data[i * 4 + 2],
     ];
     if (rgb.every((c, k) => Math.abs(c - target[k]) <= tolerance)) n++;
   }
@@ -135,9 +139,11 @@ export async function toPNG(ctx, file, region = {}) {
   const image = await readImage(ctx, x, y, width, height);
   const png = new PNG({ width, height });
   for (let i = 0; i < width * height; i++) {
-    png.data[i * 4 + 0] = image.data[i * 4 + 2]; // BGRA -> RGBA
+    // both sides are straight RGBA now; only the alpha is ours to decide,
+    // and a screenshot wants an opaque one
+    png.data[i * 4 + 0] = image.data[i * 4 + 0];
     png.data[i * 4 + 1] = image.data[i * 4 + 1];
-    png.data[i * 4 + 2] = image.data[i * 4 + 0];
+    png.data[i * 4 + 2] = image.data[i * 4 + 2];
     png.data[i * 4 + 3] = 255;
   }
   const buffer = PNG.sync.write(png);
