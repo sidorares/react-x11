@@ -121,7 +121,7 @@ export function ThemingPanel() {
         <Select
           value={name}
           options={THEME_OPTIONS}
-          onChange={setName}
+          onChange={(ev) => setName(ev.value)}
           style={{ width: 150 }}
         />
         <Button
@@ -160,14 +160,20 @@ export function ThemingPanel() {
               <text style={s.heading}>Toggles</text>
               <Checkbox
                 checked={agreed}
-                onChange={setAgreed}
+                onChange={(ev) => setAgreed(ev.value)}
                 label="Checkbox"
               />
               <box style={s.row}>
-                <Switch checked={notify} onChange={setNotify} />
+                <Switch
+                  checked={notify}
+                  onChange={(ev) => setNotify(ev.value)}
+                />
                 <text style={s.note}>Switch</text>
               </box>
-              <RadioGroup value={flavour} onChange={setFlavour}>
+              <RadioGroup
+                value={flavour}
+                onChange={(ev) => setFlavour(ev.value)}
+              >
                 <Radio value="vanilla" label="Vanilla" />
                 <Radio value="pistachio" label="Pistachio" />
               </RadioGroup>
@@ -183,7 +189,7 @@ export function ThemingPanel() {
                   value={volume}
                   min={0}
                   max={100}
-                  onChange={setVolume}
+                  onChange={(ev) => setVolume(ev.value)}
                   style={{ flexGrow: 1 }}
                 />
                 <text style={s.note}>{String(volume)}</text>

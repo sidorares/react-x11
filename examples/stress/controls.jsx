@@ -220,15 +220,20 @@ export function ControlsPanel() {
                 <Checkbox
                   key={key}
                   checked={checks[key]}
-                  onChange={(v) => setChecks((c) => ({ ...c, [key]: v }))}
+                  onChange={(ev) =>
+                    setChecks((c) => ({ ...c, [key]: ev.value }))
+                  }
                   label={`Checkbox ${key}`}
                 />
               ))}
               <box style={s.row}>
                 <text style={s.label}>Switch</text>
-                <Switch checked={toggle} onChange={setToggle} />
+                <Switch
+                  checked={toggle}
+                  onChange={(ev) => setToggle(ev.value)}
+                />
               </box>
-              <RadioGroup value={radio} onChange={setRadio}>
+              <RadioGroup value={radio} onChange={(ev) => setRadio(ev.value)}>
                 <Radio value="a" label="Option A" />
                 <Radio value="b" label="Option B" />
                 <Radio value="c" label="Option C (disabled)" disabled />
@@ -242,7 +247,7 @@ export function ControlsPanel() {
                 <Select
                   options={FRUIT}
                   value={fruit}
-                  onChange={setFruit}
+                  onChange={(ev) => setFruit(ev.value)}
                   style={{ flexGrow: 1 }}
                 />
               </box>
@@ -252,7 +257,7 @@ export function ControlsPanel() {
                   value={level}
                   min={0}
                   max={100}
-                  onChange={setLevel}
+                  onChange={(ev) => setLevel(ev.value)}
                   style={{ flexGrow: 1 }}
                 />
                 <text style={s.hint}>{String(level)}</text>

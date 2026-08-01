@@ -337,20 +337,26 @@ function Widgets() {
           press
         </Button>
         <Button label="labelled" disabled />
-        <Checkbox checked={checked} onChange={setChecked}>
+        <Checkbox checked={checked} onChange={(ev) => setChecked(ev.value)}>
           check
         </Checkbox>
-        {/* issue #115: the next value stays first, so `onChange={setChecked}`
-            still checks; the form event is an optional second argument */}
+        {/* one signature across the library: the value widgets hand over a
+            change event, exactly as <textinput> does, so a form library's
+            handler can be passed straight in */}
         <Checkbox
           checked={checked}
           name="agree"
-          onChange={(next, ev: WidgetChangeEvent<boolean>) => {
+          onChange={(ev: WidgetChangeEvent<boolean>) => {
             void (ev.target.type === 'checkbox' && ev.target.checked);
-            setChecked(next);
+            void ev.name;
+            setChecked(ev.value);
           }}
         />
-        <Switch checked={checked} name="notify" onChange={setChecked} />
+        <Switch
+          checked={checked}
+          name="notify"
+          onChange={(ev) => setChecked(ev.value)}
+        />
         <ProgressBar value={0.4} color="#2980b9" />
         <Slider
           value={20}
@@ -358,7 +364,7 @@ function Widgets() {
           max={100}
           step={5}
           name="volume"
-          onChange={(v, ev) => void (v.toFixed() + ev.target.type)}
+          onChange={(ev) => void (ev.value.toFixed() + ev.target.type)}
         />
         <Tooltip label="hi" placement="bottom" delay={200}>
           <box />
@@ -367,7 +373,7 @@ function Widgets() {
         <RadioGroup<string>
           value="a"
           name="flavour"
-          onChange={(v, ev) => void (v.toUpperCase() + ev.name)}
+          onChange={(ev) => void (ev.value.toUpperCase() + ev.name)}
         >
           <Radio value="a">A</Radio>
           <Radio value="b" label="B" />
@@ -377,7 +383,7 @@ function Widgets() {
           value={1}
           name="qty"
           options={[{ value: 1, label: 'one' }]}
-          onChange={(v) => void v.toFixed()}
+          onChange={(ev) => void ev.value.toFixed()}
         />
         <Select options={['plain', 'values']} />
       </box>

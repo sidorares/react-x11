@@ -45,7 +45,7 @@ function Control({ label, value, min, max, step, onChange, format }) {
         min={min}
         max={max}
         step={step}
-        onChange={onChange}
+        onChange={(ev) => onChange(ev.value)}
         style={{ flexGrow: 1 }}
       />
       <text style={s.ctlValue}>{format ? format(value) : String(value)}</text>
@@ -128,7 +128,7 @@ function WaveCard() {
       />
       <box style={s.ctl}>
         <text style={s.ctlLabel}>fill</text>
-        <Switch checked={filled} onChange={setFilled} />
+        <Switch checked={filled} onChange={(ev) => setFilled(ev.value)} />
       </box>
     </box>
   );
@@ -195,7 +195,7 @@ function DonutCard() {
                 value={v}
                 min={0}
                 max={50}
-                onChange={set(i)}
+                onChange={(ev) => set(i)(ev.value)}
                 style={{ flexGrow: 1 }}
               />
               <text style={s.ctlValue}>{String(v)}</text>

@@ -139,11 +139,14 @@ function App() {
         </Canvas3D>
 
         <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <Switch checked={running} onChange={setRunning} />
+          <Switch checked={running} onChange={(ev) => setRunning(ev.value)} />
           <text style={{ fontSize: 13 }}>Spin</text>
-          <Switch checked={wireframe} onChange={setWireframe} />
+          <Switch
+            checked={wireframe}
+            onChange={(ev) => setWireframe(ev.value)}
+          />
           <text style={{ fontSize: 13 }}>Wireframe</text>
-          <Switch checked={textured} onChange={setTextured} />
+          <Switch checked={textured} onChange={(ev) => setTextured(ev.value)} />
           <text style={{ fontSize: 13 }}>Texture</text>
           <box style={{ flexGrow: 1 }} />
           <text style={{ fontSize: 13, color: '#5b6570' }}>

@@ -16,7 +16,8 @@ const RadioGroupContext = React.createContext(null);
  * — exclusive choice. Arrow keys move the selection through the group in
  * mount order (wrapping); click or Space selects the focused radio.
  * `name` lives on the group, not the radios, the way it does in HTML: it is
- * the group that is one form field. `onChange(next, ev)`.
+ * the group that is one form field. `onChange(ev)`, with the chosen value
+ * on `ev.value`.
  */
 export function RadioGroup({
   value,
@@ -28,7 +29,7 @@ export function RadioGroup({
 }) {
   const order = useRef([]).current;
   const ctx = useMemo(() => {
-    const emit = (next) => onChange?.(next, changeEvent('radio', name, next));
+    const emit = (next) => onChange?.(changeEvent('radio', name, next));
     return {
       value,
       emit,

@@ -67,7 +67,7 @@ export function WidgetsPanel() {
 
       <Row label="Checkbox">
         <box style={{ gap: 6 }}>
-          <Checkbox checked={agreed} onChange={setAgreed}>
+          <Checkbox checked={agreed} onChange={(ev) => setAgreed(ev.value)}>
             I agree to nothing in particular
           </Checkbox>
           <Checkbox checked={false} disabled>
@@ -77,7 +77,7 @@ export function WidgetsPanel() {
       </Row>
 
       <Row label="Radio">
-        <RadioGroup value={flavor} onChange={setFlavor}>
+        <RadioGroup value={flavor} onChange={(ev) => setFlavor(ev.value)}>
           <Radio value="vanilla">Vanilla</Radio>
           <Radio value="chocolate">Chocolate</Radio>
           <Radio value="pistachio">Pistachio</Radio>
@@ -85,7 +85,7 @@ export function WidgetsPanel() {
       </Row>
 
       <Row label="Switch">
-        <Switch checked={notify} onChange={setNotify} />
+        <Switch checked={notify} onChange={(ev) => setNotify(ev.value)} />
         <text style={{ color: '#2d3436' }}>
           {notify ? 'notifications on' : 'off'}
         </text>
@@ -97,7 +97,7 @@ export function WidgetsPanel() {
           min={0}
           max={100}
           step={5}
-          onChange={setVolume}
+          onChange={(ev) => setVolume(ev.value)}
           style={{ width: 200 }}
         />
         <text style={{ color: '#2d3436' }}>{`${volume}`}</text>
@@ -116,7 +116,7 @@ export function WidgetsPanel() {
         <Select
           options={['fast', 'faster', 'ludicrous']}
           value={speed}
-          onChange={setSpeed}
+          onChange={(ev) => setSpeed(ev.value)}
           style={{ width: 160 }}
         />
       </Row>

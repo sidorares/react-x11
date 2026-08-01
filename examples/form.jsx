@@ -76,12 +76,12 @@ export function FormPanel() {
         <Select
           options={COLORS}
           value={color}
-          onChange={setColor}
+          onChange={(ev) => setColor(ev.value)}
           style={{ flexGrow: 1 }}
         />
         <RadioGroup
           value={weight}
-          onChange={setWeight}
+          onChange={(ev) => setWeight(ev.value)}
           style={{ flexDirection: 'row', gap: 12 }}
         >
           {WEIGHTS.map((w) => (
@@ -96,14 +96,18 @@ export function FormPanel() {
           min={12}
           max={32}
           value={size}
-          onChange={setSize}
+          onChange={(ev) => setSize(ev.value)}
           style={{ flexGrow: 1 }}
         />
         <text style={{ color: '#636e72' }}>{String(size)}</text>
       </box>
 
       <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <Checkbox checked={shout} onChange={setShout} label="Shout it" />
+        <Checkbox
+          checked={shout}
+          onChange={(ev) => setShout(ev.value)}
+          label="Shout it"
+        />
         <box style={{ flexGrow: 1 }} />
         <Button label="Clear" onPress={() => setConfirming(true)} />
         <Button primary label="Sign" onPress={submit} />

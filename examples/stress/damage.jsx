@@ -134,15 +134,15 @@ export function DamagePanel() {
       <box style={s.row}>
         <Button primary label="step" onPress={bump} />
         <text style={s.label}>animate</text>
-        <Switch checked={animate} onChange={setAnimate} />
+        <Switch checked={animate} onChange={(ev) => setAnimate(ev.value)} />
         <text style={s.label}>labels</text>
-        <Switch checked={labels} onChange={setLabels} />
+        <Switch checked={labels} onChange={(ev) => setLabels(ev.value)} />
         <text style={s.label}>cols {String(cols)}</text>
         <Slider
           value={cols}
           min={4}
           max={40}
-          onChange={setCols}
+          onChange={(ev) => setCols(ev.value)}
           style={{ width: 90 }}
         />
         <text style={s.label}>rows {String(rows)}</text>
@@ -150,7 +150,7 @@ export function DamagePanel() {
           value={rows}
           min={4}
           max={25}
-          onChange={setRows}
+          onChange={(ev) => setRows(ev.value)}
           style={{ width: 90 }}
         />
       </box>

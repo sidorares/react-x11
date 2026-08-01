@@ -10,8 +10,9 @@ const h = React.createElement;
 
 /**
  * <Checkbox checked onChange disabled>label</Checkbox> — 16px check well +
- * label row; click or Space toggles. `onChange(next, ev)`: the next value
- * first, then a form-library-shaped change event carrying `name`.
+ * label row; click or Space toggles. `onChange(ev)` gets a change event, the
+ * same shape `<textinput>` fires: the next value is `ev.value`, and
+ * `ev.target` carries `name`/`checked` for a form library.
  */
 export function Checkbox({
   children,
@@ -29,7 +30,7 @@ export function Checkbox({
     props,
     style: controlStyle,
   } = useControl(disabled, () =>
-    onChange?.(!checked, changeEvent('checkbox', name, !checked)),
+    onChange?.(changeEvent('checkbox', name, !checked)),
   );
   const fill = disabled ? theme.dim : theme.accent;
   return h(

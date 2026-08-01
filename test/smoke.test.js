@@ -1216,7 +1216,7 @@ test('Select opens a popup menu, picks an option, closes on Escape', async () =>
         React.createElement(Select, {
           options: ['red', 'green', 'blue'],
           value: null,
-          onChange: (v) => picks.push(v),
+          onChange: (ev) => picks.push(ev.value),
           style: { width: 160 },
         }),
       ),
@@ -1292,7 +1292,7 @@ test('Select: arrow keys move the active option, Enter picks it', async () => {
         React.createElement(Select, {
           options: ['red', 'green', 'blue'],
           value: 'green',
-          onChange: (v) => picks.push(v),
+          onChange: (ev) => picks.push(ev.value),
           style: { width: 160 },
         }),
       ),
@@ -1836,18 +1836,18 @@ test('Checkbox and Switch toggle through onChange', async () => {
         Checkbox,
         {
           checked,
-          onChange: (next) => {
-            log.push(['check', next]);
-            setChecked(next);
+          onChange: (ev) => {
+            log.push(['check', ev.value]);
+            setChecked(ev.value);
           },
         },
         'Enable',
       ),
       React.createElement(Switch, {
         checked: on,
-        onChange: (next) => {
-          log.push(['switch', next]);
-          setOn(next);
+        onChange: (ev) => {
+          log.push(['switch', ev.value]);
+          setOn(ev.value);
         },
       }),
     );
@@ -1879,9 +1879,10 @@ test('Checkbox and Switch toggle through onChange', async () => {
   ReactX11.unmountComponentAtNode(app);
 });
 
-// issue #115: the widgets keep `onChange(next)` — that is what they are for
-// — and carry the form-library-shaped event as a second argument.
-test("widgets pass a named change event as onChange's second argument", async () => {
+// One signature across the library: the value widgets hand `onChange` a
+// change event, exactly as `<textinput>` does, so a form library's handler
+// can be passed straight in with no per-widget adapter.
+test('value widgets pass a named change event to onChange', async () => {
   const { Checkbox, RadioGroup, Radio, Slider } =
     await import('../src/index.js');
   const app = createMockApp();
@@ -1899,9 +1900,9 @@ test("widgets pass a named change event as onChange's second argument", async ()
         {
           checked,
           name: 'agree',
-          onChange: (next, ev) => {
+          onChange: (ev) => {
             events.push(ev);
-            setChecked(next);
+            setChecked(ev.value);
           },
         },
         'Agree',
@@ -1911,9 +1912,9 @@ test("widgets pass a named change event as onChange's second argument", async ()
         {
           value: flavour,
           name: 'flavour',
-          onChange: (next, ev) => {
+          onChange: (ev) => {
             events.push(ev);
-            setFlavour(next);
+            setFlavour(ev.value);
           },
         },
         React.createElement(Radio, { value: 'a' }, 'A'),
@@ -1922,7 +1923,7 @@ test("widgets pass a named change event as onChange's second argument", async ()
       React.createElement(Slider, {
         value: 10,
         name: 'volume',
-        onChange: (next, ev) => events.push(ev),
+        onChange: (ev) => events.push(ev),
         style: { width: 100 },
       }),
     );
@@ -1962,6 +1963,52 @@ test("widgets pass a named change event as onChange's second argument", async ()
   assert.strictEqual(events[0].target.checked, true);
   assert.strictEqual(events[0].target.name, 'agree');
   assert.strictEqual(events[1].target.checked, undefined);
+  // the event is the *only* argument: a handler taking one parameter, which
+  // is what `onChange={formik.handleChange}` is, must receive the event and
+  // not a bare value
+  for (const ev of events) {
+    assert.strictEqual(typeof ev, 'object');
+    assert.strictEqual(ev.type, 'change');
+  }
+  ReactX11.unmountComponentAtNode(app);
+});
+
+// The contract that matters, stated as the thing a user actually writes.
+// A form library's handler reads the field out of `ev.target`, so passing it
+// straight to a widget only works while the event is the first argument.
+test('a one-parameter handler is handed the event, not the value', async () => {
+  const { Checkbox } = await import('../src/index.js');
+  const app = createMockApp();
+  const seen = [];
+  // exactly the shape of formik's handleChange: one parameter, destructures
+  // the field out of `.target`
+  const handleChange = ({ target }) =>
+    seen.push([target.name, target.type, target.checked]);
+  function Wrapper() {
+    const [checked, setChecked] = React.useState(false);
+    return React.createElement(Checkbox, {
+      name: 'agree',
+      checked,
+      onChange: (ev) => {
+        handleChange(ev);
+        setChecked(ev.value);
+      },
+    });
+  }
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 100 },
+      React.createElement(Wrapper),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  clickNode(wnd, findAllFocusable(wnd._reactX11Node)[0]);
+  await tick();
+  assert.deepStrictEqual(seen, [['agree', 'checkbox', true]]);
   ReactX11.unmountComponentAtNode(app);
 });
 
@@ -1975,9 +2022,9 @@ test('RadioGroup: click selects, arrow keys move selection (wrapping)', async ()
       RadioGroup,
       {
         value,
-        onChange: (v) => {
-          picks.push(v);
-          setValue(v);
+        onChange: (ev) => {
+          picks.push(ev.value);
+          setValue(ev.value);
         },
       },
       React.createElement(Radio, { value: 'a' }, 'A'),
@@ -2288,7 +2335,7 @@ test('Slider: drag keeps tracking after the pointer leaves the widget', async ()
           min: 0,
           max: 100,
           step: 1,
-          onChange: setV,
+          onChange: (ev) => setV(ev.value),
           style: { width: 200 },
         }),
       ),
@@ -2366,7 +2413,7 @@ test('Slider: keyboard steps, Home/End and PageUp/Down', async () => {
           min: 0,
           max: 100,
           step: 2,
-          onChange: setV,
+          onChange: (ev) => setV(ev.value),
           style: { width: 200 },
         }),
       ),
@@ -3036,7 +3083,7 @@ test('Slider keeps its width as the value changes (no drag feedback loop)', asyn
           min: 0,
           max: 100,
           value: v,
-          onChange: setV,
+          onChange: (ev) => setV(ev.value),
           style: { flexGrow: 1 },
         }),
       ),
@@ -3855,7 +3902,7 @@ test('Select: type-ahead jumps, refines and cycles', async () => {
         React.createElement(Select, {
           options,
           value: v,
-          onChange: setV,
+          onChange: (ev) => setV(ev.value),
           style: { width: 200 },
         }),
       ),
