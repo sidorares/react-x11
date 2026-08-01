@@ -247,12 +247,13 @@ const SCENARIOS = [
   [
     // Ten wheel notches over a long list, mounted and settled beforehand so
     // only the scrolling is measured. This is the scenario the scroll-blit
-    // fast path (issue #138) exists for: with an ntk that has
-    // Window.scrollRegion the surviving band is CopyArea'd and only the
-    // exposed strip repaints; without one it falls back to repainting the
-    // viewport each notch. The committed baseline is the fallback (CI
-    // installs ntk from npm) — re-save it when the ntk floor gains
-    // scrollRegion, so the diff records the win.
+    // fast path (issue #138) exists for: the surviving band is CopyArea'd
+    // through ntk's Window.scrollRegion and only the exposed strip repaints.
+    //
+    // Baselined with the blit live, which is the whole point of having it
+    // here: --check only fails on an increase, so a change that quietly
+    // stopped the fast path firing would sail past a fallback baseline and
+    // land squarely on this one (887 requests, 3.28 Mpx, against 437/0.65).
     'scroll: 10 notches over 500 rows',
     (() => {
       let root;
