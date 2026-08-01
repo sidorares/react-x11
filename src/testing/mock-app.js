@@ -212,6 +212,15 @@ export function createMockApp() {
           wnd.calls.push(['scrollRegion', rect, dx, dy]);
           return true;
         },
+        // ntk >= 5.2 (sidorares/ntk#148): the frame-clock gate a discrete
+        // input's paint goes through (issue #141). No server here to fall
+        // behind, so
+        // it is open unless a test closes it — set `wnd.frameInFlight` to a
+        // function of your own, or flip `wnd._frameInFlight`, to model a
+        // connection that has not acknowledged the last frame.
+        frameInFlight() {
+          return Boolean(wnd._frameInFlight);
+        },
         on(name, fn) {
           (handlers[name] ??= []).push(fn);
         },
