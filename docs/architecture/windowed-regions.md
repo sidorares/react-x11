@@ -706,7 +706,8 @@ phrased so they can be lifted directly into issue drafts (react-x11 / ntk / node
    hover/motion/cursor usage.
 4. **chore(windows): pass `backgroundPixel` at creation** (forwardable through ntk today) so
    windows stop flashing undefined content before first paint.
-   4b. **perf(latency): immediate flush for discrete inputs** — clicks, keypresses, and wheel
+   4b. **perf(latency): immediate flush for discrete inputs** (filed as
+   [#141](https://github.com/sidorares/react-x11/issues/141)) — clicks, keypresses, and wheel
    currently paint on the next paced frame (up to 16 ms + fence later); flush their damage as
    soon as the discrete handler returns, keeping coalescing for continuous motion only. No
    windows involved; probably the cheapest perceived-latency win in the stack (§0.1).
