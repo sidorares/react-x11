@@ -180,6 +180,7 @@ const ORDER = [
   'components.md',
   'events.md',
   'typescript.md',
+  'testing.md',
   'devtools.md',
   'debugging.md',
   'click-to-component.md',

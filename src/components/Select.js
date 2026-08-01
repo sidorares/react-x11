@@ -84,6 +84,7 @@ function Option({ option, selected, active, onPick, onHover, nodeRef }) {
     'box',
     {
       theme,
+      role: 'option',
       ref: nodeRef,
       onMouseEnter: () => onHover?.(),
       onClick: () => onPick(option),
@@ -243,6 +244,7 @@ export function Select({
     'box',
     {
       theme,
+      role: 'combobox',
       ref: triggerRef,
       focusable: true,
       onClick: toggle,

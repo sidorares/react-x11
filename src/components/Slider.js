@@ -124,6 +124,7 @@ export function Slider({
     'box',
     {
       theme,
+      role: 'slider',
       ref: trackRef,
       ...controlProps,
       ...boxProps,

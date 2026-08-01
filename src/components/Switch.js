@@ -66,6 +66,7 @@ export function Switch({
     'box',
     {
       theme,
+      role: 'switch',
       ...control.props,
       ...boxProps,
       style: [

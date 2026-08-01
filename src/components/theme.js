@@ -122,9 +122,12 @@ export function useControl(disabled, onActivate, { styled = false } = {}) {
   const [focused, setFocused] = useState(false);
   const activation = {
     focusable: true,
-    onClick: () => onActivate?.(),
+    // the event travels: `ButtonProps.onPress` has always been declared as
+    // taking one, and a handler that wants `ev.shiftKey` or `ev.detail` —
+    // shift-click, double-click — has no other way to get it
+    onClick: (ev) => onActivate?.(ev),
     onKeyDown: (ev) => {
-      if (ev.codepoint === 32 || ev.keysym === XK_RETURN) onActivate?.();
+      if (ev.codepoint === 32 || ev.keysym === XK_RETURN) onActivate?.(ev);
     },
   };
   const props = disabled

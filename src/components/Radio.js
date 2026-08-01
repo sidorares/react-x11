@@ -46,7 +46,7 @@ export function RadioGroup({
   }, [value, onChange, name, order]);
   return h(
     'box',
-    { ...boxProps, style: [{ gap: 6 }, style] },
+    { role: 'radiogroup', ...boxProps, style: [{ gap: 6 }, style] },
     h(RadioGroupContext.Provider, { value: ctx }, children),
   );
 }
@@ -79,6 +79,7 @@ export function Radio({ value, children, label, disabled = false }) {
     'box',
     {
       theme,
+      role: 'radio',
       ...props,
       style: [
         controlStyle,
