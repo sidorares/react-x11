@@ -16,25 +16,25 @@ tests can import them without opening a window.
 
 Roughly in the order worth reading them:
 
-|                                      |                                                                                                |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| [`simple.jsx`](simple.jsx)           | hello world: flex layout and text, no pixel math. `npm run examples:simple`                    |
-| [`simple-nojsx.js`](simple-nojsx.js) | the same thing in plain node with `React.createElement` — no build step at all                 |
-| [`xeyes.jsx`](xeyes.jsx)             | the `<canvas>` escape hatch: custom drawing plus hooks for state and polling                   |
-| [`dashboard.jsx`](dashboard.jsx)     | context for theming, `useState`/`useEffect`/`useMemo`, a custom hook, hover and focus states   |
-| [`tasks.jsx`](tasks.jsx)             | `useReducer`, dispatch through context, list rendering, `<scrollview>`, keyboard throughout    |
-| [`form.jsx`](form.jsx)               | `<textinput>`, `Select`, `RadioGroup`, `Slider`, `Checkbox`, and a modal `Dialog`              |
-| [`widgets.jsx`](widgets.jsx)         | the gallery: every standard component in one window, with a live `<markdown>` preview          |
-| [`menu.jsx`](menu.jsx)               | `MenuBar` and `ContextMenu` over real `<popup>` windows that flip at screen edges              |
-| [`theming.jsx`](theming.jsx)         | the style engine end to end: three themes in light and dark, switched at runtime               |
-| [`richtext.jsx`](richtext.jsx)       | `<markdown>` with highlighted and math fences, a live `<tex>` formula, JSX `<svg>`, `<image>`  |
-| [`windows.jsx`](windows.jsx)         | many top-level windows from one React tree, sharing state, closing via `onCloseRequest`        |
-| [`app.jsx`](app.jsx)                 | the showcase: `SplitPane` + `Tabs` hosting `form`, `widgets` and `tasks` as panels             |
-| [`gl.jsx`](gl.jsx)                   | raw GL in a `<glarea>`, compiled to a server-side display list                                 |
-| [`three.jsx`](three.jsx)             | a react-three-fiber-shaped `<Canvas3D>` scene: meshes, lights, textures                        |
-| [`icons.jsx`](icons.jsx)             | 400 icon-sized `<svg>`s that reflow on resize, with a cached-glyph control — a paint benchmark |
-| [`stress/`](stress/index.jsx)        | **the big one**: six panels to poke at by hand, with a frame log — see below                   |
-| [`wm.jsx`](wm.jsx)                   | **a reparenting window manager** — see below                                                   |
+|                                      |                                                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| [`simple.jsx`](simple.jsx)           | hello world: flex layout and text, no pixel math. `npm run examples:simple`                     |
+| [`simple-nojsx.js`](simple-nojsx.js) | the same thing in plain node with `React.createElement` — no build step at all                  |
+| [`xeyes.jsx`](xeyes.jsx)             | the `<canvas>` escape hatch: custom drawing plus hooks for state and polling                    |
+| [`dashboard.jsx`](dashboard.jsx)     | context for theming, `useState`/`useEffect`/`useMemo`, a custom hook, hover and focus states    |
+| [`tasks.jsx`](tasks.jsx)             | `useReducer`, dispatch through context, list rendering, `<scrollview>`, keyboard throughout     |
+| [`form.jsx`](form.jsx)               | `<textinput>`, `Select`, `RadioGroup`, `Slider`, `Checkbox`, and a modal `Dialog`               |
+| [`widgets.jsx`](widgets.jsx)         | the gallery: every standard component in one window, with a live `<markdown>` preview           |
+| [`menu.jsx`](menu.jsx)               | `MenuBar` and `ContextMenu` over real `<popup>` windows that flip at screen edges               |
+| [`theming.jsx`](theming.jsx)         | the style engine end to end: three themes in light and dark, switched at runtime                |
+| [`richtext.jsx`](richtext.jsx)       | `<markdown>` with highlighted and math fences, a live `<tex>` formula, JSX `<svg>`, `<image>`   |
+| [`windows.jsx`](windows.jsx)         | many top-level windows from one React tree, sharing state, closing via `onCloseRequest`         |
+| [`app.jsx`](app.jsx)                 | the showcase: `SplitPane` + `Tabs` hosting `form`, `widgets` and `tasks` as panels              |
+| [`gl.jsx`](gl.jsx)                   | raw GL in a `<glarea>`, compiled to a server-side display list                                  |
+| [`three.jsx`](three.jsx)             | a react-three-fiber-shaped `<Canvas3D>` scene: meshes, lights, textures                         |
+| [`icons.jsx`](icons.jsx)             | 400 icon-sized `<svg>`s that reflow and scroll, with a cached-glyph control — a paint benchmark |
+| [`stress/`](stress/index.jsx)        | **the big one**: six panels to poke at by hand, with a frame log — see below                    |
+| [`wm.jsx`](wm.jsx)                   | **a reparenting window manager** — see below                                                    |
 
 `app.jsx` is where a new control should get demonstrated: it imports the
 panel each of `form`, `widgets` and `tasks` exports, so adding a widget

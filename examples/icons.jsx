@@ -3,6 +3,7 @@
 //   npm run examples:icons                    400 icons from `source` strings
 //   npm run examples:icons -- --mode=jsx      the same icons as JSX children
 //   npm run examples:icons -- --count=800 --size=16
+//   npm run examples:icons -- --count=1200    tall enough to scroll on sight
 //   npm run examples:icons -- --quiet         log only frames over 50kpx
 //
 // Everything is drivable from the window: the **glyph control** switch swaps
@@ -10,6 +11,22 @@
 // set count and size. Press 1 / 2 for the two SVG modes. Drag the window
 // edge to reflow. The grid and the cell count stay identical throughout, so
 // frame logs from either side of the switch are directly comparable.
+//
+// The wall lives in a `<scrollview>`, which puts the *other* expensive frame
+// on the wheel: a scroll moves every cell without changing one of them. Those
+// frames log as `scroll`, and the damage column is where to look — the scroll
+// blit (issue #138) copies the surviving band in the backing pixmap and
+// repaints only the strip the scroll exposed, so a wheel notch reads as
+// `2 rect 26kpx` where the same viewport repainted whole is `211kpx`. A big
+// enough jump keeps less than half the viewport, misses the blit's gate and
+// falls back to the full repaint — the two lines sitting next to each other
+// in the log is the point. `REACT_X11_NO_SCROLL_BLIT=1` turns the fast path
+// off to measure against it.
+//
+// At the default 400 x 20px the wall is 544px tall and the viewport is 790,
+// so there is nothing to scroll until you raise `count` past ~600 or drag the
+// window smaller. That is deliberate: the numbers this example was baselined
+// with are the ones an untouched window still produces.
 //
 // Why this shape: `<svg>` has no cached rasterization, so `SvgView.draw`
 // re-walks the parsed document on every repaint — Path2D, flatten, stroke
@@ -183,11 +200,18 @@ const s = createStyles({
   ctl: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   ctlLabel: { fontSize: 11, color: '#7f8c8d' },
   ctlValue: { fontSize: 11, color: '#2d3436', width: 30 },
+  // The viewport: it takes the space the header leaves and lets the wall
+  // overflow it. ScrollViewNode supplies the `flex-basis: 0` and the
+  // `min-height: 0` that a scroll container always wants, so `flexGrow` is
+  // the whole declaration.
+  scroller: { flexGrow: 1 },
   // `flexWrap` is the whole point: the column count is a function of the
   // window width, so every resize is a real reflow of all `count` cells
-  // rather than a stretch of a fixed grid.
+  // rather than a stretch of a fixed grid. The wrap still happens at the
+  // viewport width inside the scrollview — what the scroll container took
+  // away is `flexGrow`, since in there the wall has to size to its content
+  // or there would be nothing to scroll.
   grid: {
-    flexGrow: 1,
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignContent: 'flex-start',
@@ -358,9 +382,13 @@ function App({
             step={2}
             onChange={setSize}
           />
-          <text style={s.hint}>drag an edge to reflow · 1 source · 2 jsx</text>
+          <text style={s.hint}>
+            drag an edge to reflow · wheel to scroll · 1 source · 2 jsx
+          </text>
         </box>
-        <box style={s.grid}>{cells}</box>
+        <scrollview style={s.scroller}>
+          <box style={s.grid}>{cells}</box>
+        </scrollview>
       </box>
     </window>
   );
@@ -522,8 +550,8 @@ if (!process.env.REACT_X11_NO_AUTORUN) {
         if (watcher) return;
         watcher = watchPaint(node, { quiet });
         process.stdout.write(
-          `\n  drag an edge to reflow · the switch swaps svg for the glyph` +
-            ` control · sliders change count and size\n\n` +
+          `\n  drag an edge to reflow · wheel to scroll · the switch swaps` +
+            ` svg for the glyph control · sliders change count and size\n\n` +
             `  frame  damage    area    client   server    total  why\n` +
             `  ${'-'.repeat(64)}\n`,
         );
