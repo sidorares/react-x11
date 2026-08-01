@@ -2056,6 +2056,11 @@ export class TextInputNode extends Node {
     this.defaultCursor = 'text';
     this._value =
       props.defaultValue != null ? String(props.defaultValue) : null;
+    // set only while an onChange/onSubmit handler is on the stack — see
+    // `get value()` and `_fireValueEvent`
+    this._pendingValue = null;
+    // the X key event driving the current edit, for `ev.nativeEvent`
+    this._keyNative = null;
     this._caret = this._chars().length;
     this._anchor = this._caret;
     this._scrollX = 0;
@@ -2084,8 +2089,103 @@ export class TextInputNode extends Node {
   }
 
   get value() {
+    // While an onChange handler is running, the control's value is the one
+    // the edit produced — the DOM behaves the same way, and it is what makes
+    // `ev.target.value` right in *controlled* mode, where `props.value` is
+    // still the old string until the parent re-renders.
+    if (this._pendingValue !== null) return this._pendingValue;
     if (this.props.value != null) return String(this.props.value);
     return this._value ?? '';
+  }
+
+  /**
+   * Writing `node.value = 'x'` sets the text the way typing would, minus the
+   * `onChange` — assigning to a DOM input's `value` does not fire one
+   * either. It exists because form libraries reset a field through the ref:
+   * react-hook-form's `register()` does `ref.value = ''` on mount and on
+   * `reset()`, and a getter-only `value` made that a TypeError during commit.
+   *
+   * On a **controlled** input `props.value` still wins the next time the
+   * parent renders, exactly as in the DOM.
+   */
+  set value(next) {
+    const text = next == null ? '' : String(next);
+    if (text === this._value) return;
+    this._value = text;
+    const len = Array.from(text).length;
+    this._caret = Math.min(this._caret, len);
+    this._anchor = Math.min(this._anchor, len);
+    // same bookkeeping a value arriving through props gets: its own undo
+    // entry, so Ctrl+Z steps back through a programmatic reset too
+    this._noteExternalValue();
+    this._repaint();
+  }
+
+  /** The `name` prop, so `ev.target.name` reads the way the DOM does. */
+  get name() {
+    return this.props.name;
+  }
+
+  /**
+   * The synthetic event `onChange` and `onSubmit` are handed. Same shape
+   * every other handler in the system gets — `_makeEvent` builds it — with
+   * the value on both `ev.value` and `ev.target.value`, and `name` mirrored
+   * the same way, because that is what every DOM form library reads.
+   *
+   * `_makeEvent` lives on the owning window's EventManager; a node that is
+   * not attached to one (a unit test, an edit that outlives its window) gets
+   * an equivalent object rather than nothing.
+   */
+  _makeValueEvent(type, native) {
+    // not dispatched through the tree, so currentTarget is the target —
+    // exactly what the DOM reports for a handler on the element itself
+    const extra = {
+      value: this.value,
+      name: this.props.name,
+      currentTarget: this,
+    };
+    const events = this.root?.events;
+    if (events) return events._makeEvent(type, native, this, extra);
+    const ev = {
+      type,
+      x: native?.x ?? 0,
+      y: native?.y ?? 0,
+      target: this,
+      nativeEvent: native ?? null,
+      shiftKey: Boolean(native?.buttons & 1),
+      ctrlKey: Boolean(native?.buttons & 4),
+      defaultPrevented: false,
+      propagationStopped: false,
+      preventDefault() {
+        ev.defaultPrevented = true;
+      },
+      stopPropagation() {
+        ev.propagationStopped = true;
+      },
+      capturePointer() {},
+      releasePointer() {},
+      ...extra,
+    };
+    return ev;
+  }
+
+  /**
+   * Call `onChange`/`onSubmit` with `value` as the control's current value,
+   * whatever `props.value` still says. Restored in a `finally` so a throwing
+   * handler cannot leave the control reporting a value it never took.
+   */
+  _fireValueEvent(prop, value, native = null) {
+    const handler = this.props[prop];
+    if (!handler) return;
+    native ??= this._keyNative;
+    const previous = this._pendingValue;
+    this._pendingValue = value;
+    const type = prop === 'onSubmit' ? 'submit' : 'change';
+    try {
+      callHandler(this, prop, handler, this._makeValueEvent(type, native));
+    } finally {
+      this._pendingValue = previous;
+    }
   }
 
   _chars() {
@@ -2174,7 +2274,7 @@ export class TextInputNode extends Node {
         beforeCaret,
         beforeAnchor,
       });
-      this.props.onChange?.(next);
+      this._fireValueEvent('onChange', next);
     }
     this._repaint();
   }
@@ -2229,7 +2329,7 @@ export class TextInputNode extends Node {
     const len = Array.from(value).length;
     this._caret = Math.min(Math.max(0, caret), len);
     this._anchor = Math.min(Math.max(0, anchor), len);
-    if (value !== previous) this.props.onChange?.(value);
+    if (value !== previous) this._fireValueEvent('onChange', value);
     this._repaint();
   }
 
@@ -2353,13 +2453,32 @@ export class TextInputNode extends Node {
 
   // --- default actions (run after user handlers unless preventDefault) ---
 
+  /**
+   * Remember the X event driving the edit so the `onChange` it produces can
+   * carry it on `nativeEvent`. Subclasses override `_editKeyDown`, not this,
+   * so the bookkeeping cannot be forgotten in one of them.
+   *
+   * Only keystrokes get this far. A paste resolves a promise, an undo is not
+   * an input event at all, and a value pushed from a parent has no X event
+   * behind it — those report `nativeEvent: null`, which is the truth.
+   */
   _defaultKeyDown(ev) {
+    const previous = this._keyNative;
+    this._keyNative = ev.nativeEvent ?? null;
+    try {
+      this._editKeyDown(ev);
+    } finally {
+      this._keyNative = previous;
+    }
+  }
+
+  _editKeyDown(ev) {
     const [a, b] = this._selection();
     const hasSelection = a !== b;
     const k = ev.keysym;
 
     if (k === XK_RETURN || k === XK_KP_ENTER) {
-      this.props.onSubmit?.(this.value, ev);
+      this._fireValueEvent('onSubmit', this.value, ev.nativeEvent);
       return;
     }
     if (k === XK_BACKSPACE) {
@@ -3034,13 +3153,13 @@ export class TextAreaNode extends TextInputNode {
     return layout.indexAt(x, line.y + (line.ascent + line.descent) / 2);
   }
 
-  _defaultKeyDown(ev) {
+  _editKeyDown(ev) {
     const k = ev.keysym;
     const layout = this._valueLayout();
 
     if (k === XK_RETURN || k === XK_KP_ENTER) {
       if (ev.ctrlKey) {
-        this.props.onSubmit?.(this.value, ev);
+        this._fireValueEvent('onSubmit', this.value, ev.nativeEvent);
         return;
       }
       this._goalX = null;
@@ -3081,7 +3200,7 @@ export class TextAreaNode extends TextInputNode {
       return;
     }
     this._goalX = null;
-    super._defaultKeyDown(ev);
+    super._editKeyDown(ev);
   }
 
   /** Thumb for the vertical overflow, same look as <scrollview>'s. */

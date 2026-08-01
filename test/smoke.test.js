@@ -832,8 +832,8 @@ test('textinput: typing, backspace, arrows, submit (uncontrolled)', async () => 
       { width: 200, height: 50 },
       React.createElement('textinput', {
         defaultValue: '',
-        onChange: (v) => changes.push(v),
-        onSubmit: (v) => (submitted = v),
+        onChange: (ev) => changes.push(ev.target.value),
+        onSubmit: (ev) => (submitted = ev.target.value),
         style: { flexGrow: 1 },
       }),
     ),
@@ -878,7 +878,7 @@ test('textinput: controlled value does not change until props do', async () => {
         { width: 200, height: 50 },
         React.createElement('textinput', {
           value,
-          onChange: (v) => changes.push(v),
+          onChange: (ev) => changes.push(ev.target.value),
           style: { flexGrow: 1 },
         }),
       ),
@@ -901,6 +901,185 @@ test('textinput: controlled value does not change until props do', async () => {
   assert.strictEqual(input.value, 'abcx');
 
   ReactX11.unmountComponentAtNode(app);
+});
+
+// issue #115: onChange/onSubmit hand over a synthetic event like every other
+// handler, so `e.target.value` — what react-hook-form, formik and every
+// tutorial's controlled input read — is the value the edit produced.
+test('textinput: onChange gets a synthetic event carrying value and name', async () => {
+  const app = createMockApp();
+  const events = [];
+  // `ev.target` is the live node, so what it reports has to be sampled while
+  // the handler runs — that is the moment form libraries read it
+  const seen = [];
+  const record = (ev) => {
+    events.push(ev);
+    seen.push({ value: ev.target.value, name: ev.target.name });
+  };
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 50 },
+      React.createElement('textinput', {
+        // controlled and never re-rendered: props.value stays 'ab', so a
+        // stale read is visible rather than hidden by the uncontrolled path
+        value: 'ab',
+        name: 'email',
+        onChange: record,
+        onSubmit: record,
+        style: { flexGrow: 1 },
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 1 });
+  wnd.emit('mouseup', { x: 10, y: 10, keycode: 1 });
+
+  pressKey(app, wnd, { keysym: 0x63, codepoint: 0x63 }); // c
+  assert.strictEqual(events.length, 1);
+  const change = events[0];
+  assert.strictEqual(change.type, 'change');
+  assert.strictEqual(change.value, 'abc');
+  assert.strictEqual(change.name, 'email');
+  assert.strictEqual(change.target, input, 'target is the public node');
+  assert.strictEqual(change.currentTarget, input);
+  assert.deepStrictEqual(
+    seen[0],
+    { value: 'abc', name: 'email' },
+    'target.value is the new value, not the stale controlled prop',
+  );
+  assert.strictEqual(typeof change.preventDefault, 'function');
+  assert.strictEqual(typeof change.stopPropagation, 'function');
+  // a keystroke carries the X event it came from — downshift reads
+  // `ev.nativeEvent.preventDownshiftDefault` and a null there is a TypeError
+  assert.strictEqual(change.nativeEvent?.codepoint, 0x63);
+
+  // and the control is back to reporting its prop once the handler returns
+  assert.strictEqual(input.value, 'ab');
+
+  pressKey(app, wnd, { keysym: XK.Return });
+  const submit = events[1];
+  assert.strictEqual(submit.type, 'submit');
+  assert.strictEqual(submit.value, 'ab');
+  assert.strictEqual(submit.target, input);
+  assert.strictEqual(submit.name, 'email');
+  assert.deepStrictEqual(seen[1], { value: 'ab', name: 'email' });
+  assert.ok(submit.nativeEvent, 'submit carries the key event it came from');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+// react-hook-form's register() hands the field ref back and writes through
+// it: `ref.value = ''` on mount and on reset(). A getter-only `value` made
+// that a TypeError during commit, which took the whole render down.
+test('textinput: node.value is writable, the way a DOM input is', async () => {
+  const app = createMockApp();
+  const changes = [];
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 50 },
+      React.createElement('textinput', {
+        defaultValue: 'start',
+        onChange: (ev) => changes.push(ev.value),
+        style: { flexGrow: 1 },
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+
+  input.value = 'written';
+  assert.strictEqual(input.value, 'written');
+  assert.deepStrictEqual(changes, [], 'assigning does not fire onChange');
+
+  input.value = '';
+  assert.strictEqual(input.value, '');
+  // and it took an undo entry, like a value pushed in through props
+  assert.strictEqual(input.undo(), true);
+  assert.strictEqual(input.value, 'written');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('textarea: Ctrl+Enter submits with the same event shape', async () => {
+  const app = createMockApp();
+  let submitted = null;
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 90 },
+      React.createElement('textarea', {
+        defaultValue: 'note',
+        name: 'body',
+        onSubmit: (ev) => (submitted = ev),
+        style: { flexGrow: 1 },
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 1 });
+  wnd.emit('mouseup', { x: 10, y: 10, keycode: 1 });
+  pressKey(app, wnd, { keysym: XK.Return, buttons: CTRL });
+  assert.strictEqual(submitted?.type, 'submit');
+  assert.strictEqual(submitted.value, 'note');
+  assert.strictEqual(submitted.target.value, 'note');
+  assert.strictEqual(submitted.name, 'body');
+  assert.strictEqual(submitted.target.name, 'body');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+// a throwing handler must not leave the control reporting a value it never
+// took — `_pendingValue` is restored in a finally
+test('textinput: a throwing onChange does not strand the pending value', async () => {
+  const app = createMockApp();
+  const errors = [];
+  const console_error = console.error;
+  console.error = (...args) => errors.push(args);
+  try {
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 200, height: 50 },
+        React.createElement('textinput', {
+          value: 'ab',
+          onChange: () => {
+            throw new Error('boom');
+          },
+          style: { flexGrow: 1 },
+        }),
+      ),
+      null,
+      app,
+    );
+    await tick();
+    const wnd = app.windows[0];
+    const input = wnd._reactX11Node.children[0];
+    wnd.emit('mousedown', { x: 10, y: 10, keycode: 1 });
+    wnd.emit('mouseup', { x: 10, y: 10, keycode: 1 });
+    pressKey(app, wnd, { keysym: 0x63, codepoint: 0x63 });
+    assert.strictEqual(input.value, 'ab');
+    assert.strictEqual(
+      errors.length,
+      1,
+      'the throw is reported, not swallowed',
+    );
+    ReactX11.unmountComponentAtNode(app);
+  } finally {
+    console.error = console_error;
+    process.exitCode = 0;
+  }
 });
 
 test('textinput: clipboard shortcuts and middle-click PRIMARY paste', async () => {
@@ -1697,6 +1876,92 @@ test('Checkbox and Switch toggle through onChange', async () => {
     ['check', false],
     ['switch', true],
   ]);
+  ReactX11.unmountComponentAtNode(app);
+});
+
+// issue #115: the widgets keep `onChange(next)` — that is what they are for
+// — and carry the form-library-shaped event as a second argument.
+test("widgets pass a named change event as onChange's second argument", async () => {
+  const { Checkbox, RadioGroup, Radio, Slider } =
+    await import('../src/index.js');
+  const app = createMockApp();
+  const events = [];
+  function Wrapper() {
+    const [checked, setChecked] = React.useState(false);
+    const [flavour, setFlavour] = React.useState('a');
+    return React.createElement(
+      'box',
+      {
+        style: { flexGrow: 1, padding: 10, gap: 10, alignItems: 'flex-start' },
+      },
+      React.createElement(
+        Checkbox,
+        {
+          checked,
+          name: 'agree',
+          onChange: (next, ev) => {
+            events.push(ev);
+            setChecked(next);
+          },
+        },
+        'Agree',
+      ),
+      React.createElement(
+        RadioGroup,
+        {
+          value: flavour,
+          name: 'flavour',
+          onChange: (next, ev) => {
+            events.push(ev);
+            setFlavour(next);
+          },
+        },
+        React.createElement(Radio, { value: 'a' }, 'A'),
+        React.createElement(Radio, { value: 'b' }, 'B'),
+      ),
+      React.createElement(Slider, {
+        value: 10,
+        name: 'volume',
+        onChange: (next, ev) => events.push(ev),
+        style: { width: 100 },
+      }),
+    );
+  }
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 240 },
+      React.createElement(Wrapper),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const focusable = findAllFocusable(wnd._reactX11Node);
+
+  clickNode(wnd, focusable[0]); // the checkbox
+  await tick();
+  clickNode(wnd, focusable[2]); // the second radio
+  await tick();
+  // the slider moves by keyboard: a click's value depends on laid-out width
+  focusable[3].focus?.();
+  pressKey(app, wnd, { keysym: 0xff53 }); // Right
+  await tick();
+
+  assert.deepStrictEqual(
+    events.map((ev) => [ev.target.type, ev.name, ev.value]),
+    [
+      ['checkbox', 'agree', true],
+      ['radio', 'flavour', 'b'],
+      ['range', 'volume', 11],
+    ],
+  );
+  // formik reads target.checked for a checkbox, react-hook-form reads it
+  // after testing target.type — both have to find it
+  assert.strictEqual(events[0].target.checked, true);
+  assert.strictEqual(events[0].target.name, 'agree');
+  assert.strictEqual(events[1].target.checked, undefined);
   ReactX11.unmountComponentAtNode(app);
 });
 
@@ -3722,7 +3987,7 @@ test('textinput: Ctrl+arrow moves by word, Ctrl+Backspace/Delete removes one', a
       { width: 300, height: 80 },
       React.createElement('textinput', {
         defaultValue: 'foo-bar baz_qux end',
-        onChange: (v) => changes.push(v),
+        onChange: (ev) => changes.push(ev.target.value),
       }),
     ),
     null,
@@ -3955,9 +4220,9 @@ test('textinput: undo in controlled mode reports through onChange', async () => 
         { width: 300, height: 80 },
         React.createElement('textinput', {
           value,
-          onChange: (v) => {
-            changes.push(v);
-            render(v);
+          onChange: (ev) => {
+            changes.push(ev.target.value);
+            render(ev.target.value);
           },
         }),
       ),

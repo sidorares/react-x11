@@ -4,7 +4,7 @@
  * DOM. See docs/events.md.
  */
 
-import type { DrawnNode } from './nodes.js';
+import type { DrawnNode, TextInputNode } from './nodes.js';
 
 /** The raw ntk/X11 event a synthetic one was made from. */
 export interface NativeEvent {
@@ -77,6 +77,38 @@ export interface KeyboardEvent<T = DrawnNode> extends SyntheticEvent<T> {
 }
 
 export interface FocusEvent<T = DrawnNode> extends SyntheticEvent<T> {}
+
+/**
+ * `<textinput onChange>` / `<textarea onChange>`. The value is on both
+ * `ev.value` and `ev.target.value` — the second is what every DOM form
+ * library reads, and it is the *new* value even in controlled mode, where
+ * `props.value` is still the old string until the parent re-renders.
+ *
+ * `nativeEvent` is the X key event when a keystroke drove the edit, and null
+ * when nothing did — a paste resolving, an undo, a value the parent pushed
+ * back. Guard it.
+ */
+export interface ChangeEvent<T = TextInputNode> extends Omit<
+  SyntheticEvent<T>,
+  'nativeEvent'
+> {
+  type: 'change';
+  value: string;
+  /** The control's `name` prop, mirrored from `target.name`. */
+  name?: string;
+  nativeEvent: NativeEvent | null;
+}
+
+/**
+ * `<textinput onSubmit>` — Enter, or Ctrl+Enter in a `<textarea>`. Same
+ * shape as {@link ChangeEvent}; `nativeEvent` is the X key event.
+ */
+export interface SubmitEvent<T = TextInputNode> extends Omit<
+  ChangeEvent<T>,
+  'type'
+> {
+  type: 'submit';
+}
 
 /** `<scrollview onScroll>`. */
 export interface ScrollEvent {

@@ -147,7 +147,7 @@ export function WidgetsPanel() {
           <textarea
             rows={4}
             value={note}
-            onChange={setNote}
+            onChange={(ev) => setNote(ev.target.value)}
             style={{
               flexGrow: 0,
               padding: 8,

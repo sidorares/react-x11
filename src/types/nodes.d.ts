@@ -50,7 +50,19 @@ export interface ScrollViewNode extends DrawnNode {
 
 /** `<textinput>` / `<textarea>`. */
 export interface TextInputNode extends DrawnNode {
-  readonly value: string;
+  /**
+   * The control's current text. Inside an `onChange` handler this is the
+   * value the edit produced, even in controlled mode — which is what makes
+   * `ev.target.value` mean what a DOM form library expects it to.
+   *
+   * Writable, as a DOM input's `value` is: assigning sets the text without
+   * firing `onChange`, and on a controlled input the next render puts
+   * `props.value` back. react-hook-form's `register()` resets a field this
+   * way.
+   */
+  value: string;
+  /** The `name` prop, for form libraries that key fields by it. */
+  readonly name?: string;
   /**
    * Step back one edit, as Ctrl+Z does. False when there is nothing to
    * undo. Controlled inputs report the restored value through `onChange`,

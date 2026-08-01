@@ -82,7 +82,7 @@ function App() {
       <box style={{ flexDirection: 'row', gap: 8 }}>
         <textinput
           value={draft}
-          onChange={setDraft}
+          onChange={(ev) => setDraft(ev.target.value)}
           onSubmit={submit}
           placeholder="what needs doing?"
           style={{

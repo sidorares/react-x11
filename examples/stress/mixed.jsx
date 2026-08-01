@@ -220,7 +220,7 @@ export function MixedPanel() {
             <text style={s.title}>a form, for focus</text>
             <textinput
               value={name}
-              onChange={setName}
+              onChange={(ev) => setName(ev.target.value)}
               placeholder="your name"
               style={{ width: '100%' }}
             />

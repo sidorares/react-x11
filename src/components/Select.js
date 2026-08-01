@@ -4,6 +4,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { useTheme } from './theme.js';
+import { changeEvent } from './change.js';
 import { measureLabel, screenOf, useAnchor } from './anchor.js';
 import { DEFAULT_TEXT_STYLE } from '../styles.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
@@ -125,6 +126,7 @@ export function Select({
   value,
   options = [],
   onChange,
+  name,
   placeholder = 'Select…',
   style,
   ...boxProps
@@ -167,9 +169,12 @@ export function Select({
   };
   const toggle = () => (open ? close() : openMenu());
 
+  const emit = (next) =>
+    onChange?.(next, changeEvent('select-one', name, next));
+
   const pick = (option) => {
     close();
-    if (option.value !== value) onChange?.(option.value);
+    if (option.value !== value) emit(option.value);
   };
 
   const move = (delta) => {
@@ -225,7 +230,7 @@ export function Select({
     const i = typeAhead(char, normalized, current, (o) => o.label);
     if (i < 0) return;
     if (open) setActiveIndex(i);
-    else if (normalized[i].value !== value) onChange?.(normalized[i].value);
+    else if (normalized[i].value !== value) emit(normalized[i].value);
   };
 
   // keep the highlighted option visible while arrowing through a menu that

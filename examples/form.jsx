@@ -61,7 +61,7 @@ export function FormPanel() {
         autoFocus
         value={name}
         placeholder="Your name"
-        onChange={setName}
+        onChange={(ev) => setName(ev.target.value)}
         onSubmit={submit}
         style={{
           padding: 8,

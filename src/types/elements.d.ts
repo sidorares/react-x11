@@ -13,9 +13,11 @@ import type {
   TextInputNode,
 } from './nodes.js';
 import type {
+  ChangeEvent,
   EventHandlers,
   MouseEvent,
   ScrollEvent,
+  SubmitEvent,
   SyntheticEvent,
   ViewportEvent,
 } from './events.js';
@@ -222,9 +224,20 @@ export interface TextInputProps extends DrawnProps<TextInputNode> {
   value?: string;
   /** Uncontrolled mode. */
   defaultValue?: string;
-  onChange?: (text: string) => void;
+  /**
+   * Field name, echoed on the event as `ev.name` and `ev.target.name`.
+   * Nothing in the renderer reads it — it exists so form libraries, which
+   * key a field by its name, have somewhere to put one.
+   */
+  name?: string;
+  /**
+   * The value changed. `ev.target.value` and `ev.value` are both the new
+   * text, so `(ev) => setText(ev.target.value)` and `(ev) => setText(ev.value)`
+   * both read naturally.
+   */
+  onChange?: (ev: ChangeEvent<TextInputNode>) => void;
   /** Enter — or Ctrl+Enter in a `<textarea>`. */
-  onSubmit?: (text: string, ev: unknown) => void;
+  onSubmit?: (ev: SubmitEvent<TextInputNode>) => void;
   placeholder?: string;
   placeholderColor?: Color;
   /** Code-point limit. */

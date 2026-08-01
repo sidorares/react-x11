@@ -3,6 +3,7 @@
 // build-step-free for consumers.
 
 import React, { useContext, useEffect, useMemo, useRef } from 'react';
+import { changeEvent } from './change.js';
 import { labelContent, useControl, useTheme } from './theme.js';
 import { XK_DOWN, XK_LEFT, XK_RIGHT, XK_UP } from './keys.js';
 
@@ -11,16 +12,26 @@ const h = React.createElement;
 const RadioGroupContext = React.createContext(null);
 
 /**
- * <RadioGroup value onChange>…<Radio value=…>label</Radio>…</RadioGroup> —
- * exclusive choice. Arrow keys move the selection through the group in
+ * <RadioGroup value onChange name>…<Radio value=…>label</Radio>…</RadioGroup>
+ * — exclusive choice. Arrow keys move the selection through the group in
  * mount order (wrapping); click or Space selects the focused radio.
+ * `name` lives on the group, not the radios, the way it does in HTML: it is
+ * the group that is one form field. `onChange(next, ev)`.
  */
-export function RadioGroup({ value, onChange, children, style, ...boxProps }) {
+export function RadioGroup({
+  value,
+  onChange,
+  name,
+  children,
+  style,
+  ...boxProps
+}) {
   const order = useRef([]).current;
-  const ctx = useMemo(
-    () => ({
+  const ctx = useMemo(() => {
+    const emit = (next) => onChange?.(next, changeEvent('radio', name, next));
+    return {
       value,
-      onChange,
+      emit,
       register: (v) => {
         order.push(v);
         return () => order.splice(order.indexOf(v), 1);
@@ -29,11 +40,10 @@ export function RadioGroup({ value, onChange, children, style, ...boxProps }) {
         if (order.length === 0) return;
         const i = order.indexOf(value);
         const next = order[(i + delta + order.length) % order.length];
-        if (next !== value) onChange?.(next);
+        if (next !== value) emit(next);
       },
-    }),
-    [value, onChange, order],
-  );
+    };
+  }, [value, onChange, name, order]);
   return h(
     'box',
     { ...boxProps, style: [{ gap: 6 }, style] },
@@ -54,7 +64,7 @@ export function Radio({ value, children, label, disabled = false }) {
     props,
     style: controlStyle,
   } = useControl(disabled, () => {
-    if (!selected) group.onChange?.(value);
+    if (!selected) group.emit(value);
   });
   const onKeyDown = props.onKeyDown;
   if (onKeyDown) {
