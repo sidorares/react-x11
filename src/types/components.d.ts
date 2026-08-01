@@ -63,13 +63,17 @@ export function useTheme(): Theme;
 type WidgetProps = Omit<BoxProps, 'children' | 'style' | 'ref'>;
 
 /**
- * The second argument a widget's `onChange` gets, after the next value.
+ * What a value widget's `onChange` receives — one signature across the
+ * library, so `onChange={formik.handleChange}` wires to a `Checkbox` exactly
+ * as it does to a `<textinput>`.
  *
- * The value stays first — `onChange={setChecked}` is what these widgets are
- * for — and this carries the field identity a form library needs.
+ * The new value is `ev.value`, so `onChange={(ev) => setChecked(ev.value)}`
+ * is the plain-React form.
+ *
  * `target` is a plain descriptor, not a node: a widget is several nodes and
- * none of them holds its value. Its shape is what formik's `handleChange`
- * and react-hook-form's event reader destructure, `type` included.
+ * none of them holds its value, so there is nothing honest to point at. Its
+ * shape is what formik's `handleChange` and react-hook-form's event reader
+ * destructure, `type` included.
  */
 export interface WidgetChangeEvent<V = unknown> {
   type: 'change';
@@ -110,7 +114,7 @@ export interface CheckboxProps extends WidgetProps, NamedWidget {
   children?: ReactNode;
   label?: string;
   checked?: boolean;
-  onChange?: (checked: boolean, ev: WidgetChangeEvent<boolean>) => void;
+  onChange?: (ev: WidgetChangeEvent<boolean>) => void;
   disabled?: boolean;
   style?: StyleProp;
 }
@@ -118,7 +122,7 @@ export const Checkbox: ComponentType<CheckboxProps>;
 
 export interface RadioGroupProps<T = unknown> extends WidgetProps, NamedWidget {
   value?: T;
-  onChange?: (value: T, ev: WidgetChangeEvent<T>) => void;
+  onChange?: (ev: WidgetChangeEvent<T>) => void;
   children?: ReactNode;
   style?: StyleProp;
 }
@@ -134,7 +138,7 @@ export function Radio<T = unknown>(props: RadioProps<T>): ReactNode;
 
 export interface SwitchProps extends WidgetProps, NamedWidget {
   checked?: boolean;
-  onChange?: (checked: boolean, ev: WidgetChangeEvent<boolean>) => void;
+  onChange?: (ev: WidgetChangeEvent<boolean>) => void;
   disabled?: boolean;
   style?: StyleProp;
 }
@@ -155,7 +159,7 @@ export interface SliderProps extends WidgetProps, NamedWidget {
   min?: number;
   max?: number;
   step?: number;
-  onChange?: (value: number, ev: WidgetChangeEvent<number>) => void;
+  onChange?: (ev: WidgetChangeEvent<number>) => void;
   disabled?: boolean;
   height?: number;
   style?: StyleProp;
@@ -207,7 +211,7 @@ export type SelectOption<T = unknown> = { value: T; label: string } | T;
 export interface SelectProps<T = unknown> extends WidgetProps, NamedWidget {
   value?: T;
   options?: readonly SelectOption<T>[];
-  onChange?: (value: T, ev: WidgetChangeEvent<T>) => void;
+  onChange?: (ev: WidgetChangeEvent<T>) => void;
   placeholder?: string;
   style?: StyleProp;
 }

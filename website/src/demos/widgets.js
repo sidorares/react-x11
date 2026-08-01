@@ -36,17 +36,17 @@ function Controls() {
       </box>
 
       <box style={{ flexDirection: 'row', gap: 20, alignItems: 'center' }}>
-        <Checkbox checked={checked} onChange={setChecked}>
+        <Checkbox checked={checked} onChange={(ev) => setChecked(ev.value)}>
           Remember me
         </Checkbox>
-        <Switch checked={on} onChange={setOn} />
+        <Switch checked={on} onChange={(ev) => setOn(ev.value)} />
         <text style={{ fontSize: 13 }}>{on ? 'on' : 'off'}</text>
       </box>
 
       <box style={{ gap: 6 }}>
         <text style={{ fontSize: 13 }}>Volume: {volume}</text>
         <Slider value={volume} min={0} max={100} step={5}
-                onChange={setVolume} style={{ width: 260 }} />
+                onChange={(ev) => setVolume(ev.value)} style={{ width: 260 }} />
         <ProgressBar value={volume / 100} style={{ width: 260 }} />
       </box>
 
@@ -54,7 +54,7 @@ function Controls() {
         <text style={{ fontSize: 13 }}>Fruit</text>
         <Select
           value={fruit}
-          onChange={setFruit}
+          onChange={(ev) => setFruit(ev.value)}
           style={{ width: 150 }}
           options={['apple', 'pear', 'cherry', 'quince']}
         />

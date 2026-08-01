@@ -121,7 +121,7 @@ export function TypographyPanel() {
           value={size}
           min={8}
           max={28}
-          onChange={setSize}
+          onChange={(ev) => setSize(ev.value)}
           style={{ width: 120 }}
         />
         <text style={s.hint}>column {String(width)}%</text>
@@ -129,7 +129,7 @@ export function TypographyPanel() {
           value={width}
           min={40}
           max={100}
-          onChange={setWidth}
+          onChange={(ev) => setWidth(ev.value)}
           style={{ width: 120 }}
         />
       </box>

@@ -125,7 +125,7 @@ function App() {
       >
         <Scene spinning={spinning} />
         <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-          <Switch checked={spinning} onChange={setSpinning} />
+          <Switch checked={spinning} onChange={(ev) => setSpinning(ev.value)} />
           <text style={{ fontSize: 13 }}>Spin</text>
           <box style={{ flexGrow: 1 }} />
           <Button onPress={() => setSpinning((s) => !s)}>

@@ -226,9 +226,9 @@ test('Select opens a real popup window and picking closes it', async () => {
     return h(Select, {
       value,
       options: ['alpha', 'beta'],
-      onChange: (v) => {
-        picked.push(v);
-        setValue(v);
+      onChange: (ev) => {
+        picked.push(ev.value);
+        setValue(ev.value);
       },
       style: { width: 160 },
     });

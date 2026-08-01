@@ -170,8 +170,7 @@ export function Select({
   };
   const toggle = () => (open ? close() : openMenu());
 
-  const emit = (next) =>
-    onChange?.(next, changeEvent('select-one', name, next));
+  const emit = (next) => onChange?.(changeEvent('select-one', name, next));
 
   const pick = (option) => {
     close();

@@ -38,6 +38,7 @@ const THUMB_ON = TRACK_WIDTH - THUMB - INSET;
 /**
  * <Switch checked onChange disabled style/> — Checkbox semantics in a
  * sliding pill; the thumb slides to the end matching the state.
+ * `onChange(ev)`, as `Checkbox`.
  *
  * The hover and focus tints are `:hover`/`:focus` blocks rather than React
  * state: the renderer already knows which node the pointer is over and
@@ -59,7 +60,7 @@ export function Switch({
   const theme = useTheme();
   const control = useControl(
     disabled,
-    () => onChange?.(!checked, changeEvent('checkbox', name, !checked)),
+    () => onChange?.(changeEvent('checkbox', name, !checked)),
     { styled: true },
   );
   return h(

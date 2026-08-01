@@ -218,11 +218,11 @@ function TickerTable() {
       <text style={s.title}>Live ticker</text>
       <box style={s.row}>
         <text style={s.hint}>live</text>
-        <Switch checked={live} onChange={setLive} />
+        <Switch checked={live} onChange={(ev) => setLive(ev.value)} />
         <text style={s.hint}>{perTick} rows/tick</text>
         <Switch
           checked={perTick > 2}
-          onChange={(on) => setPerTick(on ? 12 : 2)}
+          onChange={(ev) => setPerTick(ev.value ? 12 : 2)}
         />
       </box>
       <Table

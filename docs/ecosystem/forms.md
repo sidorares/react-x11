@@ -3,36 +3,42 @@
 There is no `<form>` element here, so nothing submits itself — wire
 `handleSubmit` to a `Button`'s `onPress` or to `<textinput onSubmit>`.
 
-Everything else on this page changed in **2.0.0**. `<textinput>` used to fire
-`onChange(newString)`; it now fires `onChange(ev)` with a synthetic event
-carrying `ev.target.value`, `ev.target.name` and a writable `ev.target.value`
-(issue #115, see [elements](../elements.md#the-change-event)). That was the
-one incompatibility that mattered, and with it gone the DOM-shaped form
-libraries work through their normal APIs rather than through an adapter:
+Everything else follows from **one signature**. Every value control in the
+library — the host elements `<textinput>` and `<textarea>`, and the widgets
+`Checkbox`, `Switch`, `RadioGroup`, `Select` and `Slider` — calls
+`onChange(ev)` with a change event carrying `ev.value`, `ev.target.value`,
+`ev.target.name` and, for a checkbox, `ev.target.checked`. That is the shape
+every DOM form library reads, so a library's handler goes straight in:
 
-| library                | 1.2.0                             | 2.0.0                                                    |
-| ---------------------- | --------------------------------- | -------------------------------------------------------- |
-| `react-hook-form`      | `<Controller>` only               | `register()` works, `<Controller>` too                   |
-| `formik`               | broke silently on `getFieldProps` | `handleChange`, `<Field>`, spread all work               |
-| `downshift`            | TypeError on the first keystroke  | works                                                    |
-| `@tanstack/react-form` | `onChange={field.handleChange}`   | `onChange={(ev) => field.handleChange(ev.target.value)}` |
+```jsx
+<textinput name="host"  value={f.values.host}   onChange={f.handleChange} />
+<Checkbox  name="agree" checked={f.values.agree} onChange={f.handleChange} />
+<Select    name="size"  value={f.values.size} options={sizes} onChange={f.handleChange} />
+```
 
-The last row is the cost. A library whose field contract is value-in/
-value-out no longer lines up by accident, so it gains one unwrap per field —
-and a bare `onChange={field.handleChange}` now stores the **event object**
-as the field value rather than erroring, which is the quiet failure mode to
-watch for when upgrading. Grep for `onChange={field.handleChange}` and for
-`onChange={set` before you ship.
+No adapter, no per-widget bridge, nothing to remember about which control
+you are wiring.
 
-Each row was established by running the library headless against this
-renderer, not by reading its documentation: react-hook-form@7.84.0,
+| library                | how it goes in                                            |
+| ---------------------- | --------------------------------------------------------- |
+| `react-hook-form`      | `{...register('host')}`, or `<Controller>` for a widget   |
+| `formik`               | `onChange={handleChange}`, `getFieldProps`, or `<Field>`  |
+| `downshift`            | `getInputProps()` spread onto a `<textinput>`             |
+| `@tanstack/react-form` | `onChange={(ev) => field.handleChange(ev.value)}` — below |
+
+Every row was established by running the library headless against this
+renderer rather than by reading its documentation: react-hook-form@7.84.0,
 formik@2.4.9, downshift@9.4.0, @tanstack/react-form@1.33.2.
 
-The widget layer keeps its own shape — `Checkbox`, `Switch`, `RadioGroup`,
-`Select` and `Slider` call `onChange(next, ev)`, value first, with the
-form-library-shaped event second
-([components](../components.md#the-change-event-and-name)). Pass the second
-argument straight to `formik.handleChange` or to RHF's `field.onChange`.
+**The one thing to know**: a library whose field contract is
+value-in/value-out — TanStack Form is the one here — needs the value taken
+off the event, and a bare `onChange={field.handleChange}` stores the _event
+object_ as the field value with no error. See below.
+
+**Where the line falls.** A control that takes a `name` is a form field and
+reports an event. `Tabs`, `Tree`, `Table` and the menus are not form fields
+and keep their plain callbacks
+([components](../components.md#the-change-event-and-name)).
 
 ## TanStack Form {#tanstack-form}
 
@@ -44,13 +50,19 @@ zod/valibot/arktype plug in directly), and submission handling. Fields are
 value-in/value-out — no DOM events, no refs.
 
 The field contract is `field.state.value` + `field.handleChange(value)` —
-a value, not an event. Since 2.0.0 `<textinput>` fires an event, so each
-field unwraps it: `onChange={(ev) => field.handleChange(ev.target.value)}`.
-One expression, and it is the same one a DOM app writes.
+a **value, not an event**. react-x11's controls fire an event, so each field
+takes the value off it:
 
-Watch for the bare form. `onChange={field.handleChange}` used to be exactly
-right and now stores the event object as the field's value — no error, no
-warning, and validation sees an object where it expected a string.
+```jsx
+onChange={(ev) => field.handleChange(ev.value)}
+```
+
+One expression, the same one a DOM app writes, and it is identical for a
+`<textinput>` and for a `Checkbox`.
+
+Watch for the bare form: `onChange={field.handleChange}` stores the event
+object as the field's value — no error, no warning, and validation sees an
+object where it expected a string.
 
 ```jsx
 import React from 'react';
@@ -73,7 +85,7 @@ function ConnectForm({ connect }) {
           <box style={{ flexDirection: 'column' }}>
             <textinput
               value={field.state.value}
-              onChange={(ev) => field.handleChange(ev.target.value)}
+              onChange={(ev) => field.handleChange(ev.value)}
             />
             {field.state.meta.errors.length > 0 && (
               <text style={{ color: '#cc4444' }}>
@@ -157,8 +169,8 @@ function Settings({ raw }) {
 
 RHF's headline API is uncontrolled-first: `register()` returns DOM-shaped
 props (`{name, ref, onChange(e), onBlur(e)}`) and reads `e.target.value` off
-the event. Since 2.0.0 that is exactly what `<textinput>` provides, so the
-terse spread works:
+the event. That is exactly what `<textinput>` provides, so the terse spread
+works:
 
 ```jsx
 const { register, handleSubmit } = useForm({ defaultValues: { host: '' } });
@@ -277,14 +289,13 @@ import { Formik, Field, useFormik } from 'formik';
 `name` prop is not optional in any of these — that is what the synthetic
 event carries it for.
 
-The widgets need one small bridge, because their `onChange` puts the value
-first:
+The widgets need no bridge — same handler, same signature:
 
 ```jsx
 <Checkbox
   name="agree"
   checked={formik.values.agree}
-  onChange={(_next, ev) => formik.handleChange(ev)}
+  onChange={formik.handleChange}
 >
   I agree
 </Checkbox>

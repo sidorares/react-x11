@@ -150,7 +150,7 @@ export function MixedPanel() {
       <box style={s.row}>
         <text style={s.head}>Mixed</text>
         <text style={s.hint}>animate</text>
-        <Switch checked={running} onChange={setRunning} />
+        <Switch checked={running} onChange={(ev) => setRunning(ev.value)} />
         <text style={s.hint}>
           a clock at 1s and a bar at 80ms — some frames carry one change, some
           two, and the union of two small rects should still be small
@@ -185,7 +185,7 @@ export function MixedPanel() {
                 value={amplitude}
                 min={0}
                 max={38}
-                onChange={setAmplitude}
+                onChange={(ev) => setAmplitude(ev.value)}
                 style={{ flexGrow: 1 }}
               />
             </box>
@@ -202,7 +202,7 @@ export function MixedPanel() {
                 min={0}
                 max={900}
                 step={20}
-                onChange={setThreshold}
+                onChange={(ev) => setThreshold(ev.value)}
                 style={{ flexGrow: 1 }}
               />
             </box>

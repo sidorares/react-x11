@@ -62,7 +62,7 @@ export function Slider({
   const fraction = (clamp(value) - min) / span;
 
   const emit = (next) => {
-    if (next !== value) onChange?.(next, changeEvent('range', name, next));
+    if (next !== value) onChange?.(changeEvent('range', name, next));
   };
 
   /** Pointer x -> value, using the track's laid-out rect. */
