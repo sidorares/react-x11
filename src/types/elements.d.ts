@@ -275,6 +275,21 @@ export interface CanvasProps extends DrawnProps<DrawnNode> {
    * the node's origin and clipped to its bounds. Runs on every repaint.
    */
   onDraw?: (ctx: any, info: DrawInfo) => void;
+  /**
+   * Opt this drawing into the paint cache: render it once and composite it
+   * on later repaints, instead of running `onDraw` again.
+   *
+   * Opt-in because only you know what `onDraw` reads — the key has to name
+   * every input the drawing depends on, and a key that leaves one out shows
+   * stale pixels. Include the things that change the picture:
+   *
+   *     <canvas cacheKey={`spark:${series.id}:${w}x${h}`} onDraw={draw} />
+   *
+   * Develop with `REACT_X11_PAINT_CACHE=verify`, which turns a key that
+   * misses an input into a loud complaint rather than a wrong pixel. Leave
+   * unset for anything animated or driven by state outside the props.
+   */
+  cacheKey?: string | number;
 }
 
 // --- rich content ----------------------------------------------------------

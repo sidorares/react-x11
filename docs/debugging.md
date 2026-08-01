@@ -113,6 +113,39 @@ repaints its whole viewport again. For measuring the blit against the
 plain path on the same build, and as first aid if a scroll ever
 misrenders. Read once at startup, like the switches above.
 
+## The paint cache — `REACT_X11_NO_PAINT_CACHE`, `REACT_X11_PAINT_CACHE=verify`
+
+`<svg>` and `<tex>` render their content once and composite the result on
+later repaints, keyed on _what is drawn_ rather than on which node drew it —
+so a wall of 400 cells holding eight distinct icons keeps eight rendered
+copies, and a repaint of unchanged content is one composite per cell. Your own
+drawings opt in with [`<canvas cacheKey>`](elements.md#cachekey--draw-it-once).
+
+Three switches, all read once at startup:
+
+- `REACT_X11_NO_PAINT_CACHE=1` disables it entirely, so everything paints
+  live. For measuring against the cached path on the same build, and as first
+  aid if anything ever renders stale — same role as `REACT_X11_NO_SCROLL_BLIT`.
+- `REACT_X11_PAINT_CACHE=verify` re-renders every cache hit and compares a
+  digest of the drawing calls against the one recorded when the entry was
+  made. A cache key that fails to name something the drawing reads then says
+  so, loudly, at the moment it would otherwise have shown a stale pixel:
+
+  ```
+  react-x11: paint cache key does not cover the paint of <canvas>.
+    key: canvas|64x24@1|spark:3
+    The drawing changed while the key did not, so a cached frame would show
+    stale pixels. Add whatever changed to the key.
+  ```
+
+  Slow by construction — it does all the work the cache exists to avoid, plus
+  the comparison. Worth leaving on while developing a `cacheKey`.
+
+- `REACT_X11_DEBUG_PAINT_CACHE=1` prints a line per frame: entries, bytes
+  held, and hits/misses/renders/evictions. Rising `renders` on a still screen
+  means keys that change when they should not; rising `evictions` means the
+  working set does not fit the budget.
+
 ## Invalidation reasons
 
 Every internal `invalidate()` call now names why it ran, from a small

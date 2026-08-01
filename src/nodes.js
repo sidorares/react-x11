@@ -30,6 +30,7 @@ import { EventManager, discrete } from './events.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
+import { paintCacheFor } from './paintcache.js';
 import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import {
@@ -1239,7 +1240,14 @@ export class Node {
   paint(ctx) {
     if (this.hidden) return;
     this._paintBackground(ctx);
-    this._paintContent(ctx);
+    // The paint cache covers a node's *content* — the expensive part — and
+    // not its box: background and border are one composite each, and keeping
+    // them out keeps their styles out of the key. A node that does not
+    // implement the protocol has no `paintCachePlan` and pays one property
+    // lookup for the privilege.
+    const cache = this.paintCachePlan && this.root?._paintCache;
+    if (cache) cache.paint(this, ctx);
+    else this._paintContent(ctx);
     this._paintChildren(ctx);
     this._paintBorder(ctx);
   }
@@ -1309,6 +1317,35 @@ export class Node {
   }
 
   _paintContent(ctx) {}
+
+  /**
+   * The paint-cache protocol (issue #149). A node implements both methods or
+   * neither; the base class has neither, so nothing is cached until it opts
+   * in, and no existing or future node changes behaviour by default.
+   *
+   *   paintCachePlan(ctx) -> null | {
+   *     key,             // identity: same key must mean same pixels
+   *     x, y,            // where the surface goes, in device pixels
+   *     width, height,   // its size, in device pixels
+   *     format,          // 'argb32', or 'a8' for coverage that gets tinted
+   *     tint,            // the colour an 'a8' surface is painted through
+   *   }
+   *   paintCached(ctx, box) -> void   // draw at the origin of `box`
+   *
+   * Returning null opts out for this frame, which is the right answer
+   * whenever the paint depends on something the key cannot see.
+   *
+   * **The key is the entire correctness surface.** It must name every input
+   * `paintCached` reads, derived from the same values `applyProps` compares
+   * so the two cannot drift. Never cache a paint that depends on state
+   * outside the key — a focus ring, a hover, a caret blink, anything
+   * animating. Run with `REACT_X11_PAINT_CACHE=verify` to have a key that
+   * misses something fail loudly instead of showing a stale pixel.
+   *
+   * `paintCached` draws in *surface-local* coordinates: `box` is at the
+   * origin, not at `this.abs`. Reaching for `this.abs.x` inside it is the
+   * mistake to look for first when a cached node draws in the wrong place.
+   */
 
   /**
    * Whether anything in this subtree actually reaches outside the clip box.
@@ -2029,6 +2066,57 @@ export class CanvasNode extends Node {
         height: this.abs.height,
         node: this,
       });
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  /**
+   * `<canvas cacheKey>` opts a drawing into the paint cache.
+   *
+   * This one has to be opt-in, and the reason is worth stating: `onDraw` is
+   * an opaque closure. Nothing here can know what it reads — a prop, a ref, a
+   * clock, a module variable — and its identity changes on every render
+   * unless the app memoizes it, so it is not a key either. Only the author
+   * knows, so the author says:
+   *
+   *   <canvas cacheKey={`spark:${series.id}:${w}x${h}`} onDraw={draw} />
+   *
+   * The rule is the protocol's rule: the key must name every input the
+   * drawing reads. A `cacheKey` that leaves one out shows stale pixels, so
+   * develop with `REACT_X11_PAINT_CACHE=verify`, which turns exactly that
+   * mistake into a loud complaint.
+   *
+   * `<canvas>` needs no `paintCached`: it already draws origin-relative, so
+   * the cached render and the live one are the same code.
+   */
+  paintCachePlan() {
+    const { cacheKey, onDraw } = this.props;
+    if (cacheKey == null || typeof onDraw !== 'function') return null;
+    const width = Math.ceil(this.abs.width);
+    const height = Math.ceil(this.abs.height);
+    if (width <= 0 || height <= 0) return null;
+    return {
+      key: `canvas|${width}x${height}@1|${cacheKey}`,
+      x: Math.round(this.abs.x),
+      y: Math.round(this.abs.y),
+      width,
+      height,
+      format: 'argb32',
+      tint: null,
+    };
+  }
+
+  paintCached(ctx, box) {
+    const onDraw = this.props.onDraw;
+    if (typeof onDraw !== 'function') return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(box.x, box.y, box.width, box.height);
+    ctx.clip();
+    ctx.translate(box.x, box.y);
+    try {
+      onDraw(ctx, { width: box.width, height: box.height, node: this });
     } finally {
       ctx.restore();
     }
@@ -4066,9 +4154,14 @@ export class WindowNode extends Node {
     // them at once, which is what keeps ntk's server-side rectangular-clip
     // fast path: a clip path holding several rects is not a rectangle, and
     // falls back to rasterizing a full-surface mask.
+    this._paintCache ??= paintCacheFor(this.app);
+    this._paintCache?.beginFrame();
     for (const rect of damage ?? [null]) {
       this._paintRegion(ctx, rect, width, height);
     }
+    // after every region: an entry drawn in one damage rect must not be
+    // evicted before the next rect of the same frame asks for it
+    this._paintCache?.endFrame();
     if (frameHook) {
       frameHook({
         root: this,
