@@ -17,6 +17,9 @@
 - [typescript.md](typescript.md) — the bundled types: one tsconfig option,
   why JSX comes from `react-x11/jsx-runtime` rather than an augmentation,
   and how the declarations are kept from drifting.
+- [extending.md](extending.md) — `registerElement()` and the subpath
+  exports: adding a host element from outside the package, the node
+  contract, and the two definition fields that fail far from their cause.
 - [testing.md](testing.md) — `react-x11/test`: render, query, drive and
   assert on real pixels, against a real X server in your test process. No
   display, no xvfb.

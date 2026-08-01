@@ -99,6 +99,22 @@
       "types": "./src/debug.d.ts",
       "default": "./src/debug.js"
     },
+    "./host": {
+      "types": "./src/host.d.ts",
+      "default": "./src/host.js"
+    },
+    "./node": {
+      "types": "./src/node.d.ts",
+      "default": "./src/node.js"
+    },
+    "./style": {
+      "types": "./src/style.d.ts",
+      "default": "./src/style.js"
+    },
+    "./ntk": {
+      "types": "./src/ntk.d.ts",
+      "default": "./src/ntk.js"
+    },
     "./test": {
       "types": "./src/testing/index.d.ts",
       "default": "./src/testing/index.js"
