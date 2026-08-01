@@ -26,7 +26,8 @@ import {
   styleHasSizeQueries,
   resolveSizeQueries,
 } from './styles.js';
-import { EventManager } from './events.js';
+import { EventManager, discrete } from './events.js';
+import { addPendingFrame, clearPendingFrame } from './frames.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
 import { hooks as traceHooks } from './trace-registry.js';
@@ -3580,15 +3581,25 @@ export class WindowNode extends Node {
           if (!err) this._wmDeleteAtom = atom;
         });
       }
-      wnd.on('message', (ev) => {
-        if (this._wmDeleteAtom != null && ev.data?.[0] === this._wmDeleteAtom) {
-          // a WM close is a user action: discrete priority, like clicks
-          runWithPriority(DiscreteEventPriority, () => {
-            const handler = this.props.onCloseRequest;
-            if (handler) callHandler(this, 'onCloseRequest', handler, ev);
-          });
-        }
-      });
+      wnd.on(
+        'message',
+        // a WM close is a user action: discrete priority and a discrete
+        // paint, like a click. An onCloseRequest that answers with a
+        // "save your work?" dialog rather than an unmount is the case that
+        // notices — the dialog is the response to the press on the WM's
+        // close button, and it is one paint away.
+        discrete((ev) => {
+          if (
+            this._wmDeleteAtom != null &&
+            ev.data?.[0] === this._wmDeleteAtom
+          ) {
+            runWithPriority(DiscreteEventPriority, () => {
+              const handler = this.props.onCloseRequest;
+              if (handler) callHandler(this, 'onCloseRequest', handler, ev);
+            });
+          }
+        }),
+      );
     }
     this.events.attach();
   }
@@ -3683,6 +3694,7 @@ export class WindowNode extends Node {
   destroySubtree() {
     if (this.destroyed) return;
     this.destroyed = true;
+    clearPendingFrame(this);
     for (const child of this.children) child.destroySubtree();
     if (this.window && typeof this.window.destroy === 'function') {
       this.window.destroy();
@@ -3937,6 +3949,13 @@ export class WindowNode extends Node {
       );
     }
     this.needsPaint = true;
+    // Recorded before the `_scheduled` gate, not inside it: the debt is
+    // "this window has damage", which a discrete event may pay off early
+    // (see frames.js). Tying it to whether a callback is outstanding would
+    // hide the second of two clicks a few milliseconds apart — the first
+    // one's frame is still scheduled, so this returns here, and the early
+    // flush would find nothing to paint.
+    addPendingFrame(this);
     if (this._scheduled) return;
     this._scheduled = true;
     const schedule =
@@ -3950,6 +3969,10 @@ export class WindowNode extends Node {
   }
 
   flush() {
+    // Whatever this frame turns out to owe, it is this call's to pay — and
+    // a window that returns below because it is destroyed or unrealized
+    // owes nothing at all.
+    clearPendingFrame(this);
     if (this.destroyed || !this.yoga || !this.window) return;
     // a transientFor whose owner was not realized yet at commit time. The
     // frame after the mount is the first moment refs have attached, so the

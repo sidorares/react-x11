@@ -2362,6 +2362,16 @@ test('Slider: drag keeps tracking after the pointer leaves the widget', async ()
   const travel = width - THUMB; // thumb is centred on the value
   const atFraction = (f) => x + THUMB / 2 + travel * f;
 
+  // A drag's moves are *continuous* priority, so React renders them from a
+  // scheduler task rather than from the microtask a discrete press commits
+  // in — one macrotask more than the press needs. It took two ticks here
+  // before too; it only fit in one while the press's own commit was still
+  // pending, leaving a scheduler task queued for the move to ride on.
+  const dragged = async () => {
+    await tick();
+    await tick();
+  };
+
   // press at the middle -> 50
   wnd.emit('mousedown', { x: atFraction(0.5), y: cy, keycode: 1 });
   await tick();
@@ -2369,19 +2379,19 @@ test('Slider: drag keeps tracking after the pointer leaves the widget', async ()
 
   // drag while still inside
   wnd.emit('mousemove', { x: atFraction(0.25), y: cy });
-  await tick();
+  await dragged();
   assert.strictEqual(seen.at(-1), 25);
 
   // pointer leaves the widget entirely (far below and to the right).
   // without pointer capture this would dispatch to whatever is under the
   // pointer and the slider would stop following.
   wnd.emit('mousemove', { x: atFraction(0.9), y: cy + 400 });
-  await tick();
+  await dragged();
   assert.strictEqual(seen.at(-1), 90, 'still tracking outside the widget');
 
   // and clamps past the ends
   wnd.emit('mousemove', { x: x - 500, y: cy });
-  await tick();
+  await dragged();
   assert.strictEqual(seen.at(-1), 0, 'clamps at min');
 
   // release out of bounds ends the drag; later moves are ignored

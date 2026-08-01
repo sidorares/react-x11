@@ -18,6 +18,36 @@ events dispatched over the drawn node tree with DOM-like semantics.
 `ev.stopPropagation()` stops the walk. Handlers always read from current
 props — they can never go stale.
 
+### When the response is painted
+
+**Discrete input paints from its own handler**, in the same turn of the
+event loop as the press — not on the next frame. A click has exactly one
+visual answer (a button darkens, a caret lands, focus moves), so there is
+nothing a frame's wait could coalesce it with, and waiting would charge it
+up to a frame interval plus a server round trip on top of a paint that
+measures in the hundreds of microseconds. The dispatcher therefore lands
+React's discrete-priority commit and paints once the whole dispatch has
+unwound — the default action, your handlers and React's update all in one
+pass, never a half-updated frame followed by a second one.
+
+Discrete means everything ntk does not coalesce: `mouseDown`/`mouseUp`,
+`keyDown`/`keyUp`, the wheel, focus and blur, and the window manager's close
+request.
+
+**Motion stays on the frame clock.** `mouseMove`, and the hover
+enter/leave work it drives, are the opposite case — the pointer reports at
+device rate and only the newest position matters — so they coalesce to at
+most one repaint per frame, as before.
+
+Bursts of discrete input stay bounded by the same mechanism. While the
+server has not acknowledged the last frame, the response goes back to the
+paced path: spin a wheel and the first notch paints immediately while the
+rest fold into one catch-up frame. Update instantly, then catch up.
+
+This needs ntk 5.2.0 or newer, which publishes the `frameInFlight()` gate
+the decision is made with. On an older ntk everything still works; the
+response simply waits for the next frame, as it did before.
+
 ### When a handler throws
 
 **No error boundary can catch it.** A boundary only sees throws React

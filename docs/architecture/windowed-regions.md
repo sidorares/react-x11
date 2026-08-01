@@ -783,6 +783,11 @@ section is the ntk-release shopping list.) Fixes independent of any decision her
    zero-Expose scroll tier on Composite servers (§5.3, §8 B) needs an explicit spelling, e.g.
    `serverBackingStore: 'whenMapped'`, plus feature detection from the screen's
    `backing-stores` field so it degrades cleanly on XQuartz.
+10. ✱ **Done (ntk#148, 5.2.0).** `Window.frameInFlight()` — whether the last frame's fence is still
+    unanswered. Asked for by issue #141 (§0.1, §8.1 item 4b): a discrete input's response is
+    painted from its own handler rather than scheduled, and this is the gate that decides
+    between painting now and leaving it to the frame clock, so a burst still costs one
+    catch-up frame instead of one paint per event.
 
 `_onMouseOut` detail/mode filtering is a react-x11-side prerequisite for **everything** above
 (and is arguably a live bug for `<glarea>` + popup-grab edge cases today).

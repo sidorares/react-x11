@@ -305,9 +305,12 @@ test('dragging the divider resizes, and clamps at both minimums', async () => {
   const wnd = app.windows[0];
   const d = divider(app);
 
+  // settle(), not tick(): a drag's moves are continuous priority, so the
+  // render lands from a scheduler task and the layout flush after it — the
+  // same "render *and* a layout flush later" the helper was written for
   wnd.emit('mousedown', { x: d.abs.x + 3, y: 100, keycode: 1 });
   wnd.emit('mousemove', { x: 250, y: 100 });
-  await tick();
+  await settle();
   const [first] = root(app).children[0].children;
   assert.ok(
     Math.abs(first.abs.width - 247) <= 3,
@@ -315,11 +318,11 @@ test('dragging the divider resizes, and clamps at both minimums', async () => {
   );
 
   wnd.emit('mousemove', { x: 5, y: 100 });
-  await tick();
+  await settle();
   assert.strictEqual(root(app).children[0].children[0].abs.width, 50, 'min');
 
   wnd.emit('mousemove', { x: 395, y: 100 });
-  await tick();
+  await settle();
   assert.strictEqual(
     root(app).children[0].children[0].abs.width,
     400 - 6 - 80,

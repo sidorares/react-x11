@@ -6,7 +6,9 @@ import {
   runWithPriority,
   DiscreteEventPriority,
   ContinuousEventPriority,
+  flushSyncWork,
 } from './priority.js';
+import { flushPendingFrames } from './frames.js';
 import { callHandler } from './errors.js';
 
 const XK_TAB = 0xff09;
@@ -23,6 +25,34 @@ const MOD1_MASK = 8;
 let clickToComponentHandler = null;
 export function setClickToComponentHandler(fn) {
   clickToComponentHandler = fn;
+}
+
+/**
+ * Wrap an ntk event callback for a *discrete* event — one whose response is
+ * a single visual state, so there is nothing a frame's wait could coalesce
+ * it with. That is everything ntk does not coalesce: mousedown/mouseup,
+ * keydown/keyup, the wheel (X delivers notches as button 4-7 presses),
+ * focus/blur and WM messages. Motion, and the hover diffing it drives, are
+ * the opposite case and stay on the paced frame.
+ *
+ * The response is painted once the *whole* dispatch has unwound — default
+ * actions, React's discrete-priority commit, and every invalidation the two
+ * produced — rather than after each handler. That ordering is what makes it
+ * one paint rather than two: paint after the `:active` flip but before the
+ * state update lands, and the frame shows half the response with the other
+ * half still waiting on the frame clock.
+ *
+ * ntk presents a window's dirty backing rects when its event handler
+ * returns, so the blit goes out in the same event-loop turn as the press
+ * that caused it. `flushPendingFrames` decides *whether* to paint now; see
+ * frames.js for the fence gate that keeps a burst from painting ten times.
+ */
+export function discrete(fn) {
+  return (ev) => {
+    fn(ev);
+    flushSyncWork();
+    flushPendingFrames();
+  };
 }
 
 export class EventManager {
@@ -84,16 +114,21 @@ export class EventManager {
   attach() {
     const wnd = this.node.window;
     if (typeof wnd.on !== 'function') return;
-    wnd.on('mousedown', (ev) => this._onMouseDown(ev));
-    wnd.on('mouseup', (ev) => this._onMouseUp(ev));
+    // `onDiscrete` paints the response from the handler; plain `wnd.on`
+    // leaves it to the paced frame. Which is which is not a judgement call:
+    // it is ntk's coalesce table (lib/events_map.js), and motion is the
+    // whole reason that table exists.
+    const onDiscrete = (name, fn) => wnd.on(name, discrete(fn));
+    onDiscrete('mousedown', (ev) => this._onMouseDown(ev));
+    onDiscrete('mouseup', (ev) => this._onMouseUp(ev));
     wnd.on('mousemove', (ev) => this._onMouseMove(ev));
     wnd.on('mouseout', (ev) => this._onMouseOut(ev));
-    wnd.on('keydown', (ev) => this._onKey('KeyDown', ev));
-    wnd.on('keyup', (ev) => this._onKey('KeyUp', ev));
+    onDiscrete('keydown', (ev) => this._onKey('KeyDown', ev));
+    onDiscrete('keyup', (ev) => this._onKey('KeyUp', ev));
     // window-level focus (ntk >= 3.7.0): the window manager decides which
     // window gets keys, and the focused node's caret/ring has to follow
-    wnd.on('focus', (ev) => this._onWindowFocus(true, ev));
-    wnd.on('blur', (ev) => this._onWindowFocus(false, ev));
+    onDiscrete('focus', (ev) => this._onWindowFocus(true, ev));
+    onDiscrete('blur', (ev) => this._onWindowFocus(false, ev));
   }
 
   /**

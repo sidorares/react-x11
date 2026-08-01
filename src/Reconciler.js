@@ -14,6 +14,7 @@ import {
   getCurrentUpdatePriority,
   setCurrentUpdatePriority,
   resolveUpdatePriority,
+  setSyncFlush,
 } from './priority.js';
 import {
   WindowNode,
@@ -464,6 +465,10 @@ const HostConfig = {
 };
 
 export const Renderer = ReactReconciler(HostConfig);
+
+// So the event dispatcher can land a discrete-priority commit before it
+// paints the response to that same input — see flushSyncWork in priority.js.
+setSyncFlush(() => Renderer.flushSyncWork());
 
 let integrations = null;
 let integrationsSettled = false;
