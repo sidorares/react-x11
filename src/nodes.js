@@ -40,7 +40,14 @@ import {
   paintEditMenu,
 } from './editmenu.js';
 
-const DRAWN_KINDS = new Set([
+/**
+ * Kinds that lay out with yoga and paint into the owning window —
+ * `paintOrder` filters on this, so a kind missing from it lays out and
+ * never paints. Mutable because `registerElement` (registry.js) adds to it;
+ * that direction, rather than nodes.js importing the registry, is what
+ * keeps the two files acyclic.
+ */
+export const DRAWN_KINDS = new Set([
   'box',
   'text',
   'image',
@@ -53,6 +60,11 @@ const DRAWN_KINDS = new Set([
   'svg',
   'tex',
 ]);
+
+/** kind -> style names a registered element claims as its own semantics.
+ * Filled by registry.js; read by `Node.semanticNames`, so a registered
+ * element gets the exemption without subclassing the getter. */
+export const CUSTOM_SEMANTIC_NAMES = new Map();
 
 // X ConfigureWindow stack-mode: Below places the window directly under the
 // named sibling (X11 protocol, ConfigureWindow).
@@ -697,9 +709,11 @@ export class Node {
     }
   }
 
-  /** Style names this element claims as its own semantics (see WindowNode). */
+  /** Style names this element claims as its own semantics (see WindowNode).
+   * Registered elements declare theirs to `registerElement`, so the common
+   * case needs no subclass. */
   get semanticNames() {
-    return NO_SEMANTIC_NAMES;
+    return CUSTOM_SEMANTIC_NAMES.get(this.kind) ?? NO_SEMANTIC_NAMES;
   }
 
   /**
@@ -827,6 +841,16 @@ export class Node {
       throw new Error(
         `react-x11: <window> cannot be nested inside <${this.kind}>; ` +
           'windows may only appear at the root or inside another <window>.',
+      );
+    }
+    // A registered element that declared childrenAllowed: false says so
+    // here, rather than laying out a child that will never paint. The flag
+    // is set on the instance by the registry, so this stays one property
+    // read and nodes.js keeps not importing it.
+    if (this._childrenAllowed === false) {
+      throw new Error(
+        `react-x11: <${this.kind}> takes no children (registered with ` +
+          `childrenAllowed: false), but <${child.kind}> is inside it.`,
       );
     }
     // captured before the child joins, so it covers the arrangement that is

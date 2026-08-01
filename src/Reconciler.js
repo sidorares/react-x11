@@ -39,6 +39,7 @@ import {
   hooks as traceHooks,
 } from './trace-registry.js';
 import { GlAreaNode } from './glnodes.js';
+import { createRegisteredNode, registeredElements } from './registry.js';
 import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
 import {
   MarkdownNode,
@@ -283,18 +284,37 @@ const HostConfig = {
       case 'glarea':
         node = new GlAreaNode(props, rootContainer);
         break;
-      default:
+      default: {
+        // Third-party elements (issue #125). Built-ins stay a switch —
+        // they are code, not data — and the registry is consulted only
+        // once the switch has run out, so it costs nothing on the way in.
+        const registered = createRegisteredNode(
+          type,
+          props,
+          rootContainer,
+          hostContext,
+        );
+        if (registered) {
+          registered._reactFiber = internalHandle;
+          return registered;
+        }
         if (SCENE_KINDS.has(type) || UNSUPPORTED_KINDS[type]) {
           throw new Error(
             `react-x11: <${type}> is a 3D element and only works inside ` +
               '<glarea> (or the <Canvas3D> component).',
           );
         }
+        const custom = registeredElements();
         throw new Error(
           `react-x11: unknown element type <${type}>. Supported: ` +
             HOST_TYPES.map((t) => `<${t}>`).join(', ') +
-            '.',
+            (custom.length > 0
+              ? `; registered: ${custom.map((t) => `<${t}>`).join(', ')}`
+              : '') +
+            '. Third-party elements are added with registerElement() from ' +
+            'react-x11/host (docs/extending.md).',
         );
+      }
     }
     node._reactFiber = internalHandle;
     return node;
