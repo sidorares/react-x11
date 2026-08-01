@@ -8,8 +8,8 @@
     "compositePixels": 160000
   },
   "text: paragraph, inside a rect clip": {
-    "requests": 43,
-    "bytesOut": 6064,
+    "requests": 40,
+    "bytesOut": 6040,
     "bytesIn": 32,
     "replies": 1,
     "composites": 1,
@@ -24,19 +24,27 @@
     "compositePixels": 160000
   },
   "shapes: 50 filled rounded boxes": {
-    "requests": 169,
-    "bytesOut": 15008,
+    "requests": 175,
+    "bytesOut": 15056,
     "bytesIn": 32,
     "replies": 1,
     "composites": 51,
     "compositePixels": 224800
   },
   "mount: window with 40 boxes and labels": {
-    "requests": 86,
-    "bytesOut": 3652,
-    "bytesIn": 160,
-    "replies": 3,
+    "requests": 89,
+    "bytesOut": 3752,
+    "bytesIn": 192,
+    "replies": 4,
     "composites": 21,
     "compositePixels": 298240
+  },
+  "scroll: 10 notches over 500 rows": {
+    "requests": 437,
+    "bytesOut": 17732,
+    "bytesIn": 704,
+    "replies": 22,
+    "composites": 111,
+    "compositePixels": 650000
   }
 }

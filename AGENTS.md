@@ -408,10 +408,12 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
 
   Presentation is ntk's job, and the two halves have to match to be worth
   anything: **ntk >= 3.10.2** copies just the rects the drawing reported, where
-  earlier versions blit the whole window however little changed. That is the
-  floor in `package.json` for this reason, not for an API — against 3.10.1 the
-  region list still computes and paints correctly, it just does not reach the
-  screen any faster (NEXT_STEPS §8 item 4). The reporting channel is the clip:
+  earlier versions blit the whole window however little changed. That was the
+  floor in `package.json` for a long time for this reason rather than for an
+  API — against 3.10.1 the region list still computes and paints correctly, it
+  just does not reach the screen any faster (NEXT_STEPS §8 item 4). The floor
+  is now **4.3.0**, and that one _is_ an API: `Window.scrollRegion`, which the
+  scroll-blit path below calls. The reporting channel is the clip:
   ntk takes each operation's clip rectangle as the region it might have touched,
   so a pass that is not clipped reports nothing and gives up the bound for the
   whole frame — which is why the frame clips per rect even though culling
@@ -425,6 +427,31 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   `_subtreeBounds()` stops at a node that `clipsChildren()` for the same
   reason: a scrollview's content extent is not what reaches the surface, and
   mid-scroll it can be ninety thousand pixels away.
+
+  On top of that bound sits the **scroll-blit fast path** (issue #138,
+  `_applyScrollBlits`): when a frame is a _pure_ single-axis scroll of one
+  viewport, the surviving band is `CopyArea`'d inside ntk's backing pixmap
+  (`Window.scrollRegion`, ntk >= 4.3.0 — the floor, though the call stays
+  feature-detected so a mock or a deduped older copy degrades rather than
+  throws) and the frame's
+  damage narrows to the exposed strip plus the scrollbar repair rects — per
+  wheel notch on a 500-row list that is 44 requests and 0.065 Mpx of
+  Composite work instead of 89 and 0.33. Everything about it is a gate that
+  falls back to the plain repaint: too-small viewports and page-sized jumps
+  are not worth the bookkeeping (`SCROLL_BLIT_MIN_AREA`,
+  `SCROLL_BLIT_MIN_KEEP`), fractional offsets and diagonal deltas cannot
+  blit, any other claim near the viewport (checked at `invalidate` time,
+  _before_ rects coalesce and hide it), a border/borderRadius on the
+  scrollview, an overlapping non-descendant, a debug overlay or DevTools
+  highlight all bail. The invariant, pinned by a pixel test in
+  `test/scroll-blit.test.js`, is that a blitted frame is byte-identical to
+  the repaint it replaced; `REACT_X11_NO_SCROLL_BLIT=1` turns the path off
+  for A/B measurement and as field first aid. The bench's scroll scenario is
+  baselined **with the blit live**, and that is what fences it: `--check`
+  only fails on an _increase_, so against fallback numbers a change that
+  silently stopped the fast path from firing would pass unnoticed. The fence
+  is verifiable — `REACT_X11_NO_SCROLL_BLIT=1 npm run bench -- --check` must
+  fail, and does (887 requests and 3.28 Mpx against a 437 / 0.65 baseline).
 
   **Where scrolling actually spent its time was neither of those.** Profiling a
   50,000-row table found the cost in ntk's `clip()`: intersecting a clip
