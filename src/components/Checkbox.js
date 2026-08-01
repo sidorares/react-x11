@@ -3,19 +3,22 @@
 // build-step-free for consumers.
 
 import React from 'react';
+import { changeEvent } from './change.js';
 import { labelContent, useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
 
 /**
  * <Checkbox checked onChange disabled>label</Checkbox> — 16px check well +
- * label row; click or Space toggles (onChange receives the next value).
+ * label row; click or Space toggles. `onChange(next, ev)`: the next value
+ * first, then a form-library-shaped change event carrying `name`.
  */
 export function Checkbox({
   children,
   label,
   checked = false,
   onChange,
+  name,
   disabled = false,
   style,
   ...boxProps
@@ -25,7 +28,9 @@ export function Checkbox({
     focused,
     props,
     style: controlStyle,
-  } = useControl(disabled, () => onChange?.(!checked));
+  } = useControl(disabled, () =>
+    onChange?.(!checked, changeEvent('checkbox', name, !checked)),
+  );
   const fill = disabled ? theme.dim : theme.accent;
   return h(
     'box',

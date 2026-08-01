@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { createStyles } from '../styles.js';
+import { changeEvent } from './change.js';
 import { useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
@@ -50,14 +51,17 @@ const THUMB_ON = TRACK_WIDTH - THUMB - INSET;
 export function Switch({
   checked = false,
   onChange,
+  name,
   disabled = false,
   style,
   ...boxProps
 }) {
   const theme = useTheme();
-  const control = useControl(disabled, () => onChange?.(!checked), {
-    styled: true,
-  });
+  const control = useControl(
+    disabled,
+    () => onChange?.(!checked, changeEvent('checkbox', name, !checked)),
+    { styled: true },
+  );
   return h(
     'box',
     {

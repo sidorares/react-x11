@@ -36,6 +36,7 @@ import {
   useTheme,
 } from '../../src/index.js';
 import type {
+  ChangeEvent,
   DrawnNode,
   KeyboardEvent,
   MouseEvent,
@@ -46,6 +47,7 @@ import type {
   StyleProp,
   TextInputNode,
   WheelEvent,
+  WidgetChangeEvent,
 } from '../../src/index.js';
 
 // --- styles ----------------------------------------------------------------
@@ -136,12 +138,24 @@ function Elements() {
       <textinput
         ref={inputRef}
         value={text}
-        onChange={setText}
-        onSubmit={(value) => void value.length}
+        name="subject"
+        // issue #115: both idioms have to type-check — `ev.target.value` is
+        // what every DOM form library reads, `ev.value` is the short form
+        onChange={(ev) => setText(ev.target.value || ev.value)}
+        onSubmit={(ev) => void (ev.value.length + (ev.name?.length ?? 0))}
         placeholder="type"
         maxLength={40}
         focusable
         tabIndex={0}
+      />
+      <textarea
+        name="body"
+        onChange={(ev: ChangeEvent<TextInputNode>) => {
+          ev.preventDefault();
+          void (ev.type === 'change' && ev.target.value);
+          // null for an edit with no single X event behind it
+          void ev.nativeEvent?.keycode;
+        }}
       />
       <Button
         label="Undo"
@@ -288,20 +302,42 @@ function Widgets() {
         <Checkbox checked={checked} onChange={setChecked}>
           check
         </Checkbox>
-        <Switch checked={checked} onChange={setChecked} />
+        {/* issue #115: the next value stays first, so `onChange={setChecked}`
+            still checks; the form event is an optional second argument */}
+        <Checkbox
+          checked={checked}
+          name="agree"
+          onChange={(next, ev: WidgetChangeEvent<boolean>) => {
+            void (ev.target.type === 'checkbox' && ev.target.checked);
+            setChecked(next);
+          }}
+        />
+        <Switch checked={checked} name="notify" onChange={setChecked} />
         <ProgressBar value={0.4} color="#2980b9" />
-        <Slider value={20} min={0} max={100} step={5} onChange={() => {}} />
+        <Slider
+          value={20}
+          min={0}
+          max={100}
+          step={5}
+          name="volume"
+          onChange={(v, ev) => void (v.toFixed() + ev.target.type)}
+        />
         <Tooltip label="hi" placement="bottom" delay={200}>
           <box />
         </Tooltip>
 
-        <RadioGroup<string> value="a" onChange={(v) => void v.toUpperCase()}>
+        <RadioGroup<string>
+          value="a"
+          name="flavour"
+          onChange={(v, ev) => void (v.toUpperCase() + ev.name)}
+        >
           <Radio value="a">A</Radio>
           <Radio value="b" label="B" />
         </RadioGroup>
 
         <Select<number>
           value={1}
+          name="qty"
           options={[{ value: 1, label: 'one' }]}
           onChange={(v) => void v.toFixed()}
         />

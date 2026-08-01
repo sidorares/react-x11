@@ -52,10 +52,14 @@ command.
    core package too — `@tanstack/query-core`, not just
    `@tanstack/react-query`, which has no hits of its own.
 
-4. **Does it expect DOM-shaped events?** react-x11's `<textinput>` calls
-   `onChange(newString)`, not `onChange(event)`. A library whose handler does
-   `event.target.value` mounts fine and then breaks on the first keystroke.
-   Grep for `target.value`.
+4. **Does it expect DOM-shaped events?** Since 2.0.0 the answer is usually
+   fine: `<textinput onChange>` hands over a synthetic event with
+   `target.value`, `target.name` and a writable `target.value`, so
+   `event.target.value` reads the way it does in the DOM. What to check
+   instead is the **opposite** direction — a library whose field contract is
+   value-in/value-out (`field.handleChange(value)`) now needs one unwrap per
+   field, and a bare `onChange={field.handleChange}` stores the event object
+   with no error. Grep your own code for `onChange={` on a `<textinput>`.
 
 A library that passes all four is almost always a drop-in. A library that
 fails 2 or 3 usually has a headless core published separately — that is the
@@ -369,46 +373,27 @@ better one for dense plots.
 These mount without a single error message. The first sign of trouble is a
 keystroke.
 
-| Package                           | Error                                                              | Use instead                                                        |
-| --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| `downshift`                       | `TypeError: Cannot read properties of undefined (reading 'value')` | react-x11's built-in `Select`                                      |
-| `formik` (`getFieldProps` spread) | _(nothing — no error, no warning, the field never updates)_        | `@tanstack/react-form` — [forms](ecosystem/forms.md#tanstack-form) |
+**Two entries left this table in 2.0.0.** `downshift` (a TypeError on the
+first keystroke) and `formik`'s `getFieldProps` spread (silent, no error,
+the field simply never updated) both had one cause: `<textinput>` called
+`onChange(newString)` rather than `onChange(event)`. It now passes a
+synthetic event, and both work — see
+[forms](ecosystem/forms.md). They are recorded here because the symptoms are
+what a 1.x user searches for.
 
-Both have the same cause: react-x11's `<textinput>` calls
-`onChange(newString)`, never `onChange(event)`.
+Nothing currently fails on first interaction. Two shapes to know about
+anyway, because they are the ones this class of bug takes here:
 
-```jsx
-const c = useCombobox({ items: ['alpha', 'beta'] });
-return <textinput {...c.getInputProps()} />;
-// mounts clean; the first keystroke calls onChange('al') and
-// downshift's handler does event.target.value
-```
-
-Note the missing `react-x11:` prefix — the throw comes from downshift, so
-nothing in the message suggests the renderer is involved. You will also see
-downshift's own dev warning if you only wire the input:
-`downshift: You forgot to call the getMenuProps getter function on your
-component / element.`
-
-Formik is the same shape, one degree quieter. `handleChange` treats a string
-argument as its curried field-name form, returns a handler, and never
-touches state — `values` stays `{"host":""}` and `touched` stays `{}` with
-nothing logged. Never spread `getFieldProps` onto a react-x11 host. If you
-must use Formik, drive it by hand:
-
-```jsx
-<textinput
-  value={f.values.host}
-  onChange={(v) => f.setFieldValue('host', v)}
-  onBlur={() => f.setFieldTouched('host')}
-/>
-```
-
-The render-prop form of `<Formik>` works this way and `f.submitForm()`
-delivers the right values. There is a sharper edge nearby: passing a
-non-string object to `handleChange` — a hand-rolled fake event, say —
-throws `TypeError: Cannot read properties of undefined (reading 'type')`
-instead of no-opping.
+- A handler that reads `event.nativeEvent.<something>` **unguarded** works
+  for a keystroke and throws for a paste or an undo, where there is no X
+  event to report. downshift reads
+  `event.nativeEvent.preventDownshiftDefault` this way; it is safe only
+  because it also checks `hasOwnProperty('nativeEvent')` first and the
+  property is always present.
+- A library that writes through a ref — `ref.value = ''` — needs the node to
+  have a value **setter**. `<textinput>` does; most nodes do not, and the
+  failure is a TypeError thrown from inside the commit phase, which takes the
+  render down rather than one handler.
 
 ### Silent failures
 

@@ -62,6 +62,40 @@ export function useTheme(): Theme;
 /** Props a widget passes through to the `<box>` it renders. */
 type WidgetProps = Omit<BoxProps, 'children' | 'style' | 'ref'>;
 
+/**
+ * The second argument a widget's `onChange` gets, after the next value.
+ *
+ * The value stays first — `onChange={setChecked}` is what these widgets are
+ * for — and this carries the field identity a form library needs.
+ * `target` is a plain descriptor, not a node: a widget is several nodes and
+ * none of them holds its value. Its shape is what formik's `handleChange`
+ * and react-hook-form's event reader destructure, `type` included.
+ */
+export interface WidgetChangeEvent<V = unknown> {
+  type: 'change';
+  target: {
+    /** `'checkbox'`, `'radio'`, `'select-one'`, `'range'`. */
+    type: string;
+    name?: string;
+    value: V;
+    /** Checkbox and switch only. */
+    checked?: boolean;
+  };
+  currentTarget: WidgetChangeEvent<V>['target'];
+  name?: string;
+  value: V;
+}
+
+/** Widgets that are one form field: they take a `name` and echo it back. */
+interface NamedWidget {
+  /**
+   * Field name, echoed on the change event as `ev.name` and
+   * `ev.target.name`. Nothing in react-x11 reads it — it is there so a form
+   * library has somewhere to put one.
+   */
+  name?: string;
+}
+
 export interface ButtonProps extends WidgetProps {
   children?: ReactNode;
   label?: string;
@@ -72,19 +106,19 @@ export interface ButtonProps extends WidgetProps {
 }
 export const Button: ComponentType<ButtonProps>;
 
-export interface CheckboxProps extends WidgetProps {
+export interface CheckboxProps extends WidgetProps, NamedWidget {
   children?: ReactNode;
   label?: string;
   checked?: boolean;
-  onChange?: (checked: boolean) => void;
+  onChange?: (checked: boolean, ev: WidgetChangeEvent<boolean>) => void;
   disabled?: boolean;
   style?: StyleProp;
 }
 export const Checkbox: ComponentType<CheckboxProps>;
 
-export interface RadioGroupProps<T = unknown> extends WidgetProps {
+export interface RadioGroupProps<T = unknown> extends WidgetProps, NamedWidget {
   value?: T;
-  onChange?: (value: T) => void;
+  onChange?: (value: T, ev: WidgetChangeEvent<T>) => void;
   children?: ReactNode;
   style?: StyleProp;
 }
@@ -98,9 +132,9 @@ export interface RadioProps<T = unknown> {
 }
 export function Radio<T = unknown>(props: RadioProps<T>): ReactNode;
 
-export interface SwitchProps extends WidgetProps {
+export interface SwitchProps extends WidgetProps, NamedWidget {
   checked?: boolean;
-  onChange?: (checked: boolean) => void;
+  onChange?: (checked: boolean, ev: WidgetChangeEvent<boolean>) => void;
   disabled?: boolean;
   style?: StyleProp;
 }
@@ -116,12 +150,12 @@ export interface ProgressBarProps extends WidgetProps {
 }
 export const ProgressBar: ComponentType<ProgressBarProps>;
 
-export interface SliderProps extends WidgetProps {
+export interface SliderProps extends WidgetProps, NamedWidget {
   value?: number;
   min?: number;
   max?: number;
   step?: number;
-  onChange?: (value: number) => void;
+  onChange?: (value: number, ev: WidgetChangeEvent<number>) => void;
   disabled?: boolean;
   height?: number;
   style?: StyleProp;
@@ -156,10 +190,10 @@ export const Dialog: ComponentType<DialogProps>;
 /** An option, or a plain value used as both value and label. */
 export type SelectOption<T = unknown> = { value: T; label: string } | T;
 
-export interface SelectProps<T = unknown> extends WidgetProps {
+export interface SelectProps<T = unknown> extends WidgetProps, NamedWidget {
   value?: T;
   options?: readonly SelectOption<T>[];
-  onChange?: (value: T) => void;
+  onChange?: (value: T, ev: WidgetChangeEvent<T>) => void;
   placeholder?: string;
   style?: StyleProp;
 }

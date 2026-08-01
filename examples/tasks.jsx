@@ -62,7 +62,7 @@ function AddTask() {
         autoFocus
         value={draft}
         placeholder="Add a task…"
-        onChange={setDraft}
+        onChange={(ev) => setDraft(ev.target.value)}
         onSubmit={add}
         style={{
           flexGrow: 1,

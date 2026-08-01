@@ -324,13 +324,53 @@ across kerning, shaping boundaries and trailing whitespace.
 
 | prop                              |                                            |
 | --------------------------------- | ------------------------------------------ |
-| `value` + `onChange(text)`        | controlled mode (display follows the prop) |
+| `value` + `onChange(ev)`          | controlled mode (display follows the prop) |
 | `defaultValue`                    | uncontrolled mode                          |
-| `onSubmit(text, ev)`              | Enter                                      |
+| `onSubmit(ev)`                    | Enter                                      |
+| `name`                            | field name, echoed on the event            |
 | `placeholder`, `placeholderColor` | shown when empty                           |
 | `maxLength`                       | code-point limit                           |
 | `selectionColor`, `caretColor`    | selection/caret paint                      |
 | text style props                  | as `<text>`                                |
+
+### The change event
+
+`onChange` and `onSubmit` get a synthetic event, the same shape every other
+handler in the library gets, rather than a bare string:
+
+```jsx
+<textinput name="email" value={email} onChange={(ev) => setEmail(ev.target.value)} />
+```
+
+| on the event                     |                                                  |
+| -------------------------------- | ------------------------------------------------ |
+| `ev.value`, `ev.target.value`    | the text **after** the edit                      |
+| `ev.name`, `ev.target.name`      | the `name` prop                                  |
+| `ev.type`                        | `'change'` or `'submit'`                         |
+| `ev.target`, `ev.currentTarget`  | the node (they are the same — this does not bubble) |
+| `ev.nativeEvent`                 | the X key event, or **null** — see below         |
+| `preventDefault`, `stopPropagation` | present for uniformity; nothing reads them    |
+
+Two details worth knowing:
+
+- **`ev.target.value` is the new value even in controlled mode**, where
+  `props.value` is still the old string until the parent re-renders. That is
+  what makes `e.target.value` mean here what it means in the DOM, and it is
+  why react-hook-form and formik work — see
+  [docs/ecosystem/forms.md](ecosystem/forms.md). It is true *while the
+  handler runs*: `ev.target` is the live node, so a handler that stashes the
+  event and reads `ev.target.value` later sees whatever the control holds
+  then. `ev.value` is a snapshot and always safe.
+- **`ev.nativeEvent` can be null.** A keystroke carries the X key event that
+  produced it, but an edit can also come from a paste resolving, an undo, or
+  a value the parent pushed back — none of which has an X event behind it.
+  Guard it. (Not academic: downshift reads
+  `event.nativeEvent.preventDownshiftDefault` unguarded, so a null there is a
+  TypeError rather than a no-op.)
+
+The node behind `ev.target` is writable, too. `node.value = ''` sets the text
+without firing `onChange`, the way assigning to a DOM input's `value` does —
+that is how react-hook-form's `register()` resets a field through its ref.
 
 Interactions: click/drag selection, double-click word select, triple-click
 select all, Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,

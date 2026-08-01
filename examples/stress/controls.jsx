@@ -276,13 +276,13 @@ export function ControlsPanel() {
               <text style={s.title}>Text entry</text>
               <textinput
                 value={note}
-                onChange={setNote}
+                onChange={(ev) => setNote(ev.target.value)}
                 placeholder="single line"
                 style={{ width: '100%' }}
               />
               <textarea
                 value={longText}
-                onChange={setLongText}
+                onChange={(ev) => setLongText(ev.target.value)}
                 rows={4}
                 style={{ width: '100%' }}
               />

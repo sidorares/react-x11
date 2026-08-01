@@ -4,6 +4,7 @@
 
 import React, { useRef, useState } from 'react';
 import { useTheme } from './theme.js';
+import { changeEvent } from './change.js';
 import {
   XK_DOWN,
   XK_END,
@@ -37,6 +38,7 @@ export function Slider({
   max = 100,
   step = 1,
   onChange,
+  name,
   disabled = false,
   height = 4,
   style,
@@ -60,7 +62,7 @@ export function Slider({
   const fraction = (clamp(value) - min) / span;
 
   const emit = (next) => {
-    if (next !== value) onChange?.(next);
+    if (next !== value) onChange?.(next, changeEvent('range', name, next));
   };
 
   /** Pointer x -> value, using the track's laid-out rect. */

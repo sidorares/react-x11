@@ -106,6 +106,34 @@ import { Button, Checkbox, RadioGroup, Radio, Switch, ProgressBar } from 'react-
 Label text is the children (or a `label` prop); a bare string is wrapped in
 a `<text>` for you, so `<Button>Save</Button>` needs no `<text>`.
 
+### The change event, and `name`
+
+Every value control — `Checkbox`, `Switch`, `RadioGroup`, `Select`,
+`Slider` — calls `onChange(next, ev)`. The **next value comes first**, which
+is the whole ergonomic point of these widgets (`onChange={setChecked}` is
+the common case and stays a one-liner), and the second argument carries the
+field identity a form library needs:
+
+```js
+{ type: 'change',
+  target: { type: 'checkbox', name: 'agree', value: true, checked: true },
+  currentTarget: /* the same object */,
+  name: 'agree', value: true }
+```
+
+`target` is a plain descriptor rather than a node: a widget is several nodes
+and none of them holds its value. Its shape is what formik's `handleChange`
+and react-hook-form's event reader destructure — `target.type` is how they
+tell a checkbox from a text field, which is why it is set even though nothing
+in react-x11 reads it. There is no `preventDefault`: the value has already
+changed by the time the handler runs.
+
+`name` is inert here. It exists so a form library has somewhere to put one;
+see [docs/ecosystem/forms.md](ecosystem/forms.md). The host elements
+`<textinput>` and `<textarea>` are different — they hand you a single
+synthetic event with no leading value, matching the DOM
+([elements.md](elements.md#the-change-event)).
+
 ### `Button`
 
 | prop                 |                                           |
@@ -120,16 +148,18 @@ a `<text>` for you, so `<Button>Save</Button>` needs no `<text>`.
 | prop                 |                                            |
 | -------------------- | ------------------------------------------ |
 | `checked`            | current value (controlled)                 |
-| `onChange(next)`     | receives the **next** value, not the event |
+| `onChange(next, ev)` | the **next** value first, then the event   |
+| `name`               | field name, for form libraries             |
 | `children` / `label` | label to the right of the 16px check well  |
 | `disabled`           | inert, dimmed                              |
 
 ### `Radio` / `RadioGroup`
 
-`RadioGroup` takes `value`, `onChange(value)`, `style` and any box props;
-each `Radio` takes the `value` it selects, plus `children`/`label` and
-`disabled` — and nothing else, so per-radio styling goes on the group. A
+`RadioGroup` takes `value`, `onChange(value, ev)`, `name`, `style` and any
+box props; each `Radio` takes the `value` it selects, plus `children`/`label`
+and `disabled` — and nothing else, so per-radio styling goes on the group. A
 `Radio` outside a `RadioGroup` throws rather than silently doing nothing.
+`name` lives on the group the way it does in HTML: the group is the field.
 
 Arrow keys move the selection through the group in **mount order**,
 wrapping — Up/Left back, Down/Right forward — which is how a native radio
@@ -137,8 +167,8 @@ group behaves; click or Space selects the focused one.
 
 ### `Switch`
 
-`checked`, `onChange(next)` and `disabled`, the same semantics as
-`Checkbox` in a sliding pill. The thumb is absolutely positioned and
+`checked`, `onChange(next, ev)`, `name` and `disabled`, the same semantics
+as `Checkbox` in a sliding pill. The thumb is absolutely positioned and
 animates on `left` (`transition: { left: 120 }`) because `justifyContent`
 would flip between the ends with nothing in between to animate — the worked
 example in [styling.md](styling.md#transitions).
@@ -182,10 +212,11 @@ import { Select } from 'react-x11';
 
 | prop                       |                                           |
 | -------------------------- | ----------------------------------------- |
-| `options`                  | array of `{value, label}` or plain values |
-| `value`, `onChange(value)` | selection                                 |
-| `placeholder`              | trigger text when nothing is selected     |
-| `style` + any box props    | forwarded to the trigger box              |
+| `options`                      | array of `{value, label}` or plain values |
+| `value`, `onChange(value, ev)` | selection                                 |
+| `name`                         | field name, for form libraries            |
+| `placeholder`                  | trigger text when nothing is selected     |
+| `style` + any box props        | forwarded to the trigger box              |
 
 Behavior: click / Space / Enter toggles the menu; Escape, focus loss, or
 picking closes it; the option list scrolls when taller than 220px; the
@@ -239,12 +270,13 @@ import { Slider } from 'react-x11';
 />;
 ```
 
-| prop                       |                                                         |
-| -------------------------- | ------------------------------------------------------- |
-| `value`, `onChange(value)` | current value (controlled)                              |
-| `min`, `max`, `step`       | range and quantisation (defaults 0, 100, 1)             |
-| `height`                   | the bar thickness (default 4); width comes from `style` |
-| `disabled`                 | inert, dimmed                                           |
+| prop                           |                                                         |
+| ------------------------------ | ------------------------------------------------------- |
+| `value`, `onChange(value, ev)` | current value (controlled)                              |
+| `name`                         | field name, for form libraries                          |
+| `min`, `max`, `step`           | range and quantisation (defaults 0, 100, 1)             |
+| `height`                       | the bar thickness (default 4); width comes from `style` |
+| `disabled`                     | inert, dimmed                                           |
 
 Dragging uses [pointer capture](events.md#pointer-capture): the press
 captures, so the thumb keeps following a pointer that has wandered far
