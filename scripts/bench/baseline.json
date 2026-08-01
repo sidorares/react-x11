@@ -24,8 +24,8 @@
     "compositePixels": 160000
   },
   "shapes: 50 filled rounded boxes": {
-    "requests": 175,
-    "bytesOut": 15056,
+    "requests": 120,
+    "bytesOut": 68424,
     "bytesIn": 32,
     "replies": 1,
     "composites": 51,
@@ -40,11 +40,27 @@
     "compositePixels": 298240
   },
   "scroll: 10 notches over 500 rows": {
-    "requests": 437,
-    "bytesOut": 17732,
+    "requests": 418,
+    "bytesOut": 16880,
     "bytesIn": 704,
     "replies": 22,
     "composites": 111,
     "compositePixels": 650000
+  },
+  "svg: 100 unchanged icons, full repaint": {
+    "requests": 1082,
+    "bytesOut": 198808,
+    "bytesIn": 128,
+    "replies": 4,
+    "composites": 501,
+    "compositePixels": 199475
+  },
+  "svg: 10 unchanged icons in a damaged row": {
+    "requests": 183,
+    "bytesOut": 12076,
+    "bytesIn": 128,
+    "replies": 4,
+    "composites": 115,
+    "compositePixels": 17584
   }
 }

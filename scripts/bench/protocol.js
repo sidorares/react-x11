@@ -141,6 +141,94 @@ function paragraphLayout(app) {
   );
 }
 
+// Four of the icon-wall drawings from `examples/icons.jsx`, with the same
+// mix of primitives (arcs, circles, lines, polylines, rects) so no single
+// route through the path code dominates. The paint attributes sit on an
+// inner <g> because SvgView starts inheritance from its own defaults and
+// ignores presentation attributes on the root <svg> — `fill="none"` there
+// would be dropped and every stroke icon would paint as a solid blob.
+const ICON_PAINT =
+  'fill="none" stroke="#2d3436" stroke-width="1.7" ' +
+  'stroke-linecap="round" stroke-linejoin="round"';
+
+const ICON_BODIES = [
+  // gauge
+  '<path d="M4.2 16.5a8.5 8.5 0 1 1 15.6 0"/><line x1="12" y1="15.5" x2="16.6" y2="10.4"/>' +
+    '<circle cx="12" cy="15.7" r="1.5"/><line x1="4.6" y1="12.6" x2="6.3" y2="13"/>' +
+    '<line x1="12" y1="7.6" x2="12" y2="9.3"/><line x1="3.5" y1="19.5" x2="20.5" y2="19.5"/>',
+  // compass
+  '<circle cx="12" cy="12" r="9"/><path d="M15.8 8.2 13.2 14 7.4 16.6 10 10.8z"/>' +
+    '<circle cx="12" cy="12" r="0.9"/><line x1="12" y1="1.6" x2="12" y2="3.4"/>' +
+    '<line x1="1.6" y1="12" x2="3.4" y2="12"/>',
+  // cpu
+  '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/>' +
+    '<line x1="9.5" y1="2" x2="9.5" y2="5"/><line x1="14.5" y1="2" x2="14.5" y2="5"/>' +
+    '<line x1="2" y1="9.5" x2="5" y2="9.5"/><line x1="19" y1="14.5" x2="22" y2="14.5"/>',
+  // chart
+  '<polyline points="3.6 3.6 3.6 20.4 20.4 20.4"/><rect x="6.4" y="13.6" width="2.6" height="6.8"/>' +
+    '<rect x="11" y="10" width="2.6" height="10.4"/><polyline points="5.6 11.4 9.4 7.2 13.6 9.6 19 4.6"/>' +
+    '<circle cx="9.4" cy="7.2" r="0.9"/><circle cx="19" cy="4.6" r="0.9"/>',
+];
+
+const ICON_SOURCES = ICON_BODIES.map(
+  (body) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">` +
+    `<g ${ICON_PAINT}>${body}</g></svg>`,
+);
+
+/** A wrapping wall of `count` <svg> cells, four distinct drawings between
+ * them — the shape `examples/icons.jsx` puts on screen, minus its controls. */
+function iconWall(count, size = 20) {
+  return React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    React.createElement(
+      'box',
+      {
+        style: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          alignContent: 'flex-start',
+          padding: 6,
+        },
+      },
+      Array.from({ length: count }, (_, i) =>
+        React.createElement(
+          'box',
+          {
+            key: i,
+            style: {
+              width: size + 4,
+              height: size + 4,
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+          },
+          React.createElement('svg', {
+            source: ICON_SOURCES[i % ICON_SOURCES.length],
+            style: { width: size, height: size },
+          }),
+        ),
+      ),
+    ),
+  );
+}
+
+/** Mount a tree, settle it, and hand back the root node plus a frame pump.
+ * The mount is what `prepare` pays for, so `run` measures only repaints. */
+async function mounted(app, element) {
+  const instance = await new Promise((resolve) =>
+    ReactX11.render(element, resolve, app),
+  );
+  const root = instance._reactX11Node;
+  const frame = () => {
+    root._scheduled = false;
+    root.flush();
+  };
+  frame();
+  return { root, frame };
+}
+
 const SCENARIOS = [
   [
     'text: paragraph, no clip',
@@ -307,6 +395,57 @@ const SCENARIOS = [
             frame();
             await new Promise((resolve) => app.X.GetInputFocus(resolve));
           }
+        },
+      };
+    })(),
+  ],
+  [
+    // The frame the <svg> rasterization cache (issue #149) exists for: every
+    // icon is inside the damage rect and not one of them changed. Damage
+    // culling already skips unchanged subtrees *outside* the damage, so this
+    // is the case it cannot help with — a theme change, an expose, a resize.
+    //
+    // `SvgView.draw` re-walks the parsed document every time: Path2D,
+    // flatten, stroke extrusion, then FillRectangles + AddTraps + Composite
+    // per subpath. So the composite count here is per *subpath*, not per
+    // icon, which is what makes 100 unchanged drawings expensive.
+    'svg: 100 unchanged icons, full repaint',
+    (() => {
+      let ctl;
+      return {
+        prepare: async (app) => {
+          ctl = await mounted(app, iconWall(100));
+        },
+        run: async (app) => {
+          // what an expose or a theme change does: unbounded damage
+          ctl.root.invalidate(true, null, 'expose');
+          ctl.frame();
+          await settle(app);
+        },
+      };
+    })(),
+  ],
+  [
+    // A sibling's damage covering unchanged icons — hovering one table row
+    // repaints every icon in it. Same drawings, ~a tenth of the damage, so
+    // the two scenarios together say whether a cache pays in proportion to
+    // the icons inside the rect or only on whole-window frames.
+    'svg: 10 unchanged icons in a damaged row',
+    (() => {
+      let ctl;
+      return {
+        prepare: async (app) => {
+          ctl = await mounted(app, iconWall(100));
+        },
+        run: async (app) => {
+          // a paint-only change on an ancestor: damage is that node's bounds,
+          // and every icon it covers repaints untouched
+          const grid = ctl.root.children[0];
+          for (let i = 0; i < 10; i++) {
+            ctl.root.invalidate(false, grid.children[i], 'style-state');
+          }
+          ctl.frame();
+          await settle(app);
         },
       };
     })(),
