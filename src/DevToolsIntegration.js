@@ -48,7 +48,14 @@ export function connect(renderer) {
   // to pass was discarded in silence. The renderer's name and version now
   // come from the host config, where Reconciler.js already sets them
   // (`rendererPackageName`, `rendererVersion`).
-  renderer.injectIntoDevTools();
+  //
+  // Unless it is already registered: `react-x11/test`'s inspect() drives
+  // the same backend in-process and may have injected first — a second
+  // inject would register a duplicate renderer with the hook, and the
+  // standalone app would show two copies of every tree.
+  if (!global.__REACT_DEVTOOLS_GLOBAL_HOOK__?.rendererInterfaces?.size) {
+    renderer.injectIntoDevTools();
+  }
 
   watchForAgent();
 }

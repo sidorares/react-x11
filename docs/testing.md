@@ -100,6 +100,69 @@ reports `dialog`. The widgets set their own: `Button` is `button`,
 `ProgressBar` `progressbar`. When AT-SPI lands, these are the names it will
 publish.
 
+## Components
+
+The queries above see what a user sees. Sometimes a test needs the React
+side instead — _which component_ made this node, with what props and state —
+and this is the layer for it. Prefer the user-visible queries when either
+would do; reach here when the question is genuinely about a component.
+
+```js
+const row = screen.getByComponent('TaskRow'); // also RegExp or predicate
+within(row).getByText('buy milk'); // scoped to that instance
+
+ownerChainOf(node); // ['Label', 'TaskRow', 'App'] — who wrote the JSX
+sourceOf(node); // { file, line, column } of the JSX that made it
+```
+
+`getByComponent` returns, per rendered instance, the topmost host nodes of
+its output — the container `within()` wants next. Ownership is React's JSX
+owner (_who wrote the element_), so content passed as children belongs to
+the component whose JSX it appears in, and a miss lists the component names
+that are in the tree. All of this reads debug info development React records
+on every fiber (`_debugOwner`, `_debugStack` — the same data
+[click-to-component](click-to-component.md) navigates by), so it costs no
+setup and no dependency, and returns nothing in production builds.
+
+### `inspect(node)` and `setHook`
+
+```js
+const c = await inspect(screen.getByText('buy milk'));
+c.name; // 'TaskRow' — the nearest mounted component
+c.props; // its live props object (treat as read-only)
+c.hooks; // [{ id, name: 'State', value, editable, source, subHooks }]
+
+await c.setHook(0, 41); // set a useState/useReducer value…
+await c.setHook(1, ['filter', 'text'], 'milk'); // …or a path inside one
+```
+
+This drives the **React DevTools backend in-process**: the same
+react-debug-tools inspection and the same override path the DevTools app
+uses, minus its WebSocket — nothing listens on anything, and `ws` is never
+loaded ([devtools.md](devtools.md) has the wiring). It needs the
+`react-devtools-core` package in your devDependencies; the queries above
+work without it.
+
+What to know before leaning on it:
+
+- **Reading hooks re-runs the component.** That is how react-debug-tools
+  recovers hook names: the render function is invoked once under a stub
+  dispatcher, output discarded, `console` muted. A render-counting test
+  will see it.
+- **Values:** `props` and editable hook values are the live objects;
+  everything else is DevTools' copy — primitives exact, deep objects as
+  the same previews the DevTools panel shows.
+- **Only `useState`/`useReducer` are settable** (`editable: true`; a
+  reducer is bypassed, not driven — no action runs). Hooks are addressed
+  by their `id`, an index the Rules of Hooks fix for the life of the
+  component. Anything else — an Effect, a Memo, a `useContext` value —
+  `setHook` refuses by name; for context, wrap a provider.
+- **Nearest component is tree ancestry** (what the DevTools panel would
+  select), where `getByComponent`/`ownerChainOf` are JSX ownership; the
+  two differ for content passed as children.
+- `setHook` resolves after React re-rendered and repainted (it is
+  `act`-wrapped), so a query straight after it sees the result.
+
 ## Driving it
 
 `userEvent` is the layer to reach for: each call injects input **and**

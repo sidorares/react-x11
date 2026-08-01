@@ -37,6 +37,7 @@ export {
 } from './harness.js';
 
 export { within, textOf, roleOf } from './queries.js';
+export { inspect, ownerChainOf, sourceOf } from './components.js';
 export {
   fireEvent,
   userEvent,

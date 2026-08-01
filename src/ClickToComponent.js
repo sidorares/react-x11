@@ -17,8 +17,10 @@ import { setClickToComponentHandler } from './events.js';
 const STACK_FRAME = /^\s*at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?\s*$/;
 
 /** The first stack frame outside React/the reconciler/node internals — the
- * user's own JSX call site for whatever element this Error was captured at. */
-function resolveLocation(debugStack) {
+ * user's own JSX call site for whatever element this Error was captured at.
+ * Exported because `react-x11/test`'s `sourceOf` answers the same question
+ * for a test that a click answers for an editor. */
+export function resolveLocation(debugStack) {
   const stack = debugStack?.stack;
   if (!stack) return null;
   for (const line of stack.split('\n').slice(1)) {

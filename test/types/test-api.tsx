@@ -27,6 +27,9 @@ import {
   roleOf,
   screenPointOf,
   pointOutsideWindows,
+  inspect,
+  ownerChainOf,
+  sourceOf,
 } from '../../src/testing/index.js';
 import {
   XK_RETURN,
@@ -109,6 +112,25 @@ async function suite() {
   clock.set(100);
   const _now: number = clock.now;
   clock.restore();
+
+  // components
+  const row = getByComponentOf();
+  function getByComponentOf() {
+    return screen.getByComponent(/^Task/);
+  }
+  void screen.getAllByComponent('TaskRow').length;
+  void screen.queryByComponent((name) => name.startsWith('T'));
+  void (await screen.findByComponent('TaskRow', { timeout: 200 }));
+  const _chain: string[] = ownerChainOf(row);
+  const _source: number | undefined = sourceOf(row)?.line;
+  const inspected = await inspect(row);
+  const _name: string | null = inspected.name;
+  void inspected.props?.label;
+  const hook = inspected.hooks[0];
+  const _editable: boolean = hook.editable;
+  void hook.subHooks.length;
+  await inspected.setHook(0, 41);
+  await inspected.setHook(0, ['nested', 'deep'], 'zz');
 
   // keysyms
   const _k: number = keysymOf('é');

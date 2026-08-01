@@ -14,6 +14,8 @@
 //   getAllBy* one or more, or throw
 //   findBy*   getBy*, retried until it appears or the timeout expires
 
+import { queryAllByComponent, componentInventory } from './components.js';
+
 const DEFAULT_TIMEOUT = 1000;
 
 /** Depth-first, in paint order, including `<popup>` subtrees. */
@@ -98,11 +100,11 @@ function inventory(root, limit = 12) {
   return lines.join('\n');
 }
 
-function one(root, found, what) {
+function one(root, found, what, printTree = inventory) {
   if (found.length === 1) return found[0];
   if (found.length === 0) {
     throw new Error(
-      `react-x11/test: no element found for ${what}.\nThe tree holds:\n${inventory(root)}`,
+      `react-x11/test: no element found for ${what}.\nThe tree holds:\n${printTree(root)}`,
     );
   }
   throw new Error(
@@ -170,26 +172,44 @@ export function within(root) {
           typeof n.props?.placeholder === 'string' &&
           matches(n.props.placeholder, text, exact),
       ),
+
+    /**
+     * Host nodes by the component that created them (the JSX owner): for
+     * each rendered instance, the topmost host nodes of its output — so
+     * `within(getByComponent('TaskRow'))` scopes the other queries to that
+     * instance. Exact name, RegExp, or predicate over the name; needs
+     * development React, which records the owner on every element.
+     */
+    queryAllByComponent: (component) => queryAllByComponent(root, component),
   };
 
   // getBy / queryBy / getAllBy / findBy are all mechanical from queryAllBy
   for (const [key, queryAll] of Object.entries(q)) {
     if (!key.startsWith('queryAll')) continue;
     const suffix = key.slice('queryAll'.length); // 'ByText', 'ByRole', …
+    // a ByComponent miss lists the components in the tree — the caller was
+    // trying to spell one of those, not an element kind
+    const printTree = suffix === 'ByComponent' ? componentInventory : inventory;
     const label = (arg) =>
-      `${suffix.replace(/^By/, '')} ${JSON.stringify(arg)}`;
+      `${suffix.replace(/^By/, '')} ${
+        arg instanceof RegExp
+          ? String(arg)
+          : typeof arg === 'function'
+            ? arg.name || '(predicate)'
+            : JSON.stringify(arg)
+      }`;
     q[`getAll${suffix}`] = (...args) => {
       const found = queryAll(...args);
       if (found.length === 0) {
         throw new Error(
           `react-x11/test: no element found for ${label(args[0])}.\n` +
-            `The tree holds:\n${inventory(root)}`,
+            `The tree holds:\n${printTree(root)}`,
         );
       }
       return found;
     };
     q[`get${suffix}`] = (...args) =>
-      one(root, queryAll(...args), label(args[0]));
+      one(root, queryAll(...args), label(args[0]), printTree);
     q[`query${suffix}`] = (...args) => {
       const found = queryAll(...args);
       if (found.length > 1) return one(root, found, label(args[0]));

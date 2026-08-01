@@ -92,6 +92,15 @@ export interface Queries {
   queryAllByTestName(name: string): DrawnNode[];
   findByTestName(name: string, options?: WaitOptions): Promise<DrawnNode>;
 
+  getByComponent(component: ComponentMatch): DrawnNode;
+  getAllByComponent(component: ComponentMatch): DrawnNode[];
+  queryByComponent(component: ComponentMatch): DrawnNode | null;
+  queryAllByComponent(component: ComponentMatch): DrawnNode[];
+  findByComponent(
+    component: ComponentMatch,
+    options?: WaitOptions,
+  ): Promise<DrawnNode>;
+
   getByPlaceholder(
     text: string | RegExp,
     options?: TextMatchOptions,
@@ -116,6 +125,13 @@ export interface Queries {
   /** Everything under here, in paint order — the escape hatch. */
   all(predicate?: (node: DrawnNode) => boolean): DrawnNode[];
 }
+
+/**
+ * How ByComponent names a component: exact display name, RegExp, or a
+ * predicate over the name. Owner-based (who wrote the JSX), so it needs
+ * development React.
+ */
+export type ComponentMatch = string | RegExp | ((name: string) => boolean);
 
 export interface TextMatchOptions {
   /** Exact, case-sensitive match. Default is a trimmed substring match. */
@@ -188,6 +204,70 @@ export function textOf(node: DrawnNode): string;
 
 /** The role a node reports: its `role` prop, else its element kind. */
 export function roleOf(node: DrawnNode): string;
+
+/**
+ * The components that created this node, nearest first — the JSX owner
+ * chain, not tree ancestry. Empty outside development React.
+ */
+export function ownerChainOf(node: DrawnNode): string[];
+
+/** Where the JSX that created this node lives, from React's own call-site
+ * capture (development mode). Null when there is no debug info. */
+export function sourceOf(node: DrawnNode): {
+  functionName?: string;
+  file: string;
+  line: number;
+  column: number;
+} | null;
+
+export interface InspectedHook {
+  /** React's index over the hooks that occupy a slot — how `setHook`
+   * addresses it. Null for hooks that don't (useContext). */
+  id: number | null;
+  /** react-debug-tools' name: 'State', 'Reducer', 'Effect', 'Context', or
+   * a custom hook's name with its primitives in `subHooks`. */
+  name: string;
+  /** Live for editable hooks; DevTools' copy (deep objects appear as
+   * previews, the way the DevTools panel shows them) for the rest. */
+  value: unknown;
+  /** True for useState/useReducer — the hooks `setHook` can write. */
+  editable: boolean;
+  source: { file: string; line: number; column: number } | null;
+  subHooks: InspectedHook[];
+}
+
+export interface InspectedComponent {
+  /** DevTools' element id — stable for the life of the instance. */
+  id: number;
+  name: string | null;
+  /** The live props object. Treat as read-only. */
+  props: Record<string, unknown> | null;
+  /** Class component state; null for function components. */
+  state: unknown;
+  /** Legacy class context only; `useContext` values appear in `hooks`. */
+  context: unknown;
+  hooks: InspectedHook[];
+  /** Owner names, nearest first — who rendered this component. */
+  owners: string[];
+  /** Set a useState/useReducer value (optionally at a path inside it),
+   * through React's own override machinery, `act`-wrapped. */
+  setHook(hookID: number, value: unknown): Promise<void>;
+  setHook(
+    hookID: number,
+    path: Array<string | number>,
+    value: unknown,
+  ): Promise<void>;
+}
+
+/**
+ * The React side of a node: the nearest mounted component above it, its
+ * props and named hooks, and `setHook` to change useState/useReducer
+ * state. Drives the React DevTools backend in-process — no WebSocket, but
+ * `react-devtools-core` must be installed, and reading hooks re-invokes
+ * the component's render function (react-debug-tools recovers names that
+ * way).
+ */
+export function inspect(node: DrawnNode): Promise<InspectedComponent>;
 
 export interface PointerOptions {
   /** Offset from the node's centre. */
