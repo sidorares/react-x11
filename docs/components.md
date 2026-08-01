@@ -145,13 +145,13 @@ synthetic event with no leading value, matching the DOM
 
 ### `Checkbox`
 
-| prop                 |                                            |
-| -------------------- | ------------------------------------------ |
-| `checked`            | current value (controlled)                 |
-| `onChange(next, ev)` | the **next** value first, then the event   |
-| `name`               | field name, for form libraries             |
-| `children` / `label` | label to the right of the 16px check well  |
-| `disabled`           | inert, dimmed                              |
+| prop                 |                                           |
+| -------------------- | ----------------------------------------- |
+| `checked`            | current value (controlled)                |
+| `onChange(next, ev)` | the **next** value first, then the event  |
+| `name`               | field name, for form libraries            |
+| `children` / `label` | label to the right of the 16px check well |
+| `disabled`           | inert, dimmed                             |
 
 ### `Radio` / `RadioGroup`
 
@@ -210,8 +210,8 @@ import { Select } from 'react-x11';
 />;
 ```
 
-| prop                       |                                           |
-| -------------------------- | ----------------------------------------- |
+| prop                           |                                           |
+| ------------------------------ | ----------------------------------------- |
 | `options`                      | array of `{value, label}` or plain values |
 | `value`, `onChange(value, ev)` | selection                                 |
 | `name`                         | field name, for form libraries            |

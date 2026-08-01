@@ -339,17 +339,21 @@ across kerning, shaping boundaries and trailing whitespace.
 handler in the library gets, rather than a bare string:
 
 ```jsx
-<textinput name="email" value={email} onChange={(ev) => setEmail(ev.target.value)} />
+<textinput
+  name="email"
+  value={email}
+  onChange={(ev) => setEmail(ev.target.value)}
+/>
 ```
 
-| on the event                     |                                                  |
-| -------------------------------- | ------------------------------------------------ |
-| `ev.value`, `ev.target.value`    | the text **after** the edit                      |
-| `ev.name`, `ev.target.name`      | the `name` prop                                  |
-| `ev.type`                        | `'change'` or `'submit'`                         |
-| `ev.target`, `ev.currentTarget`  | the node (they are the same — this does not bubble) |
-| `ev.nativeEvent`                 | the X key event, or **null** — see below         |
-| `preventDefault`, `stopPropagation` | present for uniformity; nothing reads them    |
+| on the event                        |                                                     |
+| ----------------------------------- | --------------------------------------------------- |
+| `ev.value`, `ev.target.value`       | the text **after** the edit                         |
+| `ev.name`, `ev.target.name`         | the `name` prop                                     |
+| `ev.type`                           | `'change'` or `'submit'`                            |
+| `ev.target`, `ev.currentTarget`     | the node (they are the same — this does not bubble) |
+| `ev.nativeEvent`                    | the X key event, or **null** — see below            |
+| `preventDefault`, `stopPropagation` | present for uniformity; nothing reads them          |
 
 Two details worth knowing:
 
@@ -357,8 +361,8 @@ Two details worth knowing:
   `props.value` is still the old string until the parent re-renders. That is
   what makes `e.target.value` mean here what it means in the DOM, and it is
   why react-hook-form and formik work — see
-  [docs/ecosystem/forms.md](ecosystem/forms.md). It is true *while the
-  handler runs*: `ev.target` is the live node, so a handler that stashes the
+  [docs/ecosystem/forms.md](ecosystem/forms.md). It is true _while the
+  handler runs_: `ev.target` is the live node, so a handler that stashes the
   event and reads `ev.target.value` later sees whatever the control holds
   then. `ev.value` is a snapshot and always safe.
 - **`ev.nativeEvent` can be null.** A keystroke carries the X key event that
