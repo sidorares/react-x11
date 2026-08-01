@@ -167,6 +167,11 @@ export function createMockApp() {
         setWindowType(type) {
           wnd.calls.push(['setWindowType', type]);
         },
+        // ntk >= 4.3: ICCCM WM_TRANSIENT_FOR
+        setTransientFor(owner) {
+          wnd.transientFor = owner;
+          wnd.calls.push(['setTransientFor', owner]);
+        },
         setAlwaysOnTop(on) {
           wnd.calls.push(['setAlwaysOnTop', on]);
         },

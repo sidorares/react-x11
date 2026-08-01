@@ -28,6 +28,7 @@ import {
 } from './styles.js';
 import { EventManager } from './events.js';
 import { callHandler } from './errors.js';
+import { windowIdOf } from './windowid.js';
 import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import {
@@ -3239,6 +3240,10 @@ export class WindowNode extends Node {
     // reads decorations when it frames the window, which is at map time.
     if (this.props.decorations === false) applyDecorations(wnd, false);
     applyWindowStates(wnd, [...windowStates(this.props)], 'add');
+    // ICCCM 4.1.2.6 has the window manager read WM_TRANSIENT_FOR when the
+    // transient is mapped, so this belongs before the map too. ntk writes it
+    // with predefined atoms and no round trip, so "before" is free.
+    this._applyTransientFor(this.props.transientFor);
     wnd.map?.();
     // ask before anything can be anchored to it, so the first popup is
     // placed as well as the second
@@ -3335,6 +3340,65 @@ export class WindowNode extends Node {
     if (next.decorations !== prev.decorations) {
       applyDecorations(wnd, next.decorations !== false);
     }
+    if (next.transientFor !== prev.transientFor) {
+      this._pendingTransientFor = undefined;
+      this._applyTransientFor(next.transientFor);
+    } else if (this._pendingTransientFor !== undefined) {
+      // the owner was not realized last time round; every commit is another
+      // chance, and a sibling window earlier in the tree is realized by now
+      this._applyTransientFor(this._pendingTransientFor);
+    }
+  }
+
+  /**
+   * Write `WM_TRANSIENT_FOR`, resolving whatever the prop holds — a ref to a
+   * `<window>`/`<popup>`, a ref to any drawn node (resolved to the window
+   * that owns it), a raw XID, `'root'` for the client's whole window group,
+   * or `null` to clear.
+   *
+   * Resolution has to happen here rather than in `windowAttributes`, which
+   * copies every non-event prop straight into ntk's creation attributes: a
+   * React ref is not something ntk should be asked to understand.
+   *
+   * **Refs attach in the layout phase, after every mutation.** So on the
+   * commit that mounts two sibling `<window>`s, the second one realizes
+   * while the first one's ref is still null — the owner is unresolvable
+   * exactly when a single-tree multi-window app needs it. That is what
+   * `_pendingTransientFor` is for: an unresolved owner is retried on the
+   * next commit rather than dropped, and the frame this window schedules on
+   * mount gives it one without waiting for an unrelated re-render.
+   */
+  _applyTransientFor(owner) {
+    const wnd = this.window;
+    if (!wnd || typeof wnd.setTransientFor !== 'function') return;
+    if (owner == null) {
+      this._pendingTransientFor = undefined;
+      // only clear a property we actually wrote; a bare `undefined` on mount
+      // must not cost a DeleteProperty on every window in the app
+      if (this._transientForId != null) {
+        this._transientForId = null;
+        wnd.setTransientFor(null);
+      }
+      return;
+    }
+    const id = owner === 'root' ? 'root' : windowIdOf(owner);
+    if (id == null) {
+      this._pendingTransientFor = owner;
+      return;
+    }
+    this._pendingTransientFor = undefined;
+    if (id === this._transientForId) return;
+    if (id === wnd.id) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn(
+          'react-x11: transientFor points at the window itself. A window ' +
+            'cannot own itself; the property is ignored.',
+        );
+      }
+      return;
+    }
+    this._transientForId = id;
+    wnd.setTransientFor(id);
   }
 
   /** The WM size hints among these props. */
@@ -3523,8 +3587,12 @@ export class WindowNode extends Node {
     }
     const wnd = this.window;
     if (!wnd) {
-      // not realized yet: refresh creation attributes instead
+      // not realized yet: refresh creation attributes instead. `transientFor`
+      // is the one prop that must not travel this way — it holds a React ref
+      // until the commit phase resolves it, and ntk's hint handling reads a
+      // key by that name.
       this.attributes = { ...this.attributes, ...newProps };
+      delete this.attributes.transientFor;
       return;
     }
 
@@ -3764,6 +3832,13 @@ export class WindowNode extends Node {
 
   flush() {
     if (this.destroyed || !this.yoga || !this.window) return;
+    // a transientFor whose owner was not realized yet at commit time. The
+    // frame after the mount is the first moment refs have attached, so the
+    // common "two <window>s in one tree" case resolves here rather than
+    // waiting for the app to re-render for some unrelated reason.
+    if (this._pendingTransientFor !== undefined) {
+      this._applyTransientFor(this._pendingTransientFor);
+    }
     this._advanceAnimations(now());
     const width = this.window.width ?? this.props.width ?? 0;
     const height = this.window.height ?? this.props.height ?? 0;
@@ -4200,16 +4275,22 @@ export class PopupNode extends WindowNode {
   }
 
   constructor(app, attributes, props) {
-    // override-redirect stays: it is what keeps the window manager from
-    // repositioning or decorating a menu. The EWMH type hint is additive —
-    // the spec asks for it on override-redirect windows too, so compositing
-    // managers can give menus and tooltips consistent shadows/animations.
-    // `windowType` overrides the default (e.g. "tooltip", "popup_menu").
+    // Override-redirect is the default and is what keeps the window manager
+    // from repositioning or decorating a menu — but it is now a default
+    // rather than a fact, because it is the one bit standing between
+    // `<popup>` and a real, WM-managed dialog: `overrideRedirect={false}`
+    // gives a decorated, movable window the WM will stack above its owner
+    // and iconify with it. Menus, tooltips and `Select` keep the default.
+    //
+    // The EWMH type hint is additive — the spec asks for it on
+    // override-redirect windows too, so compositing managers can give menus
+    // and tooltips consistent shadows/animations. `windowType` overrides the
+    // default (e.g. "tooltip", "popup_menu").
     super(
       app,
       {
         ...attributes,
-        overrideRedirect: true,
+        overrideRedirect: attributes.overrideRedirect ?? true,
         windowType: attributes.windowType ?? 'dropdown_menu',
       },
       props,

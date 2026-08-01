@@ -283,7 +283,11 @@ classic annoyance. The popup is sized from the _measured_ label, because a
 
 ## `Dialog`
 
-A modal dialog in a `<popup trapFocus grab>`, centred over the owner window.
+A dialog in a `<popup>`, centred over the owner window — and one the
+**window manager knows is a dialog**: it is a managed window with
+`WM_TRANSIENT_FOR` pointing at its owner, so it is framed, movable, closable
+through the WM, out of the taskbar and alt-tab list, and (on a full EWMH
+window manager) stacked above its owner and iconified with it.
 
 ```jsx
 import { Button, Dialog } from 'react-x11';
@@ -309,7 +313,8 @@ import { Button, Dialog } from 'react-x11';
 | `title`           | bold heading (optional)                                      |
 | `children`        | body content; strings become `<text>`                        |
 | `actions`         | elements for the right-aligned button row                    |
-| `onClose`         | Escape, or a press outside the dialog                        |
+| `onClose`         | Escape, or the window manager's close button                 |
+| `managed`         | `false` for the override-redirect popup 1.x shipped (below)  |
 | `width`, `height` | popup size (default 360×170)                                 |
 
 The focus behaviour is the **renderer's**, not the component's: `trapFocus`
@@ -321,10 +326,32 @@ inside to pick the first stop; with nothing to focus, the dialog surface
 takes focus itself (`tabIndex={-1}`) so Escape and Tab work immediately.
 
 Escape closes because keys go to the focused node inside the popup and
-bubble out through the popup's place in the JSX tree; `grab` makes a press
-anywhere else in the session close it too. **Pointer modality is not
+bubble out through the popup's place in the JSX tree; so does the window
+manager's close button, through `onCloseRequest`. **Pointer modality is not
 enforced** — widgets in the owner window stay clickable behind the dialog —
-so it is for confirmations, not for guarding state.
+so it is for confirmations, not for guarding state. (`_NET_WM_STATE_MODAL`
+is the mechanism that would enforce it, and it means nothing without the
+`WM_TRANSIENT_FOR` this now sets; that is why the property had to come
+first.)
+
+### `managed`
+
+| `managed`        | what you get                                                                                                                                        |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `true` (default) | a WM-managed window: frame, titlebar, movable, WM close button, transient for its owner, out of the taskbar. A press outside does **not** close it. |
+| `false`          | the override-redirect popup: no frame, not movable, a pointer grab, and a press anywhere outside calls `onClose`.                                   |
+
+They are one choice, not two: a client-side pointer grab over a window the
+window manager is trying to let the user drag swallows the press that would
+start the drag, so `grab` and the frame turn on and off together. A managed
+dialog staying open when you click elsewhere is not a regression — it is what
+a dialog does. `managed={false}` is the right shape for a transient
+confirmation on a display with no window manager at all.
+
+The owner is resolved automatically: `Dialog` already keeps an out-of-flow
+`<box>` inside the owner window for placement, and a ref to any drawn node
+resolves to the window that owns it
+([`transientFor`](elements.md#transientfor--a-window-that-belongs-to-another)).
 
 A `<popup>` is a real X window and needs its size up front, hence explicit
 `width`/`height` rather than sizing to content. Placement comes from

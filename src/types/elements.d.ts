@@ -102,6 +102,27 @@ export interface WindowProps
   /** EWMH `_NET_WM_WINDOW_TYPE`, or a list of fallbacks. */
   windowType?: WindowType | WindowType[];
   /**
+   * ICCCM `WM_TRANSIENT_FOR` — the window this one belongs to. It is what
+   * makes a second top-level window a *dialog* rather than an unrelated
+   * application window: the WM stacks it above its owner, keeps it out of
+   * the taskbar and pager, iconifies it alongside, places it relative to the
+   * owner and gives it a dialog's reduced frame.
+   *
+   * Takes a ref to a `<window>`/`<popup>`, a ref to any drawn node (resolved
+   * to the window that owns it), a raw XID, or `'root'` for "transient for
+   * this client's whole window group".
+   *
+   * Resolved in the commit phase. An owner that is not realized yet — a
+   * sibling `<window>` mounting in the same commit, whose ref attaches only
+   * in the layout phase — is retried rather than dropped.
+   *
+   * **Inert on an override-redirect window**, which is every `<popup>` by
+   * default: the WM does not manage those, so nothing reads the property.
+   * Pass `overrideRedirect={false}` to make the popup a managed window
+   * first. ICCCM 4.1.2.6 draws exactly that distinction.
+   */
+  transientFor?: Ref<NtkWindow | DrawnNode> | number | 'root' | null;
+  /**
    * EWMH `_NET_WM_STATE`. **Controlled**: this is what the window is asked
    * to be, and {@link WindowProps.onStatesChange} is what it actually is —
    * on X the window manager changes state behind the app's back, so the two
@@ -163,6 +184,18 @@ export interface PopupProps extends WindowProps {
    * this client at all. Needs ntk >= 3.7.0.
    */
   grab?: boolean;
+  /**
+   * `true` (the default) keeps the window manager out entirely, which is
+   * what makes a menu a menu — no frame, no repositioning, no taskbar entry.
+   *
+   * `false` makes the popup an ordinary managed window: decorated, movable,
+   * closable through the WM, and — with {@link WindowProps.transientFor} —
+   * stacked above its owner and iconified with it. That is the combination
+   * that turns a `<popup>` into a real dialog. Turn `grab` off with it: a
+   * client-side pointer grab over a window the WM is trying to let the user
+   * drag is a fight nobody wins.
+   */
+  overrideRedirect?: boolean;
   /** A press landed outside the popup: close it. */
   onDismiss?: (ev: MouseEvent<DrawnNode>) => void;
 }

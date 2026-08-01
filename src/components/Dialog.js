@@ -14,8 +14,30 @@ const DEFAULT_WIDTH = 360;
 const DEFAULT_HEIGHT = 170;
 
 /**
- * <Dialog open title onClose actions>…</Dialog> — a modal dialog in a
- * `<popup trapFocus grab>`, centred over the owner window.
+ * <Dialog open title onClose actions>…</Dialog> — a dialog in a `<popup>`,
+ * centred over the owner window.
+ *
+ * **The window manager knows it is a dialog** (issue #130). The popup is a
+ * managed window — `overrideRedirect={false}` — with `WM_TRANSIENT_FOR`
+ * pointing at the window that owns it, resolved from the anchor this
+ * component already keeps for placement. Measured against quartz-wm, the
+ * thinnest EWMH implementation in the stack: the dialog is reparented into a
+ * real frame, so it has a titlebar and can be moved and closed the way every
+ * other window can; it loses maximize and fullscreen; and the WM puts
+ * SKIP_TASKBAR and SKIP_PAGER on it, so it is not a second entry in the
+ * taskbar or the alt-tab list. A fuller WM also stacks it above its owner
+ * and iconifies it alongside.
+ *
+ * `managed={false}` goes back to the override-redirect popup 1.x shipped: no
+ * frame, not movable, dismissed by a press anywhere outside (a pointer
+ * grab). That is the right shape for a transient confirmation on a display
+ * with no window manager at all, and the wrong one for anything the user
+ * might want to move.
+ *
+ * The two differ in how a press outside behaves, and it is not a bug either
+ * way: a managed dialog stays open, because a real dialog does. Escape and
+ * the WM close button both call `onClose`; so does a press outside when
+ * `managed={false}`.
  *
  * The focus behaviour is the renderer's, not this component's: `trapFocus`
  * keeps Tab inside the dialog, stops presses elsewhere from moving focus,
@@ -24,11 +46,11 @@ const DEFAULT_HEIGHT = 170;
  * the first stop; otherwise the dialog surface itself takes focus, so
  * Escape and Tab work immediately (`docs/events.md`, "Focus scopes").
  *
- * Escape closes: keys go to the focused node inside the popup and bubble out
- * through the popup's place in the JSX tree. `grab` makes a press anywhere
- * else in the session close it too. Pointer modality is *not* enforced —
- * widgets in the owner window stay clickable behind the dialog, so use it
- * for confirmations rather than as a security boundary.
+ * Pointer modality is *not* enforced — widgets in the owner window stay
+ * clickable behind the dialog, so use it for confirmations rather than as a
+ * security boundary. `_NET_WM_STATE_MODAL` is the mechanism for that, and it
+ * belongs to the `states` work; it means nothing without the
+ * `WM_TRANSIENT_FOR` this now sets, which is why that had to come first.
  *
  * A `<popup>` is a real X window and needs its size up front, hence explicit
  * `width`/`height` rather than sizing to content.
@@ -39,6 +61,7 @@ export function Dialog({
   children,
   onClose,
   actions,
+  managed = true,
   width = DEFAULT_WIDTH,
   height = DEFAULT_HEIGHT,
   style,
@@ -94,9 +117,20 @@ export function Dialog({
           width: rect.width,
           height: rect.height,
           trapFocus: true,
-          grab: true,
+          // A managed window is the window manager's to move, and a
+          // client-side pointer grab over one is a fight nobody wins — the
+          // press that would start a titlebar drag is swallowed instead. So
+          // the grab and the frame are the same choice, made once.
+          overrideRedirect: !managed,
+          grab: !managed,
           windowType: 'dialog',
-          onDismiss: () => onClose?.(),
+          // inert on an override-redirect window, and ntk warns if asked to
+          // write it there, so only the managed dialog claims an owner
+          transientFor: managed ? anchor : undefined,
+          title: managed ? title : undefined,
+          onDismiss: managed ? undefined : () => onClose?.(),
+          // the WM's close button, which a managed dialog now has
+          onCloseRequest: managed ? () => onClose?.() : undefined,
           onKeyDown,
           style: { backgroundColor: theme.background },
         },

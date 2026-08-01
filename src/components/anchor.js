@@ -102,8 +102,17 @@ export function centerRect(node, { width, height }) {
   const win = node.root?.window;
   const ww = win?.width ?? width;
   const wh = win?.height ?? height;
-  let x = (win?.x ?? 0) + (ww - width) / 2;
-  let y = (win?.y ?? 0) + (wh - height) / 2;
+  // `_screenOrigin` for the same reason `anchorRect` uses it: `x`/`y` come
+  // from ConfigureNotify, and under a reparenting window manager those can be
+  // relative to the *frame* rather than the root — which would centre the
+  // dialog off by the size of the decoration. The server's own answer is
+  // right whatever the WM did. (quartz-wm happens to report root-relative
+  // coordinates, so the two agree there; that is not something to rely on.)
+  // The raw coordinates stay as the fallback, since the headless mock has no
+  // server to ask.
+  const origin = win?._screenOrigin ?? { x: win?.x ?? 0, y: win?.y ?? 0 };
+  let x = origin.x + (ww - width) / 2;
+  let y = origin.y + (wh - height) / 2;
 
   const screen = screenOf(node);
   if (screen) {

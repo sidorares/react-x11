@@ -1783,6 +1783,174 @@ test('ProgressBar fill width follows value', async () => {
   ReactX11.unmountComponentAtNode(app);
 });
 
+// issue #130 -------------------------------------------------------------
+//
+// The hard part is not writing the property, it is resolving the prop: refs
+// attach in the *layout* phase, after every mutation, so on the commit that
+// mounts two sibling <window>s the second realizes while the first one's ref
+// is still null. That is the case a multi-window app is made of.
+test('transientFor resolves a ref that attaches after the window realized', async () => {
+  const app = createMockApp();
+  const main = React.createRef();
+  const App = () =>
+    React.createElement(
+      React.Fragment,
+      null,
+      React.createElement('window', { ref: main, width: 300, height: 200 }),
+      React.createElement('window', {
+        width: 200,
+        height: 100,
+        transientFor: main,
+      }),
+    );
+  ReactX11.render(React.createElement(App), null, app);
+  const [owner, transient] = app.windows;
+  // realize() ran with main.current still null, so nothing could be written
+  assert.strictEqual(transient.transientFor, undefined);
+  assert.ok(main.current, 'the ref attached in the layout phase');
+
+  // the frame the mount scheduled is the first moment it can be resolved
+  transient._reactX11Node.flush();
+  assert.strictEqual(transient.transientFor, owner.id);
+  // and it is not re-sent on every frame
+  transient.calls.length = 0;
+  transient._reactX11Node.flush();
+  assert.strictEqual(
+    transient.calls.some((c) => c[0] === 'setTransientFor'),
+    false,
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('transientFor takes an XID, a drawn-node ref, and null to clear', async () => {
+  const app = createMockApp();
+  const anchor = React.createRef();
+  const render = (transientFor) =>
+    ReactX11.render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement('box', { ref: anchor }),
+        React.createElement('window', {
+          width: 200,
+          height: 100,
+          transientFor,
+        }),
+      ),
+      null,
+      app,
+    );
+
+  render(4242);
+  await tick();
+  const [owner, transient] = app.windows;
+  assert.strictEqual(transient.transientFor, 4242, 'a raw XID passes through');
+
+  // a ref to a *drawn* node resolves to the window that owns it
+  render(anchor);
+  assert.strictEqual(transient.transientFor, owner.id);
+
+  render('root');
+  assert.strictEqual(transient.transientFor, 'root', 'the window-group form');
+
+  transient.calls.length = 0;
+  render(null);
+  assert.strictEqual(transient.transientFor, null, 'null clears it');
+
+  // and a window that never set one does not spend a DeleteProperty saying so
+  const fresh = createMockApp();
+  ReactX11.render(
+    React.createElement('window', { width: 100, height: 100 }),
+    null,
+    fresh,
+  );
+  await tick();
+  assert.strictEqual(
+    fresh.windows[0].calls.some((c) => c[0] === 'setTransientFor'),
+    false,
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+  ReactX11.unmountComponentAtNode(fresh);
+});
+
+test('a <popup> can opt out of override-redirect and be WM-managed', async () => {
+  const app = createMockApp();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement('popup', {
+        x: 10,
+        y: 10,
+        width: 120,
+        height: 80,
+      }),
+      React.createElement('popup', {
+        x: 20,
+        y: 20,
+        width: 120,
+        height: 80,
+        overrideRedirect: false,
+        windowType: 'dialog',
+      }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const [, menu, dialog] = app.windows;
+  assert.strictEqual(
+    menu.attributes.overrideRedirect,
+    true,
+    'menus keep the default that makes them menus',
+  );
+  assert.strictEqual(menu.attributes.windowType, 'dropdown_menu');
+  assert.strictEqual(dialog.attributes.overrideRedirect, false);
+  assert.strictEqual(dialog.attributes.windowType, 'dialog');
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
+test('windowIdOf resolves windows, drawn nodes, refs and raw ids', async () => {
+  const { windowIdOf } = await import('../src/index.js');
+  const app = createMockApp();
+  const windowRef = React.createRef();
+  const boxRef = React.createRef();
+  ReactX11.render(
+    React.createElement(
+      'window',
+      { ref: windowRef, width: 300, height: 200 },
+      React.createElement('box', { ref: boxRef }),
+    ),
+    null,
+    app,
+  );
+  await tick();
+  const id = app.windows[0].id;
+
+  assert.strictEqual(windowIdOf(windowRef), id, 'a <window> ref');
+  assert.strictEqual(windowIdOf(windowRef.current), id, 'and its instance');
+  assert.strictEqual(
+    windowIdOf(boxRef),
+    id,
+    'a drawn node resolves to its window',
+  );
+  assert.strictEqual(windowIdOf(boxRef.current), id);
+  assert.strictEqual(windowIdOf(1234), 1234, 'a raw XID');
+  assert.strictEqual(windowIdOf(null), null);
+  assert.strictEqual(windowIdOf(React.createRef()), null, 'an empty ref');
+
+  // the portal handle format: lowercase hex, no 0x
+  assert.strictEqual(
+    `x11:${windowIdOf(windowRef).toString(16)}`,
+    `x11:${id.toString(16)}`,
+  );
+
+  ReactX11.unmountComponentAtNode(app);
+});
+
 test('multiple root windows share one tree; onCloseRequest handles WM close', async () => {
   const app = createMockApp();
   const events = [];
@@ -2469,9 +2637,17 @@ test('Dialog: modal popup, Escape closes it, focus goes back', async () => {
   await tick();
   const dialog = app.windows[1];
   assert.ok(dialog, 'the dialog is a popup window');
-  assert.strictEqual(dialog.attributes.overrideRedirect, true);
+  // issue #130: a dialog is a *managed* window, so the WM frames it, keeps it
+  // out of the taskbar and lets the user move it — and a client pointer grab
+  // over a window the WM is trying to drag is a fight nobody wins
+  assert.strictEqual(dialog.attributes.overrideRedirect, false);
   assert.strictEqual(dialog.attributes.windowType, 'dialog');
-  assert.strictEqual(dialog.attributes.grab, true, 'grabs, so it dismisses');
+  assert.strictEqual(dialog.attributes.grab, false);
+  assert.strictEqual(
+    'transientFor' in dialog.attributes,
+    false,
+    'the ref is resolved in the commit phase, never handed to ntk',
+  );
   assert.strictEqual(input.focused, true, 'autoFocus inside the dialog won');
 
   // Escape reaches the dialog by bubbling out of the focused node

@@ -7,8 +7,8 @@
  * `"jsx": "react-jsx"`.
  */
 
-import type { ReactNode } from 'react';
-import type { NtkApp } from './types/nodes.js';
+import type { ReactNode, RefObject } from 'react';
+import type { DrawnNode, NtkApp, NtkWindow } from './types/nodes.js';
 import type { ReactX11Elements } from './types/elements.js';
 
 export * from './types/style.js';
@@ -16,6 +16,36 @@ export * from './types/events.js';
 export * from './types/nodes.js';
 export * from './types/elements.js';
 export * from './types/components.js';
+
+/**
+ * The XID of the X11 window a ref points at, or `null` if there is not one
+ * yet. Accepts a `<window>`/`<popup>` ref (whose `current` is the live ntk
+ * window), a ref to any drawn node (resolved to the window that owns it),
+ * the ref object itself, or a raw XID.
+ *
+ * This is the walk `transientFor` resolves its prop through, and the one an
+ * xdg-desktop-portal `parent_window` handle needs — `x11:` followed by
+ * lowercase hex with no `0x` prefix.
+ */
+export function windowIdOf(
+  target:
+    | NtkWindow
+    | DrawnNode
+    | RefObject<NtkWindow | DrawnNode | null>
+    | number
+    | null
+    | undefined,
+): number | null;
+
+/**
+ * `windowIdOf` bound to a ref. Returns a **getter**, stable across renders,
+ * the same shape {@link useAnchor} has — refs attach after the commit that
+ * created the window, so a value read during render would be null on the
+ * render that matters.
+ */
+export function useWindowId(
+  ref: RefObject<NtkWindow | DrawnNode | null>,
+): () => number | null;
 
 /** What React reports alongside an error it caught. */
 export interface ErrorInfo {

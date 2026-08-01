@@ -91,6 +91,7 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `states`                    | EWMH `_NET_WM_STATE` — controlled, see below                         |
 | `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                |
 | `decorations`               | `false` asks the WM for no titlebar or border                        |
+| `transientFor`              | ICCCM `WM_TRANSIENT_FOR` — the window this one belongs to (below)    |
 | `onStatesChange(states)`    | what the window manager actually did                                 |
 | `theme`                     | palette that `$token` style values resolve against, for this subtree |
 
@@ -140,6 +141,63 @@ are free, so no `sizeHints` object is needed.
 On a `<window>` these names are the window's, not yoga's: `width`/`height`
 are the real geometry the user can drag, and `minWidth`/`maxHeight` are what
 the WM enforces. A window's _contents_ are laid out by its `style`.
+
+### `transientFor` — a window that belongs to another
+
+Without it, every secondary top-level window an app opens is, to the window
+manager, an unrelated second application: its own taskbar and alt-tab entry,
+placed wherever new windows go, stacked independently, and it does not
+minimise with the window it belongs to.
+
+```jsx
+const main = useRef(null);
+
+<window ref={main} title="editor">…</window>
+<window transientFor={main} windowType="dialog" title="Preferences">…</window>
+```
+
+Takes a ref to a `<window>`/`<popup>`, a ref to **any drawn node** (resolved
+to the window that owns it — so an out-of-flow `<box>` inside the owner is a
+perfectly good handle), a raw XID, `'root'` for "transient for this client's
+whole window group", or `null` to clear.
+
+Measured against quartz-wm — the thinnest EWMH implementation in the stack,
+so this is a floor rather than a best case:
+
+| the client sets       | the WM allows                                                 | the WM adds to `_NET_WM_STATE` |
+| --------------------- | ------------------------------------------------------------- | ------------------------------ |
+| nothing               | close, minimize, move, resize, maximize horz/vert, fullscreen | —                              |
+| `transientFor`        | close, minimize, move, resize                                 | skip_taskbar, skip_pager       |
+| `windowType="dialog"` | close, minimize, move, resize                                 | skip_taskbar, skip_pager       |
+
+Rows two and three matching is the EWMH rule working as specified: a managed
+window with `WM_TRANSIENT_FOR` and no `_NET_WM_WINDOW_TYPE` **is** a dialog.
+The converse does not hold — a `dialog` type with no owner is a dialog
+belonging to nobody, with nothing to stack above or iconify with — so set
+both, which is what real toolkits do. A fuller window manager also restacks
+the transient above its owner and iconifies it alongside; quartz-wm does
+neither, and both are policy rather than spec.
+
+**It is inert on an override-redirect window**, which is every `<popup>` by
+default: the WM never manages those, so nothing reads the property. ICCCM
+4.1.2.6 draws exactly that distinction — `WM_TRANSIENT_FOR` for windows the
+WM manages, override-redirect plus a pointer grab for menus. ntk warns if
+you ask it to write the property on one.
+
+Resolution happens in the **commit phase**, not at element creation: a React
+ref is not something ntk should be asked to understand. Refs attach in the
+layout phase, after every mutation, so on the commit that mounts two sibling
+`<window>`s the second realizes while the first one's ref is still null —
+that owner is retried on the frame the mount schedules rather than dropped.
+
+`windowIdOf(refOrInstance)` is the same resolution, exported: it returns the
+XID a ref points at, or null. It is also what an xdg-desktop-portal
+`parent_window` handle needs — `` `x11:${id.toString(16)}` ``, lowercase hex
+with **no** `0x` prefix. Both shipping portal backends happen to tolerate a
+prefix, which is exactly why it is easy to get wrong and never notice; Qt's
+parser returns 0 on failure with no error path, so the symptom would be a
+silently unparented, non-modal dialog. `useWindowId(ref)` is the hook form
+and returns a getter, like `useAnchor`.
 
 `decorations={false}` writes `_MOTIF_WM_HINTS` — honoured by Mutter, KWin,
 Xfwm, Openbox and i3. A window manager that ignores it simply decorates the
@@ -207,11 +265,12 @@ event root. Anchor with `ev.nativeEvent.rootx/rooty` (pointer in screen
 coordinates) or a ref's `abs` rect plus the owner window's `x`/`y`.
 Same props as `<window>`; conditional rendering controls its lifetime.
 
-| prop        |                                                                             |
-| ----------- | --------------------------------------------------------------------------- |
-| `grab`      | hold a pointer grab while the popup is up — how menus behave on X (below)   |
-| `onDismiss` | a press landed outside the popup: close it                                  |
-| `trapFocus` | own a focus scope: a modal (see [events.md](events.md#focus-scopes-modals)) |
+| prop               |                                                                             |
+| ------------------ | --------------------------------------------------------------------------- |
+| `grab`             | hold a pointer grab while the popup is up — how menus behave on X (below)   |
+| `onDismiss`        | a press landed outside the popup: close it                                  |
+| `trapFocus`        | own a focus scope: a modal (see [events.md](events.md#focus-scopes-modals)) |
+| `overrideRedirect` | `false` makes it a WM-managed window instead — a real dialog (below)        |
 
 A popup never receives the X input focus, but nodes inside it can hold the
 **owner window's** focus and receive keys — with `trapFocus` and `autoFocus`
@@ -229,6 +288,28 @@ normally, and only the root popup of a menu needs the grab. Needs
 ntk ≥ 3.7.0; on older ntk the popup behaves as it did before.
 
 `Select`, `ContextMenu` and `MenuBar` already do this.
+
+### A managed `<popup>` is a dialog
+
+`overrideRedirect` defaults to `true` and is what makes a menu a menu.
+Passing `false` gives up all of that on purpose and hands the window to the
+window manager: it is reparented into a frame, so it has a titlebar, can be
+moved, and has a WM close button (`onCloseRequest`). Together with
+`transientFor` that is a real dialog — above its owner, out of the taskbar
+and alt-tab list, minimising with the owner.
+
+```jsx
+<popup overrideRedirect={false} transientFor={anchor} windowType="dialog"
+       title="Preferences" trapFocus>
+```
+
+Turn `grab` off with it. A client-side pointer grab over a window the WM is
+trying to let the user drag swallows the press that would start the drag.
+That also means a press outside no longer dismisses it — which is correct: a
+real dialog does not close because you clicked elsewhere.
+
+The [`Dialog`](components.md#dialog) component does exactly this, and takes
+`managed={false}` to go back to the override-redirect shape.
 
 Defaults to `windowType="dropdown_menu"`; pass `windowType` to override
 (`"tooltip"`, `"popup_menu"`, …). The hint is **additive** — override-
