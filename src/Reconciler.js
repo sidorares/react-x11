@@ -32,6 +32,11 @@ import {
 } from './nodes.js';
 import { flattenStyle } from './styles.js';
 import { defaultRootHandlers, setErrorHandler } from './errors.js';
+import {
+  registerApp,
+  unregisterApp,
+  hooks as traceHooks,
+} from './trace-registry.js';
 import { GlAreaNode } from './glnodes.js';
 import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
 import {
@@ -154,6 +159,7 @@ const HostConfig = {
   },
 
   prepareForCommit() {
+    traceHooks.commitStart?.();
     return null;
   },
 
@@ -163,6 +169,7 @@ const HostConfig = {
   resetAfterCommit() {
     flushWindowRestacks();
     flushTokenChecks();
+    traceHooks.commitEnd?.();
   },
 
   createInstance(type, props, rootContainer, hostContext, internalHandle) {
@@ -451,6 +458,15 @@ if (process.env.REACT_X11_CLICK_TO_COMPONENT || process.env.REACT_X11_EDITOR) {
   clickToComponent.install();
 }
 
+if (process.env.REACT_X11_TRACE) {
+  // Protocol tracing (docs/debugging.md). Dynamic import like DevTools
+  // above: debug.js writes files, which the playground bundle must not
+  // drag in. The trace itself attaches per connection, as each root
+  // registers the app it connected (or borrowed).
+  const debug = await import('./debug.js');
+  debug.startEnvTrace(process.env.REACT_X11_TRACE);
+}
+
 const roots = new Map();
 let cachedNtkApp = null;
 
@@ -475,6 +491,7 @@ async function connect(options) {
 async function connectApp() {
   if (cachedNtkApp) return cachedNtkApp;
   cachedNtkApp = await connect({});
+  registerApp(cachedNtkApp);
   return cachedNtkApp;
 }
 
@@ -612,6 +629,10 @@ export async function createRoot(options = {}) {
   let unmounted = false;
   if (onDisconnect) watchConnection(app, onDisconnect, () => unmounted);
 
+  // borrowed or owned, this is now a connection the renderer draws through,
+  // which is what a REACT_X11_TRACE / startTrace() session follows
+  registerApp(app);
+
   return {
     app,
     render(element, callback) {
@@ -627,7 +648,10 @@ export async function createRoot(options = {}) {
       Renderer.updateContainerSync(null, container, null, null);
       Renderer.flushSyncWork();
       if (rest.onUncaughtError) setErrorHandler(app, null);
-      if (owned) await app.close();
+      if (owned) {
+        unregisterApp(app);
+        await app.close();
+      }
     },
   };
 }

@@ -10,4 +10,11 @@ export async function prepare() {}
 export function connect() {}
 export function attachHighlightAgent() {}
 export function install() {}
+// debug.js (the REACT_X11_TRACE tracer — writes files, so node-only)
+export function startTrace() {
+  return { stats: {}, stop: () => ({}) };
+}
+export function startEnvTrace() {
+  return null;
+}
 export default {};

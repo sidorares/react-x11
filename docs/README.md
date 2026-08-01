@@ -19,6 +19,9 @@
   and how the declarations are kept from drifting.
 - [devtools.md](devtools.md) — React DevTools integration and other
   debugging aids.
+- [debugging.md](debugging.md) — runtime diagnostics: protocol tracing
+  (`REACT_X11_TRACE`, `startTrace()`), repaint flashing and full-repaint
+  warnings (`REACT_X11_DEBUG_PAINT`), invalidation reasons.
 - [click-to-component.md](click-to-component.md) — Alt+Click a rendered
   element to open its JSX source line in your editor.
 - [ecosystem.md](ecosystem.md) — which npm packages work with react-x11 and

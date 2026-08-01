@@ -181,6 +181,7 @@ const ORDER = [
   'events.md',
   'typescript.md',
   'devtools.md',
+  'debugging.md',
   'click-to-component.md',
   'glx.md',
   'ecosystem.md',

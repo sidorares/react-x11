@@ -77,6 +77,15 @@ const nodeOnlyModules = {
         path: path.join(stubsDir, 'node-only.js'),
       }),
     );
+    // The protocol tracer writes files (node:fs); like the two above it is
+    // dynamically imported behind an env var the playground never sets. The
+    // importer check keeps the stub from eating some dependency's own
+    // ./debug.js.
+    build.onResolve({ filter: /^\.\/debug\.js$/ }, (args) =>
+      args.importer.startsWith(path.join(repoRoot, 'src'))
+        ? { path: path.join(stubsDir, 'node-only.js') }
+        : null,
+    );
   },
 };
 

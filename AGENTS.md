@@ -331,6 +331,14 @@ multiplying the server's work many times over.
 - `npm run bench -- --save` rewrites `scripts/bench/baseline.json`
 - `npm run bench -- --check` fails if a metric regressed past tolerance
 
+For a live app rather than the bench scenarios, `REACT_X11_TRACE=summary`
+(or `requests`, or `chrome:/tmp/t.json` for Perfetto) traces the protocol
+with the same splitter, `REACT_X11_DEBUG_PAINT=1` flashes damage rects and
+`=full` warns — with reason and stack — on silent full-window repaints,
+which are the regression class the bench numbers hide until re-run. See
+docs/debugging.md; the switches are read once at startup and cost nothing
+when off.
+
 Re-run it when touching painting, layout flushing, or anything in ntk's
 drawing path, and update the baseline in the same PR that changes it, so
 the diff records the cost.

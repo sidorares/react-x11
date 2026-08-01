@@ -67,7 +67,7 @@ class DocumentViewNode extends Node {
     if (this.destroyed) return;
     this._laidOutWidth = -1;
     this.yoga?.markDirty();
-    this.root?.invalidate(true);
+    this.root?.invalidate(true, null, 'content');
   }
 
   _source() {
@@ -295,7 +295,7 @@ export class SvgNode extends Node {
     // markDirty is only legal on nodes with a measure function (it is
     // unset when width and height are both fixed)
     if (this._hasMeasure) this.yoga?.markDirty();
-    this.root?.invalidate(true);
+    this.root?.invalidate(true, null, 'props');
   }
 
   _ensureView() {
@@ -392,7 +392,7 @@ export class TexNode extends Node {
   _textContentChanged() {
     this._boxKey = null;
     this.yoga?.markDirty();
-    this.root?.invalidate(true);
+    this.root?.invalidate(true, null, 'text');
   }
 
   _ensureBox() {
@@ -426,7 +426,7 @@ export class TexNode extends Node {
       newProps.displayMode !== before.displayMode
     ) {
       this.yoga.markDirty();
-      this.root?.invalidate(true);
+      this.root?.invalidate(true, null, 'props');
     }
   }
 

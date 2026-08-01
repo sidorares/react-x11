@@ -15,7 +15,8 @@
     "paths": {
       "react-x11": ["./src/index.d.ts"],
       "react-x11/jsx-runtime": ["./src/jsx-runtime.d.ts"],
-      "react-x11/jsx-dev-runtime": ["./src/jsx-dev-runtime.d.ts"]
+      "react-x11/jsx-dev-runtime": ["./src/jsx-dev-runtime.d.ts"],
+      "react-x11/debug": ["./src/debug.d.ts"]
     }
   },
   "include": ["src/**/*.d.ts", "test/types/**/*.tsx", "test/types/**/*.ts"]

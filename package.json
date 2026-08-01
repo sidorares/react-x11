@@ -93,6 +93,10 @@
     "./jsx-dev-runtime": {
       "types": "./src/jsx-dev-runtime.d.ts",
       "default": "./src/jsx-dev-runtime.js"
+    },
+    "./debug": {
+      "types": "./src/debug.d.ts",
+      "default": "./src/debug.js"
     }
   },
   "types": "./src/index.d.ts"
