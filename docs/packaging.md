@@ -8,7 +8,7 @@ guessed.
 | ------------------------------- | -------------------------- | ------------------------------ |
 | 1. plain `npm install`          | yes                        | a `node_modules` on the target |
 | 2. a single `.mjs`              | yes, with one esbuild flag | one file, ~7 MB                |
-| 3. Node single executable (SEA) | **no** — see below         | —                              |
+| 3. Node single executable (SEA) | yes, as CommonJS           | one file, ~142 MB              |
 | 4. AppImage / `.deb`            | yes, wrapping tier 1 or 2  | packaging metadata             |
 
 ## Tier 1 — `npm install`
@@ -31,10 +31,12 @@ node app.mjs
 
 Three things about that command are load-bearing.
 
-**`--format=esm`, not `cjs` or `iife`.** yoga-layout's WASM loader and ntk's
-module graph both use top-level await, and esbuild only emits it in ESM. A
-`cjs` build does not produce a broken bundle; it refuses to build, with
+**`--format=esm` is the easy path, not the only one.** It tolerates top-level
+await anywhere in the graph; `cjs` does not, and refuses to build with
 `Top-level await is currently not supported with the "cjs" output format`.
+Since ntk 5 nothing in this stack forces the issue — see
+[tier 3](#tier-3--node-single-executable), which needs `cjs` — so the choice
+is only about what your own code does at module scope.
 
 **The `--banner:js` is not optional.** node-x11 is CommonJS and uses dynamic
 `require`, which esbuild cannot resolve statically. Without the banner the
@@ -76,28 +78,59 @@ dynamically imported behind environment variables. A bundler will pull in
 out with a resolver plugin the way
 `website/scripts/build-demo-bundles.mjs` does.
 
-## Tier 3 — Node single executable: does not work
+## Tier 3 — Node single executable
 
-Building the blob succeeds. Running it does not:
-
+```sh
+esbuild app.jsx --bundle --platform=node --format=cjs --outfile=app.cjs
+node --build-sea=sea.json          # { "main": "app.cjs", "output": "myapp" }
+./myapp
 ```
-Warning: Failed to load the ES module: app.mjs. Make sure to set
-"type": "module" in the nearest package.json file or use the .mjs extension.
+
+```json
+{ "main": "app.cjs", "output": "myapp", "disableExperimentalSEAWarning": true }
 ```
 
-The cause is precise, and it is not fixable from this side. Node's SEA
-evaluates the embedded main script as **CommonJS** — there is no
-`package.json` inside the blob for it to consult, and the `.mjs` name has no
-effect on an embedded script. This stack cannot be CommonJS, because of the
-top-level await in tier 2. So the two requirements are in direct conflict:
-SEA wants CJS, yoga and ntk require ESM.
+This did not work until recently, and the reason is worth keeping: Node's SEA
+evaluates the embedded main as **CommonJS** — there is no `package.json`
+inside the blob for it to consult, and the `.mjs` name has no effect on an
+embedded script — while the stack forced ESM, because esbuild will not emit
+CommonJS for a graph containing top-level await. The await was not ours:
+`yoga-layout`'s default entry is `const Yoga = wrapAssembly(await
+loadYoga())`, ntk imported it for `HtmlView`, and every app inherited it.
+**ntk 5** loads the layout engine through `yoga-layout/load` instead — enums
+synchronously, WebAssembly during `createClient()` — and react-x11 moved its
+own three `await import()`s for DevTools, click-to-component and tracing out
+of module scope. Nothing in the graph has a top-level await now.
 
-Nothing to work around today. It needs ESM support for SEA's embedded main
-in Node itself. (Measured on Node 26; the blob builds and `postject` injects
-fine, so if that lands, everything else here is already in place.)
+Verified: a bundle of react-x11, react, ntk and node-x11's in-process X
+server mounts a 40-row tree and paints it — 157 requests in 7 socket writes —
+from a single 142 MB file, most of which is node itself.
 
-For a genuine single file, tier 2 plus a shebang and `chmod +x` gets you
-most of the way — it needs a Node on the target, which SEA is what avoids.
+What the CommonJS format costs you, in your own code:
+
+- **No top-level `await`.** Put startup in an `async function main()`;
+  `const root = await createRoot()` at the top level of your entry is enough
+  to fail the build. esbuild names the file and line, so this is a
+  five-second fix rather than a mystery.
+- **`import.meta.url` is `undefined`.** Anything resolving paths through it
+  needs `process.execPath` or a literal. react-x11 already guards its own
+  use of it (the version string DevTools shows falls back rather than
+  throwing); check your app for the same pattern.
+- **Runtime module loading is out.** Inside a SEA, `require()` _and_
+  `import()` resolve **built-in modules only** — a `data:` or `file:` URL
+  import fails with `ERR_UNKNOWN_BUILTIN_MODULE`. A bundle has nothing left
+  to resolve, so this only bites if you meant to load something later. It
+  also closes the obvious workaround for the old ESM problem: you cannot
+  carry an ESM bundle as a SEA asset and import it.
+- **Assets are not files.** `sea.getAsset()` reads what the config's
+  `assets` map embedded; fonts are the usual case, and `StaticFontSource`
+  takes bytes directly ([ntk's fonts guide][ntk-fonts]).
+
+On macOS the binary must be re-signed before it runs
+(`codesign --remove-signature myapp && codesign --sign - myapp`); on Linux
+nothing extra. Measured on Node 26.
+
+[ntk-fonts]: https://github.com/sidorares/ntk/blob/master/docs/fonts.md
 
 ## Tier 4 — AppImage, `.deb`, `.rpm`
 
@@ -122,8 +155,9 @@ way — which is why this section is short rather than absent.
 
 ## Checklist
 
-- `--format=esm`. It is not a preference.
-- Alias the banner's `createRequire`.
+- Pick the format deliberately: `--format=esm` (tier 2, needs the banner) or
+  `--format=cjs` (tier 3, needs no top-level await in your own code).
+- With `esm`, alias the banner's `createRequire`.
 - Do not ship `.Xauthority`, and do not bake `DISPLAY` into an image —
   [security.md](security.md).
 - Set `wmClass` and match it in `StartupWMClass`.
@@ -133,9 +167,15 @@ way — which is why this section is short rather than absent.
 
 ## Upstream
 
-Two things would delete most of this page:
+One thing would delete the rest of the friction here:
 
-- **node-x11: an ESM entry point, or `node:`-prefixed requires.** That
-  removes the banner, which is the only real trap in tier 2.
-- **Node: ESM support for a SEA's embedded main.** That unlocks tier 3
-  entirely.
+- **node-x11: ESM sources** ([node-x11#246][x11-246]). That removes tier 2's
+  banner, which is now the only real trap on the page. Note the tempting
+  cheaper version does not work: `node:`-prefixed requires change nothing,
+  because esbuild wraps a CommonJS module either way and its `require` shim
+  throws in ESM output regardless of the specifier — measured, not assumed.
+
+ESM support for a SEA's embedded main would be welcome in Node, but it is no
+longer load-bearing: tier 3 works as CommonJS.
+
+[x11-246]: https://github.com/sidorares/node-x11/issues/246

@@ -139,8 +139,7 @@ renderer can resolve it. Note `button` is the X button number, so left is
 ## Runners {#runners}
 
 **`node:test` (built-in) is the baseline.** react-x11's own suite uses it, it
-needs no transform, and it handles the ESM graph — including the top-level
-await inside `yoga-layout` — without configuration. Run `.jsx` files through
+needs no transform, and it handles the ESM graph without configuration. Run `.jsx` files through
 `tsx`: `node --import tsx --test 'test/**/*.test.jsx'`.
 
 ### Vitest {#vitest}

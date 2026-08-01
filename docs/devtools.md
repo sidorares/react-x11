@@ -35,10 +35,13 @@ X app runs on a headless box).
 
 ## How it works (and its sharp edges)
 
-`src/DevToolsIntegration.js`. When `REACT_X11_DEVTOOLS` is set, the module
-installs the DevTools global hook at import time (top-level await, so the
-hook exists before the first commit), connects the backend, and registers
-the renderer via `injectIntoDevTools`.
+`src/DevToolsIntegration.js`. When `REACT_X11_DEVTOOLS` is set, the hook is
+installed from `render()`/`createRoot()` rather than at import time — a
+top-level await there would make every bundle of react-x11 ESM-only, which
+rules out a single executable ([packaging.md](packaging.md)). The ordering
+guarantee is the same: a commit can only follow a root, and there is no way
+to get one without awaiting the install. It connects the backend and
+registers the renderer via `injectIntoDevTools`.
 
 Notes for maintainers:
 

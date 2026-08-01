@@ -1,6 +1,13 @@
 // The mock ntk application used by the headless tests: enough of a window,
 // a 2d context and an X connection for the renderer to run with no server.
 import React from 'react';
+import { loadLayout } from 'ntk';
+
+// ntk 5 loads the layout engine's WebAssembly in createClient() rather than
+// at import time — that is what keeps top-level await out of the bundle, and
+// so lets an app ship as a single executable (see docs/packaging.md). A mock
+// app never connects, so the nodes built here would find no Yoga.Node.
+await loadLayout();
 
 export { React };
 
