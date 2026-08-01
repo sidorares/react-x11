@@ -34,6 +34,8 @@ import {
   unmountComponentAtNode,
   useAnchor,
   useTheme,
+  useWindowId,
+  windowIdOf,
 } from '../../src/index.js';
 import type {
   DrawnNode,
@@ -217,6 +219,42 @@ function Popup() {
   );
 }
 
+// issue #130: transientFor takes a ref to a window, a ref to a drawn node, a
+// raw XID or 'root'; a <popup> can opt out of override-redirect to become a
+// WM-managed dialog
+function TransientWindows() {
+  const owner = useRef<NtkWindow>(null);
+  const anchor = useRef<DrawnNode>(null);
+  const windowId = useWindowId(anchor);
+  const parentWindow = () => `x11:${(windowId() ?? 0).toString(16)}`;
+  return (
+    <>
+      <window ref={owner} title="editor">
+        <box ref={anchor} />
+      </window>
+      <window transientFor={owner} windowType="dialog" title="Preferences" />
+      <window transientFor={anchor} />
+      <window transientFor={windowIdOf(owner) ?? 0} />
+      <window transientFor="root" />
+      <window transientFor={null} onExpose={() => void parentWindow()} />
+      <popup
+        x={0}
+        y={0}
+        width={200}
+        height={120}
+        overrideRedirect={false}
+        transientFor={anchor}
+        windowType="dialog"
+      >
+        <box />
+      </popup>
+    </>
+  );
+}
+
+// @ts-expect-error — a string is not a window, a node, an XID or 'root'
+const _badTransient = <window transientFor="mainWindow" />;
+
 // --- 3D --------------------------------------------------------------------
 
 function Scene() {
@@ -356,6 +394,10 @@ function Widgets() {
         actions={<Button label="OK" />}
       >
         <text>body</text>
+      </Dialog>
+      {/* the 1.x shape: override-redirect, dismissed by a press outside */}
+      <Dialog open managed={false} onClose={() => {}}>
+        <text>unmanaged</text>
       </Dialog>
     </ThemeProvider>
   );

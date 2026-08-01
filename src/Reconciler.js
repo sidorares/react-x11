@@ -83,6 +83,9 @@ function windowAttributes(props) {
   const hints = {};
   for (const key of Object.keys(props)) {
     if (key === 'children' || key === 'style' || isEventProp(key)) continue;
+    // resolved in the commit phase against a ref that has not attached yet
+    // at createInstance time — WindowNode._applyTransientFor
+    if (key === 'transientFor') continue;
     if (WINDOW_HINT_PROPS.includes(key)) {
       hints[key] = props[key];
       continue;

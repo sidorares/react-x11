@@ -145,6 +145,20 @@ export interface DialogProps extends WidgetProps {
   open?: boolean;
   title?: string;
   children?: ReactNode;
+  /**
+   * `true` (the default) makes the dialog a **window-manager-managed**
+   * window with `WM_TRANSIENT_FOR` pointing at its owner: framed, movable,
+   * closable through the WM, out of the taskbar and alt-tab list, and — on a
+   * full EWMH window manager — stacked above its owner and iconified with
+   * it. A press outside does **not** close it, because a real dialog does
+   * not close that way; Escape and the WM close button both call
+   * {@link DialogProps.onClose}.
+   *
+   * `false` is the override-redirect popup 1.x shipped: no frame, not
+   * movable, and a press anywhere outside dismisses it (a pointer grab).
+   * Right for a transient confirmation on a display with no window manager.
+   */
+  managed?: boolean;
   onClose?: () => void;
   actions?: ReactNode;
   width?: number;
