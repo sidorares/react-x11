@@ -33,6 +33,14 @@ What you get:
 a non-default standalone (e.g. devtools on another machine — handy when the
 X app runs on a headless box).
 
+The same backend, minus the socket, powers `react-x11/test`'s component
+inspection: `inspect()`/`setHook` in
+[testing.md](testing.md#inspectnode-and-sethook) drive the renderer
+interface the backend registers at injection, entirely in-process — no
+standalone app, no `ws`, no env variable. If a test run does set
+`REACT_X11_DEVTOOLS=1`, the two share one renderer registration (see the
+guard in `connect()`).
+
 ## How it works (and its sharp edges)
 
 `src/DevToolsIntegration.js`. When `REACT_X11_DEVTOOLS` is set, the hook is
