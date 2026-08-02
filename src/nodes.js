@@ -156,8 +156,11 @@ const SCROLL_BLIT_MIN_AREA = 48 * 1024;
 
 // Escape hatch, read once like the other switches: for measuring the blit
 // against the plain path on the same build, and as first aid if a scroll
-// ever misrenders in the field.
-const NO_SCROLL_BLIT = Boolean(process.env.REACT_X11_NO_SCROLL_BLIT);
+// ever misrenders in the field. `=== '1'` like REACT_X11_NO_PAINT_CACHE —
+// a truthy check would read NO_SCROLL_BLIT=0 as "disable the blit", and a
+// stale export like that is exactly the kind of thing a cross-machine
+// performance comparison trips over.
+const NO_SCROLL_BLIT = process.env.REACT_X11_NO_SCROLL_BLIT === '1';
 
 // If less than this fraction of the viewport survives the shift, the
 // exposed strip is most of a repaint anyway.
