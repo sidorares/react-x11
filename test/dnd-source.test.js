@@ -265,6 +265,118 @@ test('preventDefault in onDragStart cancels: the gesture stays a click', async (
   await x11Root.unmount();
 });
 
+// --- edge auto-scroll -------------------------------------------------------
+//
+// Driven from the in-app transport because the mechanism is transport
+// agnostic: both halves route through DropSession._overAt, and the timer is
+// what advances a drag whose pointer has stopped moving.
+
+/** Render a draggable row above a short scrollview of drop targets, and
+ * hand back the pieces a test needs to poke at. */
+async function renderScrollList(app) {
+  const rows = Array.from({ length: 40 }, (_, i) =>
+    h('box', {
+      key: i,
+      dropAccept: ['text'],
+      onDrop: () => {},
+      style: { height: 20 },
+    }),
+  );
+  const x11Root = await renderMock(
+    app,
+    h(
+      'window',
+      { width: 200, height: 200 },
+      h('box', {
+        draggable: true,
+        dragData: { 'text/plain': 'row' },
+        style: { height: 20 },
+      }),
+      h('scrollview', { style: { height: 100 } }, ...rows),
+    ),
+  );
+  const wnd = app.windows[0];
+  const windowNode = wnd._reactX11Node;
+  const scroller = windowNode.children.find((n) => n.kind === 'scrollview');
+  return { x11Root, wnd, windowNode, scroller };
+}
+
+/** Wait for `predicate`, letting real timers run — the auto-scroll interval
+ * is what is under test, so it is not mocked away. */
+async function waitFor(predicate, what, ms = 1000) {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
+test('a drag resting near a scrollview edge scrolls it, and stops when it leaves', async () => {
+  const app = createMockApp();
+  const { x11Root, wnd, scroller } = await renderScrollList(app);
+  assert.equal(scroller.scrollY, 0, 'starts unscrolled');
+  assert.ok(scroller.contentHeight > scroller.abs.height, 'content overflows');
+
+  // start the drag on the row above the list, then park the pointer just
+  // inside the viewport's bottom edge and stop moving
+  down(wnd, 10, 10);
+  move(wnd, 16, 10); // past the 4px threshold
+  move(wnd, 100, 115); // viewport is y 20..120, so this is in the band
+  await waitFor(() => scroller.scrollY > 0, 'the list to scroll down');
+
+  // out of the band: the same stillness now scrolls nothing
+  move(wnd, 100, 70);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  const parked = scroller.scrollY;
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.equal(scroller.scrollY, parked, 'no drift once out of the band');
+
+  // and the top edge scrolls the other way
+  move(wnd, 100, 26);
+  await waitFor(() => scroller.scrollY < parked, 'the list to scroll back up');
+
+  up(wnd, 100, 26);
+  await tick();
+  await x11Root.unmount();
+});
+
+test('auto-scroll stops at the end of the drag, and holds no timer open', async () => {
+  const app = createMockApp();
+  const { x11Root, wnd, windowNode, scroller } = await renderScrollList(app);
+  down(wnd, 10, 10);
+  move(wnd, 16, 10);
+  move(wnd, 100, 115);
+  await waitFor(() => scroller.scrollY > 0, 'the list to scroll');
+  assert.ok(windowNode._dnd._autoScrollTimer, 'stepping while the drag is on');
+
+  up(wnd, 100, 115);
+  await tick();
+  assert.equal(
+    windowNode._dnd._autoScrollTimer,
+    null,
+    'the drop cleared the timer',
+  );
+  const settled = scroller.scrollY;
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.equal(scroller.scrollY, settled, 'and nothing scrolls after the drop');
+  await x11Root.unmount();
+});
+
+test('a drag in the middle of a scrollview does not scroll it', async () => {
+  const app = createMockApp();
+  const { x11Root, wnd, windowNode, scroller } = await renderScrollList(app);
+  down(wnd, 10, 10);
+  move(wnd, 16, 10);
+  move(wnd, 100, 70); // dead centre of a 100px viewport
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(scroller.scrollY, 0, 'still at the top');
+  assert.equal(windowNode._dnd._autoScrollTimer, null, 'no timer armed');
+  up(wnd, 100, 70);
+  await tick();
+  await x11Root.unmount();
+});
+
 // --- the external transport (XDND out) --------------------------------------
 
 const SCREEN = { width: 800, height: 600 };

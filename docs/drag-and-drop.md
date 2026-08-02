@@ -205,6 +205,29 @@ exactly the distinction it exists to draw:
 <box {...dropProps} style={[s.zone, isOver && (isAccepted ? s.yes : s.no)]} />
 ```
 
+### Scrolling while dragging
+
+A drag that rests near the top or bottom edge of a `<scrollview>` scrolls
+it, so a drop target below the fold can be reached without letting go.
+Nothing opts in: it applies to any `<scrollview>` a drag passes over,
+from this application or another one.
+
+The viewport it scrolls is the nearest one enclosing the pointer — the
+same one the wheel would scroll, found the same way. `<textarea>` is
+deliberately excluded: nothing can be dropped into one, so scrolling it
+during a drag would only move text out of reach.
+
+Two consequences worth knowing:
+
+- **The content moves under a stationary pointer**, so `onDragEnter`,
+  `onDragLeave` and `onDragOver` keep firing while it scrolls, and
+  `:drag-over` follows. That is the point — the node under the pointer
+  really is changing.
+- **Do not `e.freeze()` a zone inside a scrollview.** Freezing tells the
+  source to stop sending positions, and for a drag from another
+  application those positions are what start the scrolling in the first
+  place.
+
 ### `useDropTarget`
 
 When the _render_ has to change — a hint label, a disabled sibling — the
@@ -442,6 +465,7 @@ that if you need the pattern. See [testing.md](testing.md).
 | drag threshold                     | 4px                                                    |
 | `onDrop` reply watchdog            | 10 s                                                   |
 | wait for the target's confirmation | 5 s                                                    |
+| auto-scroll edge band              | 24px, stepping every 30 ms, up to 14px a step          |
 | XDND protocol version              | 5 (the current one; older sources are negotiated down) |
 | requires                           | ntk ≥ 5.4.0                                            |
 
@@ -455,7 +479,6 @@ Not supported, deliberately or not yet:
   choice of actions is understood — `e.action` reports `'ask'` and the
   request is echoed back — but nothing pops a Copy/Move/Link menu, so
   answer it with a concrete `e.accept('copy')` if you handle it at all.
-- **Auto-scrolling** a `<scrollview>` when a drag hovers near its edge.
 - **`react-dnd`** and other DOM drag libraries — see
   [ecosystem.md](ecosystem.md).
 

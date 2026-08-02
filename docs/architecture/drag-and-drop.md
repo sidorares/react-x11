@@ -806,7 +806,12 @@ and the app-facing API is complete. Phase 3 changes no application code.
 19. A `react-dnd` backend (separate package) over the seam from §5.
 20. Auto-scroll on drag near a `<scrollview>` edge — a default action in the
     router, the same shape as the existing wheel default
-    ([events.js:294](../../src/events.js)).
+    ([events.js:294](../../src/events.js)). _Done._ It hangs off
+    `_overAt`, so both transports get it from one implementation, and the
+    step re-routes rather than re-measuring. The one thing the sketch did
+    not anticipate: the step must **not** answer with an `XdndStatus`. A
+    status is the reply to a position, and the source has sent none — so
+    the fresh answer waits for the next real position instead.
 
 ---
 
