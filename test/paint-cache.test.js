@@ -14,16 +14,6 @@ import ReactX11 from '../src/index.js';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
-import { paintCacheSupported } from '../src/paintcache.js';
-
-// The cache needs ntk's Surface, which lands in a later ntk than package.json
-// pins; without it the renderer paints live and everything below is vacuous.
-// Skipped with a reason rather than quietly passing — a green run that tested
-// nothing is worse than a red one.
-const skip = paintCacheSupported()
-  ? false
-  : 'needs ntk with Surface (sidorares/ntk#157) — the cache is inert without it';
-
 const require = createRequire(import.meta.url);
 const fontDir = join(
   dirname(require.resolve('katex/package.json')),
@@ -121,7 +111,7 @@ function wall(source, count, extra = {}) {
   );
 }
 
-test({ skip }, 'identical drawings share one rendered copy', async () => {
+test('identical drawings share one rendered copy', async () => {
   const app = await headlessApp();
   const ctl = await mount(app, wall(SQUARE('#00aa00'), 5));
   const cache = ctl.root._paintCache;
@@ -141,7 +131,7 @@ test({ skip }, 'identical drawings share one rendered copy', async () => {
   await app.close();
 });
 
-test({ skip }, 'a repaint of unchanged content is all hits', async () => {
+test('a repaint of unchanged content is all hits', async () => {
   const app = await headlessApp();
   const ctl = await mount(app, wall(SQUARE('#00aa00'), 5));
   const cache = ctl.root._paintCache;
@@ -158,7 +148,7 @@ test({ skip }, 'a repaint of unchanged content is all hits', async () => {
   await app.close();
 });
 
-test({ skip }, 'a drawing painted once is never cached', async () => {
+test('a drawing painted once is never cached', async () => {
   // the "seen twice" gate: a node painted once and never again is a pure loss
   const app = await headlessApp();
   const ctl = await mount(app, wall(SQUARE('#00aa00'), 1));
@@ -169,139 +159,113 @@ test({ skip }, 'a drawing painted once is never cached', async () => {
   await app.close();
 });
 
-test(
-  { skip },
-  'a different document is a different entry, not a stale one',
-  async () => {
-    const app = await headlessApp();
-    const ctl = await mount(app, wall(SQUARE('#00aa00'), 4));
-    const cache = ctl.root._paintCache;
-    assert.equal(cache.entries.size, 1);
+test('a different document is a different entry, not a stale one', async () => {
+  const app = await headlessApp();
+  const ctl = await mount(app, wall(SQUARE('#00aa00'), 4));
+  const cache = ctl.root._paintCache;
+  assert.equal(cache.entries.size, 1);
 
-    await new Promise((resolve) =>
-      ReactX11.render(wall(SQUARE('#0000ff'), 4), resolve, app),
-    );
-    ctl.frame();
-    await settle(app);
+  await new Promise((resolve) =>
+    ReactX11.render(wall(SQUARE('#0000ff'), 4), resolve, app),
+  );
+  ctl.frame();
+  await settle(app);
 
-    assert.equal(cache.entries.size, 2, 'the old entry is not reused');
-    const px = await pixels(app, ctl.root);
-    assert.ok(near(px(8, 8), [0, 0, 255]), `repainted blue: got ${px(8, 8)}`);
-    await app.close();
-  },
-);
+  assert.equal(cache.entries.size, 2, 'the old entry is not reused');
+  const px = await pixels(app, ctl.root);
+  assert.ok(near(px(8, 8), [0, 0, 255]), `repainted blue: got ${px(8, 8)}`);
+  await app.close();
+});
 
-test(
-  { skip },
-  'a monochrome drawing recolours without re-rendering',
-  async () => {
-    // the point of caching coverage rather than colour: one entry serves every
-    // colour the UI asks for, so a hover or a theme flip is a composite
-    const coloured = (colour) =>
-      React.createElement(
-        'window',
-        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
-        ...Array.from({ length: 4 }, (_, i) =>
-          React.createElement('svg', {
-            key: i,
-            source: SQUARE('currentColor'),
-            style: {
-              position: 'absolute',
-              left: i * 20,
-              top: 0,
-              width: 16,
-              height: 16,
-              color: colour,
-            },
-          }),
-        ),
-      );
-
-    const app = await headlessApp();
-    const ctl = await mount(app, coloured('#ff0000'));
-    const cache = ctl.root._paintCache;
-    const entries = cache.entries.size;
-    const renders = cache.stats.renders;
-    let px = await pixels(app, ctl.root);
-    assert.ok(near(px(8, 8), [255, 0, 0]), `red first: got ${px(8, 8)}`);
-
-    await new Promise((resolve) =>
-      ReactX11.render(coloured('#0000ff'), resolve, app),
-    );
-    ctl.frame();
-    await settle(app);
-
-    assert.equal(
-      cache.entries.size,
-      entries,
-      'no new entry for the new colour',
-    );
-    assert.equal(cache.stats.renders, renders, 'and nothing re-rendered');
-    px = await pixels(app, ctl.root);
-    assert.ok(near(px(8, 8), [0, 0, 255]), `now blue: got ${px(8, 8)}`);
-    await app.close();
-  },
-);
-
-test(
-  { skip },
-  'a multi-colour drawing bakes its colours and keeps them',
-  async () => {
-    const app = await headlessApp();
-    const ctl = await mount(app, wall(TWO_COLOUR, 4));
-    const cache = ctl.root._paintCache;
-    assert.equal(cache.entries.size, 1);
-
-    const px = await pixels(app, ctl.root);
-    assert.ok(near(px(8, 3), [255, 0, 0]), `top half red: got ${px(8, 3)}`);
-    assert.ok(
-      near(px(8, 13), [0, 0, 255]),
-      `bottom half blue: got ${px(8, 13)}`,
-    );
-
-    await repaint(app, ctl);
-    const after = await pixels(app, ctl.root);
-    assert.ok(
-      near(after(8, 3), [255, 0, 0]),
-      'still red after a cached repaint',
-    );
-    assert.ok(near(after(8, 13), [0, 0, 255]), 'still blue');
-    await app.close();
-  },
-);
-
-test(
-  { skip },
-  'a drawing too big to be worth caching paints live',
-  async () => {
-    const app = await headlessApp();
-    const big = {
-      position: 'absolute',
-      left: 0,
-      top: 0,
-      width: 400,
-      height: 400,
-    };
-    const ctl = await mount(
-      app,
-      React.createElement(
-        'window',
-        { width: W, height: H },
-        ...Array.from({ length: 3 }, (_, i) =>
-          React.createElement('svg', {
-            key: i,
-            source: SQUARE('#00aa00'),
-            style: big,
-          }),
-        ),
+test('a monochrome drawing recolours without re-rendering', async () => {
+  // the point of caching coverage rather than colour: one entry serves every
+  // colour the UI asks for, so a hover or a theme flip is a composite
+  const coloured = (colour) =>
+    React.createElement(
+      'window',
+      { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+      ...Array.from({ length: 4 }, (_, i) =>
+        React.createElement('svg', {
+          key: i,
+          source: SQUARE('currentColor'),
+          style: {
+            position: 'absolute',
+            left: i * 20,
+            top: 0,
+            width: 16,
+            height: 16,
+            color: colour,
+          },
+        }),
       ),
     );
-    const cache = ctl.root._paintCache;
-    assert.equal(cache.entries.size, 0, '400x400 is past the per-item cap');
-    assert.ok(cache.stats.tooBig > 0, 'and it says so');
-    await app.close();
-  },
-);
+
+  const app = await headlessApp();
+  const ctl = await mount(app, coloured('#ff0000'));
+  const cache = ctl.root._paintCache;
+  const entries = cache.entries.size;
+  const renders = cache.stats.renders;
+  let px = await pixels(app, ctl.root);
+  assert.ok(near(px(8, 8), [255, 0, 0]), `red first: got ${px(8, 8)}`);
+
+  await new Promise((resolve) =>
+    ReactX11.render(coloured('#0000ff'), resolve, app),
+  );
+  ctl.frame();
+  await settle(app);
+
+  assert.equal(cache.entries.size, entries, 'no new entry for the new colour');
+  assert.equal(cache.stats.renders, renders, 'and nothing re-rendered');
+  px = await pixels(app, ctl.root);
+  assert.ok(near(px(8, 8), [0, 0, 255]), `now blue: got ${px(8, 8)}`);
+  await app.close();
+});
+
+test('a multi-colour drawing bakes its colours and keeps them', async () => {
+  const app = await headlessApp();
+  const ctl = await mount(app, wall(TWO_COLOUR, 4));
+  const cache = ctl.root._paintCache;
+  assert.equal(cache.entries.size, 1);
+
+  const px = await pixels(app, ctl.root);
+  assert.ok(near(px(8, 3), [255, 0, 0]), `top half red: got ${px(8, 3)}`);
+  assert.ok(near(px(8, 13), [0, 0, 255]), `bottom half blue: got ${px(8, 13)}`);
+
+  await repaint(app, ctl);
+  const after = await pixels(app, ctl.root);
+  assert.ok(near(after(8, 3), [255, 0, 0]), 'still red after a cached repaint');
+  assert.ok(near(after(8, 13), [0, 0, 255]), 'still blue');
+  await app.close();
+});
+
+test('a drawing too big to be worth caching paints live', async () => {
+  const app = await headlessApp();
+  const big = {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: 400,
+    height: 400,
+  };
+  const ctl = await mount(
+    app,
+    React.createElement(
+      'window',
+      { width: W, height: H },
+      ...Array.from({ length: 3 }, (_, i) =>
+        React.createElement('svg', {
+          key: i,
+          source: SQUARE('#00aa00'),
+          style: big,
+        }),
+      ),
+    ),
+  );
+  const cache = ctl.root._paintCache;
+  assert.equal(cache.entries.size, 0, '400x400 is past the per-item cap');
+  assert.ok(cache.stats.tooBig > 0, 'and it says so');
+  await app.close();
+});
 
 // --- verify mode -----------------------------------------------------------
 //
@@ -344,33 +308,29 @@ async function drive(cache, node, ctx, times) {
   }
 }
 
-test(
-  { skip },
-  'verify mode says nothing when the key tells the truth',
-  async () => {
-    const app = await headlessApp();
-    const { PaintCache } = await import('../src/paintcache.js');
-    const cache = new PaintCache(app, { verify: true });
-    const ctx = app
-      .createPixmap({ width: 32, height: 32, depth: 32 })
-      .getContext('2d');
+test('verify mode says nothing when the key tells the truth', async () => {
+  const app = await headlessApp();
+  const { PaintCache } = await import('../src/paintcache.js');
+  const cache = new PaintCache(app, { verify: true });
+  const ctx = app
+    .createPixmap({ width: 32, height: 32, depth: 32 })
+    .getContext('2d');
 
-    const errors = [];
-    const real = console.error;
-    console.error = (...a) => errors.push(a.join(' '));
-    try {
-      // one colour forever: the drawing really is a function of the key
-      await drive(cache, lyingNode(['#00aa00']), ctx, 4);
-    } finally {
-      console.error = real;
-    }
-    assert.equal(cache.stats.hits, 2, 'gate, render, then two hits');
-    assert.deepEqual(errors, [], 'and no complaint');
-    await app.close();
-  },
-);
+  const errors = [];
+  const real = console.error;
+  console.error = (...a) => errors.push(a.join(' '));
+  try {
+    // one colour forever: the drawing really is a function of the key
+    await drive(cache, lyingNode(['#00aa00']), ctx, 4);
+  } finally {
+    console.error = real;
+  }
+  assert.equal(cache.stats.hits, 2, 'gate, render, then two hits');
+  assert.deepEqual(errors, [], 'and no complaint');
+  await app.close();
+});
 
-test({ skip }, 'verify mode catches a key that misses an input', async () => {
+test('verify mode catches a key that misses an input', async () => {
   const app = await headlessApp();
   const { PaintCache } = await import('../src/paintcache.js');
   const cache = new PaintCache(app, { verify: true });
@@ -394,7 +354,7 @@ test({ skip }, 'verify mode catches a key that misses an input', async () => {
   await app.close();
 });
 
-test({ skip }, 'verify mode is off unless asked for', async () => {
+test('verify mode is off unless asked for', async () => {
   const app = await headlessApp();
   const { PaintCache } = await import('../src/paintcache.js');
   const cache = new PaintCache(app);
@@ -439,61 +399,57 @@ test('an app that cannot make surfaces gets no cache, and no crash', async () =>
 
 // --- other implementors ----------------------------------------------------
 
-test(
-  { skip },
-  '<canvas cacheKey> is opt-in, and caches when opted in',
-  async () => {
-    const app = await headlessApp();
-    let draws = 0;
-    const onDraw = (ctx, { width, height }) => {
-      draws++;
-      ctx.fillStyle = '#00aa00';
-      ctx.fillRect(0, 0, width, height);
-    };
-    const cells = (props) =>
-      React.createElement(
-        'window',
-        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
-        ...Array.from({ length: 4 }, (_, i) =>
-          React.createElement('canvas', {
-            key: i,
-            onDraw,
-            style: {
-              position: 'absolute',
-              left: i * 20,
-              top: 0,
-              width: 16,
-              height: 16,
-            },
-            ...props,
-          }),
-        ),
-      );
-
-    // without a key: every cell runs onDraw, every frame
-    const ctl = await mount(app, cells({}));
-    assert.equal(ctl.root._paintCache.entries.size, 0);
-    assert.equal(draws, 4);
-
-    await new Promise((resolve) =>
-      ReactX11.render(cells({ cacheKey: 'green:16x16' }), resolve, app),
+test('<canvas cacheKey> is opt-in, and caches when opted in', async () => {
+  const app = await headlessApp();
+  let draws = 0;
+  const onDraw = (ctx, { width, height }) => {
+    draws++;
+    ctx.fillStyle = '#00aa00';
+    ctx.fillRect(0, 0, width, height);
+  };
+  const cells = (props) =>
+    React.createElement(
+      'window',
+      { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+      ...Array.from({ length: 4 }, (_, i) =>
+        React.createElement('canvas', {
+          key: i,
+          onDraw,
+          style: {
+            position: 'absolute',
+            left: i * 20,
+            top: 0,
+            width: 16,
+            height: 16,
+          },
+          ...props,
+        }),
+      ),
     );
-    ctl.frame();
-    await settle(app);
-    const cache = ctl.root._paintCache;
-    assert.equal(cache.entries.size, 1, 'four cells, one entry');
 
-    const drawsAfter = draws;
-    await repaint(app, ctl);
-    assert.equal(draws, drawsAfter, 'a cached repaint runs no onDraw at all');
+  // without a key: every cell runs onDraw, every frame
+  const ctl = await mount(app, cells({}));
+  assert.equal(ctl.root._paintCache.entries.size, 0);
+  assert.equal(draws, 4);
 
-    const px = await pixels(app, ctl.root);
-    assert.ok(near(px(8, 8), [0, 170, 0]), `and painted: got ${px(8, 8)}`);
-    await app.close();
-  },
-);
+  await new Promise((resolve) =>
+    ReactX11.render(cells({ cacheKey: 'green:16x16' }), resolve, app),
+  );
+  ctl.frame();
+  await settle(app);
+  const cache = ctl.root._paintCache;
+  assert.equal(cache.entries.size, 1, 'four cells, one entry');
 
-test({ skip }, 'the same formula twice is one <tex> entry', async () => {
+  const drawsAfter = draws;
+  await repaint(app, ctl);
+  assert.equal(draws, drawsAfter, 'a cached repaint runs no onDraw at all');
+
+  const px = await pixels(app, ctl.root);
+  assert.ok(near(px(8, 8), [0, 170, 0]), `and painted: got ${px(8, 8)}`);
+  await app.close();
+});
+
+test('the same formula twice is one <tex> entry', async () => {
   const app = await headlessApp();
   const formula = (props) =>
     React.createElement(

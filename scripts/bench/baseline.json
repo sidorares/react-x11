@@ -48,8 +48,8 @@
     "compositePixels": 650000
   },
   "svg: 100 unchanged icons, full repaint": {
-    "requests": 107,
-    "bytesOut": 3708,
+    "requests": 106,
+    "bytesOut": 3704,
     "bytesIn": 128,
     "replies": 4,
     "composites": 101,
