@@ -439,10 +439,10 @@ without an install. If it passes, the fastest real check is a render:
 
 ```jsx
 // probe.jsx — needs a display: run under $DISPLAY, or `xvfb-run -a`
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { TheThing } from 'the-package';
 
-await ReactX11.render(
+(await createRoot()).render(
   <window width={300} height={200} title="probe">
     <box style={{ flexGrow: 1 }}>
       <TheThing />

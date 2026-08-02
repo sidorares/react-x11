@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11, { SplitPane, Tabs } from '../src/index.js';
+import { createRoot, SplitPane, Tabs } from '../src/index.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -58,16 +58,15 @@ const ITEMS = [
   { id: 'three', label: 'Three', content: h('text', null, 'third panel') },
 ];
 
-function mountTabs(props) {
+async function mountTabs(props) {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 300, height: 200 },
       h(Tabs, { items: ITEMS, ...props }),
     ),
-    null,
-    app,
   );
   return app;
 }
@@ -79,7 +78,8 @@ const panelText = (app) =>
   )?.props.children;
 
 test('Tabs shows one panel, and clicking a tab switches it', async () => {
-  const app = mountTabs();
+  const app = await mountTabs();
+  const x11Root = await createRoot({ app });
   await tick();
   assert.strictEqual(panelText(app), 'first panel', 'the first enabled tab');
 
@@ -87,12 +87,13 @@ test('Tabs shows one panel, and clicking a tab switches it', async () => {
   await tick();
   assert.strictEqual(panelText(app), 'third panel');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('arrows move and wrap, skipping disabled tabs', async () => {
   const changes = [];
-  const app = mountTabs({ onChange: (id) => changes.push(id) });
+  const app = await mountTabs({ onChange: (id) => changes.push(id) });
+  const x11Root = await createRoot({ app });
   await tick();
   const wnd = app.windows[0];
   labelled(root(app), 'One').focus();
@@ -117,22 +118,24 @@ test('arrows move and wrap, skipping disabled tabs', async () => {
   await tick();
   assert.strictEqual(changes.at(-1), 'one');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a disabled tab is not focusable and cannot be selected', async () => {
-  const app = mountTabs();
+  const app = await mountTabs();
+  const x11Root = await createRoot({ app });
   await tick();
   const two = labelled(root(app), 'Two');
   assert.strictEqual(two.props.focusable, false);
   click(app.windows[0], two);
   await tick();
   assert.strictEqual(panelText(app), 'first panel', 'the click did nothing');
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('manual mode moves focus without selecting until Enter', async () => {
-  const app = mountTabs({ manual: true });
+  const app = await mountTabs({ manual: true });
+  const x11Root = await createRoot({ app });
   await tick();
   const wnd = app.windows[0];
   labelled(root(app), 'One').focus();
@@ -149,11 +152,12 @@ test('manual mode moves focus without selecting until Enter', async () => {
   await tick();
   assert.strictEqual(panelText(app), 'third panel', 'Enter commits it');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('vertical Tabs use Up/Down instead', async () => {
-  const app = mountTabs({ orientation: 'vertical' });
+  const app = await mountTabs({ orientation: 'vertical' });
+  const x11Root = await createRoot({ app });
   await tick();
   const wnd = app.windows[0];
   labelled(root(app), 'One').focus();
@@ -165,13 +169,14 @@ test('vertical Tabs use Up/Down instead', async () => {
   await tick();
   assert.strictEqual(panelText(app), 'third panel');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('content given as a function is only built while selected', async () => {
   let built = 0;
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 300, height: 200 },
@@ -189,8 +194,6 @@ test('content given as a function is only built while selected', async () => {
         ],
       }),
     ),
-    null,
-    app,
   );
   await tick();
   assert.strictEqual(built, 0, 'the hidden panel was never built');
@@ -199,14 +202,15 @@ test('content given as a function is only built while selected', async () => {
   await tick();
   assert.ok(built > 0, 'and is built once shown');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // --- SplitPane -------------------------------------------------------------
 
-function mountSplit(props) {
+async function mountSplit(props) {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 400, height: 200 },
@@ -217,8 +221,6 @@ function mountSplit(props) {
         h('box', { style: { flexGrow: 1, backgroundColor: 'blue' } }),
       ),
     ),
-    null,
-    app,
   );
   return app;
 }
@@ -227,14 +229,15 @@ const divider = (app) =>
   find(root(app), (n) => /resize$/.test(n.style.cursor ?? ''));
 
 test('SplitPane sizes the first pane and gives the rest to the second', async () => {
-  const app = mountSplit();
+  const app = await mountSplit();
+  const x11Root = await createRoot({ app });
   await tick();
   const [first, , second] = root(app).children[0].children;
   assert.strictEqual(first.abs.width, 100);
   assert.strictEqual(second.abs.width, 400 - 100 - 6, 'the divider takes 6');
   assert.strictEqual(first.abs.height, 200, 'panes fill across the other axis');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the second pane does not grow to fit content wider than it', async () => {
@@ -245,7 +248,8 @@ test('the second pane does not grow to fit content wider than it', async () => {
   // invisible in the empty-pane test above: with no content there is no
   // natural width for the basis to pick up.
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 400, height: 200 },
@@ -264,8 +268,6 @@ test('the second pane does not grow to fit content wider than it', async () => {
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -291,16 +293,17 @@ test('the second pane does not grow to fit content wider than it', async () => {
     );
   }
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('dragging the divider resizes, and clamps at both minimums', async () => {
   const sizes = [];
-  const app = mountSplit({
+  const app = await mountSplit({
     onResize: (n) => sizes.push(n),
     min: 50,
     minSecond: 80,
   });
+  const x11Root = await createRoot({ app });
   await tick();
   const wnd = app.windows[0];
   const d = divider(app);
@@ -330,11 +333,12 @@ test('dragging the divider resizes, and clamps at both minimums', async () => {
   );
   wnd.emit('mouseup', { x: 395, y: 100, keycode: 1 });
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the divider takes the grab point with it, without jumping', async () => {
-  const app = mountSplit();
+  const app = await mountSplit();
+  const x11Root = await createRoot({ app });
   await tick();
   const wnd = app.windows[0];
   const d = divider(app);
@@ -350,11 +354,12 @@ test('the divider takes the grab point with it, without jumping', async () => {
   );
   wnd.emit('mouseup', { x: d.abs.x + 5, y: 100, keycode: 1 });
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the divider is focusable and moves with the arrow keys', async () => {
-  const app = mountSplit();
+  const app = await mountSplit();
+  const x11Root = await createRoot({ app });
   await tick();
   const wnd = app.windows[0];
   divider(app).focus();
@@ -375,16 +380,17 @@ test('the divider is focusable and moves with the arrow keys', async () => {
   await settle();
   assert.strictEqual(root(app).children[0].children[0].abs.width, 40, 'to min');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a column split divides the other way', async () => {
-  const app = mountSplit({ direction: 'column', defaultSize: 60 });
+  const app = await mountSplit({ direction: 'column', defaultSize: 60 });
+  const x11Root = await createRoot({ app });
   await tick();
   const [first, d, second] = root(app).children[0].children;
   assert.strictEqual(first.abs.height, 60);
   assert.strictEqual(second.abs.height, 200 - 60 - 6);
   assert.strictEqual(d.style.cursor, 'row-resize');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });

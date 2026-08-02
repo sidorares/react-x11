@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import { anchorRect } from '../src/components/anchor.js';
 
 // End-to-end test: react-x11 -> real ntk client -> node-x11's pure-JS
@@ -34,9 +34,9 @@ async function createHeadlessApp() {
   return { server, app };
 }
 
-function render(element, app) {
+function render(element, x11Root) {
   return new Promise((resolve) => {
-    ReactX11.render(element, (instance) => resolve(instance), app);
+    x11Root.render(element, (instance) => resolve(instance));
   });
 }
 
@@ -84,6 +84,7 @@ async function waitForPixel(ctx, w, h, x, y, want, what) {
 
 test('renders a window tree into an in-process X server', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const instance = await render(
       React.createElement(
@@ -91,7 +92,7 @@ test('renders a window tree into an in-process X server', async () => {
         { width: 300, height: 200, title: 'integration' },
         React.createElement('window', { width: 50, height: 50, x: 10, y: 10 }),
       ),
-      app,
+      x11Root,
     );
 
     assert.ok(instance, 'render callback should receive the root instance');
@@ -104,10 +105,10 @@ test('renders a window tree into an in-process X server', async () => {
         { width: 320, height: 240, title: 'integration-updated' },
         React.createElement('window', { width: 50, height: 50, x: 10, y: 10 }),
       ),
-      app,
+      x11Root,
     );
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -116,6 +117,7 @@ test('renders a window tree into an in-process X server', async () => {
 
 test('child windows stack bottom-to-top in JSX order on the server', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const refs = { a: React.createRef(), b: React.createRef() };
     // Two child windows on the same spot. The check is QueryTree, not
@@ -141,7 +143,7 @@ test('child windows stack bottom-to-top in JSX order on the server', async () =>
         ),
       );
 
-    const parent = await render(ui(['a', 'b']), app);
+    const parent = await render(ui(['a', 'b']), x11Root);
     const queryTree = (id) =>
       new Promise((resolve, reject) =>
         app.X.QueryTree(id, (err, tree) => (err ? reject(err) : resolve(tree))),
@@ -154,14 +156,14 @@ test('child windows stack bottom-to-top in JSX order on the server', async () =>
       'the later sibling starts on top',
     );
 
-    await render(ui(['b', 'a']), app);
+    await render(ui(['b', 'a']), x11Root);
     assert.deepStrictEqual(
       (await queryTree(parent.id)).children,
       [refs.b.current.id, refs.a.current.id],
       'reordering the JSX restacks the real windows',
     );
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -170,6 +172,7 @@ test('child windows stack bottom-to-top in JSX order on the server', async () =>
 
 test('paints a flex box tree and reflows on update', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const ui = (leftColor) =>
       React.createElement(
@@ -187,17 +190,17 @@ test('paints a flex box tree and reflows on update', async () => {
         ),
       );
 
-    const wnd = await render(ui('red'), app);
+    const wnd = await render(ui('red'), x11Root);
     const ctx = wnd.getContext('2d');
 
     await waitForPixel(ctx, 160, 120, 40, 60, [255, 0, 0], 'left half red');
     await waitForPixel(ctx, 160, 120, 120, 60, [0, 0, 255], 'right half blue');
 
     // state-driven repaint
-    await render(ui('green'), app);
+    await render(ui('green'), x11Root);
     await waitForPixel(ctx, 160, 120, 40, 60, [0, 128, 0], 'left half green');
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -205,6 +208,7 @@ test('paints a flex box tree and reflows on update', async () => {
 
 test('scrollview scrolls content (pixel-verified)', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const ref = React.createRef();
     const wnd = await render(
@@ -222,7 +226,7 @@ test('scrollview scrolls content (pixel-verified)', async () => {
           }),
         ),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
 
@@ -230,7 +234,7 @@ test('scrollview scrolls content (pixel-verified)', async () => {
     ref.current.scrollTo(100);
     await waitForPixel(ctx, 100, 100, 40, 50, [0, 255, 0], 'scrolled: green');
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -238,6 +242,7 @@ test('scrollview scrolls content (pixel-verified)', async () => {
 
 test('popup is override-redirect on the server and paints', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const ref = React.createRef();
     await render(
@@ -256,7 +261,7 @@ test('popup is override-redirect on the server and paints', async () => {
           ),
         ),
       ),
-      app,
+      x11Root,
     );
 
     const popupWindow = ref.current;
@@ -276,7 +281,7 @@ test('popup is override-redirect on the server and paints', async () => {
     const ctx = popupWindow.getContext('2d');
     await waitForPixel(ctx, 60, 40, 30, 20, [255, 0, 0], 'popup content red');
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -285,6 +290,7 @@ test('popup is override-redirect on the server and paints', async () => {
 
 test('a popup anchors to the window even once a WM has reframed it', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const ref = React.createRef();
     const wnd = await render(
@@ -296,7 +302,7 @@ test('a popup anchors to the window even once a WM has reframed it', async () =>
           style: { marginTop: 30, marginLeft: 20, width: 80, height: 20 },
         }),
       ),
-      app,
+      x11Root,
     );
     await settle(app);
 
@@ -329,7 +335,7 @@ test('a popup anchors to the window even once a WM has reframed it', async () =>
       'the origin came from the server, not from ConfigureNotify',
     );
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -338,6 +344,7 @@ test('a popup anchors to the window even once a WM has reframed it', async () =>
 
 test('textinput renders its value through the ntk text stack', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const wnd = await render(
       React.createElement(
@@ -348,7 +355,7 @@ test('textinput renders its value through the ntk text stack', async () => {
           style: { fontSize: 24, flexGrow: 1, backgroundColor: 'white' },
         }),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
 
@@ -369,7 +376,7 @@ test('textinput renders its value through the ntk text stack', async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -377,6 +384,7 @@ test('textinput renders its value through the ntk text stack', async () => {
 
 test('an unfocused field shows the start of its value, not the caret', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // The caret starts at the *end* of the value, and the paint used to chase
     // it whether or not the field had ever been focused — so a field holding
@@ -402,7 +410,7 @@ test('an unfocused field shows the start of its value, not the caret', async () 
           style: { width: 120, fontSize: 13 },
         }),
       ),
-      app,
+      x11Root,
     );
 
     // paint at least once: the offsets are settled during _paintContent
@@ -430,7 +438,7 @@ test('an unfocused field shows the start of its value, not the caret', async () 
       'an unfocused textarea shows its first lines',
     );
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -438,6 +446,7 @@ test('an unfocused field shows the start of its value, not the caret', async () 
 
 test('textinput caret advances past trailing spaces', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const ref = React.createRef();
     await render(
@@ -450,7 +459,7 @@ test('textinput caret advances past trailing spaces', async () => {
           style: { flexGrow: 1 },
         }),
       ),
-      app,
+      x11Root,
     );
     const input = ref.current;
 
@@ -474,7 +483,7 @@ test('textinput caret advances past trailing spaces', async () => {
       `synthetic advance tracks shaping (${w5} vs ${full})`,
     );
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -483,6 +492,7 @@ test('textinput caret advances past trailing spaces', async () => {
 
 test('renders <text> through the ntk text stack', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const wnd = await render(
       React.createElement(
@@ -494,7 +504,7 @@ test('renders <text> through the ntk text stack', async () => {
           'Hello',
         ),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
 
@@ -518,7 +528,7 @@ test('renders <text> through the ntk text stack', async () => {
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -547,6 +557,7 @@ const isDark = ([r, g, b]) => r < 128 && g < 128 && b < 128;
 
 test('centered text is vertically balanced (half-leading)', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const wnd = await render(
       React.createElement(
@@ -568,7 +579,7 @@ test('centered text is vertically balanced (half-leading)', async () => {
           ),
         ),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
     await waitForInk(
@@ -605,7 +616,7 @@ test('centered text is vertically balanced (half-leading)', async () => {
         `off by ${offset}px`,
     );
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -613,6 +624,7 @@ test('centered text is vertically balanced (half-leading)', async () => {
 
 test('rich content scrolled out of a scrollview leaves no ink behind', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // a math fence: KaTeX draws glyph runs and vector shapes of its own,
     // which used to bypass the 2d clip and paint over whatever was above
@@ -633,7 +645,7 @@ test('rich content scrolled out of a scrollview leaves no ink behind', async () 
           ),
         ),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
     const node = wnd._reactX11Node;
@@ -670,7 +682,7 @@ test('rich content scrolled out of a scrollview leaves no ink behind', async () 
       );
     }
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -679,6 +691,7 @@ test('rich content scrolled out of a scrollview leaves no ink behind', async () 
 
 test('<markdown> survives a document being typed down to nothing', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     let setText;
     const Host = () => {
@@ -694,7 +707,7 @@ test('<markdown> survives a document being typed down to nothing', async () => {
         ),
       );
     };
-    await render(React.createElement(Host), app);
+    await render(React.createElement(Host), x11Root);
 
     // a live preview goes through these states on the way to empty, and a
     // blank block lays out with no spans at all — which used to throw
@@ -705,7 +718,7 @@ test('<markdown> survives a document being typed down to nothing', async () => {
     }
     await settle(app);
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -714,6 +727,7 @@ test('<markdown> survives a document being typed down to nothing', async () => {
 
 test('<markdown> renders through MarkdownView and dispatches onLink', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const clicked = [];
     const wnd = await render(
@@ -725,7 +739,7 @@ test('<markdown> renders through MarkdownView and dispatches onLink', async () =
           onLink: (href) => clicked.push(href),
         }),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
 
@@ -754,7 +768,7 @@ test('<markdown> renders through MarkdownView and dispatches onLink', async () =
     wnd.emit('mouseup', { x: lx, y: ly, keycode: 1 });
     assert.deepStrictEqual(clicked, ['https://example.com/']);
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -762,6 +776,7 @@ test('<markdown> renders through MarkdownView and dispatches onLink', async () =
 
 test('<html> renders styled boxes through HtmlView', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const wnd = await render(
       React.createElement(
@@ -772,11 +787,11 @@ test('<html> renders styled boxes through HtmlView', async () => {
             '<div style="width: 80px; height: 40px; background: #0000ff; margin: 0"></div>',
         }),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
     await waitForPixel(ctx, 200, 120, 20, 20, [0, 0, 255], 'html div blue');
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -784,6 +799,7 @@ test('<html> renders styled boxes through HtmlView', async () => {
 
 test('<svg> scales its viewBox into the content box', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const wnd = await render(
       React.createElement(
@@ -795,12 +811,12 @@ test('<svg> scales its viewBox into the content box', async () => {
           style: { width: 60, height: 60 },
         }),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
     await waitForPixel(ctx, 100, 100, 30, 30, [255, 0, 0], 'svg rect red');
     await waitForPixel(ctx, 100, 100, 80, 80, [255, 255, 255], 'outside white');
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -808,6 +824,7 @@ test('<svg> scales its viewBox into the content box', async () => {
 
 test('<tex> lays out and draws a formula', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const wnd = await render(
       React.createElement(
@@ -819,7 +836,7 @@ test('<tex> lays out and draws a formula', async () => {
           displayMode: true,
         }),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
     await waitForInk(
@@ -831,7 +848,7 @@ test('<tex> lays out and draws a formula', async () => {
       15,
       'tex formula ink',
     );
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -839,6 +856,7 @@ test('<tex> lays out and draws a formula', async () => {
 
 test('<html> repaints when async content arrives (ntk onInvalidate)', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // an <img> decodes off the render pass, so the first paint has nothing to
     // draw there; HtmlView then fires onInvalidate, which is the only thing
@@ -856,11 +874,11 @@ test('<html> repaints when async content arrives (ntk onInvalidate)', async () =
           source: `<div style="margin:0;padding:0"><img width="40" height="40" src="${svg}"></div>`,
         }),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
     await waitForPixel(ctx, 200, 120, 20, 20, [0, 0, 255], 'html svg img blue');
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -868,6 +886,7 @@ test('<html> repaints when async content arrives (ntk onInvalidate)', async () =
 
 test('<svg> JSX children render and update declaratively', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const ui = (fill) =>
       React.createElement(
@@ -886,12 +905,12 @@ test('<svg> JSX children render and update declaratively', async () => {
         ),
       );
 
-    const wnd = await render(ui('#ff0000'), app);
+    const wnd = await render(ui('#ff0000'), x11Root);
     const ctx = wnd.getContext('2d');
     await waitForPixel(ctx, 100, 100, 30, 30, [255, 0, 0], 'children rect red');
 
     // prop update on the SVG child re-renders the drawing
-    await render(ui('#00ff00'), app);
+    await render(ui('#00ff00'), x11Root);
     await waitForPixel(
       ctx,
       100,
@@ -902,7 +921,7 @@ test('<svg> JSX children render and update declaratively', async () => {
       'children rect green',
     );
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -910,6 +929,7 @@ test('<svg> JSX children render and update declaratively', async () => {
 
 test('<markdown> accepts its content as a string child', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const wnd = await render(
       React.createElement(
@@ -917,7 +937,7 @@ test('<markdown> accepts its content as a string child', async () => {
         { width: 300, height: 100, style: { backgroundColor: 'white' } },
         React.createElement('markdown', null, '# From a child string'),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
     await waitForInk(
@@ -929,7 +949,7 @@ test('<markdown> accepts its content as a string child', async () => {
       20,
       'child-string markdown heading ink',
     );
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -937,6 +957,7 @@ test('<markdown> accepts its content as a string child', async () => {
 
 test('<textarea> edits multi-line text with line-aware caret movement', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const ref = React.createRef();
     const wnd = await render(
@@ -949,7 +970,7 @@ test('<textarea> edits multi-line text with line-aware caret movement', async ()
           style: { flexGrow: 1, backgroundColor: 'white' },
         }),
       ),
-      app,
+      x11Root,
     );
     const ta = ref.current;
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -1001,7 +1022,7 @@ test('<textarea> edits multi-line text with line-aware caret movement', async ()
     );
     assert.ok(wrapped.lines.length > 1, 'TextLayout wraps at maxWidth');
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -1010,6 +1031,7 @@ test('<textarea> edits multi-line text with line-aware caret movement', async ()
 
 test('window hints reach the X server as real properties', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // the render callback resolves to the live ntk window (getPublicInstance)
     const wnd = await render(
@@ -1020,7 +1042,7 @@ test('window hints reach the X server as real properties', async () => {
         wmClass: ['react-x11', 'React-X11'],
         windowType: 'dialog',
       }),
-      app,
+      x11Root,
     );
     await settle(app, 6); // deferred InternAtom -> ChangeProperty chains
 
@@ -1061,7 +1083,7 @@ test('window hints reach the X server as real properties', async () => {
     const type = await getProp(typeAtom);
     assert.strictEqual(type.data.readUInt32LE(0), dialog);
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -1070,6 +1092,7 @@ test('window hints reach the X server as real properties', async () => {
 
 test('overflow: hidden still clips a child that really does overflow', async () => {
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // A clip that clips nothing is skipped, because each one costs a
     // server-side mask rebuild and a table sets `overflow: hidden` on every
@@ -1099,7 +1122,7 @@ test('overflow: hidden still clips a child that really does overflow', async () 
           }),
         ),
       ),
-      app,
+      x11Root,
     );
     const ctx = wnd.getContext('2d');
     const root = wnd._reactX11Node;
@@ -1126,7 +1149,7 @@ test('overflow: hidden still clips a child that really does overflow', async () 
       );
     }
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }

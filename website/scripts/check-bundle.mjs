@@ -39,7 +39,6 @@ const rx = await import(pathToFileURL(bundle));
 
 // --- shape -----------------------------------------------------------------
 assert.strictEqual(typeof rx.reactX11.createRoot, 'function', 'createRoot');
-assert.strictEqual(typeof rx.reactX11.render, 'function', 'render');
 assert.strictEqual(typeof rx.reactX11.createStyles, 'function', 'createStyles');
 assert.strictEqual(typeof rx.reactX11.Button, 'function', 'Button');
 assert.strictEqual(typeof rx.reactX11.Canvas3D, 'function', 'Canvas3D');

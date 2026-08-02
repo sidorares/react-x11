@@ -21,7 +21,6 @@ import {
   ProgressBar,
   Radio,
   RadioGroup,
-  render,
   Select,
   Slider,
   SplitPane,
@@ -31,7 +30,6 @@ import {
   ThemeProvider,
   Tooltip,
   Tree,
-  unmountComponentAtNode,
   useAnchor,
   useTheme,
   useWindowId,
@@ -471,11 +469,11 @@ async function main() {
   const borrowing = await createRoot({ app: root.app });
   await borrowing.unmount();
 
-  await render(<Scene />);
-  render(<RawGl />, undefined, root.app);
-  render(<Popup />, () => {}, root.app);
-  render(<Events />, () => {}, root.app);
-  unmountComponentAtNode(root.app);
+  root.render(<Scene />);
+  root.render(<RawGl />);
+  root.render(<Popup />, () => {});
+  root.render(<Events />);
+  await root.unmount();
 
   // react-x11/debug — the protocol tracer
   const trace = startTrace({ sink: 'chrome', path: '/tmp/t.json' });

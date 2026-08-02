@@ -10,7 +10,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
-import ReactX11, { Canvas3D } from '../src/index.js';
+import { createRoot, Canvas3D } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
 const { createGlxExtension, RecordingBackend } = require('x11/browser/glx');
@@ -35,8 +35,8 @@ async function createGlApp() {
   return { app };
 }
 
-const render = (element, app) =>
-  new Promise((resolve) => ReactX11.render(element, resolve, app));
+const render = (element, x11Root) =>
+  new Promise((resolve) => x11Root.render(element, resolve));
 
 const settle = async (app, roundTrips = 2) => {
   for (let i = 0; i < roundTrips; i++) {
@@ -65,20 +65,20 @@ function findSurface(node) {
 }
 
 /** Mount a scene and draw one frame, so picking has a camera to work with. */
-async function mount(app, scene, size = { width: 400, height: 300 }) {
+async function mount(x11Root, scene, size = { width: 400, height: 300 }) {
   const instance = await render(
     h(
       'window',
       size,
       h(Canvas3D, { style: { flexGrow: 1 }, ...scene.canvas }, scene.children),
     ),
-    app,
+    x11Root,
   );
   const surface = findSurface(instance._reactX11Node);
   await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
   surface.requestFrame = () => {};
   surface._drawFrame();
-  await settle(app);
+  await settle(x11Root.app);
   return surface;
 }
 
@@ -96,10 +96,11 @@ const CUBE = (props = {}) =>
 
 test('a click on a mesh hits it, and a click past it misses', async () => {
   const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const clicks = [];
     const missed = [];
-    const surface = await mount(app, {
+    const surface = await mount(x11Root, {
       canvas: {
         camera: { position: [0, 0, 6] },
         onPointerMissed: () => missed.push(true),
@@ -133,9 +134,10 @@ test('a click on a mesh hits it, and a click past it misses', async () => {
 
 test('hover enters and leaves as the pointer crosses a mesh', async () => {
   const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const log = [];
-    const surface = await mount(app, {
+    const surface = await mount(x11Root, {
       canvas: { camera: { position: [0, 0, 6] } },
       children: CUBE({
         onPointerOver: () => log.push('over'),
@@ -157,10 +159,11 @@ test('hover enters and leaves as the pointer crosses a mesh', async () => {
 
 test('the nearest mesh wins, and events bubble to the group', async () => {
   const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const hits = [];
     const groupClicks = [];
-    const surface = await mount(app, {
+    const surface = await mount(x11Root, {
       canvas: { camera: { position: [0, 0, 10] } },
       children: h(
         'group',
@@ -188,9 +191,10 @@ test('the nearest mesh wins, and events bubble to the group', async () => {
 
 test('stopPropagation keeps an event off the ancestors', async () => {
   const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const seen = [];
-    const surface = await mount(app, {
+    const surface = await mount(x11Root, {
       canvas: { camera: { position: [0, 0, 6] } },
       children: h(
         'group',
@@ -214,13 +218,14 @@ test('stopPropagation keeps an event off the ancestors', async () => {
 
 test('a transform moves what the ray hits', async () => {
   const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const hits = [];
     const scene = (x) => ({
       canvas: { camera: { position: [0, 0, 6] } },
       children: CUBE({ position: [x, 0, 0], onClick: () => hits.push(x) }),
     });
-    const surface = await mount(app, scene(0));
+    const surface = await mount(x11Root, scene(0));
 
     pointer(surface, 'mousedown', 200, 150);
     pointer(surface, 'mouseup', 200, 150);
@@ -237,7 +242,7 @@ test('a transform moves what the ray hits', async () => {
           CUBE({ position: [-6, 0, 0], onClick: () => hits.push(-6) }),
         ),
       ),
-      app,
+      x11Root,
     );
     surface._drawFrame();
     await settle(app);
@@ -252,8 +257,9 @@ test('a transform moves what the ray hits', async () => {
 
 test('X pointer events are only selected when the scene listens', async () => {
   const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
-    const quiet = await mount(app, {
+    const quiet = await mount(x11Root, {
       canvas: {},
       children: CUBE(),
     });
@@ -263,7 +269,7 @@ test('X pointer events are only selected when the scene listens', async () => {
       'no handlers: no motion events asked for',
     );
 
-    const listening = await mount(app, {
+    const listening = await mount(x11Root, {
       canvas: {},
       children: CUBE({ onClick: () => {} }),
     });

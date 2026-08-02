@@ -13,7 +13,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
-import ReactX11, { Canvas3D } from '../src/index.js';
+import { createRoot, Canvas3D } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
 const { createGlxExtension, RecordingBackend } = require('x11/browser/glx');
@@ -103,8 +103,8 @@ async function createGlApp() {
   return { app, backend, xErrors, tap: tapRequests(clientEnd) };
 }
 
-const render = (element, app) =>
-  new Promise((resolve) => ReactX11.render(element, resolve, app));
+const render = (element, x11Root) =>
+  new Promise((resolve) => x11Root.render(element, resolve));
 
 const settle = async (app, roundTrips = 3) => {
   for (let i = 0; i < roundTrips; i++) {
@@ -163,6 +163,7 @@ async function drawFrame(surface, app, tap) {
 
 test('a mesh compiles once, then every frame is one CallList', async () => {
   const { app, tap, xErrors } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const scene = (rotation) =>
       h(
@@ -180,7 +181,7 @@ test('a mesh compiles once, then every frame is one CallList', async () => {
         ),
       );
 
-    const instance = await render(scene([0, 0, 0]), app);
+    const instance = await render(scene([0, 0, 0]), x11Root);
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
     takeFrameControl(surface);
@@ -196,7 +197,7 @@ test('a mesh compiles once, then every frame is one CallList', async () => {
 
     // a transform change re-sends matrices, never geometry
     tap.reset();
-    await render(scene([0, 0.4, 0]), app);
+    await render(scene([0, 0.4, 0]), x11Root);
     await drawFrame(surface, app, tap);
 
     const moved = tap.glx(app.display.GLX.majorOpcode);
@@ -209,7 +210,7 @@ test('a mesh compiles once, then every frame is one CallList', async () => {
     );
     assert.equal(xErrors.length, 0, xErrors.map((e) => e.message).join(', '));
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -218,6 +219,7 @@ test('a mesh compiles once, then every frame is one CallList', async () => {
 
 test('per-frame cost does not grow with triangle count', async () => {
   const { app, tap } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const instance = await render(
       h(
@@ -234,7 +236,7 @@ test('per-frame cost does not grow with triangle count', async () => {
           ),
         ),
       ),
-      app,
+      x11Root,
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
@@ -264,6 +266,7 @@ test('per-frame cost does not grow with triangle count', async () => {
 
 test('changing geometry args recompiles that list once', async () => {
   const { app, tap } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const scene = (size) =>
       h(
@@ -281,14 +284,14 @@ test('changing geometry args recompiles that list once', async () => {
         ),
       );
 
-    const instance = await render(scene(1), app);
+    const instance = await render(scene(1), x11Root);
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
     takeFrameControl(surface);
     await drawFrame(surface, app, tap);
 
     tap.reset();
-    await render(scene(2), app);
+    await render(scene(2), x11Root);
     await drawFrame(surface, app, tap);
     const resized = tap.glx(app.display.GLX.majorOpcode);
     assert.equal(resized.requests(GLX_NEW_LIST), 1, 'exactly one recompile');
@@ -306,6 +309,7 @@ test('changing geometry args recompiles that list once', async () => {
 
 test('groups nest transforms and each material switches state once', async () => {
   const { app, tap } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const instance = await render(
       h(
@@ -332,7 +336,7 @@ test('groups nest transforms and each material switches state once', async () =>
           ),
         ),
       ),
-      app,
+      x11Root,
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
@@ -355,6 +359,13 @@ test('groups nest transforms and each material switches state once', async () =>
 test('unsupported r3f elements fail with the protocol reason', async () => {
   const { app } = await createGlApp();
   const errors = [];
+  // mounting this tree throws on purpose: `onUncaughtError` is the channel
+  // for it, and it keeps the default (which sets process.exitCode) out of a
+  // test that is asserting on the message
+  const x11Root = await createRoot({
+    app,
+    onUncaughtError: (err) => errors.push(String(err?.message ?? err)),
+  });
   const consoleError = console.error;
   console.error = (...args) => errors.push(args.join(' '));
   try {
@@ -364,7 +375,7 @@ test('unsupported r3f elements fail with the protocol reason', async () => {
         { width: 100, height: 100 },
         h(Canvas3D, {}, h('mesh', {}, h('shaderMaterial', {}))),
       ),
-      app,
+      x11Root,
     ).catch(() => {});
     assert.match(
       errors.join('\n'),
@@ -380,12 +391,19 @@ test('unsupported r3f elements fail with the protocol reason', async () => {
 test('3D elements outside a <glarea> say where they belong', async () => {
   const { app } = await createGlApp();
   const errors = [];
+  // mounting this tree throws on purpose: `onUncaughtError` is the channel
+  // for it, and it keeps the default (which sets process.exitCode) out of a
+  // test that is asserting on the message
+  const x11Root = await createRoot({
+    app,
+    onUncaughtError: (err) => errors.push(String(err?.message ?? err)),
+  });
   const consoleError = console.error;
   console.error = (...args) => errors.push(args.join(' '));
   try {
     await render(
       h('window', { width: 100, height: 100 }, h('mesh', {})),
-      app,
+      x11Root,
     ).catch(() => {});
     assert.match(errors.join('\n'), /<mesh> is a 3D element.*<glarea>/s);
   } finally {
@@ -396,6 +414,7 @@ test('3D elements outside a <glarea> say where they belong', async () => {
 
 test('lights drive the lit materials, and ambient needs no unit of its own', async () => {
   const { app, backend, tap } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const instance = await render(
       h(
@@ -414,7 +433,7 @@ test('lights drive the lit materials, and ambient needs no unit of its own', asy
           ),
         ),
       ),
-      app,
+      x11Root,
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
@@ -465,6 +484,7 @@ test('lights drive the lit materials, and ambient needs no unit of its own', asy
 
 test('a lit material with no lights falls back to flat colour', async () => {
   const { app, backend, tap } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const instance = await render(
       h(
@@ -481,7 +501,7 @@ test('a lit material with no lights falls back to flat colour', async () => {
           ),
         ),
       ),
-      app,
+      x11Root,
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
@@ -505,6 +525,7 @@ test('a lit material with no lights falls back to flat colour', async () => {
 
 test('a texture is uploaded once and only rebound afterwards', async () => {
   const { app, backend, tap } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     // a 2x2 RGBA checker, the shape ntk's Image has
     const map = {
@@ -530,7 +551,7 @@ test('a texture is uploaded once and only rebound afterwards', async () => {
         ),
       );
 
-    const instance = await render(scene('white'), app);
+    const instance = await render(scene('white'), x11Root);
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
     takeFrameControl(surface);
@@ -552,7 +573,7 @@ test('a texture is uploaded once and only rebound afterwards', async () => {
 
     // a material change re-sends state, never the pixels
     backend.calls.length = 0;
-    await render(scene('tomato'), app);
+    await render(scene('tomato'), x11Root);
     await drawFrame(surface, app, tap);
     const second = frameCalls(backend);
     assert.equal(
@@ -571,6 +592,7 @@ test('a texture is uploaded once and only rebound afterwards', async () => {
 
 test('a material without a map turns texturing off', async () => {
   const { app, backend, tap } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const instance = await render(
       h(
@@ -587,7 +609,7 @@ test('a material without a map turns texturing off', async () => {
           ),
         ),
       ),
-      app,
+      x11Root,
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');

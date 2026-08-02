@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
@@ -45,15 +45,15 @@ test('Alt+Click resolves the fiber to its JSX call site and logs it', async () =
   clickToComponent.install();
 
   const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   const instance = await new Promise((resolve) => {
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 200, height: 200 },
         React.createElement(Leaf),
       ),
       (i) => resolve(i),
-      app,
     );
   });
 

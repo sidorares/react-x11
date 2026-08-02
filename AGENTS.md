@@ -23,8 +23,8 @@ no override-redirect staging (issue #4).
 
 ## Layout
 
-- `src/index.js` — public entry (`render`, `createRoot`,
-  `unmountComponentAtNode`).
+- `src/index.js` — public entry (`createRoot`; the legacy
+  `render`/`unmountComponentAtNode` pair was retired in #114).
 - `src/Reconciler.js` — react-reconciler host config + render entry points.
   Written against react-reconciler 0.33 (React 19). If you upgrade
   react-reconciler, expect host config contract changes; the smoke test is

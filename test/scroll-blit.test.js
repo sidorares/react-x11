@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 import xserver from 'x11/lib/xserver/index.js';
@@ -19,10 +19,15 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 // 20 rows of 40px in a 400x400 window: content 800, plenty to scroll, and
 // a viewport comfortably above the worth-it area gate.
-function mount({ windowProps = {}, scrollProps = {}, extra = null } = {}) {
+async function mount({
+  windowProps = {},
+  scrollProps = {},
+  extra = null,
+} = {}) {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const ref = React.createRef();
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 400, height: 400, ...windowProps },
@@ -42,8 +47,6 @@ function mount({ windowProps = {}, scrollProps = {}, extra = null } = {}) {
       ),
       extra,
     ),
-    null,
-    app,
   );
   const wnd = app.windows[0];
   return { app, wnd, root: wnd._reactX11Node, ref };
@@ -52,7 +55,7 @@ function mount({ windowProps = {}, scrollProps = {}, extra = null } = {}) {
 const blits = (wnd) => wnd.calls.filter(([name]) => name === 'scrollRegion');
 
 test('a pure scroll blits the viewport and claims only the strip and thumb', async () => {
-  const { wnd, root, ref } = mount();
+  const { wnd, root, ref } = await mount();
   await tick();
   wnd.calls.length = 0;
 
@@ -78,7 +81,7 @@ test('a pure scroll blits the viewport and claims only the strip and thumb', asy
 });
 
 test('scrolling back up exposes a strip at the top', async () => {
-  const { wnd, root, ref } = mount();
+  const { wnd, root, ref } = await mount();
   await tick();
   ref.current.scrollTo(96);
   await tick();
@@ -95,7 +98,7 @@ test('scrolling back up exposes a strip at the top', async () => {
 });
 
 test('several scrollTo calls in one frame blit once, by the net delta', async () => {
-  const { wnd, ref } = mount();
+  const { wnd, ref } = await mount();
   await tick();
   wnd.calls.length = 0;
   ref.current.scrollBy(48);
@@ -108,7 +111,7 @@ test('several scrollTo calls in one frame blit once, by the net delta', async ()
 });
 
 test('other damage inside the viewport keeps the full repaint', async () => {
-  const { wnd, root, ref } = mount();
+  const { wnd, root, ref } = await mount();
   await tick();
   const row = root.children[0].children[2];
   wnd.calls.length = 0;
@@ -120,7 +123,7 @@ test('other damage inside the viewport keeps the full repaint', async () => {
 });
 
 test('a fractional target keeps the full repaint', async () => {
-  const { wnd, ref } = mount();
+  const { wnd, ref } = await mount();
   await tick();
   wnd.calls.length = 0;
   ref.current.scrollTo(48.5);
@@ -130,8 +133,9 @@ test('a fractional target keeps the full repaint', async () => {
 
 test('a small viewport is not worth the bookkeeping', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const ref = React.createRef();
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100 },
@@ -143,8 +147,6 @@ test('a small viewport is not worth the bookkeeping', async () => {
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -155,7 +157,7 @@ test('a small viewport is not worth the bookkeeping', async () => {
 });
 
 test('a page-sized jump repaints instead of blitting a sliver', async () => {
-  const { wnd, ref } = mount();
+  const { wnd, ref } = await mount();
   await tick();
   wnd.calls.length = 0;
   ref.current.scrollTo(240); // 60% of the viewport: less than half survives
@@ -164,7 +166,7 @@ test('a page-sized jump repaints instead of blitting a sliver', async () => {
 });
 
 test('a border on the scrollview keeps the full repaint', async () => {
-  const { wnd, ref } = mount({
+  const { wnd, ref } = await mount({
     scrollProps: {
       style: { flexGrow: 1, borderWidth: 2, borderColor: '#333333' },
     },
@@ -177,7 +179,7 @@ test('a border on the scrollview keeps the full repaint', async () => {
 });
 
 test('an overlapping sibling above the viewport keeps the full repaint', async () => {
-  const { wnd, ref } = mount({
+  const { wnd, ref } = await mount({
     extra: h('box', {
       style: {
         position: 'absolute',
@@ -197,7 +199,7 @@ test('an overlapping sibling above the viewport keeps the full repaint', async (
 });
 
 test('an ntk without scrollRegion gets the old behavior untouched', async () => {
-  const { wnd, root, ref } = mount();
+  const { wnd, root, ref } = await mount();
   await tick();
   delete wnd.scrollRegion;
   wnd.calls.length = 0;
@@ -210,7 +212,7 @@ test('an ntk without scrollRegion gets the old behavior untouched', async () => 
 });
 
 test('a refused blit falls back to the full repaint', async () => {
-  const { wnd, root, ref } = mount();
+  const { wnd, root, ref } = await mount();
   await tick();
   wnd.scrollRegion = () => false; // e.g. ntk with no valid backing store
   ref.current.scrollTo(48);
@@ -219,7 +221,7 @@ test('a refused blit falls back to the full repaint', async () => {
 });
 
 test('the scrolled thumb is repainted at both its old and new place', async () => {
-  const { wnd, root, ref } = mount();
+  const { wnd, root, ref } = await mount();
   await tick();
   // start mid-list, so the dragged copy of the old thumb stays on screen
   ref.current.scrollTo(96);
@@ -289,10 +291,11 @@ const readPixels = (ctx, w, h) =>
 
 test('a blitted scroll is byte-identical to the repaint it replaced', async (t) => {
   const app = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const ref = React.createRef();
     const instance = await new Promise((resolve) =>
-      ReactX11.render(
+      x11Root.render(
         h(
           'window',
           { width: 400, height: 300, style: { backgroundColor: '#f5f6fa' } },
@@ -321,7 +324,6 @@ test('a blitted scroll is byte-identical to the repaint it replaced', async (t) 
           ),
         ),
         resolve,
-        app,
       ),
     );
     if (typeof instance.scrollRegion !== 'function') {
@@ -360,7 +362,7 @@ test('a blitted scroll is byte-identical to the repaint it replaced', async (t) 
       'blitted pixels differ from a full repaint of the same state',
     );
   } finally {
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await app.close();
   }
 });

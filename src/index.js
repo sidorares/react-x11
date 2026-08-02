@@ -1,9 +1,4 @@
-export {
-  render,
-  createRoot,
-  unmountComponentAtNode,
-  Renderer,
-} from './Reconciler.js';
+export { createRoot, Renderer } from './Reconciler.js';
 export { createStyles, flattenStyle } from './styles.js';
 export { windowIdOf, useWindowId } from './windowid.js';
 export {
@@ -31,6 +26,6 @@ export {
   Canvas3D,
 } from './components/index.js';
 
-import { render, createRoot, unmountComponentAtNode } from './Reconciler.js';
+import { createRoot } from './Reconciler.js';
 
-export default { render, createRoot, unmountComponentAtNode };
+export default { createRoot };

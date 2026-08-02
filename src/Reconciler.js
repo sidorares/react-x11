@@ -552,9 +552,6 @@ function loadIntegrations() {
   return integrations;
 }
 
-const roots = new Map();
-let cachedNtkApp = null;
-
 /**
  * Open a connection this process owns. The wrapper is here for one reason:
  * to say what is wrong when there is no server, which is the first thing
@@ -571,13 +568,6 @@ async function connect(options) {
         err.message,
     );
   }
-}
-
-async function connectApp() {
-  if (cachedNtkApp) return cachedNtkApp;
-  cachedNtkApp = await connect({});
-  registerApp(cachedNtkApp);
-  return cachedNtkApp;
 }
 
 /** An ntk App, told apart from an options bag by what only an App has. */
@@ -614,53 +604,6 @@ function watchConnection(app, onDisconnect, deliberate) {
   app.X.on('error', (err) => {
     if (err?.majorOpcode === undefined) fire('error', err);
   });
-}
-
-function renderIntoContainer(element, container, callback) {
-  let root = roots.get(container);
-  if (!root) {
-    root = Renderer.createContainer(
-      container,
-      ConcurrentRoot,
-      null,
-      false,
-      null,
-      '',
-      (error) => console.error('react-x11: uncaught error', error),
-      (error) => console.error('react-x11: caught error', error),
-      (error) => console.error('react-x11: recoverable error', error),
-      null,
-    );
-    roots.set(container, root);
-  }
-
-  Renderer.updateContainerSync(element, root, null, () => {
-    const publicInstance = Renderer.getPublicRootInstance(root);
-    if (callback) {
-      callback(publicInstance, container);
-    }
-  });
-  Renderer.flushSyncWork();
-}
-
-/**
- * Legacy entry point. Without a container it connects to the X server
- * (returns a promise in that case).
- */
-export function render(element, callback, container) {
-  const pending = loadIntegrations();
-  if (!container) {
-    return Promise.resolve(pending)
-      .then(connectApp)
-      .then((app) => renderIntoContainer(element, app, callback));
-  }
-  // synchronous unless an integration has to be installed first
-  if (pending) {
-    return pending.then(() =>
-      renderIntoContainer(element, container, callback),
-    );
-  }
-  return renderIntoContainer(element, container, callback);
 }
 
 /**
@@ -747,14 +690,4 @@ export async function createRoot(options = {}) {
       }
     },
   };
-}
-
-export function unmountComponentAtNode(container) {
-  const root = roots.get(container);
-  if (root) {
-    Renderer.updateContainerSync(null, root, null, () => {
-      roots.delete(container);
-    });
-    Renderer.flushSyncWork();
-  }
 }

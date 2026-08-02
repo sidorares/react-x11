@@ -172,3 +172,39 @@ test('error handlers belong to the root, not the module', async () => {
   assert.deepStrictEqual(caught, ['boom']);
   await root.unmount();
 });
+
+test('the legacy render()/unmountComponentAtNode() pair is gone', async () => {
+  // Retired with the module-level connection cache they depended on (#114).
+  // Asserted rather than assumed: they were the reason two roots could
+  // share one fiber tree, and a re-export added back by reflex would bring
+  // the sharing back with it.
+  const mod = await import('../src/index.js');
+  assert.strictEqual(mod.render, undefined);
+  assert.strictEqual(mod.unmountComponentAtNode, undefined);
+  assert.deepStrictEqual(Object.keys(mod.default), ['createRoot']);
+});
+
+test('a root that borrows a connection can outlive another root on it', async () => {
+  // What the shared cache made impossible: `roots` was keyed by the
+  // connection, so a second root on one app was the *same* fiber root and
+  // unmounting either took down both trees.
+  const app = createMockApp();
+  const a = await createRoot({ app });
+  const b = await createRoot({ app });
+  a.render(win('a'));
+  b.render(win('b'));
+  await tick();
+  assert.strictEqual(app.windows.length, 2, 'two independent trees');
+
+  const [first, second] = app.windows;
+  await a.unmount();
+  await tick();
+  assert.ok(
+    first.calls.some(([name]) => name === 'destroy'),
+    "unmounting the first root destroyed the first root's window",
+  );
+  assert.ok(
+    !second.calls.some(([name]) => name === 'destroy'),
+    'and left the second tree standing on the same connection',
+  );
+});

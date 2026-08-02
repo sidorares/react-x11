@@ -22,22 +22,24 @@ needs to hold the pieces directly.
 ```jsx
 // helpers/harness.jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
-import { createClient } from 'ntk';
+import { createRoot } from 'react-x11';
 import xserver from 'x11/lib/xserver/index.js';
 
-export async function createHeadlessApp() {
+export async function createHeadlessRoot() {
   const server = xserver.createServer({ width: 640, height: 480 });
   const [serverEnd, clientEnd] = xserver.createStreamPair();
   server.addClientStream(serverEnd);
-  return await createClient({ stream: clientEnd });
+  // `stream` reaches a server that is not on the other end of $DISPLAY,
+  // which is the whole trick; the root owns the connection and closes it
+  // on unmount.
+  return await createRoot({ stream: clientEnd });
 }
 
-/** ReactX11.render's callback hands back the ntk window instance. */
-export const render = (element, app) =>
-  new Promise((resolve) =>
-    ReactX11.render(element, (wnd) => resolve(wnd), app),
-  );
+/** The render callback hands back the ntk window instance. `root.render`
+ * is synchronous, so this stays a plain helper — only obtaining the root
+ * is async, and that happens once. */
+export const render = (root, element) =>
+  new Promise((resolve) => root.render(element, (wnd) => resolve(wnd)));
 
 export const tick = () => new Promise((r) => setImmediate(r));
 ```
@@ -45,15 +47,15 @@ export const tick = () => new Promise((r) => setImmediate(r));
 ```jsx
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHeadlessApp, render, tick } from './helpers/harness.jsx';
+import { createHeadlessRoot, render, tick } from './helpers/harness.jsx';
 
 test('paints a box', async () => {
-  const app = await createHeadlessApp();
+  const root = await createHeadlessRoot();
   const wnd = await render(
+    root,
     <window width={320} height={240} title="probe">
       <box style={{ flexGrow: 1, backgroundColor: '#204080' }} />
     </window>,
-    app,
   );
   await tick(); // layout runs on the frame clock, after the commit
 
@@ -66,7 +68,7 @@ test('paints a box', async () => {
     height: 240,
   });
 
-  ReactX11.unmountComponentAtNode(app);
+  await root.unmount();
 });
 ```
 
@@ -97,10 +99,9 @@ export function textOf(node) {
 
 If you want to run without any X server at all — faster, and enough for most
 component tests — write a small mock ntk app that records canvas operations
-instead of painting them, and pass it as the third argument to
-`ReactX11.render`. That is what the renderer's unit tests do; there is no
-mock published in the package, so it is yours to write and yours to keep
-minimal.
+instead of painting them, and hand it to `createRoot({ app })`. That is what
+the renderer's unit tests do; there is no mock published in the package, so
+it is yours to write and yours to keep minimal.
 
 ## Driving events {#driving-events}
 
@@ -112,13 +113,13 @@ actions.
 
 ```jsx
 test('a synthetic click reaches the handler', async () => {
-  const app = await createHeadlessApp();
+  const root = await createHeadlessRoot();
   let clicks = 0;
   const wnd = await render(
+    root,
     <window width={200} height={100}>
       <box style={{ flexGrow: 1 }} onClick={() => (clicks += 1)} />
     </window>,
-    app,
   );
   await tick();
 
@@ -127,7 +128,7 @@ test('a synthetic click reaches the handler', async () => {
   await tick();
 
   assert.equal(clicks, 1);
-  ReactX11.unmountComponentAtNode(app);
+  await root.unmount();
 });
 ```
 
@@ -329,13 +330,13 @@ await fc.assert(
     fc.array(node, { maxLength: 4 }),
     fc.array(node, { maxLength: 4 }),
     async (a, b) => {
-      const app1 = await createHeadlessApp();
-      const w1 = await render(win(a), app1);
+      const root1 = await createHeadlessRoot();
+      const w1 = await render(root1, win(a));
       await tick();
-      await render(win(b), app1); // update path
+      await render(root1, win(b)); // update path
       await tick();
-      const app2 = await createHeadlessApp();
-      const w2 = await render(win(b), app2); // fresh-mount path
+      const root2 = await createHeadlessRoot();
+      const w2 = await render(root2, win(b)); // fresh-mount path
       await tick();
       assert.deepStrictEqual(snap(w1._reactX11Node), snap(w2._reactX11Node));
     },
@@ -387,12 +388,12 @@ test('toast auto-dismisses', async () => {
     toFake: ['setTimeout', 'clearTimeout', 'Date'],
   });
   try {
-    const app = await createHeadlessApp();
+    const root = await createHeadlessRoot();
     const wnd = await render(
+      root,
       <window width={100} height={50}>
         <Toast />
       </window>,
-      app,
     );
     await tick(); // mount + passive effect
     clock.tick(1000); // fires the timeout synchronously

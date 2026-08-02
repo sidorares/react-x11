@@ -54,7 +54,7 @@
 ## Entry points
 
 ```js
-import { createRoot, render, unmountComponentAtNode, Select } from 'react-x11';
+import { createRoot, Select } from 'react-x11';
 ```
 
 ### `await createRoot(options?)` → `{ app, render(element), unmount() }`
@@ -106,12 +106,9 @@ pixmap, glyph set and font is invalidated with the connection. Tear the
 root down and build a new one; nothing survives, and react-x11 promises
 nothing more than telling you it happened.
 
-### `render(element, callback?, container?)`
-
-Legacy entry point. Without `container` it connects first and returns a
-promise. Mounts/updates are flushed synchronously
-(`updateContainerSync` + `flushSyncWork`); painting happens a frame later
-on ntk's frame clock.
+`root.render(element, callback?)` flushes the mount or update synchronously
+(`updateContainerSync` + `flushSyncWork`); painting happens a frame later on
+ntk's frame clock.
 
 ## Environment variables
 

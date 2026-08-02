@@ -21,7 +21,7 @@ default recommendation for app state: zero DOM, zero adapter.
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { create } from 'zustand';
 
 const useStore = create((set) => ({
@@ -40,7 +40,7 @@ function App() {
   );
 }
 
-ReactX11.render(<App />);
+(await createRoot()).render(<App />);
 ```
 
 Because the store is module-level rather than tree-level, several windows
@@ -67,7 +67,7 @@ background work call `store.set(...)`. One store shared by several
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { atom, createStore, Provider, useAtomValue } from 'jotai';
 
 const countAtom = atom(0);
@@ -83,7 +83,7 @@ function App() {
   );
 }
 
-ReactX11.render(
+(await createRoot()).render(
   <Provider store={store}>
     <App />
   </Provider>,
@@ -111,7 +111,7 @@ imperatively.
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { proxy, useSnapshot } from 'valtio';
 
 const state = proxy({ n: 0, log: [] });
@@ -133,7 +133,7 @@ function App() {
   );
 }
 
-ReactX11.render(<App />);
+(await createRoot()).render(<App />);
 ```
 
 - Valtio 2 no longer deep-clones snapshots the way v1 did in dev; read the
@@ -157,7 +157,7 @@ level can outlive any single `<window>` and drive several of them.
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { createMachine, createActor } from 'xstate';
 import { useSelector } from '@xstate/react';
 
@@ -185,7 +185,7 @@ function App() {
   );
 }
 
-ReactX11.render(<App />);
+(await createRoot()).render(<App />);
 ```
 
 - `useMachine(machine)` inside a component works too and gives you a
@@ -207,7 +207,7 @@ middleware included.
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { configureStore, createSlice } from '@reduxjs/toolkit';
 import { Provider, useSelector, useDispatch } from 'react-redux';
 
@@ -232,7 +232,7 @@ function Counter() {
   );
 }
 
-ReactX11.render(
+(await createRoot()).render(
   <Provider store={store}>
     <window width={220} height={120} title="redux">
       <Counter />
@@ -268,7 +268,7 @@ as zustand middleware (`zustand/middleware/immer`).
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { produce } from 'immer';
 
 function App() {
@@ -295,7 +295,7 @@ function App() {
   );
 }
 
-ReactX11.render(<App />);
+(await createRoot()).render(<App />);
 ```
 
 Nothing to adapt. Useful directly with `useState`/`useReducer` for the
@@ -327,7 +327,7 @@ re-render the tree.
 // prerequisite: npm install react-dom  (satisfies mobx-react-lite's import;
 // react-x11 does not render through it)
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { makeAutoObservable, runInAction } from 'mobx';
 import { observer } from 'mobx-react-lite';
 
@@ -350,7 +350,7 @@ const App = observer(function App() {
   );
 });
 
-ReactX11.render(<App />);
+(await createRoot()).render(<App />);
 ```
 
 - Without react-dom the app fails at import time, not render time; the error

@@ -5,19 +5,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import { setDebugPaint } from '../src/nodes.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function mount(children, windowProps = {}) {
+async function mount(children, windowProps = {}) {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h('window', { width: 200, height: 100, ...windowProps }, children),
-    null,
-    app,
   );
   return { app, wnd: app.windows[0], root: app.windows[0]._reactX11Node };
 }
@@ -41,7 +40,7 @@ test('flashing strokes each damage rect, in a colour that rotates', async (t) =>
   setDebugPaint('1');
   t.after(() => setDebugPaint(''));
   const ref = React.createRef();
-  const { wnd } = mount(hoverBox(ref));
+  const { wnd } = await mount(hoverBox(ref));
   await tick(); // mount frame paints (and flashes) once
   wnd.ctx.ops.length = 0;
 
@@ -64,7 +63,7 @@ test('flashing strokes each damage rect, in a colour that rotates', async (t) =>
 
 test('flashing is off (and free) by default', async () => {
   const ref = React.createRef();
-  const { wnd } = mount(hoverBox(ref));
+  const { wnd } = await mount(hoverBox(ref));
   await tick();
   wnd.ctx.ops.length = 0;
   ref.current.setStyleState(':hover', true);
@@ -82,7 +81,7 @@ test('=full warns on a full-window repaint, naming reason and origin', async (t)
   console.warn = (...args) => warnings.push(args.join(' '));
   t.after(() => (console.warn = original));
 
-  const { root } = mount(h('box', { style: { flexGrow: 1 } }));
+  const { root } = await mount(h('box', { style: { flexGrow: 1 } }));
   await tick(); // the mount frame is legitimately full — and says why
   assert.ok(
     warnings.some(
@@ -116,7 +115,7 @@ test('a bounded frame does not warn under =full', async (t) => {
   t.after(() => (console.warn = original));
 
   const ref = React.createRef();
-  mount(
+  await mount(
     h('box', {
       ref,
       style: { width: 80, height: 40, backgroundColor: '#111111' },
@@ -131,7 +130,7 @@ test('a bounded frame does not warn under =full', async (t) => {
 
 test('a frame collects reasons and clears them for the next one', async () => {
   const ref = React.createRef();
-  const { root } = mount(
+  const { root } = await mount(
     h(
       'scrollview',
       { ref, style: { flexGrow: 1 } },
@@ -157,7 +156,7 @@ test('an unknown reason warns in DEV instead of vanishing silently', async (t) =
   const original = console.warn;
   console.warn = (...args) => warnings.push(args.join(' '));
   t.after(() => (console.warn = original));
-  const { root } = mount(h('box', { style: { flexGrow: 1 } }));
+  const { root } = await mount(h('box', { style: { flexGrow: 1 } }));
   await tick();
   root.invalidate(false, null, 'tyop');
   assert.ok(warnings.some((w) => w.includes('unknown reason')));
