@@ -120,6 +120,10 @@ useEffect(() => {
 }, [clipboard]);
 ```
 
+The built-in edit menu on `<textinput>`/`<textarea>` already does this for
+its Paste row — see [elements.md](elements.md#the-right-click-menu). This is
+the same mechanism, for your own menus.
+
 `watch()` is a server-side subscription, not a poll — it costs nothing until
 something changes. `owner === 0` means nothing is on the clipboard, which is
 the case a Paste menu item wants. It rejects on a server without XFixes;
