@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import { createStyles } from '../src/styles.js';
 import { createMockApp } from './helpers/mock-app.js';
 
@@ -19,9 +19,10 @@ const responsive = createStyles({
   },
 });
 
-function mount(width) {
+async function mount(width) {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width, height: 300 },
@@ -32,28 +33,29 @@ function mount(width) {
         h('box', { key: 'b', style: { width: 10, height: 10 } }),
       ),
     ),
-    null,
-    app,
   );
   return app;
 }
 
 test('a size query matches against the window it is laid out in', async () => {
-  const narrow = mount(400);
+  const narrow = await mount(400);
+  const x11Root_narrow = await createRoot({ app: narrow });
   await tick();
   assert.strictEqual(nodeOf(narrow).children[0].style.flexDirection, 'column');
   assert.strictEqual(nodeOf(narrow).children[0].style.gap, 4);
-  ReactX11.unmountComponentAtNode(narrow);
+  await x11Root_narrow.unmount();
 
-  const wide = mount(800);
+  const wide = await mount(800);
+  const x11Root_wide = await createRoot({ app: wide });
   await tick();
   assert.strictEqual(nodeOf(wide).children[0].style.flexDirection, 'row');
   assert.strictEqual(nodeOf(wide).children[0].style.gap, 16);
-  ReactX11.unmountComponentAtNode(wide);
+  await x11Root_wide.unmount();
 });
 
 test('resizing the window re-evaluates, and relays out', async () => {
-  const app = mount(400);
+  const app = await mount(400);
+  const x11Root = await createRoot({ app });
   await tick();
   const box = nodeOf(app).children[0];
   assert.strictEqual(box.style.flexDirection, 'column');
@@ -82,10 +84,10 @@ test('resizing the window re-evaluates, and relays out', async () => {
     'stacked again, with the narrow gap',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('size queries may carry layout properties, unlike state blocks', () => {
+test('size queries may carry layout properties, unlike state blocks', async () => {
   // the rule: a pointer state must never reflow the tree, but a size query
   // is only re-evaluated inside a layout pass the resize already required
   createStyles({ a: { '@width >= 600': { padding: 20, flexGrow: 2 } } });
@@ -95,7 +97,7 @@ test('size queries may carry layout properties, unlike state blocks', () => {
   );
 });
 
-test('a bad query is an error that shows the shape', () => {
+test('a bad query is an error that shows the shape', async () => {
   assert.throws(
     () => createStyles({ a: { '@width => 600': {} } }),
     /bad size query "@width => 600"/,
@@ -108,7 +110,8 @@ test('a bad query is an error that shows the shape', () => {
 
 test('a state block inside the matched size still wins', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 800, height: 300 },
@@ -121,8 +124,6 @@ test('a state block inside the matched size still wins', async () => {
         focusable: true,
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const box = nodeOf(app).children[0];
@@ -135,13 +136,14 @@ test('a state block inside the matched size still wins', async () => {
     'state blocks fold in after the size, so hover wins',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a node mounted after a resize matches the size the window is now', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (extra) =>
-    ReactX11.render(
+    x11Root.render(
       h(
         'window',
         { width: 800, height: 300 },
@@ -151,8 +153,6 @@ test('a node mounted after a resize matches the size the window is now', async (
           ...(extra ? [h('box', { style: responsive.bar })] : []),
         ),
       ),
-      null,
-      app,
     );
 
   render(false);
@@ -167,12 +167,13 @@ test('a node mounted after a resize matches the size the window is now', async (
     'it did not miss the query just because it arrived late',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a query that hides a node takes it out of the paint too', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 400, height: 200 },
@@ -190,8 +191,6 @@ test('a query that hides a node takes it out of the paint too', async () => {
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -206,5 +205,5 @@ test('a query that hides a node takes it out of the paint too', async () => {
   );
   assert.strictEqual(hidden.hitTest(5, 5), null, 'and takes no pointer input');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });

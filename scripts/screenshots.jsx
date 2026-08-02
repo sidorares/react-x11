@@ -40,7 +40,7 @@ import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
-const ReactX11 = (await import('../src/index.js')).default;
+const { createRoot } = await import('../src/index.js');
 const { editMenuGeometry } = await import('../src/editmenu.js');
 const Dashboard = (await import('../examples/dashboard.jsx')).default;
 const Tasks = (await import('../examples/tasks.jsx')).default;
@@ -153,9 +153,9 @@ async function makeApp() {
   return app;
 }
 
-const render = (element, app) =>
+const render = (element, x11Root) =>
   new Promise((resolve) =>
-    ReactX11.render(element, () => resolve(app.created[0]), app),
+    x11Root.render(element, () => resolve(x11Root.app.created[0])),
   );
 
 /** Depth-first search over the retained node tree of a realized window. */
@@ -262,9 +262,10 @@ async function shotOver(wnd, popup, x, y, name) {
 
 async function scene(fn) {
   const app = await makeApp();
+  const x11Root = await createRoot({ app });
   try {
-    await fn(app);
-    ReactX11.unmountComponentAtNode(app);
+    await fn(app, x11Root);
+    await x11Root.unmount();
   } finally {
     await app.close();
   }
@@ -272,8 +273,8 @@ async function scene(fn) {
 
 // --- scenes ----------------------------------------------------------------
 
-await scene(async (app) => {
-  const wnd = await render(React.createElement(Dashboard), app);
+await scene(async (app, x11Root) => {
+  const wnd = await render(React.createElement(Dashboard), x11Root);
   await sleep(100);
   const plus = labeled(wnd, '+1');
   clickNode(wnd, plus);
@@ -283,8 +284,8 @@ await scene(async (app) => {
   await shot(wnd, 'dashboard');
 });
 
-await scene(async (app) => {
-  const wnd = await render(React.createElement(Tasks), app);
+await scene(async (app, x11Root) => {
+  const wnd = await render(React.createElement(Tasks), x11Root);
   await sleep(100);
   const input = findNode(wnd._reactX11Node, (n) => n.kind === 'textinput');
   clickNode(wnd, input);
@@ -292,8 +293,8 @@ await scene(async (app) => {
   await shot(wnd, 'tasks');
 });
 
-await scene(async (app) => {
-  const wnd = await render(React.createElement(Form), app);
+await scene(async (app, x11Root) => {
+  const wnd = await render(React.createElement(Form), x11Root);
   await sleep(100);
   const input = findNode(wnd._reactX11Node, (n) => n.kind === 'textinput');
   clickNode(wnd, input);
@@ -323,7 +324,7 @@ await scene(async (app) => {
   await shot(reopened, 'select-menu');
 });
 
-await scene(async (app) => {
+await scene(async (app, x11Root) => {
   const wnd = await render(
     <window width={420} height={260} style={{ backgroundColor: '#f5f6fa' }}>
       <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
@@ -364,7 +365,7 @@ await scene(async (app) => {
         </box>
       </box>
     </window>,
-    app,
+    x11Root,
   );
   await sleep(100);
   // click right after "Hello," so the caret shows mid-text
@@ -376,7 +377,7 @@ await scene(async (app) => {
 
 // The built-in edit menu, over the field it belongs to — the point being
 // that the selection survives the right-click and the menu acts on it.
-await scene(async (app) => {
+await scene(async (app, x11Root) => {
   const wnd = await render(
     <window width={420} height={230} style={{ backgroundColor: '#f5f6fa' }}>
       <box style={{ flexGrow: 1, padding: 16, gap: 10 }}>
@@ -396,7 +397,7 @@ await scene(async (app) => {
         />
       </box>
     </window>,
-    app,
+    x11Root,
   );
   await sleep(100);
   const input = findNode(wnd._reactX11Node, (n) => n.kind === 'textinput');

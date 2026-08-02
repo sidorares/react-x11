@@ -11,7 +11,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
 const { createGlxExtension, RecordingBackend } = require('x11/browser/glx');
@@ -40,8 +40,8 @@ async function createGlApp() {
   return { app, backend, xErrors };
 }
 
-const render = (element, app) =>
-  new Promise((resolve) => ReactX11.render(element, resolve, app));
+const render = (element, x11Root) =>
+  new Promise((resolve) => x11Root.render(element, resolve));
 
 const settle = async (app, roundTrips = 3) => {
   for (let i = 0; i < roundTrips; i++) {
@@ -71,6 +71,7 @@ const getAttributes = (app, wid) =>
 
 test('<glarea> gets a GL child window and draws a frame', async () => {
   const { app, backend, xErrors } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const drawn = [];
     const instance = await render(
@@ -92,7 +93,7 @@ test('<glarea> gets a GL child window and draws a frame', async () => {
           }),
         ]),
       ),
-      app,
+      x11Root,
     );
 
     await waitFor(() => drawn.length > 0, 'the first frame');
@@ -153,7 +154,7 @@ test('<glarea> gets a GL child window and draws a frame', async () => {
     );
     assert.equal(xErrors.length, 0, xErrors.map((e) => e.message).join(', '));
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();
@@ -162,6 +163,7 @@ test('<glarea> gets a GL child window and draws a frame', async () => {
 
 test('<glarea> follows layout changes and redraws once per change', async () => {
   const { app, backend, xErrors } = await createGlApp();
+  const x11Root = await createRoot({ app });
   try {
     const frames = [];
     const tree = (padding) =>
@@ -177,12 +179,12 @@ test('<glarea> follows layout changes and redraws once per change', async () => 
         ]),
       );
 
-    const instance = await render(tree(10), app);
+    const instance = await render(tree(10), x11Root);
     await waitFor(() => frames.length > 0, 'the first frame');
     assert.deepEqual(frames.at(-1), [300, 220]);
 
     backend.calls.length = 0;
-    await render(tree(40), app);
+    await render(tree(40), x11Root);
     await waitFor(
       () => frames.some(([w]) => w === 240),
       'a frame at the new size',
@@ -210,7 +212,7 @@ test('<glarea> follows layout changes and redraws once per change', async () => 
     assert.equal(frames.length, before, 'no frames without a change');
     assert.equal(xErrors.length, 0, xErrors.map((e) => e.message).join(', '));
 
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await settle(app);
   } finally {
     await app.close();

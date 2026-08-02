@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import React from 'react';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
-const ReactX11 = (await import('../src/index.js')).default;
+const { createRoot } = await import('../src/index.js');
 
 const outDir =
   process.env.SHOT_DIR ??
@@ -140,6 +140,7 @@ if (!process.env.DISPLAY) {
 // trips are still in flight can hang (see AGENTS.md), and reconnecting per
 // scene is slower for no benefit.
 const app = await createClient();
+const x11Root = await createRoot({ app });
 const created = [];
 const origCreate = app.createWindow.bind(app);
 app.createWindow = (attrs) => {
@@ -157,7 +158,7 @@ for (const name of scenes) {
   created.length = 0;
 
   await new Promise((resolve) =>
-    ReactX11.render(React.createElement(App), resolve, app),
+    x11Root.render(React.createElement(App), resolve),
   );
   await sleep(400); // map + WM reparent + first paint
 
@@ -174,7 +175,7 @@ for (const name of scenes) {
         : '(NO frame — no reparenting WM running?)'),
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
   await settle();
   await sleep(150);
 }

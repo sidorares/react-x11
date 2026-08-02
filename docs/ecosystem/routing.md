@@ -23,7 +23,7 @@ non-browser one, so there is no adapter to write.
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import { Router, Route, Switch } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
@@ -60,7 +60,7 @@ const App = () => (
   </window>
 );
 
-ReactX11.render(<App />);
+(await createRoot()).render(<App />);
 ```
 
 - **Always mount the memory hook at the top.** A `<Route>` outside a
@@ -90,7 +90,7 @@ entry points, and the browser entry points are exactly what fails.
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import {
   MemoryRouter,
   Routes,
@@ -116,7 +116,7 @@ function About() {
   return <text>{`about page (${loc.pathname})`}</text>;
 }
 
-ReactX11.render(
+(await createRoot()).render(
   <window width={300} height={200} title="routed">
     <box style={{ flexGrow: 1 }}>
       <MemoryRouter initialEntries={['/']}>

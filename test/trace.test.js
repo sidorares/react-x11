@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import { startTrace, startEnvTrace } from '../src/debug.js';
 import { createMockApp } from './helpers/mock-app.js';
 
@@ -49,9 +49,9 @@ const settle = (app, roundTrips = 1) =>
     Promise.resolve(),
   );
 
-function render(element, app) {
+function render(element, x11Root) {
   return new Promise((resolve) => {
-    ReactX11.render(element, (instance) => resolve(instance), app);
+    x11Root.render(element, (instance) => resolve(instance));
   });
 }
 
@@ -83,6 +83,7 @@ test('counts framed requests and decodes their names exactly', async () => {
 
 test('a rendered tree shows up as named core and Render requests', async () => {
   const app = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   try {
     await settle(app);
     const trace = startTrace({ app });
@@ -94,7 +95,7 @@ test('a rendered tree shows up as named core and Render requests', async () => {
           style: { width: 80, height: 40, backgroundColor: '#e74c3c' },
         }),
       ),
-      app,
+      x11Root,
     );
     await settle(app, 3);
     const stats = trace.stop();
@@ -111,13 +112,14 @@ test('a rendered tree shows up as named core and Render requests', async () => {
     );
     assert.ok(stats.bytesIn > 0);
   } finally {
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await app.close();
   }
 });
 
 test('chrome sink writes a valid trace with commits, frames and requests', async () => {
   const app = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
   const path = join(mkdtempSync(join(tmpdir(), 'rx11-trace-')), 'trace.json');
   try {
     await settle(app);
@@ -130,7 +132,7 @@ test('chrome sink writes a valid trace with commits, frames and requests', async
           style: { width: 80, height: 40, backgroundColor: '#27ae60' },
         }),
       ),
-      app,
+      x11Root,
     );
     // run the scheduled frame deterministically (see AGENTS.md on the
     // stalled frame clock under synthetic input)
@@ -154,7 +156,7 @@ test('chrome sink writes a valid trace with commits, frames and requests', async
       'the first frame is the mount',
     );
   } finally {
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
     await app.close();
   }
 });

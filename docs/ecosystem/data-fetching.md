@@ -62,7 +62,7 @@ export const windowFocusProps = {
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import {
   QueryClient,
   QueryClientProvider,
@@ -80,7 +80,7 @@ function Weather() {
   return <text>{status === 'pending' ? 'loading…' : data}</text>;
 }
 
-ReactX11.render(
+(await createRoot()).render(
   <window width={360} height={120} title="weather" {...windowFocusProps}>
     <QueryClientProvider client={client}>
       <Weather />
@@ -132,7 +132,7 @@ so hang it off `<window onFocus>`:
 
 ```jsx
 import React from 'react';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 import useSWR, { mutate } from 'swr';
 
 const fetcher = (url) => fetch(url).then((r) => r.text());
@@ -142,7 +142,7 @@ function Weather() {
   return <text>{data ?? 'loading…'}</text>;
 }
 
-ReactX11.render(
+(await createRoot()).render(
   // the adapter is this one prop: revalidate everything on window focus
   <window
     width={360}

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -22,15 +22,16 @@ const XK = {
   Left: 0xff51,
 };
 
-test('renders a top-level window with a child window', () => {
+test('renders a top-level window with a child window', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const element = React.createElement(
     'window',
     { width: 300, height: 200, title: 'main' },
     React.createElement('window', { width: 50, height: 50, x: 10, y: 10 }),
   );
 
-  ReactX11.render(element, null, app);
+  x11Root.render(element);
 
   assert.strictEqual(app.windows.length, 2);
   // Windows are created top-down: the parent window first, then children
@@ -56,7 +57,7 @@ test('renders a top-level window with a child window', () => {
   );
   assert.strictEqual(child.mapped, true, 'child should be mapped');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // Replay the recorded ConfigureWindow requests over the stack X gives a
@@ -72,8 +73,9 @@ function serverStack(app, createdIds) {
   return stack;
 }
 
-test('child windows stack in JSX order, and a reorder restacks them', () => {
+test('child windows stack in JSX order, and a reorder restacks them', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const App = ({ order }) =>
     React.createElement(
       'window',
@@ -88,11 +90,7 @@ test('child windows stack in JSX order, and a reorder restacks them', () => {
       ),
     );
 
-  ReactX11.render(
-    React.createElement(App, { order: ['a', 'b', 'c'] }),
-    null,
-    app,
-  );
+  x11Root.render(React.createElement(App, { order: ['a', 'b', 'c'] }));
   const [, a, b, c] = app.windows;
   assert.deepStrictEqual(
     [a.title, b.title, c.title],
@@ -105,11 +103,7 @@ test('child windows stack in JSX order, and a reorder restacks them', () => {
     'mount order already stacks right — X puts each new window on top',
   );
 
-  ReactX11.render(
-    React.createElement(App, { order: ['c', 'a', 'b'] }),
-    null,
-    app,
-  );
+  x11Root.render(React.createElement(App, { order: ['c', 'a', 'b'] }));
   const root = app.windows[0]._reactX11Node;
   assert.deepStrictEqual(
     root.children.map((child) => child.props.title),
@@ -132,13 +126,14 @@ test('child windows stack in JSX order, and a reorder restacks them', () => {
     'one pass per commit: n-1 requests, not one per moved child',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('zIndex raises a child window above its later siblings', () => {
+test('zIndex raises a child window above its later siblings', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (zIndex) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 300, height: 200 },
@@ -156,8 +151,6 @@ test('zIndex raises a child window above its later siblings', () => {
           height: 50,
         }),
       ),
-      null,
-      app,
     );
 
   render(0);
@@ -171,13 +164,14 @@ test('zIndex raises a child window above its later siblings', () => {
     'the higher zIndex ends up on top even though it comes first in JSX',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('zIndex on a popup is inert — it is a child of the screen root', () => {
+test('zIndex on a popup is inert — it is a child of the screen root', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (zIndex) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 300, height: 200 },
@@ -193,19 +187,18 @@ test('zIndex on a popup is inert — it is a child of the screen root', () => {
           }),
         ),
       ),
-      null,
-      app,
     );
 
   render(0);
   render(2); // must not try to restack the <box> the popup is written under
   assert.deepStrictEqual(app.configureCalls, []);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('reordering keyed drawn children moves them instead of duplicating', () => {
+test('reordering keyed drawn children moves them instead of duplicating', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const App = ({ order }) =>
     React.createElement(
       'window',
@@ -218,19 +211,11 @@ test('reordering keyed drawn children moves them instead of duplicating', () => 
       ),
     );
 
-  ReactX11.render(
-    React.createElement(App, { order: ['red', 'green', 'blue'] }),
-    null,
-    app,
-  );
+  x11Root.render(React.createElement(App, { order: ['red', 'green', 'blue'] }));
   const root = app.windows[0]._reactX11Node;
   const green = root.children[1];
 
-  ReactX11.render(
-    React.createElement(App, { order: ['blue', 'red', 'green'] }),
-    null,
-    app,
-  );
+  x11Root.render(React.createElement(App, { order: ['blue', 'red', 'green'] }));
 
   assert.deepStrictEqual(
     root.children.map((child) => child.style.backgroundColor),
@@ -247,13 +232,14 @@ test('reordering keyed drawn children moves them instead of duplicating', () => 
   // has a parent aborts the wasm module
   assert.strictEqual(root.yoga.getChildCount(), 3);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('applies prop updates to the window', () => {
+test('applies prop updates to the window', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (props) =>
-    ReactX11.render(React.createElement('window', props), null, app);
+    x11Root.render(React.createElement('window', props));
 
   render({ width: 300, height: 200, title: 'before', x: 0, y: 0 });
   const wnd = app.windows[0];
@@ -265,13 +251,14 @@ test('applies prop updates to the window', () => {
   assert.deepStrictEqual([wnd.width, wnd.height], [400, 250]);
   assert.deepStrictEqual([wnd.x, wnd.y], [20, 30]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('adds a child to an already-mounted window top-down', () => {
+test('adds a child to an already-mounted window top-down', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (withChild) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 300, height: 200 },
@@ -279,8 +266,6 @@ test('adds a child to an already-mounted window top-down', () => {
           ? React.createElement('window', { width: 10, height: 10 })
           : null,
       ),
-      null,
-      app,
     );
 
   render(false);
@@ -298,13 +283,14 @@ test('adds a child to an already-mounted window top-down', () => {
   assert.strictEqual(child.mapped, true);
   assert.ok(!child.calls.some(([name]) => name === 'reparentTo'));
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('destroys windows that are removed', () => {
+test('destroys windows that are removed', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (withChild) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 300, height: 200 },
@@ -312,8 +298,6 @@ test('destroys windows that are removed', () => {
           ? React.createElement('window', { width: 10, height: 10 })
           : null,
       ),
-      null,
-      app,
     );
 
   render(true);
@@ -327,41 +311,36 @@ test('destroys windows that are removed', () => {
     'removed child window should be destroyed',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('unmounting destroys the top-level window', () => {
+test('unmounting destroys the top-level window', async () => {
   const app = createMockApp();
-  ReactX11.render(
-    React.createElement('window', { width: 100, height: 100 }),
-    null,
-    app,
-  );
+  const x11Root = await createRoot({ app });
+  x11Root.render(React.createElement('window', { width: 100, height: 100 }));
   const wnd = app.windows[0];
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
   assert.strictEqual(wnd.destroyed, true);
 });
 
-test('function components and state-driven rendering work', () => {
+test('function components and state-driven rendering work', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   function App({ title }) {
     return React.createElement('window', { width: 100, height: 100, title });
   }
 
-  ReactX11.render(
-    React.createElement(App, { title: 'fn component' }),
-    null,
-    app,
-  );
+  x11Root.render(React.createElement(App, { title: 'fn component' }));
   assert.strictEqual(app.windows[0].attributes.title, 'fn component');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('lays out a flex box tree with yoga and paints it', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 100 },
@@ -376,8 +355,6 @@ test('lays out a flex box tree with yoga and paints it', async () => {
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -394,13 +371,14 @@ test('lays out a flex box tree with yoga and paints it', async () => {
   assert.deepStrictEqual(fills.at(-2), ['fillRect', 0, 0, 100, 100, 'red']);
   assert.deepStrictEqual(fills.at(-1), ['fillRect', 100, 0, 100, 100, 'blue']);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('updates reflow the tree', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (direction) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 200, height: 100 },
@@ -411,8 +389,6 @@ test('updates reflow the tree', async () => {
           React.createElement('box', { style: { flexGrow: 1 } }),
         ),
       ),
-      null,
-      app,
     );
 
   render('row');
@@ -427,13 +403,14 @@ test('updates reflow the tree', async () => {
     [0, 50],
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('dispatches synthetic clicks, hover and focus events', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const log = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 100 },
@@ -457,8 +434,6 @@ test('dispatches synthetic clicks, hover and focus events', async () => {
         React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -478,13 +453,14 @@ test('dispatches synthetic clicks, hover and focus events', async () => {
     'outer',
   ]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('zIndex controls hit testing order', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const log = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 100, height: 100 },
@@ -510,8 +486,6 @@ test('zIndex controls hit testing order', async () => {
         },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -519,13 +493,14 @@ test('zIndex controls hit testing order', async () => {
   wnd.emit('mouseup', { x: 50, y: 50, keycode: 1 });
 
   assert.deepStrictEqual(log, ['top']);
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('scrollview scrolls, clamps and offsets hit testing', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const clicks = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 100, height: 100 },
@@ -541,8 +516,6 @@ test('scrollview scrolls, clamps and offsets hit testing', async () => {
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -567,11 +540,12 @@ test('scrollview scrolls, clamps and offsets hit testing', async () => {
   wnd.emit('mouseup', { x: 50, y: 10, keycode: 1 });
   assert.deepStrictEqual(clicks, [1]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a shrinking window shrinks the scrollview, not the footer out of view', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const Host = ({ height }) =>
     React.createElement(
       'window',
@@ -594,7 +568,7 @@ test('a shrinking window shrinks the scrollview, not the footer out of view', as
       ),
     );
 
-  ReactX11.render(React.createElement(Host, { height: 400 }), null, app);
+  x11Root.render(React.createElement(Host, { height: 400 }));
   await tick();
   const wnd = app.windows[0];
   const root = wnd._reactX11Node;
@@ -628,12 +602,13 @@ test('a shrinking window shrinks the scrollview, not the footer out of view', as
     'and its content now overflows, so it scrolls',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('scrollview scrollIntoView scrolls the minimum amount', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 100, height: 100 },
@@ -645,8 +620,6 @@ test('scrollview scrollIntoView scrolls the minimum amount', async () => {
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const sv = app.windows[0]._reactX11Node.children[0];
@@ -671,16 +644,15 @@ test('scrollview scrollIntoView scrolls the minimum amount', async () => {
   await tick();
   assert.strictEqual(sv.scrollY, 0);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('window manager hints pass through at creation and on update', () => {
+test('window manager hints pass through at creation and on update', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (props) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement('window', { width: 200, height: 100, ...props }),
-      null,
-      app,
     );
 
   // creation goes through ntk's Window constructor as creation attributes
@@ -745,13 +717,14 @@ test('window manager hints pass through at creation and on update', () => {
     "dropping alwaysOnTop removes 'above'",
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('popup mounts as an override-redirect window and unmounts cleanly', () => {
+test('popup mounts as an override-redirect window and unmounts cleanly', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (open) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 200, height: 100 },
@@ -768,8 +741,6 @@ test('popup mounts as an override-redirect window and unmounts cleanly', () => {
             : null,
         ),
       ),
-      null,
-      app,
     );
 
   render(false);
@@ -789,12 +760,13 @@ test('popup mounts as an override-redirect window and unmounts cleanly', () => {
   render(false);
   assert.strictEqual(popup.destroyed, true);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('cursor prop follows hover (feature-detected setCursor)', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 100 },
@@ -807,8 +779,6 @@ test('cursor prop follows hover (feature-detected setCursor)', async () => {
         React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -819,14 +789,15 @@ test('cursor prop follows hover (feature-detected setCursor)', async () => {
   wnd.emit('mousemove', { x: 150, y: 10 });
   assert.strictEqual(wnd.cursor, null, 'leaving the node restores the cursor');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: typing, backspace, arrows, submit (uncontrolled)', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const changes = [];
   let submitted = null;
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 50 },
@@ -837,8 +808,6 @@ test('textinput: typing, backspace, arrows, submit (uncontrolled)', async () => 
         style: { flexGrow: 1 },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -865,14 +834,15 @@ test('textinput: typing, backspace, arrows, submit (uncontrolled)', async () => 
   pressKey(app, wnd, { keysym: XK.Return });
   assert.strictEqual(submitted, 'oh');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: controlled value does not change until props do', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const changes = [];
   const render = (value) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 200, height: 50 },
@@ -882,8 +852,6 @@ test('textinput: controlled value does not change until props do', async () => {
           style: { flexGrow: 1 },
         }),
       ),
-      null,
-      app,
     );
   render('abc');
   await tick();
@@ -900,7 +868,7 @@ test('textinput: controlled value does not change until props do', async () => {
   render('abcx');
   assert.strictEqual(input.value, 'abcx');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // issue #115: onChange/onSubmit hand over a synthetic event like every other
@@ -908,6 +876,7 @@ test('textinput: controlled value does not change until props do', async () => {
 // tutorial's controlled input read — is the value the edit produced.
 test('textinput: onChange gets a synthetic event carrying value and name', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const events = [];
   // `ev.target` is the live node, so what it reports has to be sampled while
   // the handler runs — that is the moment form libraries read it
@@ -916,7 +885,7 @@ test('textinput: onChange gets a synthetic event carrying value and name', async
     events.push(ev);
     seen.push({ value: ev.target.value, name: ev.target.name });
   };
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 50 },
@@ -930,8 +899,6 @@ test('textinput: onChange gets a synthetic event carrying value and name', async
         style: { flexGrow: 1 },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -970,7 +937,7 @@ test('textinput: onChange gets a synthetic event carrying value and name', async
   assert.deepStrictEqual(seen[1], { value: 'ab', name: 'email' });
   assert.ok(submit.nativeEvent, 'submit carries the key event it came from');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // react-hook-form's register() hands the field ref back and writes through
@@ -978,8 +945,9 @@ test('textinput: onChange gets a synthetic event carrying value and name', async
 // that a TypeError during commit, which took the whole render down.
 test('textinput: node.value is writable, the way a DOM input is', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const changes = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 50 },
@@ -989,8 +957,6 @@ test('textinput: node.value is writable, the way a DOM input is', async () => {
         style: { flexGrow: 1 },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1006,13 +972,14 @@ test('textinput: node.value is writable, the way a DOM input is', async () => {
   assert.strictEqual(input.undo(), true);
   assert.strictEqual(input.value, 'written');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textarea: Ctrl+Enter submits with the same event shape', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   let submitted = null;
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 90 },
@@ -1023,8 +990,6 @@ test('textarea: Ctrl+Enter submits with the same event shape', async () => {
         style: { flexGrow: 1 },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1037,18 +1002,19 @@ test('textarea: Ctrl+Enter submits with the same event shape', async () => {
   assert.strictEqual(submitted.name, 'body');
   assert.strictEqual(submitted.target.name, 'body');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // a throwing handler must not leave the control reporting a value it never
 // took — `_pendingValue` is restored in a finally
 test('textinput: a throwing onChange does not strand the pending value', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const errors = [];
   const console_error = console.error;
   console.error = (...args) => errors.push(args);
   try {
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 200, height: 50 },
@@ -1060,8 +1026,6 @@ test('textinput: a throwing onChange does not strand the pending value', async (
           style: { flexGrow: 1 },
         }),
       ),
-      null,
-      app,
     );
     await tick();
     const wnd = app.windows[0];
@@ -1075,7 +1039,7 @@ test('textinput: a throwing onChange does not strand the pending value', async (
       1,
       'the throw is reported, not swallowed',
     );
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   } finally {
     console.error = console_error;
     process.exitCode = 0;
@@ -1084,6 +1048,7 @@ test('textinput: a throwing onChange does not strand the pending value', async (
 
 test('textinput: clipboard shortcuts and middle-click PRIMARY paste', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   app.clipboard = {
     writes: [],
     write(text, opts) {
@@ -1096,7 +1061,7 @@ test('textinput: clipboard shortcuts and middle-click PRIMARY paste', async () =
       );
     },
   };
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 50 },
@@ -1105,8 +1070,6 @@ test('textinput: clipboard shortcuts and middle-click PRIMARY paste', async () =
         style: { flexGrow: 1 },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1129,12 +1092,13 @@ test('textinput: clipboard shortcuts and middle-click PRIMARY paste', async () =
   await tick();
   assert.strictEqual(input.value, 'clip!primary!');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('dashed borders emit setLineDash when the context supports it', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 100, height: 100 },
@@ -1147,19 +1111,18 @@ test('dashed borders emit setLineDash when the context supports it', async () =>
         },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const dashOps = app.windows[0].ctx.ops.filter(([op]) => op === 'setLineDash');
   assert.deepStrictEqual(dashOps[0], ['setLineDash', [6, 4]]);
   assert.deepStrictEqual(dashOps.at(-1), ['setLineDash', []]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: double-click selects word, triple-click selects all', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   app.clipboard = {
     writes: [],
     write(text, opts) {
@@ -1170,7 +1133,7 @@ test('textinput: double-click selects word, triple-click selects all', async () 
       return Promise.resolve('');
     },
   };
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 50 },
@@ -1179,8 +1142,6 @@ test('textinput: double-click selects word, triple-click selects all', async () 
         style: { flexGrow: 1 },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1199,14 +1160,15 @@ test('textinput: double-click selects word, triple-click selects all', async () 
   clickAt(10, 10); // detail 3 → select all
   assert.deepStrictEqual(input._selection(), [0, 11]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Select opens a popup menu, picks an option, closes on Escape', async () => {
   const { Select } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picks = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 240, height: 120 },
@@ -1221,8 +1183,6 @@ test('Select opens a popup menu, picks an option, closes on Escape', async () =>
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1269,7 +1229,7 @@ test('Select opens a popup menu, picks an option, closes on Escape', async () =>
   await tick();
   assert.strictEqual(app.windows[2].destroyed, true);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Select: arrow keys move the active option, Enter picks it', async () => {
@@ -1281,8 +1241,9 @@ test('Select: arrow keys move the active option, Enter picks it', async () => {
   const HOVER_BG = '#2980b9';
 
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picks = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 240, height: 120 },
@@ -1297,8 +1258,6 @@ test('Select: arrow keys move the active option, Enter picks it', async () => {
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1373,7 +1332,7 @@ test('Select: arrow keys move the active option, Enter picks it', async () => {
   assert.strictEqual(app.windows[2].destroyed, true);
   assert.deepStrictEqual(picks, ['blue'], 'Escape does not pick');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Select: an overlong menu scrolls the active option into view', async () => {
@@ -1384,7 +1343,8 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
   const options = Array.from({ length: 12 }, (_, i) => `option-${i}`);
 
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 120 },
@@ -1398,8 +1358,6 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1468,7 +1426,7 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
     4 + options.length * ITEM_HEIGHT - scroller.abs.height,
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // The menu used to take the trigger's width, and the trigger is only ever as
@@ -1484,7 +1442,8 @@ test('Select: the menu fits its longest option, not the selected one', async () 
 
   const openWith = async (selected) => {
     const app = createMockApp();
-    ReactX11.render(
+    const x11Root = await createRoot({ app });
+    x11Root.render(
       React.createElement(
         'window',
         { width: 400, height: 200 },
@@ -1498,8 +1457,6 @@ test('Select: the menu fits its longest option, not the selected one', async () 
           }),
         ),
       ),
-      null,
-      app,
     );
     await tick();
     const wnd = app.windows[0];
@@ -1518,10 +1475,10 @@ test('Select: the menu fits its longest option, not the selected one', async () 
     wnd.emit('mousedown', { x, y, keycode: 1 });
     wnd.emit('mouseup', { x, y, keycode: 1 });
     await tick();
-    return { app, trigger, popup: app.windows[1] };
+    return { app, x11Root, trigger, popup: app.windows[1] };
   };
 
-  const { app, trigger, popup } = await openWith('S');
+  const { x11Root, trigger, popup } = await openWith('S');
   assert.ok(
     popup.attributes.width > trigger.abs.width,
     `menu (${popup.attributes.width}) should outgrow the trigger (${trigger.abs.width})`,
@@ -1536,7 +1493,7 @@ test('Select: the menu fits its longest option, not the selected one', async () 
     popup.attributes.width >= Math.ceil(longest) + 10,
     `menu (${popup.attributes.width}) should fit the longest label (${Math.ceil(longest)})`,
   );
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 
   // and it does not depend on which option is selected: the widest one is
   // measured bold, the way Option paints it, so that case is the wider one
@@ -1545,13 +1502,14 @@ test('Select: the menu fits its longest option, not the selected one', async () 
     withLongSelected.popup.attributes.width >= popup.attributes.width,
     'selecting the longest option must not shrink the menu',
   );
-  ReactX11.unmountComponentAtNode(withLongSelected.app);
+  await withLongSelected.x11Root.unmount();
 });
 
 test('Select: the menu is never narrower than the trigger', async () => {
   const { Select } = await import('../src/index.js');
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 400, height: 200 },
@@ -1565,8 +1523,6 @@ test('Select: the menu is never narrower than the trigger', async () => {
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1591,12 +1547,13 @@ test('Select: the menu is never narrower than the trigger', async () => {
     trigger.abs.width,
     'two one-letter options still open a menu the width of the trigger',
   );
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('text spans collect nested styles', () => {
+test('text spans collect nested styles', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 100, height: 100 },
@@ -1611,8 +1568,6 @@ test('text spans collect nested styles', () => {
         ),
       ),
     ),
-    null,
-    app,
   );
 
   const textNode = app.windows[0]._reactX11Node.children[0];
@@ -1636,7 +1591,7 @@ test('text spans collect nested styles', () => {
     ['world', 'bold', 'red'],
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('DevTools agent highlight tints the hovered node', async () => {
@@ -1644,7 +1599,8 @@ test('DevTools agent highlight tints the hovered node', async () => {
   const { attachHighlightAgent } =
     await import('../src/DevToolsIntegration.js');
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 100 },
@@ -1657,8 +1613,6 @@ test('DevTools agent highlight tints the hovered node', async () => {
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1705,11 +1659,12 @@ test('DevTools agent highlight tints the hovered node', async () => {
     'highlight cleared on hide',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('rich content elements mount, update and unmount headlessly', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const ui = (md) =>
     React.createElement(
       'window',
@@ -1727,15 +1682,15 @@ test('rich content elements mount, update and unmount headlessly', async () => {
       React.createElement('tex', { size: 20 }, 'x^2'),
     );
 
-  ReactX11.render(ui('# One'), null, app);
+  x11Root.render(ui('# One'));
   await tick(); // paint flush: no fonts on the mock app, must not throw
   const [wnd] = app.windows;
   assert.ok(wnd.mapped, 'window mounted with rich content children');
 
-  ReactX11.render(ui('# Two'), null, app);
+  x11Root.render(ui('# Two'));
   await tick();
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
   assert.ok(wnd.destroyed, 'clean unmount');
 });
 
@@ -1759,8 +1714,9 @@ const clickNode = (wnd, node) => {
 test('Button fires onPress via click and Space; disabled is inert', async () => {
   const { Button } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const presses = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
@@ -1785,8 +1741,6 @@ test('Button fires onPress via click and Space; disabled is inert', async () => 
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1817,12 +1771,13 @@ test('Button fires onPress via click and Space; disabled is inert', async () => 
   })(wnd._reactX11Node);
   clickNode(wnd, disabledText.parent);
   assert.deepStrictEqual(presses, ['go', 'go']);
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Checkbox and Switch toggle through onChange', async () => {
   const { Checkbox, Switch } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const log = [];
   function Wrapper() {
     const [checked, setChecked] = React.useState(false);
@@ -1852,14 +1807,12 @@ test('Checkbox and Switch toggle through onChange', async () => {
       }),
     );
   }
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
       React.createElement(Wrapper),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1876,7 +1829,7 @@ test('Checkbox and Switch toggle through onChange', async () => {
     ['check', false],
     ['switch', true],
   ]);
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // One signature across the library: the value widgets hand `onChange` a
@@ -1886,6 +1839,7 @@ test('value widgets pass a named change event to onChange', async () => {
   const { Checkbox, RadioGroup, Radio, Slider } =
     await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const events = [];
   function Wrapper() {
     const [checked, setChecked] = React.useState(false);
@@ -1928,14 +1882,12 @@ test('value widgets pass a named change event to onChange', async () => {
       }),
     );
   }
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 240 },
       React.createElement(Wrapper),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -1970,7 +1922,7 @@ test('value widgets pass a named change event to onChange', async () => {
     assert.strictEqual(typeof ev, 'object');
     assert.strictEqual(ev.type, 'change');
   }
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // The contract that matters, stated as the thing a user actually writes.
@@ -1979,6 +1931,7 @@ test('value widgets pass a named change event to onChange', async () => {
 test('a one-parameter handler is handed the event, not the value', async () => {
   const { Checkbox } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const seen = [];
   // exactly the shape of formik's handleChange: one parameter, destructures
   // the field out of `.target`
@@ -1995,26 +1948,25 @@ test('a one-parameter handler is handed the event, not the value', async () => {
       },
     });
   }
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 100 },
       React.createElement(Wrapper),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
   clickNode(wnd, findAllFocusable(wnd._reactX11Node)[0]);
   await tick();
   assert.deepStrictEqual(seen, [['agree', 'checkbox', true]]);
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('RadioGroup: click selects, arrow keys move selection (wrapping)', async () => {
   const { Radio, RadioGroup } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picks = [];
   function Wrapper() {
     const [value, setValue] = React.useState('a');
@@ -2032,14 +1984,12 @@ test('RadioGroup: click selects, arrow keys move selection (wrapping)', async ()
       React.createElement(Radio, { value: 'c' }, 'C'),
     );
   }
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
       React.createElement(Wrapper),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -2055,13 +2005,14 @@ test('RadioGroup: click selects, arrow keys move selection (wrapping)', async ()
   pressKey(app, wnd, { keysym: 0xff52 }); // Up wraps back -> C
   await tick();
   assert.deepStrictEqual(picks, ['b', 'c', 'a', 'c']);
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('ProgressBar fill width follows value', async () => {
   const { ProgressBar } = await import('../src/index.js');
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 100 },
@@ -2071,8 +2022,6 @@ test('ProgressBar fill width follows value', async () => {
         React.createElement(ProgressBar, { value: 0.5, style: { width: 200 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -2092,7 +2041,7 @@ test('ProgressBar fill width follows value', async () => {
     Math.abs(fill.abs.width - 100) <= 1,
     `fill should be ~half the track, got ${fill.abs.width}`,
   );
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // issue #130 -------------------------------------------------------------
@@ -2103,6 +2052,7 @@ test('ProgressBar fill width follows value', async () => {
 // is still null. That is the case a multi-window app is made of.
 test('transientFor resolves a ref that attaches after the window realized', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const main = React.createRef();
   const App = () =>
     React.createElement(
@@ -2115,7 +2065,7 @@ test('transientFor resolves a ref that attaches after the window realized', asyn
         transientFor: main,
       }),
     );
-  ReactX11.render(React.createElement(App), null, app);
+  x11Root.render(React.createElement(App));
   const [owner, transient] = app.windows;
   // realize() ran with main.current still null, so nothing could be written
   assert.strictEqual(transient.transientFor, undefined);
@@ -2132,14 +2082,15 @@ test('transientFor resolves a ref that attaches after the window realized', asyn
     false,
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('transientFor takes an XID, a drawn-node ref, and null to clear', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const anchor = React.createRef();
   const render = (transientFor) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 300, height: 200 },
@@ -2150,8 +2101,6 @@ test('transientFor takes an XID, a drawn-node ref, and null to clear', async () 
           transientFor,
         }),
       ),
-      null,
-      app,
     );
 
   render(4242);
@@ -2172,10 +2121,9 @@ test('transientFor takes an XID, a drawn-node ref, and null to clear', async () 
 
   // and a window that never set one does not spend a DeleteProperty saying so
   const fresh = createMockApp();
-  ReactX11.render(
+  const x11Root_fresh = await createRoot({ app: fresh });
+  x11Root_fresh.render(
     React.createElement('window', { width: 100, height: 100 }),
-    null,
-    fresh,
   );
   await tick();
   assert.strictEqual(
@@ -2183,13 +2131,14 @@ test('transientFor takes an XID, a drawn-node ref, and null to clear', async () 
     false,
   );
 
-  ReactX11.unmountComponentAtNode(app);
-  ReactX11.unmountComponentAtNode(fresh);
+  await x11Root.unmount();
+  await x11Root_fresh.unmount();
 });
 
 test('a <popup> can opt out of override-redirect and be WM-managed', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
@@ -2208,8 +2157,6 @@ test('a <popup> can opt out of override-redirect and be WM-managed', async () =>
         windowType: 'dialog',
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const [, menu, dialog] = app.windows;
@@ -2222,22 +2169,21 @@ test('a <popup> can opt out of override-redirect and be WM-managed', async () =>
   assert.strictEqual(dialog.attributes.overrideRedirect, false);
   assert.strictEqual(dialog.attributes.windowType, 'dialog');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('windowIdOf resolves windows, drawn nodes, refs and raw ids', async () => {
   const { windowIdOf } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const windowRef = React.createRef();
   const boxRef = React.createRef();
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { ref: windowRef, width: 300, height: 200 },
       React.createElement('box', { ref: boxRef }),
     ),
-    null,
-    app,
   );
   await tick();
   const id = app.windows[0].id;
@@ -2260,11 +2206,12 @@ test('windowIdOf resolves windows, drawn nodes, refs and raw ids', async () => {
     `x11:${id.toString(16)}`,
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('multiple root windows share one tree; onCloseRequest handles WM close', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const events = [];
   function Wrapper() {
     const [open, setOpen] = React.useState(true);
@@ -2289,7 +2236,7 @@ test('multiple root windows share one tree; onCloseRequest handles WM close', as
         }),
     );
   }
-  ReactX11.render(React.createElement(Wrapper), null, app);
+  x11Root.render(React.createElement(Wrapper));
   await tick();
   assert.strictEqual(app.windows.length, 2, 'two real top-level windows');
   const sat = app.windows[1];
@@ -2314,12 +2261,13 @@ test('multiple root windows share one tree; onCloseRequest handles WM close', as
   await tick();
   assert.deepStrictEqual(events, ['sat-close']);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Slider: drag keeps tracking after the pointer leaves the widget', async () => {
   const { Slider } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const seen = [];
   const Host = () => {
     const [v, setV] = React.useState(0);
@@ -2341,7 +2289,7 @@ test('Slider: drag keeps tracking after the pointer leaves the widget', async ()
       ),
     );
   };
-  ReactX11.render(React.createElement(Host), null, app);
+  x11Root.render(React.createElement(Host));
   await tick();
 
   const wnd = app.windows[0];
@@ -2402,12 +2350,13 @@ test('Slider: drag keeps tracking after the pointer leaves the widget', async ()
   await tick();
   assert.strictEqual(seen.at(-1), afterRelease, 'no tracking after release');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Slider: keyboard steps, Home/End and PageUp/Down', async () => {
   const { Slider } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   let current = 50;
   const Host = () => {
     const [v, setV] = React.useState(50);
@@ -2429,7 +2378,7 @@ test('Slider: keyboard steps, Home/End and PageUp/Down', async () => {
       ),
     );
   };
-  ReactX11.render(React.createElement(Host), null, app);
+  x11Root.render(React.createElement(Host));
   await tick();
 
   const wnd = app.windows[0];
@@ -2468,7 +2417,7 @@ test('Slider: keyboard steps, Home/End and PageUp/Down', async () => {
   await press(0xff56); // PageDown
   assert.strictEqual(current, 0);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Slider: thumb stays within the track at both extremes', async () => {
@@ -2487,7 +2436,8 @@ test('Slider: thumb stays within the track at both extremes', async () => {
     [100, 'flush right'],
   ]) {
     const app = createMockApp();
-    ReactX11.render(
+    const x11Root = await createRoot({ app });
+    x11Root.render(
       React.createElement(
         'window',
         { width: 400, height: 100 },
@@ -2502,8 +2452,6 @@ test('Slider: thumb stays within the track at both extremes', async () => {
           }),
         ),
       ),
-      null,
-      app,
     );
     await tick();
     const track = findTrack(app.windows[0]._reactX11Node);
@@ -2524,7 +2472,7 @@ test('Slider: thumb stays within the track at both extremes', async () => {
         'midpoint value centres the thumb',
       );
     }
-    ReactX11.unmountComponentAtNode(app);
+    await x11Root.unmount();
   }
 });
 
@@ -2617,8 +2565,9 @@ test('anchorRect places, flips at a screen edge and clamps', async () => {
 
 test('window focus: the focused node keeps focus but stops looking active', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const events = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       {
@@ -2632,8 +2581,6 @@ test('window focus: the focused node keeps focus but stops looking active', asyn
         style: { width: 120, height: 24 },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -2662,14 +2609,15 @@ test('window focus: the focused node keeps focus but stops looking active', asyn
   );
   assert.deepStrictEqual(events, ['window:blur', 'window:focus']);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('focus(): ref API, autoFocus, and blur', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const seen = [];
   const ref = React.createRef();
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 100 },
@@ -2687,8 +2635,6 @@ test('focus(): ref API, autoFocus, and blur', async () => {
         style: { width: 40, height: 20 },
       }),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -2702,12 +2648,13 @@ test('focus(): ref API, autoFocus, and blur', async () => {
   assert.strictEqual(ref.current.focused, false);
   assert.deepStrictEqual(seen, ['b:focus', 'a:focus', 'a:blur']);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Tab into a scrollview scrolls the focused node into view', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 100 },
@@ -2723,8 +2670,6 @@ test('Tab into a scrollview scrolls the focused node into view', async () => {
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -2737,11 +2682,12 @@ test('Tab into a scrollview scrolls the focused node into view', async () => {
   await tick();
   assert.ok(scroll.scrollY > 0, `scrolled to reveal it (${scroll.scrollY})`);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('tabIndex orders Tab traversal; -1 focuses but never tabs', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const box = (tabIndex, extra) =>
     React.createElement('box', {
       key: String(tabIndex),
@@ -2751,7 +2697,7 @@ test('tabIndex orders Tab traversal; -1 focuses but never tabs', async () => {
       style: { width: 100, height: 20 },
     });
   const refs = { plain: null, two: null, one: null, skip: null };
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 200, height: 200 },
@@ -2760,8 +2706,6 @@ test('tabIndex orders Tab traversal; -1 focuses but never tabs', async () => {
       box(1, { ref: (n) => (refs.one = n) }),
       box(-1, { ref: (n) => (refs.skip = n) }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -2791,14 +2735,15 @@ test('tabIndex orders Tab traversal; -1 focuses but never tabs', async () => {
   skip.focus();
   assert.strictEqual(skip.focused, true, 'focus() works on it too');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('<popup> shares the owner window focus, so keys reach into it', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const seen = [];
   let inner = null;
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200, onKeyDown: () => seen.push('window') },
@@ -2814,8 +2759,6 @@ test('<popup> shares the owner window focus, so keys reach into it', async () =>
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -2843,11 +2786,12 @@ test('<popup> shares the owner window focus, so keys reach into it', async () =>
   pressKey(app, wnd, { codepoint: 0x78 });
   assert.deepStrictEqual(seen, ['box', 'window']);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('<popup trapFocus> traps Tab and restores focus when it closes', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const refs = { trigger: null, other: null, first: null, second: null };
   const App = ({ open }) =>
     React.createElement(
@@ -2881,13 +2825,13 @@ test('<popup trapFocus> traps Tab and restores focus when it closes', async () =
         ),
     );
 
-  ReactX11.render(React.createElement(App, { open: false }), null, app);
+  x11Root.render(React.createElement(App, { open: false }));
   await tick();
   const wnd = app.windows[0];
   refs.trigger.focus();
   assert.strictEqual(refs.trigger.focused, true, 'the trigger has focus');
 
-  ReactX11.render(React.createElement(App, { open: true }), null, app);
+  x11Root.render(React.createElement(App, { open: true }));
   await tick();
   assert.strictEqual(refs.first.focused, true, 'the modal took focus');
 
@@ -2908,7 +2852,7 @@ test('<popup trapFocus> traps Tab and restores focus when it closes', async () =
   assert.strictEqual(refs.trigger.focused, false, 'the press was inert');
   assert.strictEqual(refs.first.focused, true, 'focus stayed in the modal');
 
-  ReactX11.render(React.createElement(App, { open: false }), null, app);
+  x11Root.render(React.createElement(App, { open: false }));
   await tick();
   assert.strictEqual(
     refs.trigger.focused,
@@ -2916,12 +2860,13 @@ test('<popup trapFocus> traps Tab and restores focus when it closes', async () =
     'closing the modal handed focus back to the trigger',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Dialog: modal popup, Escape closes it, focus goes back', async () => {
   const { Dialog, Button } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const closed = [];
   let trigger = null;
   let input = null;
@@ -2949,13 +2894,13 @@ test('Dialog: modal popup, Escape closes it, focus goes back', async () => {
       ),
     );
 
-  ReactX11.render(React.createElement(App, { open: false }), null, app);
+  x11Root.render(React.createElement(App, { open: false }));
   await tick();
   const wnd = app.windows[0];
   assert.strictEqual(app.windows.length, 1, 'no popup while closed');
   trigger.focus();
 
-  ReactX11.render(React.createElement(App, { open: true }), null, app);
+  x11Root.render(React.createElement(App, { open: true }));
   await tick();
   const dialog = app.windows[1];
   assert.ok(dialog, 'the dialog is a popup window');
@@ -2977,7 +2922,7 @@ test('Dialog: modal popup, Escape closes it, focus goes back', async () => {
   await tick();
   assert.deepStrictEqual(closed, ['close'], 'Escape asked to close');
 
-  ReactX11.render(React.createElement(App, { open: false }), null, app);
+  x11Root.render(React.createElement(App, { open: false }));
   await tick();
   assert.strictEqual(dialog.destroyed, true, 'popup gone');
   assert.strictEqual(
@@ -2986,13 +2931,14 @@ test('Dialog: modal popup, Escape closes it, focus goes back', async () => {
     'and focus returned to what opened it',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Dialog: with nothing to autoFocus, the surface takes focus', async () => {
   const { Dialog } = await import('../src/index.js');
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 400, height: 300 },
@@ -3002,8 +2948,6 @@ test('Dialog: with nothing to autoFocus, the surface takes focus', async () => {
         'Nothing focusable in here.',
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const dialog = app.windows[1];
@@ -3020,13 +2964,14 @@ test('Dialog: with nothing to autoFocus, the surface takes focus', async () => {
     'but it is not a stop in the tab order',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('context menu: a press outside — the window frame — dismisses it', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  await openNested(app, picked);
+  await openNested(x11Root, picked);
   const menu = app.windows[1];
 
   // the root level asks for a pointer grab; that is what makes the press
@@ -3041,13 +2986,14 @@ test('context menu: a press outside — the window frame — dismisses it', asyn
   assert.strictEqual(menu.destroyed, true, 'menu closed');
   assert.deepStrictEqual(picked, [], 'and nothing was selected');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a press inside the menu is a normal click, not a dismissal', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  await openNested(app, picked);
+  await openNested(x11Root, picked);
   const menu = app.windows[1];
   const row = rowsOf(app, 1)[0];
 
@@ -3065,12 +3011,13 @@ test('a press inside the menu is a normal click, not a dismissal', async () => {
   await tick();
   assert.deepStrictEqual(picked, ['New'], 'the row was selected');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Slider keeps its width as the value changes (no drag feedback loop)', async () => {
   const { Slider } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   let setValue;
   const Host = () => {
     const [v, setV] = React.useState(0);
@@ -3100,7 +3047,7 @@ test('Slider keeps its width as the value changes (no drag feedback loop)', asyn
     );
   };
 
-  ReactX11.render(React.createElement(Host), null, app);
+  x11Root.render(React.createElement(Host));
   await tick();
   const row = app.windows[0]._reactX11Node.children[0];
   const slider = row.children[1];
@@ -3121,12 +3068,13 @@ test('Slider keeps its width as the value changes (no drag feedback loop)', asyn
     `width is stable across the range, got ${widths.join(', ')}`,
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('ProgressBar does not widen the box it sits in', async () => {
   const { ProgressBar } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const Card = ({ progress }) =>
     React.createElement(
       'box',
@@ -3134,7 +3082,7 @@ test('ProgressBar does not widen the box it sits in', async () => {
       React.createElement(ProgressBar, { value: progress }),
     );
 
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 120 },
@@ -3145,8 +3093,6 @@ test('ProgressBar does not widen the box it sits in', async () => {
         React.createElement(Card, { key: 'b', progress: 0.9 }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -3168,13 +3114,14 @@ test('ProgressBar does not widen the box it sits in', async () => {
     `fill is 90% of the track, got ${fill.abs.width}/${track.abs.width}`,
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Tooltip shows after the delay in a popup and hides on leave', async () => {
   const { Tooltip, Button } = await import('../src/index.js');
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 120 },
@@ -3188,8 +3135,6 @@ test('Tooltip shows after the delay in a popup and hides on leave', async () => 
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -3220,13 +3165,14 @@ test('Tooltip shows after the delay in a popup and hides on leave', async () => 
   await tick();
   assert.strictEqual(tip.destroyed, true, 'popup destroyed on mouse leave');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Tooltip stays up when the pointer moves toward it, and is reachable', async () => {
   const { Tooltip, Button } = await import('../src/index.js');
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 160 },
@@ -3240,8 +3186,6 @@ test('Tooltip stays up when the pointer moves toward it, and is reachable', asyn
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -3288,13 +3232,14 @@ test('Tooltip stays up when the pointer moves toward it, and is reachable', asyn
   await tick();
   assert.strictEqual(tip.destroyed, true, 'gone once the pointer leaves');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Tooltip does not show if the pointer leaves before the delay', async () => {
   const { Tooltip, Button } = await import('../src/index.js');
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 120 },
@@ -3308,8 +3253,6 @@ test('Tooltip does not show if the pointer leaves before the delay', async () =>
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -3327,7 +3270,7 @@ test('Tooltip does not show if the pointer leaves before the delay', async () =>
   await tick();
   assert.strictEqual(app.windows.length, 1, 'the pending timer was cancelled');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 const MENU_ITEMS = (picked) => [
@@ -3348,8 +3291,9 @@ function activeMenuIndex(app) {
 test('ContextMenu opens at the pointer and skips separators/disabled', async () => {
   const { ContextMenu } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
@@ -3359,8 +3303,6 @@ test('ContextMenu opens at the pointer and skips separators/disabled', async () 
         React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -3426,14 +3368,15 @@ test('ContextMenu opens at the pointer and skips separators/disabled', async () 
   assert.deepStrictEqual(picked, ['Cut']);
   assert.strictEqual(app.windows[1].destroyed, true, 'closes after selecting');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('ContextMenu: Escape closes without selecting; disabled items are inert', async () => {
   const { ContextMenu } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
@@ -3443,8 +3386,6 @@ test('ContextMenu: Escape closes without selecting; disabled items are inert', a
         React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -3476,14 +3417,15 @@ test('ContextMenu: Escape closes without selecting; disabled items are inert', a
   assert.strictEqual(menu.destroyed, true);
   assert.deepStrictEqual(picked, []);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('ContextMenu: clicking an enabled row selects it and closes', async () => {
   const { ContextMenu } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
@@ -3493,8 +3435,6 @@ test('ContextMenu: clicking an enabled row selects it and closes', async () => {
         React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -3514,12 +3454,13 @@ test('ContextMenu: clicking an enabled row selects it and closes', async () => {
   assert.deepStrictEqual(picked, ['Copy']);
   assert.strictEqual(menu.destroyed, true, 'closes after selecting');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('MenuBar opens menus, switches on hover and walks with Left/Right', async () => {
   const { MenuBar } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
   const menus = [
     {
@@ -3534,14 +3475,12 @@ test('MenuBar opens menus, switches on hover and walks with Left/Right', async (
       items: [{ label: 'Undo', onSelect: () => picked.push('Undo') }],
     },
   ];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 320, height: 200 },
       React.createElement(MenuBar, { menus }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -3591,12 +3530,13 @@ test('MenuBar opens menus, switches on hover and walks with Left/Right', async (
   assert.deepStrictEqual(picked, ['New']);
   assert.strictEqual(fileMenu.destroyed, true, 'closes after selecting');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('backgroundColor/borderColor "transparent" paints nothing (and does not throw)', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 100, height: 60 },
@@ -3612,8 +3552,6 @@ test('backgroundColor/borderColor "transparent" paints nothing (and does not thr
         style: { flexGrow: 1, backgroundColor: '#ff0000' },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const ops = app.windows[0].ctx.ops;
@@ -3627,7 +3565,7 @@ test('backgroundColor/borderColor "transparent" paints nothing (and does not thr
     'no transparent stroke was issued',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 const NESTED_ITEMS = (picked) => [
@@ -3650,9 +3588,9 @@ const rowsOf = (app, index) =>
 const activeIn = (app, index) =>
   rowsOf(app, index).findIndex((r) => r.style.backgroundColor === '#2980b9');
 
-async function openNested(app, picked) {
+async function openNested(x11Root, picked) {
   const { ContextMenu } = await import('../src/index.js');
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 320, height: 220 },
@@ -3662,11 +3600,9 @@ async function openNested(app, picked) {
         React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
-  const wnd = app.windows[0];
+  const wnd = x11Root.app.windows[0];
   wnd.emit('mousedown', { x: 20, y: 20, keycode: 3, rootx: 200, rooty: 120 });
   // a popup lays out one tick after it is created: without this second
   // tick its rows still have zero rects and pointer assertions are vacuous
@@ -3677,8 +3613,9 @@ async function openNested(app, picked) {
 
 test('submenu: Right opens it, Left leaves, Escape closes one level', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  const wnd = await openNested(app, picked);
+  const wnd = await openNested(x11Root, picked);
   assert.strictEqual(app.windows.length, 2, 'root menu open');
 
   // move onto Export (index 1)
@@ -3733,13 +3670,14 @@ test('submenu: Right opens it, Left leaves, Escape closes one level', async () =
   assert.strictEqual(app.windows[1].destroyed, true, 'root closed');
   assert.deepStrictEqual(picked, []);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('submenu: selecting a nested item closes every level', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  const wnd = await openNested(app, picked);
+  const wnd = await openNested(x11Root, picked);
 
   pressKey(app, wnd, { keysym: 0xff54 }); // New
   await tick();
@@ -3755,13 +3693,14 @@ test('submenu: selecting a nested item closes every level', async () => {
   assert.strictEqual(app.windows[1].destroyed, true, 'root closed');
   assert.strictEqual(app.windows[2].destroyed, true, 'submenu closed');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('submenu: hovering a parent row opens it with nothing selected inside', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  await openNested(app, picked);
+  await openNested(x11Root, picked);
   const menu = app.windows[1];
   const exportRow = rowsOf(app, 1)[1];
 
@@ -3785,13 +3724,14 @@ test('submenu: hovering a parent row opens it with nothing selected inside', asy
   assert.strictEqual(app.windows[2].destroyed, true, 'submenu closed');
   assert.strictEqual(activeIn(app, 1), 2, 'Quit active');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('submenu: a diagonal path toward it keeps it open (safe polygon)', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  await openNested(app, picked);
+  await openNested(x11Root, picked);
   const menu = app.windows[1];
   const rows = rowsOf(app, 1);
   const exportRow = rows[1];
@@ -3844,13 +3784,14 @@ test('submenu: a diagonal path toward it keeps it open (safe polygon)', async ()
   assert.strictEqual(app.windows[2].destroyed, true, 'submenu closed');
   assert.strictEqual(activeIn(app, 1), 2, 'Quit active');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('submenu: a pointer that stops inside the safe polygon still switches', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  await openNested(app, picked);
+  await openNested(x11Root, picked);
   const menu = app.windows[1];
   const rows = rowsOf(app, 1);
   const exportRow = rows[1];
@@ -3889,7 +3830,7 @@ test('submenu: a pointer that stops inside the safe polygon still switches', asy
   for (let i = 0; i < 4; i++) await tick();
   assert.strictEqual(activeIn(app, 1), 2, 'Quit active once the delay lapses');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 const typeChar = (app, wnd, ch) =>
@@ -3898,6 +3839,7 @@ const typeChar = (app, wnd, ch) =>
 test('Select: type-ahead jumps, refines and cycles', async () => {
   const { Select } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const options = ['apple', 'banana', 'blueberry', 'cherry'];
   let current = null;
   const Host = () => {
@@ -3918,7 +3860,7 @@ test('Select: type-ahead jumps, refines and cycles', async () => {
       ),
     );
   };
-  ReactX11.render(React.createElement(Host), null, app);
+  x11Root.render(React.createElement(Host));
   await tick();
   const wnd = app.windows[0];
   const findFocusable = (n) =>
@@ -3980,13 +3922,14 @@ test('Select: type-ahead jumps, refines and cycles', async () => {
   await tick();
   assert.strictEqual(activeIndex(), 2, 'bb cycles to blueberry');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('menu type-ahead moves the active row and skips disabled entries', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  const wnd = await openNested(app, picked); // New / Export / Quit
+  const wnd = await openNested(x11Root, picked); // New / Export / Quit
 
   typeChar(app, wnd, 'q');
   await tick();
@@ -4002,13 +3945,14 @@ test('menu type-ahead moves the active row and skips disabled entries', async ()
   await tick();
   assert.strictEqual(activeIn(app, 1), 1, 'e -> Export');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('menu type-ahead applies to the deepest open submenu', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
-  const wnd = await openNested(app, picked);
+  const wnd = await openNested(x11Root, picked);
 
   // into Export's submenu: PNG / --- / SVG / PDF(disabled)
   pressKey(app, wnd, { keysym: 0xff54 });
@@ -4032,13 +3976,14 @@ test('menu type-ahead applies to the deepest open submenu', async () => {
   await tick();
   assert.strictEqual(activeIn(app, 2), 0, 'p -> PNG, never the disabled PDF');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: Ctrl+arrow moves by word, Ctrl+Backspace/Delete removes one', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const changes = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 80 },
@@ -4047,8 +3992,6 @@ test('textinput: Ctrl+arrow moves by word, Ctrl+Backspace/Delete removes one', a
         onChange: (ev) => changes.push(ev.target.value),
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4078,19 +4021,18 @@ test('textinput: Ctrl+arrow moves by word, Ctrl+Backspace/Delete removes one', a
   await tick();
   assert.strictEqual(changes.at(-1), 'foo-bar baz_qux end'.replace('bar ', ''));
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: shift+click extends the selection from the anchor', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 80 },
       React.createElement('textinput', { defaultValue: 'hello world' }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4116,7 +4058,7 @@ test('textinput: shift+click extends the selection from the anchor', async () =>
     'anchor kept, caret moved to the shift+clicked index',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // --- undo/redo -------------------------------------------------------------
@@ -4124,14 +4066,13 @@ test('textinput: shift+click extends the selection from the anchor', async () =>
 // Mounts a focused <textinput> and returns helpers for driving it.
 async function mountInput(props = {}) {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 80 },
       React.createElement('textinput', props),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4150,7 +4091,7 @@ async function mountInput(props = {}) {
       }
     },
     key: (keysym, buttons = 0) => pressKey(app, wnd, { keysym, buttons }),
-    unmount: () => ReactX11.unmountComponentAtNode(app),
+    unmount: () => x11Root.unmount(),
   };
 }
 
@@ -4269,9 +4210,10 @@ test('textinput: a paste is its own undo step', async () => {
 
 test('textinput: undo in controlled mode reports through onChange', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const changes = [];
   const render = (value) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 300, height: 80 },
@@ -4283,8 +4225,6 @@ test('textinput: undo in controlled mode reports through onChange', async () => 
           },
         }),
       ),
-      null,
-      app,
     );
   render('');
   await tick();
@@ -4308,20 +4248,19 @@ test('textinput: undo in controlled mode reports through onChange', async () => 
   pressKey(app, wnd, { keysym: XK_z, buttons: CTRL | SHIFT });
   assert.strictEqual(input.value, 'hi');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: a value changed from outside becomes its own undo step', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (value) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement(
         'window',
         { width: 300, height: 80 },
         React.createElement('textinput', { value }),
       ),
-      null,
-      app,
     );
   render('typed');
   await tick();
@@ -4335,19 +4274,18 @@ test('textinput: a value changed from outside becomes its own undo step', async 
   assert.strictEqual(input.undo(), true, 'undo asks for the pre-reset value');
   assert.strictEqual(input._historyValue, 'typed');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textarea: undo restores across lines, Enter is its own step', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
       React.createElement('textarea', { defaultValue: '', rows: 4 }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4369,7 +4307,7 @@ test('textarea: undo restores across lines, Enter is its own step', async () => 
   pressKey(app, wnd, { keysym: XK_z, buttons: CTRL });
   assert.strictEqual(area.value, '');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // --- right-click / the built-in edit menu ----------------------------------
@@ -4377,6 +4315,7 @@ test('textarea: undo restores across lines, Enter is its own step', async () => 
 // A focused <textinput> with everything selected, plus a working clipboard.
 async function mountSelected(props = {}) {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const writes = [];
   app.clipboard = {
     write(text, opts) {
@@ -4385,7 +4324,7 @@ async function mountSelected(props = {}) {
     },
     read: () => Promise.resolve('pasted'),
   };
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 80 },
@@ -4394,8 +4333,6 @@ async function mountSelected(props = {}) {
         ...props,
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4411,6 +4348,7 @@ const rightClick = (wnd, x = 40, y = 10) =>
 
 test('textinput: right-click keeps the selection it lands inside', async () => {
   const { app, wnd, input } = await mountSelected();
+  const x11Root = await createRoot({ app });
   assert.deepStrictEqual(input._selection(), [0, 11]);
 
   rightClick(wnd);
@@ -4426,11 +4364,12 @@ test('textinput: right-click keeps the selection it lands inside', async () => {
     'still painted while the menu holds the keyboard',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: right-click outside the selection moves the caret', async () => {
   const { app, wnd, input } = await mountSelected();
+  const x11Root = await createRoot({ app });
   input._indexAtPoint = () => 3; // stub: headless text measures 0x0
   input._caret = 6;
   input._anchor = 8; // a selection of [6, 8] — the click at 3 is outside it
@@ -4438,11 +4377,12 @@ test('textinput: right-click outside the selection moves the caret', async () =>
   rightClick(wnd);
   assert.deepStrictEqual(input._selection(), [3, 3], 'caret follows the click');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: right-click opens a menu whose rows match the state', async () => {
   const { app, wnd, input } = await mountSelected();
+  const x11Root = await createRoot({ app });
   const before = app.windows.length;
 
   rightClick(wnd);
@@ -4464,11 +4404,12 @@ test('textinput: right-click opens a menu whose rows match the state', async () 
     selectAll: false, // everything is already selected
   });
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: choosing Copy closes the menu and copies', async () => {
   const { app, wnd, input, writes } = await mountSelected();
+  const x11Root = await createRoot({ app });
   rightClick(wnd);
 
   input._chooseEditMenu('copy');
@@ -4477,11 +4418,12 @@ test('textinput: choosing Copy closes the menu and copies', async () => {
   assert.deepStrictEqual(input._selection(), [0, 11], 'selection survives');
   assert.strictEqual(input._focused, true, 'focus comes back to the field');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: Cut through the menu is one undoable step', async () => {
   const { app, wnd, input } = await mountSelected();
+  const x11Root = await createRoot({ app });
   rightClick(wnd);
   input._chooseEditMenu('cut');
 
@@ -4490,11 +4432,12 @@ test('textinput: Cut through the menu is one undoable step', async () => {
   input.undo();
   assert.strictEqual(input.value, 'hello world', 'one undo brings it back');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: Escape closes the menu, leaving the text alone', async () => {
   const { app, wnd, input } = await mountSelected();
+  const x11Root = await createRoot({ app });
   rightClick(wnd);
   const popup = input._editMenu;
   const canvas = popup.children[0];
@@ -4504,11 +4447,12 @@ test('textinput: Escape closes the menu, leaving the text alone', async () => {
   assert.strictEqual(input.value, 'hello world');
   assert.strictEqual(input._focused, true);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: arrows walk the menu, skipping disabled rows', async () => {
   const { app, wnd, input } = await mountSelected();
+  const x11Root = await createRoot({ app });
   rightClick(wnd);
   const canvas = input._editMenu.children[0];
   const items = input._editMenuItems();
@@ -4521,7 +4465,7 @@ test('textinput: arrows walk the menu, skipping disabled rows', async () => {
   assert.strictEqual(input.value, '', 'and the row it chose was Cut');
   assert.strictEqual(items[3].id, 'cut');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: onContextMenu fires, and preventDefault suppresses the menu', async () => {
@@ -4532,6 +4476,7 @@ test('textinput: onContextMenu fires, and preventDefault suppresses the menu', a
       ev.preventDefault();
     },
   });
+  const x11Root = await createRoot({ app });
 
   rightClick(wnd);
   assert.deepStrictEqual(seen, [3], 'the handler ran');
@@ -4541,11 +4486,12 @@ test('textinput: onContextMenu fires, and preventDefault suppresses the menu', a
     'and the built-in menu stayed shut',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: contextMenu={false} opts out of the built-in menu', async () => {
   const { app, wnd, input } = await mountSelected({ contextMenu: false });
+  const x11Root = await createRoot({ app });
   rightClick(wnd);
   assert.strictEqual(input._editMenu, null);
   assert.deepStrictEqual(
@@ -4554,18 +4500,19 @@ test('textinput: contextMenu={false} opts out of the built-in menu', async () =>
     'opting out still must not eat the selection',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textinput: a press outside dismisses the menu', async () => {
   const { app, wnd, input } = await mountSelected();
+  const x11Root = await createRoot({ app });
   rightClick(wnd);
   const popup = input._editMenu;
 
   popup.props.onDismiss({});
   assert.strictEqual(input._editMenu, null);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('ContextMenu around a textinput replaces the built-in menu', async () => {
@@ -4575,7 +4522,8 @@ test('ContextMenu around a textinput replaces the built-in menu', async () => {
       ? node
       : node.children.reduce((f, c) => f ?? findKind(c, kind), null);
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 120 },
@@ -4588,8 +4536,6 @@ test('ContextMenu around a textinput replaces the built-in menu', async () => {
         React.createElement('textinput', { defaultValue: 'hello' }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4611,19 +4557,18 @@ test('ContextMenu around a textinput replaces the built-in menu', async () => {
     'exactly one popup, not two stacked on each other',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textarea: right-click gets the same menu', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
       React.createElement('textarea', { defaultValue: 'a\nb', rows: 3 }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4636,12 +4581,13 @@ test('textarea: right-click gets the same menu', async () => {
   area._chooseEditMenu('selectAll');
   assert.deepStrictEqual(area._selection(), [0, 3]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textarea: PageDown/PageUp move by a viewport of lines', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
@@ -4652,8 +4598,6 @@ test('textarea: PageDown/PageUp move by a viewport of lines', async () => {
         rows: 4,
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4708,19 +4652,18 @@ test('textarea: PageDown/PageUp move by a viewport of lines', async () => {
   pressKey(app, wnd, { keysym: 0xff55 });
   assert.strictEqual(area._selection()[0], 0);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('textarea: draws a scrollbar thumb only when the text overflows', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 200 },
       React.createElement('textarea', { defaultValue: 'x', rows: 3 }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4760,14 +4703,15 @@ test('textarea: draws a scrollbar thumb only when the text overflows', async () 
   );
   assert.ok(ty >= content.y - 0.01, 'thumb starts at or below the top');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Select: PageDown/PageUp move by a menu viewport, clamped at the ends', async () => {
   const { Select } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const options = Array.from({ length: 40 }, (_, i) => `option-${i}`);
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 300, height: 120 },
@@ -4781,8 +4725,6 @@ test('Select: PageDown/PageUp move by a menu viewport, clamped at the ends', asy
         }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4850,12 +4792,13 @@ test('Select: PageDown/PageUp move by a menu viewport, clamped at the ends', asy
   }
   assert.strictEqual(active(), 0, 'clamps at the first option');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('menu: PageDown/PageUp land on a selectable row, never a separator', async () => {
   const { ContextMenu } = await import('../src/index.js');
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const picked = [];
   // 12 rows where the row a page-stride away (index 10) is a separator, so
   // a naive jump would land on something unselectable
@@ -4864,7 +4807,7 @@ test('menu: PageDown/PageUp land on a selectable row, never a separator', async 
       ? { separator: true }
       : { label: `entry-${i}`, onSelect: () => picked.push(i) },
   );
-  ReactX11.render(
+  x11Root.render(
     React.createElement(
       'window',
       { width: 320, height: 220 },
@@ -4874,8 +4817,6 @@ test('menu: PageDown/PageUp land on a selectable row, never a separator', async 
         React.createElement('box', { style: { flexGrow: 1 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -4913,7 +4854,7 @@ test('menu: PageDown/PageUp land on a selectable row, never a separator', async 
   await tick();
   assert.strictEqual(active(), 0, 'and clamps at the first entry');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('injectIntoDevTools registers the renderer metadata from the host config', async () => {
@@ -4969,10 +4910,9 @@ test('window states are declared before the map, so a window can open fullscreen
   // property; a mapped one has to *ask* the WM. Only the first can open
   // already fullscreen instead of flashing at the normal size first.
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement('window', { width: 100, height: 80, fullscreen: true }),
-    null,
-    app,
   );
   await tick();
 
@@ -4985,12 +4925,13 @@ test('window states are declared before the map, so a window can open fullscreen
   );
   assert.deepStrictEqual(stateCalls(wnd), [['fullscreen', 'add']]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('states, fullscreen and alwaysOnTop union rather than compete', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     React.createElement('window', {
       width: 100,
       height: 80,
@@ -4998,8 +4939,6 @@ test('states, fullscreen and alwaysOnTop union rather than compete', async () =>
       fullscreen: true,
       alwaysOnTop: true,
     }),
-    null,
-    app,
   );
   await tick();
 
@@ -5017,16 +4956,15 @@ test('states, fullscreen and alwaysOnTop union rather than compete', async () =>
     assert.strictEqual(typeof name, 'string', 'one state per message');
   }
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a state change sends only the difference, and only when props change', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (states) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement('window', { width: 100, height: 80, states }),
-      null,
-      app,
     );
   render(['fullscreen', 'skip_taskbar']);
   await tick();
@@ -5056,21 +4994,20 @@ test('a state change sends only the difference, and only when props change', asy
     'only the difference, in both directions',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('onStatesChange reports what the window manager actually did', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const seen = [];
-  ReactX11.render(
+  x11Root.render(
     React.createElement('window', {
       width: 100,
       height: 80,
       fullscreen: true,
       onStatesChange: (states) => seen.push(states),
     }),
-    null,
-    app,
   );
   await tick();
 
@@ -5086,16 +5023,15 @@ test('onStatesChange reports what the window manager actually did', async () => 
   await tick();
   assert.deepStrictEqual(stateCalls(wnd), [], 'the WM is not fought');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('decorations={false} writes _MOTIF_WM_HINTS with its own type atom', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const render = (decorations) =>
-    ReactX11.render(
+    x11Root.render(
       React.createElement('window', { width: 100, height: 80, decorations }),
-      null,
-      app,
     );
   render(false);
   await tick();
@@ -5119,5 +5055,5 @@ test('decorations={false} writes _MOTIF_WM_HINTS with its own type atom', async 
   const back = wnd.calls.find(([name]) => name === 'setProperty');
   assert.deepStrictEqual(back[2], [2, 0, 1, 0, 0], 'decorations back on');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });

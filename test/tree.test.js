@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11, { Tree } from '../src/index.js';
+import { createRoot, Tree } from '../src/index.js';
 import { createMockApp } from './helpers/mock-app.js';
 import { TYPE_AHEAD_TIMEOUT } from '../src/components/typeahead.js';
 
@@ -82,30 +82,31 @@ const ITEMS = [
   { id: 'locked', label: 'locked.bin', disabled: true },
 ];
 
-function mount(props) {
+async function mount(props) {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 260, height: 200 },
       h(Tree, { items: ITEMS, ...props }),
     ),
-    null,
-    app,
   );
   return app;
 }
 
 test('only the roots show until a branch is expanded', async () => {
-  const app = mount();
+  const app = await mount();
+  const x11Root = await createRoot({ app });
   await settle();
   assert.deepStrictEqual(labels(app), ['src', 'README.md', 'locked.bin']);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('defaultExpanded opens branches, nested ones included', async () => {
-  const app = mount({ defaultExpanded: ['src', 'components'] });
+  const app = await mount({ defaultExpanded: ['src', 'components'] });
+  const x11Root = await createRoot({ app });
   await settle();
   assert.deepStrictEqual(labels(app), [
     'src',
@@ -117,12 +118,13 @@ test('defaultExpanded opens branches, nested ones included', async () => {
     'locked.bin',
   ]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('clicking the twisty expands without selecting the row', async () => {
   const picked = [];
-  const app = mount({ onSelect: (id) => picked.push(id) });
+  const app = await mount({ onSelect: (id) => picked.push(id) });
+  const x11Root = await createRoot({ app });
   await settle();
 
   const row = rowFor(app, 'src');
@@ -132,27 +134,29 @@ test('clicking the twisty expands without selecting the row', async () => {
   assert.ok(labels(app).includes('nodes.js'), 'the branch opened');
   assert.deepStrictEqual(picked, [], 'and the selection did not move');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('clicking the label selects the row', async () => {
   const picked = [];
-  const app = mount({ onSelect: (id) => picked.push(id) });
+  const app = await mount({ onSelect: (id) => picked.push(id) });
+  const x11Root = await createRoot({ app });
   await settle();
 
   click(app, rowFor(app, 'README.md'));
   await settle();
   assert.deepStrictEqual(picked, ['readme']);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Right opens a branch, then walks into it; Left closes, then walks out', async () => {
   const picked = [];
-  const app = mount({
+  const app = await mount({
     defaultSelected: 'src',
     onSelect: (id) => picked.push(id),
   });
+  const x11Root = await createRoot({ app });
   await settle();
   rowFor(app, 'src').focus();
 
@@ -177,16 +181,17 @@ test('Right opens a branch, then walks into it; Left closes, then walks out', as
   await settle();
   assert.ok(!labels(app).includes('nodes.js'), 'and Left again collapses it');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Up/Down walk the visible rows and skip disabled ones', async () => {
   const picked = [];
-  const app = mount({
+  const app = await mount({
     defaultExpanded: ['src'],
     defaultSelected: 'src',
     onSelect: (id) => picked.push(id),
   });
+  const x11Root = await createRoot({ app });
   await settle();
   rowFor(app, 'src').focus();
 
@@ -208,16 +213,17 @@ test('Up/Down walk the visible rows and skip disabled ones', async () => {
   await settle();
   assert.strictEqual(picked.at(-1), 'src');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('type-ahead jumps to a row by prefix', async () => {
   const picked = [];
-  const app = mount({
+  const app = await mount({
     defaultExpanded: ['src', 'components'],
     defaultSelected: 'src',
     onSelect: (id) => picked.push(id),
   });
+  const x11Root = await createRoot({ app });
   await settle();
   rowFor(app, 'src').focus();
 
@@ -237,15 +243,16 @@ test('type-ahead jumps to a row by prefix', async () => {
   await settle();
   assert.strictEqual(picked.at(-1), 'readme');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Enter toggles a branch and reports the activation', async () => {
   const activated = [];
-  const app = mount({
+  const app = await mount({
     defaultSelected: 'src',
     onActivate: (id) => activated.push(id),
   });
+  const x11Root = await createRoot({ app });
   await settle();
   rowFor(app, 'src').focus();
 
@@ -258,14 +265,15 @@ test('Enter toggles a branch and reports the activation', async () => {
   await settle();
   assert.ok(!labels(app).includes('nodes.js'), 'and Enter again closed it');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('controlled expansion reports changes and follows the prop', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const changes = [];
   const render = (open) =>
-    ReactX11.render(
+    x11Root.render(
       h(
         'window',
         { width: 260, height: 200 },
@@ -275,8 +283,6 @@ test('controlled expansion reports changes and follows the prop', async () => {
           onExpandedChange: (next) => changes.push(next),
         }),
       ),
-      null,
-      app,
     );
 
   render([]);
@@ -293,19 +299,18 @@ test('controlled expansion reports changes and follows the prop', async () => {
   await settle();
   assert.ok(labels(app).includes('nodes.js'), 'the prop opens it');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a branch with no children still shows a twisty', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 260, height: 200 },
       h(Tree, { items: [{ id: 'empty', label: 'empty', children: [] }] }),
     ),
-    null,
-    app,
   );
   await settle();
 
@@ -317,5 +322,5 @@ test('a branch with no children still shows a twisty', async () => {
     'the twisty is drawn even with an empty children array',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });

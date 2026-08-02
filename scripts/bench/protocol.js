@@ -26,7 +26,7 @@ import { createClient, StaticFontSource } from 'ntk';
 import { compositePixels, countStream } from './xcount.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
-const ReactX11 = (await import('../../src/index.js')).default;
+const { createRoot } = await import('../../src/index.js');
 
 const require = createRequire(import.meta.url);
 const fontDir = join(
@@ -65,9 +65,10 @@ const settle = (app) =>
  * an interaction rather than a mount. */
 async function measure(name, fn) {
   const { app, stats } = await connect();
+  const x11Root = await createRoot({ app });
   await settle(app);
   if (typeof fn !== 'function') {
-    await fn.prepare(app);
+    await fn.prepare(app, x11Root);
     await settle(app);
     fn = fn.run;
   }
@@ -88,7 +89,7 @@ async function measure(name, fn) {
   };
   process.on('uncaughtException', onUncaught);
   try {
-    await fn(app);
+    await fn(app, x11Root);
   } catch (err) {
     failure ??= err;
   } finally {
@@ -216,9 +217,9 @@ function iconWall(count, size = 20) {
 
 /** Mount a tree, settle it, and hand back the root node plus a frame pump.
  * The mount is what `prepare` pays for, so `run` measures only repaints. */
-async function mounted(app, element) {
+async function mounted(x11Root, element) {
   const instance = await new Promise((resolve) =>
-    ReactX11.render(element, resolve, app),
+    x11Root.render(element, resolve),
   );
   const root = instance._reactX11Node;
   const frame = () => {
@@ -232,14 +233,14 @@ async function mounted(app, element) {
 const SCENARIOS = [
   [
     'text: paragraph, no clip',
-    async (app) => {
+    async (app, x11Root) => {
       const ctx = pixmapCtx(app);
       paragraphLayout(app).draw(ctx, 5, 5);
     },
   ],
   [
     'text: paragraph, inside a rect clip',
-    async (app) => {
+    async (app, x11Root) => {
       const ctx = pixmapCtx(app);
       const layout = paragraphLayout(app);
       ctx.save();
@@ -257,7 +258,7 @@ const SCENARIOS = [
     // to allocate a full-surface a8 pixmap, rasterize into it and Composite
     // the whole surface *per clip*, so this scenario is where that shows up.
     'clips: 40 nested rect clips with text',
-    async (app) => {
+    async (app, x11Root) => {
       const ctx = pixmapCtx(app);
       const layout = paragraphLayout(app);
       ctx.save();
@@ -277,7 +278,7 @@ const SCENARIOS = [
   ],
   [
     'shapes: 50 filled rounded boxes',
-    async (app) => {
+    async (app, x11Root) => {
       const ctx = pixmapCtx(app);
       for (let i = 0; i < 50; i++) {
         ctx.fillStyle = i % 2 ? '#2980b9' : '#dfe6e9';
@@ -295,9 +296,9 @@ const SCENARIOS = [
   ],
   [
     'mount: window with 40 boxes and labels',
-    async (app) => {
+    async (app, x11Root) => {
       await new Promise((resolve) =>
-        ReactX11.render(
+        x11Root.render(
           React.createElement(
             'window',
             { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
@@ -326,7 +327,6 @@ const SCENARIOS = [
             ),
           ),
           resolve,
-          app,
         ),
       );
       await new Promise((r) => setImmediate(r));
@@ -350,9 +350,9 @@ const SCENARIOS = [
         root.flush();
       };
       return {
-        prepare: async (app) => {
+        prepare: async (app, x11Root) => {
           const instance = await new Promise((resolve) =>
-            ReactX11.render(
+            x11Root.render(
               React.createElement(
                 'window',
                 { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
@@ -382,7 +382,6 @@ const SCENARIOS = [
                 ),
               ),
               resolve,
-              app,
             ),
           );
           root = instance._reactX11Node;
@@ -413,8 +412,8 @@ const SCENARIOS = [
     (() => {
       let ctl;
       return {
-        prepare: async (app) => {
-          ctl = await mounted(app, iconWall(100));
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, iconWall(100));
         },
         run: async (app) => {
           // what an expose or a theme change does: unbounded damage
@@ -434,8 +433,8 @@ const SCENARIOS = [
     (() => {
       let ctl;
       return {
-        prepare: async (app) => {
-          ctl = await mounted(app, iconWall(100));
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, iconWall(100));
         },
         run: async (app) => {
           // a paint-only change on an ancestor: damage is that node's bounds,

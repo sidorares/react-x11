@@ -4,17 +4,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 // 10 rows of 40 in a 100-tall viewport: 400 of content, 300 of scroll range
-function mount() {
+async function mount() {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const ref = React.createRef();
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100 },
@@ -26,8 +27,6 @@ function mount() {
         ),
       ),
     ),
-    null,
-    app,
   );
   return { app, wnd: app.windows[0] };
 }
@@ -41,7 +40,8 @@ const drag = (wnd, from, to) => {
 };
 
 test('dragging the thumb scrolls in proportion to the pointer', async () => {
-  const { app, wnd } = mount();
+  const { app, wnd } = await mount();
+  const x11Root = await createRoot({ app });
   await tick();
   const sv = scroller(app);
   const bar = sv._scrollbar();
@@ -68,11 +68,12 @@ test('dragging the thumb scrolls in proportion to the pointer', async () => {
   assert.strictEqual(sv.scrollY, bar.range);
 
   wnd.emit('mouseup', { x: bar.x + 2, y: 10_000, keycode: 1 });
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the drag keeps its grip on the thumb, without jumping', async () => {
-  const { app, wnd } = mount();
+  const { app, wnd } = await mount();
+  const x11Root = await createRoot({ app });
   await tick();
   const sv = scroller(app);
   const bar = sv._scrollbar();
@@ -87,11 +88,12 @@ test('the drag keeps its grip on the thumb, without jumping', async () => {
   assert.strictEqual(sv.scrollY, 0, 'grabbing the thumb does not move it');
   wnd.emit('mouseup', { x: bar.x + 2, y: bar.thumbStart, keycode: 1 });
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a press on the track pages towards the pointer', async () => {
-  const { app, wnd } = mount();
+  const { app, wnd } = await mount();
+  const x11Root = await createRoot({ app });
   await tick();
   const sv = scroller(app);
   const bar = sv._scrollbar();
@@ -107,13 +109,14 @@ test('a press on the track pages towards the pointer', async () => {
   wnd.emit('mousedown', { x: bar.x + 2, y: bar.trackStart + 1, keycode: 1 });
   assert.strictEqual(sv.scrollY, 0, 'and back up again');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the bar takes the press even with content painted under it', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const clicks = [];
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100 },
@@ -129,8 +132,6 @@ test('the bar takes the press even with content painted under it', async () => {
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const sv = scroller(app);
@@ -147,19 +148,18 @@ test('the bar takes the press even with content painted under it', async () => {
   drag(app.windows[0], { x: 10, y: 10 }, { x: 10, y: 10 });
   assert.deepStrictEqual(clicks, [0]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a <textarea> bar drag scrolls it, and never moves the caret', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 80 },
       h('textarea', { value: 'many lines', style: { flexGrow: 1 } }),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -207,17 +207,18 @@ test('a <textarea> bar drag scrolls it, and never moves the caret', async () => 
   area._defaultMouseDown({ x: content.x + 5, y: content.y + 5, detail: 1 });
   assert.ok(placed, 'a press away from the bar still places the caret');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // --- horizontal ------------------------------------------------------------
 
 /** A row of fixed-width cells: wider than the viewport, and unable to
  * shrink, which is what a table of columns looks like. */
-function mountWide() {
+async function mountWide() {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const ref = React.createRef();
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100 },
@@ -236,14 +237,13 @@ function mountWide() {
         ),
       ),
     ),
-    null,
-    app,
   );
   return { app, wnd: app.windows[0], ref };
 }
 
 test('content wider than the viewport scrolls sideways', async () => {
-  const { app, wnd } = mountWide();
+  const { app, wnd } = await mountWide();
+  const x11Root = await createRoot({ app });
   await tick();
   const sv = scroller(app);
 
@@ -268,11 +268,12 @@ test('content wider than the viewport scrolls sideways', async () => {
   );
   wnd.emit('mouseup', { x: 0, y: 0, keycode: 1 });
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a sideways scroll moves the content, not just the number', async () => {
-  const { app, ref } = mountWide();
+  const { app, ref } = await mountWide();
+  const x11Root = await createRoot({ app });
   await tick();
   const sv = scroller(app);
   const firstCell = sv.children[0].children[0];
@@ -286,11 +287,12 @@ test('a sideways scroll moves the content, not just the number', async () => {
     'children are laid out shifted by the scroll',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('scrollTo takes a number for y, or an object for either axis', async () => {
-  const { app, ref } = mountWide();
+  const { app, ref } = await mountWide();
+  const x11Root = await createRoot({ app });
   await tick();
   const sv = scroller(app);
 
@@ -304,11 +306,12 @@ test('scrollTo takes a number for y, or an object for either axis', async () => 
   await tick();
   assert.strictEqual(sv.scrollX, 350);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the horizontal wheel scrolls sideways, and Shift+wheel does too', async () => {
-  const { app, wnd } = mountWide();
+  const { app, wnd } = await mountWide();
+  const x11Root = await createRoot({ app });
   await tick();
   const sv = scroller(app);
 
@@ -324,11 +327,12 @@ test('the horizontal wheel scrolls sideways, and Shift+wheel does too', async ()
   assert.ok(sv.scrollX > after, 'Shift turned a vertical wheel sideways');
   assert.strictEqual(sv.scrollY, 0, 'and did not scroll down as well');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('scrollIntoView brings a node in from either side', async () => {
-  const { app, ref } = mountWide();
+  const { app, ref } = await mountWide();
+  const x11Root = await createRoot({ app });
   await tick();
   const sv = scroller(app);
   const last = sv.children[0].children[5];
@@ -341,12 +345,13 @@ test('scrollIntoView brings a node in from either side', async () => {
   await tick();
   assert.strictEqual(sv.scrollX, 0, 'and back left again');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('with both bars showing, neither runs into the other corner', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100 },
@@ -361,8 +366,6 @@ test('with both bars showing, neither runs into the other corner', async () => {
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const sv = scroller(app);
@@ -379,5 +382,5 @@ test('with both bars showing, neither runs into the other corner', async () => {
     'and so does the horizontal one',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });

@@ -107,29 +107,11 @@ export interface Root {
  */
 export function createRoot(options?: RootOptions): Promise<Root>;
 
-/**
- * Legacy entry point. Without a container it connects to the X server and
- * resolves once mounted; with one it mounts synchronously.
- */
-export function render(
-  element: ReactNode,
-  callback?: () => void,
-): Promise<void>;
-export function render(
-  element: ReactNode,
-  callback: (() => void) | undefined,
-  container: NtkApp,
-): void;
-
-export function unmountComponentAtNode(container: NtkApp): void;
-
 /** The react-reconciler instance. Escape hatch; not a stable API. */
 export const Renderer: any;
 
 declare const ReactX11: {
-  render: typeof render;
   createRoot: typeof createRoot;
-  unmountComponentAtNode: typeof unmountComponentAtNode;
 };
 export default ReactX11;
 

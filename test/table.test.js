@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11, { Table } from '../src/index.js';
+import { createRoot, Table } from '../src/index.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -56,34 +56,35 @@ const makeRows = (n) =>
     size: (i * 37) % 1000,
   }));
 
-function mount(props, rowCount = 8, height = 200) {
+async function mount(props, rowCount = 8, height = 200) {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 300, height },
       h(Table, { columns: COLUMNS, rows: makeRows(rowCount), ...props }),
     ),
-    null,
-    app,
   );
   return app;
 }
 
 test('renders a header and the rows under it', async () => {
-  const app = mount({}, 3);
+  const app = await mount({}, 3);
+  const x11Root = await createRoot({ app });
   await settle();
   const shown = texts(app);
   assert.ok(shown.includes('Name') && shown.includes('Size'), 'header labels');
   assert.ok(shown.includes('file-0000.js'));
   assert.ok(shown.includes('file-0002.js'));
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('only the rows in view are built', async () => {
   // 10k rows in a 200px window: about eight fit, plus the overscan
-  const app = mount({}, 10_000);
+  const app = await mount({}, 10_000);
+  const x11Root = await createRoot({ app });
   await settle();
 
   const built = texts(app).filter((t) => t.endsWith('.js')).length;
@@ -94,23 +95,22 @@ test('only the rows in view are built', async () => {
   );
   assert.ok(texts(app).includes('file-0000.js'), 'starting at the top');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('the first render, before anything is measured, is still bounded', () => {
+test('the first render, before anything is measured, is still bounded', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   // no awaits: this is the tree as the very first commit leaves it, before
   // layout has run and onViewport could have said how tall the viewport is.
   // Rendering "all of them" here put 130,000 nodes in the tree and froze the
   // window for the best part of a second.
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 300, height: 200 },
       h(Table, { columns: COLUMNS, rows: makeRows(10_000) }),
     ),
-    null,
-    app,
   );
 
   let nodes = 0;
@@ -121,11 +121,12 @@ test('the first render, before anything is measured, is still bounded', () => {
   walk(root(app));
   assert.ok(nodes < 1000, `first commit built ${nodes} nodes for 10,000 rows`);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the scrollbar still measures the whole list', async () => {
-  const app = mount({}, 10_000);
+  const app = await mount({}, 10_000);
+  const x11Root = await createRoot({ app });
   await settle();
   const body = find(root(app), (n) => n.kind === 'scrollview');
 
@@ -135,11 +136,12 @@ test('the scrollbar still measures the whole list', async () => {
     'the spacers stand in for the rows that were not built',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('scrolling swaps which rows exist', async () => {
-  const app = mount({}, 10_000);
+  const app = await mount({}, 10_000);
+  const x11Root = await createRoot({ app });
   await settle();
   const body = find(root(app), (n) => n.kind === 'scrollview');
 
@@ -150,12 +152,13 @@ test('scrolling swaps which rows exist', async () => {
   assert.ok(shown.includes('file-0500.js'), 'the rows at that offset exist');
   assert.ok(!shown.includes('file-0000.js'), 'and the ones at the top do not');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('clicking a header sorts, and clicking again reverses', async () => {
   const changes = [];
-  const app = mount({ onSortChange: (next) => changes.push(next) }, 4);
+  const app = await mount({ onSortChange: (next) => changes.push(next) }, 4);
+  const x11Root = await createRoot({ app });
   await settle();
 
   const header = find(
@@ -193,15 +196,16 @@ test('clicking a header sorts, and clicking again reverses', async () => {
     'descending',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Up/Down move the selection, Home/End jump to the ends', async () => {
   const picked = [];
-  const app = mount(
+  const app = await mount(
     { onSelect: (id) => picked.push(id), defaultSelected: 0 },
     50,
   );
+  const x11Root = await createRoot({ app });
   await settle();
   focusTable(app);
 
@@ -217,11 +221,12 @@ test('Up/Down move the selection, Home/End jump to the ends', async () => {
   await settle();
   assert.strictEqual(picked.at(-1), 0);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the selection is kept on screen, even when it is not built yet', async () => {
-  const app = mount({ defaultSelected: 0 }, 10_000);
+  const app = await mount({ defaultSelected: 0 }, 10_000);
+  const x11Root = await createRoot({ app });
   await settle();
   const body = find(root(app), (n) => n.kind === 'scrollview');
   focusTable(app);
@@ -235,12 +240,16 @@ test('the selection is kept on screen, even when it is not built yet', async () 
   );
   assert.ok(texts(app).includes('file-9999.js'), 'and that row now exists');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('dragging a header grip resizes that column', async () => {
   const resized = [];
-  const app = mount({ onColumnResize: (id, w) => resized.push([id, w]) }, 4);
+  const app = await mount(
+    { onColumnResize: (id, w) => resized.push([id, w]) },
+    4,
+  );
+  const x11Root = await createRoot({ app });
   await settle();
 
   const grip = find(root(app), (n) => n.style.cursor === 'col-resize');
@@ -257,11 +266,12 @@ test('dragging a header grip resizes that column', async () => {
   assert.strictEqual(cell.abs.width, 180, 'the body column followed');
 
   app.windows[0].emit('mouseup', { x: grip.abs.x + 62, y, keycode: 1 });
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('the header scrolls sideways with the body but not down', async () => {
-  const app = mount({}, 40, 120);
+  const app = await mount({}, 40, 120);
+  const x11Root = await createRoot({ app });
   await settle();
   const body = find(root(app), (n) => n.kind === 'scrollview');
   const header = find(
@@ -274,12 +284,16 @@ test('the header scrolls sideways with the body but not down', async () => {
   await settle();
   assert.strictEqual(header.abs.y, headerY, 'it stayed put vertically');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('clicking a row selects it', async () => {
   const picked = [];
-  const app = mount({ onSelect: (id, row) => picked.push([id, row.name]) }, 6);
+  const app = await mount(
+    { onSelect: (id, row) => picked.push([id, row.name]) },
+    6,
+  );
+  const x11Root = await createRoot({ app });
   await settle();
 
   const cell = find(
@@ -294,5 +308,5 @@ test('clicking a row selects it', async () => {
 
   assert.deepStrictEqual(picked, [[3, 'file-0003.js']]);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });

@@ -22,7 +22,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
 const fontDir = join(
@@ -66,8 +66,8 @@ const settled = (app) =>
  * `<window>` but the node itself for everything else, and a node knows its
  * `root`.
  */
-async function mount(app, element) {
-  await new Promise((resolve) => ReactX11.render(element, resolve, app));
+async function mount(x11Root, element) {
+  await new Promise((resolve) => x11Root.render(element, resolve));
   await new Promise((r) => setImmediate(r));
 }
 
@@ -140,9 +140,10 @@ function rowsElement(refs) {
 
 test('a hover state repaints only that row, with identical pixels', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const refs = Array.from({ length: 8 }, () => React.createRef());
-    await mount(app, rowsElement(refs));
+    await mount(x11Root, rowsElement(refs));
     const row = refs[4].current;
     const root = row.root;
 
@@ -177,9 +178,10 @@ test('a hover state repaints only that row, with identical pixels', async () => 
 
 test('two rows far apart are painted as two rects, not the box around them', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const refs = Array.from({ length: 8 }, () => React.createRef());
-    await mount(app, rowsElement(refs));
+    await mount(x11Root, rowsElement(refs));
     const root = refs[0].current.root;
 
     const { damage, rects, diff } = await paintBothWays(app, root, () => {
@@ -213,11 +215,12 @@ test('two rows far apart are painted as two rects, not the box around them', asy
 
 test('the rows between two far-apart changes are not painted', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // The pixel comparisons cannot show this: repainting a row that did not
     // change produces the same pixels, just at a cost. So count the paints.
     const refs = Array.from({ length: 8 }, () => React.createRef());
-    await mount(app, rowsElement(refs));
+    await mount(x11Root, rowsElement(refs));
     const root = refs[0].current.root;
 
     const painted = new Set();
@@ -247,9 +250,10 @@ test('the rows between two far-apart changes are not painted', async () => {
 
 test('two rows near each other collapse into one rect', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const refs = Array.from({ length: 8 }, () => React.createRef());
-    await mount(app, rowsElement(refs));
+    await mount(x11Root, rowsElement(refs));
     const root = refs[0].current.root;
 
     // Adjacent rows: two rects of ~20px separated by a 3px gap describe 40px
@@ -272,12 +276,13 @@ test('two rows near each other collapse into one rect', async () => {
 
 test('overlapping claims are merged, so no node is painted twice', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // Two rects sharing area would put a node in the overlap through two
     // passes. That is invisible for opaque drawing and wrong for anything
     // translucent, which would blend over itself — so they have to merge.
     const refs = Array.from({ length: 8 }, () => React.createRef());
-    await mount(app, rowsElement(refs));
+    await mount(x11Root, rowsElement(refs));
     const root = refs[0].current.root;
 
     root.invalidate(false, { x: 20, y: 20, width: 60, height: 60 });
@@ -294,9 +299,10 @@ test('overlapping claims are merged, so no node is painted twice', async () => {
 
 test('the number of rects stays capped, however many rows change', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const refs = Array.from({ length: 8 }, () => React.createRef());
-    await mount(app, rowsElement(refs));
+    await mount(x11Root, rowsElement(refs));
     const root = refs[0].current.root;
 
     // every other row: more separate regions than the cap allows
@@ -316,9 +322,10 @@ test('the number of rects stays capped, however many rows change', async () => {
 
 test('a claim covering the window gives up the bound entirely', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const refs = Array.from({ length: 8 }, () => React.createRef());
-    await mount(app, rowsElement(refs));
+    await mount(x11Root, rowsElement(refs));
     const root = refs[0].current.root;
 
     const { damage, rects, diff } = await paintBothWays(app, root, () => {
@@ -336,10 +343,11 @@ test('a claim covering the window gives up the bound entirely', async () => {
 
 test('a caret repaint is bounded to the field it blinks in', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const fieldRef = React.createRef();
     await mount(
-      app,
+      x11Root,
       React.createElement(
         'window',
         { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
@@ -380,6 +388,7 @@ test('a caret repaint is bounded to the field it blinks in', async () => {
 
 test('a subtree is culled by its whole extent, not its own rect', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // `host` is a 10x10 box at the top of the window whose absolutely
     // positioned child is drawn 120px lower, over `target`. Hovering
@@ -390,7 +399,7 @@ test('a subtree is culled by its whole extent, not its own rect', async () => {
     const hostRef = React.createRef();
     const targetRef = React.createRef();
     await mount(
-      app,
+      x11Root,
       React.createElement(
         'window',
         { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
@@ -470,9 +479,10 @@ test('a subtree is culled by its whole extent, not its own rect', async () => {
 
 test('a layout change is never painted partially', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     const refs = Array.from({ length: 8 }, () => React.createRef());
-    await mount(app, rowsElement(refs));
+    await mount(x11Root, rowsElement(refs));
     const row = refs[3].current;
     const root = row.root;
 
@@ -501,7 +511,7 @@ test('a layout change is never painted partially', async () => {
 // change contributes none.
 
 /** Mount `body(state)` under a component and return a state setter. */
-async function mountStateful(app, body) {
+async function mountStateful(x11Root, body) {
   const ref = React.createRef();
   let setState;
   function App() {
@@ -518,7 +528,7 @@ async function mountStateful(app, body) {
     );
   }
   await new Promise((resolve) =>
-    ReactX11.render(React.createElement(App), resolve, app),
+    x11Root.render(React.createElement(App), resolve),
   );
   await new Promise((r) => setImmediate(r));
   return { root: ref.current.root, setState: (v) => setState(v) };
@@ -526,10 +536,11 @@ async function mountStateful(app, body) {
 
 test('a React update bounds the repaint to the row that changed', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // styles built inline every render, the way an app really writes them:
     // all eight rows get a fresh style object, only one differs in value
-    const { root, setState } = await mountStateful(app, (state) =>
+    const { root, setState } = await mountStateful(x11Root, (state) =>
       Array.from({ length: 8 }, (_, i) =>
         React.createElement(
           'box',
@@ -581,6 +592,7 @@ test('a React update bounds the repaint to the row that changed', async () => {
 
 test('a non-style prop the node paints from still damages it', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // Two things change in ONE commit: a row's colour, which bounds the
     // damage to a thin strip, and the field's `placeholder`, which is a prop
@@ -625,7 +637,7 @@ test('a non-style prop the node paints from still damages it', async () => {
       );
     }
     await new Promise((resolve) =>
-      ReactX11.render(React.createElement(App), resolve, app),
+      x11Root.render(React.createElement(App), resolve),
     );
     await new Promise((r) => setImmediate(r));
 
@@ -717,6 +729,7 @@ async function framesDuring(root, app, act, { rounds = 6, delay = 0 } = {}) {
 
 test('a commit that changes nothing visible paints no frame at all', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // The state reaches no prop at all, so the re-render produces exactly the
     // tree already on screen — new element objects, so React really does walk
@@ -724,7 +737,7 @@ test('a commit that changes nothing visible paints no frame at all', async () =>
     // (State carried on *any* prop would not do: props are compared by
     // identity, so a changed one is a real claim, which is deliberate — that
     // is where a subclass's content lives.)
-    const { root, setState } = await mountStateful(app, () =>
+    const { root, setState } = await mountStateful(x11Root, () =>
       Array.from({ length: 6 }, (_, i) =>
         React.createElement(
           'box',
@@ -752,13 +765,14 @@ test('a commit that changes nothing visible paints no frame at all', async () =>
 
 test('a canvas whose onDraw changed repaints the canvas, not the window', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // onDraw matches /^on[A-Z]/, so the base class skips it as an event
     // handler and CanvasNode is the only thing that notices. It used to claim
     // damage unbounded, which made every re-render of a component that draws
     // through <canvas> — a Checkbox tick, a Select chevron — repaint the whole
     // window.
-    const { root, setState } = await mountStateful(app, (state) => [
+    const { root, setState } = await mountStateful(x11Root, (state) => [
       React.createElement('box', {
         key: 'filler',
         style: { height: ROW_H, backgroundColor: '#dfe6e9' },
@@ -790,13 +804,14 @@ test('a canvas whose onDraw changed repaints the canvas, not the window', async 
 
 test('an animated transition stays bounded, including its last frame', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // An absolutely-positioned thumb sliding on `left` is the Switch's
     // arrangement. Every frame of it used to repaint the whole window — and so
     // did the frame the animation *landed* on, because the node was dropped
     // from the animating set before anything claimed its region.
     const TRACK = { width: 36, height: 20 };
-    const { root, setState } = await mountStateful(app, (state) =>
+    const { root, setState } = await mountStateful(x11Root, (state) =>
       React.createElement(
         'box',
         {
@@ -851,6 +866,7 @@ test('an animated transition stays bounded, including its last frame', async () 
 
 test('mounting a child inside a fixed-size box repaints only that box', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // A `Checkbox`'s tick and a `Radio`'s dot are children that mount and
     // unmount, and a child list change is a layout change — which with no
@@ -858,7 +874,7 @@ test('mounting a child inside a fixed-size box repaints only that box', async ()
     // the reflow cannot move anything outside it, so the damage is that
     // subtree before the mutation unioned with the same subtree after layout.
     const WELL = 16;
-    const { root, setState } = await mountStateful(app, (state) => [
+    const { root, setState } = await mountStateful(x11Root, (state) => [
       React.createElement('box', {
         key: 'filler',
         style: { height: ROW_H, backgroundColor: '#dfe6e9' },
@@ -908,12 +924,13 @@ test('mounting a child inside a fixed-size box repaints only that box', async ()
 
 test('a child mounting in an auto-sized box still repaints in full', async () => {
   const app = await headlessApp();
+  const x11Root = await createRoot({ app });
   try {
     // The counterpart, and the reason the rule checks *both* axes: a box with
     // no pinned height grows when a child appears, which moves its siblings —
     // so there is nothing safe to bound the repaint to. If this came back
     // bounded, the test above would prove nothing about the pinned case.
-    const { root, setState } = await mountStateful(app, (state) => [
+    const { root, setState } = await mountStateful(x11Root, (state) => [
       React.createElement(
         'box',
         { key: 'auto', style: { backgroundColor: '#ffffff' } },

@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import ReactX11, { ThemeProvider, useTheme } from '../src/index.js';
+import { createRoot, ThemeProvider, useTheme } from '../src/index.js';
 import { createStyles, flattenStyle, resolveTokens } from '../src/styles.js';
 import { createMockApp, pressButton, moveMouse } from './helpers/mock-app.js';
 
@@ -13,7 +13,7 @@ const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 const nodeOf = (app, index = 0) => app.windows[index]._reactX11Node;
 
-test('flattenStyle: arrays flatten left-to-right, falsy entries skipped', () => {
+test('flattenStyle: arrays flatten left-to-right, falsy entries skipped', async () => {
   const base = { padding: 4, backgroundColor: 'red' };
   assert.strictEqual(flattenStyle(base), base, 'a lone object is not copied');
   assert.deepStrictEqual(
@@ -31,7 +31,7 @@ test('flattenStyle: arrays flatten left-to-right, falsy entries skipped', () => 
   );
 });
 
-test('createStyles rejects unknown properties and layout in state blocks', () => {
+test('createStyles rejects unknown properties and layout in state blocks', async () => {
   assert.throws(
     () => createStyles({ a: { paddin: 4 } }),
     /unknown style property "paddin" in styles\.a/,
@@ -51,14 +51,13 @@ test('createStyles rejects unknown properties and layout in state blocks', () =>
 
 test('style drives layout and paint; props stay semantic', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100, title: 'main' },
       h('box', { style: { flexGrow: 1, backgroundColor: '#123456' } }),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -75,21 +74,20 @@ test('style drives layout and paint; props stay semantic', async () => {
     'the background painted',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
-test('a hoisted style is skipped by identity on re-render', () => {
+test('a hoisted style is skipped by identity on re-render', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const s = createStyles({ box: { flexGrow: 1, backgroundColor: 'red' } });
   const render = (title) =>
-    ReactX11.render(
+    x11Root.render(
       h(
         'window',
         { width: 200, height: 100, title },
         h('box', { style: s.box }),
       ),
-      null,
-      app,
     );
 
   render('a');
@@ -98,11 +96,12 @@ test('a hoisted style is skipped by identity on re-render', () => {
   render('b');
   assert.strictEqual(box.style, first, 'same object, no re-application');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test(':hover resolves in the renderer — a repaint, not a React render', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   let renders = 0;
   function Target() {
     renders++;
@@ -115,11 +114,7 @@ test(':hover resolves in the renderer — a repaint, not a React render', async 
       },
     });
   }
-  ReactX11.render(
-    h('window', { width: 100, height: 100 }, h(Target)),
-    null,
-    app,
-  );
+  x11Root.render(h('window', { width: 100, height: 100 }, h(Target)));
   await tick();
 
   const wnd = app.windows[0];
@@ -139,12 +134,13 @@ test(':hover resolves in the renderer — a repaint, not a React render', async 
     'the component never re-rendered for a visual-only state change',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test(':hover applies up the ancestor chain, like CSS', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 100, height: 100 },
@@ -154,8 +150,6 @@ test(':hover applies up the ancestor chain, like CSS', async () => {
         h('box', { style: { width: 20, height: 20 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -167,11 +161,12 @@ test(':hover applies up the ancestor chain, like CSS', async () => {
     'hovering a child hovers its ancestors',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test(':active follows the press, :disabled wins over :hover', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const style = {
     width: 40,
     height: 40,
@@ -181,14 +176,12 @@ test(':active follows the press, :disabled wins over :hover', async () => {
     ':disabled': { backgroundColor: 'grey' },
   };
   const render = (disabled) =>
-    ReactX11.render(
+    x11Root.render(
       h(
         'window',
         { width: 100, height: 100 },
         h('box', { style, disabled, focusable: true }),
       ),
-      null,
-      app,
     );
 
   render(false);
@@ -211,12 +204,13 @@ test(':active follows the press, :disabled wins over :hover', async () => {
     ':disabled beats everything below it',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('<window>: width/height are the X window, style is the root box', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h('window', {
       width: 300,
       height: 200,
@@ -224,8 +218,6 @@ test('<window>: width/height are the X window, style is the root box', async () 
       minHeight: 80,
       style: { padding: 10, backgroundColor: 'white' },
     }),
-    null,
-    app,
   );
   await tick();
 
@@ -244,25 +236,24 @@ test('<window>: width/height are the X window, style is the root box', async () 
   );
   assert.strictEqual(root.style.padding, 10);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a style-only <window> can still size its root box with style', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 300, height: 200, style: { flexDirection: 'row' } },
       h('box', { style: { width: 50, height: 20, backgroundColor: 'red' } }),
     ),
-    null,
-    app,
   );
   await tick();
   const box = nodeOf(app).children[0];
   assert.strictEqual(box.abs.width, 50);
   assert.strictEqual(box.abs.height, 20);
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('REACT_X11_STYLE_ONLY: a flat style prop is an error that names the fix', async () => {
@@ -382,7 +373,8 @@ test('a transition eases a colour instead of snapping to it', async () => {
   setAnimationClock(() => clock);
   try {
     const app = createMockApp();
-    ReactX11.render(
+    const x11Root = await createRoot({ app });
+    x11Root.render(
       h(
         'window',
         { width: 100, height: 100 },
@@ -396,8 +388,6 @@ test('a transition eases a colour instead of snapping to it', async () => {
           },
         }),
       ),
-      null,
-      app,
     );
     await tick();
 
@@ -441,7 +431,8 @@ test('a transition after an idle spell still runs', async () => {
   setAnimationClock(() => clock);
   try {
     const app = createMockApp();
-    ReactX11.render(
+    const x11Root = await createRoot({ app });
+    x11Root.render(
       h(
         'window',
         { width: 100, height: 100 },
@@ -455,8 +446,6 @@ test('a transition after an idle spell still runs', async () => {
           },
         }),
       ),
-      null,
-      app,
     );
     await tick();
     const window = nodeOf(app);
@@ -491,7 +480,8 @@ test('an interrupted transition reverses from where it got to', async () => {
   setAnimationClock(() => clock);
   try {
     const app = createMockApp();
-    ReactX11.render(
+    const x11Root = await createRoot({ app });
+    x11Root.render(
       h(
         'window',
         { width: 100, height: 100 },
@@ -505,8 +495,6 @@ test('an interrupted transition reverses from where it got to', async () => {
           },
         }),
       ),
-      null,
-      app,
     );
     await tick();
     const root = nodeOf(app);
@@ -537,6 +525,7 @@ test('transitions cover layout too, and relayout as they run', async () => {
   setAnimationClock(() => clock);
   try {
     const app = createMockApp();
+    const x11Root = await createRoot({ app });
     const ui = (left) =>
       h(
         'window',
@@ -551,13 +540,13 @@ test('transitions cover layout too, and relayout as they run', async () => {
           },
         }),
       );
-    ReactX11.render(ui(0), null, app);
+    x11Root.render(ui(0));
     await tick();
     const root = nodeOf(app);
     const box = root.children[0];
     assert.strictEqual(box.abs.x, 0);
 
-    ReactX11.render(ui(100), null, app);
+    x11Root.render(ui(100));
     clock = 50;
     root._advanceAnimations(clock);
     root.flush();
@@ -581,6 +570,7 @@ test('a transition started by a prop change schedules its own frames', async () 
   setAnimationClock(() => clock);
   try {
     const app = createMockApp();
+    const x11Root = await createRoot({ app });
     const ui = (backgroundColor) =>
       h(
         'window',
@@ -589,7 +579,7 @@ test('a transition started by a prop change schedules its own frames', async () 
           style: { flexGrow: 1, backgroundColor, transition: 200 },
         }),
       );
-    ReactX11.render(ui('#000000'), null, app);
+    x11Root.render(ui('#000000'));
     await tick();
     const root = nodeOf(app);
     const box = root.children[0];
@@ -601,7 +591,7 @@ test('a transition started by a prop change schedules its own frames', async () 
     // displayed frame of a transition equals the previous style — so the
     // transition must schedule its first frame itself, or it only runs
     // when something else happens to dirty the window.
-    ReactX11.render(ui('#ffffff'), null, app);
+    x11Root.render(ui('#ffffff'));
 
     clock = 1100; // half way
     await tick();
@@ -640,7 +630,8 @@ test('a transition started by a prop change schedules its own frames', async () 
 
 test('a property with no midpoint snaps rather than animating', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 100, height: 100 },
@@ -652,26 +643,22 @@ test('a property with no midpoint snaps rather than animating', async () => {
         },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const root = nodeOf(app);
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 100, height: 100 },
       h('box', { style: { flexDirection: 'column', transition: 100 } }),
     ),
-    null,
-    app,
   );
   assert.strictEqual(
     root.children[0].style.flexDirection,
     'column',
     'an enum has no midpoint: it takes effect at once',
   );
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('Switch: the thumb slides between the ends instead of snapping', async () => {
@@ -681,15 +668,14 @@ test('Switch: the thumb slides between the ends instead of snapping', async () =
   setAnimationClock(() => clock);
   try {
     const app = createMockApp();
+    const x11Root = await createRoot({ app });
     const render = (checked) =>
-      ReactX11.render(
+      x11Root.render(
         h(
           'window',
           { width: 100, height: 60 },
           h(Switch, { checked, onChange: () => {} }),
         ),
-        null,
-        app,
       );
 
     render(false);
@@ -726,10 +712,11 @@ const THEME = {
 
 test('a hoisted style resolves $tokens against the nearest theme', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const s = createStyles({
     card: { backgroundColor: '$panel', padding: '$gutter', flexGrow: 1 },
   });
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 100, height: 100, theme: THEME },
@@ -739,8 +726,6 @@ test('a hoisted style resolves $tokens against the nearest theme', async () => {
         h('text', { style: { color: '$ink' } }, 'hi'),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -754,12 +739,13 @@ test('a hoisted style resolves $tokens against the nearest theme', async () => {
     'the resolved padding reached yoga',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a nested theme merges over the outer one', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 100, height: 100, theme: THEME },
@@ -769,8 +755,6 @@ test('a nested theme merges over the outer one', async () => {
         h('text', { style: { color: '$ink' } }, 'hi'),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -782,14 +766,15 @@ test('a nested theme merges over the outer one', async () => {
     'and the rest of the outer palette still applies',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('changing the theme restyles the subtree', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const s = createStyles({ card: { backgroundColor: '$panel', flexGrow: 1 } });
   const render = (theme) =>
-    ReactX11.render(
+    x11Root.render(
       h(
         'window',
         { width: 100, height: 100, theme },
@@ -799,8 +784,6 @@ test('changing the theme restyles the subtree', async () => {
           h('text', { style: { color: '$ink' } }, 'x'),
         ),
       ),
-      null,
-      app,
     );
 
   render(THEME);
@@ -813,12 +796,13 @@ test('changing the theme restyles the subtree', async () => {
   assert.strictEqual(box.style.backgroundColor, '#1e272e');
   assert.strictEqual(box.children[0].style.color, '#f5f6fa', 'deep nodes too');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a popup inherits the theme of where it is written, not its window', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 200, theme: THEME },
@@ -832,8 +816,6 @@ test('a popup inherits the theme of where it is written, not its window', async 
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -844,23 +826,28 @@ test('a popup inherits the theme of where it is written, not its window', async 
     'a menu follows the UI that opened it, across the window boundary',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('an unknown token is an error naming what the theme has', async () => {
   const app = createMockApp();
   const errors = [];
+  // The tree throws on purpose. `onUncaughtError` is the channel for that —
+  // the default one logs *and* sets process.exitCode, which is right for an
+  // app and wrong for a test asserting on the message.
+  const x11Root = await createRoot({
+    app,
+    onUncaughtError: (err) => errors.push(String(err?.message ?? err)),
+  });
   const orig = console.error;
   console.error = (...a) => errors.push(a.join(' '));
   try {
-    ReactX11.render(
+    x11Root.render(
       h(
         'window',
         { width: 100, height: 100, theme: THEME },
         h('box', { style: { backgroundColor: '$pannel' } }),
       ),
-      null,
-      app,
     );
     await tick();
   } finally {
@@ -870,7 +857,7 @@ test('an unknown token is an error naming what the theme has', async () => {
   assert.match(errors.join('\n'), /theme has panel, ink, gutter, accent/);
 });
 
-test('tokens keep the identity fast path: same style, same theme, same object', () => {
+test('tokens keep the identity fast path: same style, same theme, same object', async () => {
   const s = createStyles({ card: { backgroundColor: '$panel' } });
   const a = resolveTokens(s.card, THEME);
   const b = resolveTokens(s.card, THEME);
@@ -880,9 +867,10 @@ test('tokens keep the identity fast path: same style, same theme, same object', 
 
 test('a token change invalidates cached text, not just the style object', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const s = createStyles({ title: { fontSize: 20, color: '$ink' } });
   const render = (theme) =>
-    ReactX11.render(
+    x11Root.render(
       h(
         'window',
         { width: 200, height: 80, theme },
@@ -892,8 +880,6 @@ test('a token change invalidates cached text, not just the style object', async 
           h('text', { style: s.title }, 'Dashboard'),
         ),
       ),
-      null,
-      app,
     );
 
   render(THEME);
@@ -914,7 +900,7 @@ test('a token change invalidates cached text, not just the style object', async 
     'the memoised text layout was dropped, so the repaint uses the new colour',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // --- ThemeProvider ---------------------------------------------------------
@@ -926,20 +912,19 @@ test('a token change invalidates cached text, not just the style object', async 
 
 test('ThemeProvider feeds both channels: useTheme and $token read one palette', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const s = createStyles({ card: { backgroundColor: '$accent', flexGrow: 1 } });
   let fromContext;
   const Probe = () => {
     fromContext = useTheme();
     return h('box', { style: s.card });
   };
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 100, height: 100 },
       h(ThemeProvider, { value: { accent: '#ff0000' } }, h(Probe)),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -961,17 +946,18 @@ test('ThemeProvider feeds both channels: useTheme and $token read one palette', 
     'both channels carry the same object, so the resolution cache holds',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a nested ThemeProvider merges over the outer one, as a nested theme prop does', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   let inner;
   const Probe = () => {
     inner = useTheme();
     return h('box', { style: { backgroundColor: '$accent', flexGrow: 1 } });
   };
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 100, height: 100 },
@@ -981,8 +967,6 @@ test('a nested ThemeProvider merges over the outer one, as a nested theme prop d
         h(ThemeProvider, { value: { accent: '#333333' } }, h(Probe)),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -991,14 +975,15 @@ test('a nested ThemeProvider merges over the outer one, as a nested theme prop d
   const box = nodeOf(app).children[0].children[0].children[0];
   assert.strictEqual(box.style.backgroundColor, '#333333', 'tokens agree');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a ThemeProvider above a <window> plants the palette on the window', async () => {
   // a <window> may not sit inside a box, so the provider cannot wrap one —
   // it puts the prop on the window instead of coming between them
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       ThemeProvider,
       { value: { accent: '#abcdef' } },
@@ -1008,8 +993,6 @@ test('a ThemeProvider above a <window> plants the palette on the window', async 
         h('box', { style: { backgroundColor: '$accent', flexGrow: 1 } }),
       ),
     ),
-    null,
-    app,
   );
   await tick();
 
@@ -1017,17 +1000,18 @@ test('a ThemeProvider above a <window> plants the palette on the window', async 
   assert.strictEqual(win.kind, 'window', 'no box came between them');
   assert.strictEqual(win.children[0].style.backgroundColor, '#abcdef');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a $token with no theme anywhere is reported once, not silently dropped', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const warnings = [];
   const orig = console.warn;
   console.warn = (...a) => warnings.push(a.join(' '));
   try {
     const render = (color) =>
-      ReactX11.render(
+      x11Root.render(
         h(
           'window',
           { width: 100, height: 100 },
@@ -1035,8 +1019,6 @@ test('a $token with no theme anywhere is reported once, not silently dropped', a
             style: { backgroundColor: '$panel', color, flexGrow: 1 },
           }),
         ),
-        null,
-        app,
       );
     render('red');
     await tick();
@@ -1050,18 +1032,19 @@ test('a $token with no theme anywhere is reported once, not silently dropped', a
   assert.match(warnings[0], /<box> uses \$panel but no theme is in force/);
   assert.match(warnings[0], /ThemeProvider/, 'it names the fix');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a popup written under a theme does not trip the no-theme warning', async () => {
   // a <popup> is its own root from birth and only learns where it was
   // written when it attaches, so the check has to wait for the commit
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   const warnings = [];
   const orig = console.warn;
   console.warn = (...a) => warnings.push(a.join(' '));
   try {
-    ReactX11.render(
+    x11Root.render(
       h(
         'window',
         { width: 200, height: 200, theme: THEME },
@@ -1071,8 +1054,6 @@ test('a popup written under a theme does not trip the no-theme warning', async (
           h('box', { style: { backgroundColor: '$panel', flexGrow: 1 } }),
         ),
       ),
-      null,
-      app,
     );
     await tick();
   } finally {
@@ -1080,5 +1061,5 @@ test('a popup written under a theme does not trip the no-theme warning', async (
   }
   assert.deepStrictEqual(warnings, []);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });

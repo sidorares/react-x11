@@ -17,7 +17,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient } from 'ntk';
 
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 import { createMockApp } from './helpers/mock-app.js';
 import { hooks } from '../src/trace-registry.js';
 
@@ -48,11 +48,8 @@ const PRESSABLE = {
 
 test('a press paints its :active flip in the same event-loop turn', async () => {
   const app = createMockApp();
-  ReactX11.render(
-    h('window', { width: 200, height: 100 }, h('box', PRESSABLE)),
-    null,
-    app,
-  );
+  const x11Root = await createRoot({ app });
+  x11Root.render(h('window', { width: 200, height: 100 }, h('box', PRESSABLE)));
   await tick();
   const wnd = app.windows[0];
   const passes = countPaints();
@@ -70,11 +67,12 @@ test('a press paints its :active flip in the same event-loop turn', async () => 
     'and what it painted is the pressed background',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a click that sets React state is still exactly one paint', async () => {
   const app = createMockApp();
+  const x11Root = await createRoot({ app });
   let renders = 0;
   const Host = () => {
     const [on, setOn] = React.useState(false);
@@ -92,7 +90,7 @@ test('a click that sets React state is still exactly one paint', async () => {
       }),
     );
   };
-  ReactX11.render(h(Host), null, app);
+  x11Root.render(h(Host));
   await tick();
   const wnd = app.windows[0];
   const passes = countPaints();
@@ -109,19 +107,18 @@ test('a click that sets React state is still exactly one paint', async () => {
   await tick();
   assert.strictEqual(passes.length, 1, 'and the scheduled frame is a no-op');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a click-placed caret reaches the wire with the press', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100 },
       h('textinput', { value: 'hello', style: { width: 120, height: 24 } }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -130,12 +127,13 @@ test('a click-placed caret reaches the wire with the press', async () => {
   wnd.emit('mousedown', { x: 20, y: 10, keycode: 1 });
   assert.strictEqual(passes.length, 1, 'focus ring and caret painted at once');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('motion still coalesces to one paint per frame', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100 },
@@ -148,8 +146,6 @@ test('motion still coalesces to one paint per frame', async () => {
         },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -163,12 +159,13 @@ test('motion still coalesces to one paint per frame', async () => {
   await tick();
   assert.strictEqual(passes.length, 1, 'the whole burst is one paint');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a wheel burst inside one round trip paints twice, not ten times', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 200 },
@@ -183,8 +180,6 @@ test('a wheel burst inside one round trip paints twice, not ten times', async ()
         ),
       ),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -206,16 +201,13 @@ test('a wheel burst inside one round trip paints twice, not ten times', async ()
   await tick();
   assert.strictEqual(passes.length, 2, 'the other nine caught up in one frame');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a window whose fence is outstanding waits for its scheduled frame', async () => {
   const app = createMockApp();
-  ReactX11.render(
-    h('window', { width: 200, height: 100 }, h('box', PRESSABLE)),
-    null,
-    app,
-  );
+  const x11Root = await createRoot({ app });
+  x11Root.render(h('window', { width: 200, height: 100 }, h('box', PRESSABLE)));
   await tick();
   const wnd = app.windows[0];
   const passes = countPaints();
@@ -228,12 +220,13 @@ test('a window whose fence is outstanding waits for its scheduled frame', async 
   await tick();
   assert.strictEqual(passes.length, 1, 'the scheduled frame still ran it');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('a transition in flight survives being ticked off-cadence', async () => {
   const app = createMockApp();
-  ReactX11.render(
+  const x11Root = await createRoot({ app });
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 100 },
@@ -249,8 +242,6 @@ test('a transition in flight survives being ticked off-cadence', async () => {
         },
       }),
     ),
-    null,
-    app,
   );
   await tick();
   const wnd = app.windows[0];
@@ -291,7 +282,7 @@ test('a transition in flight survives being ticked off-cadence', async () => {
     'landing on the pressed colour',
   );
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 // --- against the real thing --------------------------------------------
@@ -320,6 +311,7 @@ const buttonPress = (keycode) => ({ type: 4, x: 100, y: 100, keycode });
 
 test('real ntk: the press paints, and the present shuts the gate behind it', async (t) => {
   const { server, app } = await xserverApp();
+  const x11Root = await createRoot({ app });
   t.after(async () => {
     await app.close?.();
     server.close?.();
@@ -328,7 +320,7 @@ test('real ntk: the press paints, and the present shuts the gate behind it', asy
   // the render callback hands back the root child's public instance, which
   // for a <window> is the live ntk window
   let wnd = null;
-  ReactX11.render(
+  x11Root.render(
     h(
       'window',
       { width: 200, height: 200 },
@@ -346,7 +338,6 @@ test('real ntk: the press paints, and the present shuts the gate behind it', asy
     (instance) => {
       wnd = instance;
     },
-    app,
   );
   await tick();
   await roundTrip(app);
@@ -381,16 +372,13 @@ test('real ntk: the press paints, and the present shuts the gate behind it', asy
   }
   assert.strictEqual(passes.length, 2, 'one catch-up frame for the rest');
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });
 
 test('an ntk without the fence accessor keeps the scheduled path', async () => {
   const app = createMockApp();
-  ReactX11.render(
-    h('window', { width: 200, height: 100 }, h('box', PRESSABLE)),
-    null,
-    app,
-  );
+  const x11Root = await createRoot({ app });
+  x11Root.render(h('window', { width: 200, height: 100 }, h('box', PRESSABLE)));
   await tick();
   const wnd = app.windows[0];
   const passes = countPaints();
@@ -403,5 +391,5 @@ test('an ntk without the fence accessor keeps the scheduled path', async () => {
   await tick();
   assert.strictEqual(passes.length, 1);
 
-  ReactX11.unmountComponentAtNode(app);
+  await x11Root.unmount();
 });

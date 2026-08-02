@@ -95,10 +95,10 @@ mounted window survive reloads, and only app modules re-execute.
 ```js
 // Minimal hot entry for an app (mirrors examples/tasks-hot.jsx):
 import { performReactRefresh } from './examples/hmr-refresh.js'; // FIRST import
-import ReactX11 from 'react-x11'; // safe now: the global hook is patched
+import { createRoot } from 'react-x11'; // safe now: the global hook is patched
 import { App } from './app-ui.jsx'; // hot: lives in the reloadable graph
 
-ReactX11.render(<App />);
+(await createRoot()).render(<App />);
 import.meta.hot?.accept('./app-ui.jsx', () => {
   performReactRefresh();
 });
@@ -208,7 +208,7 @@ under a custom renderer.
 ```jsx
 import React from 'react';
 import whyDidYouRender from '@welldone-software/why-did-you-render';
-import ReactX11 from 'react-x11';
+import { createRoot } from 'react-x11';
 
 whyDidYouRender(React); // before anything renders
 
@@ -224,7 +224,7 @@ const App = () => (
   </window>
 );
 
-ReactX11.render(<App />);
+(await createRoot()).render(<App />);
 // terminal: "Label … props.user: different objects that are equal by value."
 ```
 

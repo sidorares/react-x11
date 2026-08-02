@@ -30,7 +30,7 @@ import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
-const ReactX11 = (await import('../src/index.js')).default;
+const { createRoot } = await import('../src/index.js');
 const App = (await import('../examples/stress/index.jsx')).default;
 const { watchFrames } = await import('../examples/stress/perf.js');
 
@@ -89,6 +89,7 @@ const server = xserver.createServer({ width: W, height: H });
 const [serverEnd, clientEnd] = xserver.createStreamPair();
 server.addClientStream(serverEnd);
 const app = await createClient({ stream: clientEnd, fontSource: fontSource() });
+const x11Root = await createRoot({ app });
 
 const created = [];
 const createWindow = app.createWindow.bind(app);
@@ -99,7 +100,7 @@ app.createWindow = (attributes) => {
 };
 
 const wnd = await new Promise((resolve) =>
-  ReactX11.render(<App width={W} height={H} />, () => resolve(created[0]), app),
+  x11Root.render(<App width={W} height={H} />, () => resolve(created[0])),
 );
 await sleep(400);
 const root = wnd._reactX11Node;
