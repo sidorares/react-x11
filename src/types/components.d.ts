@@ -36,6 +36,11 @@ export interface Theme {
   accentText: string;
   surfaceHover: string;
   track: string;
+  /** The keyboard focus ring every focusable node under this palette draws
+   * on `:focus-visible` — read by the renderer, not by the widgets. */
+  focusRing: string;
+  focusRingWidth: number;
+  focusRingOffset: number;
   radius: number;
   radiusSmall: number;
   borderWidth: number;

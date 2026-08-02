@@ -30,6 +30,13 @@ const DefaultTheme = {
   accentText: 'white',
   surfaceHover: '#f1f2f6',
   track: '#dfe6e9',
+  // The keyboard focus ring. Read by the renderer, not by the widgets: any
+  // focusable node under this palette draws it on `:focus-visible`, so a
+  // plain `<box focusable>` an application writes is indicated too, and a
+  // theme restyles every ring in the app from here.
+  focusRing: '#2980b9',
+  focusRingWidth: 2,
+  focusRingOffset: 1,
   // shape
   radius: 4,
   radiusSmall: 3,

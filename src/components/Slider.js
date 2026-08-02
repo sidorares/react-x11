@@ -19,6 +19,7 @@ import {
 const h = React.createElement;
 
 const SLIDER_THUMB = 16;
+const SLIDER_SLOP = (24 - SLIDER_THUMB) / 2;
 
 /**
  * <Slider value min max step onChange disabled …boxProps> — draggable
@@ -134,6 +135,12 @@ export function Slider({
           height: SLIDER_THUMB,
           minWidth: 0,
           justifyContent: 'center',
+          // the control is as tall as its thumb and the track inside it sets
+          // `pointerEvents: 'none'`, so 16px was the whole target. Grown to
+          // WCAG 2.2 SC 2.5.8's 24 on the axis that is short, without moving
+          // a pixel of the drawing — a taller slider would misalign every row
+          // it sits in.
+          hitSlop: { top: SLIDER_SLOP, bottom: SLIDER_SLOP },
         },
         style,
       ],

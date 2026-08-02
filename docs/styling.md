@@ -65,19 +65,28 @@ The thing inline CSS cannot do, and the reason people keep a stylesheet:
 />
 ```
 
-`:hover`, `:focus`, `:active`, `:disabled`, `:drag-over`, `:dragging`.
+`:hover`, `:focus`, `:focus-visible`, `:active`, `:disabled`, `:drag-over`,
+`:dragging`.
 These are **node states, not selectors** — each is something the node itself
 already knows, so resolving them needs no cascade, no specificity and no
 tree walk. The event manager already tracks the hover path and the focused
 node; a state change now recomputes one node's style and repaints. **No
 React render.**
 
-Precedence is fixed and low-to-high: `:hover` → `:focus` → `:active` →
-`:disabled` → `:drag-over` → `:dragging`, merged per property, so a disabled
-control never looks hovered, and a drag in progress outranks all four of the
-pointer and focus states.
+Precedence is fixed and low-to-high: `:hover` → `:focus` → `:focus-visible`
+→ `:active` → `:disabled` → `:drag-over` → `:dragging`, merged per property,
+so a disabled control never looks hovered, and a drag in progress outranks
+all of the pointer and focus states.
 Because the hover _path_ is the ancestor chain, hovering a child lights up an
 ancestor's `:hover` block, exactly like CSS.
+
+`:focus-visible` is focus that came from the keyboard — Tab, an arrow inside
+a widget, `autoFocus`, `node.focus()`, a modal handing focus back as it
+closes. A **press** sets `:focus` and not `:focus-visible`, for the reason
+CSS grew the distinction: the user knows where they clicked, and a ring on
+every click is noise, where a ring on Tab is the only cue a keyboard user
+has. Put focus rings in `:focus-visible` and colour changes that are welcome
+either way in `:focus`.
 
 The last two belong to drag and drop. `:drag-over` follows the pointer
 during a drag on exactly the same ancestor-path rule as `:hover` — and,
@@ -87,11 +96,38 @@ that. `:dragging` is set on the source node for the duration of a drag.
 See [drag-and-drop.md](drag-and-drop.md).
 
 **State blocks may only set paint properties** (`backgroundColor`,
-`borderColor`, `borderRadius`, `zIndex`, `color`) — enforced at declaration
+`borderColor`, `borderRadius`, `zIndex`, `outlineWidth`, `outlineColor`,
+`outlineOffset`, `color`) — enforced at declaration
 time by `createStyles`. A `:hover` that could set `padding` would reflow the
 tree on pointer move: jitter, and the end of the "hover is a repaint" property
 that makes this worth having. Anything that changes layout or what renders
 stays in React state.
+
+### The focus ring
+
+**Every focusable node draws one already**, on `:focus-visible`, with no
+styling at all — a bare `<box focusable>` included. It is not something an
+application opts into, because a keyboard user cannot opt into needing it.
+
+`outlineWidth`, `outlineColor` and `outlineOffset` override it, and they are
+paint properties like any other: animatable, legal in a state block, and
+painted **outside the border box** so switching one on cannot move the thing
+it surrounds. That is the whole reason CSS has `outline` as well as `border`,
+and the reason these are not in the layout vocabulary.
+
+```jsx
+<box focusable />                                  {/* ring, for free */}
+<box focusable style={{ outlineWidth: 0 }} />      {/* opted out */}
+<box
+  focusable
+  style={{ ':focus-visible': { outlineWidth: 3, outlineColor: '#e17055' } }}
+/>
+```
+
+A theme sets `focusRing`, `focusRingWidth` and `focusRingOffset` to restyle
+every ring under it at once — the renderer reads them from the nearest
+`theme` prop, so `<ThemeProvider>` covers the widgets and anything an
+application writes itself.
 
 ## `createStyles`
 

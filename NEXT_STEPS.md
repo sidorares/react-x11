@@ -930,6 +930,32 @@ protocol at all.
   project on its own — a `@react-x11/a11y` sibling package is probably the
   right shape, kept out of the core render path.
 
+### 11.4 Local accessibility — DONE (#117)
+
+The half that needs no bus and no screen reader, and that the AT-SPI work
+above builds on. Three gaps, all of them the renderer knowing something and
+not acting on it:
+
+- **A focus ring.** `outlineWidth`/`outlineColor`/`outlineOffset` are paint
+  properties, painted outside the border box and invisible to yoga — the
+  reason CSS has `outline` as well as `border`. `:focus-visible` joins the
+  state keys, set by everything except a press, so a ring appears for the
+  keyboard and not for the mouse. **Every focusable node draws one without
+  opting in**, from `focusRing`/`focusRingWidth`/`focusRingOffset` on the
+  theme, because a keyboard user cannot opt into needing it.
+- **`<scrollview>` answers the keyboard** and is a tab stop whenever it has
+  somewhere to scroll, so a pane of unfocusable content is readable without
+  a pointer — WCAG 2.1.1, and previously a wheel or nothing.
+- **`hitSlop`**, hit testing only: `Switch` and `Slider` were 20px and 16px
+  targets against WCAG 2.2 SC 2.5.8's 24, and both now answer over 24
+  without a pixel of the drawing or the layout moving.
+
+What is still missing locally, and is the natural next step here rather than
+in a sibling package: **`accessibilityRole` and friends as props**. The
+widgets already carry a `role` prop that nothing reads; §11.3's RN-shaped
+vocabulary would give the AT-SPI bridge a tree to mirror instead of one to
+infer.
+
 ## 12. Before 2.0.0 freezes the API
 
 1.2.0 is what is published; #69 is 2.0.0 and unreleased. Every rename in
