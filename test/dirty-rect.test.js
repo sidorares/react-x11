@@ -477,7 +477,7 @@ test('a subtree is culled by its whole extent, not its own rect', async () => {
   }
 });
 
-test('a layout change is never painted partially', async () => {
+test('a layout change is bounded to what moved, pixel-exact', async () => {
   const app = await headlessApp();
   const x11Root = await createRoot({ app });
   try {
@@ -486,8 +486,9 @@ test('a layout change is never painted partially', async () => {
     const row = refs[3].current;
     const root = row.root;
 
-    // a height change moves every row below it, so the region the changed
-    // node covers says nothing about where stale pixels are
+    // a height change moves every row below it: the changed row claims its
+    // before/after subtree, and each displaced sibling claims its own old
+    // and new rects through the layout diff — the rows above never repaint
     const { damage, diff } = await paintBothWays(app, root, () => {
       row.applyProps(
         { ...row.props, style: { ...HOISTED[3], height: 40 } },
@@ -495,8 +496,23 @@ test('a layout change is never painted partially', async () => {
       );
     });
 
-    assert.equal(damage, null, 'a layout change repaints the whole window');
     assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+    assert.ok(damage, 'a bounded layout change must not repaint the window');
+    const row2Bottom = 6 + 2 * (ROW_H + 3) + ROW_H; // unmoved rows above
+    assert.ok(
+      damage.y >= row2Bottom,
+      `damage starts at y=${damage.y}, repainting the unmoved rows above ` +
+        `(row 2 ends at ${row2Bottom})`,
+    );
+    // both arrangements of the shifted rows: old row 7 ends at 171, and
+    // after row 3 grows by 22 every later row sits 22 lower, so the grown
+    // layout's row 7 ends at 193 — the bound must reach the deeper one
+    const lastRowNewBottom = 6 + 7 * (ROW_H + 3) + ROW_H + (40 - ROW_H);
+    assert.ok(
+      damage.y + damage.height >= lastRowNewBottom,
+      `damage ends at ${damage.y + damage.height}, short of the shifted ` +
+        `rows (row 7 now ends at ${lastRowNewBottom})`,
+    );
   } finally {
     await app.close();
   }
@@ -922,14 +938,14 @@ test('mounting a child inside a fixed-size box repaints only that box', async ()
   }
 });
 
-test('a child mounting in an auto-sized box still repaints in full', async () => {
+test('a child mounting in an auto-sized box stays bounded', async () => {
   const app = await headlessApp();
   const x11Root = await createRoot({ app });
   try {
-    // The counterpart, and the reason the rule checks *both* axes: a box with
-    // no pinned height grows when a child appears, which moves its siblings —
-    // so there is nothing safe to bound the repaint to. If this came back
-    // bounded, the test above would prove nothing about the pinned case.
+    // A box with no pinned height grows when a child appears, which moves
+    // its siblings — the box's own before/after claim cannot bound that,
+    // but the displaced sibling claims itself through the layout diff, so
+    // the frame stays the growth region instead of the whole window.
     const { root, setState } = await mountStateful(x11Root, (state) => [
       React.createElement(
         'box',
@@ -949,10 +965,114 @@ test('a child mounting in an auto-sized box still repaints in full', async () =>
 
     const regions = await framesDuring(root, app, () => setState(1));
     assert.strictEqual(regions.length, 1, 'one repaint');
-    assert.strictEqual(
-      regions[0],
-      null,
-      'an unpinned box grows, moving its siblings, so the frame is unbounded',
+    const damage = regions[0];
+    assert.ok(damage, 'the growth must not repaint the whole window');
+    // the grown box plus the sibling it pushed down, in both arrangements:
+    // everything ends well inside the top quarter of the window
+    assert.ok(
+      damage.y + damage.height >= 45 && damage.y + damage.height <= 50,
+      `damage ends at ${damage.y + damage.height}, expected the pushed ` +
+        'sibling to bound it near 46',
+    );
+    // and the bounded frame left exactly the pixels a full repaint would
+    const ctx = (root._ctx ??= root.window.getContext('2d'));
+    const settle = () =>
+      new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+    const partial = await readPixels(ctx, W, H);
+    root.needsPaint = true;
+    root._damage = null;
+    root.flush();
+    await settle();
+    const full = await readPixels(ctx, W, H);
+    const diff = differences(partial, full);
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+  } finally {
+    await app.close();
+  }
+});
+
+/** Read pixels twice — after the bounded frame, and after forcing a full
+ * repaint of the same tree — and return the damage box plus the diff. */
+async function reactPaintBothWays(app, root, act) {
+  const regions = await framesDuring(root, app, act);
+  const ctx = (root._ctx ??= root.window.getContext('2d'));
+  const settle = () =>
+    new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
+  const partial = await readPixels(ctx, W, H);
+  root.needsPaint = true;
+  root._damage = null;
+  root.flush();
+  await settle();
+  const full = await readPixels(ctx, W, H);
+  return { regions, diff: differences(partial, full) };
+}
+
+test('an absolutely-positioned box moving stays a strip, pixel-exact', async () => {
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    // The animation case the bench pins (`update: 5 absolute box moves`):
+    // `left` changes, layout runs, and the frame must be the box's old and
+    // new rects — not the window. The damage box spans both positions
+    // horizontally, so the vertical extent is what proves the bound.
+    const { root, setState } = await mountStateful(x11Root, (state) =>
+      React.createElement('box', {
+        key: 'float',
+        style: {
+          position: 'absolute',
+          left: 20 + state * 120,
+          top: 40,
+          width: 50,
+          height: 50,
+          backgroundColor: '#0984e3',
+        },
+      }),
+    );
+    const { regions, diff } = await reactPaintBothWays(app, root, () =>
+      setState(1),
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+    assert.strictEqual(regions.length, 1, 'one repaint');
+    const damage = regions[0];
+    assert.ok(damage, 'a moved absolute box must not repaint the window');
+    assert.ok(
+      damage.height <= 50 + 2 * SLOP + 2,
+      `damage is ${damage.height}px tall for a 50px box`,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a text change repaints the text line, pixel-exact', async () => {
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    // The ticking-label case: a new string rewraps inside the <text> box,
+    // whose before/after claim bounds the frame. The block below it must
+    // not repaint — its rect is unchanged, so the layout diff stays quiet.
+    const { root, setState } = await mountStateful(x11Root, (state) => [
+      React.createElement(
+        'text',
+        { key: 't', style: { fontSize: 12 } },
+        `tick ${state}`,
+      ),
+      React.createElement('box', {
+        key: 'b',
+        style: { height: ROW_H, backgroundColor: '#e6e9ef', marginTop: 60 },
+      }),
+    ]);
+    const { regions, diff } = await reactPaintBothWays(app, root, () =>
+      setState(1),
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+    assert.strictEqual(regions.length, 1, 'one repaint');
+    const damage = regions[0];
+    assert.ok(damage, 'a text change must not repaint the window');
+    assert.ok(
+      damage.y + damage.height < 60,
+      `damage reaches y=${damage.y + damage.height}, into the unmoved ` +
+        'block that starts 60px down',
     );
   } finally {
     await app.close();

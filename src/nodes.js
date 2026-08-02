@@ -113,6 +113,15 @@ const NO_DAMAGE = Symbol('no-damage');
 // against it.
 const DAMAGE_SLOP = 1;
 
+// While a bounded frame's layout pass runs, every node whose absolute rect
+// comes out different reports its old and new rects here (each already
+// inflated by that node's own paint reach) — which is what lets a layout
+// change stay a handful of rects instead of degrading the frame to
+// FULL_DAMAGE. Module state rather than a parameter because absolutize is
+// a hot recursive walk with overrides in three classes; null outside the
+// pass, and always restored through `finally`.
+let layoutDiffSink = null;
+
 // What an invalidate() may name as its reason — a small closed set, so the
 // frame log, the tracer and the full-repaint warning can print "why" next
 // to "where". A typo'd reason would silently vanish from every report, so
@@ -186,6 +195,16 @@ function insetRect(rect, by) {
     width: rect.width - 2 * by,
     height: rect.height - 2 * by,
   };
+}
+
+/** The overlap of two rects, or null when they have none. */
+function intersectRects(a, b) {
+  const x = Math.max(a.x, b.x);
+  const y = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.width, b.x + b.width);
+  const bottom = Math.min(a.y + a.height, b.y + b.height);
+  if (right <= x || bottom <= y) return null;
+  return { x, y, width: right - x, height: bottom - y };
 }
 
 /** The full track strip a scrollbar occupies (thumb travel included), with
@@ -899,39 +918,21 @@ export class Node {
   }
 
   /**
-   * True when this node's own box cannot change size, so a reflow of its
-   * children cannot move anything outside it. Both axes have to be pinned: a
-   * node with an explicit width but an auto height still grows downwards when
-   * a child appears, which moves its siblings.
-   */
-  _sizePinned() {
-    return (
-      typeof this.style?.width === 'number' &&
-      typeof this.style?.height === 'number'
-    );
-  }
-
-  /**
    * A child was inserted or removed. `before` is this node's paint bounds from
    * *before* the mutation, which the caller has to capture while the departing
    * child is still attached.
    *
-   * A child list change is a layout change, and a layout change with no bound
-   * repaints the window — which is what made toggling a `Checkbox` or a
-   * `Radio` cost a full repaint: the tick and the dot are children that mount
-   * and unmount. But when this node's own size is pinned, the reflow is
-   * confined to its subtree, so the damage is that subtree before the mutation
-   * unioned with the same subtree after layout. The second half is not
-   * measurable yet — an inserted child has no rect until layout runs — so the
-   * node is queued for the root to re-measure once it has.
+   * The damage is this subtree before the mutation unioned with the same
+   * subtree after layout. The second half is not measurable yet — an
+   * inserted child has no rect until layout runs — so the node is queued
+   * for the root to re-measure once it has. Siblings the reflow displaces
+   * outside this subtree (this node growing taller, say) claim themselves
+   * through the layout diff in flush(), which is what lets this claim stay
+   * bounded without requiring the node's own size to be pinned.
    */
   _childListChanged(before) {
     const root = this.root;
     if (!root) return;
-    if (!this._sizePinned()) {
-      root.invalidate(true, null, 'child-list');
-      return;
-    }
     root.invalidate(true, before, 'child-list');
     root._reflowed.add(this);
   }
@@ -1000,19 +1001,21 @@ export class Node {
     }
     // This is how every React update arrives, so it is where partial
     // painting pays for itself. `applyLayoutStyle` has just told us whether
-    // anything can have *moved*: if not, this node's own region bounds what
-    // changed — a new colour, a new label, a different border. And if
-    // nothing it draws changed at all, it contributes no damage, which is
-    // what keeps a commit from widening the region to every node it touched.
-    this.root?.invalidate(
-      layoutChanged,
-      layoutChanged
-        ? null
-        : this._paintChanged(newProps, prev, style, prevStyle)
-          ? this
-          : NO_DAMAGE,
-      'props',
-    );
+    // anything can have *moved*: if so, this subtree's before/after rects
+    // plus the layout diff bound the frame; if not, this node's own region
+    // bounds what changed — a new colour, a new label, a different border.
+    // And if nothing it draws changed at all, it contributes no damage,
+    // which is what keeps a commit from widening the region to every node
+    // it touched.
+    if (layoutChanged) {
+      this._invalidateLayout('props');
+    } else {
+      this.root?.invalidate(
+        false,
+        this._paintChanged(newProps, prev, style, prevStyle) ? this : NO_DAMAGE,
+        'props',
+      );
+    }
   }
 
   /**
@@ -1048,6 +1051,9 @@ export class Node {
   }
 
   setHidden(hidden) {
+    // claimed before the yoga flip so the bound covers the arrangement
+    // being vacated; the reveal is the after-layout re-claim
+    this._invalidateLayout('props');
     this.hidden = hidden;
     if (this.yoga) {
       this.yoga.setDisplay(
@@ -1056,7 +1062,6 @@ export class Node {
           : Yoga.DISPLAY_FLEX,
       );
     }
-    this.root?.invalidate(true, null, 'props');
   }
 
   /**
@@ -1219,15 +1224,58 @@ export class Node {
 
   absolutize(originX, originY) {
     if (!this.yoga) return;
-    this.abs = {
-      x: originX + this.yoga.getComputedLeft(),
-      y: originY + this.yoga.getComputedTop(),
-      width: this.yoga.getComputedWidth(),
-      height: this.yoga.getComputedHeight(),
-    };
+    this._assignAbs(
+      originX + this.yoga.getComputedLeft(),
+      originY + this.yoga.getComputedTop(),
+      this.yoga.getComputedWidth(),
+      this.yoga.getComputedHeight(),
+    );
     for (const child of this.children) {
       if (!child.isWindow) child.absolutize(this.abs.x, this.abs.y);
     }
+  }
+
+  /**
+   * absolutize's write to `abs`, funneled through one place so a bounded
+   * frame's layout diff sees every node the pass actually moved or resized.
+   * The old and new rects are claimed separately (not their union box —
+   * a node crossing the window would drag everything between them along),
+   * each grown by this node's own paint reach. A rect that was or became
+   * zero-area claims nothing: there were, or will be, no pixels there.
+   */
+  _assignAbs(x, y, width, height) {
+    const old = this.abs;
+    this.abs = { x, y, width, height };
+    if (
+      layoutDiffSink &&
+      (old.x !== x ||
+        old.y !== y ||
+        old.width !== width ||
+        old.height !== height)
+    ) {
+      const grow = this._outlineExtent() + DAMAGE_SLOP;
+      if (old.width > 0 && old.height > 0) {
+        layoutDiffSink(insetRect(old, -grow));
+      }
+      if (width > 0 && height > 0) {
+        layoutDiffSink(insetRect(this.abs, -grow));
+      }
+    }
+  }
+
+  /**
+   * A layout-affecting change confined to this node: claim the subtree as
+   * it stands now, and queue it for a second claim once layout has run —
+   * the same before/after protocol `_childListChanged` uses. Anything
+   * *else* the reflow displaces claims itself through the layout diff in
+   * `flush()`, so the frame stays bounded instead of collapsing to
+   * FULL_DAMAGE the way a bare `invalidate(true, null)` would.
+   */
+  _invalidateLayout(reason) {
+    const root = this.root;
+    if (!root) return;
+    root.invalidate(true, this.paintBounds(), reason);
+    root._reflowed.add(this);
   }
 
   /**
@@ -1631,7 +1679,13 @@ export class TextChunkNode extends Node {
   setText(text) {
     this.text = String(text);
     this.parent?._textContentChanged();
-    this.root?.invalidate(true, null, 'text');
+    // the chunk has no geometry of its own — the ancestor that owns a yoga
+    // node is the box that rewraps, and its before/after rects are the
+    // bound on what a new string can repaint
+    let owner = this.parent;
+    while (owner && !owner.yoga) owner = owner.parent;
+    if (owner) owner._invalidateLayout('text');
+    else this.root?.invalidate(true, null, 'text');
   }
 
   _textContentChanged() {
@@ -1790,7 +1844,7 @@ export class ImageNode extends Node {
       this.image = image;
       if (this.yoga) {
         this.yoga.markDirty?.();
-        this.root?.invalidate(true, null, 'content');
+        this._invalidateLayout('content');
       }
     } catch (err) {
       console.error(`react-x11: failed to load image ${src}:`, err.message);
@@ -1954,12 +2008,12 @@ export class ScrollViewNode extends Node {
 
   absolutize(originX, originY) {
     if (!this.yoga) return;
-    this.abs = {
-      x: originX + this.yoga.getComputedLeft(),
-      y: originY + this.yoga.getComputedTop(),
-      width: this.yoga.getComputedWidth(),
-      height: this.yoga.getComputedHeight(),
-    };
+    this._assignAbs(
+      originX + this.yoga.getComputedLeft(),
+      originY + this.yoga.getComputedTop(),
+      this.yoga.getComputedWidth(),
+      this.yoga.getComputedHeight(),
+    );
     const { right, bottom } = this._measureContent();
     this.contentHeight =
       bottom + this.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
@@ -1968,10 +2022,41 @@ export class ScrollViewNode extends Node {
     this.scrollY = Math.min(Math.max(0, this.scrollY), this._maxScroll('y'));
     this.scrollX = Math.min(Math.max(0, this.scrollX), this._maxScroll('x'));
     this._reportViewport();
-    for (const child of this.children) {
-      if (!child.isWindow) {
-        child.absolutize(this.abs.x - this.scrollX, this.abs.y - this.scrollY);
+    const ox = this.abs.x - this.scrollX;
+    const oy = this.abs.y - this.scrollY;
+    // The layout diff and a scroll would double-report each other: a scroll
+    // is a uniform shift of everything below this viewport, already claimed
+    // as the viewport itself (or narrowed to the exposed strip by the blit),
+    // and per-child old/new claims would re-widen the very frame the blit
+    // narrows. So when the children's origin moved, the walk below runs
+    // with the diff off. When it did not move, a child that moved did so by
+    // real layout — claim it, but clipped to the viewport: ink below the
+    // fold never reaches the surface, and an unclipped claim would repaint
+    // whatever unrelated UI sits under this node's off-viewport extent.
+    const shifted =
+      this._childOrigin &&
+      (this._childOrigin.x !== ox || this._childOrigin.y !== oy);
+    this._childOrigin = { x: ox, y: oy };
+    const outer = layoutDiffSink;
+    if (outer) {
+      if (shifted) {
+        layoutDiffSink = null;
+      } else {
+        const vp = insetRect(this.abs, -DAMAGE_SLOP);
+        layoutDiffSink = (rect) => {
+          const clipped = intersectRects(rect, vp);
+          if (clipped) outer(clipped);
+        };
       }
+    }
+    try {
+      for (const child of this.children) {
+        if (!child.isWindow) {
+          child.absolutize(ox, oy);
+        }
+      }
+    } finally {
+      layoutDiffSink = outer;
     }
   }
 
@@ -2163,7 +2248,9 @@ export class ScrollViewNode extends Node {
   scrollIntoView(node) {
     if (!node) return;
     this._scrollIntoViewTarget = node;
-    this.root?.invalidate(true, null, 'scroll');
+    // whatever the resolved scroll moves is inside this clipped viewport,
+    // so the viewport's own before/after rects bound the frame
+    this._invalidateLayout('scroll');
   }
 
   _resolveScrollIntoView() {
@@ -3312,7 +3399,7 @@ export class TextInputNode extends Node {
     }
     if (metricsChanged) {
       this.yoga.markDirty();
-      this.root?.invalidate(true, null, 'props');
+      this._invalidateLayout('props');
     } else if (newProps.value !== before.value) {
       this.root?.invalidate(false, null, 'text');
     }
@@ -3498,7 +3585,7 @@ export class TextAreaNode extends TextInputNode {
     super.applyProps(newProps, oldProps);
     if (newProps.rows !== before.rows) {
       this.yoga.markDirty();
-      this.root?.invalidate(true, null, 'props');
+      this._invalidateLayout('props');
     }
   }
 
@@ -4469,14 +4556,30 @@ export class WindowNode extends Node {
     this._advanceAnimations(now());
     const width = this.window.width ?? this.props.width ?? 0;
     const height = this.window.height ?? this.props.height ?? 0;
+    let layoutMoved = false;
     if (this.needsLayout) {
       this._resolveSizeQueries(width, height);
       this.yoga.setWidth(width);
       this.yoga.setHeight(height);
       this.yoga.calculateLayout(width, height, Yoga.DIRECTION_LTR);
       this.abs = { x: 0, y: 0, width, height };
-      for (const child of this.children) {
-        if (!child.isWindow) child.absolutize(0, 0);
+      // A bounded frame watches the walk: whatever this pass actually moved
+      // claims its old and new rects through the sink, and the frame stays
+      // a few rects instead of the whole window. An unbounded frame skips
+      // the bookkeeping — it repaints everything anyway.
+      if (this._damage !== FULL_DAMAGE) {
+        layoutDiffSink = (rect) => {
+          if (this._damage === FULL_DAMAGE) return;
+          layoutMoved = true;
+          this._damage = addDamageRect(this._damage, rect);
+        };
+      }
+      try {
+        for (const child of this.children) {
+          if (!child.isWindow) child.absolutize(0, 0);
+        }
+      } finally {
+        layoutDiffSink = null;
       }
       this.needsLayout = false;
       this.needsPaint = true;
@@ -4498,7 +4601,7 @@ export class WindowNode extends Node {
     // after layout (the claims above included), before the damage is taken:
     // a frame that turns out to be a pure scroll blits the surviving band
     // and narrows its claim to the exposed strip
-    this._applyScrollBlits(width, height);
+    this._applyScrollBlits(width, height, layoutMoved);
     if (!this.needsPaint) return;
     this.needsPaint = false;
     const damage = this._takeDamage(width, height);
@@ -4568,7 +4671,7 @@ export class WindowNode extends Node {
    * has always been the behavior. The fast path can therefore cost
    * correctness nothing: the worst mistake it can make is not firing.
    */
-  _applyScrollBlits(width, height) {
+  _applyScrollBlits(width, height, layoutMoved = false) {
     const pending = this._pendingScrolls;
     if (!pending?.size) return;
     const nodes = [...pending];
@@ -4588,6 +4691,10 @@ export class WindowNode extends Node {
       return;
     }
     if (!Array.isArray(this._damage)) return; // unbounded frame already
+    // the layout diff claimed real movement this pass — the frame is not a
+    // pure scroll, and a blit under rearranged content would shift stale
+    // pixels into place the repaint no longer covers
+    if (layoutMoved) return;
     // children clip to the border box, so a border ring or rounded corner
     // would be shifted like content
     if (node.style.borderWidth > 0 || node.style.borderRadius > 0) return;
