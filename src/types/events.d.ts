@@ -96,15 +96,25 @@ export interface DragEvent<T = DrawnNode> extends SyntheticEvent<T> {
   types: string[];
   /** Alias-aware membership test: a concrete type or a semantic group. */
   has(type: string): boolean;
-  /** The action the source asked for. */
+  /** The action the source asked for. `'ask'` means it wants the user
+   * offered a choice — see `actions`. */
   action: DropAction;
+  /** The actions an `'ask'` source will accept, in the order it listed
+   * them. Empty for every other action, which is all but a few file
+   * managers. */
+  actions: Array<'copy' | 'move' | 'link'>;
+  /** The source's own words for `actions`, positionally matched, with
+   * `null` where it offered none. Empty when `actions` is. */
+  actionDescriptions: Array<string | null>;
   /** Where the drag came from: another application, or this one. */
   source: 'internal' | 'external';
   /** Pointer position in screen (root) coordinates. */
   screenX: number;
   screenY: number;
   /** Override the declarative `dropAccept` answer for this position
-   * (`onDragOver` only; elsewhere these are inert). */
+   * (`onDragOver`), or settle what the drop actually did (`onDrop`, where
+   * `accept` picks the action reported to the source and `reject` tells it
+   * the drop was not taken after all). Inert elsewhere. */
   accept(action?: 'copy' | 'move' | 'link'): void;
   reject(): void;
   /** Opt into the XdndStatus suppression rectangle for this node's rect:

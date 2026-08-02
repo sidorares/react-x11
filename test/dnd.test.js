@@ -80,6 +80,8 @@ class FakeSource {
       'XdndTypeList',
       'XdndActionCopy',
       'XdndActionMove',
+      'XdndActionLink',
+      'XdndActionAsk',
     ];
     this.atoms = {};
     await Promise.all(
@@ -97,6 +99,26 @@ class FakeSource {
     if (payload) {
       await this.app.clipboard.write(payload, { selection: 'XdndSelection' });
     }
+  }
+
+  /** What a source that asks publishes on its own window: the actions it
+   * will accept, and its own words for them, NUL-separated. */
+  async offerAsk(actions, descriptions) {
+    await this.wnd.setProperty(
+      'XdndActionList',
+      actions.map((a) => this.atoms[a]),
+      { type: 'ATOM' },
+    );
+    const prop = await this.typeAtom('XdndActionDescription');
+    const text = descriptions.length ? `${descriptions.join('\0')}\0` : '';
+    this.X.ChangeProperty(
+      0,
+      this.wnd.id,
+      prop,
+      this.X.atoms.STRING,
+      8,
+      Buffer.from(text, 'utf8'),
+    );
   }
 
   async typeAtom(name) {
@@ -509,6 +531,110 @@ test('drop: uri-list arrives parsed, XdndFinished confirms with the action', asy
       [...new Set(converted.map((c) => c.time))],
       [43],
       "every conversion used XdndDrop's timestamp",
+    );
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+    await srcApp.close();
+  }
+});
+
+test('a source that asks: the choices reach the handler, and its answer reaches XdndFinished', async () => {
+  const { app, srcApp } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  try {
+    const drops = [];
+    const instance = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement('box', {
+          dropAccept: ['files'],
+          onDrop: (e) => {
+            drops.push({
+              action: e.action,
+              actions: e.actions,
+              descriptions: e.actionDescriptions,
+            });
+            // what a menu built from those choices would come back with
+            e.accept('move');
+          },
+          style: { flexGrow: 1 },
+        }),
+      ),
+      x11Root,
+    );
+    const src = new FakeSource(srcApp);
+    await src.init({ 'text/uri-list': 'file:///tmp/x\r\n' });
+    // Link is offered but left undescribed, so the gap is positional
+    await src.offerAsk(
+      ['XdndActionCopy', 'XdndActionMove', 'XdndActionLink'],
+      ['Copy here', 'Move here'],
+    );
+    await settle(app);
+
+    await src.enter(instance.id, ['text/uri-list']);
+    src.position(instance.id, 150, 100, { action: 'XdndActionAsk' });
+    await until(srcApp, () => src.statuses().length > 0, 'an XdndStatus');
+
+    src.drop(instance.id);
+    await until(srcApp, () => src.finished().length > 0, 'XdndFinished');
+
+    assert.equal(drops.length, 1);
+    assert.equal(drops[0].action, 'ask', 'the source asked');
+    assert.deepEqual(drops[0].actions, ['copy', 'move', 'link']);
+    assert.deepEqual(drops[0].descriptions, ['Copy here', 'Move here', null]);
+
+    const fin = src.finished()[0].data;
+    assert.equal(fin[1] & 1, 1, 'accepted');
+    assert.equal(
+      fin[2],
+      src.atoms.XdndActionMove,
+      "the handler's choice is what the source is told",
+    );
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+    await srcApp.close();
+  }
+});
+
+test('a drop handler can refuse at the last moment, and a plain drag asks for nothing', async () => {
+  const { app, srcApp } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  try {
+    let seen = null;
+    const instance = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement('box', {
+          dropAccept: ['files'],
+          onDrop: (e) => {
+            seen = { actions: e.actions, descriptions: e.actionDescriptions };
+            e.reject(); // decided against it after looking at the payload
+          },
+          style: { flexGrow: 1 },
+        }),
+      ),
+      x11Root,
+    );
+    const src = new FakeSource(srcApp);
+    await src.init({ 'text/uri-list': 'file:///tmp/x\r\n' });
+    await settle(app);
+
+    await src.enter(instance.id, ['text/uri-list']);
+    src.position(instance.id, 150, 100); // a plain copy, no asking
+    await until(srcApp, () => src.statuses().length > 0, 'an XdndStatus');
+    src.drop(instance.id);
+    await until(srcApp, () => src.finished().length > 0, 'XdndFinished');
+
+    // nothing was asked, so nothing was read off the source window
+    assert.deepEqual(seen, { actions: [], descriptions: [] });
+    assert.equal(
+      src.finished()[0].data[1] & 1,
+      0,
+      'the refusal reaches the source',
     );
     await x11Root.unmount();
   } finally {
