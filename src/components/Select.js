@@ -117,6 +117,14 @@ function Option({ option, selected, active, onPick, onHover, nodeRef }) {
  * Closes on pick, Escape, toggling the trigger, or focus loss within the
  * owner window.
  *
+ * The menu opens on the **press**, not the release — the one control here
+ * whose answer to a press is more than a tint, and the one where waiting
+ * for the release is most obviously wrong: every desktop toolkit drops the
+ * list under a held button, and the whole point of a dropdown is to be
+ * looking at the options. A press while the menu is up dismisses it through
+ * the popup's pointer grab rather than reaching this handler at all, so the
+ * two do not fight over the toggle.
+ *
  * Keyboard (the trigger keeps focus while the menu is open — the popup is
  * override-redirect and never takes it): Up/Down open the menu, then move
  * the active option with wrapping; Home/End jump to the ends; Enter/Space
@@ -246,7 +254,7 @@ export function Select({
       role: 'combobox',
       ref: triggerRef,
       focusable: true,
-      onClick: toggle,
+      onMouseDown: toggle,
       onFocus: () => setFocused(true),
       onBlur: () => {
         setFocused(false);
@@ -265,8 +273,12 @@ export function Select({
           paddingRight: 10,
           borderWidth: theme.borderWidth,
           borderRadius: theme.radius,
-          borderColor: focused || open ? theme.borderActive : theme.border,
+          borderColor: focused || open ? theme.borderFocus : theme.border,
           backgroundColor: theme.background,
+          // the menu only opens on the release; holding the trigger has to
+          // look like something is about to happen
+          ':hover': { backgroundColor: theme.surfaceHover },
+          ':active': { backgroundColor: theme.surfaceActive },
         },
         style,
       ],

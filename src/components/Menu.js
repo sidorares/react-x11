@@ -124,6 +124,13 @@ function MenuRow({
         paddingRight: 8,
         cursor: dim ? undefined : 'pointer',
         backgroundColor: active ? theme.hoverBackground : theme.background,
+        // the item is already highlighted by the time it can be pressed, so
+        // the press is a further step down rather than a first one — without
+        // it the command runs on the release out of a picture that never
+        // changed
+        ...(dim
+          ? null
+          : { ':active': { backgroundColor: theme.accentActive } }),
       },
     },
     h(
@@ -641,6 +648,16 @@ export function MenuBar({
             paddingBottom: 6,
             backgroundColor:
               openIndex === index ? theme.hoverBackground : undefined,
+            ':hover': {
+              backgroundColor:
+                openIndex === index ? theme.hoverBackground : theme.background,
+            },
+            // the menu opens on the release, so this is the whole of the
+            // answer to a held press on the bar
+            ':active': {
+              backgroundColor:
+                openIndex === index ? theme.accentActive : theme.surfaceActive,
+            },
           },
         },
         h(

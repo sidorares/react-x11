@@ -3,6 +3,7 @@
 // build-step-free for consumers.
 
 import React, { useContext, useMemo, useState } from 'react';
+import { stepBeyond } from '../styles.js';
 import { XK_RETURN } from './keys.js';
 
 const h = React.createElement;
@@ -19,7 +20,7 @@ const h = React.createElement;
 const DefaultTheme = {
   // colour
   border: '#b2bec3',
-  borderActive: '#2980b9',
+  borderFocus: '#2980b9',
   background: 'white',
   text: '#2d3436',
   dim: '#7f8c8d',
@@ -30,6 +31,20 @@ const DefaultTheme = {
   accentText: 'white',
   surfaceHover: '#f1f2f6',
   track: '#dfe6e9',
+  // The pressed step of each fill family: rest → …Hover → …Active. Every
+  // family that has a hover needs one, because a press is the state a
+  // control has to show *before* it has done anything — the activation
+  // itself only happens on the release, and half a second can pass in
+  // between.
+  //
+  // Written out here, but a theme almost never sets them: `resolveTheme`
+  // takes the step the palette's own hover made and takes it again. So a
+  // palette that names `accentHover` and stops there — which is every theme
+  // in `examples/themes.js` and every recipe in docs/ecosystem/theming.md —
+  // gets a press that matches it rather than one inherited from these.
+  accentActive: '#154c6d',
+  surfaceActive: '#e3e5ed',
+  dimActive: '#4c5a57',
   // The keyboard focus ring. Read by the renderer, not by the widgets: any
   // focusable node under this palette draws it on `:focus-visible`, so a
   // plain `<box focusable>` an application writes is indicated too, and a
@@ -45,6 +60,39 @@ const DefaultTheme = {
   paddingX: 16,
   paddingY: 8,
 };
+
+// Which pressed token is derived from which pair, when the palette does not
+// name it: the resting colour of the family and the hover it steps to.
+const PRESSED_FROM = {
+  accentActive: ['accent', 'accentHover'],
+  surfaceActive: ['background', 'surfaceHover'],
+  dimActive: ['border', 'dim'],
+};
+
+/**
+ * Merge a partial palette, filling in the pressed step for any family whose
+ * colours moved without it.
+ *
+ * The rule per token: an explicit value wins; otherwise, if this palette
+ * touched either colour the step is measured between, it is re-derived; and
+ * otherwise whatever was already in force stands. That last clause is what
+ * keeps an inner `<ThemeProvider value={{ fontSize: 18 }}>` from throwing
+ * away a pressed colour an outer one set by hand.
+ *
+ * The alternative was three more tokens every theme has to remember, and a
+ * theme that forgets one does not fail loudly — it just stops answering
+ * presses, in the one state a control has to show while nothing else can.
+ */
+export function resolveTheme(value, base = DefaultTheme) {
+  if (!value) return base;
+  const merged = { ...base, ...value };
+  for (const [token, [rest, hover]] of Object.entries(PRESSED_FROM)) {
+    if (value[token] != null) continue;
+    if (value[rest] == null && value[hover] == null) continue;
+    merged[token] = stepBeyond(merged[rest], merged[hover]);
+  }
+  return merged;
+}
 
 // Always a complete palette: the context default is the full DefaultTheme
 // and `ThemeProvider` merges before it publishes, so nothing downstream has
@@ -70,10 +118,7 @@ const FILL = Object.freeze({ flexGrow: 1 });
  */
 export function ThemeProvider({ value, style, children }) {
   const outer = useContext(ThemeContext);
-  const theme = useMemo(
-    () => (value ? { ...outer, ...value } : outer),
-    [outer, value],
-  );
+  const theme = useMemo(() => resolveTheme(value, outer), [outer, value]);
   const boxStyle = useMemo(() => (style ? [FILL, style] : FILL), [style]);
   return h(
     ThemeContext.Provider,
@@ -115,18 +160,28 @@ export function useTheme() {
 }
 
 /**
- * Shared interactive-control plumbing: hover/focus state plus the box
+ * Shared interactive-control plumbing: hover/focus/press state plus the box
  * props wiring them, click + Space/Enter activation.
  *
- * `styled: true` says the widget expresses hover and focus with `:hover`
- * and `:focus` style blocks. Then none of it is React state: no enter/leave
- * handlers, no re-render on pointer move, and the returned `hover`/`focused`
- * stay false. Reach for the React state only when hover has to change
- * something a style block cannot — what renders, or the layout.
+ * `styled: true` says the widget expresses hover, focus and the press with
+ * `:hover`, `:focus` and `:active` style blocks. Then none of it is React
+ * state: no enter/leave handlers, no re-render on pointer move, and the
+ * returned `hover`/`focused`/`pressed` stay false. **Prefer it.** The state
+ * blocks are a repaint of one node where the React state is a re-render of
+ * the widget and its label.
+ *
+ * The exception is a control whose pressed part is not the node the press
+ * lands on. `:active` marks the press chain — the pressed node and its
+ * ancestors — so a `<Checkbox>` pressed anywhere along its row cannot light
+ * up its 16px well that way, the well being a sibling of the label rather
+ * than an ancestor of it. There the press is React state, which costs one
+ * render for a discrete event that in the ordinary case was about to
+ * re-render anyway when the value changed.
  */
 export function useControl(disabled, onActivate, { styled = false } = {}) {
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [pressed, setPressed] = useState(false);
   const activation = {
     focusable: true,
     // the event travels: `ButtonProps.onPress` has always been declared as
@@ -144,13 +199,25 @@ export function useControl(disabled, onActivate, { styled = false } = {}) {
       : {
           ...activation,
           onMouseEnter: () => setHover(true),
-          onMouseLeave: () => setHover(false),
+          // a press released off the control never sends it a mouseup, so
+          // leaving is what ends the press — which is also what it means:
+          // releasing out there activates nothing
+          onMouseLeave: () => {
+            setHover(false);
+            setPressed(false);
+          },
+          onMouseDown: () => setPressed(true),
+          onMouseUp: () => setPressed(false),
           onFocus: () => setFocused(true),
-          onBlur: () => setFocused(false),
+          onBlur: () => {
+            setFocused(false);
+            setPressed(false);
+          },
         };
   return {
     hover: !styled && hover && !disabled,
     focused: !styled && focused && !disabled,
+    pressed: !styled && pressed && !disabled,
     props,
     // `cursor` is style, so it travels in the style channel — put it first
     // in the widget's style array and anything it declares still wins

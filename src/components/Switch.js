@@ -48,14 +48,24 @@ const THUMB_ON = TRACK_WIDTH - THUMB - INSET;
  * sliding pill; the thumb slides to the end matching the state.
  * `onChange(ev)`, as `Checkbox`.
  *
- * The hover and focus tints are `:hover`/`:focus` blocks rather than React
- * state: the renderer already knows which node the pointer is over and
- * which one has focus, so lighting the track up is a repaint of one node
- * instead of a re-render of this component and everything under it.
+ * The hover, press and focus tints are `:hover`/`:active`/`:focus` blocks
+ * rather than React state: the renderer already knows which node the pointer
+ * is over, which one is held and which one has focus, so lighting the track
+ * up is a repaint of one node instead of a re-render of this component and
+ * everything under it.
+ *
+ * The thumb only slides once the switch has actually flipped, which is on
+ * the release — so the press is the whole of the feedback in between, and a
+ * click held for half a second is half a second of a control that has not
+ * answered without it. `:active` marks the press chain rather than the one
+ * node under the pointer, which is what lets the track answer a press that
+ * landed on the thumb.
  *
  * The slide is a `transition` on `left`, so the animation is the renderer's
  * frame clock rather than a requestAnimationFrame loop written here — and
- * the same declaration animates the track colour with it.
+ * the same declaration animates the track colour with it. It runs on the
+ * press tint too: 120ms of fade that *starts* on the press frame, which is
+ * the part perception is actually measuring.
  */
 export function Switch({
   checked = false,
@@ -91,6 +101,9 @@ export function Switch({
         !disabled && {
           ':hover': {
             backgroundColor: checked ? theme.accentHover : theme.dim,
+          },
+          ':active': {
+            backgroundColor: checked ? theme.accentActive : theme.dimActive,
           },
         },
         style,

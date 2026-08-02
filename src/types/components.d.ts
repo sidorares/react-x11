@@ -25,7 +25,9 @@ import type {
  */
 export interface Theme {
   border: string;
-  borderActive: string;
+  /** The border of a focused control. Named for focus and not for `:active`,
+   * which is the pressed state — the `…Active` tokens below. */
+  borderFocus: string;
   background: string;
   text: string;
   dim: string;
@@ -36,6 +38,12 @@ export interface Theme {
   accentText: string;
   surfaceHover: string;
   track: string;
+  /** The pressed step of each fill family: rest → `…Hover` → `…Active`.
+   * A control activates on the release, so this is the only thing it can
+   * show while it is being held. */
+  accentActive: string;
+  surfaceActive: string;
+  dimActive: string;
   /** The keyboard focus ring every focusable node under this palette draws
    * on `:focus-visible` — read by the renderer, not by the widgets. */
   focusRing: string;

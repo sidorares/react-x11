@@ -83,7 +83,7 @@ function widgetTheme(t) {
     text: t.text,
     dim: t.dim,
     border: t.dim,
-    borderActive: t.accent,
+    borderFocus: t.accent,
     accent: t.accent,
     accentHover: t.accent,
     accentText: t.accentText,

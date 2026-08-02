@@ -61,7 +61,9 @@ export function Radio({ value, children, label, disabled = false }) {
   useEffect(() => group.register(value), [group, value]);
   const selected = group.value === value;
   const {
+    hover,
     focused,
+    pressed,
     props,
     style: controlStyle,
   } = useControl(disabled, () => {
@@ -75,7 +77,16 @@ export function Radio({ value, children, label, disabled = false }) {
       else onKeyDown(ev);
     };
   }
-  const fill = disabled ? theme.dim : theme.accent;
+  // The dot only appears on the release, so the well answers the press
+  // itself — see Checkbox, both for the three-look treatment and for why
+  // this is React state rather than an `:active` block.
+  const fill = disabled
+    ? theme.dim
+    : pressed
+      ? theme.accentActive
+      : hover
+        ? theme.accentHover
+        : theme.accent;
   return h(
     'box',
     {
@@ -97,10 +108,12 @@ export function Radio({ value, children, label, disabled = false }) {
           borderWidth: theme.borderWidth,
           borderColor: selected
             ? fill
-            : focused
-              ? theme.borderActive
-              : theme.border,
-          backgroundColor: theme.background,
+            : pressed || hover
+              ? theme.dim
+              : focused
+                ? theme.borderFocus
+                : theme.border,
+          backgroundColor: pressed ? theme.surfaceActive : theme.background,
           alignItems: 'center',
           justifyContent: 'center',
         },

@@ -168,8 +168,13 @@ export function Tabs({
                 backgroundColor:
                   item.id === selected ? theme.surfaceHover : 'transparent',
               },
+              // the panel only swaps on the release, so the press is what
+              // says the tab heard the click — and it has to outrank the
+              // selected tab's own fill, or pressing the selected tab is
+              // the one press in the strip that does nothing visible
               !item.disabled && {
                 ':hover': { backgroundColor: theme.surfaceHover },
+                ':active': { backgroundColor: theme.surfaceActive },
               },
             ],
           },
@@ -189,7 +194,7 @@ export function Tabs({
                   item.id === selected
                     ? theme.accent
                     : item.id === focusedId
-                      ? theme.borderActive
+                      ? theme.borderFocus
                       : 'transparent',
               },
             ],

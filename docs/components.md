@@ -26,14 +26,22 @@ and a partial one merges over the defaults. It carries **shape as well as
 colour** — corner radius, border weight, text size and the padding inside a
 control are most of what separates one platform's controls from another's:
 
-| token                                 |                                   |
-| ------------------------------------- | --------------------------------- |
-| `background` `text` `dim` `border`    | the surface a control sits on     |
-| `accent` `accentHover` `accentText`   | primary buttons, checks, fills    |
-| `hoverBackground` `hoverText`         | selected rows, menu highlights    |
-| `surfaceHover` `track` `borderActive` | hover fills, slider tracks, focus |
-| `radius` `radiusSmall` `borderWidth`  | control shape                     |
-| `fontSize` `paddingX` `paddingY`      | control size                      |
+| token                                      |                                |
+| ------------------------------------------ | ------------------------------ |
+| `background` `text` `dim` `border`         | the surface a control sits on  |
+| `accent` `accentHover` `accentText`        | primary buttons, checks, fills |
+| `hoverBackground` `hoverText`              | selected rows, menu highlights |
+| `surfaceHover` `track` `borderFocus`       | hover fills, tracks, focus     |
+| `accentActive` `surfaceActive` `dimActive` | the pressed step of each fill  |
+| `radius` `radiusSmall` `borderWidth`       | control shape                  |
+| `fontSize` `paddingX` `paddingY`           | control size                   |
+
+The `…Active` three are the colour a control takes **while it is held**, and
+a palette almost never sets them: each is derived from the step the palette's
+own hover already makes — `accent` → `accentHover` → one more of the same —
+so it darkens a light theme and lightens a dark one. Set one explicitly and
+it wins. See [The press state](#the-press-state) for why every control has
+one.
 
 There are two consumers of a palette, and one provider feeds both. Widgets
 read it as React context through `useTheme()`; a `$token` in a style
@@ -78,9 +86,10 @@ them at runtime.
 `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch` and `ProgressBar` share
 one piece of plumbing, `useControl(disabled, onActivate)`: it makes the
 control focusable, activates it on click or Space (Enter as well, for
-`Button`), sets the pointer cursor, and expresses hover and focus feedback as
-`:hover`/`:focus` style blocks rather than React state — so moving the
-pointer over a control repaints one node instead of rendering.
+`Button`), sets the pointer cursor, and expresses hover, press and focus
+feedback as `:hover`/`:active`/`:focus` style blocks rather than React state
+— so moving the pointer over a control repaints one node instead of
+rendering.
 
 `Button`, `Checkbox`, `Switch` and `ProgressBar` take `style`, merged after
 their own so an override wins by position, and forward any remaining props
@@ -105,6 +114,26 @@ import { Button, Checkbox, RadioGroup, Radio, Switch, ProgressBar } from 'react-
 
 Label text is the children (or a `label` prop); a bare string is wrapped in
 a `<text>` for you, so `<Button>Save</Button>` needs no `<text>`.
+
+### The press state
+
+Every control here activates on the **release** — that is what a click is.
+So every one of them also has a distinct look while it is being _held_,
+because otherwise a click a user takes half a second over is half a second
+of a control that has visibly not heard them, and the change, when it comes,
+reads as the machine being slow rather than the hand being unhurried.
+
+Four states, all different: resting, hovered, held, and hovered again on the
+release. The held one is drawn on the press **even though the press itself
+does nothing** — it acknowledges the input, it does not promise the outcome.
+A press dragged off the control drops it, and picking the control back up
+restores it, so the way it looks always agrees with whether releasing there
+would activate anything.
+
+Nothing is needed to get this: it is what the widgets do. Writing a control
+of your own, `:active` is the state block for it —
+[styling.md](styling.md#inline-pseudo-states) — and the palette's
+`accentActive`/`surfaceActive`/`dimActive` are the colours.
 
 ### The change event, and `name`
 
@@ -234,9 +263,16 @@ import { Select } from 'react-x11';
 | `placeholder`           | trigger text when nothing is selected     |
 | `style` + any box props | forwarded to the trigger box              |
 
-Behavior: click / Space / Enter toggles the menu; Escape, focus loss, or
-picking closes it; the option list scrolls when taller than 220px; the
-trigger participates in Tab traversal.
+Behavior: the menu opens on the **press** — Space and Enter toggle it too;
+Escape, focus loss, or picking closes it; the option list scrolls when taller
+than 220px; the trigger participates in Tab traversal.
+
+Opening on the press rather than the release is deliberate, and it is the
+one control whose answer to a press is more than a colour: a dropdown exists
+to be looked at, so waiting for the button to come back up before showing it
+wastes the whole time the button is down. It is what every desktop toolkit
+does. A press while the menu is up dismisses it through the popup's pointer
+grab, so the two never fight over the toggle.
 
 Keyboard, while the trigger is focused (the popup is override-redirect and
 never takes focus, so the trigger keeps handling keys with the menu open):
@@ -265,7 +301,7 @@ single letter cycles through the options starting with it.
 
 `Select` has no provider of its own — it reads the palette from
 [`ThemeProvider`](#theming) like every other widget. The trigger is
-`background`/`text` in a `border` box that turns `borderActive` on focus or
+`background`/`text` in a `border` box that turns `borderFocus` on focus or
 while open, the chevron and the placeholder text are `dim`, and the menu
 highlight is `hoverBackground`/`hoverText`.
 

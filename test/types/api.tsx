@@ -338,11 +338,28 @@ function Themed() {
   // a complete palette, whatever the provider above set
   const theme = useTheme();
   const _radius: number = theme.radius;
-  return <box style={{ backgroundColor: theme.accent }} />;
+  const _focus: string = theme.borderFocus;
+  return (
+    <box
+      style={{
+        backgroundColor: theme.accent,
+        ':hover': { backgroundColor: theme.accentHover },
+        // the pressed step: derived from the hover unless a palette names it
+        ':active': { backgroundColor: theme.accentActive },
+      }}
+    />
+  );
 }
 
 // @ts-expect-error — the palette is Partial<Theme>, not arbitrary keys
 const _badTheme = <ThemeProvider value={{ accnet: '#fff' }} />;
+
+// @ts-expect-error — `borderActive` was the focus border and is `borderFocus`
+const _oldName = <ThemeProvider value={{ borderActive: '#fff' }} />;
+
+const _pressedPalette = (
+  <ThemeProvider value={{ surfaceActive: '#ddd', dimActive: '#556' }} />
+);
 
 function Widgets() {
   const anchorRef = useRef<DrawnNode>(null);
