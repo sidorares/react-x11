@@ -271,12 +271,13 @@ event root. Anchor with `ev.nativeEvent.rootx/rooty` (pointer in screen
 coordinates) or a ref's `abs` rect plus the owner window's `x`/`y`.
 Same props as `<window>`; conditional rendering controls its lifetime.
 
-| prop               |                                                                             |
-| ------------------ | --------------------------------------------------------------------------- |
-| `grab`             | hold a pointer grab while the popup is up — how menus behave on X (below)   |
-| `onDismiss`        | a press landed outside the popup: close it                                  |
-| `trapFocus`        | own a focus scope: a modal (see [events.md](events.md#focus-scopes-modals)) |
-| `overrideRedirect` | `false` makes it a WM-managed window instead — a real dialog (below)        |
+| prop               |                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `grab`             | hold a pointer grab while the popup is up — how menus behave on X (below)                                      |
+| `onDismiss`        | a press landed outside the popup: close it                                                                     |
+| `trapFocus`        | own a focus scope: a modal (see [events.md](events.md#focus-scopes-modals))                                    |
+| `overrideRedirect` | `false` makes it a WM-managed window instead — a real dialog (below)                                           |
+| `dragPreview`      | this popup is a drag preview following the pointer, never a drop target — [drag-and-drop.md](drag-and-drop.md) |
 
 A popup never receives the X input focus, but nodes inside it can hold the
 **owner window's** focus and receive keys — with `trapFocus` and `autoFocus`

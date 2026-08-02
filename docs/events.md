@@ -106,6 +106,9 @@ const root = await createRoot({
 | `onContextMenu`                             | right-click (button 3), after `onMouseDown`; default action opens the element's menu  |
 | `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus in `tabIndex` order   |
 | `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal              |
+| `onDragEnter` / `onDragLeave`               | do not propagate; drag-path diffing, the same shape as the hover pair above           |
+| `onDragOver` / `onDrop`                     | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)        |
+| `onDragStart` / `onDrag` / `onDragEnd`      | on a `draggable` node; the press is a click until it moves 4px                        |
 
 ## Pointer capture
 

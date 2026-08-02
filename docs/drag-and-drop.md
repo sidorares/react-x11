@@ -75,9 +75,39 @@ which is a user-visible freeze in a program you do not own.
 ### The drag events
 
 `onDragEnter` and `onDragLeave` do not propagate — they are synthesized by
-path diffing, exactly like `onMouseEnter`/`onMouseLeave`. `onDragOver`
-dispatches capture → target → bubble like any other event, once per pointer
+path diffing, exactly like `onMouseEnter`/`onMouseLeave`. `onDragOver` and
+`onDrop` dispatch capture → target → bubble like any other event
+(`onDragOverCapture`, `onDropCapture`), `onDragOver` once per pointer
 position.
+
+The order across one whole drag, source events and target events
+interleaved:
+
+```
+onDragStart          the pointer passed the threshold
+  onDrag             ─┐ per pointer position, on the source
+  onDragEnter        ─┤ on nodes the drag moved onto
+  onDragOver         ─┤ on the node under the pointer, capture → bubble
+  onDragLeave        ─┘ on nodes the drag moved off
+onDrop               the release, on the accepting target
+onDragEnd            always last, on the source
+```
+
+`onDragEnd` runs even when nothing accepted the drop — with `action: null`
+and `dropped: false` — so releasing state there is safe.
+
+Which node is _the_ target, when they nest: the accept decision picks the
+**deepest** node whose `dropAccept` matches, skipping any node marked
+`disabled`, so a `<window>`-level `dropAccept` is a fallback that loses to
+any matching descendant. Two wrinkles worth knowing:
+
+- `onDrop` still dispatches capture → bubble along the whole ancestor path
+  of the node under the pointer, so an ancestor with an `onDrop` sees the
+  drop even if its own `dropAccept` did not match. If that is not what you
+  want, `e.stopPropagation()` in the inner handler.
+- `onDragEnter`, `onDragLeave` and `':drag-over'` are **not** filtered at
+  all — not by `dropAccept`, not by `disabled`. They follow the pointer's
+  ancestor path, exactly like hover.
 
 Every drag event carries:
 
@@ -102,10 +132,16 @@ plus, in `onDragOver` only, three ways to answer:
 
 ### The drop
 
-`onDrop` may be `async`. The protocol reply is held until the returned
-promise settles, so `await`ing a write is correct; a watchdog sends the
-reply anyway after 10 s, because a forgotten `await` in your app must not
-hang the drag gesture in someone else's.
+`onDrop` may be `async`. For a drop from **another application** the
+protocol reply is held until the returned promise settles, so `await`ing a
+write is correct; a watchdog sends the reply anyway after 10 s, because a
+forgotten `await` in your app must not hang the drag gesture in someone
+else's.
+
+For an **in-app** drop there is no protocol reply to hold, so nothing waits:
+`onDragEnd` fires immediately and an async `onDrop` finishes on its own
+afterwards. Do not rely on the drag being "over" only once your handler has
+resolved — if the source needs to know, have the handler tell it.
 
 The event adds three ways to reach the payload:
 
@@ -125,6 +161,9 @@ onDrop={async (e) => {
 - **`await e.getData(type)`** — one conversion of any offered type. Text-ish
   targets decode to a string, everything else stays raw bytes. Group names
   work: `getData('files')` resolves to whichever concrete type was offered.
+- **`parseUriList(text)`** — exported from the package, and the same parser
+  `e.files` uses. For when you fetch the list yourself:
+  `parseUriList(await e.getData('text/uri-list'))`.
 - **`e.items`** — _internal drags only_: the `dragData` values themselves,
   by reference, never serialised. `undefined` for drops from other
   applications, which is also how you tell the two apart without checking
@@ -137,10 +176,22 @@ literals with no error anywhere. The different name is the warning.
 
 ### `:drag-over`
 
-A drop target sets the `':drag-over'` style state while a drag it accepts
-is over it — no handler, no re-render, and it obeys the same precedence
-rules as `:hover` (see [styling.md](styling.md)). This is the whole
-highlight feature for most dropzones.
+While a drag is in flight, `':drag-over'` is set on the node under the
+pointer **and on its ancestors** — the same ancestor-path rule `:hover`
+follows, resolved the same way (a repaint, no React render). For most
+dropzones that is the whole highlight feature, with no handler and no
+state.
+
+One thing it does **not** do: it is not filtered by `dropAccept`. A node
+lights up because the pointer is over it, not because it would take the
+drop, so a zone that accepts only `image/png` still highlights while a text
+drag passes over. Where the difference matters — showing "yes" versus "no"
+feedback — use `useDropTarget` and style from `isAccepted`, which is
+exactly the distinction it exists to draw:
+
+```jsx
+<box {...dropProps} style={[s.zone, isOver && (isAccepted ? s.yes : s.no)]} />
+```
 
 ### `useDropTarget`
 
@@ -182,7 +233,10 @@ pass through. `isOver` is true whenever a drag is over the node,
   onDragEnd={(e) => {
     if (e.action === 'move') remove(file.id);
   }}
-  style={{ ':dragging': { opacity: 0.4 } }}
+  style={{
+    backgroundColor: '$panel',
+    ':dragging': { backgroundColor: '$dim' },
+  }}
 />
 ```
 
@@ -209,9 +263,23 @@ and an `application/x-…` name for private in-app payloads.
 ### `dragActions`
 
 Which actions the source offers, preferred first; default `['copy']`. The
-target picks one — `e.accept('move')` on its side — and `onDragEnd` reports
-what was actually performed, so `'move'` semantics (remove the original)
-belong in `onDragEnd`, never in `onDragStart`.
+**target** picks one — `e.accept('move')` on its side — and `onDragEnd`
+reports what was actually performed, so `'move'` semantics (remove the
+original) belong in `onDragEnd`, never in `onDragStart`.
+
+Across applications only the **first** entry reaches the wire: a foreign
+target is told the one action you prefer, not the list, so
+`dragActions={['copy', 'move']}` does not give a GTK window a copy/move
+choice. In-app targets see the same single requested action on `e.action`
+and can still answer with any of them.
+
+Note what this does _not_ include: **there is no modifier-key
+negotiation.** Holding Ctrl or Shift during a drag does not switch copy to
+move the way a desktop file manager does — the source requests its first
+action and only the target can change it. Modifier state is not reported on
+drag events either: `e.ctrlKey` and `e.shiftKey` are `false` throughout a
+drag, whichever keys are held. Decide the action from what is being dragged
+and where it lands, not from the keyboard.
 
 ### The gesture
 
@@ -224,7 +292,9 @@ DOM-shaped, and deliberately so:
 - `onDrag` fires per pointer position, with `screenX`/`screenY` and
   `accepted` (whether whatever is under the pointer would take it).
 - `onDragEnd` reports `{ action, dropped }`. `action` is `null` when the
-  drag ended over nothing or was refused.
+  drag ended over nothing or was refused. Read those rather than `source`,
+  which on `onDragStart` and `onDragEnd` is always `'internal'`; only
+  `onDrag` reports the transport actually carrying the drag.
 - A completed drag **suppresses the click**, as in the DOM.
 - `':dragging'` is set on the source node for the duration.
 

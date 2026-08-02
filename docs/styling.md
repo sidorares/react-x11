@@ -77,11 +77,12 @@ Precedence is fixed and low-to-high: `:hover` → `:focus` → `:active` →
 Because the hover _path_ is the ancestor chain, hovering a child lights up an
 ancestor's `:hover` block, exactly like CSS.
 
-The last two belong to drag and drop and follow the same rules: `:drag-over`
-is set on a drop target while a drag it accepts is over it — the whole
-highlight, with no handler and no state — and `:dragging` on the source node
-for the duration of a drag. See
-[drag-and-drop.md](drag-and-drop.md).
+The last two belong to drag and drop. `:drag-over` follows the pointer
+during a drag on exactly the same ancestor-path rule as `:hover` — and,
+like `:hover`, it says where the pointer is, not whether the node would
+accept the drop; `useDropTarget`'s `isAccepted` is the one that answers
+that. `:dragging` is set on the source node for the duration of a drag.
+See [drag-and-drop.md](drag-and-drop.md).
 
 **State blocks may only set paint properties** (`backgroundColor`,
 `borderColor`, `borderRadius`, `zIndex`, `color`) — enforced at declaration

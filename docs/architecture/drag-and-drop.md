@@ -634,7 +634,7 @@ const { dropProps, isOver, isAccepted } = useDropTarget({
   onDragEnd={(e) => {
     if (e.action === 'move') remove(row.id);
   }}
-  style={{ ':dragging': { opacity: 0.5 } }}
+  style={{ ':dragging': { backgroundColor: '$dim' } }}
 />
 ```
 
