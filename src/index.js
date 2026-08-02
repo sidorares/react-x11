@@ -4,6 +4,7 @@ export { windowIdOf, useWindowId } from './windowid.js';
 export { parseUriList } from './dnd.js';
 export {
   useDropTarget,
+  useDragSource,
   Select,
   Tabs,
   Tree,

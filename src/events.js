@@ -10,6 +10,7 @@ import {
 } from './priority.js';
 import { flushPendingFrames } from './frames.js';
 import { callHandler } from './errors.js';
+import { armDrag } from './dnd.js';
 
 const XK_TAB = 0xff09;
 const WHEEL_BUTTONS = { 4: [0, -48], 5: [0, 48], 6: [-48, 0], 7: [48, 0] };
@@ -74,6 +75,8 @@ export class EventManager {
     // toolkit that believed it was unfocused would blink no caret at all.
     this.windowFocused = true;
     this._lastClick = { time: 0, x: 0, y: 0, detail: 0 };
+    // the window's DragSession while a press has armed it (src/dnd.js)
+    this._dragArmed = null;
   }
 
   /**
@@ -317,6 +320,11 @@ export class EventManager {
       if (!ev.defaultPrevented) {
         target._defaultMouseDown?.(ev);
       }
+      // a left press on (or inside) a `draggable` arms a drag; below the
+      // threshold the gesture is still a click (src/dnd.js)
+      if (native.keycode === 1 && !ev.defaultPrevented) {
+        this._dragArmed = armDrag(this.node, target, native);
+      }
       // Right-click is two events, as in the DOM: mousedown, then a
       // separate contextmenu whose default action opens the element's own
       // menu. Handlers that only want to suppress the menu can do it
@@ -335,6 +343,20 @@ export class EventManager {
   _onMouseUp(native) {
     if (WHEEL_BUTTONS[native.keycode]) return; // wheel release
     runWithPriority(DiscreteEventPriority, () => {
+      // a completed drag ends the gesture: no mouseup, no click — as in
+      // the DOM, where dragend replaces them
+      const drag = this._dragArmed;
+      if (drag) {
+        this._dragArmed = null;
+        if (drag.release(native)) {
+          if (this.downNode && !this.downNode.destroyed) {
+            this.downNode.setStyleState(':active', false);
+          }
+          this.downNode = null;
+          this.capturedNode = null;
+          return;
+        }
+      }
       const captured = this._captured();
       const target = captured ?? this._hit(native);
       const ev = this.dispatch('MouseUp', target, native, {
@@ -367,6 +389,10 @@ export class EventManager {
 
   _onMouseMove(native) {
     runWithPriority(ContinuousEventPriority, () => {
+      // an active drag owns the pointer: drag-path diffing replaces hover,
+      // onDrag replaces mousemove. Below the threshold this falls through.
+      const drag = this._dragArmed;
+      if (drag && drag.motion(native)) return;
       const captured = this._captured();
       const target = captured ?? this._hit(native);
       // while captured, hover stays put: dragging a slider must not light
@@ -651,6 +677,7 @@ export class EventManager {
   forget(node) {
     if (this.downNode === node) this.downNode = null;
     if (this.capturedNode === node) this.capturedNode = null;
+    this.node._dragSession?.forget(node);
     this.hoverPath = this.hoverPath.filter((n) => n !== node);
     const manager = this.focusManager;
     // a scope closing restores focus, so pop before the focus reference goes

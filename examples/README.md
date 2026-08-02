@@ -33,6 +33,8 @@ Roughly in the order worth reading them:
 | [`gl.jsx`](gl.jsx)                   | raw GL in a `<glarea>`, compiled to a server-side display list                                  |
 | [`three.jsx`](three.jsx)             | a react-three-fiber-shaped `<Canvas3D>` scene: meshes, lights, textures                         |
 | [`icons.jsx`](icons.jsx)             | 400 icon-sized `<svg>`s that reflow and scroll, with a cached-glyph control — a paint benchmark |
+| [`dnd-source.jsx`](dnd-source.jsx)   | **drag out of the app** (XDND) + in-app drags with live payloads, a `<popup>` drag preview      |
+| [`dnd-target.jsx`](dnd-target.jsx)   | drop zones: `dropAccept` groups, parsed `e.files`, custom MIME types, `useDropTarget` state     |
 | [`stress/`](stress/index.jsx)        | **the big one**: six panels to poke at by hand, with a frame log — see below                    |
 | [`wm.jsx`](wm.jsx)                   | **a reparenting window manager** — see below                                                    |
 

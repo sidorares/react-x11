@@ -144,6 +144,12 @@ export interface WindowProps
    * simply decorates the window.
    */
   decorations?: boolean;
+  /**
+   * Mark this window as a drag preview: the drag router never treats it as
+   * the window under the pointer, so a `<popup dragPreview>` can follow the
+   * pointer without swallowing its own drag. See `useDragSource`.
+   */
+  dragPreview?: boolean;
   /** ConfigureNotify — the tree reflows on its own. */
   onResize?: (ev: SyntheticEvent<NtkWindow>) => void;
   onExpose?: (ev: SyntheticEvent<NtkWindow>) => void;

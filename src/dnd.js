@@ -275,6 +275,10 @@ export class DropSession {
     this.acceptedAction = 'copy';
     this.requestedAction = 'copy';
     this.lastPoint = null;
+    // which transport is feeding this session: 'external' (XDND wire) or
+    // 'internal' (a DragSession in this process). Carried onto every drag
+    // event as `e.source`.
+    this._source = 'external';
   }
 
   /** Entry point, from the window's 'message' listener. */
@@ -361,6 +365,23 @@ export class DropSession {
       return;
     }
 
+    const answer = this._overAt(rootX, rootY, time);
+    this._sendStatus(atoms, {
+      accept: answer.accept,
+      action: answer.action,
+      rect:
+        answer.freeze && this.accepted ? this._nodeRect(this.accepted) : null,
+    });
+  }
+
+  /**
+   * One position update, whichever transport delivered it: route the root
+   * point, hit-test, find the accepting node from `dropAccept` data, diff
+   * the drag path (enter/leave + `:drag-over`), and give `onDragOver` its
+   * synchronous chance to override. Returns the answer — XDND sends it as
+   * XdndStatus, an internal DragSession reads it directly.
+   */
+  _overAt(rootX, rootY, time) {
     const { windowNode, x, y } = this._routePoint(rootX, rootY);
     const target = windowNode.hitTest(x, y) ?? windowNode;
     const path = windowNode.events._path(target);
@@ -399,11 +420,72 @@ export class DropSession {
       this._dispatchOver(windowNode, path, over);
     });
     this.acceptedAction = answer.action;
-    this._sendStatus(atoms, {
-      accept: answer.accept,
-      action: answer.action,
-      rect: answer.freeze && accepted ? this._nodeRect(accepted) : null,
-    });
+    return answer;
+  }
+
+  // -- the internal transport (a DragSession in this process) --------------
+  //
+  // Same session, same path diffing, same handlers — no wire. `e.source`
+  // says 'internal', `e.items` carries live values, and the answer goes
+  // back as a return value instead of an XdndStatus.
+
+  localOver(rootX, rootY, offer, time) {
+    this._source = 'internal';
+    this.sourceWid = 0;
+    this.types = offer.types;
+    this.requestedAction = offer.action;
+    const answer = this._overAt(rootX, rootY, time);
+    return { accepted: answer.accept, action: answer.action };
+  }
+
+  localLeave() {
+    if (this._source !== 'internal') return;
+    discrete(() => this._clearPath())();
+    this.accepted = null;
+    this.lastPoint = null;
+    this._source = 'external';
+  }
+
+  /** The internal drop: dispatch with the live extras a DragSession built
+   * (`items`, prefetched `files`/`text`, a local `getData`). Synchronous
+   * from the caller's point of view — `onDragEnd` follows immediately,
+   * like the DOM's dragend after drop. */
+  localDrop(offer, extras, time) {
+    this._source = 'internal';
+    this.types = offer.types;
+    const point = this.lastPoint;
+    const accepted = this.accepted;
+    const action = this.acceptedAction;
+    if (!accepted || accepted.destroyed || !point) {
+      this.localLeave();
+      return { handled: false, action: null };
+    }
+    discrete(() => {
+      runWithPriority(DiscreteEventPriority, () => {
+        const targetNode = this._dropTarget(point) ?? accepted;
+        const drop = this._makeDragEvent(
+          point.windowNode,
+          'drop',
+          {
+            x: point.x,
+            y: point.y,
+            rootx: point.rootX,
+            rooty: point.rootY,
+            time,
+            buttons: 0,
+          },
+          targetNode,
+          null,
+        );
+        Object.assign(drop, extras);
+        this._dispatchDrop(point.windowNode, targetNode, drop, []);
+        this._clearPath();
+      });
+    })();
+    this.accepted = null;
+    this.lastPoint = null;
+    this._source = 'external';
+    return { handled: true, action };
   }
 
   _onLeave(ev) {
@@ -520,7 +602,7 @@ export class DropSession {
       types,
       has: (want) => typeMatches(types, want),
       action: this.requestedAction,
-      source: 'external',
+      source: this._source,
       screenX: native.rootx,
       screenY: native.rooty,
       accept: (action) => {
@@ -770,6 +852,665 @@ export class DropSession {
       this.X.SendClientMessage(destWid, destWid, typeAtom, 32, data, 0);
     } catch {
       // the source died mid-drag; its ClientMessages stop arriving too
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The drag source.
+//
+// One drag session, two transports (docs/architecture/drag-and-drop.md §6.3):
+// while the pointer is over this process's own windows the drag is local —
+// no wire, live JS payloads, the DropSession above delivering to the same
+// handlers with `e.source === 'internal'`. The moment it leaves them, the
+// session promotes to XDND: the payload is published on XdndSelection
+// through ntk's clipboard, the foreign target is found by descending from
+// the root, and Enter/Position/Leave/Drop go out. Handlers cannot tell the
+// transports apart except by asking.
+// ---------------------------------------------------------------------------
+
+/** DOM-ish drag threshold: a press is a click until it moves this far. */
+const DRAG_THRESHOLD = 4;
+/** How long to wait for a target's XdndFinished before ending the drag
+ * anyway — the mirror of the drop side's watchdog. */
+const FINISH_TIMEOUT = 5_000;
+/** ButtonPress | ButtonRelease | PointerMotion: what the active grab must
+ * keep selecting when the cursor is swapped mid-drag. */
+const GRAB_EVENT_MASK = 4 | 8 | 64;
+
+export function hasDragProps(props) {
+  return Boolean(props?.draggable);
+}
+
+// Realized top-level WindowNodes per app: "is this root point over one of
+// our windows" is the internal/external transport switch, and the same set
+// answers internal cross-window routing.
+const appTopLevels = new WeakMap();
+
+export function registerTopLevel(windowNode) {
+  const app = windowNode.app;
+  let set = appTopLevels.get(app);
+  if (!set) appTopLevels.set(app, (set = new Set()));
+  set.add(windowNode);
+}
+
+export function forgetTopLevel(windowNode) {
+  appTopLevels.get(windowNode.app)?.delete(windowNode);
+}
+
+/** The top-level under a root point. Popups sit above plain windows and a
+ * later realization above an earlier one — a heuristic, since the server
+ * owns top-level stacking; good enough for drags. A `<popup dragPreview>`
+ * follows the pointer by design and must never be the thing under it. */
+function topLevelAt(app, rootX, rootY) {
+  const set = appTopLevels.get(app);
+  if (!set) return null;
+  let hit = null;
+  for (const node of set) {
+    if (node.destroyed || !node.window || node.props.dragPreview) continue;
+    const wnd = node.window;
+    const origin = wnd._screenOrigin ?? { x: wnd.x ?? 0, y: wnd.y ?? 0 };
+    if (
+      rootX >= origin.x &&
+      rootY >= origin.y &&
+      rootX < origin.x + (wnd.width ?? 0) &&
+      rootY < origin.y + (wnd.height ?? 0)
+    ) {
+      if (!hit || node.isPopup || !hit.isPopup) hit = node;
+    }
+  }
+  return hit;
+}
+
+/** Called on every button-1 press (events.js): the nearest draggable
+ * ancestor of the hit node arms the window's DragSession, or nothing
+ * happens at all. */
+export function armDrag(windowNode, target, native) {
+  let source = null;
+  for (
+    let n = target;
+    n;
+    n = n === windowNode ? null : (n.parent ?? windowNode)
+  ) {
+    if (hasDragProps(n.props) && !n.props.disabled) {
+      source = n;
+      break;
+    }
+    if (n === windowNode) break;
+  }
+  if (!source) return null;
+  const session = (windowNode._dragSession ??= new DragSession(windowNode));
+  session.arm(source, native);
+  return session;
+}
+
+const isBinaryData = (v) =>
+  Buffer.isBuffer(v) || ArrayBuffer.isView(v) || v instanceof ArrayBuffer;
+
+function internAtom(X, name) {
+  return new Promise((resolve, reject) =>
+    X.InternAtom(false, name, (err, atom) =>
+      err ? reject(err) : resolve(atom),
+    ),
+  );
+}
+
+export class DragSession {
+  constructor(windowNode) {
+    this.node = windowNode;
+    this.app = windowNode.app;
+    this.X = windowNode.app.X;
+    this._reset();
+  }
+
+  _reset() {
+    this.phase = 'idle'; // 'idle' | 'armed' | 'dragging'
+    this.source = null;
+    this.press = null;
+    this.types = [];
+    this.actions = ['copy'];
+    this.currentAction = 'copy';
+    this.accepted = false;
+    this.localSession = null;
+    this._data = null;
+    this._resolved = null;
+    this._published = false;
+    this._typeAtoms = null;
+    this._atoms = null;
+    this._cursor = null;
+    this.ext = null;
+  }
+
+  /** The pressed node (or an ancestor) is draggable: remember where, and
+   * wait for the threshold. Below it, the gesture is still a click. */
+  arm(source, native) {
+    this._reset();
+    this.phase = 'armed';
+    this.source = source;
+    this.press = {
+      x: native.x,
+      y: native.y,
+      rootx: native.rootx ?? native.x,
+      rooty: native.rooty ?? native.y,
+      time: (native.time ?? 0) >>> 0,
+    };
+  }
+
+  cancel() {
+    if (this.phase === 'dragging') {
+      this.source?.setStyleState?.(':dragging', false);
+      this.localSession?.localLeave();
+    }
+    this._reset();
+  }
+
+  /** A node leaving the tree mid-gesture: abort rather than dangle. */
+  forget(node) {
+    if (this.source === node) this.cancel();
+  }
+
+  /** Every mousemove while armed or dragging. Returns true when the drag
+   * consumed the motion — the caller then skips hover and mousemove. */
+  motion(native) {
+    if (this.phase === 'armed') {
+      const moved =
+        Math.abs(native.x - this.press.x) + Math.abs(native.y - this.press.y);
+      if (moved < DRAG_THRESHOLD) return false;
+      if (!this._start(native)) return false;
+    }
+    if (this.phase !== 'dragging') return false;
+    this._feed(native);
+    return true;
+  }
+
+  _start(native) {
+    const source = this.source;
+    if (!source || source.destroyed) {
+      this._reset();
+      return false;
+    }
+    this._data = source.props.dragData ?? {};
+    this.types = Object.keys(this._data);
+    const actions = source.props.dragActions;
+    this.actions =
+      Array.isArray(actions) && actions.length > 0 ? actions : ['copy'];
+    this.currentAction = this.actions[0];
+    this._resolved = new Map();
+    const ev = this.node.events.dispatch('DragStart', source, native, {
+      types: this.types,
+      action: this.currentAction,
+      source: 'internal',
+      screenX: native.rootx ?? native.x,
+      screenY: native.rooty ?? native.y,
+    });
+    if (ev.defaultPrevented) {
+      this._reset();
+      return false;
+    }
+    this.phase = 'dragging';
+    source.setStyleState(':dragging', true);
+    this._setCursor('grab');
+    return true;
+  }
+
+  /** dragData values resolve once per drag: thunks are called on first
+   * use — at delivery for an internal drop, at promotion for an external
+   * one — and never at mousedown. */
+  _resolve(type) {
+    if (!this._resolved.has(type)) {
+      const value = this._data[type];
+      this._resolved.set(type, typeof value === 'function' ? value() : value);
+    }
+    return this._resolved.get(type);
+  }
+
+  _offer() {
+    return {
+      types: this.types,
+      action: this.actions[0],
+      source: 'internal',
+    };
+  }
+
+  /** What an internal drop event carries beyond the external one: the live
+   * values themselves, plus the same prefetched `files`/`text` shape so a
+   * handler cannot tell the transports apart unless it asks. */
+  _dropExtras() {
+    const items = {};
+    for (const t of this.types) items[t] = this._resolve(t);
+    let files = [];
+    const uriType = this.types.find((t) => TYPE_GROUPS.files.includes(t));
+    if (uriType) {
+      const v = this._resolve(uriType);
+      if (typeof v === 'string') files = parseUriList(v);
+    }
+    let text;
+    const best = TEXT_TARGETS.find((t) => this.types.includes(t));
+    if (best) {
+      const v = this._resolve(best);
+      if (typeof v === 'string') text = v;
+    }
+    const getData = (type) => {
+      const group = TYPE_GROUPS[type];
+      const concrete = group
+        ? (this.types.find((t) => group.includes(t)) ?? type)
+        : type;
+      return Promise.resolve(this._resolve(concrete));
+    };
+    return { items, files, text, getData };
+  }
+
+  _feed(native) {
+    const rootX = native.rootx ?? native.x;
+    const rootY = native.rooty ?? native.y;
+    const over = topLevelAt(this.app, rootX, rootY);
+    if (over?._dnd) {
+      // internal: deliver through the window's own DropSession
+      if (this.ext?.current) this._extLeave();
+      if (this.localSession && this.localSession !== over._dnd) {
+        this.localSession.localLeave();
+      }
+      this.localSession = over._dnd;
+      const result = this.localSession.localOver(
+        rootX,
+        rootY,
+        this._offer(),
+        (native.time ?? 0) >>> 0,
+      );
+      this.accepted = result.accepted;
+      if (result.accepted) this.currentAction = result.action;
+      this._setCursor(result.accepted ? 'grab' : 'not-allowed');
+    } else {
+      // external: over a foreign window (or nothing)
+      if (this.localSession) {
+        this.localSession.localLeave();
+        this.localSession = null;
+        this.accepted = false;
+      }
+      this._extMotion(rootX, rootY, (native.time ?? 0) >>> 0);
+    }
+    const source = this.source;
+    if (source && !source.destroyed && source.props.onDrag) {
+      callHandler(
+        source,
+        'onDrag',
+        source.props.onDrag,
+        this.node.events._makeEvent('drag', native, source, {
+          types: this.types,
+          action: this.currentAction,
+          source: this.localSession ? 'internal' : 'external',
+          accepted: this.accepted,
+          screenX: rootX,
+          screenY: rootY,
+        }),
+      );
+    }
+  }
+
+  /** Button release. Returns true when a drag ran (the caller suppresses
+   * mouseup/click, like the DOM after a drag gesture). */
+  release(native) {
+    if (this.phase !== 'dragging') {
+      this._reset();
+      return false;
+    }
+    const source = this.source;
+    source?.setStyleState?.(':dragging', false);
+    if (this.localSession) {
+      let outcome = { handled: false, action: null };
+      if (this.accepted) {
+        outcome = this.localSession.localDrop(
+          this._offer(),
+          this._dropExtras(),
+          (native.time ?? 0) >>> 0,
+        );
+      } else {
+        this.localSession.localLeave();
+      }
+      this._end(
+        native,
+        outcome.handled ? outcome.action : null,
+        outcome.handled,
+      );
+    } else if (this.ext?.current && this.accepted) {
+      this._extDrop(native); // async: onDragEnd follows XdndFinished
+    } else {
+      if (this.ext?.current) this._extLeave();
+      this._end(native, null, false);
+    }
+    return true;
+  }
+
+  _end(native, action, dropped) {
+    const source = this.source;
+    if (this._published) this._disown();
+    if (source && !source.destroyed) {
+      this.node.events.dispatch('DragEnd', source, native, {
+        types: this.types,
+        action,
+        dropped,
+        source: 'internal',
+        screenX: native.rootx ?? native.x ?? 0,
+        screenY: native.rooty ?? native.y ?? 0,
+      });
+    }
+    this._reset();
+  }
+
+  /** Swap the active grab's cursor (X ChangeActivePointerGrab works on the
+   * implicit button grab too). Core-font approximations — see the doc's
+   * XCursor caveat; the mask must keep selecting motion and release or the
+   * gesture goes silent. */
+  _setCursor(name) {
+    if (name === this._cursor) return;
+    const X = this.X;
+    if (typeof X.ChangeActivePointerGrab !== 'function') return;
+    const cursors = this.app.cursors;
+    if (!cursors?.get) return;
+    try {
+      X.ChangeActivePointerGrab(cursors.get(name), 0, GRAB_EVENT_MASK);
+      this._cursor = name;
+    } catch {
+      // no cursor feedback is a cosmetic failure, never a functional one
+    }
+  }
+
+  // -- the external transport (XDND out) -----------------------------------
+
+  /** First motion outside our windows: publish the payload. Thunks resolve
+   * now; live objects are JSON-serialised for the wire (internal drops got
+   * them by reference). ntk's clipboard owns XdndSelection and serves the
+   * conversions, INCR included. */
+  async _publish() {
+    if (this._published) return;
+    this._published = true;
+    this._atoms = await dndAtoms(this.X);
+    this._typeAtoms = await Promise.all(
+      this.types.map((t) => internAtom(this.X, t)),
+    );
+    const map = {};
+    for (const t of this.types) {
+      let v = this._resolve(t);
+      if (typeof v !== 'string' && !isBinaryData(v)) v = JSON.stringify(v);
+      map[t] = v;
+    }
+    const clipboard = this.app.clipboard;
+    if (clipboard && this.types.length > 0) {
+      await clipboard.write(map, {
+        selection: 'XdndSelection',
+        ...(this.press.time ? { time: this.press.time } : {}),
+      });
+    }
+    if (
+      this._typeAtoms.length > 3 &&
+      typeof this.node.window?.setProperty === 'function'
+    ) {
+      await this.node.window.setProperty('XdndTypeList', this._typeAtoms, {
+        type: 'ATOM',
+      });
+    }
+  }
+
+  /** Positions are serialized behind the publish and the async target
+   * descent; only the newest queued point is ever resolved, so a motion
+   * burst costs one descent, not one per event. */
+  _extMotion(rootX, rootY, time) {
+    const ext = (this.ext ??= {
+      current: null,
+      queue: null,
+      busy: false,
+      suppress: null,
+      finish: null,
+    });
+    ext.queue = { rootX, rootY, time };
+    if (ext.busy) return;
+    ext.busy = true;
+    (async () => {
+      try {
+        await this._publish();
+        while (this.ext?.queue && this.phase === 'dragging') {
+          const point = this.ext.queue;
+          this.ext.queue = null;
+          await this._extStep(point);
+        }
+      } catch {
+        // connection teardown mid-drag
+      } finally {
+        if (this.ext) this.ext.busy = false;
+      }
+    })();
+  }
+
+  async _extStep({ rootX, rootY, time }) {
+    const atoms = this._atoms;
+    const found = await this._findTarget(rootX, rootY);
+    const ext = this.ext;
+    if (!ext || this.phase !== 'dragging') return;
+    const current = ext.current;
+    if ((found?.wid ?? 0) !== (current?.wid ?? 0)) {
+      if (current) {
+        this._sendTo(current.sendWid, atoms.XdndLeave, [
+          this.node.window.id,
+          0,
+          0,
+          0,
+          0,
+        ]);
+      }
+      ext.current = found;
+      ext.suppress = null;
+      this.accepted = false;
+      this._setCursor('not-allowed');
+      if (found) {
+        const flags =
+          ((XDND_VERSION << 24) | (this.types.length > 3 ? 1 : 0)) >>> 0;
+        const t = this._typeAtoms ?? [];
+        this._sendTo(found.sendWid, atoms.XdndEnter, [
+          this.node.window.id,
+          flags,
+          t[0] ?? 0,
+          t[1] ?? 0,
+          t[2] ?? 0,
+        ]);
+      }
+    }
+    if (!ext.current) return;
+    const s = ext.suppress;
+    if (
+      s &&
+      rootX >= s.x &&
+      rootY >= s.y &&
+      rootX < s.x + s.width &&
+      rootY < s.y + s.height
+    ) {
+      return; // the target asked for silence inside this rectangle
+    }
+    this._sendTo(ext.current.sendWid, atoms.XdndPosition, [
+      this.node.window.id,
+      0,
+      (((rootX & 0xffff) << 16) | (rootY & 0xffff)) >>> 0,
+      time >>> 0,
+      actionAtom(atoms, this.actions[0]),
+    ]);
+  }
+
+  /**
+   * The XDND target under a root point: descend the window tree with
+   * TranslateCoordinates, checking XdndAware at each level (since v3 it is
+   * on the top-level client window, which under a reparenting WM sits a
+   * level or two below the frame). XdndProxy redirects the sends. Per
+   * motion and uncached — 2–4 round trips, fine locally; the drag-start
+   * window cache from the design doc is the remote-X follow-up.
+   */
+  async _findTarget(rootX, rootY) {
+    const root = this.X.display?.screen?.[0]?.root;
+    if (root == null) return null;
+    let wid = root;
+    for (let depth = 0; depth < 16; depth++) {
+      const child = await this._translate(root, wid, rootX, rootY);
+      if (!child) return null;
+      if (this._isOurs(child)) return null;
+      const aware = await this._readAware(child);
+      if (aware) {
+        return {
+          wid: child,
+          sendWid: aware.proxy || child,
+          version: Math.min(XDND_VERSION, aware.version),
+        };
+      }
+      wid = child;
+    }
+    return null;
+  }
+
+  _translate(srcWid, dstWid, x, y) {
+    return new Promise((resolve) => {
+      this.X.TranslateCoordinates(srcWid, dstWid, x, y, (err, res) =>
+        resolve(err ? 0 : (res?.child ?? 0)),
+      );
+    });
+  }
+
+  _isOurs(wid) {
+    const set = appTopLevels.get(this.app);
+    if (!set) return false;
+    for (const node of set) {
+      if (node.window?.id === wid) return true;
+    }
+    return false;
+  }
+
+  _readAware(wid) {
+    const atoms = this._atoms;
+    const read = (atom) =>
+      new Promise((resolve) => {
+        this.X.GetProperty(0, wid, atom, 0, 0, 4, (err, prop) =>
+          resolve(
+            err || !prop?.data || prop.data.length < 4 ? null : prop.data,
+          ),
+        );
+      });
+    return Promise.all([read(atoms.XdndAware), read(atoms.XdndProxy)]).then(
+      ([aware, proxy]) =>
+        aware
+          ? {
+              version: aware.readUInt32LE(0),
+              proxy: proxy ? proxy.readUInt32LE(0) : 0,
+            }
+          : null,
+    );
+  }
+
+  /** XdndStatus / XdndFinished sent back by the foreign target, routed here
+   * from the source window's 'message' listener. */
+  handleMessage(ev) {
+    if (ev.format !== 32) return;
+    const atoms = dndAtomsOf(this.X);
+    if (!atoms) return; // cannot be ours: we intern before we publish
+    if (ev.message_type === atoms.XdndStatus) this._onStatus(ev, atoms);
+    else if (ev.message_type === atoms.XdndFinished) this._onFinished(ev);
+  }
+
+  _onStatus(ev, atoms) {
+    const ext = this.ext;
+    if (!ext?.current || ev.data[0] >>> 0 !== ext.current.wid) return;
+    const accept = Boolean(ev.data[1] & 1);
+    this.accepted = accept;
+    if (accept) this.currentAction = actionName(atoms, ev.data[4] >>> 0);
+    const wantInside = Boolean(ev.data[1] & 2);
+    const rw = ev.data[3] >>> 16;
+    const rh = ev.data[3] & 0xffff;
+    ext.suppress =
+      wantInside || (rw === 0 && rh === 0)
+        ? null
+        : {
+            x: ev.data[2] >>> 16,
+            y: ev.data[2] & 0xffff,
+            width: rw,
+            height: rh,
+          };
+    this._setCursor(accept ? 'grab' : 'not-allowed');
+  }
+
+  _onFinished(ev) {
+    const ext = this.ext;
+    if (ext?.finish) {
+      const finish = ext.finish;
+      ext.finish = null;
+      finish({
+        accepted: Boolean(ev.data[1] & 1),
+        actionAtom: ev.data[2] >>> 0,
+      });
+    }
+  }
+
+  _extLeave() {
+    const ext = this.ext;
+    if (!ext?.current || !this._atoms) return;
+    this._sendTo(ext.current.sendWid, this._atoms.XdndLeave, [
+      this.node.window.id,
+      0,
+      0,
+      0,
+      0,
+    ]);
+    ext.current = null;
+    ext.suppress = null;
+    this.accepted = false;
+  }
+
+  _extDrop(native) {
+    const ext = this.ext;
+    const atoms = this._atoms;
+    const target = ext.current;
+    this._sendTo(target.sendWid, atoms.XdndDrop, [
+      this.node.window.id,
+      0,
+      (native.time ?? 0) >>> 0,
+      0,
+      0,
+    ]);
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (this.ext) this.ext.finish = null;
+      // pre-v5 XdndFinished carries no verdict: treat silence and old
+      // versions as "done, with the action the status negotiated"
+      const rejected = result != null && result.accepted === false;
+      const action =
+        result?.accepted && target.version >= 5 && result.actionAtom
+          ? actionName(atoms, result.actionAtom)
+          : this.currentAction;
+      this._end(native, rejected ? null : action, !rejected);
+    };
+    const timer = setTimeout(() => finish(null), FINISH_TIMEOUT);
+    timer.unref?.();
+    if (target.version >= 2) ext.finish = finish;
+    else finish(null);
+  }
+
+  /** Give XdndSelection up at drag end. Ownership is otherwise held until
+   * someone else drags — harmless, except that a stale offer answered long
+   * after XdndFinished is exactly what the spec warns about. */
+  _disown() {
+    internAtom(this.X, 'XdndSelection')
+      .then((sel) => {
+        try {
+          this.X.SetSelectionOwner(0, sel, 0);
+        } catch {
+          // teardown
+        }
+      })
+      .catch(() => {});
+  }
+
+  _sendTo(destWid, typeAtom, data) {
+    try {
+      this.X.SendClientMessage(destWid, destWid, typeAtom, 32, data, 0);
+    } catch {
+      // the target died mid-drag
     }
   }
 }

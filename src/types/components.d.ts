@@ -8,7 +8,10 @@ import type { Color, StyleProp } from './style.js';
 import type { BoxProps, GlAreaProps, Vec3 } from './elements.js';
 import type { DrawnNode, Rect } from './nodes.js';
 import type {
+  DragEndEvent,
   DragEvent,
+  DragSourceEvent,
+  DragSourceProps,
   DropAccept,
   DropEvent,
   DropTargetProps,
@@ -408,4 +411,26 @@ export function useDropTarget(options?: UseDropTargetOptions): {
   dropProps: DropTargetProps;
   isOver: boolean;
   isAccepted: boolean;
+};
+
+export interface UseDragSourceOptions {
+  /** Maps to the `dragData` host prop. */
+  data?: DragSourceProps['dragData'];
+  /** Maps to `dragActions`. */
+  actions?: Array<'copy' | 'move' | 'link'>;
+  onDragStart?: (ev: DragSourceEvent) => void;
+  onDrag?: (ev: DragSourceEvent) => void;
+  onDragEnd?: (ev: DragEndEvent) => void;
+}
+
+/**
+ * The source-side convenience: spread `dragProps` on the node to drag.
+ * `position` (screen coordinates, non-null while dragging) is what a
+ * `<popup dragPreview>` follows — the drag preview is a live React tree,
+ * not a bitmap.
+ */
+export function useDragSource(options?: UseDragSourceOptions): {
+  dragProps: DragSourceProps;
+  isDragging: boolean;
+  position: { x: number; y: number; accepted: boolean } | null;
 };

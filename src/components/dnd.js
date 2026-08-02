@@ -48,3 +48,56 @@ export function useDropTarget(options = {}) {
     isAccepted: Boolean(drag?.accepted),
   };
 }
+
+/**
+ * useDragSource — the source-side twin. Spread `dragProps` on the node to
+ * drag; the hook adds render state (`isDragging`, the pointer `position` in
+ * screen coordinates) so a component can dim itself, show a hint, or render
+ * a drag preview. The preview is deliberately userland — a `<popup
+ * dragPreview>` following `position` is a live React tree, which is more
+ * than a DOM `setDragImage` bitmap ever was; the `dragPreview` prop is what
+ * keeps the router from seeing the popup as the window under the pointer.
+ *
+ *   const { dragProps, isDragging, position } = useDragSource({
+ *     data: {
+ *       'text/uri-list': () => toUriList(item),   // thunk: resolved lazily
+ *       'application/x-myapp-item': item,         // live for in-app drops
+ *     },
+ *     actions: ['copy', 'move'],
+ *     onDragEnd: (e) => { if (e.action === 'move') remove(item.id); },
+ *   });
+ *   return (
+ *     <>
+ *       <box {...dragProps} style={{ ':dragging': { opacity: 0.4 } }} />
+ *       {isDragging && (
+ *         <popup dragPreview x={position.x + 12} y={position.y + 12}>
+ *           <Chip label={item.name} />
+ *         </popup>
+ *       )}
+ *     </>
+ *   );
+ */
+export function useDragSource(options = {}) {
+  const { data, actions, onDragStart, onDrag, onDragEnd } = options;
+  const [drag, setDrag] = useState(null);
+  const dragProps = {
+    draggable: true,
+    dragData: data,
+    dragActions: actions,
+    onDragStart: (ev) => {
+      onDragStart?.(ev);
+      if (!ev.defaultPrevented) {
+        setDrag({ x: ev.screenX, y: ev.screenY, accepted: false });
+      }
+    },
+    onDrag: (ev) => {
+      setDrag({ x: ev.screenX, y: ev.screenY, accepted: ev.accepted });
+      onDrag?.(ev);
+    },
+    onDragEnd: (ev) => {
+      setDrag(null);
+      onDragEnd?.(ev);
+    },
+  };
+  return { dragProps, isDragging: drag != null, position: drag };
+}

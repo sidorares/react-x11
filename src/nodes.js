@@ -27,7 +27,14 @@ import {
   resolveSizeQueries,
 } from './styles.js';
 import { EventManager, discrete } from './events.js';
-import { DropSession, dndAtoms, hasDropProps, XDND_VERSION } from './dnd.js';
+import {
+  DropSession,
+  dndAtoms,
+  forgetTopLevel,
+  hasDropProps,
+  registerTopLevel,
+  XDND_VERSION,
+} from './dnd.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
@@ -550,6 +557,7 @@ export class Node {
       ':focus': false,
       ':active': false,
       ':drag-over': false,
+      ':dragging': false,
     };
     // in-flight transitions: prop -> {from, to, start, duration}
     this._anim = null;
@@ -3522,11 +3530,17 @@ export class WindowNode extends Node {
       return; // mock app, or an ntk too old to write raw properties
     }
     this._dnd = new DropSession(this);
+    registerTopLevel(this);
     void dndAtoms(X).catch(() => {});
     wnd
       .setProperty('XdndAware', [XDND_VERSION], { type: 'ATOM' })
       .catch(() => {});
-    wnd.on('message', (ev) => this._dnd.handleMessage(ev));
+    wnd.on('message', (ev) => {
+      this._dnd.handleMessage(ev);
+      // a drag *out* of this window gets its XdndStatus/XdndFinished back
+      // on the same channel
+      this._dragSession?.handleMessage(ev);
+    });
   }
 
   /** Nodes with drop props register with their root; the count gates the
@@ -3878,6 +3892,10 @@ export class WindowNode extends Node {
     if (this.destroyed) return;
     this.destroyed = true;
     clearPendingFrame(this);
+    // out of the drag registries before the window goes: a drag routed to
+    // a dead window would translate against a null _screenOrigin
+    forgetTopLevel(this);
+    this._dragSession?.cancel();
     for (const child of this.children) child.destroySubtree();
     if (this.window && typeof this.window.destroy === 'function') {
       this.window.destroy();

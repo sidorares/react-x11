@@ -130,6 +130,56 @@ export interface DropEvent<T = DrawnNode> extends DragEvent<T> {
   files: Array<{ uri: string; path?: string }>;
   /** The best offered text flavour, when there was one. */
   text?: string;
+  /** Internal drags only: the dragData values by type name, live — no
+   * serialisation happened. Absent for drops from other applications. */
+  items?: Record<string, unknown>;
+}
+
+/** A drag *source*'s events (`onDragStart` / `onDrag` / `onDragEnd`).
+ * `source` and `accepted` describe the transport and the current target's
+ * answer; `screenX/screenY` are where the pointer is, in root coordinates
+ * — what a preview `<popup>` follows. */
+export interface DragSourceEvent<T = DrawnNode> extends SyntheticEvent<T> {
+  types: string[];
+  action: DropAction;
+  source: 'internal' | 'external';
+  screenX: number;
+  screenY: number;
+  /** Whether whatever is under the pointer currently accepts the drop. */
+  accepted?: boolean;
+}
+
+/** `onDragEnd`: `action` is what the drop performed, or null when the drag
+ * ended nowhere (or was rejected). */
+export interface DragEndEvent<T = DrawnNode> extends Omit<
+  DragSourceEvent<T>,
+  'action'
+> {
+  action: DropAction | null;
+  dropped: boolean;
+}
+
+/**
+ * The props that make a node draggable. `dragData` maps payload type names
+ * to values: strings and bytes are served as-is, thunks are resolved
+ * lazily (at delivery for an in-app drop, at promotion for an external
+ * one), and any other live value reaches in-app drops by reference
+ * (`e.items`) but is JSON-serialised for the wire.
+ */
+export interface DragSourceProps<T = DrawnNode> {
+  draggable?: boolean;
+  dragData?: Record<
+    string,
+    string | Uint8Array | (() => string | Uint8Array | unknown) | unknown
+  >;
+  /** Offered actions, preferred first. Defaults to `['copy']`. */
+  dragActions?: Array<'copy' | 'move' | 'link'>;
+  /** Fires past the drag threshold; `preventDefault()` cancels the drag
+   * (the gesture continues as plain mouse events). */
+  onDragStart?: (ev: DragSourceEvent<T>) => void;
+  /** Per motion while dragging — the source-side mirror of onDragOver. */
+  onDrag?: (ev: DragSourceEvent<T>) => void;
+  onDragEnd?: (ev: DragEndEvent<T>) => void;
 }
 
 /** The props that make a node a drop target. Any drawn element and
@@ -242,4 +292,5 @@ export interface EventHandlers<T = DrawnNode>
     PointerHandlers<T>,
     KeyboardHandlers<T>,
     FocusHandlers<T>,
-    DropTargetProps<T> {}
+    DropTargetProps<T>,
+    DragSourceProps<T> {}
