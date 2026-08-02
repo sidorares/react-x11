@@ -154,6 +154,19 @@ function frameCalls(backend) {
   return end === -1 ? backend.calls : backend.calls.slice(0, end + 1);
 }
 
+/**
+ * Stop the frame clock **and let anything already drawn reach the server**.
+ * `takeFrameControl` alone is not enough before clearing the call log: a
+ * frame the mount scheduled can be mid-flight on the wire, and a clear then
+ * bisects it — the measured "frame" is that frame's tail, missing calls
+ * (the state setup at its head) the scene genuinely made. A settle drains
+ * the wire, so the clear that follows removes whole frames only.
+ */
+async function quiesce(surface, app) {
+  takeFrameControl(surface);
+  await settle(app);
+}
+
 /** Draw one frame the way an animation tick or an expose would. */
 async function drawFrame(surface, app, tap) {
   surface._drawFrame();
@@ -437,7 +450,7 @@ test('lights drive the lit materials, and ambient needs no unit of its own', asy
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
-    takeFrameControl(surface);
+    await quiesce(surface, app);
 
     backend.calls.length = 0;
     tap.reset();
@@ -505,7 +518,7 @@ test('a lit material with no lights falls back to flat colour', async () => {
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
-    takeFrameControl(surface);
+    await quiesce(surface, app);
 
     backend.calls.length = 0;
     await drawFrame(surface, app, tap);
@@ -613,7 +626,7 @@ test('a material without a map turns texturing off', async () => {
     );
     const surface = findSurface(instance._reactX11Node);
     await waitFor(() => surface.gl?.contextTag > 0, 'the GL context');
-    takeFrameControl(surface);
+    await quiesce(surface, app);
 
     backend.calls.length = 0;
     await drawFrame(surface, app, tap);
