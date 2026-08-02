@@ -62,5 +62,29 @@
     "replies": 4,
     "composites": 11,
     "compositePixels": 10292
+  },
+  "window: 10 pure moves": {
+    "requests": 43,
+    "bytesOut": 476,
+    "bytesIn": 1376,
+    "replies": 33,
+    "composites": 0,
+    "compositePixels": 0
+  },
+  "update: 5 color flips, no layout": {
+    "requests": 60,
+    "bytesOut": 1220,
+    "bytesIn": 384,
+    "replies": 12,
+    "composites": 10,
+    "compositePixels": 25020
+  },
+  "update: 5 absolute box moves (layout)": {
+    "requests": 27,
+    "bytesOut": 572,
+    "bytesIn": 384,
+    "replies": 12,
+    "composites": 10,
+    "compositePixels": 812000
   }
 }
