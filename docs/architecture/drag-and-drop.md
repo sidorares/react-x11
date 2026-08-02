@@ -203,9 +203,11 @@ named mechanism, and the drag path got slightly cheaper.
    and the server routes to whoever owns it, wherever that is — and none of
    the reference implementations validate owner == source window. Verify in
    Phase 3; if a target does check, ntk needs a `window` option on `write()`.
-   Related: there is no disown API, so releasing `XdndSelection` at drag end
-   means `app.X.SetSelectionOwner(0, sel, time)` directly, or a small
-   `clipboard.clear(selection)` upstream.
+   Related: there was no disown API when this was written, so releasing
+   `XdndSelection` at drag end meant `app.X.SetSelectionOwner(0, sel, time)`
+   directly. **ntk 5.4.0 added `clipboard.clear(selection)`**
+   ([ntk#169](https://github.com/sidorares/ntk/issues/169)) and `_disown()`
+   uses it.
 
 #### Unchanged
 
@@ -725,10 +727,14 @@ need ([§0.1](#01-audit-against-ntk-530)).
 - **[ntk, optional]** `ChangeActivePointerGrab` wrapper for the mid-drag
   cursor swap — `grabPointer({ cursor: app.cursors.get(name) })` already
   covers grab time, and node-x11 exposes the request, so this is convenience.
-- **[ntk, optional]** `clipboard.clear(selection)` to disown `XdndSelection`
-  at drag end (otherwise `app.X.SetSelectionOwner(0, sel, time)` directly);
-  lazy payload getters on `write()` if eager serialisation at promotion turns
-  out to matter.
+- **[ntk, done in 5.4.0]** `clipboard.clear(selection)` to disown
+  `XdndSelection` at drag end
+  ([ntk#169](https://github.com/sidorares/ntk/issues/169)), and a `time`
+  option on `read()`/`targets()` so a drop converts with `XdndDrop`'s
+  timestamp rather than `CurrentTime`
+  ([ntk#168](https://github.com/sidorares/ntk/issues/168)). Both are wired
+  up. Still open: lazy payload getters on `write()`, if eager serialisation
+  at promotion turns out to matter.
 - **[decision]** `:drag-over` (and later `:dragging`) join `STATE_KEYS`.
 
 ### Phase 1 — drop target (closes #126)
@@ -832,12 +838,17 @@ Unusually strong here, and worth exploiting.
   descent (safe, because the grab makes us the only client searching).
 - **Timestamps.** Using `CurrentTime` for `ConvertSelection` mostly works and
   then fails against sources that validate — the worst failure profile there
-  is. Thread `XdndDrop`'s `l[2]` through.
+  is. Thread `XdndDrop`'s `l[2]` through. _Done:_ `read({ time })` landed in
+  ntk 5.4.0 and `_getData` passes the drop timestamp.
 - **Selection ownership outlives the drag.** ntk's `Clipboard` holds a
-  selection until someone else takes it, and has no disown API. An
-  `XdndSelection` still owned after the drag ends is mostly harmless, but a
-  stale offer answered after `XdndFinished` is the case the spec warns about
-  ("throw out extremely old data"); release it explicitly at drag end.
+  selection until someone else takes it. An `XdndSelection` still owned after
+  the drag ends is mostly harmless, but a stale offer answered after
+  `XdndFinished` is the case the spec warns about ("throw out extremely old
+  data"); release it explicitly at drag end. _Done:_ `_disown()` calls
+  `clipboard.clear('XdndSelection')` (ntk 5.4.0), which releases with the
+  acquisition timestamp — so a drag that already lost the selection to
+  another client leaves it alone, where `CurrentTime` would have taken it
+  back from them.
 - **Grabs versus `<popup>`.** Menus already take pointer grabs
   (`window.js:2017`). A drag beginning inside an open menu must not fight
   them; establish that the drag grab replaces the menu grab, and that closing

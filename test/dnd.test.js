@@ -57,8 +57,14 @@ class FakeSource {
     this.X = app.X;
     this.wnd = app.createWindow({ width: 10, height: 10 });
     this.received = []; // ClientMessages sent back to us
+    // SelectionRequests ntk's clipboard answers on our behalf. Observing
+    // them is how the conversion timestamp is checked: XDND says a drop
+    // must convert with the timestamp from XdndDrop, never CurrentTime.
+    this.conversions = [];
     this.X.on('event', (ev) => {
       if (ev.type === 33) this.received.push(ev);
+      if (ev.type === 30)
+        this.conversions.push({ target: ev.target, time: ev.time });
     });
   }
 
@@ -424,6 +430,19 @@ test('drop: uri-list arrives parsed, XdndFinished confirms with the action', asy
     assert.equal(fin[0], instance.id, 'l[0] is the target window');
     assert.equal(fin[1] & 1, 1, 'v5: accepted bit set');
     assert.equal(fin[2], src.atoms.XdndActionCopy, 'v5: performed action');
+
+    // The conversion carried XdndDrop's timestamp, l[2] = 43, rather than
+    // CurrentTime. Mainstream sources serve whatever they hold and never
+    // notice; one that validates the timestamp refuses, and that is the
+    // failure this pins.
+    const uriList = await src.typeAtom('text/uri-list');
+    const converted = src.conversions.filter((c) => c.target === uriList);
+    assert.ok(converted.length > 0, 'the target converted text/uri-list');
+    assert.deepEqual(
+      [...new Set(converted.map((c) => c.time))],
+      [43],
+      "every conversion used XdndDrop's timestamp",
+    );
     await x11Root.unmount();
   } finally {
     await app.close();

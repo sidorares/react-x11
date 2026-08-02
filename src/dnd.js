@@ -519,12 +519,12 @@ export class DropSession {
     let text;
     try {
       if (typeMatches(this.types, 'files')) {
-        const raw = await this._getData('text/uri-list');
+        const raw = await this._getData('text/uri-list', time);
         text = String(raw);
         files = parseUriList(raw);
       } else {
         const best = TEXT_TARGETS.find((t) => this.types.includes(t));
-        if (best) text = await this._getData(best);
+        if (best) text = await this._getData(best, time);
       }
     } catch {
       // conversion refused or timed out; the handler still runs with
@@ -551,7 +551,9 @@ export class DropSession {
         );
         drop.files = files;
         drop.text = text;
-        drop.getData = (type) => this._getData(this._resolveType(type));
+        // `time` is captured, not read off the session: an async onDrop can
+        // still be holding getData after a later drag has reset us
+        drop.getData = (type) => this._getData(this._resolveType(type), time);
         this._dispatchDrop(point.windowNode, targetNode, drop, pending);
         this._clearPath();
       });
@@ -726,16 +728,20 @@ export class DropSession {
   // -- data ----------------------------------------------------------------
 
   /** One selection conversion, decoded for text-ish targets. ntk's
-   * clipboard drives ConvertSelection + INCR reassembly; note it converts
-   * with CurrentTime rather than the drop timestamp (`read` has no time
-   * option yet) — fine for every mainstream source, which serves whatever
-   * it currently offers. */
-  async _getData(target, _time) {
+   * clipboard drives ConvertSelection + INCR reassembly.
+   *
+   * `time` is the timestamp from `XdndDrop`'s `l[2]`, which the protocol
+   * says to convert with — never CurrentTime. Mainstream sources serve
+   * whatever they currently offer and would not notice, but one that
+   * validates the timestamp fails mysteriously, which is the worst failure
+   * profile there is. */
+  async _getData(target, time) {
     const clipboard = this.node.app.clipboard;
     if (!clipboard) throw new Error('react-x11: no clipboard on this app');
     const data = await clipboard.read({
       selection: 'XdndSelection',
       target,
+      time,
     });
     return typeof data === 'string' ? data : decodeData(data, target);
   }
@@ -1493,17 +1499,22 @@ export class DragSession {
 
   /** Give XdndSelection up at drag end. Ownership is otherwise held until
    * someone else drags — harmless, except that a stale offer answered long
-   * after XdndFinished is exactly what the spec warns about. */
+   * after XdndFinished is exactly what the spec warns about.
+   *
+   * `clipboard.clear()` rather than a raw `SetSelectionOwner` (ntk >= 5.4.0):
+   * it releases with the timestamp the selection was acquired with, as ICCCM
+   * 2.3.1 requires, so a drag that has already lost XdndSelection to another
+   * client leaves it alone — where CurrentTime would have taken it away from
+   * them. It also keeps ntk's own record of what it owns in step, instead of
+   * waiting for the SelectionClear to come back and say so. */
   _disown() {
-    internAtom(this.X, 'XdndSelection')
-      .then((sel) => {
-        try {
-          this.X.SetSelectionOwner(0, sel, 0);
-        } catch {
-          // teardown
-        }
-      })
-      .catch(() => {});
+    // Nothing here may throw: `_end` calls this before dispatching DragEnd,
+    // so a throw would cost the app the end of its own drag.
+    try {
+      this.app?.clipboard?.clear('XdndSelection')?.catch(() => {});
+    } catch {
+      // a connection already closing
+    }
   }
 
   _sendTo(destWid, typeAtom, data) {

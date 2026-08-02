@@ -388,7 +388,7 @@ class FakeTarget {
   }
 }
 
-test('a drag out of the app speaks XDND: Enter, Position, Drop, Finished', async () => {
+test('a drag out of the app speaks XDND: Enter, Position, Drop, Finished, and gives the selection back', async () => {
   const { app, targetApp } = await headlessPair();
   const x11Root = await createRoot({ app });
   try {
@@ -520,6 +520,133 @@ test('a drag out of the app speaks XDND: Enter, Position, Drop, Finished', async
       'onDragEnd',
     );
     assert.deepEqual(log.at(-1), ['dragend', 'copy', true]);
+
+    // and the selection goes back. Holding XdndSelection past the drag is
+    // how a stale offer gets answered long after XdndFinished, which is
+    // what the spec means by "throw out extremely old data".
+    const sel = await new Promise((resolve, reject) =>
+      targetApp.X.InternAtom(false, 'XdndSelection', (err, a) =>
+        err ? reject(err) : resolve(a),
+      ),
+    );
+    const ownerOf = () =>
+      new Promise((resolve, reject) =>
+        targetApp.X.GetSelectionOwner(sel, (err, wid) =>
+          err ? reject(err) : resolve(wid),
+        ),
+      );
+    let owner = await ownerOf();
+    for (let i = 0; i < 50 && owner !== 0; i++) {
+      await settle(app);
+      await settle(targetApp);
+      owner = await ownerOf();
+    }
+    assert.equal(owner, 0, 'XdndSelection was given back at drag end');
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+    await targetApp.close();
+  }
+});
+
+test('ending a drag does not take XdndSelection back from whoever owns it now', async () => {
+  // The release is addressed at the drag's own ownership, not at the
+  // selection generally: `clipboard.clear()` releases with the timestamp the
+  // selection was acquired with, and sends nothing at all once we are no
+  // longer the owner. A raw SetSelectionOwner(None, CurrentTime) would
+  // instead succeed here and quietly strip the new owner.
+  const { app, targetApp } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  try {
+    const log = [];
+    const instance = await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: 300, height: 200 },
+          h('box', {
+            draggable: true,
+            dragData: { 'text/plain': 'ours' },
+            onDragEnd: () => log.push('dragend'),
+            style: { width: 100, height: 100 },
+          }),
+        ),
+        resolve,
+      ),
+    );
+    await settle(app);
+    await settle(app);
+
+    const sel = await new Promise((resolve, reject) =>
+      targetApp.X.InternAtom(false, 'XdndSelection', (err, a) =>
+        err ? reject(err) : resolve(a),
+      ),
+    );
+    const ownerOf = () =>
+      new Promise((resolve, reject) =>
+        targetApp.X.GetSelectionOwner(sel, (err, wid) =>
+          err ? reject(err) : resolve(wid),
+        ),
+      );
+
+    const wnd = instance;
+    wnd.emit('mousedown', {
+      x: 50,
+      y: 50,
+      rootx: 50,
+      rooty: 50,
+      keycode: 1,
+      buttons: 0,
+      time: 10,
+    });
+    wnd.emit('mousemove', {
+      x: 70,
+      y: 50,
+      rootx: 70,
+      rooty: 50,
+      buttons: 256,
+      time: 11,
+    });
+    // leave our 300-wide window: promotion publishes on XdndSelection
+    wnd.emit('mousemove', {
+      x: 450,
+      y: 60,
+      rootx: 450,
+      rooty: 60,
+      buttons: 256,
+      time: 12,
+    });
+    // `until` takes a sync predicate, and this one has to await a round
+    // trip, so poll it directly
+    let published = 0;
+    for (let i = 0; i < 300 && published === 0; i++) {
+      await settle(app);
+      await settle(targetApp);
+      published = await ownerOf();
+    }
+    assert.notEqual(published, 0, 'promotion published on XdndSelection');
+
+    // another client copies mid-drag, taking the selection from us
+    await targetApp.clipboard.write('theirs', { selection: 'XdndSelection' });
+    const theirs = await ownerOf();
+    assert.notEqual(theirs, 0, 'the other client owns it now');
+
+    wnd.emit('mouseup', {
+      x: 450,
+      y: 60,
+      rootx: 450,
+      rooty: 60,
+      keycode: 1,
+      buttons: 0,
+      time: 13,
+    });
+    await until([app, targetApp], () => log.includes('dragend'), 'onDragEnd');
+    for (let i = 0; i < 20; i++) {
+      await settle(app);
+      await settle(targetApp);
+    }
+    assert.equal(await ownerOf(), theirs, 'the new owner keeps the selection');
     await x11Root.unmount();
   } finally {
     await app.close();
