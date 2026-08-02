@@ -4542,6 +4542,11 @@ export class WindowNode extends Node {
         reasons: this._lastReasons,
         start: started,
         end: performance.now(),
+        // ntk's last measured frame fence (GetInputFocus round trip after a
+        // frame's requests): how long the server took to drain them. Client
+        // work and server drain separate cleanly in a trace only when both
+        // are in it — a slow virtualized GPU shows up here, not in `end`.
+        fence: this.window.frameLatency,
       });
     }
     // A frame that actually painted, which is the moment the app is up

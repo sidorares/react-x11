@@ -36,8 +36,13 @@ REACT_X11_TRACE=summary npm run examples:dashboard
   stderr when the process exits.
 - `requests` — one stderr line per request as it is sent
   (`x11 → Render.FillRectangles 36B`), plus one line per painted frame
-  (`frame 412: 320x24@8,40 reasons=style-state`). X errors are decoded and
-  name the failing request.
+  (`frame 412: 320x24@8,40 reasons=style-state fence=0.4ms`). X errors are
+  decoded and name the failing request. `fence` is ntk's measured server
+  round trip after the previous frame — how long the server took to drain
+  what that frame drew. Client work and server work separate here: a paint
+  that builds in 0.3ms against a fence of 20ms is a server-side problem
+  (software-fallback RENDER ops, a virtualized GPU), not a renderer one.
+  `npm run bench:frames` reports the same split as a summary.
 - `chrome:/tmp/trace.json` — [Chrome Trace Event
   JSON](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU),
   written at exit. Open it in Perfetto or `about:tracing`: React commits
