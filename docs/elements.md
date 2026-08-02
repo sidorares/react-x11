@@ -467,7 +467,7 @@ that is how react-hook-form's `register()` resets a field through its ref.
 Interactions: click/drag selection, double-click word select, triple-click
 select all, Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,
 Ctrl+C/X/V on CLIPBOARD, middle-click paste from PRIMARY, selections own
-PRIMARY (X11 conventions), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
+PRIMARY (X11 conventions, select-all included), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
 and redo, and a **right-click menu**. Focusable by default; shows the text
 cursor. `ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses
 the built-in editing behavior. To copy or paste from anywhere else — a
@@ -482,6 +482,14 @@ wiring, the way a browser gives `<input>` one — each row live only when it
 would do something, and every row running the same code the keyboard
 shortcut does. Right-clicking **inside** a selection keeps it (the menu is
 about to act on it); outside one, the caret moves there first.
+
+**Paste** is greyed when nothing owns the CLIPBOARD selection. The field
+subscribes to selection changes the first time its menu opens rather than
+asking on the way in — asking would mean a round trip against whatever
+foreign client owns the clipboard, and a wait if that client is wedged, at
+exactly the moment a menu should already be on screen. So the very first
+menu of a session still shows Paste enabled; every one after it knows. On
+a server without XFixes it stays enabled, which is where it started.
 
 Arrows walk the rows, skipping the disabled ones, Enter chooses, Escape or
 a press anywhere outside closes. The selection stays visibly highlighted

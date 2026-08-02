@@ -42,6 +42,7 @@ import { paintCacheFor } from './paintcache.js';
 import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import { inputTime } from './inputtime.js';
+import { armPasteState, canPaste } from './pastestate.js';
 import {
   editMenuColors,
   editMenuGeometry,
@@ -2687,10 +2688,7 @@ export class TextInputNode extends Node {
     if (ev.ctrlKey) {
       const letter = ctrlChordLetter(ev);
       if (letter === 0x61 /* a */) {
-        this._anchor = 0;
-        this._caret = this._chars().length;
-        this._breakUndoRun();
-        this._repaint();
+        this._selectAll();
       } else if (letter === 0x63 /* c */) {
         this._copySelection();
       } else if (letter === 0x78 /* x */) {
@@ -2818,6 +2816,18 @@ export class TextInputNode extends Node {
     this._repaint();
   }
 
+  /** Select everything, and take PRIMARY with it. Both ways in — Ctrl+A and
+   * the menu row — come through here: every other selection gesture owns
+   * PRIMARY, and GTK and Qt both do it for select-all too, so a middle-click
+   * paste after Ctrl+A pastes what is on screen rather than whatever was
+   * selected before it. */
+  _selectAll() {
+    this._anchor = 0;
+    this._caret = this._chars().length;
+    this._breakUndoRun();
+    this._ownSelection();
+  }
+
   _ownSelection() {
     this._repaint();
     if (this._caret !== this._anchor) this._copySelection('PRIMARY');
@@ -2873,9 +2883,9 @@ export class TextInputNode extends Node {
         id: 'paste',
         label: 'Paste',
         shortcut: 'Ctrl+V',
-        // whether CLIPBOARD holds anything is an async round trip, so the
-        // row stays live whenever there is a clipboard to ask
-        enabled: Boolean(this._clipboardApi()),
+        // greyed only when the server has told us the selection is unowned
+        // (pastestate.js). Never a round trip on the way to opening a menu.
+        enabled: Boolean(this._clipboardApi()) && canPaste(this.app),
       },
       { separator: true },
       {
@@ -2898,12 +2908,7 @@ export class TextInputNode extends Node {
       this._copySelection();
       if (a !== b) this._deleteRange(a, b);
     } else if (id === 'paste') this._pasteFrom();
-    else if (id === 'selectAll') {
-      this._anchor = 0;
-      this._caret = this._chars().length;
-      this._breakUndoRun();
-      this._repaint();
-    }
+    else if (id === 'selectAll') this._selectAll();
   }
 
   _defaultContextMenu(ev) {
@@ -2935,6 +2940,11 @@ export class TextInputNode extends Node {
 
   _openEditMenu(ev) {
     this._closeEditMenu();
+    // From here on the menu knows whether there is anything to paste. This
+    // first open still shows the row enabled — the answer arrives after it
+    // is drawn — which is the pre-tracking behaviour, and correct far more
+    // often than not.
+    armPasteState(this.app, this._clipboardApi());
     const items = this._editMenuItems();
     const geometry = editMenuGeometry(
       items,

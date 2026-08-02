@@ -4457,6 +4457,28 @@ async function mountSelected(props = {}) {
   return { app, wnd, input, writes };
 }
 
+test('textinput: select-all owns PRIMARY, both ways in', async () => {
+  // Every other selection gesture already did; GTK and Qt do it for
+  // select-all too, so a middle-click paste right after Ctrl+A pastes what
+  // is on screen rather than whatever was selected before it.
+  const { writes } = await mountSelected(); // its last act is Ctrl+A
+  assert.deepStrictEqual(
+    writes.at(-1),
+    ['hello world', 'PRIMARY'],
+    'Ctrl+A published the selection',
+  );
+
+  const { input, writes: menuWrites } = await mountSelected();
+  menuWrites.length = 0;
+  input._runEditAction('selectAll');
+  assert.deepStrictEqual(input._selection(), [0, 11]);
+  assert.deepStrictEqual(
+    menuWrites.at(-1),
+    ['hello world', 'PRIMARY'],
+    'the menu row published it too',
+  );
+});
+
 const rightClick = (wnd, x = 40, y = 10) =>
   wnd.emit('mousedown', { x, y, keycode: 3 });
 

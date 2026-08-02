@@ -268,3 +268,81 @@ test('watch() reports the clipboard going empty', async () => {
   assert.deepEqual(seen, [1, 0], 'unwatch stops the callbacks');
   await x11Root.unmount();
 });
+
+// --- the edit menu's Paste row ----------------------------------------------
+
+/** A focused `<textinput>` on the mock app, whose clipboard is the working
+ * one — so the Paste row is answering about real ownership. */
+async function mountInput() {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 300, height: 80 },
+      h('textinput', { defaultValue: 'hello' }),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+  return { app, wnd, input, x11Root };
+}
+
+const pasteRow = (input) =>
+  input._editMenuItems().find((r) => r.id === 'paste');
+
+test('Paste greys out once the server says the clipboard is empty', async () => {
+  const { app, wnd, input, x11Root } = await mountInput();
+  const open = () => wnd.emit('mousedown', { x: 40, y: 10, keycode: 3 });
+
+  // nothing known yet: the row is live, which is where it started
+  assert.equal(pasteRow(input).enabled, true, 'optimistic before tracking');
+
+  open(); // arms the watch
+  await tick();
+  input._closeEditMenu();
+  await tick();
+  assert.equal(
+    pasteRow(input).enabled,
+    false,
+    'seeded from the server: nothing owns CLIPBOARD',
+  );
+
+  await app.clipboard.write('now there is something');
+  assert.equal(pasteRow(input).enabled, true, 'the watch woke it up');
+
+  await app.clipboard.clear();
+  assert.equal(pasteRow(input).enabled, false, 'and put it back');
+  await x11Root.unmount();
+});
+
+test('one watch per app, however many times a menu opens', async () => {
+  const { app, wnd, input, x11Root } = await mountInput();
+  for (let i = 0; i < 5; i++) {
+    wnd.emit('mousedown', { x: 40, y: 10, keycode: 3 });
+    await tick();
+    input._closeEditMenu();
+    await tick();
+  }
+  assert.equal(
+    app.clipboard._watchers.get('CLIPBOARD')?.length,
+    1,
+    'armed once, not once per open',
+  );
+  await x11Root.unmount();
+});
+
+test('a clipboard that cannot be watched leaves Paste alone', async () => {
+  // an older ntk, or a stand-in: tracking is the enhancement, not the
+  // feature, so the row stays live rather than the menu throwing
+  const { app, wnd, input, x11Root } = await mountInput();
+  app.clipboard = {
+    write: () => Promise.resolve(),
+    read: () => Promise.resolve('x'),
+  };
+  wnd.emit('mousedown', { x: 40, y: 10, keycode: 3 });
+  await tick();
+  assert.equal(pasteRow(input).enabled, true);
+  await x11Root.unmount();
+});
