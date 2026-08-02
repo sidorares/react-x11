@@ -323,7 +323,7 @@ function createSession({ sink, path }) {
       }
     },
 
-    frame({ rects, reasons, start, end }) {
+    frame({ rects, reasons, start, end, fence }) {
       frames += 1;
       const full = !rects;
       const area = full
@@ -334,7 +334,14 @@ function createSession({ sink, path }) {
           ? 'FULL WINDOW'
           : rects.map((r) => `${r.width}x${r.height}@${r.x},${r.y}`).join(' ');
         const why = reasons?.length ? ` reasons=${reasons.join('+')}` : '';
-        line(`frame ${frames}: ${where}${why}`);
+        // the previous frame's measured server drain: on a healthy local
+        // server it sits well under a millisecond, and a fence that grows
+        // with window area is the signature of a server-side bottleneck
+        // (software-fallback RENDER ops, a virtualized GPU) that client
+        // timings cannot show
+        const wait =
+          typeof fence === 'number' ? ` fence=${fence.toFixed(1)}ms` : '';
+        line(`frame ${frames}: ${where}${why}${wait}`);
       }
       record({
         name: 'frame',
@@ -349,6 +356,7 @@ function createSession({ sink, path }) {
           rects: rects?.length ?? 0,
           area,
           reasons: reasons ?? [],
+          fenceMs: typeof fence === 'number' ? +fence.toFixed(2) : undefined,
         },
       });
     },
