@@ -440,7 +440,7 @@ export class EventManager {
     // focus alone: the press never reached that window, and menus rely on it
     // (their rows are not focusable, the trigger keeps the keys)
     if (!focusable && manager !== this) return;
-    manager.focus(focusable ?? null);
+    manager.focus(focusable ?? null, 'pointer');
   }
 
   /** Focusable: `focusable`, an explicit `tabIndex` (including a negative
@@ -542,25 +542,42 @@ export class EventManager {
     });
   }
 
-  focus(node) {
+  /**
+   * Move focus, and record *how* it moved.
+   *
+   * `reason` is what separates `:focus` from `:focus-visible`. A press is
+   * `'pointer'` and lights no ring: the user knows where they clicked, and a
+   * ring on every click is the noise CSS grew `:focus-visible` to remove.
+   * Everything else — Tab, an arrow inside a widget, `autoFocus`, a modal
+   * handing focus back as it closes, `node.focus()` from an application —
+   * lights one, because none of those tell the user where focus went.
+   */
+  focus(node, reason = 'script') {
     const manager = this.focusManager;
-    if (manager !== this) return manager.focus(node);
+    if (manager !== this) return manager.focus(node, reason);
     if (node === this.focused) return;
     const old = this.focused;
     this._previousFocus = old;
     this.focused = node;
     if (old && !old.destroyed) {
+      // Claimed *first*, while the ring is still on: a node's damage bound
+      // only reaches outside its box while it is actually drawing an
+      // outline, so a claim taken after the state flipped back would leave
+      // the ring's pixels behind.
+      old.root?.invalidate(false, old, 'focus');
       old.setStyleState(':focus', false);
+      old.setStyleState(':focus-visible', false);
       old._defaultBlur?.();
       old.props.onBlur?.(this._makeEvent('blur', null, old));
-      // the ring/caret it was drawing has to go, and it may be in another
-      // window than the new focus (owner window ↔ its popup)
+      // it may be in another window than the new focus — owner window ↔ its
+      // popup — and the caret it was drawing has to go too
       old.root?.invalidate(false, old, 'focus');
     }
     if (node) {
       // keys only reach a node whose window has the X focus
       if (!this.windowFocused) this.node.window?.focus?.();
       node.setStyleState(':focus', true);
+      node.setStyleState(':focus-visible', reason !== 'pointer');
       this._scrollIntoView(node);
       if (this.windowFocused) node._defaultFocus?.();
       node.props.onFocus?.(this._makeEvent('focus', null, node));
@@ -675,13 +692,14 @@ export class EventManager {
     const index = list.indexOf(this.focused);
     if (index === -1) {
       // nothing focused, or focus sits outside the current scope: Tab enters
-      this.focus(backwards ? list[list.length - 1] : list[0]);
+      this.focus(backwards ? list[list.length - 1] : list[0], 'key');
       return;
     }
     this.focus(
       backwards
         ? list[(index || list.length) - 1]
         : list[(index + 1) % list.length],
+      'key',
     );
   }
 

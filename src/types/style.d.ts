@@ -123,6 +123,18 @@ export interface PaintStyle {
   borderColor?: Color;
   borderRadius?: number;
   zIndex?: number;
+  /**
+   * The focus-ring family. Painted *outside* the border box and never seen
+   * by yoga — which is why CSS grew `outline` separately from `border`, and
+   * why switching one on cannot move the thing it surrounds.
+   *
+   * A focusable node draws one on `:focus-visible` with no styling at all;
+   * these override it, and `outlineWidth: 0` opts out.
+   */
+  outlineWidth?: number;
+  outlineColor?: Color;
+  /** The gap between the border box and the ring. Default 1. */
+  outlineOffset?: number;
 }
 
 /** Text properties. All affect measurement except `color`. */
@@ -141,11 +153,21 @@ export interface StateStyle extends PaintStyle {
   color?: Color;
 }
 
+/** How far outside the box the pointer still counts as hitting it. A number
+ * grows every side; the object form grows only the sides it names. */
+export type HitSlop =
+  number | { top?: number; right?: number; bottom?: number; left?: number };
+
 /** Every property a style may set, before the block forms. */
 export interface StyleProperties extends LayoutStyle, PaintStyle, TextStyle {
   borderStyle?: BorderStyle;
   cursor?: Cursor;
   pointerEvents?: PointerEvents;
+  /**
+   * Hit testing only: it never grows the drawing and never reaches yoga, so
+   * a 16px control can have a 24px target without the layout moving.
+   */
+  hitSlop?: HitSlop;
 }
 
 /**
@@ -167,6 +189,10 @@ export interface StyleBlocks {
   transition?: Transition;
   ':hover'?: StateStyle;
   ':focus'?: StateStyle;
+  /** Focus that arrived from the keyboard rather than from a press — CSS's
+   * `:focus-visible`. This is where a focus ring belongs: a ring on every
+   * click is noise, and a ring on Tab is the only cue a keyboard user has. */
+  ':focus-visible'?: StateStyle;
   ':active'?: StateStyle;
   ':disabled'?: StateStyle;
   /** Set while a drag is over this node or a descendant — the same

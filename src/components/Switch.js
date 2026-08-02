@@ -13,12 +13,20 @@ const TRACK_WIDTH = 36;
 const THUMB = 16;
 const INSET = 2;
 
+const TRACK_HEIGHT = 20;
+// WCAG 2.2 SC 2.5.8 wants 24px in both directions and the pill is 20 tall.
+// Growing the pill would be a redesign of a control whose proportions are
+// the point, so the *target* grows instead: `hitSlop` is hit testing only,
+// so nothing about the drawing or the layout moves.
+const TRACK_SLOP = (24 - TRACK_HEIGHT) / 2;
+
 const s = createStyles({
   track: {
     width: TRACK_WIDTH,
-    height: 20,
+    height: TRACK_HEIGHT,
     borderRadius: 10,
     justifyContent: 'center',
+    hitSlop: TRACK_SLOP,
     transition: { backgroundColor: 120 },
   },
   // absolutely positioned so the thumb slides on `left`: `justifyContent`
@@ -84,7 +92,6 @@ export function Switch({
           ':hover': {
             backgroundColor: checked ? theme.accentHover : theme.dim,
           },
-          ':focus': { borderColor: theme.borderActive },
         },
         style,
       ],

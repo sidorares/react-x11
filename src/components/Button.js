@@ -22,12 +22,7 @@ export function Button({
   ...boxProps
 }) {
   const theme = useTheme();
-  const {
-    hover,
-    focused,
-    props,
-    style: controlStyle,
-  } = useControl(disabled, onPress);
+  const { hover, props, style: controlStyle } = useControl(disabled, onPress);
   const background = disabled
     ? theme.surfaceHover
     : primary
@@ -60,14 +55,20 @@ export function Button({
           borderWidth: theme.borderWidth,
           borderColor: disabled
             ? theme.border
-            : focused
-              ? primary
-                ? theme.accentHover
-                : theme.borderActive
-              : primary
-                ? theme.accent
-                : theme.border,
+            : primary
+              ? theme.accent
+              : theme.border,
           backgroundColor: background,
+        },
+        // The border used to be tinted off React state, which lit it for a
+        // press as well — and re-rendered the button and its label to do it.
+        // As a state block it is a repaint of one node, and `:focus-visible`
+        // is the difference between "you clicked here" and "your keyboard is
+        // here", which is the only one of the two worth drawing.
+        !disabled && {
+          ':focus-visible': {
+            borderColor: primary ? theme.accentHover : theme.borderActive,
+          },
         },
         style,
       ],

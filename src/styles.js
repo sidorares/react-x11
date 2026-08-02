@@ -124,11 +124,20 @@ const LAYOUT_APPLIERS = {
 };
 
 // Props that only affect painting, not geometry.
+//
+// `outline*` is here rather than beside `border*` in LAYOUT_APPLIERS for the
+// reason CSS grew a second property at all: a focus ring must not move the
+// thing it is drawn around. It is painted outside the border box and takes
+// no part in yoga, so switching it on is a repaint of one node and nothing
+// under it reflows.
 const PAINT_PROPS = new Set([
   'backgroundColor',
   'borderColor',
   'borderRadius',
   'zIndex',
+  'outlineWidth',
+  'outlineColor',
+  'outlineOffset',
 ]);
 
 // Text style props. All affect measurement except color.
@@ -156,6 +165,11 @@ export const isEventProp = (name) => /^on[A-Z]/.test(name);
 export const STATE_KEYS = [
   ':hover',
   ':focus',
+  // Focus that came from the keyboard rather than from a press — CSS's
+  // `:focus-visible`, and for the same reason: a ring on every click is
+  // noise, a ring on Tab is the only way a keyboard user can tell where
+  // they are. `focus()` decides which it was; see EventManager.
+  ':focus-visible',
   ':active',
   ':disabled',
   ':drag-over',
@@ -179,6 +193,10 @@ const STYLE_PROPS = new Set([
   // moving pointerEvents into style for the same reason
   'cursor',
   'pointerEvents',
+  // How far outside the box the pointer still counts as hitting it. Neither
+  // layout nor paint — the one thing it must never do is grow the visuals,
+  // since the whole point is a 24px target under a 16px control.
+  'hitSlop',
 ]);
 
 export const isStyleProp = (name) => STYLE_PROPS.has(name);
@@ -371,6 +389,9 @@ const NOT_ANIMATABLE = new Set([
   'fontWeight',
   'fontStyle',
   'textAlign',
+  // nothing is drawn from it, so there is no frame in which a halfway value
+  // would be visible — and it may be an object, which does not lerp
+  'hitSlop',
 ]);
 
 export const isAnimatableProp = (name) =>
@@ -571,3 +592,43 @@ export const DEFAULT_TEXT_STYLE = {
   style: 'normal',
   color: 'black',
 };
+
+/**
+ * The focus ring a focusable node draws when nothing asked it to.
+ *
+ * WCAG 2.4.7 is not something an application should have to opt into, and
+ * the vocabulary alone would not have delivered it: `outlineWidth` in a
+ * `:focus-visible` block is a thing every widget author would then have to
+ * remember, on every focusable, forever. So this is the default and
+ * `outlineWidth: 0` is the opt-out. A theme overrides the three values with
+ * `focusRing`, `focusRingWidth` and `focusRingOffset`.
+ *
+ * The offset is what keeps it legible against a control whose own border is
+ * already coloured — the ring is outside the box with a gap, not a second
+ * border on it.
+ */
+export const DEFAULT_FOCUS_RING = {
+  color: '#2980b9',
+  width: 2,
+  offset: 1,
+};
+
+/**
+ * Per-side hit slop from `hitSlop: 4` or `hitSlop: { top: 4, bottom: 4 }`,
+ * or null when there is none. Sides left out are 0, so the object form only
+ * has to name what it grows.
+ */
+export function resolveHitSlop(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') {
+    if (!(value > 0)) return null;
+    return { top: value, right: value, bottom: value, left: value };
+  }
+  const slop = {
+    top: value.top ?? 0,
+    right: value.right ?? 0,
+    bottom: value.bottom ?? 0,
+    left: value.left ?? 0,
+  };
+  return slop.top || slop.right || slop.bottom || slop.left ? slop : null;
+}

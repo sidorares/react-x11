@@ -73,6 +73,15 @@ const s = createStyles({
     '@width >= 600': { flexDirection: 'row', gap: 24 },
   },
   perProperty: { transition: { backgroundColor: 200, left: 120 } },
+  // issue #117: the focus ring is paint, so it is legal in a state block and
+  // animatable; hit slop is neither paint nor layout
+  ring: {
+    outlineOffset: 2,
+    transition: { outlineWidth: 80 },
+    ':focus-visible': { outlineWidth: 3, outlineColor: '$accent' },
+  },
+  target: { hitSlop: 4 },
+  perSide: { hitSlop: { top: 4, bottom: 4 } },
 });
 
 // arrays, falsy entries, nesting
@@ -88,6 +97,9 @@ createStyles({ bad: { ':hover': { padding: 4 } } });
 
 // @ts-expect-error — unknown style property
 createStyles({ bad: { colour: 'red' } });
+
+// @ts-expect-error — hit slop is not paint, so it cannot go in a state block
+createStyles({ bad: { ':focus-visible': { hitSlop: 4 } } });
 
 // --- elements --------------------------------------------------------------
 

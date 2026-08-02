@@ -53,6 +53,11 @@ the space that is left rather than the space its content wants.
 - `borderWidth`, `borderColor`, `borderRadius`, `borderStyle`
   (`'solid'` default, `'dashed'`)
 - `zIndex` — paint/hit order among siblings (stable sort)
+- `outlineWidth`, `outlineColor`, `outlineOffset` — the focus ring, painted
+  outside the border box and invisible to yoga, so it never moves what it
+  surrounds. A focusable node draws one on `:focus-visible` without being
+  asked; `outlineWidth: 0` opts out
+  ([styling.md](styling.md#the-focus-ring))
 - `transition` — `120`, or `{ backgroundColor: 120, left: 200 }`: how long a
   change to that property takes ([styling.md](styling.md#transitions))
 - any value may be a **theme token**: `'$panel'` resolves against the nearest
@@ -64,7 +69,18 @@ the space that is left rather than the space its content wants.
 `cursor` (`'pointer'`, `'text'`, `'wait'`, `'move'`, `'crosshair'`, resize
 arrows, … — the ntk cursor name map) and `pointerEvents: 'none'` are style
 too: CSS has both, and React Native has been moving `pointerEvents` the same
-way.
+way. So is `hitSlop`:
+
+```jsx
+<box style={{ height: 16, hitSlop: { top: 4, bottom: 4 } }} /> // 24px target
+```
+
+`hitSlop: 4` grows every side, the object form only the sides it names. It
+is **hit testing and nothing else** — not paint, not yoga — which is what
+lets a 16px control answer over the 24px WCAG 2.2 SC 2.5.8 wants without a
+taller control misaligning the row it sits in. The slop may overlap a
+sibling's box; hit testing runs front to back over paint order, so the
+sibling on top keeps its own pixels either way.
 
 ## Interaction props
 
@@ -336,6 +352,22 @@ window, valid after layout).
 A clipped viewport over its (overflowing) children, on **both axes**. Wheel
 events scroll it by default; a scrollbar thumb is drawn on each axis that
 overflows, and the thumb can be dragged.
+
+**It is also a tab stop, and answers the keyboard**, whenever it has
+somewhere to scroll — which is what lets a pane of unfocusable content (a
+log, a long `<text>`, a `<markdown>`) be read without a pointer at all:
+
+| key                 |                                      |
+| ------------------- | ------------------------------------ |
+| arrows              | one wheel notch (48px) on that axis  |
+| PageUp / PageDown   | a viewport, keeping a sliver of it   |
+| Space / Shift+Space | the same, for the hand already there |
+| Home / End          | the top and the bottom               |
+
+One that fits its content is not a tab stop: it is a `<box>` with a clip,
+and stopping on it would be a stop that does nothing. The keys are a
+default action, so an `onKeyDown` of your own runs first and
+`preventDefault()` cancels them.
 
 The bar belongs to the scroller, not to the content painted under it — the
 same rule a browser applies — so a press on the thumb never reaches the row

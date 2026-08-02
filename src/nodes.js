@@ -25,6 +25,8 @@ import {
   resolveTokens,
   styleHasSizeQueries,
   resolveSizeQueries,
+  DEFAULT_FOCUS_RING,
+  resolveHitSlop,
 } from './styles.js';
 import { EventManager, discrete } from './events.js';
 import {
@@ -557,6 +559,7 @@ export class Node {
     this.states = {
       ':hover': false,
       ':focus': false,
+      ':focus-visible': false,
       ':active': false,
       ':drag-over': false,
       ':dragging': false,
@@ -1143,6 +1146,29 @@ export class Node {
     );
   }
 
+  /**
+   * The same test grown by `hitSlop`. Deliberately separate from
+   * `containsPoint`: slop belongs to *this* node's target and nothing else,
+   * so it must not widen the rect that clips this node's children, must not
+   * reach `paintBounds`, and must never touch yoga. A 16px slider with 4px
+   * of slop top and bottom is a 24px target that still draws 16px tall,
+   * which is the whole point — WCAG 2.2 SC 2.5.8 without a redesign.
+   *
+   * The slop can overlap a sibling's box. Hit testing is front-to-back over
+   * paint order, so the sibling on top keeps its own pixels either way.
+   */
+  containsPointWithSlop(x, y) {
+    if (this.containsPoint(x, y)) return true;
+    const slop = resolveHitSlop(this.style.hitSlop);
+    if (!slop) return false;
+    return (
+      x >= this.abs.x - slop.left &&
+      y >= this.abs.y - slop.top &&
+      x < this.abs.x + this.abs.width + slop.right &&
+      y < this.abs.y + this.abs.height + slop.bottom
+    );
+  }
+
   /** DOM-ish rect accessor. React DevTools' Highlighter requires host
    * instances to expose getClientRects() with a non-empty rect before it
    * emits showNativeHighlight — without this, hovering the tree silently
@@ -1175,13 +1201,17 @@ export class Node {
       return null;
     }
     const inside = this.containsPoint(x, y);
-    if (!inside && this.clipsChildren()) return null;
+    // the children are culled on the strict rect — slop grows this node's
+    // target, not the region its clip lets through
+    if (!inside && this.clipsChildren()) {
+      return this.containsPointWithSlop(x, y) ? this : null;
+    }
     const order = this.paintOrder();
     for (let i = order.length - 1; i >= 0; i--) {
       const hit = order[i].hitTest(x, y);
       if (hit) return hit;
     }
-    return inside ? this : null;
+    return inside || this.containsPointWithSlop(x, y) ? this : null;
   }
 
   absolutize(originX, originY) {
@@ -1230,7 +1260,7 @@ export class Node {
    * almost nothing.
    */
   _subtreeBounds() {
-    let bounds = this.abs;
+    let bounds = this._ownPaintBounds();
     if (this.clipsChildren()) return bounds;
     for (const child of this.children) {
       if (child.isWindow || !child.yoga || child.hidden) continue;
@@ -1238,6 +1268,80 @@ export class Node {
       bounds = unionRect(bounds, child._subtreeBounds());
     }
     return bounds;
+  }
+
+  /**
+   * This node's own rect, grown by anything it draws outside it — which is
+   * the outline and nothing else. Per node rather than once at the top,
+   * because the ring belongs to whichever node has focus and the bound has
+   * to cover it wherever that is; and grown even when the ring is currently
+   * *off*, because the frame that erases it is claimed after the state has
+   * already flipped back.
+   */
+  _ownPaintBounds() {
+    const extent = this._outlineExtent();
+    if (extent <= 0) return this.abs;
+    return {
+      x: this.abs.x - extent,
+      y: this.abs.y - extent,
+      width: this.abs.width + extent * 2,
+      height: this.abs.height + extent * 2,
+    };
+  }
+
+  /**
+   * The focus ring this node would draw: its own `outline*` style, falling
+   * back to the theme's focus-ring tokens for anything it leaves out. Null
+   * when the node is not focusable and set no outline of its own, and when
+   * `outlineWidth: 0` opts out.
+   *
+   * Resolved here rather than folded into the style so that the default
+   * costs nothing until it is asked for — which is once per focused node
+   * per frame, not once per node per commit.
+   */
+  _outline() {
+    const style = this.style;
+    const explicit = style.outlineWidth !== undefined;
+    if (!explicit && !this._focusableForRing()) return null;
+    const theme = this.theme;
+    const width = style.outlineWidth ?? theme?.focusRingWidth;
+    const resolved = width ?? DEFAULT_FOCUS_RING.width;
+    if (!(resolved > 0)) return null;
+    return {
+      width: resolved,
+      color: style.outlineColor ?? theme?.focusRing ?? DEFAULT_FOCUS_RING.color,
+      offset:
+        style.outlineOffset ??
+        theme?.focusRingOffset ??
+        DEFAULT_FOCUS_RING.offset,
+    };
+  }
+
+  /**
+   * How far outside `abs` this node's ink currently reaches. Zero unless
+   * the outline is actually being drawn — every focusable node is a
+   * candidate for the default ring, and inflating all of their damage
+   * rects for a ring that is not there would widen every claim in the tree
+   * and cost the scroll-blit fast path its containment test. The frame that
+   * *erases* a ring is the one case where the state has already flipped
+   * back, and `EventManager.focus` claims the region before it does.
+   */
+  _outlineExtent() {
+    if (this.style.outlineWidth === undefined && !this.states[':focus-visible'])
+      return 0;
+    const outline = this._outline();
+    return outline ? outline.width + Math.max(0, outline.offset) : 0;
+  }
+
+  /** Would a keyboard focus land here? Mirrors `EventManager._isFocusable`;
+   * kept as its own method because the ring is decided during paint, where
+   * the event manager is not in hand. */
+  _focusableForRing() {
+    if (this.props.disabled) return false;
+    return Boolean(
+      this.props.focusable ??
+      (this.props.tabIndex != null ? true : (this.focusableByDefault ?? false)),
+    );
   }
 
   contentBox() {
@@ -1274,6 +1378,43 @@ export class Node {
     else this._paintContent(ctx);
     this._paintChildren(ctx);
     this._paintBorder(ctx);
+    // last, and outside the border box: a ring drawn under the border would
+    // be half-hidden by it on a control whose border is thicker than the gap
+    this._paintOutline(ctx);
+  }
+
+  /**
+   * The focus ring. Drawn on `:focus-visible` — keyboard focus — so a press
+   * moves focus without lighting a ring the pointer user did not ask for,
+   * and Tab always lights one.
+   *
+   * A node that sets `outlineWidth` outside a state block gets the ring
+   * whenever it is styled to, focused or not; that is the escape hatch for
+   * anything wanting an outline for a reason of its own.
+   */
+  _paintOutline(ctx) {
+    const always = this.style.outlineWidth !== undefined;
+    if (!always && !this.states[':focus-visible']) return;
+    const outline = this._outline();
+    if (!outline || !isPaintedColor(outline.color)) return;
+    const { width, offset } = outline;
+    // stroked centred on the path, like the border, so half the width sits
+    // inside the offset gap and half outside it
+    const grow = offset + width / 2;
+    const radius = this.style.borderRadius ?? 0;
+    ctx.strokeStyle = outline.color;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    const x = this.abs.x - grow;
+    const y = this.abs.y - grow;
+    const w = this.abs.width + grow * 2;
+    const h = this.abs.height + grow * 2;
+    if (radius > 0 && typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, w, h, radius + grow);
+    } else {
+      ctx.rect(x, y, w, h);
+    }
+    ctx.stroke();
   }
 
   _roundedPath(ctx, radius) {
@@ -1958,6 +2099,57 @@ export class ScrollViewNode extends Node {
   }
 
   /**
+   * A scrollview with something to scroll is a tab stop, so a pane of
+   * *unfocusable* content — a log, a long `<text>`, a `<markdown>` — can be
+   * read without a pointer. Before this the only way to scroll one was the
+   * wheel, which is a WCAG 2.1.1 failure on the most ordinary layout the
+   * library has.
+   *
+   * Conditional on purpose: a scrollview that fits its content is a `<box>`
+   * with a clip, and stopping Tab on it would be a tab stop that does
+   * nothing. It is answered from the current layout, so a pane that grows
+   * past its viewport becomes reachable the moment it does.
+   */
+  get focusableByDefault() {
+    return this._maxScroll('y') > 0 || this._maxScroll('x') > 0;
+  }
+
+  /**
+   * The keys a scroll pane answers, matching what every desktop toolkit
+   * does: arrows by a wheel notch, PageUp/PageDown by a viewport, Home/End
+   * to the ends, Space and Shift+Space as a second pair of page keys
+   * because that is what a reader's hand is already on.
+   *
+   * Runs after the application's own `onKeyDown`, and not at all if that
+   * called `preventDefault` — the same contract `<textinput>` editing has.
+   */
+  _defaultKeyDown(ev) {
+    const page = Math.max(1, this.abs.height - SCROLL_KEY_PAGE_OVERLAP);
+    switch (ev.keysym) {
+      case XK_DOWN:
+        return this.scrollBy({ y: SCROLL_KEY_STEP });
+      case XK_UP:
+        return this.scrollBy({ y: -SCROLL_KEY_STEP });
+      case XK_RIGHT:
+        return this.scrollBy({ x: SCROLL_KEY_STEP });
+      case XK_LEFT:
+        return this.scrollBy({ x: -SCROLL_KEY_STEP });
+      case XK_PAGE_DOWN:
+        return this.scrollBy({ y: page });
+      case XK_PAGE_UP:
+        return this.scrollBy({ y: -page });
+      case XK_HOME:
+        return this.scrollTo({ y: 0 });
+      case XK_END:
+        return this.scrollTo({ y: this._maxScroll('y') });
+      case XK_SPACE:
+        return this.scrollBy({ y: ev.shiftKey ? -page : page });
+      default:
+        return undefined;
+    }
+  }
+
+  /**
    * Scroll the minimum amount that brings a descendant fully into view.
    * The request is queued rather than applied immediately: absolute rects
    * only exist after a layout pass, so a caller reacting to a mount (a
@@ -2181,6 +2373,14 @@ const XK_PAGE_DOWN = 0xff56;
 const XK_END = 0xff57;
 const XK_DELETE = 0xffff;
 const XK_ESCAPE = 0xff1b;
+const XK_SPACE = 0x0020;
+
+// An arrow key scrolls by a wheel notch — the same 48px `WHEEL_BUTTONS`
+// moves in events.js, so the two input routes agree about what one step is.
+const SCROLL_KEY_STEP = 48;
+// A page keeps a sliver of the previous one on screen, so the eye has
+// somewhere to land. Toolkits all keep a line or two; this is about that.
+const SCROLL_KEY_PAGE_OVERLAP = 24;
 
 /** Undo entries kept per input. Snapshots of a single field are small; the
  * cap is what stops a long-lived form from growing without bound. */
@@ -3055,8 +3255,10 @@ export class TextInputNode extends Node {
     if (!popup) return;
     this._editMenu = null;
     this.removeChild(popup);
-    // focus goes back to the field, so typing carries on where it left off
-    if (!this.destroyed) this.focus();
+    // focus goes back to the field, so typing carries on where it left off —
+    // as a pointer focus, since a right-click is what opened the menu and a
+    // ring appearing on the way back would be news to nobody
+    if (!this.destroyed) this._focusManager()?.focus(this, 'pointer');
   }
 
   _defaultFocus() {
