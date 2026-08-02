@@ -802,7 +802,15 @@ and the app-facing API is complete. Phase 3 changes no application code.
 ### Phase 4 — ecosystem and polish
 
 18. `XdndActionAsk` → `ContextMenu` from `XdndActionList` /
-    `XdndActionDescription`.
+    `XdndActionDescription`. _Done, but not as sketched._ The two
+    properties are read and handed to the app as `e.actions` /
+    `e.actionDescriptions`, and `onDrop` settles the answer with
+    `e.accept(action)`; the menu itself stays in application code. A
+    built-in one would have to hold `XdndFinished` open for as long as it
+    was on screen, and §9's first hazard is that a slow drop freezes the
+    source application — so how long to make someone wait is the app's
+    call, not the toolkit's. Reading the properties lazily, only when a
+    position actually asks, keeps the two round trips off every other drag.
 19. A `react-dnd` backend (separate package) over the seam from §5.
 20. Auto-scroll on drag near a `<scrollview>` edge — a default action in the
     router, the same shape as the existing wheel default

@@ -57,6 +57,9 @@ const ATOM_NAMES = [
   'XdndActionLink',
   'XdndActionAsk',
   'XdndActionPrivate',
+  // read off the source's window when it asks the target to choose
+  'XdndActionList',
+  'XdndActionDescription',
 ];
 
 // per-connection atom table: X -> { atoms|null, promise, names: Map }
@@ -329,6 +332,8 @@ export class DropSession {
     this.version = 0;
     this.types = [];
     this.path = [];
+    // what an `ask` source offered, read once per drag (see _readAskOffer)
+    this._askOffer = null;
     this.accepted = null;
     this.acceptedAction = 'copy';
     this.requestedAction = 'copy';
@@ -406,7 +411,60 @@ export class DropSession {
     });
   }
 
-  _onPosition(ev, atoms) {
+  /**
+   * What a source offering `ask` is offering, read from its window: the
+   * actions as `XdndActionList` (type ATOM) and, beside it, the source's
+   * own words for them as `XdndActionDescription` — a run of NUL-separated
+   * strings, one per action, positionally matched.
+   *
+   * Read once per drag, and only when a position actually asks, because
+   * the two round trips buy nothing for the copy/move/link sources that
+   * are the overwhelming majority.
+   */
+  async _readAskOffer(sourceWid) {
+    if (this._askOffer) return this._askOffer;
+    const dnd = dndAtomsOf(this.X);
+    const [list, describedBytes] = await Promise.all([
+      this._readAtomList(sourceWid, dnd.XdndActionList),
+      this._readBytes(sourceWid, dnd.XdndActionDescription),
+    ]);
+    const actions = (await Promise.all(list.map((a) => atomName(this.X, a))))
+      .map((name) => ACTION_NAMES[name])
+      .filter(Boolean);
+    // trailing NUL is conventional, so drop the empty tail it leaves
+    const described = describedBytes.toString('utf8').split('\0');
+    if (described.at(-1) === '') described.pop();
+    this._askOffer = {
+      actions,
+      // positional: a source that describes none, or describes fewer than
+      // it offers, leaves the rest to us to name
+      descriptions: actions.map((name, i) => described[i] ?? null),
+    };
+    return this._askOffer;
+  }
+
+  _readAtomList(wid, atom) {
+    return new Promise((resolve) => {
+      this.X.GetProperty(0, wid, atom, 0, 0, 0x1000, (err, prop) => {
+        if (err || !prop?.data?.length) return resolve([]);
+        const atoms = [];
+        for (let o = 0; o + 4 <= prop.data.length; o += 4) {
+          atoms.push(prop.data.readUInt32LE(o));
+        }
+        resolve(atoms);
+      });
+    });
+  }
+
+  _readBytes(wid, atom) {
+    return new Promise((resolve) => {
+      this.X.GetProperty(0, wid, atom, 0, 0, 0x1000, (err, prop) =>
+        resolve(err || !prop?.data ? Buffer.alloc(0) : prop.data),
+      );
+    });
+  }
+
+  async _onPosition(ev, atoms) {
     if (ev.data[0] >>> 0 !== this.sourceWid) return;
     const packed = ev.data[2] >>> 0;
     const rootX = packed >>> 16;
@@ -421,6 +479,15 @@ export class DropSession {
     if (this.node._dndTargetCount() === 0) {
       this._sendStatus(atoms, { accept: false, rect: this._windowRect() });
       return;
+    }
+
+    // `ask` means the source wants the user asked which action to perform,
+    // so the choices have to be in hand before a handler is called. Only
+    // this branch pays for them, and only once per drag.
+    if (this.requestedAction === 'ask' && !this._askOffer) {
+      await this._readAskOffer(this.sourceWid);
+      // a leave or a new drag may have overtaken the round trips
+      if (ev.data[0] >>> 0 !== this.sourceWid) return;
     }
 
     const answer = this._overAt(rootX, rootY, time);
@@ -519,6 +586,12 @@ export class DropSession {
       this.localLeave();
       return { handled: false, action: null };
     }
+    // the same outcome object the wire transport uses, so `e.accept('move')`
+    // in a drop handler means one thing across both. In-app handlers are
+    // dispatched synchronously and not awaited, so only a synchronous
+    // answer reaches `onDragEnd` — an async one is too late, exactly as it
+    // is for the rest of the in-app drop path.
+    const outcome = { accept: true, action, freeze: false };
     discrete(() => {
       runWithPriority(DiscreteEventPriority, () => {
         const targetNode = this._dropTarget(point) ?? accepted;
@@ -534,7 +607,7 @@ export class DropSession {
             buttons: 0,
           },
           targetNode,
-          null,
+          outcome,
         );
         Object.assign(drop, extras);
         this._dispatchDrop(point.windowNode, targetNode, drop, []);
@@ -544,7 +617,10 @@ export class DropSession {
     this.accepted = null;
     this.lastPoint = null;
     this._source = 'external';
-    return { handled: true, action };
+    return {
+      handled: outcome.accept,
+      action: outcome.accept ? outcome.action : null,
+    };
   }
 
   _onLeave(ev) {
@@ -591,6 +667,13 @@ export class DropSession {
     }
 
     const pending = [];
+    // What the handler settles on. `accept`/`reject` mean something
+    // different at drop time than during a hover — "I took it, doing this"
+    // rather than "I would take it" — and this is what XdndFinished
+    // reports. An `ask` source is the reason it can be changed at all: the
+    // point of asking is that the answer is not known until now, and a
+    // handler that puts a menu up settles it later still.
+    const outcome = { accept: true, action, freeze: false };
     discrete(() => {
       runWithPriority(DiscreteEventPriority, () => {
         const targetNode = this._dropTarget(point) ?? accepted;
@@ -606,7 +689,7 @@ export class DropSession {
             buttons: 0,
           },
           targetNode,
-          null,
+          outcome,
         );
         drop.files = files;
         drop.text = text;
@@ -625,7 +708,12 @@ export class DropSession {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
-      this._sendFinished(atoms, sourceWid, version, { accepted: true, action });
+      // read now, not captured: an async handler settles the outcome
+      // between the dispatch above and this call
+      this._sendFinished(atoms, sourceWid, version, {
+        accepted: outcome.accept,
+        action: outcome.action,
+      });
       // only clear session state if no new drag has entered meanwhile
       if (this.sourceWid === sourceWid) this._reset();
     };
@@ -663,6 +751,11 @@ export class DropSession {
       types,
       has: (want) => typeMatches(types, want),
       action: this.requestedAction,
+      // Only an `ask` source fills these: the actions it will accept, and
+      // its own words for them, positionally matched (null where it gave
+      // none). Empty otherwise, so a handler can read them unguarded.
+      actions: this._askOffer?.actions ?? [],
+      actionDescriptions: this._askOffer?.descriptions ?? [],
       source: this._source,
       screenX: native.rootx,
       screenY: native.rooty,

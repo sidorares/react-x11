@@ -123,11 +123,15 @@ Every drag event carries:
 | `types`                    | `string[]` — the offered payload type names                                    |
 | `has(type)`                | group-aware membership test: `e.has('files')`                                  |
 | `action`                   | `'copy' \| 'move' \| 'link' \| 'ask' \| 'private'` — what the source asked for |
+| `actions`                  | the choices an `'ask'` source will accept; empty otherwise                     |
+| `actionDescriptions`       | its own words for them, positionally matched, `null` where it gave none        |
 | `source`                   | `'internal'` (this app) or `'external'` (another application)                  |
 | `screenX` / `screenY`      | pointer position in root coordinates                                           |
 | `x`/`y`, `localX`/`localY` | window and target-relative coordinates, as on any event                        |
 
-plus, in `onDragOver` only, three ways to answer:
+plus three ways to answer. `e.freeze()` is `onDragOver` only; `e.accept()`
+and `e.reject()` also work in `onDrop`, where they settle what the drop did
+rather than whether it would be taken (see [The drop](#the-drop)):
 
 - `e.accept(action?)` — take the drop, optionally forcing the action
   (`e.accept('move')`);
@@ -185,6 +189,51 @@ There is deliberately **no `e.dataTransfer`**. X selection transfer is
 asynchronous and the DOM's `getData()` is synchronous; a lookalike
 returning a promise would stringify to `"[object Promise]"` in template
 literals with no error anywhere. The different name is the warning.
+
+`onDrop` can also settle what the drop _did_, which is what the source is
+told afterwards:
+
+- **`e.accept('move')`** — report a different action from the one that was
+  negotiated while hovering. This is how a source that asks gets its
+  answer.
+- **`e.reject()`** — having looked at the payload, refuse it after all.
+  The source is told the drop was not taken, so a "move" leaves the
+  original where it was.
+
+Both may be called late from an `async` handler: for a drag from another
+application the reply is not sent until the handler settles, so a menu can
+decide it. In-app drags do not wait, so only a synchronous answer reaches
+`onDragEnd`.
+
+### Sources that ask
+
+A file manager dragging between two filesystems often does not know
+whether you meant copy or move, so it asks: `e.action` is `'ask'`, and the
+choices it will accept come with the event.
+
+```jsx
+onDrop={async (e) => {
+  if (e.action !== 'ask') return void save(e.files, e.action);
+  // e.actions            -> ['copy', 'move', 'link']
+  // e.actionDescriptions -> ['Copy here', 'Move here', null]
+  const chosen = await myMenu(e.actions, e.actionDescriptions);
+  if (!chosen) return void e.reject();
+  save(e.files, chosen);
+  e.accept(chosen);
+}}
+```
+
+`actionDescriptions` is positional and the source's own wording — a `null`
+means it offered that action without describing it, so use your own label.
+Both arrays are empty for every other kind of drag, so they can be read
+without guarding, and nothing is read off the source's window unless a
+position actually asks.
+
+The menu is yours to draw. A built-in one would have to hold the protocol
+reply open for as long as it stayed up, and that reply is the only thing
+keeping the other application's drag cursor from freezing — so the choice
+of how long to make someone wait belongs to the app, not the toolkit.
+`ContextMenu` is the obvious thing to build it from.
 
 ### `:drag-over`
 
@@ -475,10 +524,10 @@ Not supported, deliberately or not yet:
   AWT applications speak only that and will not interoperate.
 - **XdndDirectSave (XDS)** — "drag out of the app to save a file into the
   file manager". A separate protocol layered on XDND.
-- **A menu for `XdndActionAsk`.** A source asking the target to offer a
-  choice of actions is understood — `e.action` reports `'ask'` and the
-  request is echoed back — but nothing pops a Copy/Move/Link menu, so
-  answer it with a concrete `e.accept('copy')` if you handle it at all.
+- **A built-in menu for `XdndActionAsk`.** The choices are handed to you —
+  see [Sources that ask](#sources-that-ask) — but the menu itself is yours
+  to draw. A built-in one would have to hold the reply while it was open,
+  and the reply is what keeps another application's drag from freezing.
 - **`react-dnd`** and other DOM drag libraries — see
   [ecosystem.md](ecosystem.md).
 
