@@ -3756,7 +3756,17 @@ export class WindowNode extends Node {
     // <window>s never advertise (XDND v3 puts XdndAware on top-levels
     // only); drags over them arrive here and are routed down in JS.
     if (!parentWindow) this._initDnd();
+    // The launch's own properties, and the same "before the map" rule as
+    // everything above it: EWMH's guarantee about `_NET_WM_USER_TIME` is
+    // about the window's state at the moment it is mapped. First toplevel
+    // only — a later `<window>` is not the launch (src/startup.js).
+    if (!parentWindow && !this.isPopup) {
+      this.app._reactX11Startup?.decorate(wnd);
+    }
     wnd.map?.();
+    if (!parentWindow && !this.isPopup) {
+      this.app._reactX11Startup?.mapped(wnd);
+    }
     // ask before anything can be anchored to it, so the first popup is
     // placed as well as the second
     this._refreshScreenOrigin();
@@ -4518,6 +4528,11 @@ export class WindowNode extends Node {
         end: performance.now(),
       });
     }
+    // A frame that actually painted, which is the moment the app is up
+    // (src/startup.js). One property read once the sequence is over — the
+    // session clears itself off the app — which is the same bargain the
+    // trace hook above makes with the frame loop.
+    this.app._reactX11Startup?.painted();
   }
 
   /**

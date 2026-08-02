@@ -160,7 +160,62 @@ export interface RootOptions {
    * new one; nothing survives.
    */
   onDisconnect?: (reason: 'closed' | 'error', err?: Error) => void;
+  /**
+   * Startup notification (freedesktop), on by default. Reads
+   * `DESKTOP_STARTUP_ID`, sets `_NET_STARTUP_ID` and `_NET_WM_USER_TIME` on
+   * the first toplevel before it maps, and ends the launcher's startup
+   * sequence when the app is up — which stops the busy cursor and gives
+   * focus-stealing prevention the evidence it asks for.
+   *
+   * `false` turns it off entirely, for an app that runs its own sequence or
+   * an embedder that owns the toplevel. A string supplies the id for a
+   * launch where it did not arrive in the environment.
+   *
+   * See {@link StartupNotificationOptions.completeOn} for *when* the app
+   * counts as up, and docs/desktop.md.
+   */
+  startupNotification?: boolean | string | StartupNotificationOptions;
 }
+
+export interface StartupNotificationOptions {
+  /** The launch id, when it did not come from `DESKTOP_STARTUP_ID`. */
+  id?: string;
+  /**
+   * What counts as "started". Default `'paint'`.
+   *
+   * - `'paint'` — the first frame that actually drew. This renderer maps a
+   *   window and paints it a frame later, so the map is an empty rectangle;
+   *   ending there stops the busy cursor over a blank window.
+   * - `'map'` — the first toplevel mapping, which is what GTK does. Earlier,
+   *   and right for an app whose first frame is expensive enough that it
+   *   would rather the cursor stopped before it.
+   * - `'manual'` — nothing automatic; call {@link notifyStartupComplete}.
+   *   For an app that is not up until it says so, such as one restoring a
+   *   session behind a splash.
+   *
+   * A backstop timer ends the sequence regardless, so an app that never
+   * paints — or never calls — cannot leave the cursor spinning.
+   */
+  completeOn?: 'paint' | 'map' | 'manual';
+}
+
+/**
+ * The X server timestamp of the user action that launched this app, from
+ * the startup id, or `null` when there was none.
+ *
+ * `null` is a real answer rather than a failure: an app started from a
+ * shell has no launch timestamp and never will. It is the "when" that a
+ * legitimate request to come forward is weighed against, and `0` is not a
+ * substitute — EWMH gives zero its own meaning.
+ */
+export function launchTimestamp(): number | null;
+
+/**
+ * End the startup sequence now. Idempotent, and a no-op when there is none,
+ * so it may be called unconditionally. The seam behind
+ * `startupNotification: { completeOn: 'manual' }`.
+ */
+export function notifyStartupComplete(): void;
 
 /** A mounted tree, as returned by {@link createRoot}. */
 export interface Root {

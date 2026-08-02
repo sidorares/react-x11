@@ -184,6 +184,7 @@ const ORDER = [
   'typescript.md',
   'extending.md',
   'testing.md',
+  'desktop.md',
   'remote.md',
   'security.md',
   'packaging.md',

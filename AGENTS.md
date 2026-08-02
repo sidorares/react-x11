@@ -164,6 +164,48 @@ auto-repeat and neither ntk nor node-x11 implements XKB's
 series of taps and `:active` would strobe at the repeat rate. It needs the
 XKB extension upstream first.
 
+## Decide it, then leave a way out
+
+A feature ships with a **default that serves the main customer out of the
+box** — no configuration, no decision asked of someone who has not got the
+context to make it — and **a seam for everyone else**. Both halves, always:
+a default with no override strands the edge case, and an override with no
+default makes every app answer a question most of them do not have.
+
+The main customer is whoever will hit this most, not whoever is loudest in
+the issue. Work out what they would pick if they knew everything you know,
+make that the behaviour with no arguments, and write down why in the place
+the default lives.
+
+The seam is not ceremonial and it is not a boolean by reflex. Give it the
+shape of the real disagreement:
+
+- A **config value** when the answer is a fact about the app — an id, a
+  timeout, a name it is known by.
+- An **enumerated choice** when there are a few defensible answers and the
+  cost of a wrong one is only that it fits badly.
+  `startupNotification.completeOn` is `'paint' | 'map' | 'manual'` because
+  those are the three honest moments an app can call itself started.
+- A **hook** when the answer is code we cannot write — `notifyStartupComplete()`
+  exists for an app that is up only when it says so.
+- An **off switch** when a whole feature can be someone else's job. Every
+  feature core turns on for you needs one, because sooner or later an
+  embedder owns the thing we assumed was ours.
+
+Two failure modes to watch for, both of which read as thoughtfulness:
+
+- **A default that is only a guess with an escape hatch bolted on.** If the
+  documentation for the default is "or set this to the other thing", the
+  decision has not been made — it has been forwarded.
+- **A seam nobody can reach.** An override that needs internal state, or
+  fires before the app can install it, is not an override. If the honest
+  signal is internal — "the first flush that painted" — the seam has to be
+  in core, next to the signal, rather than approximated from outside.
+
+And a default that turns something _on_ still owes the same discipline as
+one that turns something off: state what it does, what it costs, and how to
+stop it, in one place — see docs/desktop.md for the worked example.
+
 ## Commands
 
 - `npm test` — node:test. **Headless: no X server needed.** Primary feedback

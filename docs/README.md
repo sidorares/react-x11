@@ -32,6 +32,10 @@
 - [testing.md](testing.md) — `react-x11/test`: render, query, drive and
   assert on real pixels, against a real X server in your test process. No
   display, no xvfb.
+- [desktop.md](desktop.md) — what an app tells the desktop about itself
+  beyond drawing. Startup notification: why the launcher's busy cursor spins
+  for 15 seconds without it, when an app counts as "started", and the seams
+  for saying otherwise.
 - [remote.md](remote.md) — the flagship case: running the app on one
   machine and drawing to a display on another. `ssh -X` vs `-Y`, what the
   protocol costs on a link, the other X servers, and why Xwayland works

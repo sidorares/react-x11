@@ -40,6 +40,7 @@ import {
   unregisterApp,
   hooks as traceHooks,
 } from './trace-registry.js';
+import { beginStartup } from './startup.js';
 import { GlAreaNode } from './glnodes.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
 import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
@@ -690,6 +691,11 @@ export async function createRoot(options = {}) {
   // borrowed or owned, this is now a connection the renderer draws through,
   // which is what a REACT_X11_TRACE / startTrace() session follows
   registerApp(app);
+
+  // Before anything renders: the launch id has to be on the first toplevel
+  // before it maps, and the environment variable has to be consumed whether
+  // or not this app ends up using it (src/startup.js).
+  beginStartup(app, rest.startupNotification);
 
   return {
     app,
