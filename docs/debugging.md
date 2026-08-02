@@ -105,13 +105,14 @@ Full repaints are the renderer's main performance bug class (see
 them. Expected full repaints exist too — a resize, the first frame after a
 mount, ntk invalidating its backing store — and their reasons say so.
 
-## `REACT_X11_NO_SCROLL_BLIT`
+## `REACT_X11_NO_SCROLL_BLIT=1`
 
 Disables the scroll-blit fast path (a pure scroll `CopyArea`s the
 surviving band and repaints only the exposed strip), so a scroll frame
 repaints its whole viewport again. For measuring the blit against the
 plain path on the same build, and as first aid if a scroll ever
-misrenders. Read once at startup, like the switches above.
+misrenders. Read once at startup, like the switches above, and like them
+it answers only to `1` — any other value leaves the blit on.
 
 ## The paint cache — `REACT_X11_NO_PAINT_CACHE`, `REACT_X11_PAINT_CACHE=verify`
 
