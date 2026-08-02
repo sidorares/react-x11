@@ -3685,31 +3685,28 @@ export class WindowNode extends Node {
     // WM_DELETE_WINDOW protocol and the handler decides what happens
     // (unmount, hide, quit). Without it the WM default stands (the server
     // kills the connection). Opt-in is decided at realize time.
-    if (this.props.onCloseRequest && typeof wnd.setActions === 'function') {
-      wnd.setActions();
-      const X = this.app.X;
-      if (typeof X?.InternAtom === 'function') {
-        X.InternAtom(false, 'WM_DELETE_WINDOW', (err, atom) => {
-          if (!err) this._wmDeleteAtom = atom;
-        });
-      }
+    //
+    // ntk >= 5.3 owns the protocol: listening for 'close' self-arms
+    // WM_PROTOCOLS and decodes the ClientMessage (#160). Its default action
+    // — destroy the window — is always prevented, because what happens next
+    // is this handler's decision, and usually a React unmount: ntk tearing
+    // the window down underneath the reconciler is exactly what the prop
+    // exists to avoid. This also leaves the raw 'message' stream free for
+    // protocols react-x11 speaks itself (XDND, src/dnd.js).
+    if (this.props.onCloseRequest) {
       wnd.on(
-        'message',
+        'close',
         // a WM close is a user action: discrete priority and a discrete
         // paint, like a click. An onCloseRequest that answers with a
         // "save your work?" dialog rather than an unmount is the case that
         // notices — the dialog is the response to the press on the WM's
         // close button, and it is one paint away.
         discrete((ev) => {
-          if (
-            this._wmDeleteAtom != null &&
-            ev.data?.[0] === this._wmDeleteAtom
-          ) {
-            runWithPriority(DiscreteEventPriority, () => {
-              const handler = this.props.onCloseRequest;
-              if (handler) callHandler(this, 'onCloseRequest', handler, ev);
-            });
-          }
+          ev.preventDefault();
+          runWithPriority(DiscreteEventPriority, () => {
+            const handler = this.props.onCloseRequest;
+            if (handler) callHandler(this, 'onCloseRequest', handler, ev);
+          });
         }),
       );
     }
