@@ -47,6 +47,16 @@ export function useWindowId(
   ref: RefObject<NtkWindow | DrawnNode | null>,
 ): () => number | null;
 
+/**
+ * Parse a `text/uri-list` payload (RFC 2483): CRLF-separated,
+ * percent-encoded, `#` lines are comments. What `DropEvent.files` is made
+ * of; exported for handling `getData('text/uri-list')` results yourself.
+ * `path` is present only for genuinely local `file:` URIs.
+ */
+export function parseUriList(
+  text: string | Uint8Array,
+): Array<{ uri: string; path?: string }>;
+
 /** What React reports alongside an error it caught. */
 export interface ErrorInfo {
   componentStack?: string;

@@ -78,6 +78,78 @@ export interface KeyboardEvent<T = DrawnNode> extends SyntheticEvent<T> {
 
 export interface FocusEvent<T = DrawnNode> extends SyntheticEvent<T> {}
 
+/** What a drop target's `dropAccept` prop takes: an exact type name
+ * (`'image/png'`), a semantic group (`'files' | 'uris' | 'text'`), an
+ * array of either, or a predicate over the offered names. Absent means
+ * the node accepts anything — a bare `onDrop` is a valid dropzone. */
+export type DropAccept = string | string[] | ((types: string[]) => boolean);
+
+export type DropAction = 'copy' | 'move' | 'link' | 'ask' | 'private';
+
+/**
+ * A drag over a drop target (`onDragEnter` / `onDragOver` /
+ * `onDragLeave`). Enter/leave do not bubble, like their mouse
+ * counterparts; `onDragOver` dispatches capture → target → bubble.
+ */
+export interface DragEvent<T = DrawnNode> extends SyntheticEvent<T> {
+  /** Offered payload type names, e.g. `['text/uri-list', 'text/plain']`. */
+  types: string[];
+  /** Alias-aware membership test: a concrete type or a semantic group. */
+  has(type: string): boolean;
+  /** The action the source asked for. */
+  action: DropAction;
+  /** Where the drag came from: another application, or this one. */
+  source: 'internal' | 'external';
+  /** Pointer position in screen (root) coordinates. */
+  screenX: number;
+  screenY: number;
+  /** Override the declarative `dropAccept` answer for this position
+   * (`onDragOver` only; elsewhere these are inert). */
+  accept(action?: 'copy' | 'move' | 'link'): void;
+  reject(): void;
+  /** Opt into the XdndStatus suppression rectangle for this node's rect:
+   * the source stops sending positions while the pointer stays inside.
+   * Do not freeze a zone that draws per-position feedback (insertion
+   * carets, edge auto-scroll). */
+  freeze(): void;
+}
+
+/** The drop itself (`onDrop`). The common payloads are prefetched —
+ * `files` and `text` read synchronously; everything else is behind
+ * `getData`. There is deliberately no `dataTransfer`: X selection
+ * transfer is asynchronous, and a sync-looking `getData` would return
+ * `"[object Promise]"` silently. */
+export interface DropEvent<T = DrawnNode> extends DragEvent<T> {
+  /** One conversion of the drag payload. Text-ish targets decode to a
+   * string; anything else stays raw bytes. Semantic groups resolve to
+   * the first concretely offered member. */
+  getData(type: string): Promise<Uint8Array | string>;
+  /** Parsed `text/uri-list` (RFC 2483). `path` is present only for
+   * genuinely local `file:` URIs. Empty when no file flavour was
+   * offered. */
+  files: Array<{ uri: string; path?: string }>;
+  /** The best offered text flavour, when there was one. */
+  text?: string;
+}
+
+/** The props that make a node a drop target. Any drawn element and
+ * `<window>`/`<popup>` accept them; their presence registers the node
+ * with the XDND router (see docs/events.md). */
+export interface DropTargetProps<T = DrawnNode> {
+  dropAccept?: DropAccept;
+  /** Does not propagate — synthesized by drag-path diffing, and paired
+   * with the `':drag-over'` style state. */
+  onDragEnter?: (ev: DragEvent<T>) => void;
+  onDragLeave?: (ev: DragEvent<T>) => void;
+  onDragOver?: (ev: DragEvent<T>) => void;
+  onDragOverCapture?: (ev: DragEvent<T>) => void;
+  /** May be async: XdndFinished is held until the returned promise
+   * settles (or a ~10 s watchdog fires, so a forgotten await cannot hang
+   * the source application's gesture). */
+  onDrop?: (ev: DropEvent<T>) => void | Promise<void>;
+  onDropCapture?: (ev: DropEvent<T>) => void | Promise<void>;
+}
+
 /**
  * `<textinput onChange>` / `<textarea onChange>`. The value is on both
  * `ev.value` and `ev.target.value` — the second is what every DOM form
@@ -166,4 +238,8 @@ export interface FocusHandlers<T = DrawnNode> {
 }
 
 export interface EventHandlers<T = DrawnNode>
-  extends PointerHandlers<T>, KeyboardHandlers<T>, FocusHandlers<T> {}
+  extends
+    PointerHandlers<T>,
+    KeyboardHandlers<T>,
+    FocusHandlers<T>,
+    DropTargetProps<T> {}

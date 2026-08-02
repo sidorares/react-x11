@@ -7,7 +7,13 @@ import type { ComponentType, ReactNode, RefObject } from 'react';
 import type { Color, StyleProp } from './style.js';
 import type { BoxProps, GlAreaProps, Vec3 } from './elements.js';
 import type { DrawnNode, Rect } from './nodes.js';
-import type { MouseEvent } from './events.js';
+import type {
+  DragEvent,
+  DropAccept,
+  DropEvent,
+  DropTargetProps,
+  MouseEvent,
+} from './events.js';
 
 /**
  * The palette every widget reads. A theme overrides what it cares about and
@@ -380,3 +386,26 @@ export function centerRect(
 export function useAnchor(
   ref: RefObject<DrawnNode | null>,
 ): (options?: AnchorOptions) => Rect | null;
+
+// --- drag and drop ---------------------------------------------------------
+
+export interface UseDropTargetOptions {
+  /** Maps to the `dropAccept` host prop. */
+  accept?: DropAccept;
+  onDrop?: (ev: DropEvent) => void | Promise<void>;
+  onDragOver?: (ev: DragEvent) => void;
+  onDragEnter?: (ev: DragEvent) => void;
+  onDragLeave?: (ev: DragEvent) => void;
+}
+
+/**
+ * The react-dropzone-shaped convenience over the drop-target host props:
+ * spread `dropProps` on any drawn element or window. Only needed when the
+ * render itself changes with the drag — a `':drag-over'` style block
+ * highlights without any state.
+ */
+export function useDropTarget(options?: UseDropTargetOptions): {
+  dropProps: DropTargetProps;
+  isOver: boolean;
+  isAccepted: boolean;
+};

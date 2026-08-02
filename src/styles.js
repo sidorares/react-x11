@@ -153,7 +153,13 @@ export const isEventProp = (name) => /^on[A-Z]/.test(name);
  * Anything relational (`:hover > child`, `:focus-within`, `:nth-child`)
  * stays in React, where composition already answers it.
  */
-export const STATE_KEYS = [':hover', ':focus', ':active', ':disabled'];
+export const STATE_KEYS = [
+  ':hover',
+  ':focus',
+  ':active',
+  ':disabled',
+  ':drag-over',
+];
 
 // What a state block may change. Deliberately paint-only: a state block that
 // could set `padding` or `fontSize` would reflow the tree on pointer move,
