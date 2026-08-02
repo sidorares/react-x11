@@ -72,7 +72,7 @@ class DocumentViewNode extends Node {
     if (this.destroyed) return;
     this._laidOutWidth = -1;
     this.yoga?.markDirty();
-    this.root?.invalidate(true, null, 'content');
+    this._invalidateLayout('content');
   }
 
   _source() {
@@ -306,7 +306,7 @@ export class SvgNode extends Node {
   _textContentChanged() {
     this._stale = true;
     this.yoga?.markDirty();
-    this.root?.invalidate(true, null, 'props');
+    this._invalidateLayout('props');
   }
 
   _ensureView() {
@@ -468,7 +468,7 @@ export class TexNode extends Node {
   _textContentChanged() {
     this._boxKey = null;
     this.yoga?.markDirty();
-    this.root?.invalidate(true, null, 'text');
+    this._invalidateLayout('text');
   }
 
   _ensureBox() {
@@ -504,7 +504,7 @@ export class TexNode extends Node {
       newProps.displayMode !== before.displayMode
     ) {
       this.yoga.markDirty();
-      this.root?.invalidate(true, null, 'props');
+      this._invalidateLayout('props');
     }
   }
 

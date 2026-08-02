@@ -80,11 +80,11 @@
     "compositePixels": 25020
   },
   "update: 5 absolute box moves (layout)": {
-    "requests": 27,
-    "bytesOut": 572,
+    "requests": 58,
+    "bytesOut": 1156,
     "bytesIn": 384,
     "replies": 12,
     "composites": 10,
-    "compositePixels": 812000
+    "compositePixels": 31320
   }
 }
