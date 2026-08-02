@@ -19,7 +19,9 @@ import {
   createStyles,
   Dialog,
   flattenStyle,
+  launchTimestamp,
   MenuBar,
+  notifyStartupComplete,
   ProgressBar,
   Radio,
   RadioGroup,
@@ -507,6 +509,22 @@ async function main() {
   await other.unmount();
   const borrowing = await createRoot({ app: root.app });
   await borrowing.unmount();
+
+  // startup notification: on by default, three ways to say otherwise
+  const off = await createRoot({ startupNotification: false });
+  await off.unmount();
+  const withId = await createRoot({ startupNotification: 'x_TIME1' });
+  await withId.unmount();
+  const manual = await createRoot({
+    startupNotification: { id: 'x_TIME1', completeOn: 'manual' },
+  });
+  const when: number | null = launchTimestamp();
+  void when;
+  notifyStartupComplete();
+  await manual.unmount();
+
+  // @ts-expect-error — completeOn is a closed set
+  await createRoot({ startupNotification: { completeOn: 'someday' } });
 
   root.render(<Scene />);
   root.render(<RawGl />);

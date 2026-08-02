@@ -28,6 +28,19 @@ export function createMockApp() {
       ConfigureWindow(id, options) {
         app.configureCalls.push([id, options]);
       },
+      // Startup notification broadcasts through this (src/startup.js), and
+      // it is the only way to see the message: it goes to the root window,
+      // which the mock does not model as a window with properties.
+      SendClientMessage(destination, wid, type, format, data, eventMask) {
+        app.clientMessages.push({
+          destination,
+          wid,
+          type,
+          format,
+          data,
+          eventMask,
+        });
+      },
       on(event, fn) {
         (listeners[event] ??= []).push(fn);
       },
@@ -36,6 +49,7 @@ export function createMockApp() {
       },
     },
     configureCalls: [],
+    clientMessages: [],
     _atoms: new Map([['WM_DELETE_WINDOW', 999]]),
     closed: 0,
     close() {
