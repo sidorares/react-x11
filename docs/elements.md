@@ -24,8 +24,8 @@ blocks and `createStyles`.
 Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
 
 - **Size**: `width`, `height`, `minWidth`, `minHeight`, `maxWidth`,
-  `maxHeight`, `aspectRatio`. `<image>` keeps its aspect ratio when only one
-  of `width`/`height` is given
+  `maxHeight`, `aspectRatio`. `<image>` and `<svg>` keep their aspect ratio
+  when only one of `width`/`height` is given
 - **Flex**: `flexDirection` (`row`, `column`, `row-reverse`,
   `column-reverse`), `justifyContent` (`flex-start`, `center`, `flex-end`,
   `space-between`, `space-around`, `space-evenly`), `alignItems`,
@@ -539,8 +539,14 @@ scrolls too).
 | ----- | ----------------------------------- |
 | `src` | file path (PNG/JPEG, decoded in JS) |
 
-Sized by style, or measured from the natural size (aspect-preserving
-shrink-to-width) when `width`/`height` are not both given.
+Sized by style — `style={{ width, height }}`, never flat props, since both
+are style names. With only one of the two set the other follows the natural
+aspect ratio; with neither, the image measures at its natural size, shrunk
+to the width on offer.
+
+```jsx
+<image src={photo} style={{ height: 64 }} /> // width follows the aspect ratio
+```
 
 ## `<canvas>`
 
@@ -816,9 +822,10 @@ ntk `HtmlView`: its own CSS cascade (document `<style>`s plus the
 ### `<svg>`
 
 ntk `SvgView` (static SVG via Path2D — paths, shapes, gradients,
-transforms, basic text). Sized like `<image>`: natural `viewBox` size,
-aspect-preserving shrink-to-width, or explicit `width`/`height` (the
-drawing scales to the content box).
+transforms, basic text). Sized like `<image>`, and by the same style
+properties: natural `viewBox` size, aspect-preserving when the style sets
+only one of `style={{ width, height }}`, and scaled into the content box
+when it sets both.
 
 Content is **JSX children, like SVG in React DOM** — SVG elements are
 declarative children with camelCase props (`strokeWidth`, `fillRule`;
@@ -876,6 +883,8 @@ wrapping), drawn as server-side glyphs/rects.
 | children      | TeX source (string), or use `source`    |
 | `source`      | TeX source                              |
 | `size`        | base font size (the formula em), px     |
-| `color`       | ink color (default `#222222`)           |
 | `displayMode` | KaTeX display mode (default `false`)    |
 | `katex`       | extra KaTeX options (macros, strict, …) |
+
+The ink colour is `style={{ color }}` (default `#222222`), like `<text>` —
+`color` is a style name, so it is not a prop here.

@@ -5,7 +5,7 @@
 // through the widget's `onInvalidate` hook (ntk >= 3.4.0).
 import { MarkdownView, HtmlView, SvgView, layoutTex } from 'ntk';
 
-import { Node } from './nodes.js';
+import { Node, intrinsicMeasure } from './nodes.js';
 import {
   Yoga,
   isLayoutProp,
@@ -283,23 +283,29 @@ export class SvgChildNode extends Node {
  * <svg>: ntk SvgView. Content is either JSX children (React-DOM style —
  * <svg viewBox="0 0 24 24"><circle cx={12} … />; children win when both
  * are present) or a `source` markup string. Sized like <image>: natural
- * (viewBox) size, kept to its aspect ratio when only the width is
- * constrained; scales to the content box.
+ * (viewBox) size, kept to its aspect ratio when the style constrains only
+ * one axis; scales to the content box.
  */
 export class SvgNode extends Node {
   constructor(props, app) {
     super('svg', props, app);
     this.view = null;
     this._stale = true;
-    this._configureMeasure();
+    this.yoga.setMeasureFunc(
+      intrinsicMeasure(() => {
+        const view = this._ensureView();
+        return {
+          width: view?.naturalWidth ?? 0,
+          height: view?.naturalHeight ?? 0,
+        };
+      }),
+    );
   }
 
   /** Any change to the svg subtree (props, children, text) lands here. */
   _textContentChanged() {
     this._stale = true;
-    // markDirty is only legal on nodes with a measure function (it is
-    // unset when width and height are both fixed)
-    if (this._hasMeasure) this.yoga?.markDirty();
+    this.yoga?.markDirty();
     this.root?.invalidate(true, null, 'props');
   }
 
@@ -347,32 +353,8 @@ export class SvgNode extends Node {
     return this.view;
   }
 
-  _configureMeasure() {
-    if (this.props.width != null && this.props.height != null) {
-      if (this._hasMeasure) this.yoga.unsetMeasureFunc();
-      this._hasMeasure = false;
-      return;
-    }
-    this._hasMeasure = true;
-    this.yoga.setMeasureFunc((width, widthMode) => {
-      const view = this._ensureView();
-      const natW = view?.naturalWidth ?? 0;
-      const natH = view?.naturalHeight ?? 0;
-      let w = natW;
-      if (
-        widthMode !== Yoga.MEASURE_MODE_UNDEFINED &&
-        Number.isFinite(width) &&
-        width < w
-      ) {
-        w = width;
-      }
-      return { width: w, height: natW > 0 ? (w * natH) / natW : natH };
-    });
-  }
-
   applyProps(newProps, oldProps) {
     super.applyProps(newProps, oldProps);
-    this._configureMeasure();
     // attributes live in props (children form) or in `source`; either way
     // the SvgView is cheap to rebuild on the next measure/paint
     this._textContentChanged();
@@ -456,10 +438,19 @@ export class SvgNode extends Node {
   }
 }
 
+// Darker than the default text ink: a formula reads as a figure, not as a
+// run of prose.
+const DEFAULT_TEX_COLOR = '#222222';
+
 /**
- * <tex source displayMode size color>: a KaTeX formula via ntk layoutTex.
+ * <tex source displayMode size>: a KaTeX formula via ntk layoutTex.
  * Layout is synchronous and headless; the box has an intrinsic size (no
  * wrapping). Invalid TeX renders nothing and logs once.
+ *
+ * The ink colour is `style={{ color }}`, not a prop — `color` is a style
+ * name, so a `color` prop threw in development and only worked in
+ * production (issue #118). `_paintContent` and `paintCachePlan` already
+ * read it off the style; the prop reached nothing but layoutTex.
  */
 export class TexNode extends Node {
   constructor(props, app) {
@@ -481,7 +472,8 @@ export class TexNode extends Node {
   }
 
   _ensureBox() {
-    const { size, color, displayMode, katex } = this.props;
+    const { size, displayMode, katex } = this.props;
+    const color = this.style.color ?? DEFAULT_TEX_COLOR;
     const source = stringChildrenOf(this) ?? this.props.source;
     if (!source) return null;
     const key = `${source}|${size}|${color}|${displayMode}`;
@@ -504,10 +496,11 @@ export class TexNode extends Node {
   applyProps(newProps, oldProps) {
     const before = oldProps ?? this.props;
     super.applyProps(newProps, oldProps);
+    // A colour change is not in here: it cannot move the box, and the
+    // repaint it does need is already claimed for it as a paint style.
     if (
       newProps.source !== before.source ||
       newProps.size !== before.size ||
-      newProps.color !== before.color ||
       newProps.displayMode !== before.displayMode
     ) {
       this.yoga.markDirty();
@@ -521,7 +514,7 @@ export class TexNode extends Node {
     // it needs a real ntk 2d context (headless mock contexts skip)
     if (!box || !ctx.window?.app?.display) return;
     const content = this.contentBox();
-    ctx.fillStyle = this.style.color ?? '#222222';
+    ctx.fillStyle = this.style.color ?? DEFAULT_TEX_COLOR;
     box.draw(ctx, content.x, content.y);
   }
 
@@ -537,7 +530,9 @@ export class TexNode extends Node {
    * The colour is in the key rather than tinted, because a TexBox draws
    * through glyph and trapezoid composites whose colour is the context's
    * fill at draw time; rendering it as coverage would need the box to promise
-   * it never sets a colour of its own, which it does not.
+   * it never sets a colour of its own, which it does not. `_boxKey` carries
+   * it — the colour is a style value, and that is where `_ensureBox` reads
+   * it from.
    */
   paintCachePlan() {
     const box = this._ensureBox();
@@ -547,7 +542,7 @@ export class TexNode extends Node {
     const height = Math.ceil(content.height);
     if (width <= 0 || height <= 0) return null;
     return {
-      key: `tex|${width}x${height}@1|${this.style.color ?? ''}|${this._boxKey}`,
+      key: `tex|${width}x${height}@1|${this._boxKey}`,
       x: Math.round(content.x),
       y: Math.round(content.y),
       width,
@@ -560,7 +555,7 @@ export class TexNode extends Node {
   paintCached(ctx, box) {
     const laid = this._ensureBox();
     if (!laid || !ctx.window?.app?.display) return;
-    ctx.fillStyle = this.style.color ?? '#222222';
+    ctx.fillStyle = this.style.color ?? DEFAULT_TEX_COLOR;
     laid.draw(ctx, box.x, box.y);
   }
 }

@@ -182,7 +182,7 @@ function Elements() {
       <markdown source="# hi" onLink={(href) => void href.length} />
       <html source="<p>hi</p>" stylesheet="p { margin: 0 }" />
       <svg source="<svg/>" />
-      <tex source="e^{i\\pi}" size={18} color="#222" />
+      <tex source="e^{i\\pi}" size={18} style={{ color: '#222' }} />
     </window>
   );
 }
@@ -222,6 +222,14 @@ const _div = <div />;
 const _img = <img />;
 // @ts-expect-error — <box> has no 'className'
 const _classy = <box className="nope" />;
+// Size is style everywhere except <window>, so the elements that measure
+// themselves do not get to take it flat either (issue #118).
+// @ts-expect-error — <image> is sized by style, not by a width prop
+const _sized = <image src="./logo.png" width={40} />;
+// @ts-expect-error — nor is <svg>
+const _svg = <svg source="<svg/>" height={40} />;
+// @ts-expect-error — <tex> ink colour is style={{ color }}
+const _inked = <tex source="x^2" color="#222" />;
 
 // --- popups ----------------------------------------------------------------
 

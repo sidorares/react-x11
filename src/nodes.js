@@ -1580,38 +1580,60 @@ export class TextNode extends Node {
   }
 }
 
+/**
+ * The measure function the intrinsically-sized elements share — the ones
+ * with a natural width and height that scale together (`<image>`, `<svg>`).
+ * `natural()` returns that size; it is called per measure because it
+ * arrives late (a decoded file, a parsed document).
+ *
+ * **Which dimensions the style fixed is something yoga already knows**, and
+ * says in the measure modes: `EXACTLY` on an axis means the style made it
+ * definite. Working it out a second time by reading style back would be
+ * duplication; working it out by reading *props* was issue #118 — `width`
+ * is a style name, so `<image width={40}>` throws in development and only
+ * ever reached this branch in production.
+ *
+ * - Both fixed: yoga skips the measure function outright, so there is no
+ *   fixed-size case to write here.
+ * - Height fixed alone: scale the width with it, the way an `<img>` with
+ *   only a height set does, rather than stretching to the container.
+ * - Otherwise: natural size, shrunk to the width on offer, height
+ *   following the aspect ratio.
+ */
+export function intrinsicMeasure(natural) {
+  return (width, widthMode, height, heightMode) => {
+    const { width: natW, height: natH } = natural();
+    if (
+      heightMode === Yoga.MEASURE_MODE_EXACTLY &&
+      widthMode !== Yoga.MEASURE_MODE_EXACTLY &&
+      natH > 0
+    ) {
+      return { width: (height * natW) / natH, height };
+    }
+    let w = natW;
+    if (
+      widthMode !== Yoga.MEASURE_MODE_UNDEFINED &&
+      Number.isFinite(width) &&
+      width < w
+    ) {
+      w = width;
+    }
+    return { width: w, height: natW > 0 ? (w * natH) / natW : natH };
+  };
+}
+
 export class ImageNode extends Node {
   constructor(props, app) {
     super('image', props, app);
     this.image = null;
     this._loadToken = 0;
-    this._configureMeasure();
+    this.yoga.setMeasureFunc(
+      intrinsicMeasure(() => ({
+        width: this.image?.width ?? 0,
+        height: this.image?.height ?? 0,
+      })),
+    );
     this._load(props.src);
-  }
-
-  _configureMeasure() {
-    const fixed = this.props.width != null && this.props.height != null;
-    if (fixed) {
-      this.yoga.unsetMeasureFunc();
-      return;
-    }
-    this.yoga.setMeasureFunc((width, widthMode, height, heightMode) => {
-      const natW = this.image?.width ?? 0;
-      const natH = this.image?.height ?? 0;
-      // a height alone should scale the width with it, the way an <img>
-      // with only a height set does — not stretch to the container
-      if (
-        this.props.width == null &&
-        this.props.height != null &&
-        heightMode !== Yoga.MEASURE_MODE_UNDEFINED &&
-        natH > 0
-      ) {
-        return { width: (height * natW) / natH, height };
-      }
-      let w = natW;
-      if (widthMode !== Yoga.MEASURE_MODE_UNDEFINED && width < w) w = width;
-      return { width: w, height: natW > 0 ? (w * natH) / natW : natH };
-    });
   }
 
   async _load(src) {
@@ -1634,7 +1656,6 @@ export class ImageNode extends Node {
   applyProps(newProps, oldProps) {
     const before = oldProps ?? this.props;
     super.applyProps(newProps, oldProps);
-    this._configureMeasure();
     if (newProps.src !== before.src) {
       this.image = null;
       this._load(newProps.src);

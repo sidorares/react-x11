@@ -67,7 +67,10 @@ try {
   // bundled, or installed somewhere without the manifest beside us
 }
 
-const HOST_TYPES = [
+// The vocabulary, in the order the unknown-element error lists it. Exported
+// so a test can sweep every element rather than a list of them that was
+// true once (test/element-props.test.js).
+export const HOST_TYPES = [
   'window',
   'popup',
   'box',
