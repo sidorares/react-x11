@@ -736,6 +736,17 @@ export function MenuBar({
               paddingBottom: 6,
               backgroundColor:
                 openIndex === index ? theme.hoverBackground : undefined,
+              // No ring while this item's menu is up. Walking the bar with
+              // the arrow keys opens each menu as it arrives, so the item is
+              // already inverted with a menu hanging off it — a ring on top
+              // of that is saying a third time what two things already say,
+              // and it is the least specific of the three.
+              //
+              // Only while it is up, though: an item that has been tabbed to
+              // and *not* opened has nothing else to show for it, and a
+              // keyboard user who cannot see where they are is exactly the
+              // reader the ring exists for.
+              outlineWidth: openIndex === index ? 0 : undefined,
             },
             // Only while this menu is shut, as in `Select`: an open one is
             // already showing the answer, and a state block would outrank

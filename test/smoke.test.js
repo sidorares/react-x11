@@ -3840,13 +3840,40 @@ test('MenuBar: an open menu is always dismissible', async () => {
     await tick();
     assert.strictEqual(buttons[1].states[':focus-visible'], false, 'nor here');
 
-    // Left walks the bar from the keyboard, and that one does ring
+    // Left walks the bar from the keyboard. That does count as keyboard
+    // focus — but the item it lands on has opened its menu, and an item with
+    // a menu hanging off it draws no ring: the menu already said it.
     pressKey(app0(wnd), wnd, { keysym: 0xff51 });
     await tick();
     assert.strictEqual(
       buttons[0].states[':focus-visible'],
       true,
-      'a keyboard walk is the case a ring is for',
+      'the keyboard put focus here',
+    );
+    assert.strictEqual(
+      buttons[0].style.outlineWidth,
+      0,
+      'and the open menu says so without one',
+    );
+    await x11Root.unmount();
+  }
+
+  // ...but an item that has only been *reached* has nothing else to show for
+  // it, so it keeps the ring. This is the case the blanket opt-out would
+  // lose, and it is the reader the ring exists for.
+  {
+    const { x11Root, wnd, buttons } = await mount();
+    wnd._reactX11Node.events.focus(buttons[0], 'key');
+    await tick();
+    assert.strictEqual(
+      buttons[0].states[':focus-visible'],
+      true,
+      'tabbed to, menu shut',
+    );
+    assert.notStrictEqual(
+      buttons[0].style.outlineWidth,
+      0,
+      'nothing else marks where the keyboard is, so the ring stands',
     );
     await x11Root.unmount();
   }
