@@ -470,8 +470,35 @@ import { MenuBar, ContextMenu } from 'react-x11';
 ```
 
 Item shape: `{ label, onSelect, shortcut, disabled, separator, checked,
-items }`. Both take an `onSelect(item)` prop as well, fired after the
-item's own.
+icon, items }`. Both take an `onSelect(item)` prop as well, fired after the
+item's own. A bar menu opens on the **press**, for the reason `Select` does.
+
+**Icons.** `icon` fills the 16px column left of the label — the same column
+the check mark uses, so an item that is both checked and iconned shows the
+check: the check is state, the icon is only identity. One column rather than
+two, because a second would indent every label in the menu to reserve room
+for icons most items do not have.
+
+Pass a **function** for anything real. It is called with the colour the
+row's label is being drawn in and the size the column allows, which is what
+lets one drawing follow its row into the highlight and into the disabled
+grey:
+
+```jsx
+const save = ({ color, size }) => (
+  <svg source={SAVE_SVG} style={{ width: size, height: size, color }} />
+);
+
+{ label: 'Save', icon: save, shortcut: 'Ctrl+S', onSelect: onSave }
+```
+
+Paint the SVG in `currentColor` and the renderer caches it as coverage
+rather than as pixels, so recolouring per row is a composite and every
+colour of the icon shares one rendered copy
+([elements.md](elements.md#svg)). A **string** icon is drawn as text, which
+is a one-liner — but it is only as good as the font, and `✂` or `⏻` is an
+empty box on a machine without them. An element is rendered as-is.
+`examples/menu.jsx` has a worked set.
 
 **Submenus.** Give an item its own `items` and it becomes a submenu parent,
 marked with `▸` and opening to the side:
@@ -483,9 +510,12 @@ marked with `▸` and opening to the side:
 ] }
 ```
 
-Nesting is unlimited. Each level is its own `<popup>`, anchored to its
-parent row with `placement: 'right'`, so it flips to the left near a screen
-edge like any other anchored popup.
+Nesting is unlimited. Each level is its own `<popup>` with `placement:
+'right'`, so it flips to the left near a screen edge like any other anchored
+popup. It hangs off the **menu's** outer edge and lines up with the row that
+opened it — two different nodes, which is what `anchorRect`'s `alignTo` is
+for. Anchoring both to the row would put the submenu inside its parent by
+the menu's border and padding, and the two would overlap.
 
 **Keyboard.** Up/Down move the active item, **skipping separators and
 disabled entries** and wrapping; Home/End jump to the ends; Right opens a
@@ -742,12 +772,19 @@ const rect = measure({ placement: 'bottom', align: 'center', width, height });
 | `align`           | `'start'` (default), `'center'`, `'end'` on the cross axis |
 | `offset`          | gap from the anchor in px (default 2)                      |
 | `width`, `height` | size of the popup you are positioning                      |
+| `alignTo`         | node the alignment reads, when it is not the anchor        |
 
 `placement` is a **preference, not a promise**: a menu near the bottom of
 the screen flips above its trigger rather than opening off-screen, and the
 result is clamped into the screen either way. The side actually used comes
 back as `placement`. Where screen geometry is unavailable it places without
 clamping.
+
+`alignTo` takes the two axes from **different nodes**: the placement edge
+from the anchor, the alignment from `alignTo`. A submenu is the case that
+needs it — it belongs against the outer edge of the menu it comes out of,
+but level with the row that opened it, and that row is inset by the menu's
+border and padding. Both nodes have to be in the same window.
 
 ## `useDropTarget(options)` / `useDragSource(options)`
 

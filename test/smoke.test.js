@@ -2666,6 +2666,40 @@ test('anchorRect places, flips at a screen edge and clamps', async () => {
   );
   assert.strictEqual(flipsLeft.placement, 'left');
 
+  // `alignTo` splits the axes: the placement edge from the node, the
+  // alignment from another. This is a submenu — it belongs against the
+  // *menu's* right edge, but lined up with the row that opened it, and the
+  // row is inset by the menu's border and padding.
+  const menu = { x: 0, y: 0, width: 140, height: 200 };
+  const row = { abs: { x: 5, y: 60, width: 130, height: 26 } };
+  const split = anchorRect(node(menu), {
+    placement: 'right',
+    align: 'start',
+    offset: 0,
+    alignTo: row,
+    width: 120,
+    height: 80,
+  });
+  assert.strictEqual(
+    split.x,
+    100 + 0 + 140,
+    'flush with the menu edge, not five pixels inside it',
+  );
+  assert.strictEqual(split.y, 50 + 60, 'but level with the row');
+
+  // and without it the row would have decided both, which is the overlap
+  const overlapping = anchorRect(node(row.abs), {
+    placement: 'right',
+    offset: 0,
+    width: 120,
+    height: 80,
+  });
+  assert.strictEqual(
+    overlapping.x,
+    split.x - 5,
+    'the inset the fix removes, stated as the amount it used to overlap',
+  );
+
   // no screen geometry (headless mock): still places, just never clamps
   const noScreen = anchorRect({
     abs: { x: 5, y: 5, width: 50, height: 20 },

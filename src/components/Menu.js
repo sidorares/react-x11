@@ -38,6 +38,8 @@ const MENU_MIN_WIDTH = 140;
 const MENU_PAD = 4;
 
 const MENU_GUTTER = 24; // room for the check column
+// what a self-drawing icon gets to fill, inside that column's 16px
+const MENU_ICON_SIZE = 12;
 
 const MENU_SHORTCUT_GAP = 24;
 // menus size to their content rather than scrolling, so a page is a fixed
@@ -85,6 +87,37 @@ function nextSelectable(items, from, dir) {
     if (isSelectable(items[i])) return i;
   }
   return -1;
+}
+
+/**
+ * What goes in the column to the left of the label: a check mark, or the
+ * item's `icon`.
+ *
+ * One column for both, because that is the choice every desktop toolkit
+ * makes and the reason is layout rather than taste — a second column would
+ * indent every label in the menu to reserve room for icons that most items
+ * do not have. An item that is both checked and iconned shows the check,
+ * since the check is state and the icon is only identity.
+ *
+ * Three forms, and the third is the one to reach for. A **string** is drawn
+ * as text, which is a one-liner but only as good as the font: `✂` and `⏻`
+ * are tofu in Arial, and a menu of empty boxes is worse than a menu with no
+ * icons at all. An **element** renders as-is. A **function** is called with
+ * the colour the row's label is being drawn in and the size the gutter
+ * allows — which is what a `<canvas onDraw>` icon needs, since it has to
+ * pick a stroke colour and nothing else can tell it whether its row is
+ * highlighted, disabled or at rest.
+ */
+function gutterMark(item, { color, fontSize }) {
+  if (item.checked) return h('text', { style: { color, fontSize } }, '✓');
+  const { icon } = item;
+  if (icon == null) return null;
+  if (typeof icon === 'string' || typeof icon === 'number') {
+    return h('text', { style: { color, fontSize } }, String(icon));
+  }
+  return typeof icon === 'function'
+    ? icon({ color, size: MENU_ICON_SIZE })
+    : icon;
 }
 
 function MenuRow({
@@ -136,14 +169,10 @@ function MenuRow({
     h(
       'box',
       { style: { width: MENU_GUTTER - 8, alignItems: 'center' } },
-      item.checked &&
-        h('text', {
-          children: '\u2713',
-          style: {
-            color: active ? theme.hoverText : theme.text,
-            fontSize: fontSize,
-          },
-        }),
+      gutterMark(item, {
+        color: dim ? theme.dim : active ? theme.hoverText : theme.text,
+        fontSize,
+      }),
     ),
     h(
       'text',
@@ -211,6 +240,7 @@ function MenuLevel({
   const childOpen = path.length > depth + 1 && childItems?.length > 0;
 
   const activeRowRef = useRef(null);
+  const listRef = useRef(null);
   const [childRect, setChildRect] = useState(null);
 
   useEffect(() => {
@@ -224,8 +254,13 @@ function MenuLevel({
     // anyway rather than anchoring off a zero rect
     if (!node?.abs?.width) return;
     setChildRect(
-      anchorRect(node, {
+      anchorRect(listRef.current ?? node, {
         placement: 'right',
+        // The edge comes from the list box, which fills the popup, and the
+        // alignment from the row. Anchoring both to the row put the submenu
+        // a border and a padding *inside* its parent's right edge, so the
+        // two menus overlapped by five pixels.
+        alignTo: node,
         align: 'start',
         offset: 0,
         width: menuListWidth(node, childItems, fontSize),
@@ -317,6 +352,7 @@ function MenuLevel({
     h(
       'box',
       {
+        ref: listRef,
         style: {
           flexGrow: 1,
           flexShrink: 1,
@@ -610,7 +646,10 @@ export function MenuBar({
             refs.current[index] = node;
           },
           focusable: true,
-          onClick: () => (openIndex === index ? close() : openMenu(index)),
+          // on the press, as `Select` opens: a pull-down that waits for the
+          // button to come back up spends the whole of a held click saying
+          // nothing, and a menu is there to be read
+          onMouseDown: () => (openIndex === index ? close() : openMenu(index)),
           onMouseEnter: () => {
             if (openIndex >= 0 && openIndex !== index) openMenu(index);
           },

@@ -19,6 +19,14 @@ export function screenOf(node) {
  * the screen flips above its trigger rather than opening off-screen, and
  * the result is clamped into the screen either way. The chosen side comes
  * back as `placement` so the caller can style accordingly.
+ *
+ * `alignTo` takes the two axes from **different** nodes: the placement edge
+ * from `node`, the alignment from `alignTo`. A submenu is the case that
+ * needs it — it belongs against the outer edge of the menu it comes out of,
+ * but lined up with the row that spawned it, and that row is inset by the
+ * menu's border and padding. Anchoring both to the row opens the submenu
+ * *over* its parent by exactly that inset. Both nodes must be in the same
+ * window, which is what lets one origin serve both.
  */
 export function anchorRect(node, options = {}) {
   if (!node?.abs) return null;
@@ -28,6 +36,7 @@ export function anchorRect(node, options = {}) {
     offset = 2,
     width = node.abs.width,
     height = 0,
+    alignTo,
   } = options;
 
   // `_screenOrigin` is what the server says; `x`/`y` are frame-relative
@@ -39,6 +48,11 @@ export function anchorRect(node, options = {}) {
   const ay = origin.y + node.abs.y;
   const aw = node.abs.width;
   const ah = node.abs.height;
+  // the rect the *alignment* reads, which is `node`'s own unless the caller
+  // split the two axes
+  const cross = alignTo?.abs ?? node.abs;
+  const cx = origin.x + cross.x;
+  const cy = origin.y + cross.y;
 
   const screen = screenOf(node);
   const sw = screen?.pixel_width;
@@ -68,7 +82,7 @@ export function anchorRect(node, options = {}) {
       side = 'bottom';
     }
     y = side === 'bottom' ? below : above;
-    x = alignAlong(ax, aw, width);
+    x = alignAlong(cx, cross.width, width);
   } else {
     const after = ax + aw + offset;
     const before = ax - width - offset;
@@ -82,7 +96,7 @@ export function anchorRect(node, options = {}) {
       side = 'right';
     }
     x = side === 'right' ? after : before;
-    y = alignAlong(ay, ah, height);
+    y = alignAlong(cy, cross.height, height);
   }
 
   if (sw != null) x = Math.max(0, Math.min(x, sw - width));
