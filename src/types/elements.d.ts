@@ -267,6 +267,8 @@ export interface ImageProps extends DrawnProps<DrawnNode> {
   /** File path; PNG or JPEG, decoded in JS. */
   src: string;
 }
+// Size is `style={{ width, height }}`, like every other element: `width`
+// and `height` are style names, so they are not declared here.
 
 /** What `onDraw` is told about the node it is painting. */
 export interface DrawInfo {
@@ -321,11 +323,12 @@ export interface SvgProps extends DrawnProps<DrawnNode> {
   viewBox?: string;
 }
 
+// The ink colour is `style={{ color }}`: `color` is a style name, so it is
+// not a prop here.
 export interface TexProps extends DrawnProps<DrawnNode> {
   source?: string;
   /** Base font size — the formula's em, in px. */
   size?: number;
-  color?: Color;
 }
 
 // --- GL --------------------------------------------------------------------
