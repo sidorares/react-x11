@@ -230,6 +230,52 @@ test('a select drops its menu on the press, not on the release', async () => {
   await x11Root.unmount();
 });
 
+test('an open select stops answering the pointer: open outranks hover', async () => {
+  const { x11Root, wnd, tree } = await mount(
+    h(Select, {
+      value: 'utf-8',
+      options: ['utf-8', 'latin-1'],
+      onChange: () => {},
+      style: { width: 140 },
+    }),
+  );
+  const trigger = find(tree, (n) => n.props.role === 'combobox');
+  const theme = trigger.theme;
+
+  moveTo(wnd, trigger);
+  await settle();
+  assert.strictEqual(
+    trigger.style.backgroundColor,
+    theme.surfaceHover,
+    'shut, it tints under the pointer',
+  );
+
+  down(wnd, trigger);
+  up(wnd, trigger);
+  await settle();
+  const open = trigger.style.backgroundColor;
+  assert.strictEqual(
+    open,
+    theme.background,
+    'open, it joins the surface of the menu hanging off it',
+  );
+
+  // the reported bug: the pointer comes back over an open trigger and the
+  // hover tint reappears, so the trigger is darker than the popup it is
+  // supposed to be continuous with
+  wnd.emit('mouseout', { x: -5, y: -5 });
+  await settle();
+  moveTo(wnd, trigger);
+  await settle();
+  assert.strictEqual(
+    trigger.style.backgroundColor,
+    open,
+    'and moving the pointer back over it changes nothing',
+  );
+
+  await x11Root.unmount();
+});
+
 test('a held switch tints its track before the thumb moves', async () => {
   const { x11Root, wnd, tree } = await mount(
     h(Switch, { checked: false, onChange: () => {} }),

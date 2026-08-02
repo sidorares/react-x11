@@ -640,25 +640,25 @@ export function MenuBar({
             if (ev.keysym === XK_LEFT) moveMenu(-1);
             else if (ev.keysym === XK_RIGHT) moveMenu(1);
           },
-          style: {
-            cursor: 'pointer',
-            paddingLeft: 10,
-            paddingRight: 10,
-            paddingTop: 6,
-            paddingBottom: 6,
-            backgroundColor:
-              openIndex === index ? theme.hoverBackground : undefined,
-            ':hover': {
+          style: [
+            {
+              cursor: 'pointer',
+              paddingLeft: 10,
+              paddingRight: 10,
+              paddingTop: 6,
+              paddingBottom: 6,
               backgroundColor:
-                openIndex === index ? theme.hoverBackground : theme.background,
+                openIndex === index ? theme.hoverBackground : undefined,
             },
-            // the menu opens on the release, so this is the whole of the
-            // answer to a held press on the bar
-            ':active': {
-              backgroundColor:
-                openIndex === index ? theme.accentActive : theme.surfaceActive,
+            // Only while this menu is shut, as in `Select`: an open one is
+            // already showing the answer, and a state block would outrank
+            // the base colour that says so. The menu opens on the release,
+            // so `:active` is the whole of the answer to a held press.
+            openIndex !== index && {
+              ':hover': { backgroundColor: theme.background },
+              ':active': { backgroundColor: theme.surfaceActive },
             },
-          },
+          ],
         },
         h(
           'text',

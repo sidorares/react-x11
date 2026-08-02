@@ -275,8 +275,17 @@ export function Select({
           borderRadius: theme.radius,
           borderColor: focused || open ? theme.borderFocus : theme.border,
           backgroundColor: theme.background,
-          // the menu only opens on the release; holding the trigger has to
-          // look like something is about to happen
+        },
+        // Hover and press belong to the trigger while it is *shut*: they say
+        // "this opens". Once the menu is down that is answered, and the
+        // trigger's job is to read as one surface with the popup hanging off
+        // it — so the pointer wandering back over it must not re-tint it.
+        //
+        // Declaring them conditionally is the mechanism, not a shortcut: a
+        // state block always outranks the base style, so there is no colour
+        // the open state could put in `backgroundColor` that `:hover` would
+        // not overwrite. The only way for open to win is to not be competing.
+        !open && {
           ':hover': { backgroundColor: theme.surfaceHover },
           ':active': { backgroundColor: theme.surfaceActive },
         },
