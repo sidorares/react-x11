@@ -193,6 +193,13 @@ restores focus when it closes — plus the two containers an application
 window is built from: `Tabs`, `Tree` and `SplitPane`. See
 [docs/components.md](docs/components.md).
 
+**Drag and drop** works with the rest of the desktop: `<box dropAccept={['files']}
+onDrop={…}>` takes a file dragged out of Nautilus, and `<box draggable dragData={…}>`
+can be dropped into a file manager or an editor. Drags that stay inside the
+app never touch the wire and hand their payload over by reference, so a
+reorderable list and a cross-application file drop are the same two props.
+See [docs/drag-and-drop.md](docs/drag-and-drop.md).
+
 ### 3D
 
 Inside a `<glarea>` (or the `Canvas3D` component) the children are scene

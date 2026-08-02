@@ -106,6 +106,9 @@ const root = await createRoot({
 | `onContextMenu`                             | right-click (button 3), after `onMouseDown`; default action opens the element's menu  |
 | `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus in `tabIndex` order   |
 | `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal              |
+| `onDragEnter` / `onDragLeave`               | do not propagate; drag-path diffing, the same shape as the hover pair above           |
+| `onDragOver` / `onDrop`                     | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)        |
+| `onDragStart` / `onDrag` / `onDragEnd`      | on a `draggable` node; the press is a click until it moves 4px                        |
 
 ## Pointer capture
 
@@ -244,153 +247,34 @@ window's cursor and the pointer stays visible.
 
 ## Drag and drop {#drag-and-drop}
 
-react-x11 windows are XDND drop targets: drags from file managers,
-editors and browsers land as ordinary events on ordinary nodes. (The
-other direction — being a drag _source_ — is planned;
-[#126](https://github.com/sidorares/react-x11/issues/126) tracks both
-halves, and the design review lives in
-[the architecture doc](https://github.com/sidorares/react-x11/pull/161).)
+Drag and drop rides this event system — same hit testing, same
+capture/bubble dispatch, same style states — so the props sit alongside the
+pointer handlers on any drawn element, `<window>` or `<popup>`:
 
 ```jsx
 <box
   dropAccept={['files']}
-  onDrop={async (e) => setPaths(e.files.map((f) => f.path))}
-  style={{
-    borderColor: '$border',
-    ':drag-over': { borderColor: '$accent' },
-  }}
+  onDrop={(e) => setPaths(e.files.map((f) => f.path))}
+  style={{ ':drag-over': { borderColor: '$accent' } }}
 />
 ```
 
-Any drawn element, `<window>` or `<popup>` takes the props; their
-presence is what makes the node a drop target. `dropAccept` is
-deliberately namespaced (not `accept`) so a prop spread cannot turn a box
-into a dropzone by accident.
+| handler                                | notes                                                                                   |
+| -------------------------------------- | --------------------------------------------------------------------------------------- |
+| `onDragEnter` / `onDragLeave`          | do not propagate — path diffing, like hover; paired with the `':drag-over'` state       |
+| `onDragOver`                           | per pointer position; `e.accept(action)` / `e.reject()` answer the source               |
+| `onDrop`                               | may be async — the protocol reply waits for the returned promise, bounded by a watchdog |
+| `onDragStart` / `onDrag` / `onDragEnd` | the source side of a `draggable` node; `':dragging'` styles it for the duration         |
 
-| prop                          | notes                                                                                    |
-| ----------------------------- | ---------------------------------------------------------------------------------------- |
-| `dropAccept`                  | a MIME type, a group (`'files'`, `'uris'`, `'text'`), an array of either, or a predicate |
-| `onDragEnter` / `onDragLeave` | do not propagate — drag-path diffing, like hover; paired with the `':drag-over'` state   |
-| `onDragOver`                  | per position; `e.accept(action)` / `e.reject()` override the declarative answer          |
-| `onDrop`                      | may be async — the protocol reply waits for the returned promise (bounded by a watchdog) |
+Two things that differ from the events above. A press on a `draggable` node
+is still a **click** until the pointer moves 4px, and a completed drag
+suppresses the click that would otherwise follow — the same bargain the DOM
+makes. And a drag that leaves the app's own windows keeps working: it is
+promoted to the X11 XDND protocol and can be dropped into a file manager,
+an editor or another react-x11 process, with the handlers unchanged.
 
-`dropAccept` matters beyond filtering: it is **data**, so the protocol's
-accept/reject answer is computed in the event handler without entering
-React. The groups encode real-world offers — GTK text arrives as
-`text/plain;charset=utf-8`/`UTF8_STRING`, Firefox links as UTF-16
-`text/x-moz-url` — so `dropAccept={['text']}` catches what string
-equality on `'text/plain'` would miss.
-
-The drag event carries `types`, `has(type)`, `action`, `source`
-(`'external'` for XDND), and `screenX/screenY`. On `onDrop`
-additionally:
-
-- `e.files` — parsed `text/uri-list`: `[{ uri, path? }]`, `path` present
-  only for genuinely local `file:` URIs, percent-decoding done;
-- `e.text` — the best offered text flavour;
-- `await e.getData(type)` — any other offered type, decoded to a string
-  for text-ish targets, raw bytes otherwise. There is deliberately no
-  `e.dataTransfer`: X selection transfer is asynchronous, and a
-  sync-looking `getData` would stringify to `"[object Promise]"` without
-  an error in sight.
-
-The `':drag-over'` style state makes the common highlight free — no
-handler, no re-render. For render-state (an `isOver` hint label), the
-`useDropTarget` hook mirrors react-dropzone:
-
-```jsx
-const { dropProps, isOver, isAccepted } = useDropTarget({
-  accept: ['files'],
-  onDrop: (e) => setFiles(e.files),
-});
-return <box {...dropProps} style={isOver ? s.zoneHot : s.zone} />;
-```
-
-### Drag sources
-
-`draggable` makes a node a drag source; `dragData` is the offer, keyed by
-payload type name:
-
-```jsx
-<box
-  draggable
-  dragData={{
-    'text/uri-list': () => toUriList(item), // a thunk: resolved lazily
-    'text/plain': item.path,
-    'application/x-myapp-item': item, // a live object
-  }}
-  dragActions={['copy', 'move']}
-  onDragEnd={(e) => {
-    if (e.action === 'move') remove(item.id);
-  }}
-  style={{ ':dragging': { opacity: 0.4 } }}
-/>
-```
-
-One drag session, two transports, and handlers cannot tell them apart
-without asking (`e.source`):
-
-- **Inside the app** (over any of its windows, including other
-  `<window>`s and `<popup>`s) the drag is local: no X traffic at all, and
-  a drop hands values over **by reference** — `e.items['application/x-myapp-item']`
-  is the object itself, never serialised.
-- **Leaving the app's windows** promotes the drag to XDND: `dragData` is
-  published on `XdndSelection` (thunks resolve now — a drag that ends in
-  the wastebasket never builds its payload; live objects are
-  JSON-serialised for the wire), the target under the pointer is found by
-  descending from the root, and any XDND application — a file manager, an
-  editor, another react-x11 process — can accept the drop. Coming back
-  over the app demotes it again.
-
-The gesture is DOM-shaped: a press on a `draggable` is still a click
-until it moves ~4px; `onDragStart` fires at the threshold
-(`preventDefault()` cancels the drag); `onDrag` tracks every motion with
-`screenX/screenY` and `accepted`; `onDragEnd` reports `{ action,
-dropped }` — `action` is null when the drag ended nowhere. A completed
-drag suppresses the click, and `:dragging` styles the source while it
-lasts.
-
-There is deliberately no `dragPreview` prop rendering a bitmap — the
-preview is a live React tree. `useDragSource` packages the pattern:
-
-```jsx
-const { dragProps, isDragging, position } = useDragSource({
-  data: { 'text/plain': label },
-  onDragEnd: (e) => {
-    /* … */
-  },
-});
-return (
-  <>
-    <box {...dragProps} />
-    {isDragging && (
-      <popup dragPreview x={position.x + 12} y={position.y + 12}>
-        <Chip label={label} />
-      </popup>
-    )}
-  </>
-);
-```
-
-The `dragPreview` prop on the `<popup>` matters: it tells the drag router
-the window under the pointer is the preview itself, not a drop target.
-
-The two runnable halves live in
-[`examples/dnd-source.jsx`](../examples/dnd-source.jsx) and
-[`examples/dnd-target.jsx`](../examples/dnd-target.jsx) — run them in two
-terminals and drag between the processes.
-
-Notes for protocol watchers: `XdndAware` (version 5) is written on every
-top-level window unconditionally at realize time; a window with no drop
-targets mounted answers a drag with one refusal covering the whole
-window, so an app that never uses DnD costs one property and nothing per
-drag. On the source side, the foreign target is re-resolved per motion
-frame (2–4 round trips against a local server; the drag-start window
-cache for remote X is future work), the mid-drag cursor rides
-`ChangeActivePointerGrab` over the implicit button grab, and
-`XdndFinished` is awaited with a 5 s timeout so a dead target cannot wedge
-the gesture. macOS/XQuartz cannot deliver Finder drags into X11
-applications
-([XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173)) — test
-against another X client there; on Linux, XWayland bridges XDND both
-ways.
+**The full reference is [drag-and-drop.md](drag-and-drop.md)**: the
+`dropAccept` matching rules, the event payload (`e.files`, `e.text`,
+`e.getData`, `e.items`), `dragData` and lazy payloads, the `useDropTarget`
+and `useDragSource` hooks, drag previews, interoperating with GTK and
+Firefox, and how to drive a drag in a test.

@@ -65,16 +65,26 @@ The thing inline CSS cannot do, and the reason people keep a stylesheet:
 />
 ```
 
-`:hover`, `:focus`, `:active`, `:disabled`. These are **node states, not
-selectors** — each is something the node itself already knows, so resolving
-them needs no cascade, no specificity and no tree walk. The event manager
-already tracks the hover path and the focused node; a state change now
-recomputes one node's style and repaints. **No React render.**
+`:hover`, `:focus`, `:active`, `:disabled`, `:drag-over`, `:dragging`.
+These are **node states, not selectors** — each is something the node itself
+already knows, so resolving them needs no cascade, no specificity and no
+tree walk. The event manager already tracks the hover path and the focused
+node; a state change now recomputes one node's style and repaints. **No
+React render.**
 
 Precedence is fixed and low-to-high: `:hover` → `:focus` → `:active` →
-`:disabled`, merged per property, so a disabled control never looks hovered.
+`:disabled` → `:drag-over` → `:dragging`, merged per property, so a disabled
+control never looks hovered, and a drag in progress outranks all four of the
+pointer and focus states.
 Because the hover _path_ is the ancestor chain, hovering a child lights up an
 ancestor's `:hover` block, exactly like CSS.
+
+The last two belong to drag and drop. `:drag-over` follows the pointer
+during a drag on exactly the same ancestor-path rule as `:hover` — and,
+like `:hover`, it says where the pointer is, not whether the node would
+accept the drop; `useDropTarget`'s `isAccepted` is the one that answers
+that. `:dragging` is set on the source node for the duration of a drag.
+See [drag-and-drop.md](drag-and-drop.md).
 
 **State blocks may only set paint properties** (`backgroundColor`,
 `borderColor`, `borderRadius`, `zIndex`, `color`) — enforced at declaration

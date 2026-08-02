@@ -23,6 +23,20 @@ at that SHA.
 > – 5.3.0 landed while it was in review and changed four of its conclusions —
 > one of them the headline blocker on the drag-source half. [§0.1](#01-audit-against-ntk-530)
 > is the audit; the body below is corrected, not annotated.
+>
+> **What shipped, and where it diverged.** This is the design as argued, kept
+> as the record of _why_; [drag-and-drop.md](../drag-and-drop.md) is the
+> reference for what the API actually is. Phases 0–3 shipped in #162 and
+> #165. Four things landed differently from the sketch below, and the
+> reference page is authoritative on all of them: the floor is **ntk 5.4.0**,
+> not 5.3.0 (#167 needed `clipboard.read({ time })` and `clipboard.clear`);
+> the foreign target is resolved **per motion, uncached** — the drag-start
+> `QueryTree` cache in §6.3/§7 is still the remote-X follow-up; the drag
+> rides the **implicit button grab** rather than `GrabPointer` or
+> `capturePointer`, swapping only the cursor; and `dragPreview` shipped as a
+> **marker prop on a `<popup>` the app renders itself**, not as a node-valued
+> prop on the source. The atom interning is also unconditional at realize
+> rather than lazy.
 
 ---
 
@@ -634,7 +648,7 @@ const { dropProps, isOver, isAccepted } = useDropTarget({
   onDragEnd={(e) => {
     if (e.action === 'move') remove(row.id);
   }}
-  style={{ ':dragging': { opacity: 0.5 } }}
+  style={{ ':dragging': { backgroundColor: '$dim' } }}
 />
 ```
 

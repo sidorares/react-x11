@@ -114,8 +114,9 @@ export interface LayoutStyle {
 
 /**
  * Properties that only affect painting, never geometry — the only ones a
- * `:hover`/`:focus`/`:active`/`:disabled` block may set, because a state
- * block that could reflow the tree would jitter on pointer move.
+ * `:hover`/`:focus`/`:active`/`:disabled`/`:drag-over`/`:dragging` block
+ * may set, because a state block that could reflow the tree would jitter
+ * on pointer move.
  */
 export interface PaintStyle {
   backgroundColor?: Color;
@@ -168,6 +169,12 @@ export interface StyleBlocks {
   ':focus'?: StateStyle;
   ':active'?: StateStyle;
   ':disabled'?: StateStyle;
+  /** Set while a drag is over this node or a descendant — the same
+   * ancestor-path rule `:hover` follows, and like it, not filtered by
+   * whether the node would accept the drop. */
+  ':drag-over'?: StateStyle;
+  /** Set on a drag source for the duration of the drag. */
+  ':dragging'?: StateStyle;
 }
 
 /**

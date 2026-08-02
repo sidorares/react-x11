@@ -179,6 +179,7 @@ const ORDER = [
   'styling.md',
   'components.md',
   'events.md',
+  'drag-and-drop.md',
   'typescript.md',
   'extending.md',
   'testing.md',

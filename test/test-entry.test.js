@@ -404,3 +404,66 @@ test('cleanup closes every server, so a suite does not leak them', async () => {
   assert.strictEqual(a.windowNode.destroyed, true);
   assert.strictEqual(b.windowNode.destroyed, true);
 });
+
+test('a drag and drop gesture is drivable through the published surface', async () => {
+  // The pattern documented in docs/drag-and-drop.md and docs/testing.md:
+  // three real pointer events, with the 4px threshold honoured. Pinned here
+  // so the documented snippet cannot rot silently.
+  const log = [];
+  const item = { id: 7 };
+  const { windowNode } = await renderX11(
+    h(
+      'box',
+      { style: { flexGrow: 1 } },
+      h('box', {
+        draggable: true,
+        dragData: { 'application/x-row': item },
+        onDragStart: () => log.push('start'),
+        onDragEnd: (ev) => log.push(['end', ev.action, ev.dropped]),
+        style: {
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          width: 100,
+          height: 100,
+        },
+      }),
+      h('box', {
+        dropAccept: ['application/x-row'],
+        onDrop: (ev) => log.push(['drop', ev.items['application/x-row']]),
+        style: {
+          position: 'absolute',
+          left: 200,
+          top: 0,
+          width: 150,
+          height: 150,
+        },
+      }),
+    ),
+    { fonts },
+  );
+  const nodes = [];
+  const walk = (node) => {
+    nodes.push(node);
+    for (const child of node.children ?? []) walk(child);
+  };
+  walk(windowNode);
+  const card = nodes.find((n) => n.props?.draggable);
+  const bin = nodes.find((n) => n.props?.dropAccept);
+
+  await act(async () => {
+    fireEvent.mouseDown(card);
+    fireEvent.mouseMove(card, { dx: 8 }); // past the threshold, still on the card
+    fireEvent.mouseMove(bin);
+    fireEvent.mouseUp(bin);
+  });
+  await waitFor(() => log.some((entry) => entry[0] === 'end'));
+
+  assert.strictEqual(log[0], 'start');
+  assert.deepStrictEqual(
+    log.find((entry) => entry[0] === 'drop'),
+    ['drop', item],
+    'the in-app payload arrives by reference',
+  );
+  assert.deepStrictEqual(log.at(-1), ['end', 'copy', true]);
+});

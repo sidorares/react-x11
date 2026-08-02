@@ -713,6 +713,31 @@ result is clamped into the screen either way. The side actually used comes
 back as `placement`. Where screen geometry is unavailable it places without
 clamping.
 
+## `useDropTarget(options)` / `useDragSource(options)`
+
+The render-state layer over the drag-and-drop props, for the cases a
+`':drag-over'` or `':dragging'` style block cannot cover — a hint label, a
+disabled sibling, a drag preview that follows the pointer.
+
+```jsx
+const { dropProps, isOver, isAccepted } = useDropTarget({
+  accept: ['files'],
+  onDrop: (e) => setFiles(e.files),
+});
+
+const { dragProps, isDragging, position } = useDragSource({
+  data: { 'text/plain': label },
+  actions: ['copy', 'move'],
+});
+```
+
+Spread `dropProps` / `dragProps` on any drawn element. Both are thin — the
+props they return are the same ones you can write by hand — so reach for
+them when the render changes, and for the plain props when it does not.
+`position` is `{ x, y, accepted }` in screen coordinates while a drag is in
+flight, which is what a `<popup dragPreview>` follows. Full reference:
+[drag-and-drop.md](drag-and-drop.md).
+
 ---
 
 The other components — `Button`, `Checkbox`, `Radio`/`RadioGroup`,

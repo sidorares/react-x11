@@ -177,3 +177,9 @@ each saved request is a saved trip across the link:
   worth it.
 - Prefer one long-lived connection to many short ones: connection setup is
   several round trips of its own, plus the font and atom warm-up.
+- **Drags across applications are round-trip heavy**, because finding the
+  foreign window under the pointer means asking the server, per pointer
+  position. Dragging _within_ the app costs nothing extra — it never
+  touches the wire — and a drop target that answers with `e.freeze()` stops
+  the source asking while the pointer stays inside it. See
+  [drag-and-drop.md](drag-and-drop.md).
