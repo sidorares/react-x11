@@ -14,6 +14,11 @@
   `SplitPane`, `Canvas3D`, and the `useAnchor` popup placement hook.
 - [events.md](events.md) — the synthetic event system: dispatch phases,
   event object shape, focus, cursors, default actions.
+- [drag-and-drop.md](drag-and-drop.md) — accepting drops and starting
+  drags, over XDND and in-app: `dropAccept` matching, the payload
+  (`e.files`, `e.getData`, live `e.items`), `dragData` and lazy payloads,
+  the `useDropTarget`/`useDragSource` hooks, drag previews, what GTK and
+  Firefox actually offer, and how to drive a drag in a test.
 - [typescript.md](typescript.md) — the bundled types: one tsconfig option,
   why JSX comes from `react-x11/jsx-runtime` rather than an augmentation,
   and how the declarations are kept from drifting.

@@ -201,6 +201,24 @@ the pointer happened to be over, which is a rule nobody should have to learn.
 'héllo')` binds a spare keycode for `é` on both the server's keymap and the
 client's cache, so a test can type real text without owning a keymap.
 
+**Drags are real too.** Because the pointer events are genuine, a
+drag-and-drop gesture is just three of them — with a real 4px threshold, so
+move before releasing:
+
+```js
+await act(async () => {
+  fireEvent.mouseDown(card);
+  fireEvent.mouseMove(card, { x: 60, y: 50 }); // past the threshold
+  fireEvent.mouseMove(bin);
+  fireEvent.mouseUp(bin);
+});
+```
+
+`onDragStart`, `onDrop` and `onDragEnd` all run, and `e.items` carries the
+payload by reference. A drop from _another application_ needs a second X
+connection playing the foreign source — see
+[drag-and-drop.md](drag-and-drop.md).
+
 ## `act`, and the three clocks
 
 `act(fn)` flushes everything between a state update and a pixel. There are

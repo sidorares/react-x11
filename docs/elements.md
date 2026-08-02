@@ -74,6 +74,12 @@ stay inside it, focus is restored when it unmounts), `disabled` (never
 focusable, and the trigger for a `:disabled` style block), and the event
 handlers listed in [events.md](events.md).
 
+Drag and drop is two more prop families on the same elements —
+`dropAccept` + `onDrop` to accept a drop, `draggable` + `dragData` to start
+a drag — and works with other X11 applications as well as inside the app.
+Their presence is what registers the node, so there is nothing else to
+mount: [drag-and-drop.md](drag-and-drop.md).
+
 ---
 
 ## `<window>`
