@@ -107,6 +107,62 @@ the whole window, which is this renderer's main performance bug class (see
 [debugging.md](debugging.md)). `reason` joins the closed set the diagnostics
 print.
 
+### Drawing once instead of every frame
+
+A drawing that does not change between frames does not have to be redrawn
+between frames. Implement two more methods and your element is rendered once
+and composited on later repaints, sharing one rendered copy with every other
+node that produces the same key:
+
+| method                  |                                                                               |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| `paintCachePlan()`      | `null` to opt out this frame, or `{ key, x, y, width, height, format, tint }` |
+| `paintCached(ctx, box)` | draw, at the **origin of `box`** — not at `this.abs`                          |
+
+```js
+paintCachePlan() {
+  const width = Math.round(this.abs.width);
+  const height = Math.round(this.abs.height);
+  if (width <= 0 || height <= 0) return null;
+  return {
+    key: `sparkline|${width}x${height}|${this.props.seriesId}`,
+    x: Math.round(this.abs.x),
+    y: Math.round(this.abs.y),
+    width,
+    height,
+    format: 'argb32',
+    tint: null,
+  };
+}
+
+paintCached(ctx, box) {
+  this.drawSeries(ctx, box.x, box.y, box.width, box.height);
+}
+```
+
+`format: 'a8'` stores coverage rather than colour and paints through `tint`,
+so one rendered copy serves every colour the drawing is ever asked for — the
+right choice for a monochrome drawing, and it keeps the colour out of the key.
+
+**The key is the entire correctness surface.** It must name every input
+`paintCached` reads, and it should be derived from the same values
+`applyProps` compares so the two cannot drift. A key that misses something
+shows stale pixels, which is the hardest kind of bug to see — so develop with
+`REACT_X11_PAINT_CACHE=verify`, which re-renders every hit and complains
+loudly when the drawing changed while the key did not. Return `null` for
+anything animated, hovered, focused or blinking.
+
+Two footguns worth naming. `paintCached` draws in **surface-local**
+coordinates: reaching for `this.abs.x` inside it is the first thing to check
+when a cached element paints in the wrong place. And the cache is per X
+connection and keyed only on your string, so make the key specific enough
+that two different drawings cannot collide — prefix it with your element
+name, as above.
+
+`globalAlpha`, the clip and any ancestor translation are applied when the
+cached copy is composited, so an ancestor animating opacity is a cache hit
+rather than a reason to opt out.
+
 ### Elements that own a real X window
 
 `drawn: false` is for a node backed by its own child X window rather than

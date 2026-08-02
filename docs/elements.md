@@ -545,6 +545,32 @@ conical, `setLineDash`, round caps/joins, images, text — XRender-backed),
 translated to the node's origin and clipped to its bounds. `onDraw` runs on
 every repaint of the window.
 
+### `cacheKey` — draw it once
+
+A drawing that does not change between frames does not have to be redrawn
+between frames. Give the canvas a `cacheKey` and its content is rendered once
+and composited on later repaints; two canvases with the same key share the one
+rendered copy.
+
+```jsx
+<canvas cacheKey={`spark:${series.id}:${w}x${h}`} onDraw={drawSparkline} />
+```
+
+Opt-in, and the reason matters: `onDraw` is an opaque closure. Nothing in the
+renderer can know what it reads — a prop, a ref, a clock — and its identity
+changes on every render unless you memoize it, so it is not a key either. Only
+you know, so you say.
+
+**The key must name every input the drawing reads.** One that leaves something
+out shows stale pixels, which is the hardest kind of bug to see. Develop with
+`REACT_X11_PAINT_CACHE=verify`, which turns exactly that mistake into a loud
+complaint — see [Runtime diagnostics](debugging.md#the-paint-cache--react_x11_no_paint_cache-react_x11_paint_cacheverify).
+Leave `cacheKey` unset for anything animated, or driven by state outside the
+props.
+
+`<svg>` and `<tex>` do this automatically: their content is fully described by
+their props, so the renderer can build the key itself.
+
 ---
 
 ## `<glarea>`
@@ -800,6 +826,29 @@ on the `<svg>` element itself.
 | children  | declarative SVG elements          |
 | `source`  | SVG markup string                 |
 | `viewBox` | coordinate system (children form) |
+
+**`currentColor` and recolouring.** `fill="currentColor"` and
+`stroke="currentColor"` resolve to the node's `color` style, so one icon
+serves every state the UI puts it in:
+
+```jsx
+<svg
+  source={icons.gauge}
+  style={{
+    width: 20,
+    height: 20,
+    color: '$fg',
+    ':hover': { color: '$accent' },
+  }}
+/>
+```
+
+A drawing whose paint is entirely `currentColor` — or entirely one colour — is
+cached as coverage rather than as pixels, so recolouring it is a composite and
+not a re-render, and every colour of it shares one rendered copy. Drawings with
+two colours or a gradient bake their colours in, which is right: those colours
+belong to the drawing rather than to the UI. Nothing to configure either way.
+`REACT_X11_DEBUG_PAINT_CACHE=1` shows what is being kept.
 
 ### `<tex>`
 

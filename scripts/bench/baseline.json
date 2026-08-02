@@ -48,19 +48,19 @@
     "compositePixels": 650000
   },
   "svg: 100 unchanged icons, full repaint": {
-    "requests": 1082,
-    "bytesOut": 198808,
+    "requests": 106,
+    "bytesOut": 3704,
     "bytesIn": 128,
     "replies": 4,
-    "composites": 501,
-    "compositePixels": 199475
+    "composites": 101,
+    "compositePixels": 200000
   },
   "svg: 10 unchanged icons in a damaged row": {
-    "requests": 183,
-    "bytesOut": 12076,
+    "requests": 42,
+    "bytesOut": 980,
     "bytesIn": 128,
     "replies": 4,
-    "composites": 115,
-    "compositePixels": 17584
+    "composites": 11,
+    "compositePixels": 10292
   }
 }

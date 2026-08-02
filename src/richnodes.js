@@ -6,7 +6,12 @@
 import { MarkdownView, HtmlView, SvgView, layoutTex } from 'ntk';
 
 import { Node } from './nodes.js';
-import { Yoga, isLayoutProp, isPaintProp } from './styles.js';
+import {
+  Yoga,
+  isLayoutProp,
+  isPaintProp,
+  DEFAULT_TEXT_STYLE,
+} from './styles.js';
 
 /** Joined text of string children (react-markdown style), or null when the
  * element has none — then the `source` prop is the content. */
@@ -302,6 +307,7 @@ export class SvgNode extends Node {
     if (!this._stale) return this.view;
     this._stale = false;
     this.view = null;
+    this._docKey = null;
     try {
       const children = this.children.filter(
         (c) => c.isSvgChild || c.kind === 'textchunk',
@@ -314,16 +320,26 @@ export class SvgNode extends Node {
           key === 'cursor' ||
           key === 'focusable' ||
           key === 'pointerEvents';
-        this.view = new SvgView(null).setSvgDom({
+        const dom = {
           type: 'tag',
           name: 'svg',
           attribs: svgAttribs(this.props, skip),
           children: children.map((c) =>
             c.kind === 'textchunk' ? { type: 'text', data: c.text } : c.toDom(),
           ),
-        });
+        };
+        // The document's identity, for the paint cache. Built here rather
+        // than at paint time on purpose: this runs once per content change,
+        // where paint runs every frame — and it is the serialization that
+        // makes two cells holding the same drawing one cache entry instead
+        // of two. Key order follows prop order, so two logically identical
+        // documents written differently miss rather than collide, which is
+        // the harmless direction.
+        this._docKey = JSON.stringify(dom);
+        this.view = new SvgView(null).setSvgDom(dom);
       } else if (this.props.source) {
-        this.view = new SvgView(null).setSvg(String(this.props.source));
+        this._docKey = String(this.props.source);
+        this.view = new SvgView(null).setSvg(this._docKey);
       }
     } catch (err) {
       console.error('react-x11: <svg> failed to parse:', err.message);
@@ -367,7 +383,76 @@ export class SvgNode extends Node {
     if (!view) return;
     const content = this.contentBox();
     if (content.width <= 0 || content.height <= 0) return;
-    view.draw(ctx, content.x, content.y, content.width, content.height);
+    view.draw(ctx, content.x, content.y, content.width, content.height, {
+      color: this._currentColor(),
+    });
+  }
+
+  /** What `fill="currentColor"` resolves to here. */
+  _currentColor() {
+    return this.style.color ?? DEFAULT_TEXT_STYLE.color;
+  }
+
+  /**
+   * Cache plan (see `Node._paintContent` for the protocol).
+   *
+   * The key is the document, the size it is drawn at, and the device scale.
+   * Everything else that could change the pixels is either handled at blit
+   * time or deliberately excluded:
+   *
+   *  - `globalAlpha`, the clip and any ancestor translation are applied by
+   *    `drawImage`, so an ancestor animating opacity is a cache *hit*;
+   *  - colour is out of the key for a `mono` document, because the entry is
+   *    coverage and the colour arrives at blit time — one entry then serves
+   *    hover, `:disabled` and every theme;
+   *  - a `multi` document bakes its colours, so the resolved colour joins the
+   *    key. It rarely varies, so the extra component costs nothing.
+   *
+   * Sizes are rounded so the blit is unscaled: a scaled `drawImage` brackets
+   * every composite with SetPictureTransform and a filter change, which for
+   * a wall of icons is four extra requests each. The cost is that a cached
+   * drawing sits on the pixel grid where a live one could straddle it, which
+   * for icon-sized content is not visible.
+   */
+  paintCachePlan() {
+    const view = this._ensureView();
+    if (!view || !this._docKey) return null;
+    const content = this.contentBox();
+    const width = Math.round(content.width);
+    const height = Math.round(content.height);
+    if (width <= 0 || height <= 0) return null;
+
+    const mono = view.paintKind === 'mono';
+    // a mono document paints in exactly one colour: its own, or ours
+    const tint = !mono
+      ? null
+      : view.soloPaint === 'currentColor'
+        ? this._currentColor()
+        : view.soloPaint;
+    if (mono && !tint) return null; // nothing in the document paints at all
+
+    const size = `${width}x${height}@1`;
+    return {
+      key: mono
+        ? `svg|${size}|${this._docKey}`
+        : `svg|${size}|${this._currentColor()}|${this._docKey}`,
+      x: Math.round(content.x),
+      y: Math.round(content.y),
+      width,
+      height,
+      format: mono ? 'a8' : 'argb32',
+      tint,
+    };
+  }
+
+  paintCached(ctx, box) {
+    const view = this._ensureView();
+    if (!view) return;
+    // Into a coverage surface, only the alpha of a paint survives, and the
+    // tint arrives at blit time — so any opaque colour renders the same mask.
+    view.draw(ctx, box.x, box.y, box.width, box.height, {
+      color: view.paintKind === 'mono' ? '#ffffff' : this._currentColor(),
+    });
   }
 }
 
@@ -438,5 +523,44 @@ export class TexNode extends Node {
     const content = this.contentBox();
     ctx.fillStyle = this.style.color ?? '#222222';
     box.draw(ctx, content.x, content.y);
+  }
+
+  /**
+   * A formula is the other thing in the tree that is expensive to draw and
+   * never changes on its own, and `_boxKey` already says what it is made of.
+   *
+   * Note what content-keying adds over that memo: `_boxKey` caches the
+   * *layout* per node, so a document showing the same formula twice lays it
+   * out twice and rasterizes it twice on every frame. One cache entry serves
+   * both.
+   *
+   * The colour is in the key rather than tinted, because a TexBox draws
+   * through glyph and trapezoid composites whose colour is the context's
+   * fill at draw time; rendering it as coverage would need the box to promise
+   * it never sets a colour of its own, which it does not.
+   */
+  paintCachePlan() {
+    const box = this._ensureBox();
+    if (!box || !this._boxKey) return null;
+    const content = this.contentBox();
+    const width = Math.ceil(content.width);
+    const height = Math.ceil(content.height);
+    if (width <= 0 || height <= 0) return null;
+    return {
+      key: `tex|${width}x${height}@1|${this.style.color ?? ''}|${this._boxKey}`,
+      x: Math.round(content.x),
+      y: Math.round(content.y),
+      width,
+      height,
+      format: 'argb32',
+      tint: null,
+    };
+  }
+
+  paintCached(ctx, box) {
+    const laid = this._ensureBox();
+    if (!laid || !ctx.window?.app?.display) return;
+    ctx.fillStyle = this.style.color ?? '#222222';
+    laid.draw(ctx, box.x, box.y);
   }
 }
