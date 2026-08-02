@@ -19,6 +19,10 @@
   (`e.files`, `e.getData`, live `e.items`), `dragData` and lazy payloads,
   the `useDropTarget`/`useDragSource` hooks, drag previews, what GTK and
   Firefox actually offer, and how to drive a drag in a test.
+- [clipboard.md](clipboard.md) — copy and paste beyond the built-in text
+  controls: `useClipboard()`, the CLIPBOARD/PRIMARY split, offering several
+  flavours of one payload, the `text`/`files`/`uris` groups shared with drag
+  and drop, `watch()`, and why a copy carries a timestamp.
 - [typescript.md](typescript.md) — the bundled types: one tsconfig option,
   why JSX comes from `react-x11/jsx-runtime` rather than an augmentation,
   and how the declarations are kept from drifting.

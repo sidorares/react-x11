@@ -1,7 +1,8 @@
 export { createRoot, Renderer } from './Reconciler.js';
 export { createStyles, flattenStyle } from './styles.js';
 export { windowIdOf, useWindowId } from './windowid.js';
-export { parseUriList } from './dnd.js';
+export { parseUriList } from './transfer.js';
+export { useApp, useClipboard } from './appcontext.js';
 export {
   useDropTarget,
   useDragSource,

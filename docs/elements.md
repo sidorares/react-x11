@@ -470,7 +470,8 @@ Ctrl+C/X/V on CLIPBOARD, middle-click paste from PRIMARY, selections own
 PRIMARY (X11 conventions), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
 and redo, and a **right-click menu**. Focusable by default; shows the text
 cursor. `ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses
-the built-in editing behavior.
+the built-in editing behavior. To copy or paste from anywhere else — a
+canvas, a list, your own menu item — see [clipboard.md](clipboard.md).
 
 ### The right-click menu
 

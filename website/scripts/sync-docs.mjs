@@ -180,6 +180,7 @@ const ORDER = [
   'components.md',
   'events.md',
   'drag-and-drop.md',
+  'clipboard.md',
   'typescript.md',
   'extending.md',
   'testing.md',
