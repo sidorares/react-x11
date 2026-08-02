@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
-import ReactX11 from '../src/index.js';
+import { createRoot } from '../src/index.js';
 
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
@@ -43,10 +43,12 @@ const settle = (app) =>
 
 /** Mount a tree and return the root node plus a frame pump. */
 async function mount(app, element) {
+  const x11Root = await createRoot({ app });
   const instance = await new Promise((resolve) =>
-    ReactX11.render(element, resolve, app),
+    x11Root.render(element, resolve),
   );
   const root = instance._reactX11Node;
+  root._x11Root = x11Root; // so a test can re-render into the same root
   const frame = () => {
     root._scheduled = false;
     root.flush();
@@ -166,7 +168,7 @@ test('a different document is a different entry, not a stale one', async () => {
   assert.equal(cache.entries.size, 1);
 
   await new Promise((resolve) =>
-    ReactX11.render(wall(SQUARE('#0000ff'), 4), resolve, app),
+    ctl.root._x11Root.render(wall(SQUARE('#0000ff'), 4), resolve),
   );
   ctl.frame();
   await settle(app);
@@ -209,7 +211,7 @@ test('a monochrome drawing recolours without re-rendering', async () => {
   assert.ok(near(px(8, 8), [255, 0, 0]), `red first: got ${px(8, 8)}`);
 
   await new Promise((resolve) =>
-    ReactX11.render(coloured('#0000ff'), resolve, app),
+    ctl.root._x11Root.render(coloured('#0000ff'), resolve),
   );
   ctl.frame();
   await settle(app);
@@ -433,7 +435,7 @@ test('<canvas cacheKey> is opt-in, and caches when opted in', async () => {
   assert.equal(draws, 4);
 
   await new Promise((resolve) =>
-    ReactX11.render(cells({ cacheKey: 'green:16x16' }), resolve, app),
+    ctl.root._x11Root.render(cells({ cacheKey: 'green:16x16' }), resolve),
   );
   ctl.frame();
   await settle(app);
@@ -474,4 +476,88 @@ test('the same formula twice is one <tex> entry', async () => {
   await repaint(app, ctl);
   assert.equal(cache.stats.renders, renders, 'and a repaint re-renders none');
   await app.close();
+});
+
+// --- a third-party element opts in ------------------------------------------
+//
+// The protocol lives on Node and the registry takes a Node subclass, so the
+// two compose with no registry API of their own. This is the proof, and the
+// reason `paintCachePlan` is worth having on the base class rather than
+// hidden inside <svg>.
+
+test('a registered element can opt into the cache', async () => {
+  const { registerElement, unregisterElement } = await import('../src/host.js');
+  const { Node } = await import('../src/nodes.js');
+
+  let paints = 0;
+  class SwatchNode extends Node {
+    constructor(props, app) {
+      super('swatch', props, app);
+    }
+    paintCachePlan() {
+      const w = Math.round(this.abs.width);
+      const h = Math.round(this.abs.height);
+      if (w <= 0 || h <= 0) return null;
+      return {
+        key: `swatch|${w}x${h}|${this.props.tone}`,
+        x: Math.round(this.abs.x),
+        y: Math.round(this.abs.y),
+        width: w,
+        height: h,
+        format: 'argb32',
+        tint: null,
+      };
+    }
+    paintCached(ctx, box) {
+      paints++;
+      ctx.fillStyle = this.props.tone;
+      ctx.fillRect(box.x, box.y, box.width, box.height);
+    }
+  }
+
+  registerElement('swatch', {
+    create: (props, app) => new SwatchNode(props, app),
+    semanticNames: ['tone'],
+    override: true,
+  });
+
+  const app = await headlessApp();
+  try {
+    const ctl = await mount(
+      app,
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+        ...Array.from({ length: 4 }, (_, i) =>
+          React.createElement('swatch', {
+            key: i,
+            tone: '#00aa00',
+            style: {
+              position: 'absolute',
+              left: i * 20,
+              top: 0,
+              width: 16,
+              height: 16,
+            },
+          }),
+        ),
+      ),
+    );
+
+    const cache = ctl.root._paintCache;
+    assert.equal(cache.entries.size, 1, 'four swatches, one rendered copy');
+    const before = paints;
+    await repaint(app, ctl);
+    assert.equal(
+      paints,
+      before,
+      'a cached repaint calls paintCached not at all',
+    );
+
+    const px = await pixels(app, ctl.root);
+    assert.ok(near(px(8, 8), [0, 170, 0]), `and it painted: got ${px(8, 8)}`);
+  } finally {
+    unregisterElement('swatch');
+    await app.close();
+  }
 });
