@@ -215,6 +215,52 @@ function iconWall(count, size = 20) {
   );
 }
 
+/** The mount scenario's tree: `count` striped rows with a label each. */
+function rowsWindow(count) {
+  return React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    React.createElement(
+      'box',
+      { style: { flexGrow: 1, padding: 8, gap: 2 } },
+      Array.from({ length: count }, (_, i) =>
+        React.createElement(
+          'box',
+          {
+            key: i,
+            style: {
+              flexDirection: 'row',
+              gap: 6,
+              padding: 2,
+              backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+            },
+          },
+          React.createElement('text', { style: { fontSize: 11 } }, `row ${i}`),
+        ),
+      ),
+    ),
+  );
+}
+
+/** One absolutely-positioned box on a plain background — the smallest tree
+ * where "what changed" and "what repainted" can drift apart. */
+function absBoxWindow(left, color) {
+  return React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    React.createElement('box', {
+      style: {
+        position: 'absolute',
+        left,
+        top: 40,
+        width: 60,
+        height: 40,
+        backgroundColor: color,
+      },
+    }),
+  );
+}
+
 /** Mount a tree, settle it, and hand back the root node plus a frame pump.
  * The mount is what `prepare` pays for, so `run` measures only repaints. */
 async function mounted(x11Root, element) {
@@ -298,36 +344,7 @@ const SCENARIOS = [
     'mount: window with 40 boxes and labels',
     async (app, x11Root) => {
       await new Promise((resolve) =>
-        x11Root.render(
-          React.createElement(
-            'window',
-            { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
-            React.createElement(
-              'box',
-              { style: { flexGrow: 1, padding: 8, gap: 2 } },
-              Array.from({ length: 40 }, (_, i) =>
-                React.createElement(
-                  'box',
-                  {
-                    key: i,
-                    style: {
-                      flexDirection: 'row',
-                      gap: 6,
-                      padding: 2,
-                      backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
-                    },
-                  },
-                  React.createElement(
-                    'text',
-                    { style: { fontSize: 11 } },
-                    `row ${i}`,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          resolve,
-        ),
+        x11Root.render(rowsWindow(40), resolve),
       );
       await new Promise((r) => setImmediate(r));
     },
@@ -445,6 +462,95 @@ const SCENARIOS = [
           }
           ctl.frame();
           await settle(app);
+        },
+      };
+    })(),
+  ],
+  [
+    // A drag under an opaque-move WM (Compiz, KWin, Mutter) is a stream of
+    // ConfigureNotify events that change only x/y. The window's own
+    // coordinate space is untouched, so the right cost is zero pixels —
+    // before the guard in WindowNode's 'resize' listener each step was a
+    // full relayout plus a FULL WINDOW repaint. compositePixels is the
+    // alarm here: it must stay 0.
+    'window: 10 pure moves',
+    (() => {
+      let ctl;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, rowsWindow(40));
+          // pace frames on the fence alone — deterministic under test, no
+          // 16ms wall-clock timer between the event and any (wrong) repaint
+          ctl.root.window.frameInterval = 0;
+        },
+        run: async (app) => {
+          for (let i = 0; i < 10; i++) {
+            app.X.ConfigureWindow(ctl.root.window.id, {
+              x: 20 + i * 7,
+              y: 30 + (i % 3) * 11,
+            });
+            // one round trip delivers the ConfigureNotify; two immediates
+            // let the paced frame run whatever it (wrongly) scheduled
+            await new Promise((resolve) => app.X.GetInputFocus(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+            await new Promise((resolve) => setImmediate(resolve));
+          }
+          ctl.frame();
+          await settle(app);
+        },
+      };
+    })(),
+  ],
+  [
+    // A paint-only change: the box flips color in place. The damage tracker
+    // bounds this to the box, so compositePixels stays near the box's own
+    // area — this is the partial-repaint contract the Damage panel of
+    // examples/stress demonstrates, pinned as a number.
+    'update: 5 color flips, no layout',
+    (() => {
+      let ctl;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, absBoxWindow(40, '#3498db'));
+        },
+        run: async (app, x11Root) => {
+          for (let i = 0; i < 5; i++) {
+            await new Promise((resolve) =>
+              x11Root.render(
+                absBoxWindow(40, i % 2 ? '#3498db' : '#e74c3c'),
+                resolve,
+              ),
+            );
+            ctl.frame();
+            await settle(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
+    // The same box moving instead: `left` changes, layout runs, and today
+    // any layout pass degrades the frame to FULL damage — the whole window
+    // per step instead of two box-sized rects (the old and new positions).
+    // Baselined as-is on purpose: this documents the known cost of
+    // unbounded layout damage, and the number here should DROP by an order
+    // of magnitude when bounded layout damage lands (--check only fails on
+    // increases, so an improvement sails through and can be re-saved).
+    'update: 5 absolute box moves (layout)',
+    (() => {
+      let ctl;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, absBoxWindow(40, '#3498db'));
+        },
+        run: async (app, x11Root) => {
+          for (let i = 0; i < 5; i++) {
+            await new Promise((resolve) =>
+              x11Root.render(absBoxWindow(40 + (i + 1) * 30, '#3498db'), resolve),
+            );
+            ctl.frame();
+            await settle(app);
+          }
         },
       };
     })(),

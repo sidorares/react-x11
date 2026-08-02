@@ -4001,8 +4001,13 @@ export class WindowNode extends Node {
     const wnd = this.window;
     if (typeof wnd.on !== 'function') return;
     wnd.on('resize', (ev) => {
-      this.needsLayout = true;
-      this.invalidate(true, null, 'resize');
+      // ConfigureNotify also fires for pure moves and reparents; only a real
+      // size change dirties layout or pixels (ntk guards its backing store
+      // the same way)
+      if (ev.width !== this.abs.width || ev.height !== this.abs.height) {
+        this.needsLayout = true;
+        this.invalidate(true, null, 'resize');
+      }
       // a move or a reparent arrives the same way, and either changes where
       // popups anchored to this window belong
       this._refreshScreenOrigin();
@@ -4210,11 +4215,14 @@ export class WindowNode extends Node {
       pendingRestack.add(this.parent);
     }
     this._applyWindowHints(newProps, before);
+    // Position and size part ways below: both are sent to the server, but
+    // only a size change re-lays-out — the window's own coordinate space is
+    // untouched by where the window sits on screen, so a pointer-tracking
+    // popup does not repaint itself per motion.
+    const sizeChanged =
+      newProps.width !== before.width || newProps.height !== before.height;
     const geometryChanged =
-      newProps.width !== before.width ||
-      newProps.height !== before.height ||
-      newProps.x !== before.x ||
-      newProps.y !== before.y;
+      sizeChanged || newProps.x !== before.x || newProps.y !== before.y;
     if (geometryChanged) {
       if (typeof wnd.setState === 'function') {
         wnd.setState({
@@ -4244,9 +4252,14 @@ export class WindowNode extends Node {
     // (React updates the parent whenever its child list is rebuilt), and
     // that must not widen the damage those children just recorded.
     const ownPaintChanged = paintPropsChanged(style, beforeStyle);
+    // A size change is unbounded — the window's old bounds do not cover the
+    // grown area. A style-driven relayout at the same size is bounded by the
+    // window itself (its paint covers all of it; NO_DAMAGE alongside a
+    // layout change would fall through invalidate's bounds bookkeeping with
+    // no rect at all). An x/y-only commit contributes nothing.
     this.invalidate(
-      layoutChanged || geometryChanged,
-      ownPaintChanged ? this : NO_DAMAGE,
+      layoutChanged || sizeChanged,
+      sizeChanged ? null : ownPaintChanged || layoutChanged ? this : NO_DAMAGE,
       'props',
     );
   }
