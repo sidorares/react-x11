@@ -38,6 +38,8 @@ const MENU_MIN_WIDTH = 140;
 const MENU_PAD = 4;
 
 const MENU_GUTTER = 24; // room for the check column
+// what a self-drawing icon gets to fill, inside that column's 16px
+const MENU_ICON_SIZE = 12;
 
 const MENU_SHORTCUT_GAP = 24;
 // menus size to their content rather than scrolling, so a page is a fixed
@@ -87,6 +89,37 @@ function nextSelectable(items, from, dir) {
   return -1;
 }
 
+/**
+ * What goes in the column to the left of the label: a check mark, or the
+ * item's `icon`.
+ *
+ * One column for both, because that is the choice every desktop toolkit
+ * makes and the reason is layout rather than taste — a second column would
+ * indent every label in the menu to reserve room for icons that most items
+ * do not have. An item that is both checked and iconned shows the check,
+ * since the check is state and the icon is only identity.
+ *
+ * Three forms, and the third is the one to reach for. A **string** is drawn
+ * as text, which is a one-liner but only as good as the font: `✂` and `⏻`
+ * are tofu in Arial, and a menu of empty boxes is worse than a menu with no
+ * icons at all. An **element** renders as-is. A **function** is called with
+ * the colour the row's label is being drawn in and the size the gutter
+ * allows — which is what a `<canvas onDraw>` icon needs, since it has to
+ * pick a stroke colour and nothing else can tell it whether its row is
+ * highlighted, disabled or at rest.
+ */
+function gutterMark(item, { color, fontSize }) {
+  if (item.checked) return h('text', { style: { color, fontSize } }, '✓');
+  const { icon } = item;
+  if (icon == null) return null;
+  if (typeof icon === 'string' || typeof icon === 'number') {
+    return h('text', { style: { color, fontSize } }, String(icon));
+  }
+  return typeof icon === 'function'
+    ? icon({ color, size: MENU_ICON_SIZE })
+    : icon;
+}
+
 function MenuRow({
   item,
   active,
@@ -124,19 +157,22 @@ function MenuRow({
         paddingRight: 8,
         cursor: dim ? undefined : 'pointer',
         backgroundColor: active ? theme.hoverBackground : theme.background,
+        // the item is already highlighted by the time it can be pressed, so
+        // the press is a further step down rather than a first one — without
+        // it the command runs on the release out of a picture that never
+        // changed
+        ...(dim
+          ? null
+          : { ':active': { backgroundColor: theme.accentActive } }),
       },
     },
     h(
       'box',
       { style: { width: MENU_GUTTER - 8, alignItems: 'center' } },
-      item.checked &&
-        h('text', {
-          children: '\u2713',
-          style: {
-            color: active ? theme.hoverText : theme.text,
-            fontSize: fontSize,
-          },
-        }),
+      gutterMark(item, {
+        color: dim ? theme.dim : active ? theme.hoverText : theme.text,
+        fontSize,
+      }),
     ),
     h(
       'text',
@@ -204,6 +240,7 @@ function MenuLevel({
   const childOpen = path.length > depth + 1 && childItems?.length > 0;
 
   const activeRowRef = useRef(null);
+  const listRef = useRef(null);
   const [childRect, setChildRect] = useState(null);
 
   useEffect(() => {
@@ -217,8 +254,13 @@ function MenuLevel({
     // anyway rather than anchoring off a zero rect
     if (!node?.abs?.width) return;
     setChildRect(
-      anchorRect(node, {
+      anchorRect(listRef.current ?? node, {
         placement: 'right',
+        // The edge comes from the list box, which fills the popup, and the
+        // alignment from the row. Anchoring both to the row put the submenu
+        // a border and a padding *inside* its parent's right edge, so the
+        // two menus overlapped by five pixels.
+        alignTo: node,
         align: 'start',
         offset: 0,
         width: menuListWidth(node, childItems, fontSize),
@@ -310,6 +352,7 @@ function MenuLevel({
     h(
       'box',
       {
+        ref: listRef,
         style: {
           flexGrow: 1,
           flexShrink: 1,
@@ -479,7 +522,10 @@ export function ContextMenu({
       height,
     });
     setPath([-1]);
-    node.root?.events?.focus?.(node);
+    // `'pointer'`, so no ring: this only ever opens from a right-click, and
+    // the wrapper is the whole content area — a focus ring around all of it
+    // says nothing a keyboard user needs and quite a lot nobody wants.
+    node.root?.events?.focus?.(node, 'pointer');
   };
 
   return h(
@@ -547,15 +593,31 @@ export function MenuBar({
   const refs = useRef([]);
   const typeAhead = useTypeAhead();
 
+  // Which menu is open, readable from a handler that is running *inside*
+  // the call that changed it. Switching menus focuses the item taking over,
+  // which blurs the one handing off, and that blur handler would otherwise
+  // see the `openIndex` of the render it was created in — still itself —
+  // and close the menu the switch had just opened.
+  const openRef = useRef(-1);
+
   const items = openIndex >= 0 ? (menus[openIndex]?.items ?? []) : [];
 
   const close = () => {
+    openRef.current = -1;
     setOpenIndex(-1);
     setRect(null);
     setPath([]);
   };
 
-  const openMenu = (index) => {
+  /**
+   * `reason` is the gesture that opened the menu, and it decides the ring.
+   * A menu opened with the pointer already tells you where you are — the
+   * menu itself is hanging off the item — so a ring on top of that is the
+   * noise `:focus-visible` exists to remove. Walking the bar with the arrow
+   * keys is the opposite case: the ring is the only thing saying which item
+   * the keyboard is on.
+   */
+  const openMenu = (index, reason = 'key') => {
     const node = refs.current[index];
     const menu = menus[index];
     if (!node || !menu?.items?.length) return;
@@ -563,9 +625,23 @@ export function MenuBar({
     const height = menuListHeight(menu.items);
     const next = anchorRect(node, { placement: 'bottom', width, height });
     if (!next) return;
+    openRef.current = index;
     setRect(next);
     setOpenIndex(index);
     setPath([-1]);
+    // Take focus **deliberately**, the way `ContextMenu` does, and for the
+    // same reason: the popup is override-redirect and never gets the X
+    // focus, so something in the owner window has to hold it or keys go
+    // nowhere the menu can hear them.
+    //
+    // Both ways out of an open menu hang off this one thread. Escape is a
+    // key, so it arrives at the focused node; clicking away closes through
+    // `onBlur`, which only fires on a node that was focused to begin with.
+    // Leaving that to whatever the press happened to focus made both
+    // depend on the gesture that opened the menu — and a menu you cannot
+    // dismiss is worse than one that never opened, because it is holding a
+    // pointer grab while you try.
+    node.root?.events?.focus?.(node, reason);
   };
 
   const select = (item) => {
@@ -603,15 +679,33 @@ export function MenuBar({
             refs.current[index] = node;
           },
           focusable: true,
-          onClick: () => (openIndex === index ? close() : openMenu(index)),
+          // on the press, as `Select` opens: a pull-down that waits for the
+          // button to come back up spends the whole of a held click saying
+          // nothing, and a menu is there to be read
+          onMouseDown: () =>
+            openIndex === index ? close() : openMenu(index, 'pointer'),
           onMouseEnter: () => {
-            if (openIndex >= 0 && openIndex !== index) openMenu(index);
+            if (openIndex >= 0 && openIndex !== index) {
+              openMenu(index, 'pointer');
+            }
           },
+          // read live: by the time a hand-off blurs this item, the item
+          // taking over has already claimed the bar
           onBlur: () => {
-            if (openIndex === index) close();
+            if (openRef.current === index) close();
           },
           onKeyDown: (ev) => {
             if (openIndex !== index) {
+              // Escape shuts an open menu from any item on the bar, not
+              // only the one it belongs to. A menu holds a pointer grab, so
+              // the key that gets rid of it is the one thing that must not
+              // depend on which node the keystroke happened to reach. The
+              // item that *owns* the menu falls through to `handleMenuKey`
+              // instead, where Escape leaves one submenu level at a time.
+              if (ev.keysym === XK_ESCAPE && openIndex >= 0) {
+                close();
+                return;
+              }
               if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
                 openMenu(index);
               } else if (ev.keysym === XK_LEFT) moveMenu(-1);
@@ -633,15 +727,36 @@ export function MenuBar({
             if (ev.keysym === XK_LEFT) moveMenu(-1);
             else if (ev.keysym === XK_RIGHT) moveMenu(1);
           },
-          style: {
-            cursor: 'pointer',
-            paddingLeft: 10,
-            paddingRight: 10,
-            paddingTop: 6,
-            paddingBottom: 6,
-            backgroundColor:
-              openIndex === index ? theme.hoverBackground : undefined,
-          },
+          style: [
+            {
+              cursor: 'pointer',
+              paddingLeft: 10,
+              paddingRight: 10,
+              paddingTop: 6,
+              paddingBottom: 6,
+              backgroundColor:
+                openIndex === index ? theme.hoverBackground : undefined,
+              // No ring while this item's menu is up. Walking the bar with
+              // the arrow keys opens each menu as it arrives, so the item is
+              // already inverted with a menu hanging off it — a ring on top
+              // of that is saying a third time what two things already say,
+              // and it is the least specific of the three.
+              //
+              // Only while it is up, though: an item that has been tabbed to
+              // and *not* opened has nothing else to show for it, and a
+              // keyboard user who cannot see where they are is exactly the
+              // reader the ring exists for.
+              outlineWidth: openIndex === index ? 0 : undefined,
+            },
+            // Only while this menu is shut, as in `Select`: an open one is
+            // already showing the answer, and a state block would outrank
+            // the base colour that says so. The menu opens on the release,
+            // so `:active` is the whole of the answer to a held press.
+            openIndex !== index && {
+              ':hover': { backgroundColor: theme.background },
+              ':active': { backgroundColor: theme.surfaceActive },
+            },
+          ],
         },
         h(
           'text',

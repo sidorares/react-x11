@@ -79,6 +79,91 @@ no override-redirect staging (issue #4).
   Pages). It **renders `docs/`, it does not restate it** — see "The
   documentation site" below before writing anything there.
 
+## Pre-release: there is nothing to be compatible with
+
+The package is published, but nothing has been announced or marketed and
+there are no users. So **backwards compatibility is not a consideration.**
+When a better name, a better shape or a better default needs a breaking
+change, propose the breaking change — don't design around the old one, don't
+add an alias, don't keep a deprecated path working beside the new one. A
+compatibility shim added now is a shim that will still be there when the API
+does have users, and it will have shaped everything built on top of it in
+between.
+
+What this does _not_ excuse: the change still has to be the better design and
+still has to land completely — every call site, the `.d.ts`, the type test,
+`docs/`, the examples and the website demos in the same PR (see "The
+documentation site"). A rename that leaves half the tree on the old name is
+worse than either name. The release automation carries the rest: the commit
+type is what release-please reads, so a breaking change says so in the
+footer (`BREAKING CHANGE:`) and gets the version bump on its own.
+
+When the reason for a change is only "this is what it has always been
+called", that is not a reason yet.
+
+## Answer the input, not the outcome
+
+Perceived latency is the metric, and it is measured from the input, not from
+the work (see also "Protocol efficiency" below, which is about the cost of
+the work itself — a different axis). **Every input gets a visible answer on
+the event that started it**, even when the event that _does_ something is a
+later one.
+
+The failure mode this exists for: a `<Switch>` toggles on the mouse button
+**release**, because that is when a click is. Perception starts at the
+**press**. Hold the button half a second — which an unhurried user does
+without noticing — and that is half a second of a control that has visibly
+not heard you, followed by a state change that now reads as the machine
+being slow. Nothing about the code is slow. The control simply said nothing
+for the part of the gesture the user was watching.
+
+So a control has a presentation for **every state the pointer can put it
+in**, and they are all distinct: resting, hovered, held, and back to hovered
+on release. The press state is drawn on the press _even when the press
+itself does nothing_ — it is not a promise that something happened, it is
+an acknowledgement that the input arrived, and the release is still what
+acts. Same for the keyboard, and same for anything with a latency behind it:
+show the answer to the input first, and let the outcome catch up.
+
+Concretely, in this codebase:
+
+- `:active` is the press state and the renderer maintains it over the whole
+  **press chain** — the node hit and its ancestors, the same rule `:hover`
+  follows — because the node actually under the pointer is whatever the
+  control is built out of, a label or a thumb, not the control. It narrows
+  as the pointer leaves the chain and grows back as it returns, so it always
+  means "releasing now activates this", which is the same
+  nearest-common-ancestor rule the click is synthesized on (`src/events.js`,
+  `_setPressed`).
+- Prefer a **state block** to React state: `:hover`/`:active` are a repaint
+  of one node, where React state re-renders the widget and its label. Reach
+  for `useControl`'s `pressed` only when the part that has to change is not
+  on the press chain — a `<Checkbox>`'s well is a sibling of the label the
+  press lands on, and no state block can cross that.
+- A palette has a pressed step for every family that has a hover
+  (`accentActive`, `surfaceActive`, `dimActive`). A theme that names only
+  the hover gets one derived from it — `stepBeyond` takes the step the
+  palette already made and takes it again, so it darkens a light theme and
+  lightens a dark one.
+- A `transition` on the pressed property is fine and often better: what
+  matters is that the change _starts_ on the press frame, not that it
+  finishes there.
+- Where the honest answer to a press is more than a tint, **move the action
+  to the press**. `Select` opens its menu on the mousedown: a dropdown is
+  there to be looked at, so holding the button and seeing nothing wastes
+  exactly the time the user was waiting. Safe because the open popup's
+  pointer grab takes the next press itself, so dismiss and toggle never
+  both run. The rest stay on the release, because that is what a click is
+  and because a press you can still change your mind about is worth having.
+
+Known gap, so it is not rediscovered as a bug: **the keyboard has no press
+state.** Space and Enter fire on the down, so the activation is immediate,
+but nothing draws held-ness — X sends KeyRelease/KeyPress pairs for
+auto-repeat and neither ntk nor node-x11 implements XKB's
+`DetectableAutoRepeat`, so a held key is indistinguishable from a fast
+series of taps and `:active` would strobe at the repeat rate. It needs the
+XKB extension upstream first.
+
 ## Commands
 
 - `npm test` — node:test. **Headless: no X server needed.** Primary feedback

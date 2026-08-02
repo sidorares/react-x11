@@ -9,8 +9,15 @@ const h = React.createElement;
 
 /**
  * <Button onPress primary disabled …boxProps>label</Button> — the standard
- * push button the examples kept re-implementing: hover/focus feedback,
+ * push button the examples kept re-implementing: hover/press/focus feedback,
  * Space/Enter activation, pointer cursor.
+ *
+ * `onPress` fires on the **release**, as a click does everywhere — so the
+ * button darkens on the press instead, and keeps the darker fill for as long
+ * as the button is held. Without that the whole of a slow click is a control
+ * that has not answered: press, nothing, nothing, and then the action. The
+ * press state is what makes an unhurried click feel immediate, and it costs
+ * one node's repaint because it is a style block rather than React state.
  */
 export function Button({
   children,
@@ -22,16 +29,14 @@ export function Button({
   ...boxProps
 }) {
   const theme = useTheme();
-  const { hover, props, style: controlStyle } = useControl(disabled, onPress);
+  const { props, style: controlStyle } = useControl(disabled, onPress, {
+    styled: true,
+  });
   const background = disabled
     ? theme.surfaceHover
     : primary
-      ? hover
-        ? theme.accentHover
-        : theme.accent
-      : hover
-        ? theme.surfaceHover
-        : theme.background;
+      ? theme.accent
+      : theme.background;
   const color = disabled ? theme.dim : primary ? theme.accentText : theme.text;
   return h(
     'box',
@@ -60,14 +65,24 @@ export function Button({
               : theme.border,
           backgroundColor: background,
         },
-        // The border used to be tinted off React state, which lit it for a
-        // press as well — and re-rendered the button and its label to do it.
-        // As a state block it is a repaint of one node, and `:focus-visible`
-        // is the difference between "you clicked here" and "your keyboard is
-        // here", which is the only one of the two worth drawing.
+        // All three as state blocks: a repaint of one node each, where React
+        // state re-rendered the button and its label to change a colour.
+        // `:focus-visible` rather than `:focus` is the difference between
+        // "you clicked here" and "your keyboard is here", and only the
+        // second is worth a ring.
         !disabled && {
+          ':hover': {
+            backgroundColor: primary ? theme.accentHover : theme.surfaceHover,
+            borderColor: primary ? theme.accentHover : theme.border,
+          },
+          // the border follows the fill: a dark pressed face inside a
+          // resting-coloured ring reads as a rendering bug, not a press
+          ':active': {
+            backgroundColor: primary ? theme.accentActive : theme.surfaceActive,
+            borderColor: primary ? theme.accentActive : theme.dim,
+          },
           ':focus-visible': {
-            borderColor: primary ? theme.accentHover : theme.borderActive,
+            borderColor: primary ? theme.accentHover : theme.borderFocus,
           },
         },
         style,

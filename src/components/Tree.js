@@ -233,6 +233,15 @@ export function Tree({
                     ? theme.hoverBackground
                     : theme.surfaceHover,
               },
+              // the selection only moves on the release, and `:active` marks
+              // the whole press chain, so a press on the label or the twisty
+              // still darkens the row it is in
+              ':active': {
+                backgroundColor:
+                  item.id === current
+                    ? theme.accentActive
+                    : theme.surfaceActive,
+              },
             },
           ],
         },

@@ -25,7 +25,9 @@ import type {
  */
 export interface Theme {
   border: string;
-  borderActive: string;
+  /** The border of a focused control. Named for focus and not for `:active`,
+   * which is the pressed state — the `…Active` tokens below. */
+  borderFocus: string;
   background: string;
   text: string;
   dim: string;
@@ -36,6 +38,12 @@ export interface Theme {
   accentText: string;
   surfaceHover: string;
   track: string;
+  /** The pressed step of each fill family: rest → `…Hover` → `…Active`.
+   * A control activates on the release, so this is the only thing it can
+   * show while it is being held. */
+  accentActive: string;
+  surfaceActive: string;
+  dimActive: string;
   /** The keyboard focus ring every focusable node under this palette draws
    * on `:focus-visible` — read by the renderer, not by the widgets. */
   focusRing: string;
@@ -238,6 +246,22 @@ export interface MenuItem {
   disabled?: boolean;
   /** Shown right-aligned; purely a label, not a binding. */
   shortcut?: string;
+  /**
+   * Drawn in the 16px column left of the label — the same column the check
+   * mark uses, so an item that is both checked and iconned shows the check.
+   *
+   * A string is drawn as text, which is a one-liner but only as good as the
+   * font: an exotic glyph is tofu on a machine without it. A **function**
+   * is called with the colour the row's label is being drawn in and the
+   * size the gutter allows, which is what a `<canvas onDraw>` icon needs —
+   * it has to pick a stroke colour, and nothing else can tell it whether
+   * its row is highlighted, disabled or at rest. An element renders as-is.
+   */
+  icon?:
+    | string
+    | number
+    | ReactNode
+    | ((state: { color: string; size: number }) => ReactNode);
   checked?: boolean;
   /** A horizontal rule instead of an item. */
   separator?: boolean;

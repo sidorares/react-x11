@@ -20,6 +20,14 @@ const RIGHT_BUTTON = 3;
 // `shiftKey`/`ctrlKey` above already read `buttons` from.
 const MOD1_MASK = 8;
 
+/** How many leading entries two node paths share. */
+function sharedPrefix(a, b) {
+  const limit = Math.min(a.length, b.length);
+  let n = 0;
+  while (n < limit && a[n] === b[n]) n++;
+  return n;
+}
+
 // Click-to-component hook (see ClickToComponent.js). At most one handler is
 // installed, gated by REACT_X11_CLICK_TO_COMPONENT — checked ahead of the
 // normal press handling so an Alt+Click never also starts a drag or moves
@@ -62,6 +70,10 @@ export class EventManager {
     this.node = windowNode;
     this.hoverPath = [];
     this.downNode = null;
+    // where a press landed, and how much of that chain still draws `:active`
+    // — the second shrinks and grows again as the pointer leaves and returns
+    this.downPath = [];
+    this.pressPath = [];
     this.capturedNode = null;
     this.focused = null;
     // what had focus before `focused`, so a focus scope opened by something
@@ -323,7 +335,8 @@ export class EventManager {
         return;
       }
       this.downNode = target;
-      target?.setStyleState(':active', true);
+      this.downPath = target ? this._path(target) : [];
+      this._setPressed(this.downPath);
       this._focusFromPress(target);
       const ev = this.dispatch('MouseDown', target, native, {
         button: native.keycode,
@@ -361,9 +374,7 @@ export class EventManager {
       if (drag) {
         this._dragArmed = null;
         if (drag.release(native)) {
-          if (this.downNode && !this.downNode.destroyed) {
-            this.downNode.setStyleState(':active', false);
-          }
+          this._clearPress();
           this.downNode = null;
           this.capturedNode = null;
           return;
@@ -376,8 +387,8 @@ export class EventManager {
       });
       // capture ends with the gesture, like implicit DOM pointer capture
       this.capturedNode = null;
+      this._clearPress();
       if (this.downNode && !this.downNode.destroyed) {
-        this.downNode.setStyleState(':active', false);
         this.downNode._defaultMouseUp?.(ev);
       }
       if (this.downNode) {
@@ -407,9 +418,14 @@ export class EventManager {
       if (drag && drag.motion(native)) return;
       const captured = this._captured();
       const target = captured ?? this._hit(native);
+      const path = this._path(target);
       // while captured, hover stays put: dragging a slider must not light
       // up every widget the pointer crosses
-      this._updateHover(captured ? this.hoverPath : this._path(target), native);
+      this._updateHover(captured ? this.hoverPath : path, native);
+      // and neither does the press — the gesture owns the pointer, so a
+      // captured control stays pressed wherever the pointer wandered off to
+      if (this.downNode && !captured)
+        this._setPressed(this._pressedAlong(path));
       const ev = this.dispatch('MouseMove', target, native);
       // drags deliver to the pressed node even when the pointer leaves it
       if (this.downNode && !this.downNode.destroyed) {
@@ -457,23 +473,64 @@ export class EventManager {
   _onMouseOut(native) {
     runWithPriority(ContinuousEventPriority, () => {
       this._updateHover([], native);
+      // the pointer left the window with a button still down: a release out
+      // there synthesizes its click on the window, so that is as much of the
+      // press chain as may still look pressed
+      if (this.downNode) this._setPressed(this._pressedAlong([this.node]));
       this.node.props.onMouseOut?.(
         this._makeEvent('mouseOut', native, this.node),
       );
     });
   }
 
+  /**
+   * The chain of the press that is still live, as far along it as the
+   * pointer has stayed. `downPath` is where the press landed and does not
+   * move; this is the part of it a release would still deliver a click to.
+   */
+  _pressedAlong(path) {
+    return this.downPath.slice(0, sharedPrefix(this.downPath, path));
+  }
+
+  /** The gesture is over: nothing is pressed, and there is no chain left to
+   *  come back to. */
+  _clearPress() {
+    this._setPressed([]);
+    this.downPath = [];
+  }
+
+  /**
+   * Flip `:active` over a press chain, diffed the way hover is.
+   *
+   * Two things this is not. It is **not one node**: a press marks the whole
+   * ancestor chain, because the node actually hit is whatever the control
+   * happens to be built out of — a `<Button>`'s label, a `<Switch>`'s thumb —
+   * and a control that draws its own pressed state has no other way to hear
+   * about a press that landed on its own child.
+   *
+   * And it is **not fixed for the gesture**: it narrows as the pointer leaves
+   * the chain and grows back as it returns, so `:active` says "releasing now
+   * activates this" rather than "this is where the press started". That is
+   * the same nearest-common-ancestor rule `_onMouseUp` synthesizes the click
+   * on, which is what keeps the drawing from promising an activation the
+   * release will not deliver.
+   */
+  _setPressed(path) {
+    const oldPath = this.pressPath;
+    const common = sharedPrefix(oldPath, path);
+    for (let i = oldPath.length - 1; i >= common; i--) {
+      if (!oldPath[i].destroyed) oldPath[i].setStyleState(':active', false);
+    }
+    for (let i = common; i < path.length; i++) {
+      if (!path[i].destroyed) path[i].setStyleState(':active', true);
+    }
+    this.pressPath = path;
+  }
+
   /** enter/leave do not propagate: each node on the diff gets its own call. */
   _updateHover(newPath, native) {
     const oldPath = this.hoverPath;
-    let common = 0;
-    while (
-      common < oldPath.length &&
-      common < newPath.length &&
-      oldPath[common] === newPath[common]
-    ) {
-      common++;
-    }
+    const common = sharedPrefix(oldPath, newPath);
     for (let i = oldPath.length - 1; i >= common; i--) {
       const n = oldPath[i];
       if (!n.destroyed) {

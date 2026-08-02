@@ -60,7 +60,7 @@ The thing inline CSS cannot do, and the reason people keep a stylesheet:
   style={{
     backgroundColor: theme.surface,
     ':hover': { backgroundColor: theme.surfaceHover },
-    ':focus': { borderColor: theme.borderActive },
+    ':focus': { borderColor: theme.borderFocus },
   }}
 />
 ```
@@ -79,6 +79,38 @@ so a disabled control never looks hovered, and a drag in progress outranks
 all of the pointer and focus states.
 Because the hover _path_ is the ancestor chain, hovering a child lights up an
 ancestor's `:hover` block, exactly like CSS.
+
+`:active` is a press, and it follows the same chain for the same reason: the
+node under the pointer is whatever a control happens to be built out of — a
+button's label, a switch's thumb — and it is the control that has to draw
+the press. It is also **live for the whole gesture**: it drops when the
+pointer leaves the chain and comes back when it returns, so `:active` always
+means "releasing now activates this", matching the nearest-common-ancestor
+rule the click itself is synthesized on.
+
+This is not decoration. A control acts on the release, so `:active` is the
+only thing it can show while it is held, and a click held half a second is
+half a second of silence without it. Give every interactive thing one — see
+[components.md](components.md#the-press-state).
+
+```jsx
+<box
+  focusable
+  style={{
+    backgroundColor: theme.background,
+    ':hover': { backgroundColor: theme.surfaceHover },
+    ':active': { backgroundColor: theme.surfaceActive },
+  }}
+/>
+```
+
+A `transition` on the same property is welcome — what matters is that the
+change _starts_ on the press frame, not that it finishes there.
+
+The keyboard has no press state: Space and Enter act on the down, so the
+activation is immediate, but nothing draws held-ness. X reports auto-repeat
+as release/press pairs and neither ntk nor node-x11 implements XKB's
+`DetectableAutoRepeat`, so a held key cannot be told from fast tapping.
 
 `:focus-visible` is focus that came from the keyboard — Tab, an arrow inside
 a widget, `autoFocus`, `node.focus()`, a modal handing focus back as it
@@ -153,9 +185,13 @@ Every component takes `style` and merges it after its own, so an override
 wins by position instead of clobbering a computed value:
 `style: [control.style, base, checked && on, style]`.
 
-`useControl(disabled, onActivate, { styled: true })` stops holding hover and
-focus in React state: no enter/leave handlers, no re-render on pointer move.
-`Switch` is the worked example.
+`useControl(disabled, onActivate, { styled: true })` stops holding hover,
+focus and the press in React state: no enter/leave handlers, no re-render on
+pointer move. `Switch` and `Button` are the worked examples. Without it the
+hook returns `hover`/`focused`/`pressed` as React state, which is what a
+control needs when the part that has to change is not on the press chain —
+a `Checkbox`'s well is a sibling of the label the press lands on, and no
+node-local state block can cross that.
 
 A component's own props are never style. `ProgressBar` takes `color`,
 `Dialog` takes `width`/`height` — a dialog is a real popup window and needs
@@ -194,6 +230,13 @@ outer, so a panel can restate a colour or two without repeating a palette.
 Popups resolve through their place in the **tree**, not their window, so a
 menu inherits the theme of the UI that opened it even though it is a
 separate X window.
+
+Note that a raw `theme` prop is exactly the object you wrote: it merges, but
+nothing is computed from it. The widget palette's derived tokens — the
+pressed `accentActive`/`surfaceActive`/`dimActive` — are filled in by
+`<ThemeProvider>`, which plants the resolved palette in the tree for this
+lookup to find. Hand-writing `theme={{ accentHover: … }}` on a box gets the
+merge and not the derivation.
 
 Changing the theme restyles the subtree in place. Nodes whose own props did
 not change are still updated — which is why a theme change also drops the

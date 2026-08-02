@@ -11,67 +11,254 @@
 import React, { useState } from 'react';
 import { createRoot, ContextMenu, MenuBar } from '../src/index.js';
 
+// Menu icons are SVG paths painted in `currentColor`, so one drawing serves
+// every state a row can be in: the menu calls `icon` with the colour its
+// label is being drawn in, and the icon puts it on the node as `color`. The
+// renderer caches a single-colour drawing as *coverage* rather than pixels,
+// so following the highlight is a composite and not a re-render, and every
+// colour of an icon shares one rendered copy.
+//
+// `icon` also takes a plain string, which is a one-liner — but only as good
+// as the font: `\u2702` and `\u23FB` are empty boxes in Arial, and a column
+// of tofu is worse than no icons at all.
+const svg = (body) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">` +
+  `<g fill="none" stroke="currentColor" stroke-width="1.25" ` +
+  `stroke-linecap="round" stroke-linejoin="round">${body}</g></svg>`;
+
+const icon =
+  (source) =>
+  ({ color, size }) => (
+    <svg source={source} style={{ width: size, height: size, color }} />
+  );
+
+const ICONS = {
+  page: icon(svg('<path d="M3 1.5h6l3 3v10H3z"/><path d="M9 1.5v3h3"/>')),
+  folder: icon(svg('<path d="M1.5 13.5v-10h4l1.5 2h7.5v8z"/>')),
+  save: icon(
+    svg(
+      '<path d="M8 1.5v8"/><path d="M5 6.5 8 9.5l3-3"/><path d="M2 13.5h12"/>',
+    ),
+  ),
+  power: icon(svg('<path d="M8 1.5v6"/><path d="M4.6 3.9a5 5 0 1 0 6.8 0"/>')),
+  undo: icon(
+    svg(
+      '<path d="M6 3.5 2.5 6.5 6 9.5"/><path d="M2.5 6.5h6a4 4 0 0 1 0 8H5"/>',
+    ),
+  ),
+  redo: icon(
+    svg(
+      '<path d="m10 3.5 3.5 3-3.5 3"/><path d="M13.5 6.5h-6a4 4 0 0 0 0 8H11"/>',
+    ),
+  ),
+  scissors: icon(
+    svg(
+      '<path d="M4 2 11 12"/><path d="M12 2 5 12"/>' +
+        '<circle cx="4" cy="13" r="1.7"/><circle cx="12" cy="13" r="1.7"/>',
+    ),
+  ),
+  copy: icon(
+    svg(
+      '<rect x="5.5" y="1.5" width="9" height="9" rx="1"/><path d="M10.5 13.5h-9v-9"/>',
+    ),
+  ),
+  clipboard: icon(
+    svg(
+      '<rect x="2.5" y="2.5" width="11" height="12" rx="1"/>' +
+        '<path d="M6 2.5V1.5h4v1z" fill="currentColor"/>',
+    ),
+  ),
+  zoomIn: icon(
+    svg(
+      '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/><path d="M5 7h4M7 5v4"/>',
+    ),
+  ),
+  zoomOut: icon(
+    svg(
+      '<circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/><path d="M5 7h4"/>',
+    ),
+  ),
+};
+
 function App() {
   const [last, setLast] = useState('(none)');
   const [wrap, setWrap] = useState(true);
   const note = (label) => () => setLast(label);
 
+  // `icon` shares the check column, so it is a glyph rather than a picture:
+  // a string is drawn as text in the font already in use. Pass a React
+  // element instead — `<canvas onDraw>` — when it has to be a real drawing.
   const menus = [
     {
       label: 'File',
       items: [
-        { label: 'New', shortcut: 'Ctrl+N', onSelect: note('New') },
-        { label: 'Open…', shortcut: 'Ctrl+O', onSelect: note('Open…') },
+        {
+          label: 'New',
+          icon: ICONS.page,
+          shortcut: 'Ctrl+N',
+          onSelect: note('New'),
+        },
+        {
+          label: 'Open…',
+          icon: ICONS.folder,
+          shortcut: 'Ctrl+O',
+          onSelect: note('Open…'),
+        },
+        {
+          // three levels: Open Recent → Projects → the file itself, which is
+          // what a submenu's placement has to survive
+          label: 'Open Recent',
+          items: [
+            {
+              label: 'Projects',
+              items: [
+                { label: 'react-x11', onSelect: note('Recent → react-x11') },
+                { label: 'ntk', onSelect: note('Recent → ntk') },
+                { label: 'node-x11', onSelect: note('Recent → node-x11') },
+              ],
+            },
+            {
+              label: 'Documents',
+              items: [
+                { label: 'notes.md', onSelect: note('Recent → notes.md') },
+                { label: 'todo.md', onSelect: note('Recent → todo.md') },
+              ],
+            },
+            { separator: true },
+            { label: 'Clear list', onSelect: note('Recent → clear') },
+          ],
+        },
         { separator: true },
-        { label: 'Save', shortcut: 'Ctrl+S', onSelect: note('Save') },
+        {
+          label: 'Save',
+          icon: ICONS.save,
+          shortcut: 'Ctrl+S',
+          onSelect: note('Save'),
+        },
         { label: 'Save As…', disabled: true },
         {
           label: 'Export',
           items: [
-            { label: 'PNG image', onSelect: note('Export → PNG') },
-            { label: 'SVG vector', onSelect: note('Export → SVG') },
+            {
+              label: 'Image',
+              items: [
+                { label: 'PNG', onSelect: note('Export → PNG') },
+                { label: 'JPEG', onSelect: note('Export → JPEG') },
+                { label: 'WebP', disabled: true },
+              ],
+            },
+            {
+              label: 'Vector',
+              items: [
+                { label: 'SVG', onSelect: note('Export → SVG') },
+                { label: 'EPS', onSelect: note('Export → EPS') },
+              ],
+            },
             { separator: true },
             { label: 'PDF', disabled: true },
           ],
         },
         { separator: true },
-        { label: 'Quit', shortcut: 'Ctrl+Q', onSelect: note('Quit') },
+        {
+          label: 'Quit',
+          icon: ICONS.power,
+          shortcut: 'Ctrl+Q',
+          onSelect: note('Quit'),
+        },
       ],
     },
     {
       label: 'Edit',
       items: [
-        { label: 'Undo', shortcut: 'Ctrl+Z', onSelect: note('Undo') },
-        { label: 'Redo', shortcut: 'Ctrl+Y', disabled: true },
+        {
+          label: 'Undo',
+          icon: ICONS.undo,
+          shortcut: 'Ctrl+Z',
+          onSelect: note('Undo'),
+        },
+        { label: 'Redo', icon: ICONS.redo, shortcut: 'Ctrl+Y', disabled: true },
         { separator: true },
-        { label: 'Cut', shortcut: 'Ctrl+X', onSelect: note('Cut') },
-        { label: 'Copy', shortcut: 'Ctrl+C', onSelect: note('Copy') },
-        { label: 'Paste', shortcut: 'Ctrl+V', onSelect: note('Paste') },
+        {
+          label: 'Cut',
+          icon: ICONS.scissors,
+          shortcut: 'Ctrl+X',
+          onSelect: note('Cut'),
+        },
+        {
+          label: 'Copy',
+          icon: ICONS.copy,
+          shortcut: 'Ctrl+C',
+          onSelect: note('Copy'),
+        },
+        {
+          label: 'Paste',
+          icon: ICONS.clipboard,
+          shortcut: 'Ctrl+V',
+          onSelect: note('Paste'),
+        },
       ],
     },
     {
       label: 'View',
       items: [
         {
+          // checked and iconned at once: the check wins, because the check
+          // is state and the icon is only identity
           label: 'Wrap lines',
+          icon: ICONS.page,
           checked: wrap,
           onSelect: () => {
             setWrap((w) => !w);
             setLast('Wrap lines');
           },
         },
-        { label: 'Zoom in', shortcut: 'Ctrl++', onSelect: note('Zoom in') },
-        { label: 'Zoom out', shortcut: 'Ctrl+-', onSelect: note('Zoom out') },
+        {
+          label: 'Zoom in',
+          icon: ICONS.zoomIn,
+          shortcut: 'Ctrl++',
+          onSelect: note('Zoom in'),
+        },
+        {
+          label: 'Zoom out',
+          icon: ICONS.zoomOut,
+          shortcut: 'Ctrl+-',
+          onSelect: note('Zoom out'),
+        },
       ],
     },
   ];
 
   const contextItems = [
-    { label: 'Cut', shortcut: 'Ctrl+X', onSelect: note('Cut (context)') },
-    { label: 'Copy', shortcut: 'Ctrl+C', onSelect: note('Copy (context)') },
-    { label: 'Paste', disabled: true },
+    {
+      label: 'Cut',
+      icon: ICONS.scissors,
+      shortcut: 'Ctrl+X',
+      onSelect: note('Cut (context)'),
+    },
+    {
+      label: 'Copy',
+      icon: ICONS.copy,
+      shortcut: 'Ctrl+C',
+      onSelect: note('Copy (context)'),
+    },
+    { label: 'Paste', icon: ICONS.clipboard, disabled: true },
     { separator: true },
-    { label: 'Delete', onSelect: note('Delete (context)') },
+    {
+      label: 'Convert',
+      items: [
+        {
+          label: 'Case',
+          items: [
+            { label: 'UPPER', onSelect: note('Convert → UPPER') },
+            { label: 'lower', onSelect: note('Convert → lower') },
+            { label: 'Title', onSelect: note('Convert → Title') },
+          ],
+        },
+        { label: 'Tabs to spaces', onSelect: note('Convert → tabs') },
+      ],
+    },
+    { separator: true },
+    { label: 'Delete', icon: '\u2717', onSelect: note('Delete (context)') },
   ];
 
   return (

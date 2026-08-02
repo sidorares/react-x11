@@ -368,6 +368,17 @@ export function Table({
                   backgroundColor:
                     row.id === current ? theme.hoverBackground : 'transparent',
                 },
+                // pressed even on the selected row: a re-press on the row
+                // that is already current is the one click in the table
+                // that would otherwise look ignored
+                {
+                  ':active': {
+                    backgroundColor:
+                      row.id === current
+                        ? theme.accentActive
+                        : theme.surfaceActive,
+                  },
+                },
                 row.id !== current && {
                   ':hover': { backgroundColor: theme.surfaceHover },
                 },

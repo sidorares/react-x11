@@ -452,6 +452,27 @@ export function interpolate(from, to, t) {
   return null;
 }
 
+/**
+ * One more step in the direction `from` → `to`, clamped to the gamut.
+ *
+ * This is how a palette that named a hover and stopped there still gets a
+ * pressed colour (`theme.js`): the press is the hover step taken twice. It
+ * reads the *direction* rather than assuming one, so it darkens a light
+ * theme and lightens a dark one without being told which it is — which is
+ * the whole reason it is not a `darken(colour, 0.1)`.
+ *
+ * Straight components, like `interpolate`, and for the same round-trip
+ * reason. Clamping is what extrapolation needs and interpolation does not:
+ * two steps out of a near-white hover leaves the cube.
+ */
+export function stepBeyond(from, to) {
+  const a = cssColorStraight(from);
+  const b = cssColorStraight(to);
+  if (!a || !b) return to;
+  const step = (i) => Math.min(1, Math.max(0, b[i] + (b[i] - a[i])));
+  return rgba([step(0), step(1), step(2), step(3)]);
+}
+
 // ease-out cubic: fast to start, settles gently — the shape almost every UI
 // toolkit defaults to for state changes
 export const ease = (t) => 1 - (1 - t) ** 3;

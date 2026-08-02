@@ -2666,6 +2666,40 @@ test('anchorRect places, flips at a screen edge and clamps', async () => {
   );
   assert.strictEqual(flipsLeft.placement, 'left');
 
+  // `alignTo` splits the axes: the placement edge from the node, the
+  // alignment from another. This is a submenu — it belongs against the
+  // *menu's* right edge, but lined up with the row that opened it, and the
+  // row is inset by the menu's border and padding.
+  const menu = { x: 0, y: 0, width: 140, height: 200 };
+  const row = { abs: { x: 5, y: 60, width: 130, height: 26 } };
+  const split = anchorRect(node(menu), {
+    placement: 'right',
+    align: 'start',
+    offset: 0,
+    alignTo: row,
+    width: 120,
+    height: 80,
+  });
+  assert.strictEqual(
+    split.x,
+    100 + 0 + 140,
+    'flush with the menu edge, not five pixels inside it',
+  );
+  assert.strictEqual(split.y, 50 + 60, 'but level with the row');
+
+  // and without it the row would have decided both, which is the overlap
+  const overlapping = anchorRect(node(row.abs), {
+    placement: 'right',
+    offset: 0,
+    width: 120,
+    height: 80,
+  });
+  assert.strictEqual(
+    overlapping.x,
+    split.x - 5,
+    'the inset the fix removes, stated as the amount it used to overlap',
+  );
+
   // no screen geometry (headless mock): still places, just never clamps
   const noScreen = anchorRect({
     abs: { x: 5, y: 5, width: 50, height: 20 },
@@ -3646,6 +3680,208 @@ test('MenuBar opens menus, switches on hover and walks with Left/Right', async (
 
   await x11Root.unmount();
 });
+
+// An open bar menu holds a pointer grab, so a menu nobody can dismiss is
+// worse than one that never opened. Both ways out — Escape, and clicking
+// away — run through the *focused node*, so what is really under test is
+// that opening a menu puts focus somewhere the menu can hear from, rather
+// than leaving it wherever the gesture that opened it happened to land.
+test('MenuBar: an open menu is always dismissible', async () => {
+  const { MenuBar } = await import('../src/index.js');
+  const menus = [
+    { label: 'File', items: [{ label: 'New' }, { label: 'Open' }] },
+    { label: 'Edit', items: [{ label: 'Undo' }] },
+  ];
+
+  const mount = async () => {
+    const app = createMockApp();
+    const x11Root = await createRoot({ app });
+    x11Root.render(
+      React.createElement(
+        'window',
+        { width: 320, height: 200 },
+        React.createElement(
+          'box',
+          { style: { flexGrow: 1 } },
+          React.createElement(MenuBar, { menus }),
+          React.createElement('box', { style: { flexGrow: 1 } }),
+        ),
+      ),
+    );
+    await tick();
+    const wnd = app.windows[0];
+    const bar = wnd._reactX11Node.children[0].children[0];
+    const buttons = bar.children.filter((c) => c.props.focusable);
+    return { app, x11Root, wnd, buttons };
+  };
+
+  const openFile = (wnd, node) => {
+    const x = node.abs.x + node.abs.width / 2;
+    const y = node.abs.y + node.abs.height / 2;
+    wnd.emit('mousedown', { x, y, keycode: 1 });
+    wnd.emit('mouseup', { x, y, keycode: 1 });
+  };
+
+  // opening focuses the item the menu belongs to, deliberately — that is
+  // the thread both dismissals hang off
+  {
+    const { x11Root, wnd, buttons } = await mount();
+    openFile(wnd, buttons[0]);
+    await tick();
+    assert.strictEqual(app0Windows(wnd), 2, 'menu open');
+    // `assert.ok` on the comparison, never `strictEqual` on two nodes: a
+    // failing diff walks the whole retained tree and reports no test name
+    assert.ok(
+      wnd._reactX11Node.events.focused === buttons[0],
+      'the bar item holds focus while its menu is up',
+    );
+    await x11Root.unmount();
+  }
+
+  // Escape
+  {
+    const { app, x11Root, wnd, buttons } = await mount();
+    openFile(wnd, buttons[0]);
+    await tick();
+    pressKey(app, wnd, { keysym: 0xff1b });
+    await tick();
+    assert.strictEqual(app.windows[1].destroyed, true, 'Escape closes it');
+    await x11Root.unmount();
+  }
+
+  // Escape while focus sits on a *different* item of the bar
+  {
+    const { app, x11Root, wnd, buttons } = await mount();
+    openFile(wnd, buttons[0]);
+    await tick();
+    wnd._reactX11Node.events.focus(buttons[1], 'script');
+    await tick();
+    pressKey(app, wnd, { keysym: 0xff1b });
+    await tick();
+    assert.strictEqual(
+      app.windows[1].destroyed,
+      true,
+      'Escape is not fussy about which item of the bar heard it',
+    );
+    await x11Root.unmount();
+  }
+
+  // a press somewhere else in the window
+  {
+    const { app, x11Root, wnd, buttons } = await mount();
+    openFile(wnd, buttons[0]);
+    await tick();
+    wnd.emit('mousedown', { x: 160, y: 170, keycode: 1 });
+    wnd.emit('mouseup', { x: 160, y: 170, keycode: 1 });
+    await tick();
+    assert.strictEqual(
+      app.windows[1].destroyed,
+      true,
+      'a press in the content closes it',
+    );
+    await x11Root.unmount();
+  }
+
+  // ...and the same, for a menu reached by sliding along the bar rather
+  // than by pressing. This is the case the press cannot carry: hovering
+  // does not move focus, so unless opening takes focus itself, the item now
+  // showing a menu has none — and the press that dismisses it blurs the
+  // wrong item, leaving the menu up with a pointer grab held.
+  {
+    const { app, x11Root, wnd, buttons } = await mount();
+    openFile(wnd, buttons[0]);
+    await tick();
+    wnd.emit('mousemove', {
+      x: buttons[1].abs.x + buttons[1].abs.width / 2,
+      y: buttons[1].abs.y + buttons[1].abs.height / 2,
+    });
+    await tick();
+    await tick(); // mousemove is continuous priority
+    assert.ok(
+      wnd._reactX11Node.events.focused === buttons[1],
+      'sliding onto Edit hands it the focus with the menu',
+    );
+    wnd.emit('mousedown', { x: 160, y: 170, keycode: 1 });
+    wnd.emit('mouseup', { x: 160, y: 170, keycode: 1 });
+    await tick();
+    assert.strictEqual(
+      app.windows[1].destroyed,
+      true,
+      'so a press in the content still gets rid of it',
+    );
+    await x11Root.unmount();
+  }
+
+  // Taking focus must not also light a ring. A menu opened with the pointer
+  // is already pointing at the item it came out of, so the ring is exactly
+  // the noise `:focus-visible` exists to remove; a menu reached with the
+  // arrow keys is the case that needs it.
+  {
+    const { x11Root, wnd, buttons } = await mount();
+    openFile(wnd, buttons[0]);
+    await tick();
+    assert.strictEqual(
+      buttons[0].states[':focus'],
+      true,
+      'focused, which is what makes it dismissible',
+    );
+    assert.strictEqual(
+      buttons[0].states[':focus-visible'],
+      false,
+      'but no ring: the open menu already says where you are',
+    );
+
+    // and the same when the pointer slides along the bar
+    wnd.emit('mousemove', {
+      x: buttons[1].abs.x + buttons[1].abs.width / 2,
+      y: buttons[1].abs.y + buttons[1].abs.height / 2,
+    });
+    await tick();
+    await tick();
+    assert.strictEqual(buttons[1].states[':focus-visible'], false, 'nor here');
+
+    // Left walks the bar from the keyboard. That does count as keyboard
+    // focus — but the item it lands on has opened its menu, and an item with
+    // a menu hanging off it draws no ring: the menu already said it.
+    pressKey(app0(wnd), wnd, { keysym: 0xff51 });
+    await tick();
+    assert.strictEqual(
+      buttons[0].states[':focus-visible'],
+      true,
+      'the keyboard put focus here',
+    );
+    assert.strictEqual(
+      buttons[0].style.outlineWidth,
+      0,
+      'and the open menu says so without one',
+    );
+    await x11Root.unmount();
+  }
+
+  // ...but an item that has only been *reached* has nothing else to show for
+  // it, so it keeps the ring. This is the case the blanket opt-out would
+  // lose, and it is the reader the ring exists for.
+  {
+    const { x11Root, wnd, buttons } = await mount();
+    wnd._reactX11Node.events.focus(buttons[0], 'key');
+    await tick();
+    assert.strictEqual(
+      buttons[0].states[':focus-visible'],
+      true,
+      'tabbed to, menu shut',
+    );
+    assert.notStrictEqual(
+      buttons[0].style.outlineWidth,
+      0,
+      'nothing else marks where the keyboard is, so the ring stands',
+    );
+    await x11Root.unmount();
+  }
+});
+
+const app0 = (wnd) => wnd._reactX11Node.app;
+
+const app0Windows = (wnd) => wnd._reactX11Node.app.windows.length;
 
 test('backgroundColor/borderColor "transparent" paints nothing (and does not throw)', async () => {
   const app = createMockApp();
