@@ -343,9 +343,7 @@ const SCENARIOS = [
   [
     'mount: window with 40 boxes and labels',
     async (app, x11Root) => {
-      await new Promise((resolve) =>
-        x11Root.render(rowsWindow(40), resolve),
-      );
+      await new Promise((resolve) => x11Root.render(rowsWindow(40), resolve));
       await new Promise((r) => setImmediate(r));
     },
   ],
@@ -546,7 +544,10 @@ const SCENARIOS = [
         run: async (app, x11Root) => {
           for (let i = 0; i < 5; i++) {
             await new Promise((resolve) =>
-              x11Root.render(absBoxWindow(40 + (i + 1) * 30, '#3498db'), resolve),
+              x11Root.render(
+                absBoxWindow(40 + (i + 1) * 30, '#3498db'),
+                resolve,
+              ),
             );
             ctl.frame();
             await settle(app);
