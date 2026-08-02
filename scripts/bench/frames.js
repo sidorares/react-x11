@@ -49,12 +49,19 @@ const W = 800;
 const H = 600;
 
 function App({ tick }) {
-  const left = MODE === 'move' ? Math.round(340 + 300 * Math.sin(tick / 20)) : 340;
-  const color = MODE === 'color' ? (tick % 2 ? '#3498db' : '#e74c3c') : '#3498db';
+  const left =
+    MODE === 'move' ? Math.round(340 + 300 * Math.sin(tick / 20)) : 340;
+  const color =
+    MODE === 'color' ? (tick % 2 ? '#3498db' : '#e74c3c') : '#3498db';
   const label = MODE === 'text' ? `tick ${tick}` : 'tick';
   return e(
     'window',
-    { width: W, height: H, title: 'bench:frames', style: { backgroundColor: '#f4f4f4' } },
+    {
+      width: W,
+      height: H,
+      title: 'bench:frames',
+      style: { backgroundColor: '#f4f4f4' },
+    },
     e(
       'box',
       { style: { flexGrow: 1, padding: 16, gap: 12 } },
