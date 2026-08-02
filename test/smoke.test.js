@@ -9,10 +9,15 @@ import { createMockApp } from './helpers/mock-app.js';
 
 // Simulate an ntk keydown: registers the keysym for a synthetic keycode and
 // emits the raw event shape the EventManager consumes.
-function pressKey(app, wnd, { keysym, codepoint, buttons = 0 }) {
+function pressKey(app, wnd, { keysym, codepoint, buttons = 0, time }) {
   const keycode = ((keysym ?? codepoint) % 248) + 8;
   app.X.keycode2keysyms[keycode] = [keysym ?? codepoint];
-  wnd.emit('keydown', { keycode, codepoint, buttons });
+  wnd.emit('keydown', {
+    keycode,
+    codepoint,
+    buttons,
+    ...(time ? { time } : {}),
+  });
 }
 
 const XK = {
@@ -1091,6 +1096,104 @@ test('textinput: clipboard shortcuts and middle-click PRIMARY paste', async () =
   wnd.emit('mousedown', { x: 10, y: 10, keycode: 2 }); // middle click
   await tick();
   assert.strictEqual(input.value, 'clip!primary!');
+
+  await x11Root.unmount();
+});
+
+test('textinput: a copy and a paste carry the timestamp of the event behind them', async () => {
+  // X arbitrates selection ownership by timestamp, and the right one is the
+  // event that triggered the copy — not "whenever ntk's round trip asking
+  // the server for the time happened to finish"
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  app.clipboard = {
+    writes: [],
+    reads: [],
+    write(text, opts) {
+      this.writes.push({ text, selection: opts?.selection, time: opts?.time });
+      return Promise.resolve();
+    },
+    read(opts) {
+      this.reads.push({ selection: opts?.selection, time: opts?.time });
+      return Promise.resolve('pasted');
+    },
+  };
+  x11Root.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 50 },
+      React.createElement('textinput', {
+        defaultValue: 'hello',
+        style: { flexGrow: 1 },
+      }),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 1, time: 900 });
+  wnd.emit('mouseup', { x: 10, y: 10, keycode: 1, time: 901 });
+
+  pressKey(app, wnd, { keysym: 0x61, codepoint: 0x61, buttons: 4, time: 1000 }); // ctrl+a
+  pressKey(app, wnd, { keysym: 0x63, codepoint: 0x63, buttons: 4, time: 1001 }); // ctrl+c
+  assert.strictEqual(
+    app.clipboard.writes.at(-1).time,
+    1001,
+    'the copy carries its own keystroke, not the select-all before it',
+  );
+
+  pressKey(app, wnd, { keysym: 0x76, codepoint: 0x76, buttons: 4, time: 1002 }); // ctrl+v
+  await tick();
+  assert.deepStrictEqual(app.clipboard.reads.at(-1), {
+    selection: 'CLIPBOARD',
+    time: 1002,
+  });
+
+  // middle-click paste is driven by the button event, so that is the stamp
+  wnd.emit('mousedown', { x: 10, y: 10, keycode: 2, time: 1003 });
+  await tick();
+  assert.deepStrictEqual(app.clipboard.reads.at(-1), {
+    selection: 'PRIMARY',
+    time: 1003,
+  });
+
+  await x11Root.unmount();
+});
+
+test('textinput: with no input seen yet, ntk is left to find its own timestamp', async () => {
+  // `undefined` rather than 0: CurrentTime is what ICCCM 2.1 forbids, and
+  // ntk's own fallback asks the server for a real one
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const writes = [];
+  app.clipboard = {
+    write(text, opts) {
+      writes.push(opts);
+      return Promise.resolve();
+    },
+    read: () => Promise.resolve(''),
+  };
+  x11Root.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 50 },
+      React.createElement('textinput', {
+        defaultValue: 'hello',
+        style: { flexGrow: 1 },
+      }),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const input = wnd._reactX11Node.children[0];
+  input._anchor = 0;
+  input._caret = 5;
+  input._copySelection();
+  assert.strictEqual(writes.length, 1);
+  assert.ok(
+    !('time' in writes[0]) || writes[0].time === undefined,
+    'no invented timestamp',
+  );
 
   await x11Root.unmount();
 });

@@ -41,6 +41,7 @@ import { windowIdOf } from './windowid.js';
 import { paintCacheFor } from './paintcache.js';
 import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
+import { inputTime } from './inputtime.js';
 import {
   editMenuColors,
   editMenuGeometry,
@@ -2180,7 +2181,7 @@ function ctrlChordLetter(ev) {
  * prefix measurement, editing via the EventManager default-action hooks
  * (user onKeyDown/onMouseDown handlers run first and can preventDefault).
  * Clipboard: Ctrl+C/X/V on CLIPBOARD, X11-style middle-click paste and
- * select-to-own on PRIMARY (needs ntk >= 3.2.0 app.clipboard; degrades
+ * select-to-own on PRIMARY (needs ntk >= 5.4.0 app.clipboard; degrades
  * gracefully without it). Controlled (`value` + `onChange`) or uncontrolled
  * (`defaultValue`). Caret indices are in code points, not UTF-16 units.
  */
@@ -2573,13 +2574,32 @@ export class TextInputNode extends Node {
     const text = this._selectedText();
     if (!text) return;
     this._clipboardApi()
-      ?.write(text, { selection })
-      .catch(() => {});
+      // ICCCM 2.1: the timestamp of the event that triggered the copy is
+      // what arbitrates a race with another app copying at the same moment.
+      // It also saves ntk a round trip asking the server for one, which on
+      // PRIMARY is a round trip per selection-extending keystroke.
+      ?.write(text, { selection, time: inputTime(this.app) })
+      .catch((err) => {
+        // Losing the race is now possible rather than theoretical: a real
+        // event timestamp can be older than another client's, where the
+        // server-time fallback never was. A cut that deleted the text
+        // without acquiring the selection should not be silent.
+        //
+        // `err?.message ?? err` because a throw in here would be an
+        // unhandled rejection, which ends the process — the exact failure
+        // errors.js exists to keep away from a GUI event path.
+        console.warn(
+          `react-x11: could not take the ${selection} selection: ${err?.message ?? err}`,
+        );
+      });
   }
 
   _pasteFrom(selection = 'CLIPBOARD') {
     this._clipboardApi()
-      ?.read({ selection })
+      // ICCCM 2.4: convert with the timestamp of the event that asked for
+      // the paste, so an owner that has replaced its data since can tell
+      // which value was wanted (ntk >= 5.4.0)
+      ?.read({ selection, time: inputTime(this.app) })
       .then((text) => {
         if (!this.destroyed && text) this._insert(text);
       })

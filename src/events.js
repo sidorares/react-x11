@@ -11,6 +11,7 @@ import {
 import { flushPendingFrames } from './frames.js';
 import { callHandler } from './errors.js';
 import { armDrag } from './dnd.js';
+import { noteInputTime } from './inputtime.js';
 
 const XK_TAB = 0xff09;
 const WHEEL_BUTTONS = { 4: [0, -48], 5: [0, 48], 6: [-48, 0], 7: [48, 0] };
@@ -121,7 +122,18 @@ export class EventManager {
     // leaves it to the paced frame. Which is which is not a judgement call:
     // it is ntk's coalesce table (lib/events_map.js), and motion is the
     // whole reason that table exists.
-    const onDiscrete = (name, fn) => wnd.on(name, discrete(fn));
+    // Every X input event carries a server timestamp, and the selection
+    // operations further down need one (inputtime.js). Noting it here, on
+    // the way past, is what keeps `write()`/`read()` from having to ask the
+    // server for the time they should already know.
+    const onDiscrete = (name, fn) =>
+      wnd.on(
+        name,
+        discrete((ev) => {
+          noteInputTime(this.node.app, name, ev);
+          return fn(ev);
+        }),
+      );
     onDiscrete('mousedown', (ev) => this._onMouseDown(ev));
     onDiscrete('mouseup', (ev) => this._onMouseUp(ev));
     wnd.on('mousemove', (ev) => this._onMouseMove(ev));
