@@ -159,6 +159,7 @@ export const STATE_KEYS = [
   ':active',
   ':disabled',
   ':drag-over',
+  ':dragging',
 ];
 
 // What a state block may change. Deliberately paint-only: a state block that

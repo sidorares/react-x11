@@ -306,11 +306,91 @@ const { dropProps, isOver, isAccepted } = useDropTarget({
 return <box {...dropProps} style={isOver ? s.zoneHot : s.zone} />;
 ```
 
+### Drag sources
+
+`draggable` makes a node a drag source; `dragData` is the offer, keyed by
+payload type name:
+
+```jsx
+<box
+  draggable
+  dragData={{
+    'text/uri-list': () => toUriList(item), // a thunk: resolved lazily
+    'text/plain': item.path,
+    'application/x-myapp-item': item, // a live object
+  }}
+  dragActions={['copy', 'move']}
+  onDragEnd={(e) => {
+    if (e.action === 'move') remove(item.id);
+  }}
+  style={{ ':dragging': { opacity: 0.4 } }}
+/>
+```
+
+One drag session, two transports, and handlers cannot tell them apart
+without asking (`e.source`):
+
+- **Inside the app** (over any of its windows, including other
+  `<window>`s and `<popup>`s) the drag is local: no X traffic at all, and
+  a drop hands values over **by reference** — `e.items['application/x-myapp-item']`
+  is the object itself, never serialised.
+- **Leaving the app's windows** promotes the drag to XDND: `dragData` is
+  published on `XdndSelection` (thunks resolve now — a drag that ends in
+  the wastebasket never builds its payload; live objects are
+  JSON-serialised for the wire), the target under the pointer is found by
+  descending from the root, and any XDND application — a file manager, an
+  editor, another react-x11 process — can accept the drop. Coming back
+  over the app demotes it again.
+
+The gesture is DOM-shaped: a press on a `draggable` is still a click
+until it moves ~4px; `onDragStart` fires at the threshold
+(`preventDefault()` cancels the drag); `onDrag` tracks every motion with
+`screenX/screenY` and `accepted`; `onDragEnd` reports `{ action,
+dropped }` — `action` is null when the drag ended nowhere. A completed
+drag suppresses the click, and `:dragging` styles the source while it
+lasts.
+
+There is deliberately no `dragPreview` prop rendering a bitmap — the
+preview is a live React tree. `useDragSource` packages the pattern:
+
+```jsx
+const { dragProps, isDragging, position } = useDragSource({
+  data: { 'text/plain': label },
+  onDragEnd: (e) => {
+    /* … */
+  },
+});
+return (
+  <>
+    <box {...dragProps} />
+    {isDragging && (
+      <popup dragPreview x={position.x + 12} y={position.y + 12}>
+        <Chip label={label} />
+      </popup>
+    )}
+  </>
+);
+```
+
+The `dragPreview` prop on the `<popup>` matters: it tells the drag router
+the window under the pointer is the preview itself, not a drop target.
+
+The two runnable halves live in
+[`examples/dnd-source.jsx`](../examples/dnd-source.jsx) and
+[`examples/dnd-target.jsx`](../examples/dnd-target.jsx) — run them in two
+terminals and drag between the processes.
+
 Notes for protocol watchers: `XdndAware` (version 5) is written on every
 top-level window unconditionally at realize time; a window with no drop
 targets mounted answers a drag with one refusal covering the whole
 window, so an app that never uses DnD costs one property and nothing per
-drag. macOS/XQuartz cannot deliver Finder drags into X11 applications
+drag. On the source side, the foreign target is re-resolved per motion
+frame (2–4 round trips against a local server; the drag-start window
+cache for remote X is future work), the mid-drag cursor rides
+`ChangeActivePointerGrab` over the implicit button grab, and
+`XdndFinished` is awaited with a 5 s timeout so a dead target cannot wedge
+the gesture. macOS/XQuartz cannot deliver Finder drags into X11
+applications
 ([XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173)) — test
 against another X client there; on Linux, XWayland bridges XDND both
 ways.
