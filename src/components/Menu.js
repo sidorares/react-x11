@@ -590,9 +590,17 @@ export function MenuBar({
   const refs = useRef([]);
   const typeAhead = useTypeAhead();
 
+  // Which menu is open, readable from a handler that is running *inside*
+  // the call that changed it. Switching menus focuses the item taking over,
+  // which blurs the one handing off, and that blur handler would otherwise
+  // see the `openIndex` of the render it was created in — still itself —
+  // and close the menu the switch had just opened.
+  const openRef = useRef(-1);
+
   const items = openIndex >= 0 ? (menus[openIndex]?.items ?? []) : [];
 
   const close = () => {
+    openRef.current = -1;
     setOpenIndex(-1);
     setRect(null);
     setPath([]);
@@ -606,9 +614,23 @@ export function MenuBar({
     const height = menuListHeight(menu.items);
     const next = anchorRect(node, { placement: 'bottom', width, height });
     if (!next) return;
+    openRef.current = index;
     setRect(next);
     setOpenIndex(index);
     setPath([-1]);
+    // Take focus **deliberately**, the way `ContextMenu` does, and for the
+    // same reason: the popup is override-redirect and never gets the X
+    // focus, so something in the owner window has to hold it or keys go
+    // nowhere the menu can hear them.
+    //
+    // Both ways out of an open menu hang off this one thread. Escape is a
+    // key, so it arrives at the focused node; clicking away closes through
+    // `onBlur`, which only fires on a node that was focused to begin with.
+    // Leaving that to whatever the press happened to focus made both
+    // depend on the gesture that opened the menu — and a menu you cannot
+    // dismiss is worse than one that never opened, because it is holding a
+    // pointer grab while you try.
+    node.root?.events?.focus?.(node);
   };
 
   const select = (item) => {
@@ -653,11 +675,23 @@ export function MenuBar({
           onMouseEnter: () => {
             if (openIndex >= 0 && openIndex !== index) openMenu(index);
           },
+          // read live: by the time a hand-off blurs this item, the item
+          // taking over has already claimed the bar
           onBlur: () => {
-            if (openIndex === index) close();
+            if (openRef.current === index) close();
           },
           onKeyDown: (ev) => {
             if (openIndex !== index) {
+              // Escape shuts an open menu from any item on the bar, not
+              // only the one it belongs to. A menu holds a pointer grab, so
+              // the key that gets rid of it is the one thing that must not
+              // depend on which node the keystroke happened to reach. The
+              // item that *owns* the menu falls through to `handleMenuKey`
+              // instead, where Escape leaves one submenu level at a time.
+              if (ev.keysym === XK_ESCAPE && openIndex >= 0) {
+                close();
+                return;
+              }
               if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
                 openMenu(index);
               } else if (ev.keysym === XK_LEFT) moveMenu(-1);
