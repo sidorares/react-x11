@@ -241,3 +241,76 @@ the one name that is not a glyph in that font, so ntk builds it from an
 empty 1×1 mask. Note it is **not** the same as setting no cursor at all:
 with none of a node's ancestors naming one, the window inherits the root
 window's cursor and the pointer stays visible.
+
+## Drag and drop {#drag-and-drop}
+
+react-x11 windows are XDND drop targets: drags from file managers,
+editors and browsers land as ordinary events on ordinary nodes. (The
+other direction — being a drag _source_ — is planned;
+[#126](https://github.com/sidorares/react-x11/issues/126) tracks both
+halves, and the design review lives in
+[the architecture doc](https://github.com/sidorares/react-x11/pull/161).)
+
+```jsx
+<box
+  dropAccept={['files']}
+  onDrop={async (e) => setPaths(e.files.map((f) => f.path))}
+  style={{
+    borderColor: '$border',
+    ':drag-over': { borderColor: '$accent' },
+  }}
+/>
+```
+
+Any drawn element, `<window>` or `<popup>` takes the props; their
+presence is what makes the node a drop target. `dropAccept` is
+deliberately namespaced (not `accept`) so a prop spread cannot turn a box
+into a dropzone by accident.
+
+| prop                          | notes                                                                                    |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| `dropAccept`                  | a MIME type, a group (`'files'`, `'uris'`, `'text'`), an array of either, or a predicate |
+| `onDragEnter` / `onDragLeave` | do not propagate — drag-path diffing, like hover; paired with the `':drag-over'` state   |
+| `onDragOver`                  | per position; `e.accept(action)` / `e.reject()` override the declarative answer          |
+| `onDrop`                      | may be async — the protocol reply waits for the returned promise (bounded by a watchdog) |
+
+`dropAccept` matters beyond filtering: it is **data**, so the protocol's
+accept/reject answer is computed in the event handler without entering
+React. The groups encode real-world offers — GTK text arrives as
+`text/plain;charset=utf-8`/`UTF8_STRING`, Firefox links as UTF-16
+`text/x-moz-url` — so `dropAccept={['text']}` catches what string
+equality on `'text/plain'` would miss.
+
+The drag event carries `types`, `has(type)`, `action`, `source`
+(`'external'` for XDND), and `screenX/screenY`. On `onDrop`
+additionally:
+
+- `e.files` — parsed `text/uri-list`: `[{ uri, path? }]`, `path` present
+  only for genuinely local `file:` URIs, percent-decoding done;
+- `e.text` — the best offered text flavour;
+- `await e.getData(type)` — any other offered type, decoded to a string
+  for text-ish targets, raw bytes otherwise. There is deliberately no
+  `e.dataTransfer`: X selection transfer is asynchronous, and a
+  sync-looking `getData` would stringify to `"[object Promise]"` without
+  an error in sight.
+
+The `':drag-over'` style state makes the common highlight free — no
+handler, no re-render. For render-state (an `isOver` hint label), the
+`useDropTarget` hook mirrors react-dropzone:
+
+```jsx
+const { dropProps, isOver, isAccepted } = useDropTarget({
+  accept: ['files'],
+  onDrop: (e) => setFiles(e.files),
+});
+return <box {...dropProps} style={isOver ? s.zoneHot : s.zone} />;
+```
+
+Notes for protocol watchers: `XdndAware` (version 5) is written on every
+top-level window unconditionally at realize time; a window with no drop
+targets mounted answers a drag with one refusal covering the whole
+window, so an app that never uses DnD costs one property and nothing per
+drag. macOS/XQuartz cannot deliver Finder drags into X11 applications
+([XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173)) — test
+against another X client there; on Linux, XWayland bridges XDND both
+ways.

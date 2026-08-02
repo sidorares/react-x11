@@ -2240,15 +2240,26 @@ test('multiple root windows share one tree; onCloseRequest handles WM close', as
   await tick();
   assert.strictEqual(app.windows.length, 2, 'two real top-level windows');
   const sat = app.windows[1];
-  assert.ok(
-    sat.calls.some((c) => c[0] === 'setActions'),
-    'onCloseRequest opts the window into WM_DELETE_WINDOW',
-  );
 
-  // WM close button: ClientMessage with data[0] = WM_DELETE_WINDOW atom
-  sat.emit('message', { format: 32, data: [999, 0, 0, 0, 0] });
+  // WM close button: ntk >= 5.3 decodes WM_DELETE_WINDOW into a cancellable
+  // 'close' event (#160). react-x11 must always prevent the default — ntk
+  // would destroy the window, and the unmount is React's decision.
+  const closeEv = {
+    name: 'close',
+    time: 0,
+    defaultPrevented: false,
+    preventDefault() {
+      closeEv.defaultPrevented = true;
+    },
+  };
+  sat.emit('close', closeEv);
   await tick();
   assert.deepStrictEqual(events, ['sat-close']);
+  assert.strictEqual(
+    closeEv.defaultPrevented,
+    true,
+    "react-x11 prevents ntk's default destroy; the handler decides",
+  );
   assert.strictEqual(
     sat.destroyed,
     true,
@@ -2256,8 +2267,8 @@ test('multiple root windows share one tree; onCloseRequest handles WM close', as
   );
   assert.strictEqual(app.windows[0].destroyed, false, 'main window stays');
 
-  // unrelated client messages do not fire the handler
-  app.windows[0].emit('message', { format: 32, data: [123, 0, 0, 0, 0] });
+  // raw client messages no longer reach the close path at all
+  app.windows[0].emit('message', { format: 32, data: [999, 0, 0, 0, 0] });
   await tick();
   assert.deepStrictEqual(events, ['sat-close']);
 

@@ -4,6 +4,7 @@
 // typeahead.js and keys.js.
 export { ThemeProvider, useTheme } from './theme.js';
 export { anchorRect, centerRect, useAnchor } from './anchor.js';
+export { useDropTarget } from './dnd.js';
 export { Button } from './Button.js';
 export { Dialog } from './Dialog.js';
 export { Checkbox } from './Checkbox.js';

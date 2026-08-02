@@ -21,7 +21,9 @@ export function createMockApp() {
       display: { screen: [{ root: 1 }] },
       keycode2keysyms: {},
       InternAtom(onlyIfExists, name, cb) {
-        cb(null, name === 'WM_DELETE_WINDOW' ? 999 : 1);
+        // unique ids, so per-name atom tables (src/dnd.js) work on the mock
+        if (!app._atoms.has(name)) app._atoms.set(name, 1000 + app._atoms.size);
+        cb(null, app._atoms.get(name));
       },
       ConfigureWindow(id, options) {
         app.configureCalls.push([id, options]);
@@ -34,6 +36,7 @@ export function createMockApp() {
       },
     },
     configureCalls: [],
+    _atoms: new Map([['WM_DELETE_WINDOW', 999]]),
     closed: 0,
     close() {
       app.closed++;

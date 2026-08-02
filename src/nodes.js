@@ -27,6 +27,7 @@ import {
   resolveSizeQueries,
 } from './styles.js';
 import { EventManager, discrete } from './events.js';
+import { DropSession, dndAtoms, hasDropProps, XDND_VERSION } from './dnd.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
@@ -544,7 +545,12 @@ export class Node {
     // absolute rect within the owning window, filled by absolutize()
     this.abs = { x: 0, y: 0, width: 0, height: 0 };
     // node states that style blocks can react to, owned by EventManager
-    this.states = { ':hover': false, ':focus': false, ':active': false };
+    this.states = {
+      ':hover': false,
+      ':focus': false,
+      ':active': false,
+      ':drag-over': false,
+    };
     // in-flight transitions: prop -> {from, to, start, duration}
     this._anim = null;
     this._syncStyle(props);
@@ -967,6 +973,14 @@ export class Node {
     }
     if (Boolean(newProps.trapFocus) !== Boolean((oldProps ?? prev).trapFocus)) {
       this._syncFocusScope();
+    }
+    // drop-target registration follows the props edge, like trapFocus
+    if (hasDropProps(newProps) !== hasDropProps(oldProps ?? prev)) {
+      const root = this.root;
+      if (root?._registerDropTarget) {
+        if (hasDropProps(newProps)) root._registerDropTarget(this);
+        else root._forgetDropTarget(this);
+      }
     }
     // This is how every React update arrives, so it is where partial
     // painting pays for itself. `applyLayoutStyle` has just told us whether
@@ -3476,11 +3490,71 @@ export class WindowNode extends Node {
     // transient is mapped, so this belongs before the map too. ntk writes it
     // with predefined atoms and no round trip, so "before" is free.
     this._applyTransientFor(this.props.transientFor);
+    // Top-level windows advertise XDND before the map, like the EWMH
+    // properties above: a declaration, made before anyone can look. Child
+    // <window>s never advertise (XDND v3 puts XdndAware on top-levels
+    // only); drags over them arrive here and are routed down in JS.
+    if (!parentWindow) this._initDnd();
     wnd.map?.();
     // ask before anything can be anchored to it, so the first popup is
     // placed as well as the second
     this._refreshScreenOrigin();
     this.invalidate(true, null, 'mount');
+  }
+
+  /**
+   * XDND drop-target wiring (src/dnd.js): write `XdndAware = 5`, start the
+   * atom interning, and route incoming ClientMessages to the session.
+   * Unconditional — the property is 4 bytes on a window that exists anyway,
+   * and advertising lazily would race sources that cache the window list
+   * at drag start. A window with no registered drop targets answers "not
+   * accepting" once per entry instead (DropSession).
+   */
+  _initDnd() {
+    const wnd = this.window;
+    const X = this.app?.X;
+    if (
+      !X ||
+      typeof X.InternAtom !== 'function' ||
+      typeof wnd.on !== 'function' ||
+      typeof wnd.setProperty !== 'function'
+    ) {
+      return; // mock app, or an ntk too old to write raw properties
+    }
+    this._dnd = new DropSession(this);
+    void dndAtoms(X).catch(() => {});
+    wnd
+      .setProperty('XdndAware', [XDND_VERSION], { type: 'ATOM' })
+      .catch(() => {});
+    wnd.on('message', (ev) => this._dnd.handleMessage(ev));
+  }
+
+  /** Nodes with drop props register with their root; the count gates the
+   * whole-window "not accepting" fast path. Child <window>s roll up into
+   * their top-level's count, since that is where the messages arrive. */
+  _registerDropTarget(node) {
+    (this._dropTargets ??= new Set()).add(node);
+  }
+
+  _forgetDropTarget(node) {
+    this._dropTargets?.delete(node);
+    this._dndOwner()?.forget(node);
+  }
+
+  _dndTargetCount() {
+    let count = this._dropTargets?.size ?? 0;
+    for (const child of this.children) {
+      if (child.isWindow && !child.isPopup) count += child._dndTargetCount();
+    }
+    return count;
+  }
+
+  /** The session that owns drags over this window: its own for a
+   * top-level, the enclosing top-level's for a nested <window>. */
+  _dndOwner() {
+    let node = this;
+    while (node && !node._dnd) node = node.parent?.root;
+    return node?._dnd ?? null;
   }
 
   /**
@@ -3685,31 +3759,28 @@ export class WindowNode extends Node {
     // WM_DELETE_WINDOW protocol and the handler decides what happens
     // (unmount, hide, quit). Without it the WM default stands (the server
     // kills the connection). Opt-in is decided at realize time.
-    if (this.props.onCloseRequest && typeof wnd.setActions === 'function') {
-      wnd.setActions();
-      const X = this.app.X;
-      if (typeof X?.InternAtom === 'function') {
-        X.InternAtom(false, 'WM_DELETE_WINDOW', (err, atom) => {
-          if (!err) this._wmDeleteAtom = atom;
-        });
-      }
+    //
+    // ntk >= 5.3 owns the protocol: listening for 'close' self-arms
+    // WM_PROTOCOLS and decodes the ClientMessage (#160). Its default action
+    // — destroy the window — is always prevented, because what happens next
+    // is this handler's decision, and usually a React unmount: ntk tearing
+    // the window down underneath the reconciler is exactly what the prop
+    // exists to avoid. This also leaves the raw 'message' stream free for
+    // protocols react-x11 speaks itself (XDND, src/dnd.js).
+    if (this.props.onCloseRequest) {
       wnd.on(
-        'message',
+        'close',
         // a WM close is a user action: discrete priority and a discrete
         // paint, like a click. An onCloseRequest that answers with a
         // "save your work?" dialog rather than an unmount is the case that
         // notices — the dialog is the response to the press on the WM's
         // close button, and it is one paint away.
         discrete((ev) => {
-          if (
-            this._wmDeleteAtom != null &&
-            ev.data?.[0] === this._wmDeleteAtom
-          ) {
-            runWithPriority(DiscreteEventPriority, () => {
-              const handler = this.props.onCloseRequest;
-              if (handler) callHandler(this, 'onCloseRequest', handler, ev);
-            });
-          }
+          ev.preventDefault();
+          runWithPriority(DiscreteEventPriority, () => {
+            const handler = this.props.onCloseRequest;
+            if (handler) callHandler(this, 'onCloseRequest', handler, ev);
+          });
         }),
       );
     }
@@ -3827,6 +3898,11 @@ export class WindowNode extends Node {
     const style = this._syncStyle(newProps);
     if (Boolean(newProps.trapFocus) !== Boolean(before.trapFocus)) {
       this._syncFocusScope();
+    }
+    // a <window onDrop> is a whole-window dropzone; same edge as Node
+    if (hasDropProps(newProps) !== hasDropProps(before)) {
+      if (hasDropProps(newProps)) this._registerDropTarget(this);
+      else this._forgetDropTarget(this);
     }
     const wnd = this.window;
     if (!wnd) {

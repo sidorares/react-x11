@@ -32,6 +32,7 @@ import {
   WINDOW_HINT_PROPS,
 } from './nodes.js';
 import { flattenStyle } from './styles.js';
+import { hasDropProps } from './dnd.js';
 import { defaultRootHandlers, setErrorHandler } from './errors.js';
 import {
   registerApp,
@@ -343,9 +344,13 @@ const HostConfig = {
     // Popups are not attached to the container or realized by a parent
     // window; commitMount realizes them against the screen root. autoFocus
     // and trapFocus need commitMount too — the node has to be in the tree
-    // first, so it can find the EventManager that owns focus.
+    // first, so it can find the EventManager that owns focus. Drop targets
+    // likewise: registration needs the root, which insertion assigns.
     return (
-      type === 'popup' || Boolean(props.autoFocus) || Boolean(props.trapFocus)
+      type === 'popup' ||
+      Boolean(props.autoFocus) ||
+      Boolean(props.trapFocus) ||
+      hasDropProps(props)
     );
   },
 
@@ -355,6 +360,9 @@ const HostConfig = {
     }
     if (props.trapFocus) {
       instance._syncFocusScope?.();
+    }
+    if (hasDropProps(props)) {
+      instance.root?._registerDropTarget?.(instance);
     }
     if (props.autoFocus && typeof instance.focus === 'function') {
       instance.focus();
@@ -423,6 +431,7 @@ const HostConfig = {
 
   detachDeletedInstance(instance) {
     instance.root?.events?.forget(instance);
+    instance.root?._forgetDropTarget?.(instance);
   },
 
   preparePortalMount() {},
