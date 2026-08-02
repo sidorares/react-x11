@@ -59,7 +59,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^5.4.0",
+    "ntk": "^6.0.1",
     "react-reconciler": "^0.33.0"
   },
   "peerDependencies": {

@@ -1,51 +1,51 @@
 {
   "text: paragraph, no clip": {
-    "requests": 32,
-    "bytesOut": 5884,
+    "requests": 28,
+    "bytesOut": 5780,
     "bytesIn": 32,
     "replies": 1,
     "composites": 1,
     "compositePixels": 160000
   },
   "text: paragraph, inside a rect clip": {
-    "requests": 40,
-    "bytesOut": 6040,
+    "requests": 30,
+    "bytesOut": 5820,
     "bytesIn": 32,
     "replies": 1,
     "composites": 1,
     "compositePixels": 160000
   },
   "clips: 40 nested rect clips with text": {
-    "requests": 277,
-    "bytesOut": 97884,
+    "requests": 147,
+    "bytesOut": 93024,
     "bytesIn": 32,
     "replies": 1,
     "composites": 1,
     "compositePixels": 160000
   },
   "shapes: 50 filled rounded boxes": {
-    "requests": 120,
-    "bytesOut": 68424,
+    "requests": 112,
+    "bytesOut": 68216,
     "bytesIn": 32,
     "replies": 1,
     "composites": 51,
     "compositePixels": 224800
   },
   "mount: window with 40 boxes and labels": {
-    "requests": 89,
-    "bytesOut": 3752,
-    "bytesIn": 192,
-    "replies": 4,
+    "requests": 100,
+    "bytesOut": 3952,
+    "bytesIn": 768,
+    "replies": 22,
     "composites": 21,
     "compositePixels": 298240
   },
   "scroll: 10 notches over 500 rows": {
-    "requests": 418,
-    "bytesOut": 16880,
+    "requests": 348,
+    "bytesOut": 14360,
     "bytesIn": 704,
     "replies": 22,
-    "composites": 111,
-    "compositePixels": 650000
+    "composites": 81,
+    "compositePixels": 644480
   },
   "svg: 100 unchanged icons, full repaint": {
     "requests": 106,
@@ -57,7 +57,7 @@
   },
   "svg: 10 unchanged icons in a damaged row": {
     "requests": 42,
-    "bytesOut": 980,
+    "bytesOut": 972,
     "bytesIn": 128,
     "replies": 4,
     "composites": 11,
@@ -72,16 +72,16 @@
     "compositePixels": 0
   },
   "update: 5 color flips, no layout": {
-    "requests": 60,
-    "bytesOut": 1220,
+    "requests": 58,
+    "bytesOut": 1128,
     "bytesIn": 384,
     "replies": 12,
     "composites": 10,
     "compositePixels": 25020
   },
   "update: 5 absolute box moves (layout)": {
-    "requests": 58,
-    "bytesOut": 1156,
+    "requests": 57,
+    "bytesOut": 1112,
     "bytesIn": 384,
     "replies": 12,
     "composites": 10,
