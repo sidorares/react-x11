@@ -26,6 +26,14 @@ import {
 } from './priority.js';
 import { callHandler, reportHandlerError } from './errors.js';
 import { discrete } from './events.js';
+import {
+  TEXT_TARGETS,
+  TYPE_GROUPS,
+  decodeData,
+  parseUriList,
+  resolveType,
+  typeMatches,
+} from './transfer.js';
 
 export const XDND_VERSION = 5;
 
@@ -117,47 +125,7 @@ function atomName(X, atom) {
   return p;
 }
 
-// ---------------------------------------------------------------------------
-// The type vocabulary.
-//
-// The same logical payload arrives under different names depending on who is
-// dragging: files are text/uri-list (plus desktop-specific variants), GTK
-// text is text/plain;charset=utf-8 / UTF8_STRING / STRING / COMPOUND_TEXT,
-// Firefox links are UTF-16 text/x-moz-url, Chromium's are _NETSCAPE_URL.
-// String equality on 'text/plain' misses GTK text entirely — normalising
-// this once, here, is the interop feature.
-// ---------------------------------------------------------------------------
-
-/** Best-first text flavours, for `e.text` and the 'text' group. */
-const TEXT_TARGETS = [
-  'text/plain;charset=utf-8',
-  'UTF8_STRING',
-  'text/plain',
-  'STRING',
-  'TEXT',
-  'COMPOUND_TEXT',
-];
-
-const TYPE_GROUPS = {
-  files: [
-    'text/uri-list',
-    'application/x-kde4-urilist',
-    'x-special/gnome-copied-files',
-  ],
-  uris: ['text/uri-list', 'text/x-moz-url', '_NETSCAPE_URL'],
-  text: TEXT_TARGETS,
-};
-
-/** Does the offered type list satisfy one accept entry — a semantic group
- * ('files' | 'uris' | 'text') or a concrete type name? MIME names compare
- * case-insensitively; X atom names like UTF8_STRING are exact. */
-export function typeMatches(offered, want) {
-  const group = TYPE_GROUPS[want];
-  if (group) return group.some((t) => offered.includes(t));
-  if (offered.includes(want)) return true;
-  const lower = String(want).toLowerCase();
-  return offered.some((t) => t.toLowerCase() === lower);
-}
+export { parseUriList, typeMatches };
 
 /**
  * Does a node's `dropAccept` accept this offer? `dropAccept` is a type
@@ -170,34 +138,6 @@ export function matchAccept(accept, offered) {
   if (typeof accept === 'function') return Boolean(accept(offered));
   const list = Array.isArray(accept) ? accept : [accept];
   return list.some((want) => typeMatches(offered, want));
-}
-
-/**
- * Parse a `text/uri-list` payload (RFC 2483): CRLF-separated, `#` lines are
- * comments, URIs are percent-encoded. `path` is present only for `file:`
- * URIs that are actually local — a remote `file://host/...` has no local
- * path and must not pretend to.
- */
-export function parseUriList(text) {
-  const files = [];
-  for (const line of String(text).split(/\r?\n/)) {
-    const uri = line.trim();
-    if (!uri || uri.startsWith('#')) continue;
-    const entry = { uri };
-    try {
-      const url = new URL(uri);
-      if (
-        url.protocol === 'file:' &&
-        (url.hostname === '' || url.hostname === 'localhost')
-      ) {
-        entry.path = decodeURIComponent(url.pathname);
-      }
-    } catch {
-      // not a parseable URI — keep the raw line, claim no path
-    }
-    files.push(entry);
-  }
-  return files;
 }
 
 /** The props that make a node a drop target (and register it, see
@@ -247,13 +187,6 @@ function actionAtom(atoms, name) {
 
 /** Decode selection bytes for a text-ish target; anything else stays a
  * Buffer. STRING is defined as latin-1; everything textual else is UTF-8. */
-function decodeData(data, target) {
-  const textish =
-    TEXT_TARGETS.includes(target) || /^text\//i.test(String(target));
-  if (!textish) return data;
-  return data.toString(target === 'STRING' ? 'latin1' : 'utf8');
-}
-
 /**
  * The viewport a drag over `path` scrolls: the nearest enclosing one,
  * found by walking out from the hit node the same way the wheel's default
@@ -968,9 +901,7 @@ export class DropSession {
   /** `getData('files')` and friends: resolve a semantic group to the first
    * concretely offered member. */
   _resolveType(type) {
-    const group = TYPE_GROUPS[type];
-    if (!group) return type;
-    return group.find((t) => this.types.includes(t)) ?? type;
+    return resolveType(type, this.types);
   }
 
   // -- geometry ------------------------------------------------------------
@@ -1315,13 +1246,8 @@ export class DragSession {
       const v = this._resolve(best);
       if (typeof v === 'string') text = v;
     }
-    const getData = (type) => {
-      const group = TYPE_GROUPS[type];
-      const concrete = group
-        ? (this.types.find((t) => group.includes(t)) ?? type)
-        : type;
-      return Promise.resolve(this._resolve(concrete));
-    };
+    const getData = (type) =>
+      Promise.resolve(this._resolve(resolveType(type, this.types)));
     return { items, files, text, getData };
   }
 

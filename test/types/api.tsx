@@ -12,6 +12,8 @@ import {
   Button,
   Canvas3D,
   Checkbox,
+  useApp,
+  useClipboard,
   ContextMenu,
   createRoot,
   createStyles,
@@ -487,6 +489,35 @@ async function main() {
   void [n, perOpcode, one.stats.errors, one.stop()];
 }
 
+// the clipboard facade: groups, options, and the two read contracts
+function _Clip() {
+  const app = useApp();
+  const clipboard = useClipboard();
+  async function go() {
+    await clipboard.writeText('hi');
+    await clipboard.write({ 'text/html': '<b>hi</b>', 'text/plain': 'hi' });
+    await clipboard.writeText('sel', { selection: 'PRIMARY', time: 12 });
+    const text: string = await clipboard.readText();
+    const rich: string | Uint8Array | null = await clipboard.read('text');
+    const png = await clipboard.read('image/png', { timeout: 500 });
+    const files = await clipboard.readFiles();
+    const first: string | undefined = files[0]?.path;
+    const offered: string[] = await clipboard.targets();
+    const stop = await clipboard.watch((ev) => {
+      const empty: boolean = ev.owner === 0;
+      void empty;
+    });
+    const stop2 = await clipboard.watch('PRIMARY', () => {});
+    stop();
+    stop2();
+    await clipboard.clear('PRIMARY');
+    void [app, text, rich, png, first, offered];
+  }
+  void go;
+  return null;
+}
+
+void _Clip;
 void main;
 void grow;
 void _div;

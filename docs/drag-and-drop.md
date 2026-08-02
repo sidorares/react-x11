@@ -54,7 +54,9 @@ What the node will take. Four shapes:
 
 The three groups exist because the same payload arrives under different
 names depending on who is dragging, and exact-match filtering silently
-misses most of the desktop:
+misses most of the desktop. The clipboard uses the same table, on purpose —
+what a file manager offers on a drop is what it offers on a copy, so
+[`clipboard.read('files')`](clipboard.md#reading) resolves it the same way:
 
 | group     | matches                                                                                                    |
 | --------- | ---------------------------------------------------------------------------------------------------------- |

@@ -42,6 +42,77 @@ export function createMockApp() {
       app.closed++;
       return Promise.resolve();
     },
+    // A clipboard that behaves like ntk's without a server: selections are
+    // owned in this process, so a write is visible to the next read. Enough
+    // for anything that copies or pastes — the ICCCM machinery itself is
+    // tested against the real thing in test/clipboard.test.js.
+    clipboard: {
+      /** every write, in order: `{ data, selection, time }` */
+      writes: [],
+      /** selection name -> the target map currently owned */
+      owned: new Map(),
+      _watchers: new Map(),
+      write(data, { selection = 'CLIPBOARD', time } = {}) {
+        app.clipboard.writes.push({ data, selection, time });
+        const map =
+          typeof data === 'string'
+            ? { UTF8_STRING: data, STRING: data }
+            : { ...data };
+        app.clipboard.owned.set(selection, map);
+        for (const fn of app.clipboard._watchers.get(selection) ?? []) {
+          fn({ selection, owner: 1, reason: 'new-owner' });
+        }
+        return Promise.resolve();
+      },
+      clear(selection = 'CLIPBOARD') {
+        app.clipboard.owned.delete(selection);
+        for (const fn of app.clipboard._watchers.get(selection) ?? []) {
+          fn({ selection, owner: 0, reason: 'new-owner' });
+        }
+        return Promise.resolve();
+      },
+      targets({ selection = 'CLIPBOARD' } = {}) {
+        return Promise.resolve([
+          ...Object.keys(app.clipboard.owned.get(selection) ?? {}),
+        ]);
+      },
+      read({ selection = 'CLIPBOARD', target } = {}) {
+        const map = app.clipboard.owned.get(selection);
+        if (!map) {
+          return Promise.reject(
+            new Error(
+              `clipboard: nothing to paste — ${selection} has no owner`,
+            ),
+          );
+        }
+        if (target === undefined) {
+          const text = map.UTF8_STRING ?? map.STRING;
+          return text === undefined
+            ? Promise.reject(
+                new Error('clipboard: owner refused both text targets'),
+              )
+            : Promise.resolve(text);
+        }
+        if (!(target in map)) {
+          return Promise.reject(
+            new Error(`clipboard: owner cannot convert to ${target}`),
+          );
+        }
+        const value = map[target];
+        return Promise.resolve(
+          typeof value === 'string' ? Buffer.from(value, 'utf8') : value,
+        );
+      },
+      watch(selection, handler) {
+        const list = app.clipboard._watchers.get(selection) ?? [];
+        list.push(handler);
+        app.clipboard._watchers.set(selection, list);
+        return Promise.resolve(() => {
+          const at = list.indexOf(handler);
+          if (at !== -1) list.splice(at, 1);
+        });
+      },
+    },
     windows: [],
     createWindow(attributes) {
       const handlers = {};

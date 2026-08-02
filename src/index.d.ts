@@ -57,6 +57,75 @@ export function parseUriList(
   text: string | Uint8Array,
 ): Array<{ uri: string; path?: string }>;
 
+/** A semantic group, or any concrete type name the owner offers. */
+export type TransferType = 'text' | 'files' | 'uris' | (string & {});
+
+export interface ClipboardOptions {
+  /** Selection atom name; `'CLIPBOARD'` by default, `'PRIMARY'` for the
+   * middle-click buffer. Any name works. */
+  selection?: string;
+  /** ms to wait for the owner at each protocol step. */
+  timeout?: number;
+  /** The server timestamp of the event behind this (ICCCM 2.1 / 2.4).
+   * Defaults to the last input event seen on this connection, which is
+   * almost always what you want. */
+  time?: number;
+}
+
+export interface SelectionChange {
+  selection: string;
+  /** Window now owning it, or `0` when nothing does — the case an edit
+   * menu wants. */
+  owner: number;
+  timestamp?: number;
+  selectionTimestamp?: number;
+  reason?: 'new-owner' | 'destroyed' | 'closed';
+}
+
+/** What `useClipboard()` returns. See docs/clipboard.md. */
+export interface Clipboard {
+  /** Offer several flavours of one thing: type name to string or bytes. */
+  write(
+    data: string | Record<string, string | Uint8Array>,
+    options?: ClipboardOptions,
+  ): Promise<void>;
+  writeText(text: string, options?: ClipboardOptions): Promise<void>;
+  /** Stop owning the selection, so nothing is served for it any more. */
+  clear(selection?: string): Promise<void>;
+  /** What the current owner can convert to; `[]` when nothing owns it. */
+  targets(options?: ClipboardOptions): Promise<string[]>;
+  /** Plain text, via the owner's `UTF8_STRING`/`STRING` targets. Rejects
+   * when there is no owner or it offers neither — `read('text')` is the
+   * interop-hardened version. */
+  readText(options?: ClipboardOptions): Promise<string>;
+  /** One type, decoded, or `null` when the owner has nothing of that kind.
+   * Text-ish types resolve to a string, anything else to bytes. */
+  read(
+    type: TransferType,
+    options?: ClipboardOptions,
+  ): Promise<string | Uint8Array | null>;
+  /** Files copied in a file manager, parsed; `[]` when there are none. */
+  readFiles(
+    options?: ClipboardOptions,
+  ): Promise<Array<{ uri: string; path?: string }>>;
+  /** Called whenever the selection changes hands. Resolves to an
+   * unsubscribe function. Rejects on a server without XFixes. */
+  watch(handler: (change: SelectionChange) => void): Promise<() => void>;
+  watch(
+    selection: string,
+    handler: (change: SelectionChange) => void,
+  ): Promise<() => void>;
+}
+
+/**
+ * The ntk connection this tree renders onto — `app.fonts`, `app.cursors`,
+ * `app.X` and the rest. Throws outside a tree rendered by `createRoot()`.
+ */
+export function useApp(): unknown;
+
+/** The clipboard, scoped to this tree's connection. */
+export function useClipboard(): Clipboard;
+
 /** What React reports alongside an error it caught. */
 export interface ErrorInfo {
   componentStack?: string;

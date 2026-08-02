@@ -33,6 +33,7 @@ import {
 } from './nodes.js';
 import { flattenStyle } from './styles.js';
 import { hasDropProps } from './dnd.js';
+import { AppProvider } from './appcontext.js';
 import { defaultRootHandlers, setErrorHandler } from './errors.js';
 import {
   registerApp,
@@ -379,6 +380,12 @@ const HostConfig = {
       // screen root.
       child.realize(null);
     }
+    // React's getPublicRootInstance answers from the root fiber's first
+    // child, and only when that child is a host component. `render()` wraps
+    // the tree in a context provider, which is not one, so it would answer
+    // null — the container keeps the list instead. Same answer as before:
+    // the first top-level node the tree put here.
+    (container._rootChildren ??= []).push(child);
   },
 
   insertBefore(parentInstance, child, beforeChild) {
@@ -394,6 +401,9 @@ const HostConfig = {
   },
 
   removeChildFromContainer(container, child) {
+    const roots = container._rootChildren;
+    const at = roots ? roots.indexOf(child) : -1;
+    if (at !== -1) roots.splice(at, 1);
     child.destroySubtree();
   },
 
@@ -681,8 +691,22 @@ export async function createRoot(options = {}) {
   return {
     app,
     render(element, callback) {
-      Renderer.updateContainerSync(element, container, null, () => {
-        callback?.(Renderer.getPublicRootInstance(container), app);
+      // The provider wraps rather than replaces: it renders no host node, so
+      // `getPublicRootInstance` still hands back the tree's own root and
+      // nothing downstream can tell it is there. `null` unmounts, and must
+      // stay null rather than become a provider around nothing.
+      // The provider renders no host node, so it changes nothing about
+      // what is drawn — but it does sit between the root fiber and the
+      // tree, which is why the public instance comes from the container's
+      // own record rather than from getPublicRootInstance. `null` unmounts,
+      // and has to stay null rather than become a provider around nothing.
+      const tree =
+        element == null
+          ? element
+          : React.createElement(AppProvider, { value: app }, element);
+      Renderer.updateContainerSync(tree, container, null, () => {
+        const rootNode = app._rootChildren?.[0] ?? null;
+        callback?.(rootNode && HostConfig.getPublicInstance(rootNode), app);
       });
       Renderer.flushSyncWork();
     },
