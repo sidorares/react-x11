@@ -1,7 +1,8 @@
 // Regenerates the README screenshots (docs/img/*.png) headlessly: renders
 // the real examples into node-x11's in-process pure-JS X server, drives
 // them through the real event pipeline (clicks, typing, opening the Select
-// popup), reads pixels back with GetImage and writes PNGs. No $DISPLAY.
+// popup), reads pixels back through `scripts/capture.js` and writes PNGs.
+// No $DISPLAY.
 //
 //   npm run screenshots
 //
@@ -38,6 +39,8 @@ import React from 'react';
 import { PNG } from 'pngjs';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
+
+import { blit, captureWindow } from './capture.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../src/index.js');
@@ -203,43 +206,37 @@ async function typeText(app, wnd, text) {
   }
 }
 
-async function capture(wnd) {
-  const { width, height } = wnd;
-  const ctx = wnd.getContext('2d');
-  const data = await new Promise((resolve, reject) =>
-    ctx.getImageData(0, 0, width, height, (err, d) =>
-      err ? reject(err) : resolve(d),
-    ),
-  );
-  return { data: data.data, width, height };
-}
-
-/** Blit a capture into a PNG at (ox, oy), converting BGRA to RGBA. */
-function blit(png, src, ox, oy) {
-  for (let y = 0; y < src.height; y++) {
-    for (let x = 0; x < src.width; x++) {
-      const dx = ox + x;
-      const dy = oy + y;
-      if (dx < 0 || dy < 0 || dx >= png.width || dy >= png.height) continue;
-      const s = (y * src.width + x) * 4;
-      const d = (dy * png.width + dx) * 4;
-      png.data[d + 0] = src.data[s + 2];
-      png.data[d + 1] = src.data[s + 1];
-      png.data[d + 2] = src.data[s + 0];
-      png.data[d + 3] = 255;
-    }
-  }
-}
-
 function write(png, name) {
   const file = join(outDir, `${name}.png`);
   writeFileSync(file, PNG.sync.write(png));
   console.log(`wrote ${file} (${png.width}x${png.height})`);
 }
 
+/**
+ * Pin the caret on before capturing.
+ *
+ * A focused `<textinput>` blinks on a 500ms interval, so whether its caret
+ * is in the shot is a race between that timer and the sleep above — and a
+ * one-pixel column that flips at random is exactly what the frozen clock and
+ * the pinned heap usage above exist to prevent. Caret **on** is also the
+ * more honest picture: these scenes have just typed into the field.
+ */
+function pinCaret(wnd) {
+  const walk = (node) => {
+    if (node._focused && node._repaint) node._repaint();
+    for (const child of node.children) if (!child.isWindow) walk(child);
+  };
+  const root = wnd._reactX11Node;
+  if (!root) return;
+  walk(root);
+  root._scheduled = false;
+  root.flush();
+}
+
 async function shot(wnd, name) {
   await sleep(250); // let the frame clock paint
-  const base = await capture(wnd);
+  pinCaret(wnd);
+  const base = await captureWindow(wnd);
   const png = new PNG({ width: base.width, height: base.height });
   blit(png, base, 0, 0);
   write(png, name);
@@ -252,8 +249,9 @@ async function shot(wnd, name) {
  */
 async function shotOver(wnd, popup, x, y, name) {
   await sleep(250);
-  const base = await capture(wnd);
-  const over = await capture(popup);
+  pinCaret(wnd);
+  const base = await captureWindow(wnd);
+  const over = await captureWindow(popup);
   const png = new PNG({ width: base.width, height: base.height });
   blit(png, base, 0, 0);
   blit(png, over, x, y);

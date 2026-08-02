@@ -21,6 +21,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import React from 'react';
 
+import { captureDrawable, toPng } from './capture.js';
+
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../src/index.js');
 
@@ -101,28 +103,14 @@ async function findFrame(app, wid) {
   return { frame, reparented: frame !== wid };
 }
 
+// The frame belongs to the window manager, not to us, so there is no ntk
+// context to read it through — `captureDrawable` takes the raw GetImage
+// route and asks the display what the bytes mean.
 async function capture(app, drawable, file) {
-  const X = app.X;
-  const geom = await cb2p(X.GetGeometry.bind(X))(drawable);
-  const img = await cb2p(X.GetImage.bind(X))(
-    2 /* ZPixmap */,
-    drawable,
-    0,
-    0,
-    geom.width,
-    geom.height,
-    0xffffffff,
-  );
-  const png = new PNG({ width: geom.width, height: geom.height });
-  for (let i = 0; i < geom.width * geom.height; i++) {
-    png.data[i * 4 + 0] = img.data[i * 4 + 2]; // BGRA -> RGBA
-    png.data[i * 4 + 1] = img.data[i * 4 + 1];
-    png.data[i * 4 + 2] = img.data[i * 4 + 0];
-    png.data[i * 4 + 3] = 255;
-  }
+  const shot = await captureDrawable(app, drawable);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, PNG.sync.write(png));
-  return geom;
+  writeFileSync(file, PNG.sync.write(toPng(shot)));
+  return shot;
 }
 
 // --- run -------------------------------------------------------------------

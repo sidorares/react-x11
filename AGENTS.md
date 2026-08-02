@@ -132,6 +132,18 @@ no override-redirect staging (issue #4).
   the in-process X server has no GL, so it is captured by hand from
   `npm run examples:three` on a real server with indirect GLX. Re-capture it
   only when the 3D examples change visibly.
+  **Pixels come out of `scripts/capture.js` and nowhere else**, and
+  `test/capture.test.js` pins it. Every script here used to hand-roll "the
+  server gives BGRA" and swap the channels itself; ntk 5.3.0 made
+  `getImageData` speak straight RGBA the way canvas does, and `screenshots`
+  then regenerated every PNG with its reds and blues exchanged — for a whole
+  ntk major, because a committed screenshot has no other reader and CI does
+  not diff them. A window of ours goes through `captureWindow`; a drawable
+  we do not own — a WM frame — through `captureDrawable`, which asks the
+  display for the pixel layout rather than assuming one. The script also
+  pins the `<textinput>` caret **on** before capturing, alongside the frozen
+  clock and heap usage: a blinking caret made `tasks.png` differ run to run,
+  which is what makes a dirty tree after a regeneration meaningless.
 - `npm run screenshots:framed [scene…]` — the same examples captured
   **with the window manager's frame**, into `docs/img/framed/`
   (gitignored — the decorations are whatever WM is running locally, so

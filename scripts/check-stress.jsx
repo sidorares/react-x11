@@ -29,6 +29,8 @@ import { PNG } from 'pngjs';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
+import { captureWindow, toPng } from './capture.js';
+
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../src/index.js');
 const App = (await import('../examples/stress/index.jsx')).default;
@@ -160,40 +162,23 @@ function countNodes(node) {
 }
 
 async function readback() {
-  const data = await new Promise((resolve, reject) =>
-    app.display.client.GetImage(
-      2,
-      wnd.id,
-      0,
-      0,
-      W,
-      H,
-      0xffffffff,
-      (err, img) => (err ? reject(err) : resolve(img.data)),
-    ),
-  );
+  const shot = await captureWindow(wnd);
+  const { data } = shot;
   // Ink = pixels that are not the window background, a crude "did anything
   // render at all" signal that catches a panel laid out to zero height.
   let ink = 0;
   for (let i = 0; i < W * H; i++) {
-    const b = data[i * 4];
+    const r = data[i * 4];
     const g = data[i * 4 + 1];
-    const r = data[i * 4 + 2];
+    const b = data[i * 4 + 2];
     if (r !== 245 || g !== 246 || b !== 250) ink += 1;
   }
-  return { data, ink };
+  return { shot, ink };
 }
 
-function writePng(name, data) {
-  const png = new PNG({ width: W, height: H });
-  for (let i = 0; i < W * H; i++) {
-    png.data[i * 4] = data[i * 4 + 2]; // GetImage gives BGRA
-    png.data[i * 4 + 1] = data[i * 4 + 1];
-    png.data[i * 4 + 2] = data[i * 4];
-    png.data[i * 4 + 3] = 255;
-  }
+function writePng(name, shot) {
   const out = join(tmpdir(), `stress-${name}.png`);
-  writeFileSync(out, PNG.sync.write(png));
+  writeFileSync(out, PNG.sync.write(toPng(shot)));
   return out;
 }
 
@@ -322,8 +307,8 @@ for (const tab of TABS) {
   }
   const nodes = countNodes(root);
   nodeCounts[tab] = nodes;
-  const { data, ink } = await readback();
-  const png = WRITE_PNG ? `  ${writePng(tab.toLowerCase(), data)}` : '';
+  const { shot, ink } = await readback();
+  const png = WRITE_PNG ? `  ${writePng(tab.toLowerCase(), shot)}` : '';
   realError(
     `  ${tab.padEnd(12)} ${String(nodes).padStart(6)} ${((ink / (W * H)) * 100).toFixed(1).padStart(6)}%${png}`,
   );
