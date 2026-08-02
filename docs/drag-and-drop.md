@@ -62,9 +62,12 @@ misses most of the desktop:
 | `'uris'`  | `text/uri-list`, `text/x-moz-url`, `_NETSCAPE_URL`                                                         |
 | `'text'`  | `text/plain;charset=utf-8`, `UTF8_STRING`, `text/plain`, `STRING`, `TEXT`, `COMPOUND_TEXT` (in that order) |
 
-`dropAccept={['text']}` therefore catches GTK text (`UTF8_STRING`), Firefox
-links (`text/x-moz-url`) and a plain terminal selection alike, where
-`dropAccept={['text/plain']}` would catch only the last.
+`dropAccept={['text']}` therefore catches GTK text (`UTF8_STRING`), a
+terminal selection (`STRING`) and a modern editor's
+`text/plain;charset=utf-8` alike, where `dropAccept={['text/plain']}`
+catches only the last of those. Groups do not overlap: a Firefox link is
+`text/x-moz-url`, which is in `uris`, so accept `['uris', 'text']` if you
+want both. A group only ever expands to its own list.
 
 `dropAccept` is **data, not a callback**, and that is load-bearing rather
 than stylistic: the protocol's accept/reject answer is computed straight
@@ -84,14 +87,18 @@ The order across one whole drag, source events and target events
 interleaved:
 
 ```
-onDragStart          the pointer passed the threshold
-  onDrag             ─┐ per pointer position, on the source
-  onDragEnter        ─┤ on nodes the drag moved onto
-  onDragOver         ─┤ on the node under the pointer, capture → bubble
-  onDragLeave        ─┘ on nodes the drag moved off
-onDrop               the release, on the accepting target
-onDragEnd            always last, on the source
+onDragStart                      the pointer passed the threshold
+  ┌ onDragLeave   (target)       nodes the drag moved off, deepest first
+  │ onDragEnter   (target)       nodes it moved onto, outermost first
+  │ onDragOver    (target)       the node under the pointer, capture → bubble
+  └ onDrag        (source)       last, once the target has been told
+onDrop                           the release, capture → bubble
+onDragEnd                        always last, on the source
 ```
+
+The four middle handlers repeat per pointer position, in that order — the
+target learns where the pointer is before the source hears about the move,
+which is why `onDrag`'s `accepted` is already up to date when it runs.
 
 `onDragEnd` runs even when nothing accepted the drop — with `action: null`
 and `dropped: false` — so releasing state there is safe.
@@ -128,7 +135,9 @@ plus, in `onDragOver` only, three ways to answer:
 - `e.freeze()` — tell the source to stop sending positions while the
   pointer stays inside this node's rectangle. Cheap on a remote display,
   but it makes the node deaf: **do not freeze a zone that draws an
-  insertion caret or auto-scrolls near its edges.**
+  insertion caret or auto-scrolls near its edges.** It applies to drags
+  from other applications only; during an in-app drag it does nothing,
+  since there is no source to tell.
 
 ### The drop
 
@@ -157,7 +166,10 @@ onDrop={async (e) => {
   `#` comment lines dropped, percent-decoding done. `path` is present only
   for genuinely local `file:` URIs — a remote `file://otherhost/…` has a
   `uri` and no `path`, rather than a path that does not exist here.
-- **`e.text`** — the best flavour the source offered, decoded.
+- **`e.text`** — the best text flavour the source offered, decoded. For a
+  file drag it is the raw `text/uri-list` payload instead, which is what
+  `e.files` was parsed from; and it is `undefined` when nothing text-ish
+  was offered or the conversion failed.
 - **`await e.getData(type)`** — one conversion of any offered type. Text-ish
   targets decode to a string, everything else stays raw bytes. Group names
   work: `getData('files')` resolves to whichever concrete type was offered.
@@ -252,9 +264,12 @@ happens to it:
 | any other object        | **by reference**, on `e.items` | `JSON.stringify`d                              |
 | a function (thunk)      | called on drop                 | called when the drag first leaves your windows |
 
-Thunks are the reason the payload of a drag that ends in the wastebasket is
-never built. Offer `'text/uri-list': () => buildUriList(selection)` and the
-list is assembled only if the drag actually reaches a foreign window.
+Thunks are why a payload nobody asks for is never built. Offer
+`'text/uri-list': () => buildUriList(selection)` and the list is assembled
+only when it is needed — at the drop for an in-app drag, and at the moment
+the pointer first leaves your windows for an external one. Note the second:
+crossing the window edge is enough to resolve every thunk, whether or not
+the drag is ever dropped.
 
 Type names are yours to choose. Use real MIME types for anything another
 application might want (`text/uri-list` is what every file manager reads),
@@ -275,18 +290,25 @@ and can still answer with any of them.
 
 Note what this does _not_ include: **there is no modifier-key
 negotiation.** Holding Ctrl or Shift during a drag does not switch copy to
-move the way a desktop file manager does — the source requests its first
-action and only the target can change it. Modifier state is not reported on
-drag events either: `e.ctrlKey` and `e.shiftKey` are `false` throughout a
-drag, whichever keys are held. Decide the action from what is being dragged
-and where it lands, not from the keyboard.
+move the way a desktop file manager does — the requested action is fixed
+when the drag starts, and only the target can change it.
+
+Modifier state is readable on the **source** side, where the events carry
+the real X motion event: `e.ctrlKey` and `e.shiftKey` are meaningful in
+`onDrag`. On the **target** side they are always `false` —
+`onDragEnter`/`onDragOver`/`onDragLeave`/`onDrop` are built from a
+synthesized event with no button mask — so a dropzone cannot see what the
+user is holding. Decide the action from what is being dragged and where it
+lands.
 
 ### The gesture
 
 DOM-shaped, and deliberately so:
 
 - A press on a `draggable` node is **still a click** until the pointer
-  moves 4px. Buttons inside draggable rows keep working.
+  moves 4px — measured as `|dx| + |dy|`, so a straight move needs the full
+  4 and a diagonal one starts at about 2.8. Buttons inside draggable rows
+  keep working.
 - `onDragStart` fires at the threshold. `e.preventDefault()` cancels — the
   gesture continues as ordinary mouse events.
 - `onDrag` fires per pointer position, with `screenX`/`screenY` and
@@ -402,7 +424,7 @@ const bin = /* the dropzone node */;
 
 await act(async () => {
   fireEvent.mouseDown(card);
-  fireEvent.mouseMove(card, { x: 60, y: 50 }); // past the 4px threshold
+  fireEvent.mouseMove(card, { dx: 8 }); // past the threshold, still on the card
   fireEvent.mouseMove(bin); // over the target
   fireEvent.mouseUp(bin);
 });
@@ -429,8 +451,10 @@ Not supported, deliberately or not yet:
   AWT applications speak only that and will not interoperate.
 - **XdndDirectSave (XDS)** — "drag out of the app to save a file into the
   file manager". A separate protocol layered on XDND.
-- **`XdndActionAsk`** — a source asking the target to offer a choice of
-  actions gets `copy` rather than a menu.
+- **A menu for `XdndActionAsk`.** A source asking the target to offer a
+  choice of actions is understood — `e.action` reports `'ask'` and the
+  request is echoed back — but nothing pops a Copy/Move/Link menu, so
+  answer it with a concrete `e.accept('copy')` if you handle it at all.
 - **Auto-scrolling** a `<scrollview>` when a drag hovers near its edge.
 - **`react-dnd`** and other DOM drag libraries — see
   [ecosystem.md](ecosystem.md).
@@ -443,10 +467,12 @@ For anyone watching the wire, or debugging against another toolkit:
   unconditionally at realize time. Child windows — `<glarea>`, a nested
   `<window>` — never advertise, per XDND v3+; drags over them arrive at the
   top-level and are routed down in JavaScript.
-- A window with **no drop targets mounted** answers the first position with
-  one refusal covering the whole window, so a source stops asking until the
-  pointer leaves. An app that never uses drag and drop costs one property
-  write, once, and nothing per drag.
+- A window with **no drop targets mounted** answers with a refusal covering
+  the whole window, so a well-behaved source stops asking while the pointer
+  stays inside it. What an app that never uses drag and drop still pays:
+  the `XdndAware` property, one batch of atom interns, and a session object
+  per top-level window, all once at realize — plus one refusal per drag
+  that crosses it.
 - The drop conversion uses the timestamp from `XdndDrop`, as the protocol
   requires, and `XdndSelection` is released at drag end with the timestamp
   it was acquired with (ICCCM 2.3.1).

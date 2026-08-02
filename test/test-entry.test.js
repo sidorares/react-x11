@@ -453,7 +453,7 @@ test('a drag and drop gesture is drivable through the published surface', async 
 
   await act(async () => {
     fireEvent.mouseDown(card);
-    fireEvent.mouseMove(card, { x: 60, y: 50 }); // past the threshold
+    fireEvent.mouseMove(card, { dx: 8 }); // past the threshold, still on the card
     fireEvent.mouseMove(bin);
     fireEvent.mouseUp(bin);
   });

@@ -73,7 +73,9 @@ node; a state change now recomputes one node's style and repaints. **No
 React render.**
 
 Precedence is fixed and low-to-high: `:hover` → `:focus` → `:active` →
-`:disabled`, merged per property, so a disabled control never looks hovered.
+`:disabled` → `:drag-over` → `:dragging`, merged per property, so a disabled
+control never looks hovered, and a drag in progress outranks all four of the
+pointer and focus states.
 Because the hover _path_ is the ancestor chain, hovering a child lights up an
 ancestor's `:hover` block, exactly like CSS.
 
