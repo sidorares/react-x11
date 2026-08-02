@@ -54,8 +54,8 @@ at that SHA.
   props like every other event in the toolkit, with `useDropTarget` as a
   thin convenience in `src/components/` — the same two-layer shape as
   `anchorRect`/`useAnchor` and `windowIdOf`/`useWindowId`.
-- **`accept` must be declarative, and that is a latency argument, not a taste
-  argument.** With `accept` as data, `XdndStatus` can be answered from the
+- **`dropAccept` must be declarative, and that is a latency argument, not a
+  taste argument.** With `dropAccept` as data, `XdndStatus` can be answered from the
   ClientMessage handler without entering React. An always-advertised window
   that stalls on a render stalls _the source application's drag cursor_ — the
   user sees another app freeze. Declarative accept is what makes "always
@@ -72,10 +72,10 @@ at that SHA.
   them apart. This is how GTK and Qt are built, and it is the only shape that
   respects the project's perceived-latency goal.
 - **The source half is 3–4× the target half, but it is no longer blocked.**
-  ntk 5.3.0 landed INCR on the selection *write* side plus arbitrary targets
+  ntk 5.3.0 landed INCR on the selection _write_ side plus arbitrary targets
   and binary payloads ([ntk#164](https://github.com/sidorares/ntk/issues/164)),
   which was the one hard prerequisite. `app.clipboard.write({'text/uri-list':
-  …, 'image/png': buf}, { selection: 'XdndSelection', time })` is the whole
+…, 'image/png': buf}, { selection: 'XdndSelection', time })` is the whole
   data-publishing half of an XDND source, today. See [§0.1](#01-audit-against-ntk-530).
 - **npm reuse: `react-dnd` is the one real prize.** Its core (`dnd-core`) is
   deliberately DOM-free and its backends are pluggable, so a
@@ -159,7 +159,7 @@ worth doing: `onCloseRequest` gains cancellability.
 
 `grabPointer({ cursor })` takes a cursor **XID**, and `app.cursors.get(name)`
 mints one from the standard cursor font (`cursor.js:68`). So the drag cursor
-*at grab time* needs no new ntk API. Only the mid-drag swap as the accepted
+_at grab time_ needs no new ntk API. Only the mid-drag swap as the accepted
 action changes needs `ChangeActivePointerGrab`, which node-x11 exposes
 (`corereqs.js:867`) and react-x11 can call directly. Phase 0 item downgraded
 from prerequisite to optional convenience wrapper.
@@ -170,7 +170,7 @@ the themed XCursor names toolkits use for drag feedback (`dnd-copy`,
 approximation until ntk gains XCursor theme loading — cosmetic, but it is the
 part of a drag the user stares at.
 
-#### Strengthened — request buffering does *not* cost the latency argument
+#### Strengthened — request buffering does _not_ cost the latency argument
 
 `feat: one socket write per frame — buffer requests by default`
 ([ntk#141](https://github.com/sidorares/ntk/issues/141), 5.0.0) is the change
@@ -179,7 +179,7 @@ event-loop turn": a 64 KB output buffer with a 5 ms age gate would have added
 up to a frame of latency to every reply.
 
 It does not. node-x11's frame buffer has an explicit backstop —
-"*nothing is left in the buffer when the event loop goes to poll for I/O*",
+"_nothing is left in the buffer when the event loop goes to poll for I/O_",
 implemented as a `setImmediate` flush (`framebuffer.js:33-38`), alongside the
 size cap, the 5 ms age gate and a flush before any request expecting a reply.
 A `SendEvent` written from the ClientMessage handler therefore leaves the
@@ -193,7 +193,7 @@ named mechanism, and the drag path got slightly cheaper.
    `write()` time (`clipboard.js:398`), so §6.2's lazy `dragData` thunks are
    resolved by react-x11 **at promotion** — when it takes `XdndSelection` —
    not when a target converts. Still worth having (an in-app drag serialises
-   *nothing*, and an external drag serialises once at promotion rather than at
+   _nothing_, and an external drag serialises once at promotion rather than at
    mousedown), but the "pull-based, so a 20 MB payload is never built for a
    drag that ends in the wastebasket" claim is now only true of drags that
    never leave our windows. Ask ntk for lazy payload getters if that matters.
@@ -361,7 +361,7 @@ Four reasons, in order of how much they hurt:
 
 The one obligation `always advertise` creates: **you must always answer, and
 answer fast.** A window that is `XdndAware` and silent freezes the _source_
-application's drag. That obligation is why `accept` has to be declarative
+application's drag. That obligation is why `dropAccept` has to be declarative
 (§4.1) — the answer must be computable without waiting for React.
 
 ### 2.5 The exact lifecycle points
@@ -416,7 +416,7 @@ and drop should inherit that, with three deliberate divergences.
    drop" — the most-complained-about wart in the HTML5 DnD API, and it is
    _meaningless here_: there is no browser and no default. Use
    `e.accept(action)` / `e.reject()`. Explicit, discoverable, and the
-   declarative `accept` prop means most code never calls either.
+   declarative `dropAccept` prop means most code never calls either.
 2. **No `e.dataTransfer`.** X selections are asynchronous — `ConvertSelection`
    then wait for `SelectionNotify`, possibly through INCR chunks. DOM's
    `getData()` is synchronous and returns a string. A `dataTransfer` whose
@@ -439,7 +439,7 @@ and drop should inherit that, with three deliberate divergences.
 This is where a plausible-looking API quietly fails in the field. Each item
 below is a concrete requirement on the API surface, not just the plumbing.
 
-### 4.1 `accept` must be smarter than string equality
+### 4.1 `dropAccept` must be smarter than string equality
 
 The same logical payload arrives under different names depending on who is
 dragging:
@@ -451,9 +451,9 @@ dragging:
 | A link from Firefox                    | `text/x-moz-url` (**UTF-16LE**, `url\ntitle`), `text/uri-list`, `text/plain`               |
 | A link from Chromium                   | `text/uri-list`, `_NETSCAPE_URL`, `text/html`                                              |
 
-`accept: ['text/plain']` therefore misses GTK text entirely, and
-`accept: ['text/uri-list']` catches files but silently drops Firefox's
-preferred link type. So `accept` takes:
+`dropAccept: ['text/plain']` therefore misses GTK text entirely, and
+`dropAccept: ['text/uri-list']` catches files but silently drops Firefox's
+preferred link type. So `dropAccept` takes:
 
 - exact MIME strings — `'image/png'`;
 - **semantic groups** — `'files'`, `'text'`, `'uris'` — expanding through a
@@ -481,7 +481,7 @@ once.
 
 ### 4.3 Protocol obligations that shape the API
 
-- **Answer `XdndPosition` promptly, always.** §2.4. Declarative `accept`
+- **Answer `XdndPosition` promptly, always.** §2.4. Declarative `dropAccept`
   handles the common case without React; a handler-based answer runs at
   `DiscreteEventPriority` and, if a render is in flight, replies with the last
   known answer rather than waiting.
@@ -551,7 +551,7 @@ capture/bubble machinery — no marker, no parallel router:
 
 ```jsx
 <box
-  accept={['files']} // declarative; answers XdndStatus without React
+  dropAccept={['files']} // declarative; answers XdndStatus without React
   onDragEnter={(e) => {}} // does not bubble, like onMouseEnter
   onDragOver={(e) => {}} // per motion, unless frozen
   onDragLeave={(e) => {}}
@@ -562,6 +562,20 @@ capture/bubble machinery — no marker, no parallel router:
   }}
 />
 ```
+
+**Why `dropAccept` and not `accept`.** Prop _presence_ is what registers a
+node as a drop target, so the name carries behaviour, and a name as generic
+as `accept` (HTML's `<input accept>`, react-dropzone's option) could ride
+in on a `{...spread}` and silently make a box a dropzone — on `<input
+type=file>` the element supplies the context; on a generic `<box>` nothing
+does. The `drop*` prefix also keeps the family discoverable next to
+`onDrop` and mirrors the source side's `drag*` data props (`dragData`,
+`dragActions`, `dragPreview`). Rejected alternatives: `dndAcceptTypes`
+(abbreviation prefix foreign to the codebase, splits the family into two
+namespaces, and `Types` over-narrows a value that can be a group or a
+predicate), `acceptDrops` (reads boolean, takes a list), `droppable`
+(prettiest symmetry with `draggable`, but the target needs a _filter_, and
+with `onDrop` implying accept-anything its boolean form is boilerplate).
 
 `:drag-over` joins `STATE_KEYS` ([styles.js:156](../../src/styles.js)) and is
 set by the router through the same `setStyleState` path `:hover` uses
@@ -593,7 +607,7 @@ Convenience hook in `src/components/`, mirroring react-dropzone:
 
 ```jsx
 const { dropProps, isOver, isAccepted } = useDropTarget({
-  accept: ['files'],
+  accept: ['files'], // the hook name supplies the scope; emits `dropAccept`
   onDrop: (e) => setFiles(e.files),
 });
 <box {...dropProps} style={s.zone} />;
@@ -726,10 +740,10 @@ need ([§0.1](#01-audit-against-ntk-530)).
 4. Root-coordinate router: root point → owning `WindowNode` (descending our
    own child windows, §2.2) → `hitTest` → path.
 5. `XdndEnter`/`Position`/`Leave`/`Drop` handling; `XdndStatus` answered from
-   declarative `accept` without entering React; the zero-target whole-window
+   declarative `dropAccept` without entering React; the zero-target whole-window
    suppression fast path; enter/leave diffing reusing the hover-path algorithm
    ([events.js:429](../../src/events.js)).
-6. Drag event objects on top of `_makeEvent`; `:drag-over`; `accept`
+6. Drag event objects on top of `_makeEvent`; `:drag-over`; the `dropAccept`
    normalisation table (§4.1); `text/uri-list` parsing (§4.2).
 7. `XdndDrop` → `clipboard.read({ selection: 'XdndSelection', target })` with
    the drop timestamp → `onDrop` → `XdndFinished` with the watchdog.
@@ -835,10 +849,10 @@ Unusually strong here, and worth exploiting.
 
 1. **Is #126's API right?** The protocol plan is; the API needs three changes:
    ordinary host props instead of marker-carrying spread props (the existing
-   dispatcher already does the work), declarative `accept` promoted from a
+   dispatcher already does the work), declarative `dropAccept` promoted from a
    convenience to the mechanism that makes always-advertising safe, and no
    `dataTransfer` façade over an asynchronous transfer. Plus parsed `files`,
-   a smarter `accept` vocabulary, and the `XdndFinished` watchdog.
+   a smarter `dropAccept` vocabulary, and the `XdndFinished` watchdog.
 2. **Should the advertisement be lazy?** No — but the refcount you were
    reaching for is real; point it at the suppression rectangle instead of at
    the property. You get the same saving, with no race, no churn, and no
