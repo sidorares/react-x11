@@ -522,7 +522,10 @@ export function ContextMenu({
       height,
     });
     setPath([-1]);
-    node.root?.events?.focus?.(node);
+    // `'pointer'`, so no ring: this only ever opens from a right-click, and
+    // the wrapper is the whole content area — a focus ring around all of it
+    // says nothing a keyboard user needs and quite a lot nobody wants.
+    node.root?.events?.focus?.(node, 'pointer');
   };
 
   return h(
@@ -606,7 +609,15 @@ export function MenuBar({
     setPath([]);
   };
 
-  const openMenu = (index) => {
+  /**
+   * `reason` is the gesture that opened the menu, and it decides the ring.
+   * A menu opened with the pointer already tells you where you are — the
+   * menu itself is hanging off the item — so a ring on top of that is the
+   * noise `:focus-visible` exists to remove. Walking the bar with the arrow
+   * keys is the opposite case: the ring is the only thing saying which item
+   * the keyboard is on.
+   */
+  const openMenu = (index, reason = 'key') => {
     const node = refs.current[index];
     const menu = menus[index];
     if (!node || !menu?.items?.length) return;
@@ -630,7 +641,7 @@ export function MenuBar({
     // depend on the gesture that opened the menu — and a menu you cannot
     // dismiss is worse than one that never opened, because it is holding a
     // pointer grab while you try.
-    node.root?.events?.focus?.(node);
+    node.root?.events?.focus?.(node, reason);
   };
 
   const select = (item) => {
@@ -671,9 +682,12 @@ export function MenuBar({
           // on the press, as `Select` opens: a pull-down that waits for the
           // button to come back up spends the whole of a held click saying
           // nothing, and a menu is there to be read
-          onMouseDown: () => (openIndex === index ? close() : openMenu(index)),
+          onMouseDown: () =>
+            openIndex === index ? close() : openMenu(index, 'pointer'),
           onMouseEnter: () => {
-            if (openIndex >= 0 && openIndex !== index) openMenu(index);
+            if (openIndex >= 0 && openIndex !== index) {
+              openMenu(index, 'pointer');
+            }
           },
           // read live: by the time a hand-off blurs this item, the item
           // taking over has already claimed the bar

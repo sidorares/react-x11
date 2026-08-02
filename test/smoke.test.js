@@ -3811,7 +3811,48 @@ test('MenuBar: an open menu is always dismissible', async () => {
     );
     await x11Root.unmount();
   }
+
+  // Taking focus must not also light a ring. A menu opened with the pointer
+  // is already pointing at the item it came out of, so the ring is exactly
+  // the noise `:focus-visible` exists to remove; a menu reached with the
+  // arrow keys is the case that needs it.
+  {
+    const { x11Root, wnd, buttons } = await mount();
+    openFile(wnd, buttons[0]);
+    await tick();
+    assert.strictEqual(
+      buttons[0].states[':focus'],
+      true,
+      'focused, which is what makes it dismissible',
+    );
+    assert.strictEqual(
+      buttons[0].states[':focus-visible'],
+      false,
+      'but no ring: the open menu already says where you are',
+    );
+
+    // and the same when the pointer slides along the bar
+    wnd.emit('mousemove', {
+      x: buttons[1].abs.x + buttons[1].abs.width / 2,
+      y: buttons[1].abs.y + buttons[1].abs.height / 2,
+    });
+    await tick();
+    await tick();
+    assert.strictEqual(buttons[1].states[':focus-visible'], false, 'nor here');
+
+    // Left walks the bar from the keyboard, and that one does ring
+    pressKey(app0(wnd), wnd, { keysym: 0xff51 });
+    await tick();
+    assert.strictEqual(
+      buttons[0].states[':focus-visible'],
+      true,
+      'a keyboard walk is the case a ring is for',
+    );
+    await x11Root.unmount();
+  }
 });
+
+const app0 = (wnd) => wnd._reactX11Node.app;
 
 const app0Windows = (wnd) => wnd._reactX11Node.app.windows.length;
 
