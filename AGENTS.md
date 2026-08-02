@@ -343,6 +343,67 @@ Re-run it when touching painting, layout flushing, or anything in ntk's
 drawing path, and update the baseline in the same PR that changes it, so
 the diff records the cost.
 
+## An error you hit is an error an app developer will hit
+
+Whenever an error turns up while researching, benchmarking or sketching —
+even in throwaway code, even when it was your own mistake — stop and ask
+two questions (this is ntk's policy too, sidorares/ntk#170; it found
+sidorares/ntk#121 before any user filed it):
+
+1. **Can an app developer reach this?** If yes, you have found a bug
+   report before anyone wrote it. Look hardest at ambient facts about the
+   machine — no `$DISPLAY`, no fontconfig, no GLX, no window manager, an
+   XQuartz quirk — because your box is not the deployment target, and a
+   container has none of those things.
+2. **Can the error say what to do about it?** Say what was expected, what
+   was found, and what to change — a fix instruction, the diagnostics to
+   work one out, or a link to the page that explains it.
+
+react-x11's consumer makes the first question bite harder than usual: a
+React developer with DOM habits and no X11 vocabulary. The layers under us
+— ntk, node-x11, yoga, fontconfig, the server itself — all throw in _their_
+vocabulary, from stacks that name nothing the developer wrote. A
+`BadWindow` with a sequence number, a `spawnSync fc-match ENOENT` from the
+first text layout: nothing there to search for, no JSX element, no
+component. The renderer's job is to be the translation layer for errors
+too, not just for drawing.
+
+The house style already has the pattern; hold new errors to it:
+
+- The unknown-element error names the tag **and lists the supported set**
+  — and [docs/ecosystem.md](docs/ecosystem.md)'s compatibility table is
+  built out of those messages being specific enough to be rows.
+- A handler throw is reported with the handler name, the element, and the
+  component that rendered it, plus _why_ no error boundary could catch it
+  and that dispatch continues (`src/errors.js`).
+- A style property passed flat throws naming the property and showing the
+  corrected JSX.
+
+Two failure classes are specifically ours:
+
+- **ntk version skew.** The renderer feature-detects ntk APIs and
+  degrades. Degrading silently is right when the loss is cosmetic (no
+  `setCursor` means no pointer feedback); it is wrong when it is
+  load-bearing — a feature that silently never engages looks _broken_,
+  not degraded, and the developer has no thread to pull. Load-bearing
+  degradation says so once, in development, naming the ntk version that
+  has the API.
+- **The consumer may be running a different program.** X11 protocol
+  conversations — XDND, selections, WM protocols — fail into _another
+  application's_ UI: a reply we never send freezes a drag cursor in a
+  window we do not own, for a user who will never see our stderr. For
+  cross-client protocols, deadlines and watchdog replies are the error
+  message; write them as deliberately as one.
+
+The bar, so this is not a licence to rewrite every throw: the developer
+must be able to reach it in a supported setup and act on what it says; the
+remedy must be specific (a snippet and an `apt-get` line, not "configure
+fonts"); the cheapest real fix goes first even when it is not ours; and
+"your environment lacks something" is distinguished from "your call is
+wrong". Where the fix is longer than a sentence, the message links to
+`docs/` — and a test pins that anchor, because a URL in a string literal
+is the one kind of doc link nothing in CI checks.
+
 ## Gotchas
 
 - The package is **ESM** (`"type": "module"`). ntk is ESM with top-level
