@@ -2584,8 +2584,12 @@ export class TextInputNode extends Node {
         // event timestamp can be older than another client's, where the
         // server-time fallback never was. A cut that deleted the text
         // without acquiring the selection should not be silent.
+        //
+        // `err?.message ?? err` because a throw in here would be an
+        // unhandled rejection, which ends the process — the exact failure
+        // errors.js exists to keep away from a GUI event path.
         console.warn(
-          `react-x11: could not take the ${selection} selection: ${err.message}`,
+          `react-x11: could not take the ${selection} selection: ${err?.message ?? err}`,
         );
       });
   }
