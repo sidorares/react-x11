@@ -258,6 +258,73 @@ test('top-level windows advertise XdndAware = 5; child windows do not', async ()
   }
 });
 
+test('a foreign drag resting near a scrollview edge scrolls it, silently', async () => {
+  // The timer scrolls and re-routes, but sends nothing: an XdndStatus is the
+  // answer to an XdndPosition, and an unsolicited one is not in the
+  // protocol. The source hears the new answer on its next real position.
+  const { app, srcApp } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  try {
+    const rows = Array.from({ length: 40 }, (_, i) =>
+      React.createElement('box', {
+        key: i,
+        dropAccept: ['files'],
+        onDrop: () => {},
+        style: { height: 20 },
+      }),
+    );
+    const instance = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement('scrollview', { style: { height: 100 } }, ...rows),
+      ),
+      x11Root,
+    );
+    const scroller = instance._reactX11Node.children.find(
+      (n) => n.kind === 'scrollview',
+    );
+    const src = new FakeSource(srcApp);
+    await src.init({ 'text/uri-list': 'file:///tmp/x\r\n' });
+    await settle(app);
+    await settle(app);
+    assert.ok(
+      scroller.contentHeight > scroller.abs.height,
+      'content overflows',
+    );
+
+    await src.enter(instance.id, ['text/uri-list']);
+    // one position, parked inside the viewport's bottom edge band
+    src.position(instance.id, 150, 95);
+    await until(
+      srcApp,
+      () => src.statuses().length > 0,
+      'the first XdndStatus',
+    );
+
+    for (let i = 0; i < 200 && scroller.scrollY === 0; i++) {
+      await settle(app);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(scroller.scrollY > 0, 'the list scrolled with no further motion');
+    assert.equal(
+      src.statuses().length,
+      1,
+      'still exactly one status: one position was sent, one was answered',
+    );
+
+    src.leave(instance.id);
+    await settle(app);
+    const stopped = scroller.scrollY;
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    assert.equal(scroller.scrollY, stopped, 'the leave stopped the scrolling');
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+    await srcApp.close();
+  }
+});
+
 test('zero drop targets: one refusal with a whole-window suppression rect', async () => {
   const { app, srcApp } = await headlessPair();
   const x11Root = await createRoot({ app });

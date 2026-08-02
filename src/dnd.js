@@ -34,6 +34,13 @@ export const XDND_VERSION = 5;
  * application's drag gesture. */
 const DROP_TIMEOUT = 10_000;
 
+// Edge auto-scroll. How near a viewport's edge the pointer has to be for
+// the drag to start scrolling it, how often a step goes out, and the
+// fastest one step can be.
+const AUTOSCROLL_EDGE = 24;
+const AUTOSCROLL_INTERVAL = 30;
+const AUTOSCROLL_STEP = 14;
+
 const ATOM_NAMES = [
   'XdndAware',
   'XdndSelection',
@@ -244,6 +251,56 @@ function decodeData(data, target) {
   return data.toString(target === 'STRING' ? 'latin1' : 'utf8');
 }
 
+/**
+ * The viewport a drag over `path` scrolls: the nearest enclosing one,
+ * found by walking out from the hit node the same way the wheel's default
+ * action does ([events.js](./events.js)). Stopping at the first rather
+ * than chaining to an outer viewport is that default's behaviour too, so
+ * the two gestures agree about which viewport a point belongs to.
+ *
+ * `<textarea>` scrolls under the wheel but not under a drag: nothing can
+ * be dropped into one, so scrolling it would move text the drag cannot
+ * reach.
+ */
+function scrollerIn(path) {
+  for (let i = path.length - 1; i >= 0; i--) {
+    if (path[i].kind === 'scrollview') return path[i];
+  }
+  return null;
+}
+
+/**
+ * Pixels to scroll per step for a pointer at `x, y` over `rect`, or null
+ * when it is not near enough to an edge to scroll at all.
+ *
+ * The rate ramps with depth into the band rather than being constant: a
+ * drag crossing a long list crawls at a constant slow rate, and one
+ * nudging the next row into view overshoots at a constant fast one. Each
+ * axis takes the nearer of its two edges, so a viewport shorter than two
+ * bands still scrolls one way rather than fighting itself.
+ */
+function edgeVelocity(rect, x, y) {
+  const inside =
+    x >= rect.x &&
+    x <= rect.x + rect.width &&
+    y >= rect.y &&
+    y <= rect.y + rect.height;
+  if (!inside) return null;
+  const ramp = (distance) =>
+    distance >= AUTOSCROLL_EDGE
+      ? 0
+      : Math.ceil(
+          (1 - Math.max(0, distance) / AUTOSCROLL_EDGE) * AUTOSCROLL_STEP,
+        );
+  const top = y - rect.y;
+  const bottom = rect.y + rect.height - y;
+  const left = x - rect.x;
+  const right = rect.x + rect.width - x;
+  const dy = top < bottom ? -ramp(top) : ramp(bottom);
+  const dx = left < right ? -ramp(left) : ramp(right);
+  return dx === 0 && dy === 0 ? null : { dx, dy };
+}
+
 // ---------------------------------------------------------------------------
 // The per-top-level session.
 // ---------------------------------------------------------------------------
@@ -267,6 +324,7 @@ export class DropSession {
   }
 
   _reset() {
+    this._stopAutoScroll();
     this.sourceWid = 0;
     this.version = 0;
     this.types = [];
@@ -400,6 +458,7 @@ export class DropSession {
     }
     this.accepted = accepted;
     this.lastPoint = { windowNode, x, y, rootX, rootY, time };
+    this._updateAutoScroll(path, x, y);
 
     const answer = {
       accept: Boolean(accepted),
@@ -672,6 +731,71 @@ export class DropSession {
     }
   }
 
+  // -- edge auto-scroll ----------------------------------------------------
+  //
+  // A drop target below the fold is otherwise unreachable: the pointer is
+  // already at the bottom of the list, and a source that sees no motion
+  // sends no more positions. So the timer, not the next position, is what
+  // advances the drag — which is also why the suppression rectangle
+  // (`e.freeze()`) is opt-in and off by default.
+
+  /**
+   * Aim the auto-scroll at whatever the pointer is over now, or stop it.
+   * Called from every position update, so the velocity tracks the pointer
+   * without the timer having to re-measure anything.
+   */
+  _updateAutoScroll(path, x, y) {
+    const node = scrollerIn(path);
+    const velocity = node?.abs ? edgeVelocity(node.abs, x, y) : null;
+    if (!velocity) return this._stopAutoScroll();
+    this._autoScroll = { node, ...velocity };
+    // already stepping: the line above is the whole update
+    if (this._autoScrollTimer) return;
+    this._autoScrollTimer = setInterval(
+      () => this._autoScrollStep(),
+      AUTOSCROLL_INTERVAL,
+    );
+    // a drag must never be the reason a process cannot exit
+    this._autoScrollTimer.unref?.();
+  }
+
+  _stopAutoScroll() {
+    if (this._autoScrollTimer) clearInterval(this._autoScrollTimer);
+    this._autoScrollTimer = null;
+    this._autoScroll = null;
+  }
+
+  /**
+   * One step. Re-routing after it is the point of the whole feature: the
+   * content moved under a stationary pointer, so which node is hovered —
+   * and whether it accepts — can differ from one step to the next.
+   *
+   * Nothing is sent to the source. An `XdndStatus` is the answer to an
+   * `XdndPosition`, and an unsolicited one is not in the protocol; the next
+   * real position carries the fresh answer instead.
+   */
+  _autoScrollStep() {
+    const state = this._autoScroll;
+    const point = this.lastPoint;
+    if (!state || !point || state.node.destroyed) return this._stopAutoScroll();
+    const { node, dx, dy } = state;
+    // Nothing may escape a timer callback: there is no caller to catch it,
+    // so a throw here would take the process down rather than end a drag.
+    // The tree can be torn down between steps — a handler on the way past
+    // is free to unmount whatever this was scrolling.
+    try {
+      const before = `${node.scrollX},${node.scrollY}`;
+      node.scrollBy({ x: dx, y: dy });
+      // at the limit: no movement, so nothing under the pointer changed and
+      // there is nothing to re-route. The timer stays armed — the content
+      // can still grow, and the pointer is still in the band.
+      if (`${node.scrollX},${node.scrollY}` === before) return;
+      this._overAt(point.rootX, point.rootY, point.time);
+    } catch {
+      this._stopAutoScroll();
+    }
+  }
+
   /** Enter/leave diffing over the drag path — the hover algorithm, with
    * `:drag-over` in place of `:hover`. Non-bubbling, like the DOM's. */
   _updateDragPath(newPath, native) {
@@ -713,6 +837,8 @@ export class DropSession {
   }
 
   _clearPath() {
+    // every way a drag ends — leave, drop, reset — comes through here
+    this._stopAutoScroll();
     const native = this.lastPoint
       ? {
           x: this.lastPoint.x,
