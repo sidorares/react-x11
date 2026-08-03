@@ -26,6 +26,7 @@
     "examples:richtext": "tsx examples/richtext.jsx",
     "examples:widgets": "tsx examples/widgets.jsx",
     "examples:icons": "tsx examples/icons.jsx",
+    "examples:raster-gate": "tsx examples/raster-gate.jsx",
     "examples:stress": "tsx examples/stress/index.jsx",
     "examples:gl": "tsx examples/gl.jsx",
     "examples:three": "tsx examples/three.jsx",
