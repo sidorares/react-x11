@@ -11,7 +11,6 @@
     "skipLibCheck": false,
     "types": [],
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
     "paths": {
       "react-x11": ["./src/index.d.ts"],
       "react-x11/jsx-runtime": ["./src/jsx-runtime.d.ts"],
