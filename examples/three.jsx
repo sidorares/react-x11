@@ -52,6 +52,35 @@ function useSpin(running, windowRef) {
   return angle;
 }
 
+/**
+ * Shown in place of the surface when the X server cannot give us a GL
+ * context — which is the default on Xwayland and on Xorg without `+iglx`,
+ * so most people run this example and land here first. The error carries a
+ * `code` to branch on and a `hint` explaining how to get a server that works.
+ */
+function NoGL({ error }) {
+  const disabled = error.code === 'GLX_INDIRECT_DISABLED';
+  return (
+    <box
+      style={{
+        flexGrow: 1,
+        padding: 20,
+        gap: 10,
+        justifyContent: 'center',
+        backgroundColor: '#12161f',
+      }}
+    >
+      <text style={{ fontSize: 15, color: '#e8ecf1' }}>
+        {disabled ? 'This X server has no indirect GLX' : 'No GL surface'}
+      </text>
+      <text style={{ fontSize: 12, color: '#9aa7b4' }}>{error.message}</text>
+      {error.hint ? (
+        <text style={{ fontSize: 11, color: '#6f7d8c' }}>{error.hint}</text>
+      ) : null}
+    </box>
+  );
+}
+
 function App() {
   const windowRef = useRef(null);
   const [running, setRunning] = useState(true);
@@ -87,6 +116,7 @@ function App() {
           glx={{ DEPTH_SIZE: 24 }}
           camera={{ position: [0, 2.6, 8.5], target: [0, -0.2, 0], fov: 45 }}
           style={{ flexGrow: 1 }}
+          fallback={(err) => <NoGL error={err} />}
         >
           <ambientLight intensity={0.35} />
           <pointLight position={[5, 6, 6]} intensity={1} />

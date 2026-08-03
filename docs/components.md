@@ -747,10 +747,59 @@ Takes every `<glarea>` prop (layout props, `clearColor`, `frameLoop`, `glx`,
 - `camera` — `{ position, target, up, fov, near, far }`, or
   `{ orthographic: true, zoom }`. Defaults to a perspective camera at
   `[0, 0, 5]` looking at the origin with a 50° vertical field of view.
+- `fallback` — what to show when this X server cannot give us a GL context.
 
 Animate by changing props from a `requestAnimationFrame` loop on the window
 ref (see `examples/three.jsx`) — a scene only redraws when something
 changes, unless `frameLoop="always"`.
+
+### When there is no GL
+
+Plan for it. Indirect GLX — the only kind that works over the wire, and so
+the only kind react-x11 can use — is **disabled by default** on Xorg ≥ 1.17
+and on Xwayland, which is most desktops. A `<Canvas3D>` there has nothing to
+draw with, and without a `fallback` it renders an empty box.
+
+```jsx
+<Canvas3D
+  style={{ flexGrow: 1 }}
+  fallback={(err) => <NoGL error={err} />}
+>
+```
+
+`fallback` takes an element or a function of the error, and is rendered in a
+`<box>` carrying the component's `style` — so it holds the same place in the
+layout the surface would have. It cannot be `children`: those are the scene
+graph. (Same reason `<Suspense fallback>` is a prop.)
+
+The error is classified, so branch on `code` rather than matching the
+message:
+
+| `err.code`              |                                                               |
+| ----------------------- | ------------------------------------------------------------- |
+| `GLX_INDIRECT_DISABLED` | server has GLX but refuses indirect contexts — the common one |
+| `GLX_NO_EXTENSION`      | server has no GLX at all                                      |
+| `GLX_NO_CONFIG`         | no visual matches the `glx` spec you asked for                |
+| `GLX_CONTEXT_FAILED`    | anything else in setup                                        |
+
+`err.hint` is a multi-line explanation of how to get a server that works,
+written to be printed as-is. The codes come from ntk and are also available
+as `GLXError` from `react-x11/ntk` if you would rather not spell them out.
+
+Setup failure is a property of the connection, not of one surface, so it is
+remembered per app: a second `<Canvas3D>` mounting after the first has found
+out renders its fallback on the first frame, with no round trip and no
+flash of empty box.
+
+To develop against a server that does have it:
+
+```bash
+Xwayland :5 +iglx & DISPLAY=:5 npm run examples:three
+```
+
+Be warned that on current Linux distros the indirect GL engine behind those
+contexts is frequently missing even with `+iglx` — contexts are created and
+nothing rasterizes. See [3D over indirect GLX](glx.md).
 
 ## `useAnchor(ref)` / `anchorRect(node, options)`
 
