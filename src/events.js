@@ -28,6 +28,66 @@ function sharedPrefix(a, b) {
   return n;
 }
 
+// 'MouseDown' → 'mouseDown', memoized — the set of names is small and
+// closed, and dispatch runs at motion rate
+const TYPE_NAMES = Object.create(null);
+function eventType(name) {
+  return (TYPE_NAMES[name] ??= name[0].toLowerCase() + name.slice(1));
+}
+
+/**
+ * One synthetic event, methods on the prototype: they used to be built as
+ * four fresh closures on every event object, which at motion rate was
+ * steady allocation for the GC to chew on (issue #188). Handlers only ever
+ * call them as methods (`ev.capturePointer()`), the same contract DOM
+ * events have.
+ */
+class SyntheticEvent {
+  constructor(manager, type, native, target, extra) {
+    this._manager = manager;
+    this._targetNode = target;
+    this.type = type;
+    this.x = native?.x ?? 0;
+    this.y = native?.y ?? 0;
+    this.target = manager._public(target);
+    this.currentTarget = null;
+    this.nativeEvent = native;
+    // X11 modifier mask: bit 0 Shift, bit 2 Control. Carried on every
+    // event, not just keys — shift+click needs it too.
+    this.shiftKey = Boolean(native?.buttons & 1);
+    this.ctrlKey = Boolean(native?.buttons & 4);
+    this.defaultPrevented = false;
+    this.propagationStopped = false;
+    if (extra) Object.assign(this, extra);
+    if (target.abs) {
+      this.localX = this.x - target.abs.x;
+      this.localY = this.y - target.abs.y;
+    }
+  }
+
+  preventDefault() {
+    this.defaultPrevented = true;
+  }
+
+  stopPropagation() {
+    this.propagationStopped = true;
+  }
+
+  // Pointer capture, DOM-like: while captured, mousemove/mouseup go to the
+  // capturing node instead of whatever is under the pointer, so a drag
+  // keeps working past the widget's own bounds. Released automatically on
+  // mouseup and when the node unmounts.
+  capturePointer() {
+    this._manager.capturedNode = this._targetNode;
+  }
+
+  releasePointer() {
+    if (this._manager.capturedNode === this._targetNode) {
+      this._manager.capturedNode = null;
+    }
+  }
+}
+
 // Click-to-component hook (see ClickToComponent.js). At most one handler is
 // installed, gated by REACT_X11_CLICK_TO_COMPONENT — checked ahead of the
 // normal press handling so an Alt+Click never also starts a drag or moves
@@ -196,77 +256,43 @@ export class EventManager {
       n;
       n = n === this.node ? null : (n.parent ?? this.node)
     ) {
-      path.unshift(n);
+      path.push(n);
       if (n === this.node) break;
     }
-    return path;
+    return path.reverse();
   }
 
   _makeEvent(type, native, target, extra) {
-    const ev = {
-      type,
-      x: native?.x ?? 0,
-      y: native?.y ?? 0,
-      target: this._public(target),
-      currentTarget: null,
-      nativeEvent: native,
-      // X11 modifier mask: bit 0 Shift, bit 2 Control. Carried on every
-      // event, not just keys — shift+click needs it too.
-      shiftKey: Boolean(native?.buttons & 1),
-      ctrlKey: Boolean(native?.buttons & 4),
-      defaultPrevented: false,
-      propagationStopped: false,
-      preventDefault() {
-        ev.defaultPrevented = true;
-      },
-      stopPropagation() {
-        ev.propagationStopped = true;
-      },
-      // Pointer capture, DOM-like: while captured, mousemove/mouseup go to
-      // the capturing node instead of whatever is under the pointer, so a
-      // drag keeps working past the widget's own bounds. Released
-      // automatically on mouseup and when the node unmounts.
-      capturePointer: () => {
-        this.capturedNode = target;
-      },
-      releasePointer: () => {
-        if (this.capturedNode === target) this.capturedNode = null;
-      },
-      ...extra,
-    };
-    if (target.abs) {
-      ev.localX = ev.x - target.abs.x;
-      ev.localY = ev.y - target.abs.y;
-    }
-    return ev;
+    return new SyntheticEvent(this, type, native, target, extra);
   }
 
-  /** Capture → target → bubble along the ancestor path. Returns the event. */
-  dispatch(name, target, native, extra) {
-    const path = this._path(target);
-    const ev = this._makeEvent(
-      name[0].toLowerCase() + name.slice(1),
-      native,
-      target,
-      extra,
-    );
+  /**
+   * Capture → target → bubble along the ancestor path. A caller that
+   * already built the target's path for its own bookkeeping passes it in;
+   * everyone else lets the default build it. Returns the event.
+   */
+  dispatch(name, target, native, extra, path = this._path(target)) {
+    const ev = this._makeEvent(eventType(name), native, target, extra);
+    // the two handler keys are per dispatch, not per node visited
+    const bubbleKey = 'on' + name;
+    const captureKey = bubbleKey + 'Capture';
     // Each handler is called inside callHandler: a throw here has no React
     // on the stack to catch it, so bare it would unwind into ntk's socket
     // handler and take the process. Reported and stepped over instead —
     // one bad handler must not stop the ones after it, or the frame loop.
     for (const n of path) {
-      const handler = n.props[`on${name}Capture`];
+      const handler = n.props[captureKey];
       if (handler) {
         ev.currentTarget = this._public(n);
-        callHandler(n, `on${name}Capture`, handler, ev);
+        callHandler(n, captureKey, handler, ev);
         if (ev.propagationStopped) return ev;
       }
     }
     for (let i = path.length - 1; i >= 0; i--) {
-      const handler = path[i].props[`on${name}`];
+      const handler = path[i].props[bubbleKey];
       if (handler) {
         ev.currentTarget = this._public(path[i]);
-        callHandler(path[i], `on${name}`, handler, ev);
+        callHandler(path[i], bubbleKey, handler, ev);
         if (ev.propagationStopped) return ev;
       }
     }
@@ -338,10 +364,16 @@ export class EventManager {
       this.downPath = target ? this._path(target) : [];
       this._setPressed(this.downPath);
       this._focusFromPress(target);
-      const ev = this.dispatch('MouseDown', target, native, {
-        button: native.keycode,
-        detail: this._clickDetail(native),
-      });
+      const ev = this.dispatch(
+        'MouseDown',
+        target,
+        native,
+        {
+          button: native.keycode,
+          detail: this._clickDetail(native),
+        },
+        this.downPath,
+      );
       if (!ev.defaultPrevented) {
         target._defaultMouseDown?.(ev);
       }
@@ -426,7 +458,7 @@ export class EventManager {
       // captured control stays pressed wherever the pointer wandered off to
       if (this.downNode && !captured)
         this._setPressed(this._pressedAlong(path));
-      const ev = this.dispatch('MouseMove', target, native);
+      const ev = this.dispatch('MouseMove', target, native, undefined, path);
       // drags deliver to the pressed node even when the pointer leaves it
       if (this.downNode && !this.downNode.destroyed) {
         this.downNode._defaultMouseDrag?.(ev);
@@ -572,8 +604,14 @@ export class EventManager {
   _onKey(name, native) {
     runWithPriority(DiscreteEventPriority, () => {
       const wnd = this.node.window;
-      const syms = wnd.X?.keycode2keysyms?.[native.keycode];
-      const keysym = syms?.[0];
+      // ntk decodes the key on the way in (window.js decorates the event
+      // with keysym/baseKeysym/codepoint), so re-deriving it from the
+      // keymap here was redundant. `baseKeysym` — group 1, level 1 — is
+      // what shortcut comparisons want (XK_TAB even under Shift), which is
+      // exactly what the old level-0 read gave. The keymap lookup stays as
+      // the fallback for synthetic events that skip ntk's decoration.
+      const keysym =
+        native.baseKeysym ?? wnd.X?.keycode2keysyms?.[native.keycode]?.[0];
       // the focused node may live inside a <popup> of this window: focus is
       // shared with the popup (see focusManager), key delivery follows it
       const focused = this.focusManager.focused;
@@ -586,8 +624,6 @@ export class EventManager {
           native.codepoint && native.codepoint >= 0x20
             ? String.fromCodePoint(native.codepoint)
             : undefined,
-        shiftKey: Boolean(native.buttons & 1),
-        ctrlKey: Boolean(native.buttons & 4),
       });
       if (name === 'KeyDown' && keysym === XK_TAB && !ev.defaultPrevented) {
         this._cycleFocus(Boolean(native.buttons & 1));

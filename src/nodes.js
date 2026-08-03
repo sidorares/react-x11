@@ -588,6 +588,11 @@ export class Node {
     };
     // in-flight transitions: prop -> {from, to, start, duration}
     this._anim = null;
+    // hot pointer-path caches (issue #188): the children in paint order,
+    // re-verified against the live children on every read, and the
+    // subtree's hit reach, invalidated through _clearHitBounds()
+    this._paintOrderCache = null;
+    this._hitBoundsCache = null;
     this._syncStyle(props);
     this.yoga = yoga ? Yoga.Node.create() : null;
     if (this.yoga) {
@@ -682,6 +687,17 @@ export class Node {
     this.style = this._anim?.size
       ? { ...target, ...this._animatedValues() }
       : target;
+    // `hitSlop` feeds the cached hit reach and `overflow` decides where its
+    // invalidation walks stop, so a swap that changes either clears here —
+    // the one funnel every style path goes through. Animation ticks never
+    // change them: neither interpolates, so both land on the target value
+    // in this very swap, before any tick runs.
+    if (
+      displayed.hitSlop !== this.style.hitSlop ||
+      displayed.overflow !== this.style.overflow
+    ) {
+      this._clearHitBounds();
+    }
     return this.style;
   }
 
@@ -931,6 +947,9 @@ export class Node {
    * bounded without requiring the node's own size to be pinned.
    */
   _childListChanged(before) {
+    // belt for a subtree attached imperatively with its rect already laid
+    // out — nothing then re-runs _assignAbs to notice the reach grew
+    this._clearHitBounds();
     const root = this.root;
     if (!root) return;
     root.invalidate(true, before, 'child-list');
@@ -1120,25 +1139,71 @@ export class Node {
 
   /** Drawn, visible children in paint order (stable sort by zIndex). */
   paintOrder() {
+    // Hit testing asks at every node it visits and painting at every node
+    // it draws, so the filter-map-sort-map here was steady per-event
+    // allocation (issue #188). Cached — and verified against the live
+    // children on every read rather than invalidated: membership and
+    // z-keys are the same reads the filter always did, so a fresh cache
+    // costs no allocation and a stale one is impossible, whatever mutates
+    // children, styles, visibility or DRAWN_KINDS.
+    const cache = this._paintOrderCache;
+    if (cache && this._paintOrderFresh(cache)) return cache.order;
     // `display: 'none'` takes a node out of the layout, and it has to leave
     // the paint with it. They were separate before because the only way to
     // hide something was the `hidden` flag, which does both — until a size
     // query started setting `display` from a style block, and the hidden
     // node carried on painting at the position it no longer had.
-    const drawn = this.children.filter(
-      (c) =>
+    const drawn = [];
+    const z = [];
+    for (const c of this.children) {
+      if (
         DRAWN_KINDS.has(c.kind) &&
         c.yoga &&
         !c.hidden &&
-        c.style.display !== 'none',
-    );
-    return drawn
-      .map((node, i) => ({ node, i }))
-      .sort(
-        (a, b) =>
-          (a.node.style.zIndex ?? 0) - (b.node.style.zIndex ?? 0) || a.i - b.i,
-      )
-      .map((e) => e.node);
+        c.style.display !== 'none'
+      ) {
+        drawn.push(c);
+        z.push(c.style.zIndex ?? 0);
+      }
+    }
+    // document order already answers the usual no-zIndex case; the sort is
+    // only paid when some z actually disagrees with it
+    let order = drawn;
+    for (let i = 1; i < z.length; i++) {
+      if (z[i] < z[i - 1]) {
+        order = drawn
+          .map((node, j) => ({ node, z: z[j], j }))
+          .sort((a, b) => a.z - b.z || a.j - b.j)
+          .map((e) => e.node);
+        break;
+      }
+    }
+    this._paintOrderCache = { order, drawn, z };
+    return order;
+  }
+
+  /** Do the cached drawn children and their z-keys still match the tree? */
+  _paintOrderFresh({ drawn, z }) {
+    let j = 0;
+    for (const c of this.children) {
+      if (
+        !DRAWN_KINDS.has(c.kind) ||
+        !c.yoga ||
+        c.hidden ||
+        c.style.display === 'none'
+      ) {
+        continue;
+      }
+      if (
+        j >= drawn.length ||
+        drawn[j] !== c ||
+        z[j] !== (c.style.zIndex ?? 0)
+      ) {
+        return false;
+      }
+      j++;
+    }
+    return j === drawn.length;
   }
 
   clipsChildren() {
@@ -1199,6 +1264,67 @@ export class Node {
     ];
   }
 
+  /**
+   * The rect a hit anywhere in this subtree must fall inside: this node's
+   * rect grown by its own hitSlop, unioned with every child's reach —
+   * except under a clipping node, whose children can only be hit while the
+   * point is inside its rect (hitTest never descends from outside one).
+   *
+   * A conservative superset, and only ever that: hidden and
+   * pointerEvents-none subtrees are counted anyway, and nothing shrinks a
+   * cached bound before the next invalidation. A bound too big costs a
+   * walk; one too small would drop real input. Every change that can
+   * *grow* the true reach funnels through `_clearHitBounds`: `_assignAbs`
+   * for whatever layout moves (mounts, reveals and scrolls all change
+   * `abs`), `_retarget` for `hitSlop` and `overflow`, `_childListChanged`
+   * for a subtree attached with its rect already laid out, and `flush`
+   * for the root's own rect, which is written without `_assignAbs`.
+   */
+  _hitBounds() {
+    let b = this._hitBoundsCache;
+    if (b) return b;
+    const abs = this.abs;
+    const slop = resolveHitSlop(this.style.hitSlop);
+    let left = abs.x;
+    let top = abs.y;
+    let right = abs.x + abs.width;
+    let bottom = abs.y + abs.height;
+    if (slop) {
+      left -= slop.left;
+      top -= slop.top;
+      right += slop.right;
+      bottom += slop.bottom;
+    }
+    if (!this.clipsChildren()) {
+      for (const child of this.children) {
+        if (child.isWindow || !child.yoga) continue;
+        const cb = child._hitBounds();
+        if (cb.left < left) left = cb.left;
+        if (cb.top < top) top = cb.top;
+        if (cb.right > right) right = cb.right;
+        if (cb.bottom > bottom) bottom = cb.bottom;
+      }
+    }
+    b = { left, top, right, bottom };
+    this._hitBoundsCache = b;
+    return b;
+  }
+
+  /**
+   * This node's reach changed: drop the cached bounds here and up the
+   * chain of ancestors whose unions embed them. The walk stops at a
+   * clipping ancestor — its reach is its own rect, so nothing below it
+   * changes what it or anything above it reports — or at one already
+   * invalid, whose own clear walked the rest of the way up.
+   */
+  _clearHitBounds() {
+    this._hitBoundsCache = null;
+    for (let n = this.parent; n; n = n.parent) {
+      if (n.clipsChildren() || n._hitBoundsCache === null) return;
+      n._hitBoundsCache = null;
+    }
+  }
+
   /** Front-to-back hit test. Returns the deepest hit node or null. */
   hitTest(x, y) {
     if (
@@ -1206,6 +1332,13 @@ export class Node {
       this.style.display === 'none' ||
       this.style.pointerEvents === 'none'
     ) {
+      return null;
+    }
+    // nothing in this subtree reaches the point: skip it whole, children
+    // and all — this is what keeps a motion event from walking every node
+    // in the window (issue #188)
+    const b = this._hitBounds();
+    if (x < b.left || y < b.top || x >= b.right || y >= b.bottom) {
       return null;
     }
     const inside = this.containsPoint(x, y);
@@ -1245,14 +1378,19 @@ export class Node {
    */
   _assignAbs(x, y, width, height) {
     const old = this.abs;
-    this.abs = { x, y, width, height };
     if (
-      layoutDiffSink &&
-      (old.x !== x ||
-        old.y !== y ||
-        old.width !== width ||
-        old.height !== height)
+      old.x === x &&
+      old.y === y &&
+      old.width === width &&
+      old.height === height
     ) {
+      return;
+    }
+    this.abs = { x, y, width, height };
+    // moving or resizing changes where this subtree can be hit, and the
+    // cached unions all the way up with it
+    this._clearHitBounds();
+    if (layoutDiffSink) {
       const grow = this._outlineExtent() + DAMAGE_SLOP;
       if (old.width > 0 && old.height > 0) {
         layoutDiffSink(insetRect(old, -grow));
@@ -4568,6 +4706,9 @@ export class WindowNode extends Node {
       this.yoga.setHeight(height);
       this.yoga.calculateLayout(width, height, Yoga.DIRECTION_LTR);
       this.abs = { x: 0, y: 0, width, height };
+      // the root's rect is written here, not through _assignAbs, so its
+      // cached hit reach is dropped here too (children bubble their own)
+      this._hitBoundsCache = null;
       // A bounded frame watches the walk: whatever this pass actually moved
       // claims its old and new rects through the sink, and the frame stays
       // a few rects instead of the whole window. An unbounded frame skips
