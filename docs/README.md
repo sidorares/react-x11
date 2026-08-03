@@ -14,6 +14,11 @@
   `SplitPane`, `Canvas3D`, and the `useAnchor` popup placement hook.
 - [events.md](events.md) — the synthetic event system: dispatch phases,
   event object shape, focus, cursors, default actions.
+- [react-features.md](react-features.md) — what your React knowledge buys
+  you here and where a DOM habit breaks: `useLayoutEffect` vs `useEffect`,
+  measuring a node without `getBoundingClientRect()`, what a `ref` hands
+  back, `<popup>` instead of `createPortal`, where to put an error boundary
+  so the window survives, and which React APIs are simply not available.
 - [drag-and-drop.md](drag-and-drop.md) — accepting drops and starting
   drags, over XDND and in-app: `dropAccept` matching, the payload
   (`e.files`, `e.getData`, live `e.items`), `dragData` and lazy payloads,
