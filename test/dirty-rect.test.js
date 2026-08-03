@@ -1078,3 +1078,155 @@ test('a text change repaints the text line, pixel-exact', async () => {
     await app.close();
   }
 });
+
+test('a controlled value change repaints the field, pixel-exact', async () => {
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    // Typing into a controlled <textinput>: the parent re-renders with a new
+    // `value`, metrics unchanged. The field clips its own painting, so the
+    // frame is the field — not the window (issue #187).
+    const { root, setState } = await mountStateful(x11Root, (state) => [
+      ...HOISTED.slice(0, 4).map((style, i) =>
+        React.createElement('box', { key: `r${i}`, style }),
+      ),
+      React.createElement('textinput', {
+        key: 'field',
+        value: state ? 'hello world' : 'hello',
+        onChange: () => {},
+        style: { height: 22, backgroundColor: '#ffffff' },
+      }),
+    ]);
+    const { regions, diff } = await reactPaintBothWays(app, root, () =>
+      setState(1),
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+    assert.strictEqual(regions.length, 1, 'one repaint');
+    const damage = regions[0];
+    assert.ok(damage, 'a value change must not repaint the window');
+    assert.ok(
+      damage.height <= 22 + 2 * SLOP + 2,
+      `expected the field's height, got ${damage.height}`,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('a textarea inner scroll repaints the field, pixel-exact', async () => {
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const taRef = React.createRef();
+    await mount(
+      x11Root,
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+        React.createElement('box', { style: { flexGrow: 1, padding: 6 } }, [
+          ...HOISTED.slice(0, 2).map((style, i) =>
+            React.createElement('box', { key: `r${i}`, style }),
+          ),
+          React.createElement('textarea', {
+            key: 'ta',
+            ref: taRef,
+            defaultValue: Array.from(
+              { length: 12 },
+              (_, i) => `line ${i}`,
+            ).join('\n'),
+            style: { backgroundColor: '#ffffff' },
+          }),
+        ]),
+      ),
+    );
+    const ta = taRef.current;
+    const root = ta.root;
+    const taHeight = ta.abs.height;
+
+    // the wheel path — pixels move only inside the field's own clip
+    const { damage, diff } = await paintBothWays(app, root, () =>
+      ta.scrollBy(12),
+    );
+    assert.ok(ta._scrollY > 0, 'the textarea actually scrolled');
+    assert.ok(damage, 'an inner scroll must not repaint the window');
+    assert.ok(
+      damage.height <= taHeight + 2 * SLOP + 2,
+      `expected the field's height, got ${damage.height}`,
+    );
+    assert.equal(diff, 0, `${diff} pixels differ from a full repaint`);
+  } finally {
+    await app.close();
+  }
+});
+
+test('the DevTools highlight claims its rects, not the window', async () => {
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const aRef = React.createRef();
+    const bRef = React.createRef();
+    await mount(
+      x11Root,
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+        React.createElement(
+          'box',
+          { style: { flexGrow: 1, padding: 6, gap: 3 } },
+          [
+            React.createElement('box', {
+              key: 'a',
+              ref: aRef,
+              style: rowStyle(0),
+            }),
+            ...HOISTED.slice(1, 4).map((style, i) =>
+              React.createElement('box', { key: `r${i}`, style }),
+            ),
+            React.createElement('box', {
+              key: 'b',
+              ref: bRef,
+              style: rowStyle(4),
+            }),
+          ],
+        ),
+      ),
+    );
+    const a = aRef.current;
+    const b = bRef.current;
+    const root = a.root;
+
+    // appear: the tint lands on one row
+    const on = await paintBothWays(app, root, () => root.setHighlight(a));
+    assert.ok(on.damage, 'highlighting a node must not repaint the window');
+    assert.ok(
+      on.damage.height <= ROW_H + 2,
+      `expected the row's height, got ${on.damage.height}`,
+    );
+    assert.equal(on.diff, 0, `${on.diff} pixels differ from a full repaint`);
+
+    // move: the old rect and the new one, not the rows between them
+    const move = await paintBothWays(app, root, () => root.setHighlight(b));
+    assert.ok(move.damage, 'moving the highlight must not repaint the window');
+    assert.strictEqual(
+      move.rects.length,
+      2,
+      'old and new rects stay two claims, not the box around them',
+    );
+    assert.equal(
+      move.diff,
+      0,
+      `${move.diff} pixels differ from a full repaint`,
+    );
+
+    // clear: the tinted rect repaints, nothing else
+    const off = await paintBothWays(app, root, () => root.setHighlight(null));
+    assert.ok(off.damage, 'clearing the highlight must not repaint the window');
+    assert.ok(
+      off.damage.height <= ROW_H + 2,
+      `expected the row's height, got ${off.damage.height}`,
+    );
+    assert.equal(off.diff, 0, `${off.diff} pixels differ from a full repaint`);
+  } finally {
+    await app.close();
+  }
+});
