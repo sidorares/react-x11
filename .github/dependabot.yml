@@ -7,6 +7,23 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # eslint 10 cannot be installed here: eslint-plugin-react caps its peer
+      # at `^9.7` (7.37.5 is the newest release, and the `next` tag is an
+      # older prerelease), so `npm ci` fails with ERESOLVE before any job
+      # gets to run — which is what made every check on #182 red. Dropping
+      # the plugin is not the way out either: `react/jsx-uses-react` and
+      # `react/jsx-uses-vars` are what stop `no-unused-vars` flagging
+      # `React` and every JSX-referenced identifier, 30 errors' worth.
+      #
+      # Lift this once jsx-eslint/eslint-plugin-react#3977 ships. Nothing
+      # else here is in the way: eslint 10's new recommended rules
+      # (preserve-caught-error, no-useless-assignment) already pass.
+      - dependency-name: eslint
+        update-types: ['version-update:semver-major']
+      # released in lockstep with eslint, so holding one holds both
+      - dependency-name: '@eslint/js'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:

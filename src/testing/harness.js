@@ -24,6 +24,7 @@ async function optional(specifier, why) {
         `inside ntk's dependency tree, so this usually means a package ` +
         `manager that does not hoist — add "${specifier.split('/')[0]}" to ` +
         `your own devDependencies.\n${err.message}`,
+      { cause: err },
     );
   }
 }

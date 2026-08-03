@@ -182,6 +182,7 @@ function rendererInterface() {
             'in-process, which needs the react-devtools-core package — ' +
             'add it to your devDependencies. Original error: ' +
             err.message,
+          { cause: err },
         );
       }
       const api = mod.default?.initialize ? mod.default : mod;

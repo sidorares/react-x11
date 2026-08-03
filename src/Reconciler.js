@@ -553,6 +553,7 @@ async function connect(options) {
       'react-x11: could not connect to the X server. Is an X server running ' +
         `and DISPLAY set (DISPLAY=${display})? Original error: ` +
         err.message,
+      { cause: err },
     );
   }
 }

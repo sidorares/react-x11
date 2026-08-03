@@ -68,7 +68,9 @@ const isNear = (rgb, want, tol = 40) =>
 
 async function waitForPixel(ctx, w, h, x, y, want, what) {
   const deadline = Date.now() + 3000;
-  let last = null;
+  // no initializer: the loop below always assigns before anything reads it,
+  // and eslint 10's no-useless-assignment flags the dead `= null`
+  let last;
   for (;;) {
     const image = await readPixels(ctx, w, h);
     last = px(image, w, x, y);
