@@ -4235,17 +4235,38 @@ export class WindowNode extends Node {
     if (typeof wnd.on !== 'function') return;
     wnd.on('resize', (ev) => {
       // ConfigureNotify also fires for pure moves and reparents; only a real
-      // size change dirties layout or pixels (ntk guards its backing store
-      // the same way)
+      // size change dirties layout or pixels.
+      //
+      // Compared against the laid-out rect rather than ntk's `ev.resized`
+      // (which is "differs from the last delivered event"), because the two
+      // answer different questions and this is the one that matters here: a
+      // React-driven resize configures the window and lays out in the same
+      // commit, and the server's echo comes back a moment later saying the
+      // size changed — true, but already accounted for. `ev.resized` would
+      // relayout and fully repaint a second time for every controlled
+      // resize.
       if (ev.width !== this.abs.width || ev.height !== this.abs.height) {
         this.needsLayout = true;
         this.invalidate(true, null, 'resize');
       }
-      // a move or a reparent arrives the same way, and either changes where
-      // popups anchored to this window belong
-      this._refreshScreenOrigin();
+      // Where the window sits on screen decides where popups anchored to it
+      // belong — and finding that out is a server round trip
+      // (TranslateCoordinates), so it is worth not making one per frame of a
+      // resize drag that never moved the window. `ev.moved` is ntk >= 6.2
+      // (sidorares/ntk#184), which is the floor; the `?? true` is for a mock
+      // window or a deduped older copy, which then keep the unconditional
+      // refresh rather than losing the anchor.
+      if (ev.moved ?? true) this._refreshScreenOrigin();
       this.props.onResize?.(ev);
     });
+    // A reparent is the other way the origin moves: the window manager puts
+    // the window inside its frame, and ConfigureNotify coordinates become
+    // frame-relative from then on. It usually arrives with a ConfigureNotify
+    // whose coordinates changed, but "usually" is not a guarantee — a frame
+    // whose client offset happens to match the old root position reports no
+    // move at all. StructureNotify is already selected for 'resize', so
+    // listening costs nothing.
+    wnd.on('reparent', () => this._refreshScreenOrigin());
     // the frame clock emits 'draw' when the backing store content is invalid
     wnd.on('draw', () => {
       (this._frameReasons ??= new Set()).add('expose');

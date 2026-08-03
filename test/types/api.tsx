@@ -128,7 +128,7 @@ function Elements() {
       onStatesChange={(states) => void states.includes('fullscreen')}
       style={s.root}
       onCloseRequest={() => {}}
-      onResize={(ev) => void ev.nativeEvent.rootx}
+      onResize={(ev) => void (ev.resized && ev.width + ev.height)}
     >
       <box
         ref={boxRef}

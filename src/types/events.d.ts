@@ -4,7 +4,7 @@
  * DOM. See docs/events.md.
  */
 
-import type { DrawnNode, TextInputNode } from './nodes.js';
+import type { DrawnNode, NtkWindow, TextInputNode } from './nodes.js';
 
 /** The raw ntk/X11 event a synthetic one was made from. */
 export interface NativeEvent {
@@ -304,3 +304,36 @@ export interface EventHandlers<T = DrawnNode>
     FocusHandlers<T>,
     DropTargetProps<T>,
     DragSourceProps<T> {}
+
+/**
+ * `<window onResize>`: X's ConfigureNotify, handed over as ntk's own event
+ * object rather than a synthetic one — there is no capture/bubble phase and
+ * nothing to `preventDefault`, because the window manager has already done
+ * the thing being reported.
+ *
+ * It fires for **moves and reparents** as much as for size changes; see
+ * docs/elements.md. `x`/`y` are relative to whatever the window's parent is,
+ * which is the window manager's frame once it has framed the window — not
+ * screen coordinates.
+ */
+export interface WindowResizeEvent {
+  /** X event type number (22, ConfigureNotify). */
+  type: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** The size differs from the last delivered event's. */
+  resized: boolean;
+  /** The position does. */
+  moved: boolean;
+  /**
+   * The geometry `moved`/`resized` are measured against, or null when none
+   * is known yet.
+   */
+  previous: { x: number; y: number; width: number; height: number } | null;
+  /** Every raw event merged into this one, oldest first. */
+  coalesced?: WindowResizeEvent[];
+  window: NtkWindow;
+  target: NtkWindow;
+}
