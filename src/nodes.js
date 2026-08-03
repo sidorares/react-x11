@@ -3401,7 +3401,10 @@ export class TextInputNode extends Node {
       this.yoga.markDirty();
       this._invalidateLayout('props');
     } else if (newProps.value !== before.value) {
-      this.root?.invalidate(false, null, 'text');
+      // painting clips to the content box and the measure function reads
+      // only font metrics, so a value change is confined to the field —
+      // the same claim applyProps makes for any paint-only prop
+      this.root?.invalidate(false, this, 'text');
     }
   }
 
@@ -3527,7 +3530,8 @@ export class TextAreaNode extends TextInputNode {
     const next = Math.min(Math.max(0, y), bar.range);
     if (next === this._scrollY) return;
     this._scrollY = next;
-    this.root?.invalidate(false, null, 'scroll');
+    // an inner scroll moves pixels only inside the field's own clip
+    this.root?.invalidate(false, this, 'scroll');
   }
 
   constructor(props, app) {
@@ -3603,7 +3607,8 @@ export class TextAreaNode extends TextInputNode {
     const next = Math.min(Math.max(0, this._scrollY + dy), max);
     if (next === this._scrollY) return;
     this._scrollY = next;
-    this.root?.invalidate(false, null, 'scroll');
+    // an inner scroll moves pixels only inside the field's own clip
+    this.root?.invalidate(false, this, 'scroll');
   }
 
   /** Visual lines that fit in the viewport — one Page keypress worth. */
@@ -4861,7 +4866,12 @@ export class WindowNode extends Node {
       // The clip is belt to the culling's braces: it bounds the server-side
       // mask work for whatever *does* paint, and it contains any node that
       // inks slightly outside its own rect. Rectangular clips take ntk's
-      // server-side fast path, so this is cheap.
+      // server-side fast path, so this is cheap. The unbounded pass stays
+      // unclipped on purpose: a clip would only re-report what ntk already
+      // does — its fallback present is clamped to min(window, backing)
+      // (ntk >= 5.3, window.js _presentNow) — at two SetPictureClipRectangles
+      // per composite, which the protocol bench prices at +207 requests for
+      // a hundred-icon full repaint.
       ctx.save();
       ctx.beginPath();
       ctx.rect(damage.x, damage.y, damage.width, damage.height);
@@ -4969,8 +4979,22 @@ export class WindowNode extends Node {
   /** DevTools hover highlight: tint a node's rect on the next paint. */
   setHighlight(node) {
     if (this._highlight === node) return;
+    const prev = this._highlight;
     this._highlight = node;
-    this.invalidate(false, null, 'highlight');
+    // The tint leaves one rect and lands on another, and both are already
+    // known, so the claim is their union rather than the window. A side
+    // with no laid-out rect tints (or tinted) the whole window — the same
+    // fallback _paintRegion paints — so only that case stays unbounded.
+    const rects = [];
+    for (const n of [prev, node]) {
+      if (!n) continue;
+      if (!n.abs?.width) {
+        this.invalidate(false, null, 'highlight');
+        return;
+      }
+      rects.push(n.abs);
+    }
+    for (const rect of rects) this.invalidate(false, rect, 'highlight');
   }
 
   /** REACT_X11_DEBUG_LAYOUT=1: outline every drawn node, color by depth. */
