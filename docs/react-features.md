@@ -1,343 +1,360 @@
 # React features
 
-Everything that lives in React core works here unchanged, because
-`src/Reconciler.js` is an ordinary mutation renderer: `supportsMutation:
-true`, no persistence, no hydration. That is the configuration React's
-context, error, effect and Suspense machinery expects, so hooks, error
-boundaries, `<Suspense>`, `lazy`, `use`, transitions and `<Profiler>` all
-behave the way the React docs say they do.
+You already know React. This page is about the parts where that knowledge
+transfers unchanged, the parts where it transfers with a caveat, and the
+four places where a habit from the DOM will quietly not work.
 
-What changes is anything whose meaning was defined by the DOM. There are
-four of those, and they are the whole of this page:
+The short version: **everything in React core behaves exactly as documented.**
+Hooks, context, error boundaries, `<Suspense>`, `lazy`, `use`, transitions,
+`<Profiler>`, `<StrictMode>` — all of it. react-x11 is a normal React 19
+renderer, and where React's behaviour does not depend on the DOM, it is the
+same behaviour.
 
-- **Paint timing.** A commit does not paint. Pixels arrive on ntk's frame
-  clock, which is a timer _and_ an X fence.
-- **Measurement.** There is no forced synchronous layout — no
-  `getBoundingClientRect()` that flushes layout on demand.
-- **Hiding.** `display: none` on a `<box>` is a Yoga flag; on a `<window>`
-  it is a real `UnmapWindow` on the wire.
-- **Containers.** A portal container is an X connection or an X window, not
-  a node.
+What differs is anything the DOM used to define for you:
+
+- **Paint timing.** A commit does not put pixels on screen. Frames go out on
+  a clock, so "before paint" is a real, observable boundary.
+- **Measuring.** There is no `getBoundingClientRect()` that forces layout.
+  Layout has already happened, or it has not.
+- **Hiding.** `<Suspense>` and `<Activity>` hide a `<box>` cheaply, but
+  hiding a `<window>` genuinely unmaps it, and the window manager notices.
+- **Portal containers.** There is no document to portal into.
 
 ## At a glance
 
-|                                                                            |                                                                 |
-| -------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `useState`, `useReducer`, `useContext`, `useMemo`, `useCallback`, `useRef` | work, unchanged                                                 |
-| `useSyncExternalStore`                                                     | works, and is the preferred bridge — see below                  |
-| `useTransition`, `startTransition`, `useDeferredValue`                     | work, and genuinely time-slice                                  |
-| `useOptimistic`, `useActionState`                                          | work (pure core; no host involvement)                           |
-| `useLayoutEffect` vs `useEffect`                                           | the distinction is real and matters                             |
-| `useImperativeHandle`, `forwardRef`, ref-as-a-prop, ref cleanup            | work                                                            |
-| `<Suspense>`, `React.lazy`, `use(promise)`, `use(context)`                 | work                                                            |
-| `<Activity>`                                                               | works, with a known bug for toplevel `<window>`                 |
-| Error boundaries                                                           | work; **placement relative to `<window>` matters**              |
-| `<StrictMode>`                                                             | safe; effect double-invocation is suppressed at mount           |
-| `<Profiler>`                                                               | works                                                           |
-| `useId`                                                                    | works, but there is almost nothing here to use it for           |
-| `createPortal`                                                             | reachable via `Renderer`, with real constraints                 |
-| `flushSync`                                                                | no export; `Renderer.flushSyncFromReconciler` is the equivalent |
-| `useFormStatus`                                                            | not wired                                                       |
-| Server Components                                                          | not attempted                                                   |
-| anything from `react-dom`                                                  | not available — see [Absent](#absent)                           |
+|                                                                            |                                                                            |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `useState`, `useReducer`, `useContext`, `useMemo`, `useCallback`, `useRef` | unchanged                                                                  |
+| `useImperativeHandle`, `forwardRef`, `ref` as a prop, ref cleanup          | unchanged                                                                  |
+| `use(promise)`, `use(context)`, `React.lazy`                               | unchanged                                                                  |
+| `useOptimistic`, `useActionState`, `<Profiler>`, custom hooks              | unchanged                                                                  |
+| `useSyncExternalStore`                                                     | unchanged, and the best way to bridge non-React code                       |
+| `useTransition`, `startTransition`, `useDeferredValue`                     | work, and really do stay responsive                                        |
+| `useLayoutEffect` vs `useEffect`                                           | the difference is real — one paint versus two                              |
+| `<Suspense>`                                                               | works; read [Suspense and Activity](#suspense-and-activity) for `<window>` |
+| `<Activity>`                                                               | works for drawn nodes; known bug around a toplevel `<window>`              |
+| Error boundaries                                                           | work — but **where you put one** decides if the window survives            |
+| `<StrictMode>`                                                             | safe to use; effects are not double-invoked on the first mount             |
+| `useId`                                                                    | works; there is very little here to use it for                             |
+| `createPortal`                                                             | use [`<popup>`](elements.md) instead — see [Portals](#portals)             |
+| `flushSync`                                                                | not exported; you almost certainly do not need it                          |
+| `useFormStatus`                                                            | not wired up                                                               |
+| React Server Components                                                    | not available                                                              |
+| anything imported from `react-dom`                                         | not available — see [Not available](#not-available)                        |
 
-## Effects, and what "before paint" means
+## Effects, and the paint boundary
 
-On the paths that matter, effect ordering is a hard guarantee rather than a
-race. `root.render()` goes through `updateContainerSync`, which hard-codes
-the sync lane, and every discrete X11 event runs at `DiscreteEventPriority`,
-which _is_ the sync lane. On a sync-lane commit React flushes passive
-effects synchronously inside the commit itself, so nothing can interleave
-between the mutation phase and `useEffect`.
+Put an effect that **changes what the user sees** in `useLayoutEffect`. Put
+everything else in `useEffect`. That is the same rule as the DOM, and here
+it has a directly observable consequence:
 
-The distinction that survives is about which lane your `setState` lands on:
+| you call `setState` from | what the user sees                                      |
+| ------------------------ | ------------------------------------------------------- |
+| `useLayoutEffect`        | one frame, with the corrected value                     |
+| `useEffect`              | one frame with the old value, then a frame with the new |
 
-|                                   | lane              | flushed by `flushSyncWork()` | result                                                       |
-| --------------------------------- | ----------------- | ---------------------------- | ------------------------------------------------------------ |
-| `setState` from `useLayoutEffect` | Sync              | yes                          | folds into the same frame — **one paint**                    |
-| `setState` from `useEffect`       | Default (floored) | no                           | the intermediate state paints, then a second commit repaints |
+So an adjustment made in `useEffect` flickers. This is not a timing race you
+can get lucky with — updates from a layout effect are folded into the frame
+being prepared, and updates from a passive effect are not.
 
-So the DOM rule holds: **measure-and-adjust belongs in `useLayoutEffect`**,
-and doing it in `useEffect` produces a visible flash. `src/priority.js`
-explains the flush that makes this work — a discrete handler that has
-returned has not yet seen React's half of its own response, so the
-dispatcher lands the commit before ntk blits.
+The same boundary is why an event handler feels instant: react-x11 lands the
+React update caused by a click or a keystroke **before** the frame goes out,
+so the response and the default action paint together rather than a frame
+apart.
 
-`commitMount` runs before refs attach, which is why `<popup>` realization,
-`autoFocus`, `trapFocus` and drop-target registration all happen there: the
-node has to be in the tree, and the window has to exist, before anything
-can be handed out.
-
-## Measurement — the one that does not transfer
-
-There is no forced synchronous layout. Yoga layout runs on the frame clock
-(a 16 ms timer _and_ an X fence — see `src/frames.js`), not on demand, so a
-node's `abs` rect is not necessarily meaningful during the commit that
-created it. `getClientRects()` reads what the last layout produced; it does
-not cause one.
-
-The consequences are visible throughout the library, and they are the
-idiom to copy:
-
-- `useWindowId()` and `useAnchor()` return **getters**, not values — refs
-  attach after the commit that created the window, so a value read during
-  render would be `null` on exactly the render that matters.
-- `Table` ships an `ASSUMED_ROWS` constant, with the comment that there is
-  always one render that has to guess.
-- The replacement for measure-in-effect is a **post-layout callback**:
-  `<scrollview onViewport>` (fired from `absolutize`, deduped, with
-  `scrollWidth`/`scrollHeight` semantics) and `<window onResize>`.
-
-If you are porting DOM code, this is the pattern that will not survive
-translation. Reach for `onViewport` rather than a `useLayoutEffect` that
-measures.
-
-## Refs on host nodes
-
-`getPublicInstance` hands out two unrelated kinds of object:
-
-- **`<window>` and `<popup>`** → the live **ntk window** (`<popup>` too:
-  `PopupNode extends WindowNode`, and `commitMount` realizes it before refs
-  attach). If the window is not realized or has been destroyed, the ref
-  holds the `WindowNode` instead — so "a window ref is always an ntk window"
-  is not an invariant you can lean on.
-- **everything else** → the retained react-x11 `Node`, the same object the
-  paint walk, hit test and Yoga layout use: `focus()`, `blur()`, `focused`,
-  `contains()`, `hitTest()`, `getClientRects()`, `paintOrder()`,
-  `containsPoint()`.
-
-From an ntk window you can get back to the node through
-`window._reactX11Node`, which `realize()` stamps.
-
-Two edges worth knowing. `invalidate()` is defined only on `WindowNode`, so
-from a drawn node you reach it through `.root`. And a `<canvas>` ref has
-**no `getContext()`** — drawing is a paint-phase _pull_, so the imperative
-idiom is to mutate a ref and then ask the renderer to pull:
-
-```js
-canvasRef.current.root.invalidate(false, canvasRef.current, 'style-state');
+```jsx
+// good — the corrected size is in the first frame the user sees
+useLayoutEffect(() => {
+  if (tooTall) setRows(fits);
+}, [tooTall, fits]);
 ```
 
-The built-in text-input edit menu does exactly this: it keeps its hovered
-row in a plain mutable object and repaints with `invalidate`, with no React
-render involved.
+## Measuring a node
 
-## Concurrency
+**There is no forced synchronous layout.** Nothing you can call will make
+layout run so you can read the result. This is the DOM habit most likely to
+break on the way over, because in a browser `getBoundingClientRect()` both
+reads _and_ triggers.
 
-Transitions and `useDeferredValue` genuinely time-slice — the Scheduler
-yields in Node just as it does in a browser. But the set of lanes that gets
-the interruptible work loop is narrower than you might assume:
+A node's `abs` rect (and `getClientRects()`) reports what the **last** layout
+produced. On the very first render of a node, that is nothing yet.
 
-- **Sync, InputContinuous and Default all take the synchronous work loop**,
-  with no yield check. So an ordinary `setState` — from a click, from a
-  timer, from a socket callback — renders in one uninterruptible pass.
-- **Time slicing happens only** on transition lanes, retry lanes (an
-  ordinary Suspense retry slices, with no transition involved), the deferred
-  lane, and the idle lane.
+What to do instead:
 
-Three more things that surprise people:
+- **Let the element tell you.** `<scrollview onViewport>` fires when the
+  viewport or content size changes, with `width`/`height`/`contentWidth`/
+  `contentHeight`. `<window onResize>` fires when the window is resized.
+  These are the supported way to react to a size.
+- **Read `abs` from a ref in a handler or a later effect**, not during the
+  render that created the node.
+- **Take a getter, not a value.** `useWindowId(ref)` and `useAnchor()` return
+  getters for exactly this reason — a value captured during render would be
+  `null` on the render where you needed it.
 
-1. **`root.render()` is always synchronous.** It calls
-   `updateContainerSync` and then flushes, so the tree is committed before
-   the call returns. Wrapping it in `startTransition` does nothing — the
-   sync lane is baked in.
-2. **Transitions override the event-priority mapping, not the other way
-   round.** `startTransition` inside a mousedown handler takes a transition
-   lane; the `DiscreteEventPriority` the dispatcher just installed is never
-   consulted.
-3. **React 19 unifies the top three lanes.** Sync, InputContinuous and
-   Default are selected together, so a hover update and a resize update
-   render in the _same_ pass, at the higher priority. A slow resize is
-   promoted by a concurrent hover rather than starved by it.
+```jsx
+const [cols, setCols] = useState(1);
 
-`src/events.js` maps X11 events onto React's priorities: presses, releases,
-keys, focus/blur, popup dismiss, WM close and XDND drop are **discrete**;
-motion, mouse-out and drag-over are **continuous**. Only genuinely discrete
-work is flushed synchronously — a continuous-priority update is scheduled,
-not flushed, which is what makes a motion burst coalesce.
+<scrollview onViewport={({ width }) => setCols(Math.max(1, (width / 200) | 0))}>
+  {items.map(…)}
+</scrollview>;
+```
 
-There is no `flushSync` export. The equivalent is
-`Renderer.flushSyncFromReconciler(fn)`, and note it **commits without
-painting**: same-turn pixels are what `flushSyncWork()` plus
-`flushPendingFrames()` produce, which is what the event dispatcher does.
+If you are porting a component that measures itself and adjusts, this is the
+part to rewrite. See [elements.md](elements.md) for `onViewport` and
+`onResize`, and [components.md](components.md) for `useAnchor`.
 
-### `useSyncExternalStore`
+## What a ref gives you
 
-Preferred over a hand-rolled `setState` bridge, and not only for tearing.
-A store notification is dispatched on the sync lane regardless of what
-priority is installed, and with `supportsMicrotasks` the render and its host
-commit land in the **next microtask**. The same `setState` from the same
-call site waits for the next macrotask.
+Two different kinds of object, depending on the element:
 
-That makes it the right way to bring anything outside React — an ntk timer,
-a D-Bus signal, a socket — into the tree. `examples/wm.jsx` is the worked
-example: the window-manager core is a plain store and the UI subscribes to
-it.
+- **`<window>` and `<popup>`** hand back the live **ntk window** — the
+  object with `getContext('2d')`, and what
+  [`windowIdOf()`](elements.md) resolves to an XID.
+- **every other element** hands back its **node**: `focus()`, `blur()`,
+  `focused`, `hitTest()`, `containsPoint()`, `getClientRects()`, and `abs`
+  for its position and size. `<textinput>`/`<textarea>` additionally match
+  the DOM closely enough that libraries like react-hook-form drive them
+  through a ref.
 
-## Suspense, lazy, Activity
+A window ref is `null` until that window exists, and refs attach after the
+commit — so read them in effects and handlers, never during render.
 
-`<Suspense>` works. `hideInstance` sets Yoga `DISPLAY_NONE`, so the hidden
-primary tree **vacates its layout box entirely** and the fallback lays out
-as if it were not there. Size fallbacks deliberately, or the content box
-collapses to the fallback and jumps back on reveal.
+For `<canvas>`, note that the **node is not a drawing surface**. There is no
+`getContext()` on it; you draw in `onDraw`, which the renderer calls with a
+context whenever the canvas needs repainting:
 
-Three things have no DOM analogue:
+```jsx
+<canvas onDraw={(ctx, { width, height }) => { …}} />
+```
 
-- **A hidden `<window>` is really unmapped.** `WindowNode.setHidden`
-  overrides without calling `super`: it sends `UnmapWindow`/`MapWindow` and
-  never touches Yoga. So the window manager gets a fresh map request on
-  reveal — re-placement, restacking, WM-decided geometry — and, because
-  Yoga is untouched, the window still occupies its parent's layout box while
-  invisible.
-- **Only the topmost host instance of each hidden branch is hidden.**
-  Descendants keep `hidden === false` and collapse purely because an
-  ancestor is `DISPLAY_NONE`. Code that reads `node.hidden` on a node other
-  than a branch root sees `false` inside a hidden subtree.
-- **Focus is not released.** See [Known gaps](#known-gaps).
+To make it repaint, change something React can see — a prop, state, or the
+`cacheKey`. That is the supported path, and it is usually what you want.
+There is an imperative escape hatch for element authors in
+[extending.md](extending.md), but note that it lives on the **owning
+window**, not on the drawn node, despite what the bundled types currently
+say (see [Known gaps](#known-gaps)).
 
-`React.lazy` works. Under the single-file bundling path a statically
-resolvable `import()` is inlined by esbuild: you keep deferred _evaluation_,
-but there is no code splitting and no bytes saved. See
-[packaging.md](packaging.md).
+## Transitions, and what stays responsive
 
-`<Activity>` works — children render once, refs do not attach, effects do
-not run — with one bug for toplevel windows, below.
+`useTransition`, `startTransition` and `useDeferredValue` all work, and they
+really do keep the UI responsive — React will interrupt a transition render
+to handle an incoming click or keystroke.
 
-Testing note: a promise that settles _outside_ `act()` is not necessarily
-picked up by an `await act()`. React throttles a retry-lane commit behind a
-real `setTimeout` when a fallback was shown recently, and that timer is this
-renderer's plain `setTimeout`. Use `waitFor` from `react-x11/test`.
+What is worth knowing is that **transitions are the mechanism that does
+this**. An ordinary `setState` — from a handler, a timer, a socket callback —
+renders in one uninterruptible pass, however much work it is. If a render is
+big enough to drop a frame, wrapping it in `startTransition` (or deferring
+its input with `useDeferredValue`) is not a micro-optimisation, it is the
+difference between a responsive window and a frozen one.
 
-## Portals, and why `<popup>` is usually the answer
+```jsx
+const [pending, startTransition] = useTransition();
 
-There is no `createPortal` export. It is reachable as
-`Renderer.createPortal`, since `src/index.js` re-exports the reconciler, and
-it works with two real constraints:
+// typing stays instant; the expensive list catches up
+const onChange = (e) => {
+  setQuery(e.value);
+  startTransition(() => setResults(search(e.value)));
+};
+```
 
-- The portal's immediate host child must be **`<window>` or `<popup>`** —
-  the only nodes with `realize()`. A `<box>` throws.
-- The container must be an **ntk App** (giving a new top-level window) or a
-  **live ntk window** from a `<window>` ref (giving a nested child X
-  window). A react-x11 node is not a container.
+Two smaller notes:
 
-Portaling into a window ref has a quiet trap: the whole portaled subtree
-inherits that window as its `app`, so `app.fonts` and `app.clipboard` are
-missing — `<text>` inside it measures nothing and renders nothing, without
-an error.
+- `root.render()` is **synchronous** — the tree is committed before the call
+  returns. Wrapping it in `startTransition` does nothing.
+- A `startTransition` inside a click handler is still a transition. It does
+  not inherit the handler's urgency.
 
-For almost every case where the DOM would reach for a portal, **`<popup>`
-is the tool**. It is an ordinary fiber child wherever you write it in JSX,
-but its X window is created against the screen root, so it escapes its
-parent's clip without leaving the React tree. Which means the DOM's "a
-portal still sees context" rule holds here without portals being involved:
-a provider around a menu trigger is read by the popup's contents.
+react-x11 already classifies X11 input for you: presses, releases, keys,
+focus changes, window close and drops are urgent; pointer motion and
+drag-over are not, which is what keeps a motion burst from flooding the
+renderer. You do not have to do anything to get this.
 
-`Dialog`, `Tooltip`, `ContextMenu`, `MenuBar` and `Select` are all built
-this way — see [components.md](components.md).
+### Bridging non-React code
 
-## Error boundaries
+`useSyncExternalStore` is the right tool for anything that lives outside
+React — a timer, a D-Bus signal, a socket, an ntk event. It is also faster
+here than a hand-rolled `setState` bridge: a store notification is applied
+urgently and lands in the next microtask, where the equivalent `setState`
+waits a turn longer.
 
-`getDerivedStateFromError` and `componentDidCatch` work unchanged; nothing
-in the host config sits on the capture path. The callback order is
-`getDerivedStateFromError` → the root's `onCaughtError` → `componentDidCatch`,
-so `onCaughtError` cannot observe state the boundary just set.
+Every mainstream store (zustand, jotai, valtio, redux, XState) works with no
+adapter for this reason. The [window-manager
+example](../examples/wm.jsx) is the worked case: the WM core is a plain
+store, and the UI subscribes to it.
 
-The X11-specific decision is **where you put the boundary**:
+## Suspense and Activity
 
-| boundary               | on a throw                                                                                                           |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| **inside** `<window>`  | contents are swapped; the X window survives with the same id, position, stacking and `_NET_WM_STATE`                 |
-| **outside** `<window>` | the subtree is deleted, so the X window is **destroyed**; a fallback rendering `<window>` again gets a brand-new one |
+`<Suspense>` works. The one thing to plan for is layout: a hidden subtree
+gives up its space entirely, so the fallback lays out as if the real content
+were not there. **Size your fallback deliberately**, or the window collapses
+to the fallback and jumps back on reveal.
 
-A remount is not an update. Anything the window manager or the user did to
-that window — moved it, maximized it, tabbed it — is gone. Put the boundary
-inside the window unless you actually want the window replaced.
+```jsx
+<Suspense fallback={<box style={{ height: 240 }} />}>
+  <Report />
+</Suspense>
+```
 
-An **uncaught** error unmounts the whole tree, which here means every
-toplevel `<window>` is destroyed: a live process with an open socket and no
-windows. That is why the default handler sets `process.exitCode = 1`. The
-root is not poisoned — rendering into it again works — but any ntk window
-held from a ref is now a destroyed id.
+If a `<window>` is inside the boundary, hiding it **unmaps the real window**.
+The window manager treats the reveal as a new window: it may re-place it,
+restack it, or apply its own geometry, and anything the user did to it can be
+lost. Prefer suspending _inside_ a window over suspending the window itself.
 
-A throw from an **event handler** never reaches a boundary. It has no React
-frame on the stack, and the reconciler does not export the entry point that
-would let a renderer inject one. (React DOM does not route handler throws to
-boundaries either — this is not a react-x11 limitation so much as a place
-where `onUncaughtError` is _extended_ to cover a channel React leaves
-alone.) See [events.md](events.md) and `src/errors.js`.
+`React.lazy` works. If you ship a single-file bundle, note that dynamic
+`import()` gets inlined — you keep lazy _evaluation_ but get no code
+splitting; see [packaging.md](packaging.md).
+
+`<Activity>` works for drawn content. Around a toplevel `<window>` it
+currently has a bug — see [Known gaps](#known-gaps).
+
+**Testing Suspense**: a promise that settles outside `act()` is not always
+picked up by an `await act()`, because React throttles the commit when a
+fallback was shown very recently. Use `waitFor` from `react-x11/test` —
+see [testing.md](testing.md).
+
+## Portals
+
+**Use `<popup>`.** It is what you want in almost every case where the DOM
+would reach for `createPortal`: a `<popup>` is written as an ordinary child
+in your JSX — so it sees context, state and props exactly where you wrote it
+— but it is a real top-level X window, so it escapes its parent's clipping
+and can extend past the window edge.
+
+```jsx
+<box>
+  <Button
+    onClick={(e) => setAt({ x: e.nativeEvent.rootx, y: e.nativeEvent.rooty })}
+  >
+    Options…
+  </Button>
+  {at && (
+    <popup
+      x={at.x}
+      y={at.y}
+      width={180}
+      height={120}
+      grab
+      onDismiss={() => setAt(null)}
+    >
+      <Menu />
+    </popup>
+  )}
+</box>
+```
+
+Its position in the JSX has no effect on where it appears — you place it in
+screen coordinates, and `useAnchor()` does that math for you when you are
+anchoring to another node.
+
+`Dialog`, `Tooltip`, `ContextMenu`, `MenuBar` and `Select` are all built this
+way — see [components.md](components.md).
+
+There is no `createPortal` export. The reconciler's own is reachable through
+the `Renderer` escape hatch, but it is not a supported surface: the container
+has to be an X connection or an X window rather than a node, and only
+`<window>`/`<popup>` can be the portal's immediate child. If you find
+yourself wanting it, you almost certainly want a second `<window>` or a
+`<popup>`.
+
+## Where to put an error boundary
+
+Boundaries work exactly as documented. The X11-specific decision is
+**placement**, and it decides whether the user's window survives:
+
+```jsx
+// good — the window and everything the WM knows about it survives
+<window title="Editor">
+  <ErrorBoundary fallback={<text>Something broke</text>}>
+    <Document />
+  </ErrorBoundary>
+</window>
+
+// the window itself is destroyed and recreated on a throw
+<ErrorBoundary fallback={<window title="Editor">…</window>}>
+  <window title="Editor">
+    <Document />
+  </window>
+</ErrorBoundary>
+```
+
+A recreated window is a **new** window: its position, size, stacking,
+maximized state and anything else the user or the window manager did to it
+are gone. Put the boundary inside the window unless you genuinely want the
+window replaced.
+
+An **uncaught** error unmounts the whole tree, which here means every window
+disappears while the process stays alive. `createRoot` takes
+`onUncaughtError`, `onCaughtError` and `onRecoverableError` so you can decide
+what that should mean for your app — the default logs and sets a failing exit
+code. See [events.md](events.md).
+
+One thing React does not cover: **a throw inside an event handler never
+reaches a boundary.** (That is true in React DOM too.) react-x11 routes those
+to `onUncaughtError` instead, so they are at least reportable rather than
+silent.
 
 ## Smaller notes
 
-**`useId`** works, but there is nearly nothing to use it for: no host
-element takes an `id`, there is no hydration, and association is structural
-(`<Checkbox label>`, `<Radio>`). The identifier this renderer actually has
-is the XID — see `useWindowId()`. Note that an unknown prop on `<window>`
-is forwarded to ntk as a creation attribute, so an `id` there is not inert.
+**`useId`** works, but there is little use for it: no element takes an `id`,
+there is no hydration, and labels are associated structurally (`<Checkbox
+label>`, `<Radio>children</Radio>`). If you want a window's real identity,
+that is `useWindowId()`. Avoid putting an `id` prop on `<window>` — unknown
+props there are forwarded to the underlying window as creation attributes.
 
-**`<StrictMode>`** is safe: `createInstance` performs no X11 calls, so a
-discarded render costs no protocol traffic and double-rendering never
-doubles windows. Be aware that effect double-invocation is **suppressed on
-the mount commit**, because `render()` wraps every tree in a context
-provider and React's DEV double-invoke walk stops at a newly-placed
-non-strict fiber.
+**`<StrictMode>`** is safe. A discarded render costs no X11 traffic, so
+double-rendering never produces double windows. Be aware that effects are
+**not** double-invoked on the initial mount, so it will not catch a missing
+cleanup at mount the way it does in React DOM.
 
-**`memo` / `useMemo`** save CPU, not protocol bytes. There is no
-`diffProperties` layer: every re-rendered host element gets `commitUpdate`
-→ `applyProps` on plain reference inequality of the props object. The waste
-is absorbed one level down by `_paintChanged`, which compares paint-relevant
-style **by value**, so a style object React rebuilt with the same contents
-produces no Yoga writes, no damage and no frame. Passing a fresh style array
-every render is the documented idiom, not a leak.
+**`memo` / `useMemo`** save CPU, not bandwidth. Rebuilding a `style` object
+or array every render is free — styles are compared by value, so an
+identical style produces no layout work, no repaint and no frame. Passing
+`style={[base, active && on]}` inline is the documented idiom, not a leak.
+See [styling.md](styling.md).
 
-**Keys** cost different things for different elements. Reordering `<box>`
-children issues **zero** X11 requests (a Yoga reparent plus a bounded
-repaint). Reordering `<window>` children costs one restack pass of `n-1`
-`ConfigureWindow` requests — O(n), not O(moved) — coalesced into a single
-pass by `flushWindowRestacks` in `resetAfterCommit`. Reordering _toplevel_
-windows emits nothing at all; use `alwaysOnTop`. Missing keys therefore
-widen a repaint for drawn nodes but destroy real server resources for
-windows.
+**Keys** matter more for `<window>` children than for drawn ones. Reordering
+`<box>` children is cheap. Reordering sibling `<window>`s restacks real
+windows, and a missing key destroys and recreates them — with the same loss
+of window-manager state described above. To keep a window on top, use
+`alwaysOnTop` rather than ordering.
 
-**DevTools** works behind `REACT_X11_DEVTOOLS`, and highlight-on-hover
-tints the real rect in the X11 window. The Profiler **Timeline** is not
-available (the reconciler no longer exposes the hook it needs); the commit
-list and flamegraph work, in a development build. See
-[devtools.md](devtools.md).
+**DevTools** works — set `REACT_X11_DEVTOOLS=1` and the component tree,
+props and highlight-on-hover all behave normally, with the highlight drawn
+into the real window. The Profiler **Timeline** tab is unavailable; the
+commit list and flamegraph work. See [devtools.md](devtools.md).
 
-**Fast Refresh** works with no bundler, through Node's module hooks — see
-`examples/hmr-register.mjs`. Keep anything whose identity must survive a
-reload (contexts, stores) in a module you do not edit.
+**Fast Refresh** works without a bundler. Keep anything whose identity must
+survive a reload — contexts, stores — in a module you are not editing. See
+the [hot-reload example](../examples/tasks-hot.jsx).
 
-## Absent
+## Not available
 
-`react-dom` is neither a dependency nor a peer dependency, so
-`ReactDOM.createPortal`, `flushSync`, `findDOMNode`, `hydrateRoot` and
-`unstable_batchedUpdates` are not reachable through react-x11.
+**`react-dom`.** It is not a dependency, so `ReactDOM.createPortal`,
+`flushSync`, `findDOMNode`, `hydrateRoot` and `unstable_batchedUpdates` are
+not part of react-x11.
 
-The failure mode to watch for is not the import error. `react-dom` is a
-required peer of some libraries, so a default install can pull it in, the
-import resolves, and `react-dom@19`'s `flushSync()` called outside any
-react-dom root runs the callback without throwing — silently not doing the
-synchronous flush the library depends on. Run `npm ls react-dom` before
-trusting a passing import. See [ecosystem.md](ecosystem.md).
+The trap is not the import error — it is that `react-dom` is a required peer
+of some libraries, so it can end up installed anyway. Then the import
+resolves, and `flushSync()` runs your callback **without flushing anything**,
+because it is talking to a renderer you are not using. If a library depends
+on synchronous flushing, check `npm ls react-dom`. The
+[ecosystem register](ecosystem.md) records which packages hit this.
 
-Server Components are not attempted. Nothing structurally rules them out —
-the reconciler has no knowledge of RSC either way — but there is no Flight
-client wired up and no transport for one.
+**Server Components** are not available: there is no Flight client wired up.
 
-`useFormStatus` is not wired: the host transition context is a stub.
-`useOptimistic` and `useActionState` are unaffected, since they are pure
-core.
+**`useFormStatus`** is not wired up. `useOptimistic` and `useActionState` are
+unaffected and work normally.
 
 ## Known gaps
 
-Tracked bugs where a React feature does not yet mean here what it should:
+Open bugs where a React feature does not yet mean here what it should:
 
 - [#201](https://github.com/sidorares/react-x11/issues/201) — `<Activity
-mode="hidden">` (and an initial-mount `<Suspense>`) around a toplevel
-  `<window>` leaves it **mapped and visible** when a window manager is
-  present, because the redirected `MapWindow` outlives the `UnmapWindow`
-  that follows it.
+mode="hidden">` around a toplevel `<window>` leaves the window **visible**
+  when a window manager is running.
 - [#202](https://github.com/sidorares/react-x11/issues/202) — hiding a
-  subtree does not release focus, so keys keep landing on a control the user
-  cannot see.
+  subtree with `<Suspense>` or `<Activity>` does not move focus out of it, so
+  a focused control keeps receiving keystrokes while invisible.
+- The bundled types declare `invalidate()` on every node; at runtime only the
+  owning `<window>` has it. Reach it as `ref.current.root` — or better, drive
+  repaints through props and `cacheKey`.
