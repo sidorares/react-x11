@@ -102,24 +102,47 @@ mount: [drag-and-drop.md](drag-and-drop.md).
 
 A real X11 window; the flex, paint and event root for its subtree.
 
-| prop                        |                                                                      |
-| --------------------------- | -------------------------------------------------------------------- |
-| `title`                     | window title (UTF-8, via `WM_NAME` + `_NET_WM_NAME`)                 |
-| `width`, `height`, `x`, `y` | window geometry (window state, not yoga style — the user may resize) |
-| `backgroundColor`           | full-window clear color (default white)                              |
-| `onResize(ev)`              | ConfigureNotify — the tree reflows automatically                     |
-| `onExpose(ev)`              | after a repaint was required                                         |
-| `onCloseRequest(ev)`        | WM close button (opts into `WM_DELETE_WINDOW`)                       |
-| `states`                    | EWMH `_NET_WM_STATE` — controlled, see below                         |
-| `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                |
-| `decorations`               | `false` asks the WM for no titlebar or border                        |
-| `transientFor`              | ICCCM `WM_TRANSIENT_FOR` — the window this one belongs to (below)    |
-| `onStatesChange(states)`    | what the window manager actually did                                 |
-| `theme`                     | palette that `$token` style values resolve against, for this subtree |
+| prop                        |                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| `title`                     | window title (UTF-8, via `WM_NAME` + `_NET_WM_NAME`)                                  |
+| `width`, `height`, `x`, `y` | window geometry (window state, not yoga style — the user may resize)                  |
+| `backgroundColor`           | full-window clear color (default white)                                               |
+| `onResize(ev)`              | ConfigureNotify — the tree reflows automatically. Fires for **moves** too (see below) |
+| `onExpose(ev)`              | after a repaint was required                                                          |
+| `onCloseRequest(ev)`        | WM close button (opts into `WM_DELETE_WINDOW`)                                        |
+| `states`                    | EWMH `_NET_WM_STATE` — controlled, see below                                          |
+| `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                                 |
+| `decorations`               | `false` asks the WM for no titlebar or border                                         |
+| `transientFor`              | ICCCM `WM_TRANSIENT_FOR` — the window this one belongs to (below)                     |
+| `onStatesChange(states)`    | what the window manager actually did                                                  |
+| `theme`                     | palette that `$token` style values resolve against, for this subtree                  |
 
 Windows may be nested inside other windows (real X11 child windows).
 **Ref**: the live ntk `Window` — `getContext('2d')`,
 `requestAnimationFrame`, `setCursor`, the whole ntk API.
+
+### `onResize` fires for moves
+
+`onResize` is X's `ConfigureNotify`, which reports _any_ geometry change:
+under a window manager that moves windows opaquely, dragging one by its
+title bar delivers one per pointer step, all the same size. The renderer
+already discriminates — a move costs no layout and no repaint — but a
+handler of your own has to, or it does its work per step of a drag. The
+event says which it was:
+
+```jsx
+<window
+  onResize={(ev) => {
+    if (ev.resized) refit(ev.width, ev.height);
+    if (ev.moved) rememberPosition(ev.x, ev.y);
+  }}
+/>
+```
+
+`ev.previous` carries the geometry these are measured against. Note that
+`ev.x`/`ev.y` are frame-relative once a reparenting window manager has
+framed the window, so they are not screen coordinates — the renderer
+resolves the real origin itself for popup anchoring.
 
 ### Stacking
 

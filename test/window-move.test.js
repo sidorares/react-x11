@@ -144,3 +144,61 @@ test('a WM-driven resize still lays out and repaints', async () => {
     `the frame names its reason (got ${JSON.stringify(frames.map((f) => f.reasons))})`,
   );
 });
+
+// Where the window is on screen cannot be read off ConfigureNotify — a
+// reparenting WM makes those coordinates frame-relative — so it costs a
+// TranslateCoordinates round trip, and popups anchored to the window need
+// it. ntk's `ev.moved` (sidorares/ntk#184) says whether the position
+// changed at all, which is what keeps a resize drag from paying for one
+// per frame.
+let translates = 0;
+const countTranslates = () => {
+  const real = app.X.TranslateCoordinates.bind(app.X);
+  app.X.TranslateCoordinates = (...args) => {
+    translates++;
+    return real(...args);
+  };
+};
+countTranslates();
+
+test('a resize that did not move the window asks the server nothing', async () => {
+  await sleep(120);
+  translates = 0;
+  app.X.ConfigureWindow(node.window.id, { width: W + 120, height: H + 80 });
+  await waitFor(() => node.window.width === W + 120, 'the resize');
+  await sleep(120);
+  assert.strictEqual(
+    translates,
+    0,
+    'a pure resize must not re-ask where the window is',
+  );
+});
+
+test('a move still refreshes the screen origin', async () => {
+  await sleep(120);
+  translates = 0;
+  app.X.ConfigureWindow(node.window.id, { x: 33, y: 44 });
+  await waitFor(() => node.window.x === 33, 'the move');
+  await waitFor(() => translates > 0, 'the screen-origin refresh');
+  await waitFor(
+    () => node.window._screenOrigin?.x === 33,
+    'the origin the server answered with',
+  );
+});
+
+test('a reparent refreshes the screen origin on its own', async () => {
+  await sleep(120);
+  // stand in for a window manager framing the window: a parent at a known
+  // offset, which is exactly the case where ConfigureNotify coordinates
+  // stop meaning screen coordinates
+  const frame = app.X.AllocID();
+  app.X.CreateWindow(frame, app.X.display.screen[0].root, 70, 90, 400, 400);
+  app.X.MapWindow(frame);
+  translates = 0;
+  app.X.ReparentWindow(node.window.id, frame, 0, 0);
+  await waitFor(() => translates > 0, 'the reparent refresh');
+  await waitFor(
+    () => node.window._screenOrigin?.x === 70,
+    `the framed origin (got ${JSON.stringify(node.window._screenOrigin)})`,
+  );
+});

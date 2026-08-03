@@ -20,6 +20,7 @@ import type {
   SubmitEvent,
   SyntheticEvent,
   ViewportEvent,
+  WindowResizeEvent,
 } from './events.js';
 
 /** Props every element takes. */
@@ -150,8 +151,12 @@ export interface WindowProps
    * pointer without swallowing its own drag. See `useDragSource`.
    */
   dragPreview?: boolean;
-  /** ConfigureNotify — the tree reflows on its own. */
-  onResize?: (ev: SyntheticEvent<NtkWindow>) => void;
+  /**
+   * ConfigureNotify — the tree reflows on its own. Fires for moves and
+   * reparents too: check `ev.resized` / `ev.moved` before doing work of
+   * your own, or a window drag pays for it per pointer step.
+   */
+  onResize?: (ev: WindowResizeEvent) => void;
   onExpose?: (ev: SyntheticEvent<NtkWindow>) => void;
   /**
    * The states the window manager now has on the window. Subscribing is
