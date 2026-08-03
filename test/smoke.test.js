@@ -3063,6 +3063,16 @@ test('Dialog: modal popup, Escape closes it, focus goes back', async () => {
     false,
     'the ref is resolved in the commit phase, never handed to ntk',
   );
+  // ntk's Window constructor registers any `onKeyDown`/`onFocus`/… it finds
+  // in its creation args as a raw listener (events_map.toSnake). A handler
+  // that got there would be called a second time with the native X event —
+  // no preventDefault, no target — so no event prop may reach the
+  // attributes, on creation or on the pre-realize update path.
+  assert.deepStrictEqual(
+    Object.keys(dialog.attributes).filter((k) => /^on[A-Z]/.test(k)),
+    [],
+    'event props are dispatched by the EventManager, never by ntk',
+  );
   assert.strictEqual(input.focused, true, 'autoFocus inside the dialog won');
 
   // Escape reaches the dialog by bubbling out of the focused node

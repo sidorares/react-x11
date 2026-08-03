@@ -497,6 +497,43 @@ export const WINDOW_HINT_PROPS = [
   'maxAspect',
   'gravity',
 ];
+
+/**
+ * ntk's Window constructor takes every creation attribute up front. The
+ * user-facing shape and ntk's differ in two places: size hints are flat
+ * props here and a `sizeHints` object there, and the window background is
+ * a style property here and a creation attribute there.
+ *
+ * Event props never travel this way. ntk reads `onKeyDown` & co. off its
+ * creation args and registers them as raw listeners (events_map.toSnake),
+ * which would hand the application the native X event instead of the
+ * synthetic one the EventManager dispatches — and hold the first render's
+ * closure forever. Handlers are read from current props at dispatch time
+ * instead, so they can never go stale. `children` is the tree's, and
+ * `transientFor` holds a React ref that only the commit phase can resolve
+ * (WindowNode._applyTransientFor).
+ */
+export function windowAttributes(props) {
+  const attributes = {};
+  const hints = {};
+  for (const key of Object.keys(props)) {
+    if (key === 'children' || key === 'style' || isEventProp(key)) continue;
+    if (key === 'transientFor') continue;
+    if (WINDOW_HINT_PROPS.includes(key)) {
+      hints[key] = props[key];
+      continue;
+    }
+    attributes[key] = props[key];
+  }
+  if (Object.keys(hints).length > 0) attributes.sizeHints = hints;
+  if (props.style !== undefined) {
+    const style = flattenStyle(props.style);
+    if (style.backgroundColor !== undefined) {
+      attributes.backgroundColor = style.backgroundColor;
+    }
+  }
+  return attributes;
+}
 /**
  * The `_NET_WM_STATE` names these props ask for. `states` is the general
  * mechanism; `fullscreen` and `alwaysOnTop` are sugar for the two everyone
@@ -4446,12 +4483,13 @@ export class WindowNode extends Node {
     }
     const wnd = this.window;
     if (!wnd) {
-      // not realized yet: refresh creation attributes instead. `transientFor`
-      // is the one prop that must not travel this way — it holds a React ref
-      // until the commit phase resolves it, and ntk's hint handling reads a
-      // key by that name.
-      this.attributes = { ...this.attributes, ...newProps };
-      delete this.attributes.transientFor;
+      // Not realized yet: refresh creation attributes instead — through the
+      // same filter createInstance used, since these are the arguments ntk's
+      // constructor will see. Spreading raw props here was the bug behind
+      // `ev.preventDefault is not a function` in a <popup>'s onKeyDown: ntk
+      // registers any `onFoo` in its creation args as a raw listener, so the
+      // handler was called a second time with the native X event.
+      this.attributes = { ...this.attributes, ...windowAttributes(newProps) };
       return;
     }
 
