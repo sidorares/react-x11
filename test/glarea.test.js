@@ -11,6 +11,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
+import { Canvas3D } from '../src/components/index.js';
 import { createRoot } from '../src/index.js';
 
 const require = createRequire(import.meta.url);
@@ -18,7 +19,7 @@ const { createGlxExtension, RecordingBackend } = require('x11/browser/glx');
 
 const h = React.createElement;
 
-async function createGlApp() {
+async function createGlApp({ indirectContexts = true } = {}) {
   const server = xserver.createServer({ width: 640, height: 480 });
   const backend = new RecordingBackend();
   const surfaces = new Map();
@@ -26,6 +27,7 @@ async function createGlApp() {
     'GLX',
     createGlxExtension({
       backend,
+      indirectContexts,
       getDrawableSurface: (xid) => surfaces.get(xid) || null,
     }),
   );
@@ -211,6 +213,147 @@ test('<glarea> follows layout changes and redraws once per change', async () => 
     await settle(app, 6);
     assert.equal(frames.length, before, 'no frames without a change');
     assert.equal(xErrors.length, 0, xErrors.map((e) => e.message).join(', '));
+
+    await x11Root.unmount();
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
+// A server with indirect GLX disabled is the common case, not an edge case:
+// it is the default on Xwayland and on Xorg without +iglx. The emulator's
+// indirectContexts:false reproduces it exactly — every query answers, and
+// CreateContext alone fails with BadValue 0.
+test('<Canvas3D fallback> renders instead of the surface when GL is refused', async () => {
+  const { app } = await createGlApp({ indirectContexts: false });
+  const x11Root = await createRoot({ app });
+  try {
+    const errors = [];
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          {
+            style: { flexGrow: 1 },
+            fallback: (err) => {
+              errors.push(err);
+              // a box, not text: this suite's font source is empty
+              return h('box', { name: 'no-gl' });
+            },
+          },
+          h('mesh', null, h('boxGeometry', { args: [1, 1, 1] })),
+        ),
+      ),
+      x11Root,
+    );
+
+    await waitFor(() => errors.length > 0, 'the fallback to render');
+    await settle(app);
+
+    const err = errors[0];
+    assert.equal(
+      err.code,
+      'GLX_INDIRECT_DISABLED',
+      `classified by cause, got ${err.code}: ${err.message}`,
+    );
+    assert.match(err.message, /indirect GLX/);
+    assert.ok(err.hint, 'and carries the remedy for whoever wants to show it');
+
+    const node = instance._reactX11Node;
+    const [child] = node.children;
+    assert.equal(child.kind, 'box', 'the surface is gone, the fallback is up');
+    assert.equal(
+      child.children[0].props.name,
+      'no-gl',
+      'and it is what the fallback returned',
+    );
+
+    await x11Root.unmount();
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a failed <glarea> leaves no X window over the fallback', async () => {
+  const { app } = await createGlApp({ indirectContexts: false });
+  const x11Root = await createRoot({ app });
+  try {
+    const errors = [];
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h('glarea', { style: { flexGrow: 1 }, onError: (e) => errors.push(e) }),
+      ),
+      x11Root,
+    );
+
+    await waitFor(() => errors.length > 0, 'onError');
+    await settle(app);
+
+    const area = instance._reactX11Node.children[0];
+    assert.equal(area.kind, 'glarea');
+    assert.equal(area.error, errors[0], 'the node records why it has no GL');
+    assert.equal(area.gl, null, 'no context');
+    assert.equal(
+      area.window,
+      null,
+      'and no child window: an unpainted one would cover whatever replaces it',
+    );
+
+    await x11Root.unmount();
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
+// Why the connection remembers: the reason GL is unavailable is a property
+// of the X server, so a second surface asking would get the same answer one
+// round trip later — and show an empty box until it arrived.
+test('a second <Canvas3D> shows its fallback on the first frame', async () => {
+  const { app } = await createGlApp({ indirectContexts: false });
+  const x11Root = await createRoot({ app });
+  try {
+    const first = [];
+    const commits = [];
+    const canvas = (log) =>
+      h(Canvas3D, {
+        style: { flexGrow: 1 },
+        fallback: (err) => {
+          log.push(err);
+          return h('box', { name: 'no-gl' });
+        },
+      });
+
+    await render(
+      h('window', { width: 320, height: 240 }, canvas(first)),
+      x11Root,
+    );
+    await waitFor(() => first.length > 0, 'the first surface to find out');
+    await settle(app);
+
+    // a second surface, mounted after the answer is known
+    const second = [];
+    let rendered = 0;
+    const Probe = () => {
+      rendered++;
+      commits.push(second.length);
+      return canvas(second);
+    };
+    await render(h('window', { width: 320, height: 240 }, h(Probe)), x11Root);
+
+    assert.ok(rendered > 0, 'the second tree rendered');
+    assert.equal(
+      second.length,
+      1,
+      'its fallback ran on the first commit, with no round trip in between',
+    );
+    assert.equal(second[0].code, 'GLX_INDIRECT_DISABLED');
 
     await x11Root.unmount();
     await settle(app);

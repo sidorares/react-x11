@@ -19,6 +19,13 @@ export const Path2D: new (...args: unknown[]) => unknown;
 export const Image: new (...args: unknown[]) => unknown;
 export const Pixmap: new (...args: unknown[]) => unknown;
 export const Yoga: Record<string, unknown>;
+/** `code` values on a failed GL setup — see `<Canvas3D fallback>`. */
+export const GLXError: {
+  NO_EXTENSION: 'GLX_NO_EXTENSION';
+  INDIRECT_DISABLED: 'GLX_INDIRECT_DISABLED';
+  NO_CONFIG: 'GLX_NO_CONFIG';
+  CONTEXT_FAILED: 'GLX_CONTEXT_FAILED';
+};
 
 declare const ntk: Record<string, unknown>;
 export default ntk;

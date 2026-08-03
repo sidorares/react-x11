@@ -21,6 +21,12 @@ const AppContext = createContext(null);
 /** Wraps the rendered element; not exported to applications. */
 export const AppProvider = AppContext.Provider;
 
+/** `useApp()` without the throw, for components that can still render
+ * something useful outside a tree (see `<Canvas3D>`). Not public. */
+export function useAppOrNull() {
+  return useContext(AppContext);
+}
+
 /**
  * The ntk connection this tree is rendering onto.
  *
