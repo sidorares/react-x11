@@ -161,6 +161,64 @@ test('a drawing painted once is never cached', async () => {
   await app.close();
 });
 
+// Cell `i` at frame `f` draws tone `(f + i) % 5`, so every drawing recurs on
+// the next frame one cell to the left. That cross-node recurrence is what an
+// animated wall produces, and it is enough sightings to satisfy the "seen
+// twice" gate — which is why the gate alone does not keep animation out.
+const TONES = ['#00aa00', '#0000ff', '#ff0000', '#aa00aa', '#00aaaa'];
+const wave = (frame, count) =>
+  React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+    ...Array.from({ length: count }, (_, i) =>
+      React.createElement('svg', {
+        key: i,
+        source: SQUARE(TONES[(frame + i) % TONES.length]),
+        style: {
+          position: 'absolute',
+          left: i * 20,
+          top: 0,
+          width: 16,
+          height: 16,
+        },
+      }),
+    ),
+  );
+
+test('an animated document is never cached, however often it recurs', async () => {
+  const app = await headlessApp();
+  const ctl = await mount(app, wave(0, 4));
+  const cache = ctl.root._paintCache;
+
+  const FRAMES = 8;
+  for (let f = 1; f <= FRAMES; f++) {
+    await new Promise((resolve) =>
+      ctl.root._x11Root.render(wave(f, 4), resolve),
+    );
+    ctl.frame();
+    await settle(app);
+  }
+
+  assert.equal(
+    cache.stats.renders,
+    0,
+    'a document that changed since its own last paint is not worth a surface',
+  );
+  assert.equal(cache.entries.size, 0, 'so nothing accumulates');
+
+  // and every cell still shows the frame it was last rendered with
+  const px = await pixels(app, ctl.root);
+  for (let i = 0; i < 4; i++) {
+    const want = TONES[(FRAMES + i) % TONES.length];
+    const rgb = [1, 3, 5].map((o) => parseInt(want.slice(o, o + 2), 16));
+    assert.ok(
+      near(px(i * 20 + 8, 8), rgb),
+      `cell ${i}: got ${px(i * 20 + 8, 8)}`,
+    );
+  }
+  await app.close();
+});
+
 test('a different document is a different entry, not a stale one', async () => {
   const app = await headlessApp();
   const ctl = await mount(app, wall(SQUARE('#00aa00'), 4));
@@ -173,9 +231,15 @@ test('a different document is a different entry, not a stale one', async () => {
   ctl.frame();
   await settle(app);
 
-  assert.equal(cache.entries.size, 2, 'the old entry is not reused');
+  // A document that just changed paints live for one frame — see the
+  // animation note in paintCachePlan — so what matters on this frame is the
+  // pixels: blue, not the green entry reused.
   const px = await pixels(app, ctl.root);
   assert.ok(near(px(8, 8), [0, 0, 255]), `repainted blue: got ${px(8, 8)}`);
+
+  // and once it has settled it earns an entry of its own, beside the green
+  await repaint(app, ctl);
+  assert.equal(cache.entries.size, 2, 'the old entry is not reused');
   await app.close();
 });
 

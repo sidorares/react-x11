@@ -291,6 +291,11 @@ export class SvgNode extends Node {
     super('svg', props, app);
     this.view = null;
     this._stale = true;
+    /** Bumped every time the document is rebuilt, and sampled at paint time,
+     * so `paintCachePlan` can tell an animated document from a settled one.
+     * See the note there. */
+    this._docRevision = 0;
+    this._paintedRevision = -1;
     this.yoga.setMeasureFunc(
       intrinsicMeasure(() => {
         const view = this._ensureView();
@@ -312,6 +317,7 @@ export class SvgNode extends Node {
   _ensureView() {
     if (!this._stale) return this.view;
     this._stale = false;
+    this._docRevision++;
     this.view = null;
     this._docKey = null;
     try {
@@ -395,10 +401,34 @@ export class SvgNode extends Node {
    * a wall of icons is four extra requests each. The cost is that a cached
    * drawing sits on the pixel grid where a live one could straddle it, which
    * for icon-sized content is not visible.
+   *
+   * ## Animated documents opt themselves out
+   *
+   * A document that was rebuilt since this node's last paint is being
+   * animated, and caching it is a pure loss: the entry is written, composited
+   * once at most, and never matched again. The cache has a "seen twice" gate
+   * for exactly this, but content keying defeats it here — a wall of the same
+   * animated drawing at different phases produces documents that recur across
+   * *nodes* by coincidence, which is enough sightings to pass the gate and
+   * never enough to pay it back. Measured on a wall of 30 animated gauges:
+   * 450 of 1076 distinct documents recurred, 12% of lookups hit, and each
+   * miss-that-cached bought a CreatePixmap plus a second rasterization of a
+   * drawing that had already been painted live. On a server where offscreen
+   * rasterization is a software fallback that doubled the frame's fence.
+   *
+   * So the revision has to match the one this node last painted. A node that
+   * has never painted has nothing to compare and stays speculative, exactly
+   * as before — the "seen twice" gate is still the thing deciding, so a wall
+   * of identical icons fills on its first frame from its own sibling cells.
+   * Only a document that then *changes* opts out, which is the signal that it
+   * was never going to be matched again.
    */
   paintCachePlan() {
     const view = this._ensureView();
     if (!view || !this._docKey) return null;
+    const painted = this._paintedRevision;
+    this._paintedRevision = this._docRevision;
+    if (painted >= 0 && painted !== this._docRevision) return null;
     const content = this.contentBox();
     const width = Math.round(content.width);
     const height = Math.round(content.height);
