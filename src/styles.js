@@ -148,6 +148,9 @@ export const TEXT_LAYOUT_PROPS = new Set([
   'fontStyle',
   'textAlign',
   'lineHeight',
+  // read by TextNode rather than passed to ntk: it trims the box the layout
+  // produced, it does not change the layout
+  'textBoxTrim',
 ]);
 
 export const isLayoutProp = (name) =>

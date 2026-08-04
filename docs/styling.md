@@ -161,6 +161,41 @@ every ring under it at once — the renderer reads them from the nearest
 `theme` prop, so `<ThemeProvider>` covers the widgets and anything an
 application writes itself.
 
+## Measuring text to its letters
+
+```jsx
+<text style={{ fontSize: 24, textBoxTrim: 'cap-alphabetic', padding: 12 }}>
+  HEX
+</text>
+```
+
+`textBoxTrim` is CSS's `text-box-trim: trim-both` with `text-box-edge: cap
+alphabetic`: the `<text>`'s box becomes the capitals down to the last
+baseline, so padding around a label is measured from the letters and
+centring centres what you can see. Default `'none'`.
+
+The problem it solves is that **a line box is not the text**. It is the
+font's ascent plus its descent plus its line gap, and the space over a
+capital differs from the space under a baseline by `(ascent - capHeight) -
+descent` — a property of the typeface, so a label is only ever optically
+centred by luck. With the KaTeX face the tests use, a 24px label in a 12px
+padded box sits 17px below the top and 18px above the bottom; trimmed, it is
+12 and 12.
+
+**`lineHeight` is not an alternative.** It is a multiplier over the natural
+line box and the leading still splits evenly above and below, so it moves
+both edges by the same amount — it can change how much space there is, never
+how it is balanced.
+
+Two things worth knowing:
+
+- It applies to `<text>`. `<textinput>` and `<textarea>` keep their full line
+  box, because their caret and selection geometry is measured against it.
+- Trimming removes real space, so a control gets shorter: size the padding
+  for the result you want rather than to whatever the metrics happened to
+  add. The built-in widgets do not set it — a theme that wants it sets it on
+  the styles it passes.
+
 ## `createStyles`
 
 Identity is the point — a hoisted style object lets `applyProps` skip the

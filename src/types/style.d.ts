@@ -137,6 +137,18 @@ export interface PaintStyle {
   outlineOffset?: number;
 }
 
+/**
+ * Which edges of the text a `<text>`'s box is measured to.
+ *
+ * `'cap-alphabetic'` is CSS's `text-box-trim: trim-both` with
+ * `text-box-edge: cap alphabetic`: the box becomes the capitals down to the
+ * last baseline, so padding around a label is measured from the letters
+ * rather than from the font's ascent and descent — and centring centres what
+ * you can see. `lineHeight` is not an alternative: it scales the line box
+ * and the leading still splits evenly, moving both edges by the same amount.
+ */
+export type TextBoxTrim = 'none' | 'cap-alphabetic';
+
 /** Text properties. All affect measurement except `color`. */
 export interface TextStyle {
   color?: Color;
@@ -146,6 +158,10 @@ export interface TextStyle {
   fontStyle?: FontStyle;
   textAlign?: TextAlign;
   lineHeight?: number;
+  /** Default `'none'`. Applies to `<text>`; the editable controls keep their
+   *  full line box, which their caret and selection geometry are measured
+   *  against. */
+  textBoxTrim?: TextBoxTrim;
 }
 
 /** What a pseudo-state block may change: paint properties, plus `color`. */
