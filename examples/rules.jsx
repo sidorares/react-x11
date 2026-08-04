@@ -773,7 +773,12 @@ function TokenField({ options, values, onChange }) {
           height={height + 2}
           grab
           onDismiss={() => setOpen(false)}
-          style={{ backgroundColor: C.card }}
+          // `transparent` and no window background: the rounded card below
+          // is the only thing painted, so the square corners it leaves over
+          // stay empty and the compositor shows the desktop through them.
+          // Without it the window fills white and the rounding is a card on
+          // a white rectangle. Needs a compositor — see docs/elements.md.
+          transparent
         >
           <box style={s.menu}>
             <scrollview style={{ flexGrow: 1, padding: 4 }}>
