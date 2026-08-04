@@ -40,6 +40,7 @@ import {
   hooks as traceHooks,
 } from './trace-registry.js';
 import { beginStartup } from './startup.js';
+import { beginCompositing, endCompositing } from './compositing.js';
 import { GlAreaNode } from './glnodes.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
 import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
@@ -662,6 +663,12 @@ export async function createRoot(options = {}) {
   // or not this app ends up using it (src/startup.js).
   beginStartup(app, rest.startupNotification);
 
+  // Awaited, and this is the only place it can be: whether a compositor is
+  // running decides what a `transparent` window paints, and a window that
+  // realized before the answer landed would paint the wrong thing once and
+  // correct itself visibly. One round trip, on a path that is already async.
+  await beginCompositing(app);
+
   return {
     app,
     render(element, callback) {
@@ -691,6 +698,7 @@ export async function createRoot(options = {}) {
       Renderer.updateContainerSync(null, container, null, null);
       Renderer.flushSyncWork();
       if (rest.onUncaughtError) setErrorHandler(app, null);
+      endCompositing(app);
       if (owned) {
         unregisterApp(app);
         await app.close();

@@ -332,23 +332,55 @@ that is empty except for what the tree paints.
 opaque window it is ignored: giving up the corners there would only expose
 the server's white, which is worse than square.
 
-Requirements and fallbacks, in the order they bite:
+### When transparency is not available
 
-- **A running compositor** (Mutter, KWin, picom, …). Without one the X
-  server shows the raw pixels, and unpainted regions come out black rather
-  than transparent — so a rounded popup gets black corners. There is no
-  detection: react-x11 does what it is asked. Check with
-  `xprop -root _NET_SUPPORTING_WM_CHECK` and your desktop's settings if a
-  popup looks wrong.
-- **ntk ≥ 6.6.0**, for `App#findArgbVisual()` and for `clearRect()` meaning
-  transparent on a depth-32 window.
-- **A depth-32 TrueColor visual.** XQuartz has none. There the window is
-  created opaque and paints exactly as it did before, with a `console.warn`
-  in development.
+Transparency needs two things, and either can be missing: a **depth-32
+TrueColor visual** (XQuartz has none), and a **running compositor** (Mutter,
+KWin, picom, …) to blend the alpha channel. Without a compositor the X
+server shows the raw pixels, and a corner you painted away is not
+transparent — it is **black**.
 
-Set at creation, because a visual is a `CreateWindow` field: toggling
-`transparent` on a mounted window does nothing until it remounts (change its
-`key`).
+react-x11 never lets that happen. When transparency would not actually be
+seen, the window is filled edge to edge and `borderRadius` on it is ignored:
+you get the square opaque popup, not a black-cornered one. A translucent
+`backgroundColor` is flattened rather than composited onto the last frame.
+Nothing is required of the application for that floor to hold.
+
+What the application _does_ control is the design on the other side of it,
+through the `'@supports transparency'` style block:
+
+```jsx
+<popup
+  transparent
+  style={{
+    backgroundColor: '#1c1c22', // square and opaque, works everywhere
+    '@supports transparency': {
+      backgroundColor: 'rgba(24, 24, 30, 0.86)',
+      borderRadius: 14,
+    },
+  }}
+/>
+```
+
+See [Capability queries](styling.md#capability-queries). The block is
+answered per window and re-resolved live, so a compositor being switched on
+mid-session turns the popup rounded without a remount — which is why
+`transparent` still takes the 32-bit visual when nothing is compositing yet.
+A visual is a `CreateWindow` field and cannot be changed afterwards; what
+the window paints can.
+
+For decisions that are not styling, `useSupports('transparency')` answers
+the same question about the display, and can be asked before any window
+exists:
+
+```jsx
+const canBlend = useSupports('transparency');
+const margin = canBlend ? 26 : 0; // room for a client-drawn shadow
+```
+
+Toggling the `transparent` prop itself on a mounted window does nothing
+until it remounts (change its `key`) — again because the visual is fixed at
+creation. Requires **ntk ≥ 6.6.0**.
 
 Two things a transparent window does **not** change. Input still hits the
 full rectangle — the corners are invisible, not click-through; use the Shape

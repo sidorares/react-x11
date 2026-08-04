@@ -3,6 +3,8 @@
 import React from 'react';
 import { loadLayout } from 'ntk';
 
+import { setCompositingForTests } from '../compositing.js';
+
 // ntk 5 loads the layout engine's WebAssembly in createClient() rather than
 // at import time — that is what keeps top-level await out of the bundle, and
 // so lets an app ship as a single executable (see docs/packaging.md). A mock
@@ -135,6 +137,8 @@ export function createMockApp() {
     findArgbVisual() {
       return { visual: 0x21, depth: 32 };
     },
+    // …and one with a compositor running — see the bottom of this function,
+    // where that half is seeded.
     createWindow(attributes) {
       const handlers = {};
       const ops = [];
@@ -330,6 +334,13 @@ export function createMockApp() {
       return wnd;
     },
   };
+  // The mock display composites. Seeded here rather than probed, because
+  // there is no X connection to ask — and seeding it means `createRoot`
+  // finds a session already open and leaves it alone. Tests that want the
+  // other half of the matrix — ARGB visuals with nothing blending them,
+  // where a transparent corner would render black — call
+  // `setCompositingForTests(app, false)` before rendering.
+  setCompositingForTests(app, true);
   return app;
 }
 

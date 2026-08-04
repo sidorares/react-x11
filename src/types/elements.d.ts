@@ -155,13 +155,28 @@ export interface WindowProps
    * (`rgba(20, 20, 24, 0.9)`), and leaving it unset makes the window empty
    * except for what the tree paints.
    *
-   * **Needs a running compositor** (Mutter, KWin, picom, …). Without one, X
-   * shows the raw pixels and unpainted regions come out black rather than
-   * transparent. Needs ntk >= 6.6.0; on a display with no 32-bit visual
-   * (XQuartz) the window is created opaque and paints as it always did.
+   * Transparency needs a 32-bit visual (XQuartz has none) **and** a running
+   * compositor to blend it. When either is missing, the window is filled
+   * edge to edge and `borderRadius` on it is ignored — a square opaque
+   * popup rather than a black-cornered one, which is what painting the
+   * corners away would give on a server with nothing compositing. Guard the
+   * enhanced design with a `'@supports transparency'` style block:
    *
-   * Set at creation: a visual is a `CreateWindow` field, so toggling this on
-   * a mounted window does nothing until it remounts (change its `key`).
+   * ```jsx
+   * style={{
+   *   backgroundColor: '#1c1c22',
+   *   '@supports transparency': {
+   *     backgroundColor: 'rgba(24, 24, 30, 0.86)',
+   *     borderRadius: 14,
+   *   },
+   * }}
+   * ```
+   *
+   * The visual is still taken when nothing is compositing yet, so that a
+   * compositor starting mid-session turns the window transparent without a
+   * remount. Set at creation: a visual is a `CreateWindow` field, so
+   * toggling this prop on a mounted window does nothing until it remounts
+   * (change its `key`). Needs ntk >= 6.6.0.
    */
   transparent?: boolean;
   /**

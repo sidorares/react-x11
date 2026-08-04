@@ -126,6 +126,21 @@ export function useApp(): unknown;
 /** The clipboard, scoped to this tree's connection. */
 export function useClipboard(): Clipboard;
 
+/** Features `useSupports()` can be asked about. */
+export type SupportsFeature = 'transparency';
+
+/**
+ * Can this **display** do something? `'transparency'` is true when the
+ * server has a 32-bit visual to draw on *and* a compositor is running to
+ * blend it; it re-renders when a compositor starts or stops.
+ *
+ * The companion is the `'@supports transparency'` style block, which asks
+ * about the window a node is actually in. Reach for that first — this is
+ * for decisions that are not styling, and that have to be made before a
+ * window exists (sizing a popup to hold a client-drawn shadow, say).
+ */
+export function useSupports(feature: SupportsFeature): boolean;
+
 /** What React reports alongside an error it caught. */
 export interface ErrorInfo {
   componentStack?: string;

@@ -217,21 +217,41 @@ const isState = (key) => key.charCodeAt(0) === 58; /* ':' */
  * resize has already triggered, so it costs nothing extra.
  */
 const SIZE_QUERY = /^@(width|height)\s*(>=|<=|>|<)\s*(\d+(?:\.\d+)?)$/;
-const isSizeQuery = (key) => key.charCodeAt(0) === 64; /* '@' */
+
+/**
+ * Capability queries: `'@supports transparency'`. Where a size query asks
+ * about the window, this asks about the *server* — what will actually be
+ * shown if the style asks for it.
+ *
+ * `transparency` is true only when the window really has an alpha channel
+ * (it was created on a 32-bit visual) *and* a compositor is running to
+ * blend it. Either half missing and a transparent corner is a black corner,
+ * so the honest answer is no. It is per window, not per display: a plain
+ * `<window>` never composites anything, so the same component nested in one
+ * gets the opaque design without being told twice.
+ */
+const SUPPORTS_QUERY = /^@supports\s+(transparency)$/;
+const SUPPORTS_FEATURES = ['transparency'];
+const isQuery = (key) => key.charCodeAt(0) === 64; /* '@' */
 
 const parsedQueries = new Map();
-function parseSizeQuery(key) {
+function parseQuery(key) {
   let q = parsedQueries.get(key);
   if (q === undefined) {
-    const m = SIZE_QUERY.exec(key);
-    q = m ? { axis: m[1], op: m[2], value: Number(m[3]) } : null;
+    const size = SIZE_QUERY.exec(key);
+    const supports = size ? null : SUPPORTS_QUERY.exec(key);
+    q = size
+      ? { kind: 'size', axis: size[1], op: size[2], value: Number(size[3]) }
+      : supports
+        ? { kind: 'supports', feature: supports[1] }
+        : null;
     parsedQueries.set(key, q);
   }
   return q;
 }
 
-function queryMatches(q, size) {
-  const v = size[q.axis];
+function sizeMatches(q, size) {
+  const v = size?.[q.axis];
   if (v == null) return false;
   return q.op === '>='
     ? v >= q.value
@@ -242,23 +262,53 @@ function queryMatches(q, size) {
         : v < q.value;
 }
 
-export function styleHasSizeQueries(style) {
-  for (const key of Object.keys(style)) if (isSizeQuery(key)) return true;
+const hasQueryOfKind = (style, kind) => {
+  for (const key of Object.keys(style)) {
+    if (isQuery(key) && parseQuery(key)?.kind === kind) return true;
+  }
   return false;
-}
+};
+
+/** Re-resolved when the window is laid out at a new size. */
+export const styleHasSizeQueries = (style) => hasQueryOfKind(style, 'size');
+
+/** Re-resolved when the server's answer changes — a compositor starting or
+ *  stopping — rather than on every layout. The two registries are kept
+ *  apart because the triggers are: a resize must not walk every node that
+ *  only ever asked about transparency. */
+export const styleHasSupportsQueries = (style) =>
+  hasQueryOfKind(style, 'supports');
 
 /**
- * Merge the size-query blocks that match `size`, in declaration order, over
- * the base. Returns the style itself when nothing matches, so the identity
- * fast path survives the common case.
+ * Merge the query blocks that match, in declaration order, over the base.
+ * Size and capability blocks resolve in one pass so that ordering between
+ * them is the order they were written in. Returns the style itself when
+ * nothing matches, so the identity fast path survives the common case.
+ *
+ * `supports` is the map of capability answers, or null while they are still
+ * unknown — in which case a capability block does not apply, which is the
+ * safe way round: the fallback design is the one that works everywhere.
+ */
+/**
+ * `resolveQueries` with only the size half, the shape this had before
+ * capability blocks existed. Kept because `react-x11/style` is a public
+ * entry and a registered element outside the package may be calling it.
  */
 export function resolveSizeQueries(style, size) {
-  if (!size) return style;
+  return size ? resolveQueries(style, { size }) : style;
+}
+
+export function resolveQueries(style, { size = null, supports = null } = {}) {
   let out = style;
   for (const key of Object.keys(style)) {
-    if (!isSizeQuery(key)) continue;
-    const q = parseSizeQuery(key);
-    if (!q || !queryMatches(q, size)) continue;
+    if (!isQuery(key)) continue;
+    const q = parseQuery(key);
+    if (!q) continue;
+    const hit =
+      q.kind === 'size'
+        ? size && sizeMatches(q, size)
+        : Boolean(supports?.[q.feature]);
+    if (!hit) continue;
     if (out === style) out = { ...style };
     Object.assign(out, style[key]);
   }
@@ -267,11 +317,12 @@ export function resolveSizeQueries(style, size) {
 
 function validateStyle(style, where) {
   for (const key of Object.keys(style)) {
-    if (isSizeQuery(key)) {
-      if (!parseSizeQuery(key)) {
+    if (isQuery(key)) {
+      if (!parseQuery(key)) {
         throw new Error(
-          `react-x11: bad size query "${key}" in ${where} ` +
-            '(expected e.g. "@width >= 600" on width or height)',
+          `react-x11: bad query "${key}" in ${where} (expected a size query ` +
+            'like "@width >= 600", or a capability query like ' +
+            `"@supports ${SUPPORTS_FEATURES.join('" / "@supports ')}")`,
         );
       }
       validateStyle(style[key] ?? {}, `${where} ${key}`);
