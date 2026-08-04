@@ -70,12 +70,17 @@ function App() {
           width={CARD}
           height={132}
           onDismiss={() => setOpen(null)}
-          // The window's own background: translucent, so the desktop reads
-          // through it, and rounded, so the corners it gives up are the
-          // corners the compositor shows through.
+          // Opaque and square is the base; translucent and rounded is the
+          // enhancement, and `@supports transparency` is what gates it. On a
+          // server with no 32-bit visual, or with nothing compositing, the
+          // block does not apply and the popup is an ordinary opaque one —
+          // where painting the corners away would have shown black.
           style={{
-            backgroundColor: 'rgba(24, 24, 30, 0.86)',
-            borderRadius: 14,
+            backgroundColor: '#181820',
+            '@supports transparency': {
+              backgroundColor: 'rgba(24, 24, 30, 0.86)',
+              borderRadius: 14,
+            },
           }}
         >
           <box
