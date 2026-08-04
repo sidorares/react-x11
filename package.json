@@ -23,6 +23,7 @@
     "examples:menu": "tsx examples/menu.jsx",
     "examples:clipboard": "tsx examples/clipboard.jsx",
     "examples:form": "tsx examples/form.jsx",
+    "examples:rules": "tsx examples/rules.jsx",
     "examples:richtext": "tsx examples/richtext.jsx",
     "examples:widgets": "tsx examples/widgets.jsx",
     "examples:icons": "tsx examples/icons.jsx",
@@ -60,7 +61,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^6.4.0",
+    "ntk": "^6.5.0",
     "react-reconciler": "^0.33.0"
   },
   "peerDependencies": {

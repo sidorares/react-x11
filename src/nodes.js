@@ -1885,9 +1885,13 @@ export class TextNode extends Node {
           widthMode === Yoga.MEASURE_MODE_UNDEFINED ? Infinity : width;
         const layout = this._layoutFor(maxWidth);
         if (!layout) return { width: 0, height: 0 };
+        const trim = this._trim(layout);
         return {
           width: Math.ceil(layout.width),
-          height: Math.ceil(layout.height),
+          height: Math.max(
+            0,
+            Math.ceil(layout.height) - (trim ? trim.top + trim.bottom : 0),
+          ),
         };
       });
     }
@@ -1946,10 +1950,51 @@ export class TextNode extends Node {
     return layout;
   }
 
+  /**
+   * `textBoxTrim: 'cap-alphabetic'` — CSS's `text-box-trim: trim-both` with
+   * `text-box-edge: cap alphabetic`. How much of the line box to take off
+   * the top and the bottom so the box *is* the letters: from the capitals
+   * down to the last baseline.
+   *
+   * A line box is not the text you can see. It is the font's ascent plus
+   * descent plus line gap, and the space over a capital differs from the
+   * space under a baseline by `(ascent - capHeight) - descent` — a property
+   * of the typeface, which is why padding around an untrimmed label is only
+   * ever optically even by luck. `lineHeight` cannot fix it: it scales the
+   * box and the leading still splits evenly, so it moves both edges alike.
+   *
+   * Measured in the coordinates the layout is **drawn** in, not the ones it
+   * reports: `halfLeading` shifts it, and deriving the baseline from the
+   * metrics again would silently disagree the day that shift changes.
+   */
+  _trim(layout) {
+    if (this.style.textBoxTrim !== 'cap-alphabetic') return null;
+    const lines = layout?.lines;
+    if (!lines?.length) return null;
+    const base = textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
+    const font = this.app?.fonts?.match?.(base.family, {
+      weight: base.weight,
+      style: base.style,
+    });
+    const capHeight = font?.metrics?.(base.size)?.capHeight;
+    if (!capHeight) return null; // no metrics: leave the box alone
+    const shift = halfLeading(layout);
+    const firstBaseline = shift + lines[0].baseline;
+    const lastBaseline = shift + lines[lines.length - 1].baseline;
+    return {
+      top: Math.max(0, firstBaseline - capHeight),
+      bottom: Math.max(0, Math.ceil(layout.height) - lastBaseline),
+    };
+  }
+
   _paintContent(ctx) {
     const content = this.contentBox();
     const layout = this._layoutFor(content.width || Infinity);
-    if (layout) layout.draw(ctx, content.x, content.y + halfLeading(layout));
+    if (!layout) return;
+    // the box was shortened from the top, so the glyphs come up with it
+    const trim = this._trim(layout);
+    const y = content.y + halfLeading(layout) - (trim ? trim.top : 0);
+    layout.draw(ctx, content.x, y);
   }
 }
 

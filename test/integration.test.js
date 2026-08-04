@@ -1156,3 +1156,119 @@ test('overflow: hidden still clips a child that really does overflow', async () 
     await app.close();
   }
 });
+
+// `textBoxTrim: 'cap-alphabetic'` makes a <text>'s box the letters — the
+// capitals down to the last baseline — so padding around a label is even
+// above and below instead of inheriting the font's ascent/descent asymmetry.
+//
+// The assertion is the ink, not the box: a shorter box would also come from
+// simply dropping the descent, and that would leave the text riding high.
+// "HEX" is measured because it is all caps with flat tops, no descenders and
+// no round letters, so its ink top *is* the cap line and its ink bottom *is*
+// the baseline — the two edges the trim is defined against.
+test('textBoxTrim: cap-alphabetic centres a label on its capitals', async () => {
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  const W = 200;
+  const H = 120;
+  const PAD = 12;
+
+  /** Rows of the pill that contain ink, and the pill's own extent. */
+  const inkOf = async (ctx, node) => {
+    const image = await readPixels(ctx, W, H);
+    const top = Math.round(node.abs.y);
+    const bottom = Math.round(node.abs.y + node.abs.height);
+    const rows = [];
+    for (let y = top; y < bottom; y++) {
+      for (
+        let x = Math.round(node.abs.x);
+        x < Math.round(node.abs.x + node.abs.width);
+        x++
+      ) {
+        if (px(image, W, x, y)[0] < 120) {
+          rows.push(y);
+          break;
+        }
+      }
+    }
+    return { top, bottom, first: rows[0], last: rows[rows.length - 1] + 1 };
+  };
+
+  try {
+    const pill = (trim) =>
+      React.createElement(
+        'box',
+        {
+          style: {
+            alignSelf: 'flex-start',
+            padding: PAD,
+            backgroundColor: '#ffffff',
+          },
+        },
+        React.createElement(
+          'text',
+          {
+            style: {
+              fontSize: 24,
+              color: '#000000',
+              ...(trim ? { textBoxTrim: 'cap-alphabetic' } : {}),
+            },
+          },
+          'HEX',
+        ),
+      );
+
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+        pill(false),
+        pill(true),
+      ),
+      x11Root,
+    );
+
+    const ctx = wnd.getContext('2d');
+    await waitForPixel(ctx, W, H, 2, 2, [255, 255, 255], 'window painted');
+
+    const root = wnd._reactX11Node;
+    const pills = root.children.filter((n) => n.kind === 'box');
+    assert.strictEqual(pills.length, 2, 'two pills');
+
+    // let the frame land before reading ink
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const plain = await inkOf(ctx, pills[0]);
+    const trimmed = await inkOf(ctx, pills[1]);
+
+    assert.ok(plain.first != null, 'the untrimmed label drew something');
+    assert.ok(trimmed.first != null, 'the trimmed label drew something');
+
+    // the trimmed box is the cap band plus the padding it was given
+    assert.ok(
+      pills[1].abs.height < pills[0].abs.height,
+      `trimming should shorten the pill (${pills[1].abs.height} vs ${pills[0].abs.height})`,
+    );
+    assert.strictEqual(
+      trimmed.last - trimmed.first,
+      plain.last - plain.first,
+      'the glyphs themselves are untouched — only the box around them moved',
+    );
+
+    // the point of the exercise: even space above the caps and below the
+    // baseline, to within the pixel grid
+    const above = trimmed.first - trimmed.top;
+    const below = trimmed.bottom - trimmed.last;
+    assert.ok(
+      Math.abs(above - below) <= 1,
+      `trimmed padding should be even: ${above} above the caps, ${below} below the baseline`,
+    );
+    assert.ok(
+      Math.abs(above - PAD) <= 1,
+      `and should be the padding that was asked for: ${above} vs ${PAD}`,
+    );
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+  }
+});

@@ -61,6 +61,8 @@ const s = createStyles({
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   half: { width: '50%', marginLeft: 'auto' },
   title: { fontSize: 20, color: '$text', fontWeight: 'bold' },
+  // the box is the capitals down to the baseline, so this padding is even
+  trimmed: { fontSize: 20, textBoxTrim: 'cap-alphabetic', padding: 8 },
   card: {
     borderRadius: 8,
     borderWidth: 1,
