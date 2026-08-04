@@ -23,6 +23,7 @@
     "examples:menu": "tsx examples/menu.jsx",
     "examples:clipboard": "tsx examples/clipboard.jsx",
     "examples:form": "tsx examples/form.jsx",
+    "examples:rules": "tsx examples/rules.jsx",
     "examples:richtext": "tsx examples/richtext.jsx",
     "examples:widgets": "tsx examples/widgets.jsx",
     "examples:icons": "tsx examples/icons.jsx",
