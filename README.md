@@ -254,6 +254,7 @@ npm run examples:xeyes         # canvas drawing + hooks
 npm run examples:dashboard     # context theming, custom hooks, components
 npm run examples:tasks         # useReducer, textinput, scrollview
 npm run examples:menu          # right-click context menu via <popup>
+npm run examples:transparent   # rounded translucent <popup transparent>
 npm run examples:form          # <textinput> + Select dropdowns
 npm run examples:gl            # raw GL in a <glarea> (display-list cube)
 npm run examples:three         # <Canvas3D> scene: meshes, lights, textures

@@ -128,6 +128,13 @@ export function createMockApp() {
       },
     },
     windows: [],
+    // A display that does have a 32-bit TrueColor visual, so `<window
+    // transparent>` takes its real path here. Delete it from the app to
+    // model the displays that do not (XQuartz), where the renderer falls
+    // back to an opaque window.
+    findArgbVisual() {
+      return { visual: 0x21, depth: 32 };
+    },
     createWindow(attributes) {
       const handlers = {};
       const ops = [];
@@ -140,6 +147,9 @@ export function createMockApp() {
           ops.push(['fillRect', x, y, w, h, ctx.fillStyle]);
         },
         beginPath() {},
+        clearRect(x, y, w, h) {
+          ops.push(['clearRect', x, y, w, h]);
+        },
         rect(x, y, w, h) {
           ops.push(['rect', x, y, w, h]);
         },

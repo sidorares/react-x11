@@ -146,6 +146,25 @@ export interface WindowProps
    */
   decorations?: boolean;
   /**
+   * Give the window a 32-bit ARGB visual, so what it does not paint stays
+   * transparent and a compositor shows the desktop through it. Together with
+   * `style={{ borderRadius }}` this is how a `<popup>` gets rounded,
+   * antialiased corners — no Shape extension, no 1-bit mask.
+   *
+   * The window's own `backgroundColor` may then be translucent
+   * (`rgba(20, 20, 24, 0.9)`), and leaving it unset makes the window empty
+   * except for what the tree paints.
+   *
+   * **Needs a running compositor** (Mutter, KWin, picom, …). Without one, X
+   * shows the raw pixels and unpainted regions come out black rather than
+   * transparent. Needs ntk >= 6.6.0; on a display with no 32-bit visual
+   * (XQuartz) the window is created opaque and paints as it always did.
+   *
+   * Set at creation: a visual is a `CreateWindow` field, so toggling this on
+   * a mounted window does nothing until it remounts (change its `key`).
+   */
+  transparent?: boolean;
+  /**
    * Mark this window as a drag preview: the drag router never treats it as
    * the window under the pointer, so a `<popup dragPreview>` can follow the
    * pointer without swallowing its own drag. See `useDragSource`.

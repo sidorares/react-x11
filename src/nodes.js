@@ -509,16 +509,18 @@ export const WINDOW_HINT_PROPS = [
  * which would hand the application the native X event instead of the
  * synthetic one the EventManager dispatches — and hold the first render's
  * closure forever. Handlers are read from current props at dispatch time
- * instead, so they can never go stale. `children` is the tree's, and
+ * instead, so they can never go stale. `children` is the tree's,
  * `transientFor` holds a React ref that only the commit phase can resolve
- * (WindowNode._applyTransientFor).
+ * (WindowNode._applyTransientFor), and `transparent` names a visual that has
+ * to be looked up on the connection (WindowNode._argbAttributes) rather than
+ * a value ntk takes.
  */
 export function windowAttributes(props) {
   const attributes = {};
   const hints = {};
   for (const key of Object.keys(props)) {
     if (key === 'children' || key === 'style' || isEventProp(key)) continue;
-    if (key === 'transientFor') continue;
+    if (key === 'transientFor' || key === 'transparent') continue;
     if (WINDOW_HINT_PROPS.includes(key)) {
       hints[key] = props[key];
       continue;
@@ -4007,6 +4009,9 @@ export class WindowNode extends Node {
     this.root = this;
     this.attributes = attributes;
     this.window = null;
+    // set by realize() only once the ARGB visual is actually there, so the
+    // paint path never assumes an alpha channel the window does not have
+    this._transparent = false;
     this.needsLayout = true;
     this.needsPaint = true;
     this._scheduled = false;
@@ -4035,6 +4040,11 @@ export class WindowNode extends Node {
     if (parentWindow) {
       attributes.parent = parentWindow;
     }
+    // Before the window exists, because a visual is a CreateWindow field: a
+    // window cannot become transparent later, which is also why `transparent`
+    // is read here and never in the update path.
+    if (this.props.transparent)
+      Object.assign(attributes, this._argbAttributes());
     const wnd = this.app.createWindow(attributes);
     this.window = wnd;
     wnd._reactX11Node = this;
@@ -4086,6 +4096,37 @@ export class WindowNode extends Node {
     // placed as well as the second
     this._refreshScreenOrigin();
     this.invalidate(true, null, 'mount');
+  }
+
+  /**
+   * Creation attributes for a per-pixel transparent window: a 32-bit
+   * TrueColor visual, and a background of transparent black rather than the
+   * server's white, so nothing flashes before the first paint. ntk gives the
+   * window its own colormap and border pixel to go with the visual —
+   * inheriting either from a parent of a different depth is a BadMatch.
+   *
+   * Empty when the display has no such visual (XQuartz has none) or ntk is
+   * too old to find one, and then `_transparent` stays false and the window
+   * paints its background opaque, exactly as it did before. A transparent
+   * window that cannot be transparent is a square opaque one, not a broken
+   * one — and the alternative, black corners, is worse than square.
+   */
+  _argbAttributes() {
+    const argb = this.app?.findArgbVisual?.();
+    if (!argb) {
+      if (DEV) {
+        console.warn(
+          'react-x11: <%s transparent> — no 32-bit TrueColor visual on this ' +
+            'display, falling back to an opaque window',
+          this.isPopup ? 'popup' : 'window',
+        );
+      }
+      return null;
+    }
+    // What the paint path keys off: the window really does have an alpha
+    // channel, so clearing it means transparent rather than white.
+    this._transparent = true;
+    return { ...argb, backgroundPixel: 0 };
   }
 
   /**
@@ -5107,6 +5148,21 @@ export class WindowNode extends Node {
 
   /** Repaint one damage rect, or the whole window when `damage` is null. */
   _paintRegion(ctx, damage, width, height) {
+    // A transparent window erases where an opaque one paints over. Its
+    // backing store holds premultiplied ARGB, and compositing a translucent
+    // background onto the previous frame would compound towards opaque
+    // instead of replacing it — a popup that fades in would stick.
+    //
+    // Before the clip below, deliberately: clearing exactly the damage rect
+    // covers the same pixels, and an unclipped clearRect is one server-side
+    // FillRectangles where a clipped one has to rasterize a coverage mask.
+    if (this._transparent) {
+      if (damage) {
+        ctx.clearRect(damage.x, damage.y, damage.width, damage.height);
+      } else {
+        ctx.clearRect(0, 0, width, height);
+      }
+    }
     if (damage) {
       // The clip is belt to the culling's braces: it bounds the server-side
       // mask work for whatever *does* paint, and it contains any node that
@@ -5122,12 +5178,7 @@ export class WindowNode extends Node {
       ctx.rect(damage.x, damage.y, damage.width, damage.height);
       ctx.clip();
     }
-    ctx.fillStyle = this.style.backgroundColor || 'white';
-    // repainting the background only where it is about to be drawn over is
-    // the other half of the win: a full-window fill is a full-window
-    // composite however little changed
-    if (damage) ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
-    else ctx.fillRect(0, 0, width, height);
+    this._paintWindowBackground(ctx, damage, width, height);
     this._paintDamage = damage;
     try {
       this._paintChildren(ctx);
@@ -5159,6 +5210,45 @@ export class WindowNode extends Node {
       this._paintDamage = null;
       if (damage) ctx.restore();
     }
+  }
+
+  /**
+   * The window's own background, painted under the whole tree.
+   *
+   * An opaque window falls back to white, because "no background" is not
+   * something X can show. A transparent one has no fallback and needs none:
+   * the clear in `_paintRegion` already left it empty, and empty is the
+   * point — a `<popup transparent>` with no `backgroundColor` is a floating
+   * tree with nothing behind it.
+   *
+   * `borderRadius` only means anything here, and only on a transparent
+   * window. This fill is the bottom-most thing in the window, so rounding it
+   * rounds the window itself, and the corners it gives up are the corners
+   * the compositor then shows the desktop through — antialiased, without the
+   * Shape extension's hard 1-bit edge.
+   */
+  _paintWindowBackground(ctx, damage, width, height) {
+    const { backgroundColor, borderRadius = 0 } = this.style;
+    if (this._transparent) {
+      if (!isPaintedColor(backgroundColor)) return;
+      ctx.fillStyle = backgroundColor;
+      if (borderRadius > 0 && typeof ctx.roundRect === 'function') {
+        // The path is the whole window however small the damage rect is —
+        // the clip bounds it — so repainting one corner still draws that
+        // corner's curve rather than a square patch of background.
+        ctx.beginPath();
+        ctx.roundRect(0, 0, width, height, borderRadius);
+        ctx.fill();
+        return;
+      }
+    } else {
+      ctx.fillStyle = backgroundColor || 'white';
+    }
+    // repainting the background only where it is about to be drawn over is
+    // the other half of the win: a full-window fill is a full-window
+    // composite however little changed
+    if (damage) ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
+    else ctx.fillRect(0, 0, width, height);
   }
 
   /**
