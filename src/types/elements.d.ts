@@ -146,6 +146,40 @@ export interface WindowProps
    */
   decorations?: boolean;
   /**
+   * Give the window a 32-bit ARGB visual, so what it does not paint stays
+   * transparent and a compositor shows the desktop through it. Together with
+   * `style={{ borderRadius }}` this is how a `<popup>` gets rounded,
+   * antialiased corners — no Shape extension, no 1-bit mask.
+   *
+   * The window's own `backgroundColor` may then be translucent
+   * (`rgba(20, 20, 24, 0.9)`), and leaving it unset makes the window empty
+   * except for what the tree paints.
+   *
+   * Transparency needs a 32-bit visual (XQuartz has none) **and** a running
+   * compositor to blend it. When either is missing, the window is filled
+   * edge to edge and `borderRadius` on it is ignored — a square opaque
+   * popup rather than a black-cornered one, which is what painting the
+   * corners away would give on a server with nothing compositing. Guard the
+   * enhanced design with a `'@supports transparency'` style block:
+   *
+   * ```jsx
+   * style={{
+   *   backgroundColor: '#1c1c22',
+   *   '@supports transparency': {
+   *     backgroundColor: 'rgba(24, 24, 30, 0.86)',
+   *     borderRadius: 14,
+   *   },
+   * }}
+   * ```
+   *
+   * The visual is still taken when nothing is compositing yet, so that a
+   * compositor starting mid-session turns the window transparent without a
+   * remount. Set at creation: a visual is a `CreateWindow` field, so
+   * toggling this prop on a mounted window does nothing until it remounts
+   * (change its `key`). Needs ntk >= 6.6.0.
+   */
+  transparent?: boolean;
+  /**
    * Mark this window as a drag preview: the drag router never treats it as
    * the window under the pointer, so a `<popup dragPreview>` can follow the
    * pointer without swallowing its own drag. See `useDragSource`.

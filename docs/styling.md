@@ -359,6 +359,56 @@ only when the size actually changed.
 A malformed query is an error rather than a key that silently never
 matches.
 
+## Capability queries
+
+`'@supports transparency'` is to `@supports` what the size queries are to
+`@media`: what a style can ask about the **server**, rather than about the
+window it is in.
+
+```jsx
+const s = createStyles({
+  menu: {
+    backgroundColor: '#1c1c22', // works everywhere
+    borderWidth: 1,
+    borderColor: '#3a3a44',
+    '@supports transparency': {
+      backgroundColor: 'rgba(24, 24, 30, 0.86)',
+      borderRadius: 14,
+      borderWidth: 0,
+    },
+  },
+});
+```
+
+Write the design that works everywhere as the base and the enhancement in
+the block — the same way you would write a `@media` query for a wider
+screen. That ordering is the point: get it the other way round and the
+fallback is the _unusual_ case, which is the one nobody tests.
+
+`transparency` is true only when **both** halves hold: the window was
+created on a 32-bit visual (`<window transparent>`, and the display had one
+to give), **and** a compositor is running to blend it. Either half missing
+and a transparent corner is a _black_ corner — X shows the raw pixels — so
+the honest answer is no, and the block does not apply.
+
+It is answered **per window**, not per display. A component rendered inside
+a `<popup transparent>` gets the translucent design; the same component
+nested in a plain `<window>` gets the opaque one, without being told which
+it is in.
+
+The answer can change while the app runs — a compositor being started or
+stopped is a checkbox on some desktops — and blocks are re-resolved when it
+does. That is why `transparent` takes the 32-bit visual even when nothing is
+compositing yet: a window's _visual_ is fixed at creation and cannot follow,
+but what it paints can.
+
+For decisions that are not styling — sizing a popup to hold a shadow margin,
+say, which has to happen before the window exists — there is
+[`useSupports('transparency')`](elements.md#transparent--rounded-corners-and-translucency),
+which answers the same question about the display.
+
+An unknown feature name is an error, like a malformed size query.
+
 ## Decided
 
 - **`':hover'`, not `_hover`.** The CSS spelling costs a pair of quotes and

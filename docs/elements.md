@@ -113,6 +113,7 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `states`                    | EWMH `_NET_WM_STATE` — controlled, see below                                          |
 | `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                                 |
 | `decorations`               | `false` asks the WM for no titlebar or border                                         |
+| `transparent`               | 32-bit ARGB visual — rounded, translucent windows (below)                             |
 | `transientFor`              | ICCCM `WM_TRANSIENT_FOR` — the window this one belongs to (below)                     |
 | `onStatesChange(states)`    | what the window manager actually did                                                  |
 | `theme`                     | palette that `$token` style values resolve against, for this subtree                  |
@@ -300,6 +301,93 @@ no decoration, no taskbar entry, nothing above it, and no pointer:
 same as leaving `cursor` unset, which inherits whatever the root window's
 cursor is — see [styling.md](styling.md).
 
+### `transparent` — rounded corners and translucency
+
+`transparent` creates the window on a 32-bit ARGB visual, so it has a real
+alpha channel: what the tree does not paint stays empty, and a compositor
+blends it against whatever is behind. That is what makes rounded corners
+possible, and it is the main reason to reach for it:
+
+```jsx
+<popup
+  transparent
+  grab
+  style={{ backgroundColor: 'rgba(24, 24, 30, 0.86)', borderRadius: 14 }}
+>
+  …
+</popup>
+```
+
+Two props do the work together. `transparent` gives the window somewhere to
+put transparency; `borderRadius` in the window's own `style` rounds the
+background painted into it, and the corners it gives up are the corners the
+desktop then shows through. The edge is **antialiased**, because it is alpha
+rather than the Shape extension's 1-bit mask — no `XShapeCombineMask`, no
+jagged diagonal.
+
+`backgroundColor` may be translucent, and leaving it unset gives a window
+that is empty except for what the tree paints.
+
+`borderRadius` on a window is meaningful **only** with `transparent`. On an
+opaque window it is ignored: giving up the corners there would only expose
+the server's white, which is worse than square.
+
+### When transparency is not available
+
+Transparency needs two things, and either can be missing: a **depth-32
+TrueColor visual** (XQuartz has none), and a **running compositor** (Mutter,
+KWin, picom, …) to blend the alpha channel. Without a compositor the X
+server shows the raw pixels, and a corner you painted away is not
+transparent — it is **black**.
+
+react-x11 never lets that happen. When transparency would not actually be
+seen, the window is filled edge to edge and `borderRadius` on it is ignored:
+you get the square opaque popup, not a black-cornered one. A translucent
+`backgroundColor` is flattened rather than composited onto the last frame.
+Nothing is required of the application for that floor to hold.
+
+What the application _does_ control is the design on the other side of it,
+through the `'@supports transparency'` style block:
+
+```jsx
+<popup
+  transparent
+  style={{
+    backgroundColor: '#1c1c22', // square and opaque, works everywhere
+    '@supports transparency': {
+      backgroundColor: 'rgba(24, 24, 30, 0.86)',
+      borderRadius: 14,
+    },
+  }}
+/>
+```
+
+See [Capability queries](styling.md#capability-queries). The block is
+answered per window and re-resolved live, so a compositor being switched on
+mid-session turns the popup rounded without a remount — which is why
+`transparent` still takes the 32-bit visual when nothing is compositing yet.
+A visual is a `CreateWindow` field and cannot be changed afterwards; what
+the window paints can.
+
+For decisions that are not styling, `useSupports('transparency')` answers
+the same question about the display, and can be asked before any window
+exists:
+
+```jsx
+const canBlend = useSupports('transparency');
+const margin = canBlend ? 26 : 0; // room for a client-drawn shadow
+```
+
+Toggling the `transparent` prop itself on a mounted window does nothing
+until it remounts (change its `key`) — again because the visual is fixed at
+creation. Requires **ntk ≥ 6.6.0**.
+
+Two things a transparent window does **not** change. Input still hits the
+full rectangle — the corners are invisible, not click-through; use the Shape
+extension's input region through the ntk ref if that matters. And child
+`<window>`s are composited by the X server, not the compositor, so nesting a
+transparent window inside another window blends against nothing.
+
 ## `<popup>`
 
 An override-redirect top-level window at **screen coordinates** — the
@@ -313,6 +401,7 @@ Same props as `<window>`; conditional rendering controls its lifetime.
 | prop               |                                                                                                                |
 | ------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `grab`             | hold a pointer grab while the popup is up — how menus behave on X (below)                                      |
+| `transparent`      | 32-bit ARGB visual: rounded corners and translucency ([above](#transparent--rounded-corners-and-translucency)) |
 | `onDismiss`        | a press landed outside the popup: close it                                                                     |
 | `trapFocus`        | own a focus scope: a modal (see [events.md](events.md#focus-scopes-modals))                                    |
 | `overrideRedirect` | `false` makes it a WM-managed window instead — a real dialog (below)                                           |

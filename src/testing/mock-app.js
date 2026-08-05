@@ -3,6 +3,8 @@
 import React from 'react';
 import { loadLayout } from 'ntk';
 
+import { setCompositingForTests } from '../compositing.js';
+
 // ntk 5 loads the layout engine's WebAssembly in createClient() rather than
 // at import time — that is what keeps top-level await out of the bundle, and
 // so lets an app ship as a single executable (see docs/packaging.md). A mock
@@ -128,6 +130,15 @@ export function createMockApp() {
       },
     },
     windows: [],
+    // A display that does have a 32-bit TrueColor visual, so `<window
+    // transparent>` takes its real path here. Delete it from the app to
+    // model the displays that do not (XQuartz), where the renderer falls
+    // back to an opaque window.
+    findArgbVisual() {
+      return { visual: 0x21, depth: 32 };
+    },
+    // …and one with a compositor running — see the bottom of this function,
+    // where that half is seeded.
     createWindow(attributes) {
       const handlers = {};
       const ops = [];
@@ -140,6 +151,9 @@ export function createMockApp() {
           ops.push(['fillRect', x, y, w, h, ctx.fillStyle]);
         },
         beginPath() {},
+        clearRect(x, y, w, h) {
+          ops.push(['clearRect', x, y, w, h]);
+        },
         rect(x, y, w, h) {
           ops.push(['rect', x, y, w, h]);
         },
@@ -320,6 +334,13 @@ export function createMockApp() {
       return wnd;
     },
   };
+  // The mock display composites. Seeded here rather than probed, because
+  // there is no X connection to ask — and seeding it means `createRoot`
+  // finds a session already open and leaves it alone. Tests that want the
+  // other half of the matrix — ARGB visuals with nothing blending them,
+  // where a transparent corner would render black — call
+  // `setCompositingForTests(app, false)` before rendering.
+  setCompositingForTests(app, true);
   return app;
 }
 

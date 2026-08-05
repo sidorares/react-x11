@@ -24,7 +24,8 @@ import {
   tokenNames,
   resolveTokens,
   styleHasSizeQueries,
-  resolveSizeQueries,
+  styleHasSupportsQueries,
+  resolveQueries,
   DEFAULT_FOCUS_RING,
   resolveHitSlop,
 } from './styles.js';
@@ -38,6 +39,7 @@ import {
   XDND_VERSION,
 } from './dnd.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
+import { compositingActive, watchCompositing } from './compositing.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
 import { paintCacheFor } from './paintcache.js';
@@ -141,6 +143,7 @@ const INVALIDATE_REASONS = new Set([
   'mount', // the window was just realized; its first frame
   'expose', // ntk asked for a redraw (backing store invalidated)
   'highlight', // DevTools hover highlight
+  'capabilities', // a compositor started or stopped: what the window may paint
 ]);
 
 // A frame with no recorded reasons shares one frozen empty list, so the
@@ -509,16 +512,18 @@ export const WINDOW_HINT_PROPS = [
  * which would hand the application the native X event instead of the
  * synthetic one the EventManager dispatches — and hold the first render's
  * closure forever. Handlers are read from current props at dispatch time
- * instead, so they can never go stale. `children` is the tree's, and
+ * instead, so they can never go stale. `children` is the tree's,
  * `transientFor` holds a React ref that only the commit phase can resolve
- * (WindowNode._applyTransientFor).
+ * (WindowNode._applyTransientFor), and `transparent` names a visual that has
+ * to be looked up on the connection (WindowNode._argbAttributes) rather than
+ * a value ntk takes.
  */
 export function windowAttributes(props) {
   const attributes = {};
   const hints = {};
   for (const key of Object.keys(props)) {
     if (key === 'children' || key === 'style' || isEventProp(key)) continue;
-    if (key === 'transientFor') continue;
+    if (key === 'transientFor' || key === 'transparent') continue;
     if (WINDOW_HINT_PROPS.includes(key)) {
       hints[key] = props[key];
       continue;
@@ -675,11 +680,26 @@ export class Node {
         else root._sizeQueryNodes.delete(this);
       }
     }
-    if (queried) {
-      this._baseStyle = resolveSizeQueries(
-        this._baseStyle,
-        this.root?.querySize ?? null,
-      );
+    // `@supports` blocks keep their own registry: what re-resolves them is
+    // the server's answer changing, not a resize
+    // Registered unconditionally rather than on change: a `<window>`'s own
+    // style is resolved by the Node constructor, before `root` is even
+    // assigned, so the first pass has nowhere to register and a "did it
+    // change" guard would keep it unregistered forever. Set.add is
+    // idempotent and these blocks are rare.
+    const asks = styleHasSupportsQueries(this._baseStyle);
+    this._supportsQueried = asks;
+    if (this.root?._supportsQueryNodes) {
+      if (asks) this.root._supportsQueryNodes.add(this);
+      else this.root._supportsQueryNodes.delete(this);
+    }
+    if (queried || asks) {
+      this._baseStyle = resolveQueries(this._baseStyle, {
+        size: this.root?.querySize ?? null,
+        // null before the window is realized, which reads as "not
+        // supported" — the fallback design is the one that works everywhere
+        supports: this.root?.capabilities ?? null,
+      });
     }
     this._stateful = hasStateStyles(this._baseStyle);
     return this._retarget(
@@ -799,6 +819,12 @@ export class Node {
       this.root._sizeQueryNodes.add(this);
       if (this.root.querySize) this._sizeQueriesChanged();
     }
+    if (this._supportsQueried && this.root?._supportsQueryNodes) {
+      this.root._supportsQueryNodes.add(this);
+      // a node mounted into a window that already knows its capabilities
+      // has to match against those, not against the startup default
+      this._sizeQueriesChanged();
+    }
     for (const child of this.children) {
       if (!child.isWindow) child._registerSizeQueries();
     }
@@ -833,7 +859,7 @@ export class Node {
   /** The owning window resized: re-resolve, since a query block may now
    * match that did not, or the other way round. */
   _sizeQueriesChanged() {
-    if (!this._queried || this.destroyed) return;
+    if (!(this._queried || this._supportsQueried) || this.destroyed) return;
     const before = this.style;
     this._syncStyle(this.props);
     if (textStyleChanged(this.style, before)) this._textContentChanged();
@@ -4007,6 +4033,15 @@ export class WindowNode extends Node {
     this.root = this;
     this.attributes = attributes;
     this.window = null;
+    // set by realize() only once the ARGB visual is actually there, so the
+    // paint path never assumes an alpha channel the window does not have
+    this._transparent = false;
+    // What `@supports` blocks are answered from, and what the paint path
+    // reads. `transparency` needs *both* halves — an alpha channel to write
+    // and a compositor to blend it — and starts false so a window that has
+    // not resolved either yet paints the design that works everywhere.
+    this._capabilities = { transparency: false };
+    this._unwatchCompositing = null;
     this.needsLayout = true;
     this.needsPaint = true;
     this._scheduled = false;
@@ -4019,6 +4054,9 @@ export class WindowNode extends Node {
     // nodes with `@width`/`@height` blocks, and the size they last matched
     // against
     this._sizeQueryNodes = new Set();
+    // nodes with `@supports` blocks, re-resolved when the server's answer
+    // changes rather than on every layout
+    this._supportsQueryNodes = new Set();
     // nodes whose child list changed and whose own size is pinned: their new
     // arrangement is only measurable once layout has run (see
     // Node._childListChanged)
@@ -4035,8 +4073,17 @@ export class WindowNode extends Node {
     if (parentWindow) {
       attributes.parent = parentWindow;
     }
+    // Before the window exists, because a visual is a CreateWindow field: a
+    // window cannot become transparent later, which is also why `transparent`
+    // is read here and never in the update path.
+    if (this.props.transparent)
+      Object.assign(attributes, this._argbAttributes());
     const wnd = this.app.createWindow(attributes);
     this.window = wnd;
+    // Now that the visual is known: settle the capabilities, re-resolve any
+    // `@supports` block against them, and start following the compositor.
+    // Before the first paint, and before children realize against it.
+    this._watchCapabilities();
     wnd._reactX11Node = this;
     wnd._reactFiber = this._reactFiber;
     // windows are DevTools public instances too — see Node.getClientRects
@@ -4086,6 +4133,99 @@ export class WindowNode extends Node {
     // placed as well as the second
     this._refreshScreenOrigin();
     this.invalidate(true, null, 'mount');
+  }
+
+  /**
+   * What this window can actually do, for `@supports` blocks to read and for
+   * the paint path to obey. Read-only to callers; recomputed by
+   * `_refreshCapabilities`.
+   */
+  get capabilities() {
+    return this._capabilities;
+  }
+
+  /**
+   * Will transparency actually be *seen*? Both halves have to hold: the
+   * window needs an alpha channel to write, and something has to be
+   * compositing it. Miss either and a cleared corner is a black corner, so
+   * the paint path fills opaque instead.
+   *
+   * This is deliberately not the same question as "was `transparent` asked
+   * for". A visual is fixed at CreateWindow and cannot follow a compositor
+   * that starts or stops mid-session; what it paints can, and does.
+   */
+  get transparencyEffective() {
+    return this._capabilities.transparency;
+  }
+
+  /**
+   * Recompute, and if the answer moved, re-resolve every `@supports` block
+   * under this window and repaint. Returns whether anything changed.
+   */
+  _refreshCapabilities() {
+    const transparency = this._transparent && compositingActive(this.app);
+    if (transparency === this._capabilities.transparency) return false;
+    // a new object rather than a mutation: `resolveQueries` may have handed
+    // this map to a memoized style, and identity is how that stays honest
+    this._capabilities = { ...this._capabilities, transparency };
+    // The window's own style first, and separately: it resolves its style
+    // in the Node constructor, before `root` exists to register against, so
+    // it is not in its own registry on the pass that matters — the one
+    // realize() triggers once the visual is known.
+    if (this._supportsQueried) this._sizeQueriesChanged();
+    for (const node of [...this._supportsQueryNodes]) {
+      if (node.destroyed) this._supportsQueryNodes.delete(node);
+      else if (node !== this) node._sizeQueriesChanged();
+    }
+    // The window's own background is not a styled node and has no query
+    // block to re-resolve — it reads `transparencyEffective` directly, so
+    // it just needs the repaint.
+    this.invalidate(true, null, 'capabilities');
+    return true;
+  }
+
+  /**
+   * Follow the compositor for the life of the window. A menu that was opaque
+   * because nothing was compositing becomes a rounded translucent one the
+   * moment something is, with no remount — which is the whole reason the
+   * ARGB visual is taken even when no compositor is running yet.
+   */
+  _watchCapabilities() {
+    this._refreshCapabilities();
+    this._unwatchCompositing ??= watchCompositing(this.app, () => {
+      if (!this.destroyed) this._refreshCapabilities();
+    });
+  }
+
+  /**
+   * Creation attributes for a per-pixel transparent window: a 32-bit
+   * TrueColor visual, and a background of transparent black rather than the
+   * server's white, so nothing flashes before the first paint. ntk gives the
+   * window its own colormap and border pixel to go with the visual —
+   * inheriting either from a parent of a different depth is a BadMatch.
+   *
+   * Empty when the display has no such visual (XQuartz has none) or ntk is
+   * too old to find one, and then `_transparent` stays false and the window
+   * paints its background opaque, exactly as it did before. A transparent
+   * window that cannot be transparent is a square opaque one, not a broken
+   * one — and the alternative, black corners, is worse than square.
+   */
+  _argbAttributes() {
+    const argb = this.app?.findArgbVisual?.();
+    if (!argb) {
+      if (DEV) {
+        console.warn(
+          'react-x11: <%s transparent> — no 32-bit TrueColor visual on this ' +
+            'display, falling back to an opaque window',
+          this.isPopup ? 'popup' : 'window',
+        );
+      }
+      return null;
+    }
+    // What the paint path keys off: the window really does have an alpha
+    // channel, so clearing it means transparent rather than white.
+    this._transparent = true;
+    return { ...argb, backgroundPixel: 0 };
   }
 
   /**
@@ -4496,6 +4636,8 @@ export class WindowNode extends Node {
     if (this.destroyed) return;
     this.destroyed = true;
     clearPendingFrame(this);
+    this._unwatchCompositing?.();
+    this._unwatchCompositing = null;
     // out of the drag registries before the window goes: a drag routed to
     // a dead window would translate against a null _screenOrigin
     forgetTopLevel(this);
@@ -5107,6 +5249,25 @@ export class WindowNode extends Node {
 
   /** Repaint one damage rect, or the whole window when `damage` is null. */
   _paintRegion(ctx, damage, width, height) {
+    // A transparent window erases where an opaque one paints over. Its
+    // backing store holds premultiplied ARGB, and compositing a translucent
+    // background onto the previous frame would compound towards opaque
+    // instead of replacing it — a popup that fades in would stick.
+    //
+    // Before the clip below, deliberately: clearing exactly the damage rect
+    // covers the same pixels, and an unclipped clearRect is one server-side
+    // FillRectangles where a clipped one has to rasterize a coverage mask.
+    //
+    // `transparencyEffective`, not `_transparent`: an ARGB window with
+    // nothing compositing it must not clear, because the server would show
+    // those zeroed pixels as black rather than as the desktop.
+    if (this.transparencyEffective) {
+      if (damage) {
+        ctx.clearRect(damage.x, damage.y, damage.width, damage.height);
+      } else {
+        ctx.clearRect(0, 0, width, height);
+      }
+    }
     if (damage) {
       // The clip is belt to the culling's braces: it bounds the server-side
       // mask work for whatever *does* paint, and it contains any node that
@@ -5122,12 +5283,7 @@ export class WindowNode extends Node {
       ctx.rect(damage.x, damage.y, damage.width, damage.height);
       ctx.clip();
     }
-    ctx.fillStyle = this.style.backgroundColor || 'white';
-    // repainting the background only where it is about to be drawn over is
-    // the other half of the win: a full-window fill is a full-window
-    // composite however little changed
-    if (damage) ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
-    else ctx.fillRect(0, 0, width, height);
+    this._paintWindowBackground(ctx, damage, width, height);
     this._paintDamage = damage;
     try {
       this._paintChildren(ctx);
@@ -5159,6 +5315,60 @@ export class WindowNode extends Node {
       this._paintDamage = null;
       if (damage) ctx.restore();
     }
+  }
+
+  /**
+   * The window's own background, painted under the whole tree.
+   *
+   * An opaque window falls back to white, because "no background" is not
+   * something X can show. A transparent one has no fallback and needs none:
+   * the clear in `_paintRegion` already left it empty, and empty is the
+   * point — a `<popup transparent>` with no `backgroundColor` is a floating
+   * tree with nothing behind it.
+   *
+   * `borderRadius` only means anything here, and only on a transparent
+   * window. This fill is the bottom-most thing in the window, so rounding it
+   * rounds the window itself, and the corners it gives up are the corners
+   * the compositor then shows the desktop through — antialiased, without the
+   * Shape extension's hard 1-bit edge.
+   */
+  _paintWindowBackground(ctx, damage, width, height) {
+    const { backgroundColor, borderRadius = 0 } = this.style;
+    if (this.transparencyEffective) {
+      if (!isPaintedColor(backgroundColor)) return;
+      ctx.fillStyle = backgroundColor;
+      if (borderRadius > 0 && typeof ctx.roundRect === 'function') {
+        // The path is the whole window however small the damage rect is —
+        // the clip bounds it — so repainting one corner still draws that
+        // corner's curve rather than a square patch of background.
+        ctx.beginPath();
+        ctx.roundRect(0, 0, width, height, borderRadius);
+        ctx.fill();
+        return;
+      }
+    } else {
+      // An ARGB window that nothing is compositing has an alpha channel it
+      // must not use. It gets filled edge to edge and square — `borderRadius`
+      // is ignored, because giving up the corners here would expose the
+      // black those pixels really are. A translucent colour is flattened
+      // over white rather than composited onto the last frame, which on a
+      // window with alpha would otherwise creep towards opaque a frame at a
+      // time and never settle anywhere predictable.
+      if (this._transparent) {
+        ctx.fillStyle = 'white';
+        if (damage) {
+          ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
+        } else {
+          ctx.fillRect(0, 0, width, height);
+        }
+      }
+      ctx.fillStyle = backgroundColor || 'white';
+    }
+    // repainting the background only where it is about to be drawn over is
+    // the other half of the win: a full-window fill is a full-window
+    // composite however little changed
+    if (damage) ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
+    else ctx.fillRect(0, 0, width, height);
   }
 
   /**

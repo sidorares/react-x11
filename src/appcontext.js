@@ -12,9 +12,16 @@
 // wrong — one process can drive several roots on several connections, which
 // the test suite does routinely.
 
-import { createContext, useContext, useMemo } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useSyncExternalStore,
+} from 'react';
 
 import { createClipboard } from './clipboard.js';
+import { compositingActive, watchCompositing } from './compositing.js';
 
 const AppContext = createContext(null);
 
@@ -43,6 +50,52 @@ export function useApp() {
     );
   }
   return app;
+}
+
+const SUPPORTS_FEATURES = new Set(['transparency']);
+
+/**
+ * Can this **display** do something, as a value a component can branch on?
+ *
+ * ```jsx
+ * const canBlend = useSupports('transparency');
+ * // a shadow has to be painted into a margin the popup owns, so the
+ * // decision has to be made before the window is sized
+ * const margin = canBlend ? 26 : 0;
+ * ```
+ *
+ * `'transparency'` is true when the server has a 32-bit visual to draw on
+ * *and* a compositor is running to blend it. It re-renders when a compositor
+ * starts or stops.
+ *
+ * The companion is the `'@supports transparency'` style block, and the two
+ * answer deliberately different questions. This one is about the display, so
+ * it can be asked before any window exists — which is what a caller sizing a
+ * popup needs. The style block is about the window the node is actually in,
+ * so a component nested in a plain `<window>` gets the opaque design there
+ * and the translucent one inside a `<popup transparent>`, without being
+ * told which it is. Reach for the style block first; this is for decisions
+ * that are not styling.
+ */
+export function useSupports(feature) {
+  const app = useApp();
+  if (!SUPPORTS_FEATURES.has(feature)) {
+    throw new Error(
+      `react-x11: useSupports(${JSON.stringify(feature)}) — unknown feature ` +
+        `(expected one of ${[...SUPPORTS_FEATURES].join(', ')})`,
+    );
+  }
+  const subscribe = useCallback(
+    (onChange) => watchCompositing(app, onChange),
+    [app],
+  );
+  // a boolean, so the snapshot is stable for a given state — returning the
+  // visual object here would tear on every render
+  const snapshot = useCallback(
+    () => compositingActive(app) && Boolean(app.findArgbVisual?.()),
+    [app],
+  );
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**

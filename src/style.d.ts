@@ -46,9 +46,25 @@ export function resolveTokens(
 ): StyleProperties;
 
 export function styleHasSizeQueries(style: StyleProperties): boolean;
+/** Does the style carry a `'@supports …'` block? Those are re-resolved when
+ *  the server's answer changes, not when the window is laid out. */
+export function styleHasSupportsQueries(style: StyleProperties): boolean;
+/** `resolveQueries` with only the size half — the shape this had before
+ *  capability blocks existed. */
 export function resolveSizeQueries(
   style: StyleProperties,
   size: { width: number; height: number },
+): StyleProperties;
+/** Merge every matching `@` block — size and capability alike — in
+ *  declaration order. `supports` maps feature name to whether the window can
+ *  actually do it; a missing map matches nothing, which is the safe way
+ *  round. */
+export function resolveQueries(
+  style: StyleProperties,
+  context?: {
+    size?: { width: number; height: number } | null;
+    supports?: Record<string, boolean> | null;
+  },
 ): StyleProperties;
 
 export function interpolate(from: unknown, to: unknown, t: number): unknown;

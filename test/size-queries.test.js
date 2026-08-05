@@ -100,11 +100,17 @@ test('size queries may carry layout properties, unlike state blocks', async () =
 test('a bad query is an error that shows the shape', async () => {
   assert.throws(
     () => createStyles({ a: { '@width => 600': {} } }),
-    /bad size query "@width => 600"/,
+    /bad query "@width => 600"/,
   );
   assert.throws(
     () => createStyles({ a: { '@depth >= 600': {} } }),
-    /bad size query/,
+    /bad query/,
+  );
+  // a capability query names its feature, so a typo in the feature is the
+  // same class of error as a typo in the shape
+  assert.throws(
+    () => createStyles({ a: { '@supports rounded-corners': {} } }),
+    /bad query "@supports rounded-corners"/,
   );
 });
 
