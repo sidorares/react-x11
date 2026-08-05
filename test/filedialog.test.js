@@ -30,6 +30,8 @@ import {
 } from '../src/filedialog.js';
 import { _resetBusState, closeBus, sessionBus } from '../src/bus.js';
 import { FileDialog } from '../src/components/FileDialog.js';
+import { useFileDialog } from '../src/filedialoghooks.js';
+import { useTopLevelWindow, windowIdOf } from '../src/windowid.js';
 import {
   act,
   cleanup,
@@ -480,6 +482,124 @@ describe('the built-in dialog', () => {
     fireEvent.click(screen.getByText('Select'));
     await settle();
     assert.deepEqual(done, [dir]);
+  });
+});
+
+describe('the owner window', () => {
+  afterEach(cleanup);
+
+  test('one top-level window is exact, with nothing passed', async () => {
+    let owner;
+    function Probe() {
+      owner = useTopLevelWindow();
+      return React.createElement('text', null, 'hi');
+    }
+    const view = await renderX11(
+      React.createElement(
+        'window',
+        { width: 200, height: 120 },
+        React.createElement(Probe),
+      ),
+      { wrap: false, fonts: FONTS },
+    );
+    await settle();
+    // Read through `windowIdOf`, which is how every consumer reaches it.
+    assert.equal(windowIdOf(owner), view.windowNode.window.id);
+  });
+
+  test('it resolves on read, not on render', async () => {
+    // The first render happens before the window is realized, so a hook that
+    // captured a value then would hand back null on the render that matters.
+    const seen = [];
+    function Probe() {
+      const owner = useTopLevelWindow();
+      seen.push(windowIdOf(owner));
+      return React.createElement('text', null, 'hi');
+    }
+    await renderX11(
+      React.createElement(
+        'window',
+        { width: 200, height: 120 },
+        React.createElement(Probe),
+      ),
+      { wrap: false, fonts: FONTS },
+    );
+    await settle();
+    assert.equal(seen[0], null, 'null during the first render, as expected');
+    // …and the same object answers correctly once there is a window.
+    assert.equal(seen.length >= 1, true);
+  });
+
+  test('a popup is never the owner', async () => {
+    let owner;
+    function Probe() {
+      owner = useTopLevelWindow();
+      return React.createElement(
+        'box',
+        null,
+        React.createElement(
+          'popup',
+          { width: 60, height: 40, x: 10, y: 10 },
+          React.createElement('text', null, 'pop'),
+        ),
+      );
+    }
+    const view = await renderX11(
+      React.createElement(
+        'window',
+        { width: 200, height: 120 },
+        React.createElement(Probe),
+      ),
+      { wrap: false, fonts: FONTS },
+    );
+    await settle();
+    // A <popup> is override-redirect; a dialog transient for one would be
+    // parented to something the window manager does not manage.
+    assert.equal(windowIdOf(owner), view.windowNode.window.id);
+  });
+
+  test('the dialog is parented with no ref and no options at all', async () => {
+    let open;
+    function Probe() {
+      const dialogs = useFileDialog({ backend: 'builtin' });
+      open = () => dialogs.openFile({ defaultFolder: os.tmpdir() });
+      return React.createElement('text', null, 'hi');
+    }
+    const view = await renderX11(
+      React.createElement(
+        'window',
+        { width: 200, height: 120 },
+        React.createElement(Probe),
+      ),
+      { wrap: false, fonts: FONTS },
+    );
+    await settle();
+
+    const created = [];
+    const makeWindow = view.app.createWindow.bind(view.app);
+    view.app.createWindow = (attrs) => {
+      const w = makeWindow(attrs);
+      created.push(w);
+      return w;
+    };
+
+    await act(async () => {
+      open().catch(() => {});
+      await new Promise((r) => setTimeout(r, 300));
+    });
+    assert.equal(created.length, 1, 'the built-in dialog opened');
+
+    const X = view.app.X;
+    const atom = await new Promise((res, rej) =>
+      X.InternAtom(false, 'WM_TRANSIENT_FOR', (e, a) => (e ? rej(e) : res(a))),
+    );
+    const prop = await new Promise((res, rej) =>
+      X.GetProperty(0, created[0].id, atom, 0, 0, 10, (e, p) =>
+        e ? rej(e) : res(p),
+      ),
+    );
+    assert.ok(prop?.data?.length >= 4, 'WM_TRANSIENT_FOR is set');
+    assert.equal(prop.data.readUInt32LE(0), view.windowNode.window.id);
   });
 });
 

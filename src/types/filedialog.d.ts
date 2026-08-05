@@ -141,6 +141,23 @@ export interface FileDialogs {
 }
 
 /**
+ * The window this component is in, resolved when it is read rather than at
+ * render time — a `<window>` has no XID until the commit phase.
+ *
+ * Returns a **ref-like object**, so it drops into anything that already takes
+ * a ref (`parentWindow`, `transientFor`) and `windowIdOf()` resolves it.
+ * `useFileDialog()` uses it for you; reach for it directly when something
+ * else needs the owner window.
+ *
+ * Exact when the tree has one top-level window, which is nearly every app.
+ * With several it prefers the focused one and warns in development when it
+ * has to guess — see docs/filedialog.md.
+ */
+export declare function useTopLevelWindow(): {
+  readonly current: NtkWindow | DrawnNode | null;
+};
+
+/**
  * File dialogs that never run out of rungs: the desktop's own where there is
  * one, `osascript` on macOS, and a browser react-x11 draws itself everywhere
  * else. Cancelling resolves to `null` on all three.

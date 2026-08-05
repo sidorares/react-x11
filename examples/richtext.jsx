@@ -10,7 +10,7 @@
 // Run with: npm run examples:richtext  (needs an X server)
 import { fileURLToPath } from 'node:url';
 
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Button, createRoot, useFileDialog } from '../src/index.js';
 
 // any PNG/JPEG path works; this one ships with the docs
@@ -79,12 +79,11 @@ function Logo({ spin }) {
 function App() {
   const [n, setN] = useState(2);
   const [doc, setDoc] = useState({ source: MARKDOWN, from: null });
-  const win = useRef(null);
-
   // The dialog is one call and one `null` check — and it is the desktop's own
   // dialog, `NSOpenPanel` on a Mac, or one react-x11 draws, depending only on
-  // what the machine has. See docs/filedialog.md.
-  const { openFile } = useFileDialog({ parentWindow: win });
+  // what the machine has. Nothing is passed: it parents itself to this
+  // window. See docs/filedialog.md.
+  const { openFile } = useFileDialog();
   const load = async () => {
     const files = await openFile({
       title: 'Open a Markdown file',
@@ -107,7 +106,6 @@ function App() {
 
   return (
     <window
-      ref={win}
       width={560}
       height={640}
       title={doc.from ? `rich content — ${doc.from}` : 'rich content'}

@@ -17,7 +17,7 @@
 // which is the whole point. See docs/filedialog.md.
 //
 // Run with: npm run examples:menu  (needs an X server / DISPLAY)
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   createRoot,
   ContextMenu,
@@ -100,15 +100,11 @@ function App() {
   const [wrap, setWrap] = useState(true);
   const note = (label) => () => setLast(label);
 
-  // The File menu drives real dialogs. `parentWindow` is the one line worth
-  // writing: it makes the dialog transient for this window, so the window
-  // manager stacks it on top and the portal's own backend parents it the
-  // same way. Without it the dialog floats, which is legal and looks
-  // careless.
-  const win = useRef(null);
-  const { openFile, saveFile, selectFolder } = useFileDialog({
-    parentWindow: win,
-  });
+  // The File menu drives real dialogs. Nothing to pass: the dialog is
+  // parented to the window this component is in, worked out when it opens
+  // rather than asked for — so it stacks above this window and the portal's
+  // own backend parents it the same way.
+  const { openFile, saveFile, selectFolder } = useFileDialog();
 
   // Which rung this machine lands on — the desktop's own portal, macOS's
   // NSOpenPanel through `osascript`, or the browser react-x11 draws itself.
@@ -324,7 +320,6 @@ function App() {
 
   return (
     <window
-      ref={win}
       width={520}
       height={300}
       title="menus"

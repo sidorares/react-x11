@@ -55,6 +55,7 @@ import {
   Tree,
   useAnchor,
   useTheme,
+  useTopLevelWindow,
   useWindowId,
   windowIdOf,
 } from '../../src/index.js';

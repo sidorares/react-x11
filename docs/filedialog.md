@@ -5,8 +5,8 @@ Open a file, save a file, pick a folder — on whatever the machine has.
 ```jsx
 import { useFileDialog } from 'react-x11';
 
-function Toolbar({ windowRef }) {
-  const { openFile } = useFileDialog({ parentWindow: windowRef });
+function Toolbar() {
+  const { openFile } = useFileDialog();
 
   return (
     <Button
@@ -66,14 +66,38 @@ draw in — so it never runs out of rungs and never rejects for lack of a dialog
 | `defaultFolder`               | where it opens                                    |
 | `defaultName` / `defaultPath` | what a save dialog starts on                      |
 | `acceptLabel`                 | the confirm button's text — 'Import', 'Attach', … |
-| `parentWindow`                | a `<window>` ref or XID — see below               |
+| `parentWindow`                | override the owner window; inferred otherwise     |
 | `signal`                      | an `AbortSignal` that closes the dialog           |
 | `backend`                     | force a rung; the seam for a kiosk, and for tests |
 
 Options given to the hook are defaults for every call; options given to a call
 win.
 
-### `parentWindow` is worth the one line
+### The dialog parents itself
+
+The dialog is `transientFor` the window the component is in — `parent_window`
+for the portal — which is what makes the window manager treat it as belonging
+to your window: stacked above it, and not a second entry in the task switcher.
+
+**You do not pass anything for that.** `useFileDialog()` resolves the owner
+window through `useTopLevelWindow()` at the moment a dialog opens, by which
+time the window is mounted and has an XID.
+
+Why inference rather than a lookup: a hook has no position in the host tree.
+React context cannot come from a host element, the host context
+`getChildHostContext` builds reaches `createInstance` and not components, and a
+`<window>` has no XID until the commit phase. So it answers from what the
+renderer does know — the top-level windows this connection is rendering:
+
+- **one top-level window is exact.** The component is in it, because there is
+  nowhere else to be. That is nearly every app.
+- several, one focused: that one. You clicked in it a moment ago, which is why
+  a dialog is opening.
+- several with nothing to separate them: the most recently opened, plus a
+  development warning naming `parentWindow` as the way to be exact.
+
+So `parentWindow` survives as the **override for multi-window apps**, and takes
+a `<window>` ref, an XID, or anything `windowIdOf()` accepts:
 
 ```jsx
 const win = useRef(null);
@@ -81,10 +105,10 @@ const { openFile } = useFileDialog({ parentWindow: win });
 return <window ref={win}>…</window>;
 ```
 
-It becomes `transientFor` on the built-in dialog and `parent_window` on the
-portal, which is what makes the window manager treat the dialog as belonging to
-your window — stacked above it, and not a second entry in the task switcher.
-Without it the dialog floats: legal, and it looks careless.
+`useTopLevelWindow()` is exported for anything else that needs the owner
+window. It returns a **ref-like object** — the window is not realized on the
+first render, so a value read then would be `null` on the render that matters —
+which drops into `parentWindow`, `transientFor`, or `windowIdOf()`.
 
 **The portal never embeds the dialog.** It is a top-level window in another
 process, and logical parenting is all there is. There is no version of this

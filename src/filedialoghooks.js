@@ -29,7 +29,7 @@ import { NoFileDialogError, runNativeDialog } from './filedialog.js';
 import { PortalCancelledError } from './portal.js';
 import { useApp } from './appcontext.js';
 import { createRoot } from './Reconciler.js';
-import { windowIdOf } from './windowid.js';
+import { useTopLevelWindow, windowIdOf } from './windowid.js';
 
 /**
  * Show the built-in dialog on its own root, and resolve with what the user
@@ -58,7 +58,7 @@ async function showBuiltin(app, theme, props) {
  * File dialogs, on the best rung this machine has.
  *
  * ```jsx
- * const { openFile, saveFile } = useFileDialog({ parentWindow: windowRef });
+ * const { openFile, saveFile } = useFileDialog();
  *
  * <MenuBar onSelect={async (id) => {
  *   if (id === 'open') {
@@ -68,10 +68,11 @@ async function showBuiltin(app, theme, props) {
  * }} />
  * ```
  *
- * `parentWindow` — a `<window>` ref or a raw XID — is what makes the dialog
- * behave like a dialog: `transientFor` for the built-in one, `parent_window`
- * for the portal. It is optional and worth the one line; without it the
- * dialog floats unparented, which is legal and looks careless.
+ * **No arguments needed.** The dialog is parented to the window this
+ * component is in — `transientFor` for the built-in one, `parent_window` for
+ * the portal — worked out at the moment it opens rather than asked for.
+ * `parentWindow` remains as the override for a tree with several top-level
+ * windows, where inference has to guess and says so.
  *
  * Every call resolves to `null` when the user cancels. That is an ordinary
  * outcome, not an exception, on all three rungs.
@@ -79,10 +80,15 @@ async function showBuiltin(app, theme, props) {
 export function useFileDialog(defaults = {}) {
   const app = useApp();
   const theme = useTheme();
+  // The window this component is in, resolved when a dialog actually opens —
+  // by which time it is mounted and has an XID. So a parented dialog costs
+  // the app nothing, and `parentWindow` is left as the override for a tree
+  // with several top-level windows. See `useTopLevelWindow`.
+  const owner = useTopLevelWindow();
 
   const run = useCallback(
     async (kind, options = {}) => {
-      const opts = { ...defaults, ...options };
+      const opts = { parentWindow: owner, ...defaults, ...options };
       try {
         return await runNativeDialog(kind, opts);
       } catch (err) {
@@ -106,7 +112,7 @@ export function useFileDialog(defaults = {}) {
     // a new object every render would rebuild these callbacks every render and
     // defeat the memo below. It is read through the closure at call time,
     // which is when its values are actually wanted.
-    [app, theme],
+    [app, theme, owner],
   );
 
   return useMemo(
