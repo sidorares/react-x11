@@ -188,8 +188,12 @@ export function Select({
   // keeps the menu under the trigger for as long as it is open: a scrolled
   // ancestor, the trigger's own layout moving it (a neighbouring field
   // wrapping to a second line), or the owner window being nudged by the
-  // window manager or a script would otherwise leave it hanging in place
-  useAnchorTracking(triggerRef, open, menuAnchorOptions, setAnchor);
+  // window manager or a script would otherwise leave it hanging in place.
+  // If the trigger itself scrolls out of view, the menu closes instead of
+  // following it there — a popup is a real window, not something clipped
+  // by the trigger's ancestors, so it would otherwise hang over content it
+  // no longer points at.
+  useAnchorTracking(triggerRef, open, menuAnchorOptions, setAnchor, close);
 
   const emit = (next) => onChange?.(changeEvent('select-one', name, next));
 

@@ -443,12 +443,19 @@ export function useAnchor(
  * `setRect` again with the new rect. `getOptions` is read fresh on every
  * change, so it need not be memoized. `setRect` is only called when the
  * measured rect actually differs from the previous one.
+ *
+ * If the anchor node scrolls (or is laid out) entirely past a clipping
+ * ancestor or the owner window, `onOutOfView` is called instead of moving
+ * the popup there — a popup is a real window, not a web element clipped by
+ * its ancestors, so following a trigger that is no longer visible would
+ * leave it pointing at nothing. Typically `onOutOfView` closes the popup.
  */
 export function useAnchorTracking(
   ref: RefObject<DrawnNode | null>,
   active: boolean,
   getOptions: () => AnchorOptions,
   setRect: (next: Rect | null | ((prev: Rect | null) => Rect | null)) => void,
+  onOutOfView?: () => void,
 ): void;
 
 // --- drag and drop ---------------------------------------------------------

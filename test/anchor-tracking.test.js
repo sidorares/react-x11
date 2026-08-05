@@ -39,9 +39,17 @@ async function waitFor(fn, what, ms = 1000) {
  * A trigger-anchored `<popup>` that stays live for as long as `open`: the
  * exact shape `Select`, `Tooltip` and `MenuBar` all follow — measure once on
  * open (so opening is instant, no extra frame of latency) and keep tracking
- * after (so it catches up whatever moves next).
+ * after (so it catches up whatever moves next). `onClose` is called instead
+ * of tracking once the trigger scrolls entirely out of view.
  */
-function TrackedPopup({ open, triggerRef, popupRef, width = 60, height = 30 }) {
+function TrackedPopup({
+  open,
+  onClose,
+  triggerRef,
+  popupRef,
+  width = 60,
+  height = 30,
+}) {
   const measure = useAnchor(triggerRef);
   const [rect, setRect] = React.useState(null);
   const getOptions = () => ({ placement: 'bottom', width, height });
@@ -56,7 +64,7 @@ function TrackedPopup({ open, triggerRef, popupRef, width = 60, height = 30 }) {
     // deliberately just `open`: `getOptions` is read fresh, not a dependency
   }, [open]);
 
-  useAnchorTracking(triggerRef, open, getOptions, setRect);
+  useAnchorTracking(triggerRef, open, getOptions, setRect, onClose);
 
   return (
     rect &&
@@ -79,15 +87,34 @@ async function renderMock(app, element) {
   return x11Root;
 }
 
-test('a tracked popup follows a scrolled ancestor', async () => {
-  const app = createMockApp();
-  const triggerRef = React.createRef();
-  const popupRef = React.createRef();
-  const rows = Array.from({ length: 20 }, (_, i) =>
-    h('box', { key: i, style: { height: 20 } }),
-  );
+/**
+ * `TrackedPopup` wrapped in its own `open` state, the way `Select` and the
+ * others actually behave — `onClose` (an out-of-view notification, same as
+ * Escape or a press outside) really shuts it, rather than a test only
+ * observing that the callback fired.
+ */
+function Harness({ triggerRef, popupRef, closedRef }) {
+  const [open, setOpen] = React.useState(true);
+  const close = () => {
+    if (closedRef) closedRef.current++;
+    setOpen(false);
+  };
+  return h(TrackedPopup, { open, onClose: close, triggerRef, popupRef });
+}
 
-  const x11Root = await renderMock(
+// Layout shared by both scroll tests: a couple of short rows, then the
+// trigger (visible in the scrollview's own 100px viewport at scrollY 0),
+// then enough rows after it that the view has 160px left to scroll through
+// — some of that keeps the trigger visible and moved, the rest scrolls it
+// entirely past the scrollview's own bottom edge.
+function renderScrolledTrigger(app, popup) {
+  const rowsBefore = Array.from({ length: 2 }, (_, i) =>
+    h('box', { key: `before-${i}`, style: { height: 20 } }),
+  );
+  const rowsAfter = Array.from({ length: 10 }, (_, i) =>
+    h('box', { key: `after-${i}`, style: { height: 20 } }),
+  );
+  return renderMock(
     app,
     h(
       'window',
@@ -95,12 +122,23 @@ test('a tracked popup follows a scrolled ancestor', async () => {
       h(
         'scrollview',
         { style: { height: 100 } },
-        ...rows,
-        h('box', { ref: triggerRef, style: { width: 80, height: 20 } }),
+        ...rowsBefore,
+        h('box', { ref: popup.triggerRef, style: { width: 80, height: 20 } }),
+        ...rowsAfter,
       ),
-      h(TrackedPopup, { open: true, triggerRef, popupRef }),
+      popup.element,
     ),
   );
+}
+
+test('a tracked popup follows a scrolled ancestor, while the trigger stays visible', async () => {
+  const app = createMockApp();
+  const triggerRef = React.createRef();
+  const popupRef = React.createRef();
+  const x11Root = await renderScrolledTrigger(app, {
+    triggerRef,
+    element: h(TrackedPopup, { open: true, triggerRef, popupRef }),
+  });
 
   const wnd = app.windows[0];
   const windowNode = wnd._reactX11Node;
@@ -109,13 +147,49 @@ test('a tracked popup follows a scrolled ancestor', async () => {
   assert.ok(scroller.contentHeight > scroller.abs.height, 'content overflows');
 
   const before = { x: popupRef.current.x, y: popupRef.current.y };
-  scroller.scrollTo({ y: 100 });
+  // the trigger sits at content y 40..60, so this leaves it at 10..30 —
+  // still inside the scrollview's [0, 100) viewport
+  scroller.scrollTo({ y: 30 });
 
   await waitFor(
-    () => popupRef.current.y === before.y - 100,
-    `the popup following the scroll (got ${popupRef.current.y}, want ${before.y - 100})`,
+    () => popupRef.current.y === before.y - 30,
+    `the popup following the scroll (got ${popupRef.current.y}, want ${before.y - 30})`,
   );
   assert.strictEqual(popupRef.current.x, before.x, 'x unaffected by a vertical scroll');
+
+  await x11Root.unmount();
+});
+
+test('a tracked popup closes once its trigger scrolls entirely out of view', async () => {
+  const app = createMockApp();
+  const triggerRef = React.createRef();
+  const popupRef = React.createRef();
+  const closedRef = { current: 0 };
+  const x11Root = await renderScrolledTrigger(app, {
+    triggerRef,
+    element: h(Harness, { triggerRef, popupRef, closedRef }),
+  });
+
+  const wnd = app.windows[0];
+  const scroller = wnd._reactX11Node.children.find(
+    (n) => n.kind === 'scrollview',
+  );
+  assert.ok(popupRef.current, 'the popup opened');
+
+  // the trigger sits at content y 40..60; scrolling past 60 puts it entirely
+  // above the scrollview's own viewport, not merely moved within it
+  scroller.scrollTo({ y: 90 });
+
+  await waitFor(
+    () => closedRef.current > 0,
+    'onClose firing once the trigger left view',
+  );
+  await tick();
+  assert.strictEqual(
+    popupRef.current,
+    null,
+    'the popup unmounted rather than following the trigger off-view',
+  );
 
   await x11Root.unmount();
 });

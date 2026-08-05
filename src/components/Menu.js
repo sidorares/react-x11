@@ -650,7 +650,9 @@ export function MenuBar({
   // owner window being nudged by the window manager or a script would
   // otherwise leave it stranded. `openRef` (not `openIndex`) both because
   // it is already the live index a handler mid-call reads, and because a
-  // stable ref keeps `activeTriggerRef`'s identity fixed across renders.
+  // stable ref keeps `activeTriggerRef`'s identity fixed across renders. If
+  // the bar item itself scrolls out of view, the menu closes rather than
+  // following it there.
   const activeTriggerRef = useMemo(
     () => ({
       get current() {
@@ -673,6 +675,7 @@ export function MenuBar({
       };
     },
     setRect,
+    close,
   );
 
   const select = (item) => {
