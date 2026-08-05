@@ -40,7 +40,12 @@ import {
   XDND_VERSION,
 } from './dnd.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
-import { compositingActive, watchCompositing } from './compositing.js';
+import {
+  argbVisual,
+  compositingActive,
+  transparencyDisabled,
+  watchCompositing,
+} from './compositing.js';
 import { baseTheme } from './palette.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
@@ -4345,19 +4350,29 @@ export class WindowNode extends Node {
   }
 
   _argbAttributes() {
-    const argb = this.app?.findArgbVisual?.();
+    const argb = argbVisual(this.app);
     if (!argb) {
-      // Once per connection. The answer is a property of the display and
-      // cannot change while it is open, and since the widgets ask for a
-      // transparent popup every time a menu or a tooltip opens, warning per
-      // window would turn one piece of news into a running commentary.
+      // Once per connection. The answer is a property of the display (or of
+      // an environment switch) and cannot change while it is open, and since
+      // the widgets ask for a transparent popup every time a menu or a
+      // tooltip opens, warning per window would turn one piece of news into
+      // a running commentary.
       if (DEV && this.app && !warnedNoArgb.has(this.app)) {
         warnedNoArgb.add(this.app);
-        console.warn(
-          'react-x11: <%s transparent> — no 32-bit TrueColor visual on this ' +
-            'display, falling back to an opaque window',
-          this.isPopup ? 'popup' : 'window',
-        );
+        const what = this.isPopup ? 'popup' : 'window';
+        if (transparencyDisabled()) {
+          console.warn(
+            'react-x11: REACT_X11_NO_TRANSPARENCY=1 — <%s transparent> ' +
+              'ignored, this run is opaque',
+            what,
+          );
+        } else {
+          console.warn(
+            'react-x11: <%s transparent> — no 32-bit TrueColor visual on ' +
+              'this display, falling back to an opaque window',
+            what,
+          );
+        }
       }
       return null;
     }

@@ -166,6 +166,39 @@ export function compositingActive(app) {
   return sessions.get(app)?.supported === true;
 }
 
+/**
+ * Is transparency switched off for this process?
+ *
+ * `REACT_X11_NO_TRANSPARENCY=1` makes every display answer the way one with
+ * no 32-bit visual does: `transparent` is ignored, windows are created on
+ * the ordinary visual, and `'@supports transparency'` never matches. It is
+ * for looking at the fallback design on the machine you actually work on —
+ * the built-in menus and tooltips have two looks now, and the opaque one is
+ * otherwise reachable only by stopping the compositor for the whole session,
+ * which takes every other window on the desktop with it.
+ *
+ * `=== '1'` rather than a truthy test, like `REACT_X11_NO_PAINT_CACHE`: a
+ * stale `NO_TRANSPARENCY=0` left in a shell profile must not silently mean
+ * the opposite of what it says. Read per call rather than once at load, so
+ * a test can turn it on around one mount — and because the question it
+ * feeds is already one whose answer may change while an app runs.
+ */
+export function transparencyDisabled() {
+  return process.env.REACT_X11_NO_TRANSPARENCY === '1';
+}
+
+/**
+ * The 32-bit visual a transparent window would be created on, or null when
+ * this display has none — and null whatever it has when transparency is
+ * switched off. The one place that question is asked, so the switch cannot
+ * be half-applied: a window that took the visual but a `useSupports` that
+ * said no would size a tooltip for an arrow it then refused to draw.
+ */
+export function argbVisual(app) {
+  if (transparencyDisabled()) return null;
+  return app?.findArgbVisual?.() ?? null;
+}
+
 /** Subscribe to the answer changing. Returns an unsubscribe function. */
 export function watchCompositing(app, fn) {
   const session = sessions.get(app);

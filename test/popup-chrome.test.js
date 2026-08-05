@@ -285,6 +285,30 @@ test('direction="auto" changes axis when neither top nor bottom fits', async () 
   await x11Root.unmount();
 });
 
+test('REACT_X11_NO_TRANSPARENCY=1 gives the opaque design on a display that composites', async () => {
+  // the switch has to reach both halves at once: the window's style blocks,
+  // and the arrow, which is decided a step earlier because it is part of how
+  // big the window is
+  process.env.REACT_X11_NO_TRANSPARENCY = '1';
+  try {
+    const tip = await showTip({}, { screen: ROOMY });
+    assert.ok(!('depth' in tip.tip.attributes), 'no ARGB visual taken');
+    assert.equal(tip.tip._reactX11Node.children.length, 1, 'no arrow');
+    assert.equal(
+      tip.tip._reactX11Node.children[0].style.borderRadius,
+      undefined,
+    );
+    await tip.x11Root.unmount();
+
+    const { x11Root, menu, list } = await openMenu();
+    assert.equal(list.style.borderRadius, undefined, 'and a square menu');
+    assert.equal(menu._reactX11Node.style.backgroundColor, 'white');
+    await x11Root.unmount();
+  } finally {
+    delete process.env.REACT_X11_NO_TRANSPARENCY;
+  }
+});
+
 test('a named direction grows the popup along its own axis', async () => {
   const right = await showTip({ direction: 'right' }, { screen: ROOMY });
   const down = await showTip({ direction: 'bottom' }, { screen: ROOMY });

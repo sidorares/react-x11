@@ -119,6 +119,43 @@ plain path on the same build, and as first aid if a scroll ever
 misrenders. Read once at startup, like the switches above, and like them
 it answers only to `1` — any other value leaves the blit on.
 
+## `REACT_X11_NO_TRANSPARENCY=1`
+
+Makes every display answer the way one with no 32-bit visual does:
+[`transparent`](elements.md#transparent--rounded-corners-and-translucency)
+is ignored, windows are created on
+the ordinary visual, `'@supports transparency'`
+([styling.md](styling.md#capability-queries)) never matches, and
+`useSupports('transparency')` is false.
+
+```sh
+REACT_X11_NO_TRANSPARENCY=1 npm run examples:tooltips
+```
+
+It exists because the fallback design is otherwise unreachable on the
+machine you work on. Rounded menus, the tooltip's arrow and any
+`@supports` block of your own have a second look for displays that cannot
+composite — and the only way to see it used to be stopping the compositor,
+which takes every other window on the desktop with it. Both halves answer
+this switch at once, deliberately: a window that took the ARGB visual under
+a `useSupports` that said no would size a popup for chrome it then refused
+to draw.
+
+What it models is a display with **no 32-bit visual** — XQuartz, a plain
+remote server. The other degraded case, an ARGB window with _nothing
+compositing it_, is the one where a cleared corner comes out black rather
+than showing the desktop; that one needs a real session with the compositor
+off (or `setCompositingForTests`), since the visual has to be taken for the
+question to arise. Both render the same by design, which is the invariant
+worth checking.
+
+Like the switches above it answers only to `1`, so a stale
+`NO_TRANSPARENCY=0` cannot quietly mean the opposite of what it says.
+Unlike them it is read per call rather than once at startup — it is asked
+when a window is created and when a `@supports` block resolves, never on
+the frame path, and being live is what lets a test turn it on around a
+single mount.
+
 ## The paint cache — `REACT_X11_NO_PAINT_CACHE`, `REACT_X11_PAINT_CACHE=verify`
 
 `<svg>` and `<tex>` render their content once and composite the result on

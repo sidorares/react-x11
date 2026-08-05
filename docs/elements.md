@@ -378,6 +378,13 @@ const canBlend = useSupports('transparency');
 const margin = canBlend ? 26 : 0; // room for a client-drawn shadow
 ```
 
+To **look at the fallback** on a display that composites perfectly well,
+run with `REACT_X11_NO_TRANSPARENCY=1`: `transparent` is ignored, the window
+is created on the ordinary visual, and both the style block and
+`useSupports` answer false. Otherwise the only way to see the design you
+wrote for XQuartz is to stop the compositor, which takes the rest of your
+desktop with it. See [debugging.md](debugging.md).
+
 Toggling the `transparent` prop itself on a mounted window does nothing
 until it remounts (change its `key`) — again because the visual is fixed at
 creation. Requires **ntk ≥ 6.6.0**.

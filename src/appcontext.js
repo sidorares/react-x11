@@ -21,7 +21,11 @@ import {
 } from 'react';
 
 import { createClipboard } from './clipboard.js';
-import { compositingActive, watchCompositing } from './compositing.js';
+import {
+  argbVisual,
+  compositingActive,
+  watchCompositing,
+} from './compositing.js';
 
 const AppContext = createContext(null);
 
@@ -66,7 +70,9 @@ const SUPPORTS_FEATURES = new Set(['transparency']);
  *
  * `'transparency'` is true when the server has a 32-bit visual to draw on
  * *and* a compositor is running to blend it. It re-renders when a compositor
- * starts or stops.
+ * starts or stops. `REACT_X11_NO_TRANSPARENCY=1` answers false whatever the
+ * display can do, so the fallback design can be looked at without stopping
+ * the compositor for the whole session.
  *
  * The companion is the `'@supports transparency'` style block, and the two
  * answer deliberately different questions. This one is about the display, so
@@ -92,7 +98,7 @@ export function useSupports(feature) {
   // a boolean, so the snapshot is stable for a given state — returning the
   // visual object here would tear on every render
   const snapshot = useCallback(
-    () => compositingActive(app) && Boolean(app.findArgbVisual?.()),
+    () => compositingActive(app) && Boolean(argbVisual(app)),
     [app],
   );
   return useSyncExternalStore(subscribe, snapshot, snapshot);

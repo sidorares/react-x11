@@ -437,3 +437,73 @@ test('an unknown @supports feature merges nothing rather than half-matching', as
     'red',
   );
 });
+
+// --- the switch -----------------------------------------------------------
+//
+// A desktop that composites has no other way to look at the opaque design:
+// stopping the compositor takes every other window on the screen with it.
+
+test('REACT_X11_NO_TRANSPARENCY=1 ignores the prop, on a display that could', async () => {
+  process.env.REACT_X11_NO_TRANSPARENCY = '1';
+  const ref = React.createRef();
+  try {
+    const app = createMockApp(); // composites, and has a 32-bit visual
+    const x11Root = await createRoot({ app });
+    x11Root.render(
+      h(
+        'window',
+        {
+          width: 200,
+          height: 100,
+          transparent: true,
+          style: { backgroundColor: '#101014', borderRadius: 14 },
+        },
+        h('box', { ref, style: CARD }),
+      ),
+    );
+    await tick();
+    const wnd = app.windows[0];
+
+    // created on the ordinary visual, exactly as on a display with none
+    assert.ok(!('depth' in wnd.attributes), 'no ARGB visual taken');
+    assert.strictEqual(wnd._reactX11Node._transparent, false);
+    assert.strictEqual(wnd._reactX11Node.transparencyEffective, false);
+    assert.ok(!wnd.ctx.ops.some(([op]) => op === 'clearRect'), 'never erases');
+    assert.ok(!wnd.ctx.ops.some(([op]) => op === 'roundRect'), 'square');
+    // and the style block that would have rounded it does not match
+    assert.strictEqual(ref.current.style.backgroundColor, '#1c1c22');
+    assert.strictEqual(ref.current.style.borderRadius, undefined);
+
+    await x11Root.unmount();
+  } finally {
+    delete process.env.REACT_X11_NO_TRANSPARENCY;
+  }
+});
+
+test('useSupports("transparency") answers the switch too', async () => {
+  // the two have to agree: a window that took the visual under a hook that
+  // said no would size a popup for chrome it then refused to draw
+  const seen = [];
+  function Probe() {
+    seen.push(useSupports('transparency'));
+    return null;
+  }
+  process.env.REACT_X11_NO_TRANSPARENCY = '1';
+  try {
+    const app = createMockApp();
+    const x11Root = await createRoot({ app });
+    x11Root.render(h('window', { width: 100, height: 60 }, h(Probe)));
+    await tick();
+    assert.strictEqual(seen.at(-1), false);
+    await x11Root.unmount();
+  } finally {
+    delete process.env.REACT_X11_NO_TRANSPARENCY;
+  }
+
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(h('window', { width: 100, height: 60 }, h(Probe)));
+  await tick();
+  assert.strictEqual(seen.at(-1), true, 'and true again with it unset');
+  await x11Root.unmount();
+});
