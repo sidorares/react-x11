@@ -4492,6 +4492,27 @@ export class WindowNode extends Node {
     for (const cb of this._anchorListeners) cb();
   }
 
+  /**
+   * Subscribe to this window gaining or losing the **window manager's**
+   * focus. Returns an unsubscribe function.
+   *
+   * Deliberately not the same thing as a node's `onBlur`: a window losing
+   * focus does not blur the node inside it — the node keeps focus and stops
+   * looking active, which is what the DOM does with `document.activeElement`
+   * and what a caret coming back where you left it depends on. So nothing in
+   * the tree hears about it, and the things that must — a menu holding a
+   * pointer grab, most of all — have nowhere else to ask.
+   */
+  onWindowFocusChange(cb) {
+    (this._windowFocusListeners ??= new Set()).add(cb);
+    return () => this._windowFocusListeners?.delete(cb);
+  }
+
+  _notifyWindowFocus(focused) {
+    if (!this._windowFocusListeners?.size) return;
+    for (const cb of [...this._windowFocusListeners]) cb(focused);
+  }
+
   /** Walk the drawn subtree and give every <glarea> its child X window. */
   _realizeGlAreas(node) {
     for (const child of node.children) {

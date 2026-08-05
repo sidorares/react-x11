@@ -2,9 +2,16 @@
 // support needed. Plain createElement (no JSX) so the library stays
 // build-step-free for consumers.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useApp, useSupports } from '../appcontext.js';
-import { useTheme } from './theme.js';
+import { interpolate } from '../styles.js';
+import { ThemeProvider, useTheme } from './theme.js';
 import {
   DEFAULT_LABEL_SIZE,
   measureLabel,
@@ -53,6 +60,45 @@ const AUTO_SIDES = ['top', 'bottom', 'right', 'left'];
 // `anchorRect`'s own 2px gap, and enough left over that the hint is not
 // jammed flush against the edge of the screen.
 const AUTO_MARGIN = 8;
+
+/**
+ * The palette **inside** the bubble, which is the one outside it upside
+ * down: a tooltip is drawn in the palette's ink so that it reads as a label
+ * over the desktop rather than as another panel of the app, and that makes
+ * its surface `text` and its own ink `background`.
+ *
+ * Content has to be told, or it cannot be written once and stay legible in
+ * both schemes — a card that hard-codes light text is invisible on the light
+ * bubble a dark palette gives it, which is what a naive component label
+ * does. Published through `ThemeProvider`, so both routes agree: a `$token`
+ * in the content and a `useTheme()` in it describe the surface the content
+ * is actually on.
+ *
+ * `dim` is derived rather than swapped, because the palette's own is a mid
+ * grey chosen against the *app's* background. Mixing the bubble's ink
+ * towards its surface lands on the muted version of whichever ink this
+ * turned out to be.
+ */
+const MUTED = 0.38;
+const BORDERISH = 0.6;
+
+// The provider's box fills the bubble and centres what is in it, so a
+// string label still sits in the middle and an element with `flexGrow: 1`
+// still gets the whole rectangle.
+const BUBBLE_CONTENT = Object.freeze({
+  flexGrow: 1,
+  justifyContent: 'center',
+});
+
+function invertedSurface(theme) {
+  return {
+    background: theme.text,
+    text: theme.background,
+    dim: interpolate(theme.background, theme.text, MUTED) ?? theme.dim,
+    border:
+      interpolate(theme.background, theme.text, BORDERISH) ?? theme.border,
+  };
+}
 
 /**
  * The one hint that is up, per connection.
@@ -230,6 +276,9 @@ export function Tooltip({
   // exists — it is part of how big the window is — so this is the display
   // question (`useSupports`) rather than the per-window style block.
   const composited = useSupports('transparency');
+  // memoized for identity, not for the arithmetic: a fresh palette every
+  // render would re-resolve every `$token` under it
+  const surfacePalette = useMemo(() => invertedSurface(theme), [theme]);
 
   // `cancel` and `hide` touch nothing but refs and a state setter, so they
   // can hold still across renders — and `hide` has to: it is this tooltip's
@@ -415,9 +464,16 @@ export function Tooltip({
             '@supports transparency': { borderRadius: theme.radiusTooltip },
           },
         },
-        isText(label)
-          ? h('text', { style: { color: theme.background, fontSize } }, label)
-          : label,
+        // the content is on the inverted surface, and is given the palette
+        // that says so — both routes at once, which is what `ThemeProvider`
+        // is for. The filling box it plants keeps a string label centred.
+        h(
+          ThemeProvider,
+          { value: surfacePalette, style: BUBBLE_CONTENT },
+          isText(label)
+            ? h('text', { style: { color: '$text', fontSize } }, label)
+            : label,
+        ),
       ),
       arrow &&
         h('canvas', {

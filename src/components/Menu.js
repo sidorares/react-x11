@@ -13,6 +13,7 @@ import {
   screenOf,
   screenPoint,
   useAnchorTracking,
+  useDismissOnWindowBlur,
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
@@ -47,6 +48,18 @@ const MENU_PAD = 5;
 // an edge where it meets the desktop behind it, and a theme that draws 2px
 // borders on its *controls* does not mean a 2px outline around every menu.
 const MENU_BORDER = 1;
+
+// How far a bar item's pill sits inside the bar, taken out of its padding so
+// the bar's height does not change.
+const BAR_INSET = 3;
+
+// The horizontal gap between a menu and the submenu it opens, measured from
+// the parent popup's outer edge — so `0` is flush against it, a positive
+// value leaves the desktop showing between the two, and a negative one
+// overlaps the parent the way the classic toolkits do. The pointer crosses
+// this gap on its way to the submenu and the safe polygon covers it either
+// way (`movingToward`), so this is a matter of taste rather than of reach.
+const SUBMENU_GAP = 0;
 
 const MENU_GUTTER = 24; // room for the check column
 // what a self-drawing icon gets to fill, inside that column's 16px
@@ -314,7 +327,7 @@ function MenuLevel({
         // the inset puts the first item exactly beside the item it came
         // out of, which is where the eye is already looking.
         alignOffset: -(MENU_BORDER + MENU_PAD),
-        offset: 0,
+        offset: SUBMENU_GAP,
         width: menuListWidth(node, childItems, fontSize),
         height: menuListHeight(childItems),
       }),
@@ -568,6 +581,11 @@ export function ContextMenu({
     onSelect?.(item);
   };
 
+  // the wrapper keeps the focus the right-click gave it, so `onBlur` below
+  // never fires when the *window* loses focus — and the menu is holding a
+  // pointer grab until something closes it
+  useDismissOnWindowBlur(ref, Boolean(rect), close);
+
   const openAt = (ev) => {
     const node = ref.current;
     if (!node || !items.length) return;
@@ -739,6 +757,11 @@ export function MenuBar({
     setRect,
     close,
   );
+  // and shut it when the whole window loses focus. The bar item keeps the
+  // focus it took, so its own `onBlur` never fires for this — and a menu
+  // left open over an application the user has switched away from is still
+  // holding the pointer grab it opened with.
+  useDismissOnWindowBlur(activeTriggerRef, openIndex >= 0, close);
 
   const select = (item) => {
     close();
@@ -766,8 +789,13 @@ export function MenuBar({
         style,
       ],
     },
-    menus.map((menu, index) =>
-      h(
+    menus.map((menu, index) => {
+      // The bar is the first level of the same trail: while its menu is open
+      // with nothing chosen in it the item is the selection, and the moment a
+      // row down there takes over it goes quiet — the same handover, drawn
+      // the same way, one level up (`rowState`).
+      const barState = rowState(index, openIndex, (path[0] ?? -1) >= 0);
+      return h(
         'box',
         {
           key: menu.label,
@@ -828,10 +856,29 @@ export function MenuBar({
               cursor: 'pointer',
               paddingLeft: 10,
               paddingRight: 10,
-              paddingTop: 6,
-              paddingBottom: 6,
+              // The same pill the rows inside the menu wear, at the same
+              // radius: the bar item and the first row of the menu it opens
+              // are one gesture, and a square title over rounded rows reads
+              // as two widgets that have not met.
+              //
+              // The margin is what a radius needs to be seen — a rounded
+              // rect flush against the strip's own edges reads as a cut
+              // corner rather than a pill — and it comes out of the padding
+              // rather than being added to it, so the bar is the height it
+              // always was.
+              marginTop: BAR_INSET,
+              marginBottom: BAR_INSET,
+              marginLeft: 1,
+              marginRight: 1,
+              paddingTop: 6 - BAR_INSET,
+              paddingBottom: 6 - BAR_INSET,
+              borderRadius: theme.radiusPopupItem,
               backgroundColor:
-                openIndex === index ? theme.hoverBackground : undefined,
+                barState === 'active'
+                  ? theme.hoverBackground
+                  : barState === 'path'
+                    ? theme.surfaceActive
+                    : undefined,
               // No ring while this item's menu is up. Walking the bar with
               // the arrow keys opens each menu as it arrives, so the item is
               // already inverted with a menu hanging off it — a ring on top
@@ -858,14 +905,14 @@ export function MenuBar({
           'text',
           {
             style: {
-              color: openIndex === index ? theme.hoverText : theme.text,
+              color: barState === 'active' ? theme.hoverText : theme.text,
               fontSize: fontSize,
             },
           },
           menu.label,
         ),
-      ),
-    ),
+      );
+    }),
     openIndex >= 0 &&
       rect &&
       path.length > 0 &&

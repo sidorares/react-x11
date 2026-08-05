@@ -1443,6 +1443,9 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
   const XK_DOWN = 0xff54;
   const XK_END = 0xff57;
   const ITEM_HEIGHT = 28;
+  // the scrollview's own padding, which the menu's chrome is measured from
+  // (`Select.js`, MENU_PAD — the same inset the menus use)
+  const MENU_PAD = 5;
   const options = Array.from({ length: 12 }, (_, i) => `option-${i}`);
 
   const app = createMockApp();
@@ -1512,7 +1515,7 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
   assert.strictEqual(scroller.scrollY, 0);
 
   // arrowing down only scrolls once the active option leaves the viewport
-  const visible = Math.floor((scroller.abs.height - 4) / ITEM_HEIGHT);
+  const visible = Math.floor((scroller.abs.height - MENU_PAD) / ITEM_HEIGHT);
   for (let i = 0; i < visible - 1; i++) pressKey(app, wnd, { keysym: XK_DOWN });
   await settle();
   assert.strictEqual(scroller.scrollY, 0, 'still within the viewport');
@@ -1526,7 +1529,7 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
   await settle();
   assert.strictEqual(
     scroller.scrollY,
-    4 + options.length * ITEM_HEIGHT - scroller.abs.height,
+    MENU_PAD + options.length * ITEM_HEIGHT - scroller.abs.height,
   );
 
   await x11Root.unmount();
@@ -3772,6 +3775,31 @@ test('MenuBar: an open menu is always dismissible', async () => {
       app.windows[1].destroyed,
       true,
       'Escape is not fussy about which item of the bar heard it',
+    );
+    await x11Root.unmount();
+  }
+
+  // the window losing the window manager's focus — alt-tab, a click in
+  // another application. Nothing in the tree hears that on its own: the bar
+  // item keeps the focus it took (a window blur leaves the focused node
+  // focused and merely stops it looking active), so without
+  // `useDismissOnWindowBlur` the menu stays up over an app the user has
+  // switched away from, still holding its pointer grab.
+  {
+    const { app, x11Root, wnd, buttons } = await mount();
+    openFile(wnd, buttons[0]);
+    await tick();
+    wnd.emit('blur', {});
+    await tick();
+    await tick();
+    assert.strictEqual(
+      app.windows[1].destroyed,
+      true,
+      'switching away closes it',
+    );
+    assert.ok(
+      wnd._reactX11Node.events.focused === buttons[0],
+      'and the bar item still holds focus, as a blurred window leaves it',
     );
     await x11Root.unmount();
   }

@@ -289,6 +289,12 @@ Behavior: the menu opens on the **press** — Space and Enter toggle it too;
 Escape, focus loss, or picking closes it; the option list scrolls when taller
 than 220px; the trigger participates in Tab traversal.
 
+The menu is the **same surface a menu is**: an ARGB popup rounded at
+`radiusPopup` with a hairline border where the display composites, and the
+active option is the same pill at `radiusPopupItem`, inset from the sheet's
+edge. A dropdown and a menu are one kind of thing, and two shapes for it
+would only say that the widgets were written at different times.
+
 Opening on the press rather than the release is deliberate, and it is the
 one control whose answer to a press is more than a colour: a dropdown exists
 to be looked at, so waiting for the button to come back up before showing it
@@ -312,6 +318,12 @@ scrolled into view.
 
 **PageUp/PageDown** move by a menu viewport (`MAX_MENU_HEIGHT / ITEM_HEIGHT`
 options), clamping at the ends rather than wrapping the way the arrows do.
+
+**Losing the window** closes it too. That is not the same event as the
+trigger's own blur: a window losing the window manager's focus leaves the
+node inside it focused and merely stops it looking active — so without this
+the menu would still be up over an application you have switched away from,
+holding the pointer grab it opened with. The menus do the same.
 
 **Type-ahead.** Typing letters jumps to the matching option: with the menu
 open it moves the highlight, and with it closed it changes the value
@@ -426,6 +438,16 @@ imposed on it:
 
 Anything renders in there, widgets included — it is a real tree in a real
 window, not a rich-text label. `examples/tooltips.jsx` has both kinds.
+
+**The palette inside the bubble is upside down.** A tooltip is drawn in the
+palette's ink so that it reads as a label over the desktop rather than as
+another panel of the app — so inside it, `$background` is the bubble and
+`$text` is the ink on it, published through a `ThemeProvider` so that
+`useTheme()` agrees. Write the content the way you would write anything
+else and it is legible in both schemes; hard-code a light text colour and
+it will be invisible on the light bubble a dark palette gives it. `dim` is
+derived for the same reason — the palette's own is a grey chosen against
+the app's background, not against this one.
 
 Where the display composites, the popup is an ARGB window: a bubble rounded
 at `radiusTooltip`, no border, and a small arrow pointing back at the middle
@@ -550,13 +572,19 @@ selection colour, shared with `Select`'s active option and `Table`'s current
 row, so one token moves every highlight in the app. Without a compositor
 both go square, which is what those pixels can honestly be.
 
-**One selection at a time.** With submenus open, only the deepest level
-wears the selection colour; the rows behind it are drawn in `surfaceActive`.
+**One selection at a time.** The bar item, the row under it and the row
+under that are one trail, and only its deepest level wears the selection
+colour; everything behind is drawn in `surfaceActive`.
 They are still chosen — they are the way back — but two selection-coloured
 rows in two menus claim the same thing twice, and only one of them is where
 the keys are going. A submenu that is open with _nothing_ selected in it has
 not taken over yet: the pointer is still on the row that opened it, so that
-row stays lit.
+row stays lit — which is why a menu bar item stays coloured until you touch
+a row in the menu it opened, and goes quiet then.
+
+The bar item wears the same pill as the rows, at `radiusPopupItem`, inset
+into the bar by a few pixels taken out of its own padding so the bar is the
+height it always was.
 
 **Icons.** `icon` fills the 16px column left of the label — the same column
 the check mark uses, so an item that is both checked and iconned shows the

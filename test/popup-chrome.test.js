@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 
-import { createRoot, MenuBar, Tooltip } from '../src/index.js';
+import { createRoot, MenuBar, Select, Tooltip } from '../src/index.js';
 import { resolveTheme } from '../src/components/theme.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { createMockApp, moveMouse, pressButton } from './helpers/mock-app.js';
@@ -183,6 +183,28 @@ test('a submenu lines its first item up with the row that opened it', async () =
   await x11Root.unmount();
 });
 
+test('the bar item is the first link in the trail', async () => {
+  const { x11Root, wnd, menu, list } = await openMenu();
+  const item = wnd._reactX11Node.children[0].children[0];
+  const theme = list.theme;
+
+  assert.equal(item.style.borderRadius, RADIUS_ITEM, 'the same pill');
+  assert.equal(
+    item.style.backgroundColor,
+    theme.hoverBackground,
+    'lit while its menu is open with nothing chosen in it',
+  );
+
+  await hoverRow(menu, 0);
+  assert.equal(
+    item.style.backgroundColor,
+    theme.surfaceActive,
+    'and quiet once a row down there takes the selection over',
+  );
+
+  await x11Root.unmount();
+});
+
 test('only the live end of the trail is selection-coloured', async () => {
   const { app, x11Root, menu, list } = await openMenu();
   const theme = list.theme;
@@ -209,6 +231,53 @@ test('only the live end of the trail is selection-coloured', async () => {
   );
   // quiet, not unselected: it still has to read as the way back
   assert.notEqual(list.children[2].style.backgroundColor, 'transparent');
+
+  await x11Root.unmount();
+});
+
+// --- dropdowns --------------------------------------------------------------
+
+test("a Select's menu is the same surface as a menu, and its options the same pill", async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 300, height: 200 },
+      h(
+        'box',
+        { style: { flexGrow: 1, padding: 10 } },
+        h(Select, { options: ['one', 'two', 'three'], value: 'one' }),
+      ),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const trigger = wnd._reactX11Node.children[0].children[0];
+  // opens on the press, as it always has
+  pressButton(wnd, trigger.abs.x + 4, trigger.abs.y + 4);
+  await tick();
+  await tick();
+
+  const menu = app.windows[1];
+  const sheet = menu._reactX11Node.children[0];
+  assert.equal(menu.attributes.depth, 32, 'ARGB, like a menu');
+  assert.equal(menu._reactX11Node.style.backgroundColor, 'transparent');
+  assert.equal(sheet.style.borderRadius, RADIUS_POPUP);
+  assert.equal(sheet.style.borderWidth, 1, 'the same hairline edge');
+
+  const rows = sheet.children[0].children; // through the scrollview
+  const theme = sheet.theme;
+  assert.equal(rows[0].style.borderRadius, RADIUS_ITEM);
+  assert.equal(
+    rows[0].style.backgroundColor,
+    theme.hoverBackground,
+    'the selected option opens active',
+  );
+  assert.equal(rows[1].style.backgroundColor, 'transparent', 'and the rest');
+  // inset from the sheet on both sides, so the pill sits on it
+  assert.ok(rows[0].abs.x >= 5, `option inset by ${rows[0].abs.x}px`);
+  assert.equal(rows[0].abs.width, menu.width - rows[0].abs.x * 2);
 
   await x11Root.unmount();
 });

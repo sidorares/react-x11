@@ -268,6 +268,35 @@ export function useAnchorTracking(
   }, [active, ref, measure, setRect]);
 }
 
+/**
+ * useDismissOnWindowBlur(ref, active, onDismiss) — shut a popup when the
+ * **window** it belongs to loses focus.
+ *
+ * A node's `onBlur` does not fire for this, deliberately: a window losing
+ * focus leaves the node inside it focused and merely stops it looking
+ * active, so the trigger a menu closes on never hears anything. What is left
+ * is a menu still open over an application the user has switched away from
+ * — and, for the ones that grab, still holding the pointer grab that came
+ * with it, so the first click anywhere goes to dismissing it.
+ *
+ * The window manager's own focus, then, rather than anything in the tree:
+ * `WindowNode.onWindowFocusChange` (nodes.js), which the event manager
+ * notifies from the same place it suspends the caret.
+ */
+export function useDismissOnWindowBlur(ref, active, onDismiss) {
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const root = ref.current?.root;
+    if (!root?.onWindowFocusChange) return undefined;
+    return root.onWindowFocusChange((focused) => {
+      if (!focused) onDismissRef.current?.();
+    });
+  }, [active, ref]);
+}
+
 /** Measured size of a single-line label, for sizing a popup around it.
  *  Falls back to a rough estimate where no font stack is available. */
 export function measureLabel(node, text, style) {
