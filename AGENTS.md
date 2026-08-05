@@ -215,7 +215,7 @@ stop it, in one place — see docs/desktop.md for the worked example.
   Runs in CI beside lint. **A prop change is not done until the `.d.ts` and a
   line in the type test change with it** — hand-written declarations drift
   silently otherwise, and nothing else catches it.
-- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,windows,wm}`
+- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,react-features,windows,wm}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). `examples:app` is the showcase: it hosts `form`, `widgets`
   and `tasks` as tabs by importing the panel each of them exports, so a new

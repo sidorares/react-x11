@@ -10,6 +10,16 @@ Hooks, context, error boundaries, `<Suspense>`, `lazy`, `use`, transitions,
 renderer, and where React's behaviour does not depend on the DOM, it is the
 same behaviour.
 
+Everything on this page is also a panel you can drive by hand:
+
+```sh
+npm run examples:react-features
+```
+
+[`examples/react-features.jsx`](../examples/react-features.jsx) is priority,
+`<Suspense>`, `useOptimistic`, `<Activity>` and the two error-boundary
+placements, with the counters that show which of them React threw away.
+
 What differs is anything the DOM used to define for you:
 
 - **Paint timing.** A commit does not put pixels on screen. Frames go out on
@@ -168,6 +178,16 @@ react-x11 already classifies X11 input for you: presses, releases, keys,
 focus changes, window close and drops are urgent; pointer motion and
 drag-over are not, which is what keeps a motion burst from flooding the
 renderer. You do not have to do anything to get this.
+
+The Priority panel of the [react-features
+example](../examples/react-features.jsx) is this paragraph with a slider on
+it: a thousand-cell field that takes ~25ms to rebuild, on a switch. Off, the
+thumb crawls; on, thirty slider updates produce one or two field rebuilds and
+the thumb stays under the pointer. Two things there are worth copying, and
+both are one-line mistakes in the other direction: the expensive subtree is
+`memo`ised (or the urgent render rebuilds it anyway, and deferring buys
+nothing), and no prop that changes on every update — not even a "stale"
+border — is passed into it.
 
 ### Bridging non-React code
 
