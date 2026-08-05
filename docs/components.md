@@ -32,15 +32,16 @@ changes and everything else keeps following. It carries **shape as well as
 colour** — corner radius, border weight, text size and the padding inside a
 control are most of what separates one platform's controls from another's:
 
-| token                                      |                                |
-| ------------------------------------------ | ------------------------------ |
-| `background` `text` `dim` `border`         | the surface a control sits on  |
-| `accent` `accentHover` `accentText`        | primary buttons, checks, fills |
-| `hoverBackground` `hoverText`              | selected rows, menu highlights |
-| `surfaceHover` `track` `borderFocus`       | hover fills, tracks, focus     |
-| `accentActive` `surfaceActive` `dimActive` | the pressed step of each fill  |
-| `radius` `radiusSmall` `borderWidth`       | control shape                  |
-| `fontSize` `paddingX` `paddingY`           | control size                   |
+| token                                           |                                |
+| ----------------------------------------------- | ------------------------------ |
+| `background` `text` `dim` `border`              | the surface a control sits on  |
+| `accent` `accentHover` `accentText`             | primary buttons, checks, fills |
+| `hoverBackground` `hoverText`                   | selected rows, menu highlights |
+| `surfaceHover` `track` `borderFocus`            | hover fills, tracks, focus     |
+| `accentActive` `surfaceActive` `dimActive`      | the pressed step of each fill  |
+| `radius` `radiusSmall` `borderWidth`            | control shape                  |
+| `radiusPopup` `radiusPopupItem` `radiusTooltip` | floating-surface shape         |
+| `fontSize` `paddingX` `paddingY`                | control size                   |
 
 The `…Active` three are the colour a control takes **while it is held**, and
 a palette almost never sets them: each is derived from the step the palette's
@@ -48,6 +49,21 @@ own hover already makes — `accent` → `accentHover` → one more of the same 
 so it darkens a light theme and lightens a dark one. Set one explicitly and
 it wins. See [The press state](#the-press-state) for why every control has
 one.
+
+The `radius…` three that name a popup are derived too, and from the **text
+size** rather than from `radius`: a menu is a sheet laid over the window
+where a button is a control cut into it, and half the body size is the
+number desktops land near — 7px at a 14px body. The other two step in from
+there, because a rounded thing inside a rounded thing needs the tighter
+curve: `radiusPopupItem` is the highlight on a menu row, `radiusTooltip` the
+tooltip bubble. A palette that moves `fontSize` and names none of them gets
+all three in proportion; naming one pins it.
+
+They are only ever _seen_ where the display composites — a popup gives up
+its corners by not painting them, and with nothing blending them those
+pixels are black rather than the desktop, so the widgets ask the window
+(`'@supports transparency'`, [styling.md](styling.md)) and stay square
+where the answer is no.
 
 There are two consumers of a palette, and one provider feeds both. Widgets
 read it as React context through `useTheme()`; a `$token` in a style
@@ -273,6 +289,12 @@ Behavior: the menu opens on the **press** — Space and Enter toggle it too;
 Escape, focus loss, or picking closes it; the option list scrolls when taller
 than 220px; the trigger participates in Tab traversal.
 
+The menu is the **same surface a menu is**: an ARGB popup rounded at
+`radiusPopup` with a hairline border where the display composites, and the
+active option is the same pill at `radiusPopupItem`, inset from the sheet's
+edge. A dropdown and a menu are one kind of thing, and two shapes for it
+would only say that the widgets were written at different times.
+
 Opening on the press rather than the release is deliberate, and it is the
 one control whose answer to a press is more than a colour: a dropdown exists
 to be looked at, so waiting for the button to come back up before showing it
@@ -296,6 +318,12 @@ scrolled into view.
 
 **PageUp/PageDown** move by a menu viewport (`MAX_MENU_HEIGHT / ITEM_HEIGHT`
 options), clamping at the ends rather than wrapping the way the arrows do.
+
+**Losing the window** closes it too. That is not the same event as the
+trigger's own blur: a window losing the window manager's focus leaves the
+node inside it focused and merely stops it looking active — so without this
+the menu would still be up over an application you have switched away from,
+holding the pointer grab it opened with. The menus do the same.
 
 **Type-ahead.** Typing letters jumps to the matching option: with the menu
 open it moves the highlight, and with it closed it changes the value
@@ -358,18 +386,74 @@ import { Tooltip } from 'react-x11';
 </Tooltip>;
 ```
 
-| prop        |                                                    |
-| ----------- | -------------------------------------------------- |
-| `label`     | the hint text (nothing shows without it)           |
-| `placement` | `'top'` (default), `'bottom'`, `'left'`, `'right'` |
-| `delay`     | ms of hover before showing (default 500)           |
-| `fontSize`  | label size, also used to size the popup            |
+| prop              |                                                              |
+| ----------------- | ------------------------------------------------------------ |
+| `label`           | the hint: a string, or an element (nothing shows without it) |
+| `direction`       | `'auto'` (default), `'top'`, `'bottom'`, `'left'`, `'right'` |
+| `delay`           | ms of hover before showing (default 500)                     |
+| `fontSize`        | label size, also used to size the popup                      |
+| `width`, `height` | the bubble's size — required for an element `label`          |
 
 Wraps its children in a row box carrying the hover handlers and the anchor
 ref, so it composes around any element. Hides immediately on leave and on
 mousedown — a tooltip lingering over the menu you just opened is the
-classic annoyance. The popup is sized from the _measured_ label, because a
-`<popup>` is a real X window and needs its size before layout.
+classic annoyance.
+
+**One at a time**, per connection: a hint belongs to where the pointer is,
+and there is one pointer. A trigger taking the hover dismisses whatever is
+showing straight away rather than at the end of its own delay, so two are
+never up together saying different things about the same place. This does
+not fight the safe-polygon grace that lets a hint with content in it be
+reached — a trigger underneath an open hint cannot be hovered, the popup
+being a window above it.
+
+`direction` is which side of the trigger it opens on. The default, `'auto'`,
+takes the first side the hint fits on, preferring above — measured against
+the **screen**, because a popup is a real X window and the screen is what
+bounds it. A named side is a preference rather than a promise either way:
+it still flips to its opposite instead of opening off-screen. (`placement`
+is the older name for the same prop and still wins where it is given.)
+
+A **string** `label` is measured and the popup sized around it, because a
+`<popup>` is a real X window and needs its size before layout. An
+**element** is the same problem without a way to measure, so the caller
+gives `width`/`height` — and then gets the bubble to fill, with no padding
+imposed on it:
+
+```jsx
+<Tooltip
+  label={
+    <box style={{ flexGrow: 1, padding: 10, gap: 7 }}>
+      <text style={{ color: '#f5f6fa' }}>Scratch volume</text>
+      <ProgressBar value={used} />
+    </box>
+  }
+  width={200}
+  height={82}
+  direction="right"
+>
+  <box>…</box>
+</Tooltip>
+```
+
+Anything renders in there, widgets included — it is a real tree in a real
+window, not a rich-text label. `examples/tooltips.jsx` has both kinds.
+
+**The palette inside the bubble is upside down.** A tooltip is drawn in the
+palette's ink so that it reads as a label over the desktop rather than as
+another panel of the app — so inside it, `$background` is the bubble and
+`$text` is the ink on it, published through a `ThemeProvider` so that
+`useTheme()` agrees. Write the content the way you would write anything
+else and it is legible in both schemes; hard-code a light text colour and
+it will be invisible on the light bubble a dark palette gives it. `dim` is
+derived for the same reason — the palette's own is a grey chosen against
+the app's background, not against this one.
+
+Where the display composites, the popup is an ARGB window: a bubble rounded
+at `radiusTooltip`, no border, and a small arrow pointing back at the middle
+of the trigger with everything neither covers left transparent. Without a
+compositor it is the square opaque rectangle it has always been and there is
+no arrow — those pixels would be black rather than empty.
 
 ## `Dialog`
 
@@ -479,6 +563,29 @@ Item shape: `{ label, onSelect, shortcut, disabled, separator, checked,
 icon, items }`. Both take an `onSelect(item)` prop as well, fired after the
 item's own. A bar menu opens on the **press**, for the reason `Select` does.
 
+**The sheet.** Where the display composites, a menu is an ARGB window
+rounded at `radiusPopup` with a hairline border, and the highlight on a row
+is a pill: inset from the popup's edge by the list's own padding and rounded
+a step tighter (`radiusPopupItem`), so it reads as sitting _on_ the sheet
+rather than cutting across it. The fill is `hoverBackground` — the palette's
+selection colour, shared with `Select`'s active option and `Table`'s current
+row, so one token moves every highlight in the app. Without a compositor
+both go square, which is what those pixels can honestly be.
+
+**One selection at a time.** The bar item, the row under it and the row
+under that are one trail, and only its deepest level wears the selection
+colour; everything behind is drawn in `surfaceActive`.
+They are still chosen — they are the way back — but two selection-coloured
+rows in two menus claim the same thing twice, and only one of them is where
+the keys are going. A submenu that is open with _nothing_ selected in it has
+not taken over yet: the pointer is still on the row that opened it, so that
+row stays lit — which is why a menu bar item stays coloured until you touch
+a row in the menu it opened, and goes quiet then.
+
+The bar item wears the same pill as the rows, at `radiusPopupItem`, inset
+into the bar by a few pixels taken out of its own padding so the bar is the
+height it always was.
+
 **Icons.** `icon` fills the 16px column left of the label — the same column
 the check mark uses, so an item that is both checked and iconned shows the
 check: the check is state, the icon is only identity. One column rather than
@@ -522,6 +629,12 @@ popup. It hangs off the **menu's** outer edge and lines up with the row that
 opened it — two different nodes, which is what `anchorRect`'s `alignTo` is
 for. Anchoring both to the row would put the submenu inside its parent by
 the menu's border and padding, and the two would overlap.
+
+Lined up on the **items**, not on the boxes: a submenu whose top edge is
+level with its parent row starts its first item a border and a padding
+lower, and what the eye lines up is the text. `anchorRect`'s `alignOffset`
+is the shift that pays for the submenu's own chrome, so the row you came
+from and the row you arrive at are on one line.
 
 **Keyboard.** Up/Down move the active item, **skipping separators and
 disabled entries** and wrapping; Home/End jump to the ends; Right opens a

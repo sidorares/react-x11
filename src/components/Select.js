@@ -10,6 +10,7 @@ import {
   screenOf,
   useAnchor,
   useAnchorTracking,
+  useDismissOnWindowBlur,
 } from './anchor.js';
 import { DEFAULT_TEXT_STYLE } from '../styles.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
@@ -35,7 +36,15 @@ const MAX_MENU_HEIGHT = 220;
 // is measuring for clips the very labels it exists to fit.
 const ITEM_PAD_LEFT = 10;
 const ITEM_PAD_RIGHT = 10;
-const MENU_PAD = 4; // the scrollview's own padding
+// The scrollview's own padding, and so the inset between the sheet's edge
+// and an option — which is what makes the highlight read as a pill on the
+// menu rather than a band across it. The same number the menus use
+// (`Menu.js`): a dropdown is the same kind of surface and there is no
+// reading in which it wants a different one.
+const MENU_PAD = 5;
+// A hairline, not `theme.borderWidth`: this border gives the sheet an edge
+// where it meets the desktop behind it, and a theme that draws 2px borders
+// on its *controls* does not mean a 2px outline around every popup.
 const MENU_BORDER = 1;
 // the scrollbar is drawn *over* the content rather than insetting it
 // (`nodes.js`, SCROLLBAR_WIDTH), so a menu that scrolls reserves the room
@@ -99,7 +108,14 @@ function Option({ option, selected, active, onPick, onHover, nodeRef }) {
         paddingLeft: ITEM_PAD_LEFT,
         paddingRight: ITEM_PAD_RIGHT,
         cursor: 'pointer',
-        backgroundColor: active ? theme.hoverBackground : theme.background,
+        // the menus' pill, for the same reason and at the same radius: an
+        // option list and a menu are one surface with rows in it, and two
+        // shapes for that would only say the widgets were written apart
+        borderRadius: theme.radiusPopupItem,
+        // nothing at rest — the sheet under it is already that colour, and a
+        // rounded fill of the same colour is a coverage mask drawn to change
+        // nothing, with four corners it deliberately leaves out
+        backgroundColor: active ? theme.hoverBackground : 'transparent',
       },
     },
     h(
@@ -194,6 +210,9 @@ export function Select({
   // by the trigger's ancestors, so it would otherwise hang over content it
   // no longer points at.
   useAnchorTracking(triggerRef, open, menuAnchorOptions, setAnchor, close);
+  // and shut it when the whole window loses focus: the trigger keeps the
+  // focus it has, so its own `onBlur` never fires for this
+  useDismissOnWindowBlur(triggerRef, open, close);
 
   const emit = (next) => onChange?.(changeEvent('select-one', name, next));
 
@@ -332,13 +351,23 @@ export function Select({
       h(
         'popup',
         {
+          theme,
           x: anchor.x,
           y: anchor.y,
           width: anchor.width,
           height: menuHeight + 2,
           grab: true,
           onDismiss: close,
-          style: { backgroundColor: theme.background },
+          // ARGB where the display has it, so the corners the sheet gives up
+          // are the desktop rather than a colour — as the menus are. The
+          // window paints nothing itself when it can be seen through: the
+          // box below is the whole of the dropdown, and a square fill under
+          // it would put the corners straight back.
+          transparent: true,
+          style: {
+            backgroundColor: theme.background,
+            '@supports transparency': { backgroundColor: 'transparent' },
+          },
         },
         h(
           'box',
@@ -349,6 +378,7 @@ export function Select({
               borderWidth: MENU_BORDER,
               borderColor: theme.border,
               backgroundColor: theme.background,
+              '@supports transparency': { borderRadius: theme.radiusPopup },
             },
           },
           h(

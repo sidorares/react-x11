@@ -52,6 +52,15 @@ export interface Theme {
   focusRingOffset: number;
   radius: number;
   radiusSmall: number;
+  /** A floating surface — a menu, a dropdown — which rounds on a wider
+   * scale than a control does: half the text size, and derived from
+   * `fontSize` for any palette that moves it without naming this. */
+  radiusPopup: number;
+  /** A row inside one, a step tighter so the highlight reads as a pill on
+   * the sheet rather than as a second edge just inside its own. */
+  radiusPopupItem: number;
+  /** A tooltip bubble — the smallest floating surface there is. */
+  radiusTooltip: number;
   borderWidth: number;
   fontSize: number;
   paddingX: number;
@@ -209,12 +218,30 @@ export const Slider: ComponentType<SliderProps>;
 export type Placement = 'top' | 'bottom' | 'left' | 'right';
 
 export interface TooltipProps extends WidgetProps {
-  label: string;
+  /**
+   * The hint. A string is measured and the popup sized around it; an
+   * element is given the bubble to fill and sized by {@link TooltipProps.width}
+   * / {@link TooltipProps.height}, since a `<popup>` is a real X window and
+   * needs its size before anything in it can be laid out.
+   */
+  label: ReactNode;
   children?: ReactNode;
+  /**
+   * Which side of the trigger to open on. `'auto'` (the default) takes the
+   * first side the hint fits on, preferring above; a named side is still a
+   * preference rather than a promise, since it flips to its opposite rather
+   * than opening off-screen.
+   */
+  direction?: Placement | 'auto';
+  /** The older name for {@link TooltipProps.direction}; wins where given. */
   placement?: Placement;
   /** ms before it appears (default 500). */
   delay?: number;
   fontSize?: number;
+  /** The bubble's size. Required for an element `label` (defaults to
+   * 220×80); for text it overrides the measured size. */
+  width?: number;
+  height?: number;
   style?: StyleProp;
 }
 export const Tooltip: ComponentType<TooltipProps>;
@@ -431,6 +458,13 @@ export interface AnchorOptions {
   placement?: Placement;
   /** Gap between the anchor and the popup, in px. */
   gap?: number;
+  /**
+   * Shift along the *alignment* axis, applied before the popup is clamped
+   * into the screen. For lining up what is drawn in a surface rather than
+   * the surface itself: a submenu level with the row that opened it has its
+   * first item a border and a padding lower, and the eye lines up the items.
+   */
+  alignOffset?: number;
   width?: number;
   height?: number;
   /** Flip to the opposite side when there is no room (default true). */
@@ -448,6 +482,15 @@ export function centerRect(
   node: DrawnNode,
   size: { width: number; height: number },
 ): Rect;
+
+/**
+ * A node's laid-out rect in screen coordinates — where a popup's *trigger*
+ * is, rather than where to put the popup. What a surface has to know when
+ * it points back at the thing it belongs to: a tooltip's arrow aims at the
+ * middle of the trigger, and that stops being the middle of the tooltip as
+ * soon as a screen edge slides one of the two.
+ */
+export function screenRect(node: DrawnNode): Rect | null;
 
 /** `anchorRect` bound to a ref, recomputed on demand. */
 export function useAnchor(

@@ -415,6 +415,11 @@ which answers the same question about the display.
 
 An unknown feature name is an error, like a malformed size query.
 
+Running with `REACT_X11_NO_TRANSPARENCY=1` makes the answer false on any
+display, so the base design — the one nobody tests, being the unusual case —
+can be looked at without stopping the compositor for the whole session. See
+[debugging.md](debugging.md#react_x11_no_transparency1).
+
 ## Decided
 
 - **`':hover'`, not `_hover`.** The CSS spelling costs a pair of quotes and

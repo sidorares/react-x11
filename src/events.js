@@ -232,6 +232,10 @@ export class EventManager {
       if (focused) node._defaultFocus?.();
       else node._defaultBlur?.();
     }
+    // …and the things that keep a window of their own open on the strength
+    // of this one having focus — a menu, a dropdown — which the focused node
+    // keeping its focus would otherwise never tell (`WindowNode`, nodes.js)
+    this.node._notifyWindowFocus?.(focused);
     runWithPriority(DiscreteEventPriority, () => {
       const prop = focused ? 'onFocus' : 'onBlur';
       this.node.props[prop]?.(

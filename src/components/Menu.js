@@ -13,6 +13,7 @@ import {
   screenOf,
   screenPoint,
   useAnchorTracking,
+  useDismissOnWindowBlur,
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
@@ -36,7 +37,29 @@ const MENU_SEPARATOR_HEIGHT = 7;
 
 const MENU_MIN_WIDTH = 140;
 
-const MENU_PAD = 4;
+// The inset between the popup's edge and a row, which is what makes the
+// highlight read as a *pill on* the menu rather than a band across it — and
+// what keeps the first and last one clear of the sheet's rounded corners,
+// where a full-width highlight would show a square shoulder outside the
+// curve.
+const MENU_PAD = 5;
+
+// A hairline, not `theme.borderWidth`: this border is there to give the sheet
+// an edge where it meets the desktop behind it, and a theme that draws 2px
+// borders on its *controls* does not mean a 2px outline around every menu.
+const MENU_BORDER = 1;
+
+// How far a bar item's pill sits inside the bar, taken out of its padding so
+// the bar's height does not change.
+const BAR_INSET = 3;
+
+// The horizontal gap between a menu and the submenu it opens, measured from
+// the parent popup's outer edge — so `0` is flush against it, a positive
+// value leaves the desktop showing between the two, and a negative one
+// overlaps the parent the way the classic toolkits do. The pointer crosses
+// this gap on its way to the submenu and the safe polygon covers it either
+// way (`movingToward`), so this is a matter of taste rather than of reach.
+const SUBMENU_GAP = 0;
 
 const MENU_GUTTER = 24; // room for the check column
 // what a self-drawing icon gets to fill, inside that column's 16px
@@ -56,7 +79,7 @@ function menuListHeight(items) {
       sum + (item.separator ? MENU_SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT),
     0,
   );
-  return body + MENU_PAD * 2 + 2;
+  return body + (MENU_PAD + MENU_BORDER) * 2;
 }
 
 /** Widest label + shortcut, measured, so the popup can be sized up front. */
@@ -75,7 +98,7 @@ function menuListWidth(node, items, fontSize) {
   }
   return Math.max(
     MENU_MIN_WIDTH,
-    Math.ceil(widest) + MENU_GUTTER + MENU_PAD * 2 + 12,
+    Math.ceil(widest) + MENU_GUTTER + (MENU_PAD + MENU_BORDER) * 2 + 10,
   );
 }
 
@@ -121,9 +144,24 @@ function gutterMark(item, { color, fontSize }) {
     : icon;
 }
 
+/**
+ * How a row is drawn, which is three states and not two.
+ *
+ * `'active'` is the selection: this row is where the menus are being driven
+ * from. `'path'` is a row whose submenu has taken that over — it is still
+ * the way back to where you are, and it still has to look chosen, but two
+ * selection-coloured rows in two menus would be claiming the same thing
+ * twice. Every desktop resolves that the same way: the trail goes quiet and
+ * only the live end of it stays lit.
+ */
+function rowState(index, active, handedOn) {
+  if (index !== active) return undefined;
+  return handedOn ? 'path' : 'active';
+}
+
 function MenuRow({
   item,
-  active,
+  state,
   onHover,
   onMove,
   onSelect,
@@ -131,6 +169,9 @@ function MenuRow({
   nodeRef,
 }) {
   const theme = useTheme();
+  // only the live end of the trail takes the selection colour, and with it
+  // the inverted label
+  const active = state === 'active';
   if (item.separator) {
     return h(
       'box',
@@ -157,7 +198,19 @@ function MenuRow({
         paddingLeft: 8,
         paddingRight: 8,
         cursor: dim ? undefined : 'pointer',
-        backgroundColor: active ? theme.hoverBackground : theme.background,
+        // A pill inside the sheet: the row is inset from the popup edge by
+        // the list's padding and rounded a step tighter than the menu, so
+        // the highlight sits *on* the menu instead of cutting across it.
+        borderRadius: theme.radiusPopupItem,
+        // Nothing at rest: the sheet under it is already that colour, and
+        // now that the row is rounded, repainting it per row would be a
+        // coverage mask drawn to change nothing — with four corners it
+        // deliberately leaves out.
+        backgroundColor: active
+          ? theme.hoverBackground
+          : state === 'path'
+            ? theme.surfaceActive
+            : 'transparent',
         // the item is already highlighted by the time it can be pressed, so
         // the press is a further step down rather than a first one — without
         // it the command runs on the release out of a picture that never
@@ -239,6 +292,10 @@ function MenuLevel({
   const active = path[depth] ?? -1;
   const childItems = items[active]?.items;
   const childOpen = path.length > depth + 1 && childItems?.length > 0;
+  // Has this level's selection handed over to the one below it? A submenu
+  // opened with nothing selected in it yet has not: the pointer is still on
+  // the row that opened it, and that row is still where the keys go.
+  const handedOn = childOpen && (path[depth + 1] ?? -1) >= 0;
 
   const activeRowRef = useRef(null);
   const listRef = useRef(null);
@@ -263,7 +320,14 @@ function MenuLevel({
         // two menus overlapped by five pixels.
         alignTo: node,
         align: 'start',
-        offset: 0,
+        // Lined up on the *items*, not on the boxes: the submenu's own
+        // border and padding come before its first row, so a popup whose
+        // top edge is level with the parent row opens that row's
+        // continuation six pixels lower than the row itself. Shifting by
+        // the inset puts the first item exactly beside the item it came
+        // out of, which is where the eye is already looking.
+        alignOffset: -(MENU_BORDER + MENU_PAD),
+        offset: SUBMENU_GAP,
         width: menuListWidth(node, childItems, fontSize),
         height: menuListHeight(childItems),
       }),
@@ -348,7 +412,17 @@ function MenuLevel({
       windowType: 'popup_menu',
       grab: depth === 0,
       onDismiss: depth === 0 ? onDismiss : undefined,
-      style: { backgroundColor: theme.background },
+      // ARGB where the display has it, so the corners the sheet gives up are
+      // the desktop rather than a colour. The window paints nothing itself
+      // when it can be seen through — the list box below is the whole of the
+      // menu, and a square fill under it would put the corners straight back.
+      // Without a compositor the window is the opaque rectangle it always
+      // was, and the list box's rounding is gated off to match.
+      transparent: true,
+      style: {
+        backgroundColor: theme.background,
+        '@supports transparency': { backgroundColor: 'transparent' },
+      },
     },
     h(
       'box',
@@ -358,16 +432,17 @@ function MenuLevel({
           flexGrow: 1,
           flexShrink: 1,
           padding: MENU_PAD,
-          borderWidth: 1,
+          borderWidth: MENU_BORDER,
           borderColor: theme.border,
           backgroundColor: theme.background,
+          '@supports transparency': { borderRadius: theme.radiusPopup },
         },
       },
       items.map((item, index) =>
         h(MenuRow, {
           key: item.separator ? `sep-${index}` : (item.key ?? item.label),
           item,
-          active: index === active,
+          state: rowState(index, active, handedOn),
           fontSize,
           nodeRef: index === active ? activeRowRef : undefined,
           onHover: (ev) => hover(index, ev),
@@ -505,6 +580,11 @@ export function ContextMenu({
     item.onSelect?.(item);
     onSelect?.(item);
   };
+
+  // the wrapper keeps the focus the right-click gave it, so `onBlur` below
+  // never fires when the *window* loses focus — and the menu is holding a
+  // pointer grab until something closes it
+  useDismissOnWindowBlur(ref, Boolean(rect), close);
 
   const openAt = (ev) => {
     const node = ref.current;
@@ -677,6 +757,11 @@ export function MenuBar({
     setRect,
     close,
   );
+  // and shut it when the whole window loses focus. The bar item keeps the
+  // focus it took, so its own `onBlur` never fires for this — and a menu
+  // left open over an application the user has switched away from is still
+  // holding the pointer grab it opened with.
+  useDismissOnWindowBlur(activeTriggerRef, openIndex >= 0, close);
 
   const select = (item) => {
     close();
@@ -704,8 +789,13 @@ export function MenuBar({
         style,
       ],
     },
-    menus.map((menu, index) =>
-      h(
+    menus.map((menu, index) => {
+      // The bar is the first level of the same trail: while its menu is open
+      // with nothing chosen in it the item is the selection, and the moment a
+      // row down there takes over it goes quiet — the same handover, drawn
+      // the same way, one level up (`rowState`).
+      const barState = rowState(index, openIndex, (path[0] ?? -1) >= 0);
+      return h(
         'box',
         {
           key: menu.label,
@@ -766,10 +856,29 @@ export function MenuBar({
               cursor: 'pointer',
               paddingLeft: 10,
               paddingRight: 10,
-              paddingTop: 6,
-              paddingBottom: 6,
+              // The same pill the rows inside the menu wear, at the same
+              // radius: the bar item and the first row of the menu it opens
+              // are one gesture, and a square title over rounded rows reads
+              // as two widgets that have not met.
+              //
+              // The margin is what a radius needs to be seen — a rounded
+              // rect flush against the strip's own edges reads as a cut
+              // corner rather than a pill — and it comes out of the padding
+              // rather than being added to it, so the bar is the height it
+              // always was.
+              marginTop: BAR_INSET,
+              marginBottom: BAR_INSET,
+              marginLeft: 1,
+              marginRight: 1,
+              paddingTop: 6 - BAR_INSET,
+              paddingBottom: 6 - BAR_INSET,
+              borderRadius: theme.radiusPopupItem,
               backgroundColor:
-                openIndex === index ? theme.hoverBackground : undefined,
+                barState === 'active'
+                  ? theme.hoverBackground
+                  : barState === 'path'
+                    ? theme.surfaceActive
+                    : undefined,
               // No ring while this item's menu is up. Walking the bar with
               // the arrow keys opens each menu as it arrives, so the item is
               // already inverted with a menu hanging off it — a ring on top
@@ -796,14 +905,14 @@ export function MenuBar({
           'text',
           {
             style: {
-              color: openIndex === index ? theme.hoverText : theme.text,
+              color: barState === 'active' ? theme.hoverText : theme.text,
               fontSize: fontSize,
             },
           },
           menu.label,
         ),
-      ),
-    ),
+      );
+    }),
     openIndex >= 0 &&
       rect &&
       path.length > 0 &&

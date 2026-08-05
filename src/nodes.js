@@ -40,7 +40,12 @@ import {
   XDND_VERSION,
 } from './dnd.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
-import { compositingActive, watchCompositing } from './compositing.js';
+import {
+  argbVisual,
+  compositingActive,
+  transparencyDisabled,
+  watchCompositing,
+} from './compositing.js';
 import { baseTheme } from './palette.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
@@ -460,6 +465,9 @@ function isPaintedColor(color) {
 }
 
 const DEV = process.env.NODE_ENV !== 'production';
+
+// Connections already told they have no 32-bit visual (`_argbAttributes`).
+const warnedNoArgb = new WeakSet();
 
 // Frame timestamps for transitions. Indirected so tests can drive the clock
 // instead of sleeping through real animations.
@@ -4342,14 +4350,29 @@ export class WindowNode extends Node {
   }
 
   _argbAttributes() {
-    const argb = this.app?.findArgbVisual?.();
+    const argb = argbVisual(this.app);
     if (!argb) {
-      if (DEV) {
-        console.warn(
-          'react-x11: <%s transparent> — no 32-bit TrueColor visual on this ' +
-            'display, falling back to an opaque window',
-          this.isPopup ? 'popup' : 'window',
-        );
+      // Once per connection. The answer is a property of the display (or of
+      // an environment switch) and cannot change while it is open, and since
+      // the widgets ask for a transparent popup every time a menu or a
+      // tooltip opens, warning per window would turn one piece of news into
+      // a running commentary.
+      if (DEV && this.app && !warnedNoArgb.has(this.app)) {
+        warnedNoArgb.add(this.app);
+        const what = this.isPopup ? 'popup' : 'window';
+        if (transparencyDisabled()) {
+          console.warn(
+            'react-x11: REACT_X11_NO_TRANSPARENCY=1 — <%s transparent> ' +
+              'ignored, this run is opaque',
+            what,
+          );
+        } else {
+          console.warn(
+            'react-x11: <%s transparent> — no 32-bit TrueColor visual on ' +
+              'this display, falling back to an opaque window',
+            what,
+          );
+        }
       }
       return null;
     }
@@ -4467,6 +4490,27 @@ export class WindowNode extends Node {
   _notifyAnchorChange() {
     if (!this._anchorListeners?.size) return;
     for (const cb of this._anchorListeners) cb();
+  }
+
+  /**
+   * Subscribe to this window gaining or losing the **window manager's**
+   * focus. Returns an unsubscribe function.
+   *
+   * Deliberately not the same thing as a node's `onBlur`: a window losing
+   * focus does not blur the node inside it — the node keeps focus and stops
+   * looking active, which is what the DOM does with `document.activeElement`
+   * and what a caret coming back where you left it depends on. So nothing in
+   * the tree hears about it, and the things that must — a menu holding a
+   * pointer grab, most of all — have nowhere else to ask.
+   */
+  onWindowFocusChange(cb) {
+    (this._windowFocusListeners ??= new Set()).add(cb);
+    return () => this._windowFocusListeners?.delete(cb);
+  }
+
+  _notifyWindowFocus(focused) {
+    if (!this._windowFocusListeners?.size) return;
+    for (const cb of [...this._windowFocusListeners]) cb(focused);
   }
 
   /** Walk the drawn subtree and give every <glarea> its child X window. */

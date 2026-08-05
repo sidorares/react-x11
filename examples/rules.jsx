@@ -36,39 +36,49 @@ import {
   ThemeProvider,
   useAnchor,
   useAnchorTracking,
+  useTheme,
 } from '../src/index.js';
 
 // --- palette ---------------------------------------------------------------
+//
+// Two palettes, and the example says nothing about which is in force:
+// `<ThemeProvider value={LIGHT} dark={DARK}>` layers the dark one on when the
+// desktop is dark, so this follows the machine the way the widgets do.
+//
+// Four of the design's colours are the *standard* tokens — `text`, `dim`,
+// `border`, `background` — because that is what they are, and naming them
+// privately would mean a sheet whose ink and a `Select` whose ink were two
+// different decisions that happened to agree. What stays private is what the
+// design actually adds: the sheet under the rows, the bracket rail, the
+// true/false chips, the drop target.
+//
+// Everything reads them as `$tokens` rather than as values, which is what
+// lets the styles below stay hoisted at module level and still follow the
+// desktop — resolution walks the node tree, not React (docs/styling.md).
 
-const C = {
+const LIGHT = {
+  // the standard four, which the built-in widgets read too
+  background: '#ffffff',
+  text: '#18181b',
+  dim: '#71717a',
+  border: '#e4e4e7',
+  // this design's own
   page: '#ffffff',
   row: '#fafafa',
   rowLocked: '#f4f4f5',
-  card: '#ffffff',
+  faint: '#a1a1aa',
+  rail: '#d4d4d8',
   dropEdge: '#93c5fd',
   dropFill: '#eff6ff',
-  edge: '#e4e4e7',
-  rail: '#d4d4d8',
-  text: '#18181b',
-  dim: '#71717a',
-  faint: '#a1a1aa',
   trueBg: '#ecfdf3',
   trueText: '#067647',
   falseBg: '#fef3f2',
   falseText: '#b42318',
-};
-
-// The widget palette. Everything the built-in controls paint reads from
-// here, so the pills, their dropdowns and the ghost buttons stay one look.
-const UI = {
-  border: C.edge,
-  borderActive: C.faint,
-  background: C.card,
-  text: C.text,
-  dim: C.faint,
+  // the widget palette: a monochrome accent, because every coloured thing in
+  // this sheet means something and a blue button would be the odd one out
   hoverBackground: '#f4f4f5',
-  hoverText: C.text,
-  accent: C.text,
+  hoverText: '#18181b',
+  accent: '#18181b',
   accentHover: '#3f3f46',
   surfaceHover: '#f4f4f5',
   radius: 8,
@@ -78,10 +88,45 @@ const UI = {
   paddingY: 7,
 };
 
-// A second palette for the two dropdowns that read as labels rather than
-// as choices — the locked trigger's status and the branch selector. Only
-// the colours differ, so they are still real menus, just quiet ones.
-const UI_QUIET = { ...UI, text: C.faint, background: C.row };
+// The same design in the dark scheme rather than a second one: same shapes,
+// same roles, the greys walked the other way. Zinc, as the light palette is.
+const DARK = {
+  background: '#1f1f23',
+  text: '#f4f4f5',
+  dim: '#a1a1aa',
+  border: '#3f3f46',
+  page: '#18181b',
+  row: '#232327',
+  rowLocked: '#26262b',
+  faint: '#71717a',
+  rail: '#52525b',
+  dropEdge: '#3b82f6',
+  dropFill: '#1e293b',
+  trueBg: '#0c2f1e',
+  trueText: '#4ade80',
+  falseBg: '#3a1416',
+  falseText: '#fca5a5',
+  hoverBackground: '#2a2a30',
+  hoverText: '#f4f4f5',
+  accent: '#f4f4f5',
+  accentHover: '#d4d4d8',
+  // the accent is the ink here, so what goes *on* it is the page
+  accentText: '#18181b',
+  surfaceHover: '#2a2a30',
+};
+
+/**
+ * The palette for the two dropdowns that read as labels rather than as
+ * choices — the locked trigger's status, and the branch selector. Only the
+ * colours differ, so they are still real menus, just quiet ones.
+ *
+ * Derived from the palette in force rather than written out twice: it is the
+ * same two substitutions in either scheme.
+ */
+const quietPalette = (theme) => ({
+  text: theme.faint,
+  background: theme.row,
+});
 
 // --- the vocabulary --------------------------------------------------------
 
@@ -301,16 +346,21 @@ const LUCIDE = {
   strokeLinejoin: 'round',
 };
 
-function Icon({ children, color = C.faint, size = 16, style }) {
+// `currentColor` and the colour in the *style*, rather than a stroke per
+// shape: an SVG attribute takes a value, and a `$token` is only resolved in
+// the style channel — which is also where a colour has to be for the
+// renderer to cache the drawing as coverage and recolour it per node
+// (docs/elements.md).
+function Icon({ children, color = '$faint', size = 16, style }) {
   return (
     <svg
       viewBox="0 0 24 24"
-      style={[{ width: size, height: size, flexShrink: 0 }, style]}
+      style={[{ width: size, height: size, flexShrink: 0, color }, style]}
     >
       {React.Children.map(children, (child) =>
         React.cloneElement(child, {
           ...LUCIDE,
-          stroke: color,
+          stroke: 'currentColor',
           ...child.props,
         }),
       )}
@@ -413,7 +463,7 @@ const RAIL_X = 8.5; // the vertical line inside it, on a half pixel
 const JOIN_W = 38; // the And/Or pill, wide enough for either word
 
 const s = createStyles({
-  window: { backgroundColor: C.page },
+  window: { backgroundColor: '$page' },
   // the left padding is the bracket's gutter: a top-level list pulls itself
   // into it so its rows line up with the headers and the trigger above them
   page: { flexGrow: 1, padding: 28, paddingTop: 22, paddingLeft: 28 + RAIL },
@@ -446,13 +496,13 @@ const s = createStyles({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: C.edge,
+    borderColor: '$border',
     borderRadius: 11,
-    backgroundColor: C.card,
+    backgroundColor: '$background',
     cursor: 'pointer',
-    ':hover': { borderColor: C.faint },
+    ':hover': { borderColor: '$faint' },
   },
-  joinText: { fontSize: 12, color: C.dim },
+  joinText: { fontSize: 12, color: '$dim' },
 
   // the grey capsule a rule or an action lives in
   row: {
@@ -463,7 +513,7 @@ const s = createStyles({
     paddingLeft: 10,
     paddingRight: 10,
     borderRadius: 10,
-    backgroundColor: C.row,
+    backgroundColor: '$row',
     // carried by every row, painted on none of them: the lifted row turns it
     // on, and a border that only appears when held would make the row 2px
     // taller than the landing box standing in for it
@@ -472,7 +522,7 @@ const s = createStyles({
   },
   // the row while it is held: off the page rather than in it, which without
   // a shadow to cast is said with the fill and an edge the flow rows lack
-  rowLifted: { backgroundColor: C.card, borderColor: C.edge },
+  rowLifted: { backgroundColor: '$background', borderColor: '$border' },
   // the wrapping half of a row. `flexBasis: 0` because yoga defaults
   // flexShrink to 0: with `auto`, this takes its content's max-content width
   // as its base, cannot shrink back, and the fields never wrap at all
@@ -499,9 +549,9 @@ const s = createStyles({
   landing: {
     borderWidth: 2,
     borderStyle: 'dashed',
-    borderColor: C.dropEdge,
+    borderColor: '$dropEdge',
     borderRadius: 10,
-    backgroundColor: C.dropFill,
+    backgroundColor: '$dropFill',
   },
   rowLocked: {
     flexDirection: 'row',
@@ -511,10 +561,10 @@ const s = createStyles({
     paddingLeft: 12,
     paddingRight: 10,
     borderRadius: 10,
-    backgroundColor: C.rowLocked,
+    backgroundColor: '$rowLocked',
   },
-  word: { color: C.dim, fontSize: 14 },
-  lockedWord: { color: C.dim, fontSize: 14 },
+  word: { color: '$dim', fontSize: 14 },
+  lockedWord: { color: '$dim', fontSize: 14 },
 
   handle: {
     width: 20,
@@ -543,11 +593,11 @@ const s = createStyles({
     paddingLeft: 10,
     paddingRight: 10,
     fontSize: 14,
-    color: C.text,
+    color: '$text',
     borderWidth: 1,
-    borderColor: C.edge,
+    borderColor: '$border',
     borderRadius: 8,
-    backgroundColor: C.card,
+    backgroundColor: '$background',
   },
 
   // the multi-value field, and the removable chips in it
@@ -564,12 +614,12 @@ const s = createStyles({
     paddingLeft: 6,
     paddingRight: 6,
     borderWidth: 1,
-    borderColor: C.edge,
+    borderColor: '$border',
     borderRadius: 8,
-    backgroundColor: C.card,
+    backgroundColor: '$background',
     cursor: 'pointer',
   },
-  tokensOpen: { borderColor: C.faint },
+  tokensOpen: { borderColor: '$faint' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -578,11 +628,11 @@ const s = createStyles({
     paddingLeft: 8,
     paddingRight: 2,
     borderWidth: 1,
-    borderColor: C.edge,
+    borderColor: '$border',
     borderRadius: 6,
-    backgroundColor: C.card,
+    backgroundColor: '$background',
   },
-  chipText: { fontSize: 13, color: C.text },
+  chipText: { fontSize: 13, color: '$text' },
   chipClose: {
     width: 18,
     height: 18,
@@ -592,15 +642,15 @@ const s = createStyles({
     cursor: 'pointer',
     ':hover': { backgroundColor: '$surfaceActive' },
   },
-  placeholder: { fontSize: 13, color: C.faint, paddingLeft: 4 },
+  placeholder: { fontSize: 13, color: '$faint', paddingLeft: 4 },
 
   menu: {
     flexGrow: 1,
     flexShrink: 1,
     borderWidth: 1,
-    borderColor: C.edge,
+    borderColor: '$border',
     borderRadius: 8,
-    backgroundColor: C.card,
+    backgroundColor: '$background',
   },
   menuItem: {
     flexDirection: 'row',
@@ -613,20 +663,20 @@ const s = createStyles({
     cursor: 'pointer',
     ':hover': { backgroundColor: '$surfaceHover' },
   },
-  menuText: { fontSize: 13, color: C.text },
+  menuText: { fontSize: 13, color: '$text' },
 
   // the group card, and the buttons under every list
   card: {
     padding: 14,
     paddingBottom: 10,
     borderWidth: 1,
-    borderColor: C.edge,
+    borderColor: '$border',
     borderRadius: 12,
-    backgroundColor: C.card,
+    backgroundColor: '$background',
     gap: 10,
   },
   cardHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  cardTitle: { fontSize: 12, color: C.faint },
+  cardTitle: { fontSize: 12, color: '$faint' },
 
   buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 4 },
   ghost: {
@@ -637,13 +687,13 @@ const s = createStyles({
     paddingLeft: 12,
     paddingRight: 14,
     borderWidth: 1,
-    borderColor: C.edge,
+    borderColor: '$border',
     borderRadius: 8,
-    backgroundColor: C.card,
+    backgroundColor: '$background',
     cursor: 'pointer',
-    ':hover': { backgroundColor: '$background', borderColor: C.faint },
+    ':hover': { backgroundColor: '$background', borderColor: '$faint' },
   },
-  ghostText: { fontSize: 14, color: C.text },
+  ghostText: { fontSize: 14, color: '$text' },
 
   // the two THEN branches
   branch: {
@@ -673,6 +723,7 @@ const valueOf = (ev) => (ev?.type === 'change' ? ev.value : ev);
 
 /** The pill every dropdown in a row is: `Select`, shaped to match. */
 function Pill({ quiet = false, style, onChange, ...props }) {
+  const theme = useTheme();
   const select = (
     <Select
       {...props}
@@ -690,9 +741,11 @@ function Pill({ quiet = false, style, onChange, ...props }) {
       ]}
     />
   );
-  // the quiet palette is scoped to the one control, not to the tree
+  // the quiet palette is scoped to the one control, not to the tree — and
+  // derived from the one in force rather than frozen, so it follows the
+  // desktop like everything else
   return quiet ? (
-    <ThemeProvider value={UI_QUIET}>{select}</ThemeProvider>
+    <ThemeProvider value={quietPalette(theme)}>{select}</ThemeProvider>
   ) : (
     select
   );
@@ -791,7 +844,7 @@ function TokenField({ options, values, onChange }) {
           // rectangle, exactly as it was before.
           transparent
           style={{
-            backgroundColor: C.card,
+            backgroundColor: '$background',
             '@supports transparency': { backgroundColor: 'transparent' },
           }}
         >
@@ -814,7 +867,7 @@ function TokenField({ options, values, onChange }) {
                     {/* the tick's slot is held whether or not it is on, so
                         the labels do not shuffle as values are picked */}
                     <box style={s.tick}>
-                      {on && <CheckIcon color={C.text} size={16} />}
+                      {on && <CheckIcon color={'$text'} size={16} />}
                     </box>
                     <Label style={s.menuText}>{option}</Label>
                   </box>
@@ -861,7 +914,9 @@ function Rail({ position, gapBelow, hidden = false, onElbow }) {
         onElbow?.(node.abs.y + cy);
         if (position === 'only') return;
         const r = 8;
-        ctx.strokeStyle = C.rail;
+        // a canvas paints with values, not tokens — `node.theme` is the
+        // same palette a `$rail` in a style would have resolved against
+        ctx.strokeStyle = node.theme?.rail ?? '#d4d4d8';
         ctx.lineWidth = 1;
         ctx.beginPath();
         if (position === 'first') {
@@ -1310,8 +1365,8 @@ function ListButtons({ onNodes, nodes, kind }) {
 function Branch({ tone, label }) {
   const colors =
     tone === 'yes'
-      ? { backgroundColor: C.trueBg, color: C.trueText }
-      : { backgroundColor: C.falseBg, color: C.falseText };
+      ? { backgroundColor: '$trueBg', color: '$trueText' }
+      : { backgroundColor: '$falseBg', color: '$falseText' };
   return (
     <box style={[s.branch, { backgroundColor: colors.backgroundColor }]}>
       <CheckIcon color={colors.color} size={14} />
@@ -1350,13 +1405,12 @@ export function RulesPanel() {
     });
   };
 
-  // the widget palette wraps the panel rather than the window, so the panel
-  // still looks like itself wherever it is dropped
+  // The palette wraps the panel rather than the window, so the panel still
+  // looks like itself wherever it is dropped — `App` puts a second provider
+  // above the window, which is the only way the *window's* own background
+  // can read a token this palette defines.
   return (
-    // This app styles everything from its own `C` palette, so it pins rather
-    // than half-following: layering a light design over a dark base is what
-    // produces a window of mixed light and dark controls.
-    <ThemeProvider value={UI} colorScheme="light">
+    <ThemeProvider value={LIGHT} dark={DARK}>
       <scrollview style={s.page}>
         <box style={s.sheet}>
           <Label style={s.section}>WHEN</Label>
@@ -1430,17 +1484,22 @@ export function RulesPanel() {
 }
 
 function App() {
+  // A provider above a `<window>` renders no box — it plants the palette on
+  // the window itself (a window may not sit inside a box), which is what
+  // lets the window's own `backgroundColor: '$page'` resolve.
   return (
-    <window
-      title="rules"
-      width={880}
-      height={820}
-      minWidth={560}
-      minHeight={360}
-      style={s.window}
-    >
-      <RulesPanel />
-    </window>
+    <ThemeProvider value={LIGHT} dark={DARK}>
+      <window
+        title="rules"
+        width={880}
+        height={820}
+        minWidth={560}
+        minHeight={360}
+        style={s.window}
+      >
+        <RulesPanel />
+      </window>
+    </ThemeProvider>
   );
 }
 

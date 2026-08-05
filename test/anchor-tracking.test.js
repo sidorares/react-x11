@@ -20,7 +20,7 @@ import { createClient, StaticFontSource } from 'ntk';
 
 import { createRoot } from '../src/index.js';
 import { useAnchor, useAnchorTracking } from '../src/components/anchor.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, moveMouse } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -315,4 +315,67 @@ test('a tracked popup follows the owner window when it moves', async () => {
   } finally {
     await app.close();
   }
+});
+
+test('a popup that closes stays closed, even though closing is a layout pass', async () => {
+  // The shape every real caller has, `Tooltip` most literally: one piece of
+  // state is both the rect and whether there is a popup at all, and it is
+  // driven from pointer motion. So closing nulls the rect and destroys the
+  // window in one commit, the window's next frame lays out without it —
+  // and that layout pass notifies every anchor subscriber before React has
+  // flushed the effect cleanup that would have removed this one.
+  //
+  // A subscription that trusted the `active` of the render it was made in
+  // answers by measuring a fresh rect for the popup just closed, and the
+  // reconciler hands back a second window in place of the one that went
+  // away: a popup nothing can dismiss, because dismissing it is what brings
+  // it back. (Continuous priority is load-bearing here — React flushes a
+  // click synchronously, and the cleanup then wins the race by luck.)
+  const app = createMockApp();
+  const triggerRef = React.createRef();
+  const SIZE = { placement: 'bottom', width: 60, height: 30 };
+
+  function OnHover() {
+    const [rect, setRect] = React.useState(null);
+    const measure = useAnchor(triggerRef);
+    const hide = () => setRect(null);
+    useAnchorTracking(triggerRef, Boolean(rect), () => SIZE, setRect, hide);
+    return h(
+      'window',
+      { width: 200, height: 120 },
+      // the popup inside the box the trigger is in, as `Tooltip`'s is, so
+      // that dropping it is a change to that box's children
+      h(
+        'box',
+        {
+          ref: triggerRef,
+          onMouseEnter: () => setRect(measure(SIZE)),
+          onMouseLeave: hide,
+          style: { marginTop: 30, marginLeft: 20, width: 80, height: 20 },
+        },
+        rect && h('popup', { x: rect.x, y: rect.y, ...SIZE }),
+      ),
+    );
+  }
+
+  const x11Root = await renderMock(app, h(OnHover));
+  const wnd = app.windows[0];
+  const { x, y } = triggerRef.current.abs;
+
+  moveMouse(wnd, x + 2, y + 2);
+  await tick();
+  await tick();
+  assert.equal(app.windows.length, 2, 'the popup is up');
+
+  moveMouse(wnd, x + 2, y + 100); // off the trigger entirely
+  for (let i = 0; i < 5; i++) await tick();
+
+  assert.equal(app.windows[1].destroyed, true, 'the popup went away');
+  assert.equal(
+    app.windows.filter((w) => !w.destroyed).length,
+    1,
+    'and nothing took its place',
+  );
+
+  await x11Root.unmount();
 });
