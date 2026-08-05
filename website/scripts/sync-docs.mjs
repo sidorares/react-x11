@@ -186,6 +186,7 @@ const ORDER = [
   'extending.md',
   'testing.md',
   'desktop.md',
+  'dbus.md',
   'remote.md',
   'security.md',
   'packaging.md',

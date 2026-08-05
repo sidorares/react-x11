@@ -8,12 +8,25 @@
  */
 import React, { useRef, useState } from 'react';
 import { startTrace } from 'react-x11/debug';
+import type {
+  BusHandle,
+  BusKind,
+  BusRef,
+  BusStatus,
+  MessageBus,
+} from 'react-x11';
 import {
   Button,
+  BusUnavailableError,
   Canvas3D,
   Checkbox,
+  closeBus,
+  sessionBus,
+  systemBus,
   useApp,
   useClipboard,
+  useSessionBus,
+  useSystemBus,
   ContextMenu,
   createRoot,
   createStyles,
@@ -574,6 +587,48 @@ function _Clip() {
   return null;
 }
 
+// the bus floor: the hooks, the imperative pair, and the `required` overload
+function _Bus() {
+  const session: BusHandle = useSessionBus();
+  const system = useSystemBus();
+
+  // The terse path has to type-check on its own — no `status` in sight.
+  if (!session.bus) return null;
+
+  const status: BusStatus = session.status;
+  const name: string | null = session.uniqueName;
+  const why: BusUnavailableError | undefined = system.cause;
+  const kind: BusKind | undefined = why?.kind;
+  session.retry();
+
+  async function go() {
+    // The default answers null, so the null check is not optional.
+    const ref = await sessionBus();
+    if (ref) {
+      const bus: MessageBus = ref.bus;
+      const unique: string = ref.uniqueName;
+      const names: string[] = await bus.listNames();
+      // Anything else on the dbus-native surface stays reachable.
+      await bus.exportInterface({}, '/org/example', {});
+      await ref.release();
+      void [unique, names];
+    }
+    // @ts-expect-error — null until it is checked
+    (await systemBus()).release();
+
+    // `required` narrows away the null.
+    const required: BusRef = await sessionBus({ required: true });
+    await required[Symbol.asyncDispose]();
+
+    await closeBus('session');
+    // @ts-expect-error — not a bus
+    await closeBus('accessibility');
+  }
+  void go;
+  return null;
+}
+
+void _Bus;
 void _Clip;
 void main;
 void grow;

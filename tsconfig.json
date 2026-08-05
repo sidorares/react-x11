@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "ESNext.Disposable"],
     "jsx": "react-jsx",
     "jsxImportSource": "react-x11",
     "strict": true,

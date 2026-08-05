@@ -41,6 +41,11 @@
   beyond drawing. Startup notification: why the launcher's busy cursor spins
   for 15 seconds without it, when an app counts as "started", and the seams
   for saying otherwise.
+- [dbus.md](dbus.md) — the bus every desktop-integration feature sits on:
+  `useSessionBus()` / `useSystemBus()` with nothing to wrap, the imperative
+  `sessionBus()` pair underneath, why one process is one connection and one
+  identity, and why "there is no bus" is a first-class configuration rather
+  than an error.
 - [remote.md](remote.md) — the flagship case: running the app on one
   machine and drawing to a display on another. `ssh -X` vs `-Y`, what the
   protocol costs on a link, the other X servers, and why Xwayland works

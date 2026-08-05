@@ -154,6 +154,11 @@ await esbuild.build({
     keysym: path.join(shimsDir, 'keysym.js'),
     // heavy optional ntk dep no demo needs
     pngjs: path.join(stubsDir, 'pngjs.js'),
+    // The D-Bus transport: node-only, dynamically imported by src/bus.js, and
+    // six node builtins deep. The stub throws on import, which is the same
+    // answer a Node 20 install gives — see the file for why that is the right
+    // shape rather than an inert proxy.
+    'dbus-native': path.join(stubsDir, 'dbus-native.js'),
   },
 });
 

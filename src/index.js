@@ -4,6 +4,8 @@ export { windowIdOf, useWindowId } from './windowid.js';
 export { launchTimestamp, notifyStartupComplete } from './startup.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
+export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
+export { useSessionBus, useSystemBus } from './bushooks.js';
 export {
   useDropTarget,
   useDragSource,
