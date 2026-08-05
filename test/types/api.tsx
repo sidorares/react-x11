@@ -13,6 +13,7 @@ import type {
   BusKind,
   BusRef,
   BusStatus,
+  FileDialogBackend,
   MessageBus,
 } from 'react-x11';
 import {
@@ -21,10 +22,15 @@ import {
   Canvas3D,
   Checkbox,
   closeBus,
+  fileDialogBackend,
+  NoFileDialogError,
+  openFile,
+  saveFile,
   sessionBus,
   systemBus,
   useApp,
   useClipboard,
+  useFileDialog,
   useSessionBus,
   useSystemBus,
   ContextMenu,
@@ -49,6 +55,7 @@ import {
   Tree,
   useAnchor,
   useTheme,
+  useTopLevelWindow,
   useWindowId,
   windowIdOf,
 } from '../../src/index.js';
@@ -628,6 +635,55 @@ function _Bus() {
   return null;
 }
 
+// the file dialog: the ladder, the options, and what cancel looks like
+function _Files() {
+  const win = useRef<NtkWindow | null>(null);
+  const {
+    openFile: open,
+    saveFile: save,
+    selectFolder,
+  } = useFileDialog({
+    parentWindow: win,
+  });
+
+  async function go() {
+    const files: string[] | null = await open({
+      multiple: true,
+      filters: [
+        { name: 'Text', extensions: ['txt', 'md'] },
+        { name: 'Images', mimeTypes: ['image/png'] },
+      ],
+      defaultFolder: '/tmp',
+      acceptLabel: 'Import',
+    });
+    // Cancelling is `null`, not a throw — the terse path has to type-check.
+    if (!files) return;
+    const target: string | null = await save({ defaultName: 'out.md' });
+    const dirs: string[] | null = await selectFolder();
+
+    // The bare functions, for host-side code with no component to hang off.
+    const bare: string[] | null = await openFile({ backend: 'builtin' });
+    const backend: FileDialogBackend = await fileDialogBackend();
+    // @ts-expect-error — not a rung
+    await openFile({ backend: 'zenity' });
+    // @ts-expect-error — a filter needs a name
+    await openFile({ filters: [{ extensions: ['txt'] }] });
+
+    try {
+      await saveFile();
+    } catch (err) {
+      if (err instanceof NoFileDialogError) {
+        const why: unknown = err.cause;
+        void why;
+      }
+    }
+    void [target, dirs, bare, backend];
+  }
+  void go;
+  return null;
+}
+
+void _Files;
 void _Bus;
 void _Clip;
 void main;

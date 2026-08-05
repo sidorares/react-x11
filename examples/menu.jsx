@@ -1,4 +1,6 @@
-// Menus: a MenuBar of pull-down menus plus a ContextMenu on right-click.
+// Menus: a MenuBar of pull-down menus plus a ContextMenu on right-click —
+// and, in the File menu, real file dialogs.
+//
 // Both render into <popup> — override-redirect X11 windows anchored with
 // useAnchor, so they escape the owner window and flip at screen edges.
 //
@@ -7,9 +9,22 @@
 // Right opens a submenu and Left leaves it, Enter picks, Escape closes one
 // level at a time.
 //
+// **File → Open… is the real thing**, through `useFileDialog()`: the
+// desktop's own dialog over xdg-desktop-portal where there is one,
+// `NSOpenPanel` through `osascript` on a Mac, and a browser react-x11 draws
+// itself everywhere else — ssh, a bare startx, a container. The window shows
+// which rung this machine landed on; the menu code is the same either way,
+// which is the whole point. See docs/filedialog.md.
+//
 // Run with: npm run examples:menu  (needs an X server / DISPLAY)
-import React, { useState } from 'react';
-import { createRoot, ContextMenu, MenuBar } from '../src/index.js';
+import React, { useEffect, useState } from 'react';
+import {
+  createRoot,
+  ContextMenu,
+  fileDialogBackend,
+  MenuBar,
+  useFileDialog,
+} from '../src/index.js';
 
 // Menu icons are SVG paths painted in `currentColor`, so one drawing serves
 // every state a row can be in: the menu calls `icon` with the colour its
@@ -85,6 +100,38 @@ function App() {
   const [wrap, setWrap] = useState(true);
   const note = (label) => () => setLast(label);
 
+  // The File menu drives real dialogs. Nothing to pass: the dialog is
+  // parented to the window this component is in, worked out when it opens
+  // rather than asked for — so it stacks above this window and the portal's
+  // own backend parents it the same way.
+  const { openFile, saveFile, selectFolder } = useFileDialog();
+
+  // Which rung this machine lands on — the desktop's own portal, macOS's
+  // NSOpenPanel through `osascript`, or the browser react-x11 draws itself.
+  // Shown because the whole point is that the app does not care.
+  const [backend, setBackend] = useState('…');
+  useEffect(() => {
+    fileDialogBackend().then(setBackend, () => setBackend('unknown'));
+  }, []);
+
+  // Every one of these resolves to `null` when the user cancels — an
+  // ordinary outcome, so none of them needs a `try`.
+  const TEXT = [{ name: 'Text', extensions: ['txt', 'md'] }];
+  const open = (options) => async () => {
+    setLast('opening…');
+    const files = await openFile({ filters: TEXT, ...options });
+    setLast(files ? files.join(', ') : 'cancelled');
+  };
+  const save = () => async () => {
+    setLast('saving…');
+    const file = await saveFile({ filters: TEXT, defaultName: 'notes.md' });
+    setLast(file ?? 'cancelled');
+  };
+  const folder = () => async () => {
+    const dirs = await selectFolder();
+    setLast(dirs ? dirs.join(', ') : 'cancelled');
+  };
+
   // `icon` shares the check column, so it is a glyph rather than a picture:
   // a string is drawn as text in the font already in use. Pass a React
   // element instead — `<canvas onDraw>` — when it has to be a real drawing.
@@ -102,7 +149,17 @@ function App() {
           label: 'Open…',
           icon: ICONS.folder,
           shortcut: 'Ctrl+O',
-          onSelect: note('Open…'),
+          onSelect: open(),
+        },
+        {
+          label: 'Open Files…',
+          icon: ICONS.folder,
+          onSelect: open({ multiple: true }),
+        },
+        {
+          label: 'Open Folder…',
+          icon: ICONS.folder,
+          onSelect: folder(),
         },
         {
           // three levels: Open Recent → Projects → the file itself, which is
@@ -135,7 +192,7 @@ function App() {
           shortcut: 'Ctrl+S',
           onSelect: note('Save'),
         },
-        { label: 'Save As…', disabled: true },
+        { label: 'Save As…', icon: ICONS.save, onSelect: save() },
         {
           label: 'Export',
           items: [
@@ -263,8 +320,8 @@ function App() {
 
   return (
     <window
-      width={460}
-      height={280}
+      width={520}
+      height={300}
       title="menus"
       style={{ backgroundColor: '#f5f6fa' }}
     >
@@ -287,6 +344,10 @@ function App() {
           </text>
           <text style={{ color: '#7f8c8d' }}>
             wrap lines: {wrap ? 'on' : 'off'}
+          </text>
+          <text style={{ color: '#7f8c8d' }}>
+            File → Open/Save runs a real dialog, on this machine's{' '}
+            <text style={{ color: '#2980b9' }}>{backend}</text> backend
           </text>
         </ContextMenu>
       </box>

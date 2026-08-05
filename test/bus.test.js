@@ -398,6 +398,34 @@ describe('against a broker', { ...needsBroker }, () => {
     }
   });
 
+  test('closeBus at zero refs settles instead of draining the loop', async () => {
+    // The teardown is a use of the connection. At zero refs the socket is
+    // `unref()`d, so `bus.close()` — which resolves on the socket's own
+    // 'close' event — had nothing holding the loop open, and a process with no
+    // other work drained before the event arrived: the promise never settled
+    // and the process exited silently, mid-close. A child with nothing else
+    // pending is the only place that is observable.
+    const broker = await startBroker();
+    try {
+      const { code, stdout, stderr } = await runScript(
+        `
+        import { sessionBus, closeBus } from './src/bus.js';
+        const ref = await sessionBus();
+        await ref.release();
+        await closeBus('session');
+        console.log('closed');
+        `,
+        { DBUS_SESSION_BUS_ADDRESS: broker.address() },
+        [],
+        5000,
+      );
+      assert.equal(code, 0, stderr);
+      assert.match(stdout, /closed/, 'closeBus() resolved');
+    } finally {
+      await stopBroker(broker);
+    }
+  });
+
   test('generation on death: old refs stay harmless, a new one connects', async () => {
     const socket = await reservedSocket();
     let broker = await startBroker({ socket });

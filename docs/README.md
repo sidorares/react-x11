@@ -46,6 +46,10 @@
   `sessionBus()` pair underneath, why one process is one connection and one
   identity, and why "there is no bus" is a first-class configuration rather
   than an error.
+- [filedialog.md](filedialog.md) — open, save and pick a folder:
+  `useFileDialog()`, the three-rung ladder (the desktop's own portal,
+  `osascript` on macOS, a browser react-x11 draws itself), why cancelling is
+  `null` rather than a throw, and the places the backends genuinely differ.
 - [remote.md](remote.md) — the flagship case: running the app on one
   machine and drawing to a display on another. `ssh -X` vs `-Y`, what the
   protocol costs on a link, the other X servers, and why Xwayland works

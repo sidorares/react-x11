@@ -187,6 +187,7 @@ const ORDER = [
   'testing.md',
   'desktop.md',
   'dbus.md',
+  'filedialog.md',
   'remote.md',
   'security.md',
   'packaging.md',

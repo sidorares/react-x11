@@ -150,6 +150,19 @@ await esbuild.build({
     // createRequire, used by react-x11 to read its own package.json
     module: path.join(shimsDir, 'module.js'),
     'node:module': path.join(shimsDir, 'module.js'),
+    // What the file dialog reaches for, all behind dynamic imports it never
+    // takes here — but esbuild follows those too. See the shim for why they
+    // throw rather than answering emptily.
+    'node:crypto': path.join(shimsDir, 'desktop-only.js'),
+    crypto: path.join(shimsDir, 'desktop-only.js'),
+    'node:child_process': path.join(shimsDir, 'desktop-only.js'),
+    child_process: path.join(shimsDir, 'desktop-only.js'),
+    'node:url': path.join(shimsDir, 'desktop-only.js'),
+    url: path.join(shimsDir, 'desktop-only.js'),
+    // `alias` matches whole specifiers, so `node:fs` above does not cover the
+    // `/promises` subpath — it resolves against the shim *file* and fails.
+    'node:fs/promises': path.join(shimsDir, 'desktop-only.js'),
+    'fs/promises': path.join(shimsDir, 'desktop-only.js'),
     // keysym reads its JSON tables with fs at load time; this build inlines them
     keysym: path.join(shimsDir, 'keysym.js'),
     // heavy optional ntk dep no demo needs

@@ -5,7 +5,9 @@
 // once: `transientFor` resolves its prop through this, and the
 // xdg-desktop-portal work needs it to build a `parent_window` handle.
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
+
+import { useAppOrNull } from './appcontext.js';
 
 /**
  * The XID of the X11 window a ref points at, or `null` if there is not one
@@ -57,4 +59,89 @@ export function windowIdOf(target) {
  */
 export function useWindowId(ref) {
   return useCallback(() => windowIdOf(ref), [ref]);
+}
+
+/**
+ * The top-level windows this connection is currently rendering, in the order
+ * they were added.
+ *
+ * `createContainer(app, …)` passes the app as the container, so
+ * `appendChildToContainer` records every top-level node on the app itself —
+ * which makes "what windows does this tree have" answerable without the app
+ * author wiring anything. Popups are excluded: a `<popup>` is
+ * override-redirect and never what a dialog should be transient for.
+ */
+function topLevelWindows(app) {
+  if (!app) return [];
+  return (app._rootChildren ?? []).filter(
+    (node) => node?.isWindow && !node.isPopup && node.window?.id,
+  );
+}
+
+let warnedAboutAmbiguity = false;
+
+/**
+ * The window a component belongs to, resolved when it is read.
+ *
+ * ```js
+ * const owner = useTopLevelWindow();
+ * // …later, in a handler, when everything is mounted:
+ * const id = windowIdOf(owner);
+ * ```
+ *
+ * **Why this is inference and not a lookup.** A hook has no position in the
+ * host tree: React context cannot come from a host element, the host context
+ * `getChildHostContext` builds reaches `createInstance` and not components,
+ * and a `<window>` has no XID at all until the commit phase. Everything else
+ * in this file walks *up from a node* — which is why the alternative is
+ * `useRef` on the window and a line of wiring in every app that wants a
+ * parented dialog.
+ *
+ * So it answers from what the renderer does know, at read time, when the tree
+ * is mounted and realized:
+ *
+ * - **one top-level window — the overwhelmingly common case — is exact.** The
+ *   component is in that window, because there is nowhere else to be.
+ * - several, and one of them holds the X input focus: that one. You clicked
+ *   in it a moment ago, which is why a dialog is opening.
+ * - several with nothing to separate them: the most recently opened, and a
+ *   development warning naming `parentWindow` as the way to be exact. A
+ *   guess that says it is guessing beats a guess that does not.
+ *
+ * Returns a **ref-like object** rather than a number: the window is not
+ * realized on the first render, so a value read then would be `null` on the
+ * render that matters. It drops into anything that already takes a ref —
+ * `parentWindow`, `transientFor` — and `windowIdOf()` resolves it.
+ */
+export function useTopLevelWindow() {
+  const app = useAppOrNull();
+  return useMemo(
+    () => ({
+      get current() {
+        const windows = topLevelWindows(app);
+        if (windows.length <= 1) return windows[0] ?? null;
+
+        const focused = windows.filter((w) => w.events?.windowFocused);
+        if (focused.length === 1) return focused[0];
+
+        // Nothing separates them. `windowFocused` also defaults to true on an
+        // ntk too old to report focus changes, so "all of them" is the same
+        // answer as "none of them" and both land here.
+        if (process.env.NODE_ENV !== 'production' && !warnedAboutAmbiguity) {
+          warnedAboutAmbiguity = true;
+          console.warn(
+            `react-x11: this tree has ${windows.length} top-level windows and ` +
+              'none of them is uniquely focused, so the owner window is a ' +
+              'guess (the most recently opened). Pass the window explicitly ' +
+              'to be exact:\n' +
+              '  const win = useRef(null);\n' +
+              '  const { openFile } = useFileDialog({ parentWindow: win });\n' +
+              '  return <window ref={win}>…</window>;',
+          );
+        }
+        return windows[windows.length - 1];
+      },
+    }),
+    [app],
+  );
 }

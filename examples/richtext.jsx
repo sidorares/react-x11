@@ -1,11 +1,17 @@
 // Rich content elements: <markdown> (with highlighted + math fences) in a
 // scrollview, a live-updating <tex> formula, a declarative JSX <svg> and an
 // <image> — all drawn client-side through ntk's document widgets and image
-// pipeline. Run with: npm run examples:richtext  (needs an X server)
+// pipeline.
+//
+// "open a .md…" is the file dialog (`useFileDialog()`), pointed at a real
+// file and rendered by the same <markdown> element — the shortest honest
+// demonstration of why an app wants one.
+//
+// Run with: npm run examples:richtext  (needs an X server)
 import { fileURLToPath } from 'node:url';
 
 import React, { useState } from 'react';
-import { Button, createRoot } from '../src/index.js';
+import { Button, createRoot, useFileDialog } from '../src/index.js';
 
 // any PNG/JPEG path works; this one ships with the docs
 const PICTURE = fileURLToPath(
@@ -72,11 +78,37 @@ function Logo({ spin }) {
 
 function App() {
   const [n, setN] = useState(2);
+  const [doc, setDoc] = useState({ source: MARKDOWN, from: null });
+  // The dialog is one call and one `null` check — and it is the desktop's own
+  // dialog, `NSOpenPanel` on a Mac, or one react-x11 draws, depending only on
+  // what the machine has. Nothing is passed: it parents itself to this
+  // window. See docs/filedialog.md.
+  const { openFile } = useFileDialog();
+  const load = async () => {
+    const files = await openFile({
+      title: 'Open a Markdown file',
+      filters: [
+        { name: 'Markdown', extensions: ['md', 'markdown'] },
+        { name: 'Text', extensions: ['txt'] },
+      ],
+    });
+    if (!files) return; // cancelled
+    const { readFile } = await import('node:fs/promises');
+    try {
+      setDoc({ source: await readFile(files[0], 'utf8'), from: files[0] });
+    } catch (err) {
+      setDoc({
+        source: `# Could not read that file\n\n\`${err.message}\``,
+        from: null,
+      });
+    }
+  };
+
   return (
     <window
       width={560}
       height={640}
-      title="rich content"
+      title={doc.from ? `rich content — ${doc.from}` : 'rich content'}
       style={{ backgroundColor: 'white' }}
     >
       <box
@@ -93,6 +125,7 @@ function App() {
           {`e^{i\\pi} + 1 = 0 \\qquad x^{${n}}`}
         </tex>
         <box style={{ flexGrow: 1 }} />
+        <Button label="open a .md…" onPress={load} />
         <Button
           primary
           label="bump exponent"
@@ -104,7 +137,7 @@ function App() {
           onLink={(href) => console.log('link clicked:', href)}
           style={{ padding: 16 }}
         >
-          {MARKDOWN}
+          {doc.source}
         </markdown>
       </scrollview>
 

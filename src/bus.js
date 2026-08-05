@@ -111,7 +111,13 @@ function newState(kind, generation) {
  */
 let transport = null;
 
-async function loadTransport() {
+/**
+ * Not public. `portal.js` needs `Variant` from the same copy of the transport
+ * to build `a{sv}` option dicts, and there is only ever one copy — importing
+ * `dbus-native` a second time from another module would be a second resolve
+ * of a package that may not be installed.
+ */
+export async function loadTransport() {
   if (transport) return transport;
   const mod = await import('dbus-native');
   // CJS with an `exports` map: named exports do not reliably survive
@@ -468,6 +474,12 @@ export async function closeBus(kind) {
   }
   const s = state[kind];
   const bus = s.bus;
+  // **The teardown is itself a use of the connection.** At zero refs the
+  // socket is `unref()`d, so `bus.close()` — which resolves on the socket's
+  // own 'close' event — has nothing holding the event loop open, and a
+  // process with no other work drains before the event arrives: the promise
+  // never settles. Re-ref for the duration, and let the close destroy it.
+  hold(s, true);
   // Swap the state first, so anything awaiting the old generation sees it
   // retired rather than racing the socket teardown.
   state[kind] = newState(kind, s.generation + 1);
