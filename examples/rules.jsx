@@ -35,6 +35,7 @@ import {
   Select,
   ThemeProvider,
   useAnchor,
+  useAnchorTracking,
 } from '../src/index.js';
 
 // --- palette ---------------------------------------------------------------
@@ -729,13 +730,20 @@ function TokenField({ options, values, onChange }) {
   const measure = useAnchor(ref);
 
   const height = Math.min(options.length * 28 + 8, 232);
+  const anchorOptions = () => ({ placement: 'bottom', height: height + 2 });
   const toggle = () => {
     if (open) return setOpen(false);
-    const rect = measure({ placement: 'bottom', height: height + 2 });
+    const rect = measure(anchorOptions());
     if (!rect) return;
     setAnchor(rect);
     setOpen(true);
   };
+
+  // keeps the popup under the field for as long as it is open: a scrolled
+  // ancestor, the field's own layout moving it (a neighbouring field
+  // wrapping to a second line), or the owner window being nudged by the
+  // window manager or a script would otherwise leave it hanging in place
+  useAnchorTracking(ref, open, anchorOptions, setAnchor);
 
   const set = (next) => onChange(options.filter((o) => next.includes(o)));
 

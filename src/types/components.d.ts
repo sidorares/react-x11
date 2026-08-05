@@ -436,6 +436,21 @@ export function useAnchor(
   ref: RefObject<DrawnNode | null>,
 ): (options?: AnchorOptions) => Rect | null;
 
+/**
+ * Keeps an `anchorRect` live for as long as `active`, instead of measuring
+ * once at open time: a scrolled ancestor, the node's own layout moving it,
+ * or the owner window being repositioned by the WM or a script each call
+ * `setRect` again with the new rect. `getOptions` is read fresh on every
+ * change, so it need not be memoized. `setRect` is only called when the
+ * measured rect actually differs from the previous one.
+ */
+export function useAnchorTracking(
+  ref: RefObject<DrawnNode | null>,
+  active: boolean,
+  getOptions: () => AnchorOptions,
+  setRect: (next: Rect | null | ((prev: Rect | null) => Rect | null)) => void,
+): void;
+
 // --- drag and drop ---------------------------------------------------------
 
 export interface UseDropTargetOptions {

@@ -42,6 +42,7 @@ export {
   MenuBar,
   ContextMenu,
   useAnchor,
+  useAnchorTracking,
   anchorRect,
   centerRect,
   Canvas3D,

@@ -2,7 +2,7 @@
 // support needed. Plain createElement (no JSX) so the library stays
 // build-step-free for consumers.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from './theme.js';
 import {
   DEFAULT_LABEL_SIZE,
@@ -12,6 +12,7 @@ import {
   SAFE_HOVER_DELAY,
   screenOf,
   screenPoint,
+  useAnchorTracking,
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
@@ -643,6 +644,36 @@ export function MenuBar({
     // pointer grab while you try.
     node.root?.events?.focus?.(node, reason);
   };
+
+  // keeps the pulled-down menu under its bar item for as long as it is
+  // open: a scrolled ancestor, the item's own layout moving it, or the
+  // owner window being nudged by the window manager or a script would
+  // otherwise leave it stranded. `openRef` (not `openIndex`) both because
+  // it is already the live index a handler mid-call reads, and because a
+  // stable ref keeps `activeTriggerRef`'s identity fixed across renders.
+  const activeTriggerRef = useMemo(
+    () => ({
+      get current() {
+        return refs.current[openRef.current] ?? null;
+      },
+    }),
+    [],
+  );
+  useAnchorTracking(
+    activeTriggerRef,
+    openIndex >= 0,
+    () => {
+      const node = refs.current[openRef.current];
+      const menu = menus[openRef.current];
+      if (!node || !menu?.items?.length) return null;
+      return {
+        placement: 'bottom',
+        width: menuListWidth(node, menu.items, fontSize),
+        height: menuListHeight(menu.items),
+      };
+    },
+    setRect,
+  );
 
   const select = (item) => {
     close();

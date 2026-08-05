@@ -4326,7 +4326,32 @@ export class WindowNode extends Node {
     X.TranslateCoordinates(wnd.id, root, 0, 0, (err, res) => {
       if (err || this.destroyed || !this.window) return;
       this.window._screenOrigin = { x: res.destX, y: res.destY };
+      this._notifyAnchorChange();
     });
+  }
+
+  /**
+   * Subscribe to "something this window's popups might be anchored to just
+   * moved" — a real layout pass (a trigger's own position changing: text
+   * wrapping, a sibling growing, an ancestor scrollview scrolling — scroll
+   * offset is applied during absolutize, so it is a layout change too) or a
+   * fresh `_screenOrigin` (the window manager or a script moving this window).
+   * Returns an unsubscribe function.
+   *
+   * Event-driven off the same signals `flush()` and `_refreshScreenOrigin()`
+   * already track internally, rather than a polling loop: costs nothing
+   * between real changes, and `useAnchor`'s tracking hook (`anchor.js`) is
+   * what turns this into a popup that follows its trigger instead of hanging
+   * over stale ground once opened.
+   */
+  onAnchorChange(cb) {
+    (this._anchorListeners ??= new Set()).add(cb);
+    return () => this._anchorListeners?.delete(cb);
+  }
+
+  _notifyAnchorChange() {
+    if (!this._anchorListeners?.size) return;
+    for (const cb of this._anchorListeners) cb();
   }
 
   /** Walk the drawn subtree and give every <glarea> its child X window. */
@@ -4962,6 +4987,10 @@ export class WindowNode extends Node {
     const width = this.window.width ?? this.props.width ?? 0;
     const height = this.window.height ?? this.props.height ?? 0;
     let layoutMoved = false;
+    // captured before the branch clears it: whether *this* flush ran a
+    // layout pass is what decides whether an anchored popup needs a look,
+    // not the flag's post-pass value
+    const layoutRan = this.needsLayout;
     if (this.needsLayout) {
       this._resolveSizeQueries(width, height);
       this.yoga.setWidth(width);
@@ -5006,6 +5035,8 @@ export class WindowNode extends Node {
     } else if (this._reflowed.size) {
       this._reflowed.clear();
     }
+    // any node this pass laid out may be what an open popup is anchored to
+    if (layoutRan) this._notifyAnchorChange();
     // after layout (the claims above included), before the damage is taken:
     // a frame that turns out to be a pure scroll blits the surviving band
     // and narrows its claim to the exposed strip
