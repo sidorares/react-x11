@@ -12,6 +12,36 @@ export function screenOf(node) {
 }
 
 /**
+ * A node's laid-out rect in **screen** coordinates: the owner window's
+ * position plus the node's own box.
+ *
+ * `_screenOrigin` is what the server says the window is at; `x`/`y` are
+ * frame-relative under a reparenting window manager and are only a fallback
+ * (the headless mock has no server to ask).
+ *
+ * Exported because a popup sometimes has to know where its *trigger* is and
+ * not only where to put itself — a tooltip's arrow points at the middle of
+ * the thing it annotates, which stops being the middle of the tooltip as
+ * soon as a screen edge slides one of them.
+ */
+export function screenRect(node) {
+  if (!node?.abs) return null;
+  const origin = windowOrigin(node);
+  return {
+    x: origin.x + node.abs.x,
+    y: origin.y + node.abs.y,
+    width: node.abs.width,
+    height: node.abs.height,
+  };
+}
+
+/** Where the node's owner window is on the screen. */
+function windowOrigin(node) {
+  const win = node?.root?.window;
+  return win?._screenOrigin ?? { x: win?.x ?? 0, y: win?.y ?? 0 };
+}
+
+/**
  * Where to put a `<popup>` anchored to a drawn node, in **screen**
  * coordinates: the owner window's position plus the node's laid-out rect.
  *
@@ -39,17 +69,14 @@ export function anchorRect(node, options = {}) {
     alignTo,
   } = options;
 
-  // `_screenOrigin` is what the server says; `x`/`y` are frame-relative
-  // under a reparenting WM and are only a fallback (the headless mock has
-  // no server to ask)
-  const win = node.root?.window;
-  const origin = win?._screenOrigin ?? { x: win?.x ?? 0, y: win?.y ?? 0 };
+  const origin = windowOrigin(node);
   const ax = origin.x + node.abs.x;
   const ay = origin.y + node.abs.y;
   const aw = node.abs.width;
   const ah = node.abs.height;
   // the rect the *alignment* reads, which is `node`'s own unless the caller
-  // split the two axes
+  // split the two axes — one origin serves both, since both nodes are in the
+  // same window
   const cross = alignTo?.abs ?? node.abs;
   const cx = origin.x + cross.x;
   const cy = origin.y + cross.y;

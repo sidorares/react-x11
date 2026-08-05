@@ -461,6 +461,9 @@ function isPaintedColor(color) {
 
 const DEV = process.env.NODE_ENV !== 'production';
 
+// Connections already told they have no 32-bit visual (`_argbAttributes`).
+const warnedNoArgb = new WeakSet();
+
 // Frame timestamps for transitions. Indirected so tests can drive the clock
 // instead of sleeping through real animations.
 let now = () => Date.now();
@@ -4344,7 +4347,12 @@ export class WindowNode extends Node {
   _argbAttributes() {
     const argb = this.app?.findArgbVisual?.();
     if (!argb) {
-      if (DEV) {
+      // Once per connection. The answer is a property of the display and
+      // cannot change while it is open, and since the widgets ask for a
+      // transparent popup every time a menu or a tooltip opens, warning per
+      // window would turn one piece of news into a running commentary.
+      if (DEV && this.app && !warnedNoArgb.has(this.app)) {
+        warnedNoArgb.add(this.app);
         console.warn(
           'react-x11: <%s transparent> — no 32-bit TrueColor visual on this ' +
             'display, falling back to an opaque window',

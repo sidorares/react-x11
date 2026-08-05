@@ -62,6 +62,20 @@ export const DefaultTheme = {
   // shape
   radius: 4,
   radiusSmall: 3,
+  // Floating surfaces round on their own scale, and it is a wider one: a
+  // menu is a sheet of paper laid over the window, where a button is a
+  // control cut into it. Half the text size is the number every desktop
+  // lands near — 7px at a 14px body — and tying it to the type rather than
+  // to `radius` is what keeps a theme that only sets `fontSize` from
+  // getting a 20px menu with a 4px corner.
+  //
+  // The two inside it step down from there, because a rounded thing inside
+  // a rounded thing wants a *smaller* curve or the two read as concentric
+  // rings: the highlight on a menu row, and the tooltip bubble, which is
+  // the smallest floating surface there is and the one closest to text.
+  radiusPopup: 7,
+  radiusPopupItem: 5,
+  radiusTooltip: 4,
   borderWidth: 1,
   fontSize: 14,
   paddingX: 16,
@@ -76,9 +90,19 @@ const PRESSED_FROM = {
   dimActive: ['border', 'dim'],
 };
 
+// And the same for the floating-surface radii, which are a function of the
+// text they wrap: a palette that sets `fontSize` and nothing else still gets
+// menus in proportion to it.
+const RADIUS_FROM_FONT = {
+  radiusPopup: (size) => Math.round(size / 2),
+  radiusPopupItem: (size) => Math.max(0, Math.round(size / 2) - 2),
+  radiusTooltip: (size) => Math.max(0, Math.round(size / 2) - 3),
+};
+
 /**
  * Merge a partial palette, filling in the pressed step for any family whose
- * colours moved without it.
+ * colours moved without it — and the popup radii for a palette that moved
+ * the text size without them.
  *
  * The rule per token: an explicit value wins; otherwise, if this palette
  * touched either colour the step is measured between, it is re-derived; and
@@ -97,6 +121,11 @@ export function resolveTheme(value, base = DefaultTheme) {
     if (value[token] != null) continue;
     if (value[rest] == null && value[hover] == null) continue;
     merged[token] = stepBeyond(merged[rest], merged[hover]);
+  }
+  if (value.fontSize != null) {
+    for (const [token, from] of Object.entries(RADIUS_FROM_FONT)) {
+      if (value[token] == null) merged[token] = from(merged.fontSize);
+    }
   }
   return merged;
 }

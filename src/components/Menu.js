@@ -36,7 +36,17 @@ const MENU_SEPARATOR_HEIGHT = 7;
 
 const MENU_MIN_WIDTH = 140;
 
-const MENU_PAD = 4;
+// The inset between the popup's edge and a row, which is what makes the
+// highlight read as a *pill on* the menu rather than a band across it — and
+// what keeps the first and last one clear of the sheet's rounded corners,
+// where a full-width highlight would show a square shoulder outside the
+// curve.
+const MENU_PAD = 5;
+
+// A hairline, not `theme.borderWidth`: this border is there to give the sheet
+// an edge where it meets the desktop behind it, and a theme that draws 2px
+// borders on its *controls* does not mean a 2px outline around every menu.
+const MENU_BORDER = 1;
 
 const MENU_GUTTER = 24; // room for the check column
 // what a self-drawing icon gets to fill, inside that column's 16px
@@ -56,7 +66,7 @@ function menuListHeight(items) {
       sum + (item.separator ? MENU_SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT),
     0,
   );
-  return body + MENU_PAD * 2 + 2;
+  return body + (MENU_PAD + MENU_BORDER) * 2;
 }
 
 /** Widest label + shortcut, measured, so the popup can be sized up front. */
@@ -75,7 +85,7 @@ function menuListWidth(node, items, fontSize) {
   }
   return Math.max(
     MENU_MIN_WIDTH,
-    Math.ceil(widest) + MENU_GUTTER + MENU_PAD * 2 + 12,
+    Math.ceil(widest) + MENU_GUTTER + (MENU_PAD + MENU_BORDER) * 2 + 10,
   );
 }
 
@@ -157,7 +167,15 @@ function MenuRow({
         paddingLeft: 8,
         paddingRight: 8,
         cursor: dim ? undefined : 'pointer',
-        backgroundColor: active ? theme.hoverBackground : theme.background,
+        // A pill inside the sheet: the row is inset from the popup edge by
+        // the list's padding and rounded a step tighter than the menu, so
+        // the highlight sits *on* the menu instead of cutting across it.
+        borderRadius: theme.radiusPopupItem,
+        // Nothing at rest: the sheet under it is already that colour, and
+        // now that the row is rounded, repainting it per row would be a
+        // coverage mask drawn to change nothing — with four corners it
+        // deliberately leaves out.
+        backgroundColor: active ? theme.hoverBackground : 'transparent',
         // the item is already highlighted by the time it can be pressed, so
         // the press is a further step down rather than a first one — without
         // it the command runs on the release out of a picture that never
@@ -348,7 +366,17 @@ function MenuLevel({
       windowType: 'popup_menu',
       grab: depth === 0,
       onDismiss: depth === 0 ? onDismiss : undefined,
-      style: { backgroundColor: theme.background },
+      // ARGB where the display has it, so the corners the sheet gives up are
+      // the desktop rather than a colour. The window paints nothing itself
+      // when it can be seen through — the list box below is the whole of the
+      // menu, and a square fill under it would put the corners straight back.
+      // Without a compositor the window is the opaque rectangle it always
+      // was, and the list box's rounding is gated off to match.
+      transparent: true,
+      style: {
+        backgroundColor: theme.background,
+        '@supports transparency': { backgroundColor: 'transparent' },
+      },
     },
     h(
       'box',
@@ -358,9 +386,10 @@ function MenuLevel({
           flexGrow: 1,
           flexShrink: 1,
           padding: MENU_PAD,
-          borderWidth: 1,
+          borderWidth: MENU_BORDER,
           borderColor: theme.border,
           backgroundColor: theme.background,
+          '@supports transparency': { borderRadius: theme.radiusPopup },
         },
       },
       items.map((item, index) =>

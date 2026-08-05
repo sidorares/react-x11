@@ -47,6 +47,7 @@ export {
   useAnchorTracking,
   anchorRect,
   centerRect,
+  screenRect,
   Canvas3D,
 } from './components/index.js';
 
