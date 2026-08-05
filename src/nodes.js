@@ -4174,6 +4174,11 @@ export class WindowNode extends Node {
     // Before the first paint, and before children realize against it.
     this._watchCapabilities();
     wnd._reactX11Node = this;
+    // The backing pixmap — and with it the GC that clears the part a resize
+    // grows into — is allocated on the first `getContext('2d')`, which is
+    // later than this. The event fires after every (re)allocation, so the
+    // first one arrives in time for the second: a resize.
+    wnd.on?.('_backing', () => this._syncWindowBackground());
     wnd._reactFiber = this._reactFiber;
     // windows are DevTools public instances too — see Node.getClientRects
     wnd.getClientRects ??= () => [
@@ -4313,17 +4318,46 @@ export class WindowNode extends Node {
     if (this._transparent || !this.window || this.destroyed) return;
     const pixel = pixelFor(this._windowBackground());
     const X = this.app?.X;
-    if (pixel === null || pixel === this._backgroundPixel || !X) return;
-    this._backgroundPixel = pixel;
-    if (X._closing || typeof X.ChangeWindowAttributes !== 'function') return;
-    // Errors are swallowed: the window can be gone by the time this lands,
-    // and the background attribute is a nicety — the paint that follows is
-    // what the user actually sees.
-    X.ChangeWindowAttributes(
-      this.window.id,
-      { backgroundPixel: pixel },
-      () => {},
-    );
+    if (pixel === null || !X || X._closing) return;
+
+    if (pixel !== this._backgroundPixel) {
+      this._backgroundPixel = pixel;
+      // Errors are swallowed: the window can be gone by the time this lands.
+      X.ChangeWindowAttributes?.(
+        this.window.id,
+        { backgroundPixel: pixel },
+        () => {},
+      );
+    }
+
+    // **And the buffer the window is actually showing.** ntk double-buffers
+    // into a backing pixmap and grows it on resize, filling the new part
+    // through a GC it creates once with the screen's *white* pixel
+    // (`_allocBacking`, ntk lib/window.js). That fill is what is on screen
+    // between the resize and this renderer's next frame — so the window
+    // attribute above never gets its chance, and the new strip stays white
+    // until something damages it.
+    //
+    // `_clearGc` is an internal, hence the guards: ntk has no option for the
+    // colour, and the alternative is a white flash on every resize of every
+    // dark window. Worth an ntk option so this can go away.
+    const wnd = this.window;
+    const gc = wnd._clearGc;
+    if (gc == null || this._clearPixel === pixel) return;
+    this._clearPixel = pixel;
+    X.ChangeGC?.(gc, { foreground: pixel });
+
+    // The GC only fixes the *next* allocation. This one has already been
+    // filled — at creation that is white, and the fill covers the pixmap's
+    // headroom too: ntk rounds the backing up to a 128px granularity, so a
+    // window dragged from 200px to 250px grows into area that was cleared
+    // white and never reallocated, which is why the strip survives until
+    // something damages it. Repaint it in the right colour now; a fresh
+    // backing carries no content to lose, and a reallocated one has already
+    // been marked invalid by ntk.
+    const backing = wnd._backing;
+    if (backing == null || typeof X.PolyFillRectangle !== 'function') return;
+    X.PolyFillRectangle(backing.id, gc, [0, 0, backing.width, backing.height]);
   }
 
   _argbAttributes() {

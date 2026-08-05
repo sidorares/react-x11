@@ -1051,6 +1051,41 @@ describe('ThemeProvider following the desktop', () => {
     setAppearanceForTests(null);
   });
 
+  // **The strip a resize exposes**, measured where it actually comes from.
+  // The X window's background attribute is not what is on screen: ntk
+  // double-buffers, grows its backing pixmap when the window outgrows it, and
+  // fills the new part through a GC it creates once at the screen's *white*
+  // pixel. That fill is what a drag of the corner shows until the next frame.
+  test('a resize does not expose white', async () => {
+    const { app } = await renderX11(
+      React.createElement('box', { style: { flexGrow: 1 } }),
+      { width: 200, height: 150, colorScheme: 'dark' },
+    );
+    await settle();
+    const wnd = app._rootChildren[0].window;
+    const X = app.X;
+    if (wnd._clearGc == null || wnd._backing == null) {
+      // ntk's internals moved; the fix is aimed at something that is not
+      // there any more, and saying so beats passing quietly.
+      assert.fail('ntk no longer has _clearGc/_backing — revisit the fix');
+    }
+
+    // Past the 128px backing granularity, so this is a *reallocation* and not
+    // spare headroom being used up.
+    X.ResizeWindow(wnd.id, 400, 400);
+    await settle(app, 3);
+
+    const image = await new Promise((res, rej) =>
+      X.GetImage(2, wnd._backing.id, 250, 250, 8, 8, 0xffffffff, (e, i) =>
+        e ? rej(e) : res(i),
+      ),
+    );
+    const [b, g, r] = [image.data[0], image.data[1], image.data[2]];
+    const hex =
+      '#' + [r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('');
+    assert.equal(hex, DarkTheme.background, 'the grown area, before any frame');
+  });
+
   test('a window that names its own background keeps it', async () => {
     const { createMockApp } = await import('../src/testing/mock-app.js');
     const { createRoot } = await import('../src/index.js');
