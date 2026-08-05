@@ -527,6 +527,21 @@ export function stepBeyond(from, to) {
   return rgba([step(0), step(1), step(2), step(3)]);
 }
 
+/**
+ * A colour at a given opacity — `tint('#2980b9', 0.3)`.
+ *
+ * For fills that are drawn *under* text whose colour they do not control: a
+ * selection highlight is the case, and an opaque one has to be chosen to
+ * contrast with the ink on top of it, which cannot be done once for both a
+ * light and a dark palette. A translucent one is chosen against the surface
+ * instead, and the ink keeps whatever contrast it already had.
+ */
+export function tint(color, alpha) {
+  const c = cssColorStraight(color);
+  if (!c) return color;
+  return rgba([c[0], c[1], c[2], c[3] * alpha]);
+}
+
 // ease-out cubic: fast to start, settles gently — the shape almost every UI
 // toolkit defaults to for state changes
 export const ease = (t) => 1 - (1 - t) ** 3;

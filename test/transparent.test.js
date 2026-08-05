@@ -41,7 +41,12 @@ test('an opaque window is untouched: no visual, no depth', async () => {
 
   assert.ok(!('depth' in wnd.attributes));
   assert.ok(!('visual' in wnd.attributes));
-  assert.ok(!('backgroundPixel' in wnd.attributes));
+  // It does get a `backgroundPixel` — every window does, so the server fills
+  // a resize with the colour that is about to be painted there rather than
+  // with its own default. What marks the ARGB path is that the pixel is 0,
+  // which on a window with an alpha channel means transparent.
+  assert.notEqual(wnd.attributes.backgroundPixel, 0);
+  assert.equal(wnd.attributes.backgroundPixel, 0xffffff, 'the light palette');
 
   await x11Root.unmount();
 });

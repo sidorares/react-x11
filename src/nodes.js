@@ -27,7 +27,9 @@ import {
   resolveQueries,
   DEFAULT_FOCUS_RING,
   resolveHitSlop,
+  tint,
 } from './styles.js';
+import { cssColorStraight } from 'ntk';
 import { EventManager, discrete } from './events.js';
 import {
   DropSession,
@@ -399,6 +401,22 @@ export function flushWindowRestacks() {
   const nodes = [...pendingRestack];
   pendingRestack.clear();
   for (const node of nodes) node._restackWindowChildren();
+}
+
+/**
+ * A CSS colour as an X pixel value.
+ *
+ * The 24-bit TrueColor layout, which is what `redMask`/`greenMask`/`blueMask`
+ * say on every server a client meets today and what ntk's own ARGB visual
+ * uses. Alpha is dropped: this is the *window background attribute*, a single
+ * opaque pixel the server repeats, not something composited.
+ */
+function pixelFor(color) {
+  const rgba = cssColorStraight(color);
+  if (!rgba) return null;
+  const [r, g, b] = rgba;
+  const byte = (c) => Math.max(0, Math.min(255, Math.round(c * 255)));
+  return ((byte(r) << 16) | (byte(g) << 8) | byte(b)) >>> 0;
 }
 
 /**
@@ -926,6 +944,10 @@ export class Node {
   _themeChanged() {
     const wasInk = this._theme?.text;
     this._theme = undefined;
+    // A `<window>` with no `backgroundColor` of its own follows the palette,
+    // and the server's copy of that colour has to follow with it — otherwise
+    // the next resize fills the new area in the old scheme.
+    if (this.isWindow) this._syncWindowBackground();
     // The inherited ink is not in any style object, so `_usesTokens` does not
     // see it move — but a cached layout carries the colour it was shaped
     // with, and would keep painting the old one.
@@ -3706,7 +3728,7 @@ export class TextInputNode extends Node {
     const isEmpty = text.length === 0;
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
     const color = isEmpty
-      ? (this.props.placeholderColor ?? '#9aa0a6')
+      ? (this.props.placeholderColor ?? this.theme.dim)
       : style.color;
     const layout = fonts.layout([{ text: shown, ...style, color }], style);
     // Center the glyph ink (ascent + descent) rather than layout.height:
@@ -3754,7 +3776,14 @@ export class TextInputNode extends Node {
     if (this._showsSelection() && a !== b && !isEmpty) {
       const selStart = this._prefixWidth(a);
       const selEnd = this._prefixWidth(b);
-      ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
+      // A **translucent** accent rather than an opaque light blue. The ink
+      // on top is `style.color`, which this fill does not control, so an
+      // opaque highlight has to be picked to contrast with it — and no one
+      // colour does that on both a light and a dark palette. `#b3d4fc`
+      // under the dark palette's near-white ink is 1.3:1, which is nothing.
+      // Tinting the surface instead leaves the ink's own contrast intact.
+      ctx.fillStyle =
+        this.props.selectionColor ?? tint(this.theme.accent, 0.35);
       ctx.fillRect(originX + selStart, markY, selEnd - selStart, markHeight);
     }
 
@@ -3858,7 +3887,7 @@ export class TextAreaNode extends TextInputNode {
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
     const s = this._textStyle();
     const color = isEmpty
-      ? (this.props.placeholderColor ?? '#9aa0a6')
+      ? (this.props.placeholderColor ?? this.theme.dim)
       : s.color;
     const width = this.contentBox().width || undefined;
     const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}`;
@@ -4032,7 +4061,14 @@ export class TextAreaNode extends TextInputNode {
     if (this._showsSelection() && a !== b && !isEmpty) {
       const posA = layout.caretPosition(a);
       const posB = layout.caretPosition(b);
-      ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
+      // A **translucent** accent rather than an opaque light blue. The ink
+      // on top is `style.color`, which this fill does not control, so an
+      // opaque highlight has to be picked to contrast with it — and no one
+      // colour does that on both a light and a dark palette. `#b3d4fc`
+      // under the dark palette's near-white ink is 1.3:1, which is nothing.
+      // Tinting the surface instead leaves the ink's own contrast intact.
+      ctx.fillStyle =
+        this.props.selectionColor ?? tint(this.theme.accent, 0.35);
       for (let li = posA.line; li <= posB.line; li++) {
         const line = layout.lines[li];
         const x0 = li === posA.line ? posA.x : line.x;
@@ -4114,9 +4150,21 @@ export class WindowNode extends Node {
     if (parentWindow) {
       attributes.parent = parentWindow;
     }
+    // **What the server paints into newly exposed area.** A resize enlarges
+    // the window before the app can possibly have drawn the new part, and X
+    // fills it with this attribute in the meantime — so without one, growing
+    // a window flashes whatever the server's default is, which on a dark
+    // palette is a bright rectangle. Setting it to the colour that is about
+    // to be painted there makes the flash the same colour as the result.
+    const pixel = pixelFor(this._windowBackground());
+    if (pixel !== null) {
+      attributes.backgroundPixel = pixel;
+      this._backgroundPixel = pixel;
+    }
     // Before the window exists, because a visual is a CreateWindow field: a
     // window cannot become transparent later, which is also why `transparent`
-    // is read here and never in the update path.
+    // is read here and never in the update path. It overrides the pixel above
+    // with 0 — transparent black — when the ARGB visual is really there.
     if (this.props.transparent)
       Object.assign(attributes, this._argbAttributes());
     const wnd = this.app.createWindow(attributes);
@@ -4251,6 +4299,33 @@ export class WindowNode extends Node {
    * window that cannot be transparent is a square opaque one, not a broken
    * one — and the alternative, black corners, is worse than square.
    */
+  /** What this window paints as its background — its own, or the palette's. */
+  _windowBackground() {
+    return this.style.backgroundColor || this.theme.background;
+  }
+
+  /**
+   * Keep the server's idea of the background in step with ours. Called when
+   * the palette moves under an unstyled window and when the style names a new
+   * colour; a `transparent` window keeps its 0, which means transparent.
+   */
+  _syncWindowBackground() {
+    if (this._transparent || !this.window || this.destroyed) return;
+    const pixel = pixelFor(this._windowBackground());
+    const X = this.app?.X;
+    if (pixel === null || pixel === this._backgroundPixel || !X) return;
+    this._backgroundPixel = pixel;
+    if (X._closing || typeof X.ChangeWindowAttributes !== 'function') return;
+    // Errors are swallowed: the window can be gone by the time this lands,
+    // and the background attribute is a nicety — the paint that follows is
+    // what the user actually sees.
+    X.ChangeWindowAttributes(
+      this.window.id,
+      { backgroundPixel: pixel },
+      () => {},
+    );
+  }
+
   _argbAttributes() {
     const argb = this.app?.findArgbVisual?.();
     if (!argb) {
@@ -4724,6 +4799,9 @@ export class WindowNode extends Node {
     if (newProps.title !== before.title) {
       wnd.setTitle?.(newProps.title || '');
     }
+    // The colour the server fills a resize with, kept in step with the one
+    // the app paints.
+    this._syncWindowBackground();
     // a popup is a child of the screen root, not of the node it is written
     // under, so its zIndex means nothing — and its parent here may well be
     // a drawn node with no children to stack

@@ -157,6 +157,19 @@ const { accent } = useSystemAppearance();
 <ThemeProvider value={{ ...brand, accent: accent ?? brand.accent }}>
 ```
 
+### Resizing
+
+The colour a window is _painted_ is only half of it. Dragging a window larger
+exposes area before the app can possibly have drawn it, and X fills that area
+with the window's background **attribute** in the meantime — so a window that
+never set one flashes the server's default on every drag of the corner, which
+on a dark palette is a bright rectangle.
+
+react-x11 sets it to the colour that is about to be painted there — the
+window's own `backgroundColor`, or the palette's — and keeps it in step when
+either moves. Nothing to do; it is worth knowing only because it is the one
+piece of the palette the _server_ holds a copy of.
+
 ### What does not follow
 
 `<markdown>` and `<html>` draw with **ntk's own document palette** — its own

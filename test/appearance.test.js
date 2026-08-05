@@ -32,6 +32,7 @@ import {
 import { useSystemAppearance } from '../src/appearancehooks.js';
 import { ThemeProvider, useTheme } from '../src/components/theme.js';
 import { DarkTheme, DefaultTheme } from '../src/palette.js';
+import { tint } from '../src/styles.js';
 import { _resetBusState, busRefs, closeBus } from '../src/bus.js';
 import {
   act,
@@ -764,6 +765,61 @@ describe('the remembered answer', () => {
 
 // ---------------------------------------------------------------------------
 
+describe('the palette reaches what has no style of its own', () => {
+  afterEach(cleanup);
+
+  // The bug this guards: the selection highlight was a fixed `#b3d4fc`, and
+  // the ink drawn on top of it is `style.color`, which the highlight does not
+  // control. On the dark palette that is near-white text on a light blue fill
+  // — about 1.3:1, which is not a contrast, it is a blank.
+  //
+  // The fix is to tint the *surface* rather than pick an opaque colour that
+  // has to contrast with an ink it does not own, so the ink keeps whatever
+  // contrast it already had. That property is what is asserted here; the
+  // paint itself needs a font, which the mock backend has not got.
+  test('a translucent fill can never hide the ink on top of it', () => {
+    for (const palette of [DefaultTheme, DarkTheme]) {
+      const fill = tint(palette.accent, 0.35);
+      assert.match(fill, /^rgba\(/, 'translucent, not an opaque colour');
+      const alpha = Number(fill.slice(5, -1).split(',')[3]);
+      assert.ok(alpha > 0 && alpha < 1, `alpha ${alpha} is between 0 and 1`);
+    }
+    // and it is the accent, so it follows a theme that moves it
+    assert.equal(tint('#3d8bd4', 0.35), 'rgba(61, 139, 212, 0.35)');
+    assert.equal(tint('#ffffff', 1), 'rgba(255, 255, 255, 1)');
+    // never throws on something it cannot parse — a paint path is no place
+    // to discover that a colour was misspelled
+    assert.equal(tint('not a colour', 0.5), 'not a colour');
+  });
+
+  // Both of the defaults that used to be fixed now come off the node's
+  // palette, so they move with the desktop rather than being chosen once
+  // against white.
+  test('the selection and placeholder defaults come off the palette', async () => {
+    const seen = [];
+    for (const scheme of ['light', 'dark']) {
+      const { app } = await renderX11(
+        React.createElement('textinput', {
+          value: 'selected',
+          placeholder: 'type here',
+          style: { width: 120 },
+        }),
+        { backend: 'mock', colorScheme: scheme },
+      );
+      await settle();
+      const input = app.windows[0]._reactX11Node.children[0];
+      seen.push([input.theme.accent, input.theme.dim]);
+      await cleanup();
+    }
+    assert.deepEqual(seen, [
+      [DefaultTheme.accent, DefaultTheme.dim],
+      [DarkTheme.accent, DarkTheme.dim],
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
 describe('useSystemAppearance', () => {
   afterEach(cleanup);
 
@@ -962,6 +1018,54 @@ describe('ThemeProvider following the desktop', () => {
       assert.ok(ink > 40, `${what} drew ${ink}px of the palette's ink`);
       assert.equal(black, 0, `${what} drew no black`);
     }
+  });
+
+  // **What the server fills a resize with.** Enlarging a window exposes area
+  // before the app can possibly have drawn it, and X paints that area with
+  // the window's background attribute in the meantime — so on a dark palette
+  // a window with no attribute set flashes a bright rectangle on every drag
+  // of the corner. The attribute is the colour that is about to be painted
+  // there, so the flash is the same colour as the result.
+  test('the X background attribute follows the palette', async () => {
+    const { createMockApp } = await import('../src/testing/mock-app.js');
+    const { createRoot } = await import('../src/index.js');
+    const { setAppearanceForTests } = await import('../src/appearance.js');
+
+    for (const [scheme, expected] of [
+      ['light', DefaultTheme.background],
+      ['dark', DarkTheme.background],
+    ]) {
+      const app = createMockApp();
+      setAppearanceForTests(scheme === 'dark' ? { colorScheme: 'dark' } : {});
+      const root = await createRoot({ app });
+      root.render(React.createElement('window', { width: 100, height: 100 }));
+      await new Promise((r) => setImmediate(r));
+      const hex =
+        '#' +
+        app.windows[0].attributes.backgroundPixel.toString(16).padStart(6, '0');
+      // 'white' is #ffffff; the dark palette names its own
+      const want = expected === 'white' ? '#ffffff' : expected;
+      assert.equal(hex, want, `${scheme} window background attribute`);
+      await root.unmount();
+    }
+    setAppearanceForTests(null);
+  });
+
+  test('a window that names its own background keeps it', async () => {
+    const { createMockApp } = await import('../src/testing/mock-app.js');
+    const { createRoot } = await import('../src/index.js');
+    const app = createMockApp();
+    const root = await createRoot({ app });
+    root.render(
+      React.createElement('window', {
+        width: 100,
+        height: 100,
+        style: { backgroundColor: '#123456' },
+      }),
+    );
+    await new Promise((r) => setImmediate(r));
+    assert.equal(app.windows[0].attributes.backgroundPixel, 0x123456);
+    await root.unmount();
   });
 
   test('and light on a light desktop, with the same tree', async () => {
