@@ -468,9 +468,14 @@ export class SvgNode extends Node {
   }
 }
 
-// Darker than the default text ink: a formula reads as a figure, not as a
-// run of prose.
-const DEFAULT_TEX_COLOR = '#222222';
+/**
+ * A formula's ink, which is the palette's text colour unless the style names
+ * one. It used to be a fixed `#222222` — a shade darker than the prose around
+ * it, so a formula read as a figure. That cannot survive a palette that
+ * follows the desktop: `#222222` on a dark background is invisible, and
+ * stepping past `text` to keep the contrast lands on black on a light one.
+ */
+const texColor = (node) => node.style.color ?? node.theme.text;
 
 /**
  * <tex source displayMode size>: a KaTeX formula via ntk layoutTex.
@@ -503,7 +508,7 @@ export class TexNode extends Node {
 
   _ensureBox() {
     const { size, displayMode, katex } = this.props;
-    const color = this.style.color ?? DEFAULT_TEX_COLOR;
+    const color = texColor(this);
     const source = stringChildrenOf(this) ?? this.props.source;
     if (!source) return null;
     const key = `${source}|${size}|${color}|${displayMode}`;
@@ -544,7 +549,7 @@ export class TexNode extends Node {
     // it needs a real ntk 2d context (headless mock contexts skip)
     if (!box || !ctx.window?.app?.display) return;
     const content = this.contentBox();
-    ctx.fillStyle = this.style.color ?? DEFAULT_TEX_COLOR;
+    ctx.fillStyle = texColor(this);
     box.draw(ctx, content.x, content.y);
   }
 
@@ -585,7 +590,7 @@ export class TexNode extends Node {
   paintCached(ctx, box) {
     const laid = this._ensureBox();
     if (!laid || !ctx.window?.app?.display) return;
-    ctx.fillStyle = this.style.color ?? DEFAULT_TEX_COLOR;
+    ctx.fillStyle = texColor(this);
     laid.draw(ctx, box.x, box.y);
   }
 }

@@ -30,6 +30,7 @@ import {
   PopupNode,
 } from '../src/nodes.js';
 import { MarkdownNode, HtmlNode, SvgNode, TexNode } from '../src/richnodes.js';
+import { DefaultTheme } from '../src/palette.js';
 import { GlAreaNode } from '../src/glnodes.js';
 import { isStyleProp } from '../src/styles.js';
 import { createMockApp } from './helpers/mock-app.js';
@@ -315,7 +316,14 @@ test('<tex> takes its ink colour from the style', () => {
   node._syncStyle({ source: 'x^2', style: { color: '#ff0000' } });
   node._ensureBox();
   assert.match(node._boxKey, /#ff0000/, 'the layout is keyed on the style');
+  // Without one it is the palette's text colour, not a fixed shade: the
+  // palette follows the desktop, and a hardcoded `#222222` is invisible on a
+  // dark one. `createMockApp()` pins the light palette.
   const plain = new TexNode({ source: 'x^2', size: 12 }, app);
   plain._ensureBox();
-  assert.match(plain._boxKey, /#222222/, 'and defaults without one');
+  assert.match(
+    plain._boxKey,
+    new RegExp(DefaultTheme.text.replace('#', '\\#')),
+    'and defaults to the palette without one',
+  );
 });

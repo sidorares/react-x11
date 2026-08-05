@@ -159,12 +159,17 @@ const { accent } = useSystemAppearance();
 
 ### What does not follow
 
-`<markdown>`, `<html>` and `<tex>` draw with **ntk's own document palette** —
-its own colours for headings, code, links, quotes and syntax highlighting —
-and do not read this one. On a dark desktop that is dark text on a dark
-surface, so give those a light surface explicitly, as
-[`examples/widgets.jsx`](../examples/widgets.jsx) does. Mapping a react-x11
-palette onto a document theme is its own piece of work.
+`<markdown>` and `<html>` draw with **ntk's own document palette** — its own
+colours for headings, code, links, quotes and syntax highlighting — and do not
+read this one. On a dark desktop that is dark text on a dark surface, so give
+those a light surface explicitly, as
+[`examples/richtext.jsx`](../examples/richtext.jsx) does. Mapping a react-x11
+palette onto a whole document theme is its own piece of work.
+
+`<tex>` does follow: a formula is a single ink, so it takes one step beyond
+`dim` towards `text` — darker than the prose around it on a light palette,
+lighter on a dark one, without being told which it is. `style={{ color }}`
+still wins.
 
 ### Testing
 
