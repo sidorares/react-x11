@@ -867,6 +867,26 @@ export class Node {
   }
 
   /**
+   * The text style a node inherits when nothing named one.
+   *
+   * The ink is the **palette's**, not a fixed black: a `<text>` or a
+   * `<textinput>` that never mentions a colour has to be readable on the
+   * surface it is drawn on, and that surface follows the desktop now. Black
+   * on `#1e2228` is invisible, which is the whole bug.
+   *
+   * Cached per node so the object identity is stable while the palette is —
+   * the layouts below are keyed on style and a fresh base each call would
+   * miss the cache every time.
+   */
+  get inheritedTextStyle() {
+    const color = this.theme.text;
+    if (this._textBase?.color !== color) {
+      this._textBase = { ...DEFAULT_TEXT_STYLE, color };
+    }
+    return this._textBase;
+  }
+
+  /**
    * Whether this node's ancestry is complete, so a `$token` that does not
    * resolve is a mistake rather than a node that has not been placed yet.
    *
@@ -904,7 +924,15 @@ export class Node {
   /** The theme above or on this node changed: drop the caches and restyle
    * the subtree, since a token can appear at any depth. */
   _themeChanged() {
+    const wasInk = this._theme?.text;
     this._theme = undefined;
+    // The inherited ink is not in any style object, so `_usesTokens` does not
+    // see it move — but a cached layout carries the colour it was shaped
+    // with, and would keep painting the old one.
+    if (wasInk !== undefined && wasInk !== this.theme.text) {
+      this._textContentChanged();
+      this.root?.invalidate(true, null, 'theme');
+    }
     if (this._usesTokens) {
       const before = this.style;
       this._syncStyle(this.props);
@@ -1975,8 +2003,9 @@ export class TextNode extends Node {
     const key = String(maxWidth);
     let layout = this._layouts.get(key);
     if (!layout) {
-      const spans = this.collectSpans(DEFAULT_TEXT_STYLE, []);
-      const base = textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
+      const inherited = this.inheritedTextStyle;
+      const spans = this.collectSpans(inherited, []);
+      const base = textStyleFrom(this.style, inherited);
       layout = fonts.layout(spans, base, {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
         align: this.style.textAlign,
@@ -2009,7 +2038,7 @@ export class TextNode extends Node {
     if (this.style.textBoxTrim !== 'cap-alphabetic') return null;
     const lines = layout?.lines;
     if (!lines?.length) return null;
-    const base = textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
+    const base = textStyleFrom(this.style, this.inheritedTextStyle);
     const font = this.app?.fonts?.match?.(base.family, {
       weight: base.weight,
       style: base.style,
@@ -2899,7 +2928,7 @@ export class TextInputNode extends Node {
   }
 
   _textStyle() {
-    return textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
+    return textStyleFrom(this.style, this.inheritedTextStyle);
   }
 
   _layoutOf(text) {

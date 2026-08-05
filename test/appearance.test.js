@@ -36,6 +36,7 @@ import { _resetBusState, busRefs, closeBus } from '../src/bus.js';
 import {
   act,
   cleanup,
+  countPixels,
   expectPixel,
   renderX11,
   screen,
@@ -929,6 +930,38 @@ describe('ThemeProvider following the desktop', () => {
     // And the window fill under them, which is the other route and the one
     // that would otherwise leave a white rectangle behind dark widgets.
     await expectPixel(ctx, 2, 2, DarkTheme.background, { tolerance: 2 });
+  });
+
+  // The ink a `<text>` or a `<textinput>` inherits is not in any style object,
+  // so nothing else in the theme machinery notices it move. It used to be a
+  // fixed `'black'`, which on the dark palette's #1e2228 is invisible — and
+  // invisible only for text that never named a colour, which is why a
+  // placeholder (a fixed grey) read fine while the value beside it did not.
+  test('unstyled text takes the palette’s ink, not black', async () => {
+    const { ctx } = await renderX11(
+      React.createElement(
+        'box',
+        { style: { flexGrow: 1, padding: 10, gap: 8 } },
+        React.createElement('text', { style: { fontSize: 30 } }, 'PLAIN'),
+        React.createElement('textinput', {
+          value: 'TYPED',
+          style: { fontSize: 30, padding: 4 },
+        }),
+      ),
+      { fonts: FONTS, colorScheme: 'dark' },
+    );
+    await settle();
+
+    for (const [what, y] of [
+      ['<text>', 12],
+      ['<textinput>', 55],
+    ]) {
+      const band = { x: 8, y, width: 200, height: 40 };
+      const ink = await countPixels(ctx, band, DarkTheme.text, 6);
+      const black = await countPixels(ctx, band, '#000000', 6);
+      assert.ok(ink > 40, `${what} drew ${ink}px of the palette's ink`);
+      assert.equal(black, 0, `${what} drew no black`);
+    }
   });
 
   test('and light on a light desktop, with the same tree', async () => {
