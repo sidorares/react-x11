@@ -62,31 +62,41 @@ import {
 } from '../src/index.js';
 
 // --- palette ---------------------------------------------------------------
+//
+// There isn't one. Every colour below is a `$token`, so this window is the
+// desktop's colours — light on a light desktop, dark on a dark one — and the
+// widgets, which read the same palette through React context, cannot drift
+// away from the boxes around them. See docs/appearance.md.
+//
+// This example used to carry a Zinc-ish light palette of its own and hand a
+// partial copy of it to `<ThemeProvider>`. That was already a trap and the
+// system palette made it visible: the copy never mentioned `text`, so on a
+// dark desktop the ink came from the desktop and the surfaces came from here.
 
 const C = {
-  page: '#ffffff',
-  chrome: '#f7f7f8',
-  edge: '#e4e4e7',
-  text: '#18181b',
-  dim: '#71717a',
-  faint: '#a1a1aa',
-  accent: '#2563eb',
-  good: '#16a34a',
-  warn: '#b45309',
-  bad: '#dc2626',
-  mono: '#f4f4f5',
+  page: '$background',
+  chrome: '$surfaceHover',
+  edge: '$border',
+  text: '$text',
+  dim: '$dim',
+  // The faintest neutral the palette has — `border` is lighter than `dim` on
+  // a light scheme and darker on a dark one, which is "fainter" both times.
+  faint: '$border',
+  accent: '$accent',
+  mono: '$surfaceHover',
+
+  // Status has no token, because a palette describes a surface and these
+  // describe a fact: owned, activatable, unreachable. Mid-tones, so they
+  // clear 3:1 against both the light background and the dark one rather than
+  // being tuned for white and disappearing on the other.
+  good: '#2ea043',
+  warn: '#bf8700',
+  bad: '#e5484d',
 };
 
-const THEME = {
-  background: C.page,
-  foreground: C.text,
-  border: C.edge,
-  dim: C.dim,
-  accent: C.accent,
-  accentText: '#ffffff',
-  surfaceHover: '#f1f5f9',
-  radius: 5,
-};
+// The only thing this app wants that the desktop does not decide: slightly
+// rounder corners than the default 4. Colours are deliberately absent.
+const THEME = { radius: 5 };
 
 const MONO = 'monospace';
 
