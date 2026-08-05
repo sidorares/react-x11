@@ -3947,6 +3947,11 @@ const rowsOf = (app, index) =>
   app.windows[index]._reactX11Node.children[0].children;
 const activeIn = (app, index) =>
   rowsOf(app, index).findIndex((r) => r.style.backgroundColor === '#2980b9');
+// A row whose submenu has taken the selection over is still the chosen one,
+// but only the deepest open level wears the selection colour — the trail
+// behind it goes quiet (`surfaceActive`).
+const pathIn = (app, index) =>
+  rowsOf(app, index).findIndex((r) => r.style.backgroundColor === '#e3e5ed');
 
 async function openNested(x11Root, picked) {
   const { ContextMenu } = await import('../src/index.js');
@@ -4328,7 +4333,7 @@ test('menu type-ahead applies to the deepest open submenu', async () => {
   typeChar(app, wnd, 's');
   await tick();
   assert.strictEqual(activeIn(app, 2), 2, 's -> SVG, inside the submenu');
-  assert.strictEqual(activeIn(app, 1), 1, 'parent row unchanged');
+  assert.strictEqual(pathIn(app, 1), 1, 'parent row unchanged, and quiet');
 
   // the disabled PDF is never matched
   await new Promise((r) => setTimeout(r, 800));

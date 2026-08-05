@@ -458,6 +458,13 @@ export interface AnchorOptions {
   placement?: Placement;
   /** Gap between the anchor and the popup, in px. */
   gap?: number;
+  /**
+   * Shift along the *alignment* axis, applied before the popup is clamped
+   * into the screen. For lining up what is drawn in a surface rather than
+   * the surface itself: a submenu level with the row that opened it has its
+   * first item a border and a padding lower, and the eye lines up the items.
+   */
+  alignOffset?: number;
   width?: number;
   height?: number;
   /** Flip to the opposite side when there is no room (default true). */

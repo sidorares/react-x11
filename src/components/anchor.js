@@ -57,12 +57,21 @@ function windowOrigin(node) {
  * menu's border and padding. Anchoring both to the row opens the submenu
  * *over* its parent by exactly that inset. Both nodes must be in the same
  * window, which is what lets one origin serve both.
+ *
+ * `alignOffset` shifts the result along the *alignment* axis, where `offset`
+ * moves it along the placement one — and it is applied before the clamp, so
+ * a popup nudged towards a screen edge is still brought back from it. What
+ * needs it is the difference between lining up a **surface** and lining up
+ * what is drawn **in** it: a submenu whose top edge is level with the row
+ * that opened it has its first item a border and a padding lower down, and
+ * the eye lines up the items, not the boxes.
  */
 export function anchorRect(node, options = {}) {
   if (!node?.abs) return null;
   const {
     placement = 'bottom',
     align = 'start',
+    alignOffset = 0,
     offset = 2,
     width = node.abs.width,
     height = 0,
@@ -86,11 +95,12 @@ export function anchorRect(node, options = {}) {
   const sh = screen?.pixel_height;
 
   const alignAlong = (start, size, extent) =>
-    align === 'center'
+    alignOffset +
+    (align === 'center'
       ? start + (size - extent) / 2
       : align === 'end'
         ? start + size - extent
-        : start;
+        : start);
 
   let side = placement;
   let x;
@@ -227,12 +237,23 @@ export function useAnchorTracking(
   getOptionsRef.current = getOptions;
   const onOutOfViewRef = useRef(onOutOfView);
   onOutOfViewRef.current = onOutOfView;
+  // Read during render, and read again inside the notification, because the
+  // two do not happen in that order. Closing a popup sets its rect to null
+  // and the *commit* destroys its window — and destroying a window is a
+  // layout pass, which notifies from inside the commit, before React gets
+  // to the effect cleanup that would have unsubscribed. A subscription that
+  // only knew the `active` of the render it was made in would answer that
+  // notification by measuring a fresh rect for the popup just closed, and
+  // hand back a second window in place of the one that went away.
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   useEffect(() => {
     if (!active) return undefined;
     const root = ref.current?.root;
     if (!root?.onAnchorChange) return undefined;
     return root.onAnchorChange(() => {
+      if (!activeRef.current) return;
       const node = ref.current;
       if (node?._offscreen?.()) {
         onOutOfViewRef.current?.();

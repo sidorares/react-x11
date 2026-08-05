@@ -387,6 +387,14 @@ ref, so it composes around any element. Hides immediately on leave and on
 mousedown — a tooltip lingering over the menu you just opened is the
 classic annoyance.
 
+**One at a time**, per connection: a hint belongs to where the pointer is,
+and there is one pointer. A trigger taking the hover dismisses whatever is
+showing straight away rather than at the end of its own delay, so two are
+never up together saying different things about the same place. This does
+not fight the safe-polygon grace that lets a hint with content in it be
+reached — a trigger underneath an open hint cannot be hovered, the popup
+being a window above it.
+
 `direction` is which side of the trigger it opens on. The default, `'auto'`,
 takes the first side the hint fits on, preferring above — measured against
 the **screen**, because a popup is a real X window and the screen is what
@@ -542,6 +550,14 @@ selection colour, shared with `Select`'s active option and `Table`'s current
 row, so one token moves every highlight in the app. Without a compositor
 both go square, which is what those pixels can honestly be.
 
+**One selection at a time.** With submenus open, only the deepest level
+wears the selection colour; the rows behind it are drawn in `surfaceActive`.
+They are still chosen — they are the way back — but two selection-coloured
+rows in two menus claim the same thing twice, and only one of them is where
+the keys are going. A submenu that is open with _nothing_ selected in it has
+not taken over yet: the pointer is still on the row that opened it, so that
+row stays lit.
+
 **Icons.** `icon` fills the 16px column left of the label — the same column
 the check mark uses, so an item that is both checked and iconned shows the
 check: the check is state, the icon is only identity. One column rather than
@@ -585,6 +601,12 @@ popup. It hangs off the **menu's** outer edge and lines up with the row that
 opened it — two different nodes, which is what `anchorRect`'s `alignTo` is
 for. Anchoring both to the row would put the submenu inside its parent by
 the menu's border and padding, and the two would overlap.
+
+Lined up on the **items**, not on the boxes: a submenu whose top edge is
+level with its parent row starts its first item a border and a padding
+lower, and what the eye lines up is the text. `anchorRect`'s `alignOffset`
+is the shift that pays for the submenu's own chrome, so the row you came
+from and the row you arrive at are on one line.
 
 **Keyboard.** Up/Down move the active item, **skipping separators and
 disabled entries** and wrapping; Home/End jump to the ends; Right opens a

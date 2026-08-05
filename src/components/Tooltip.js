@@ -2,8 +2,8 @@
 // support needed. Plain createElement (no JSX) so the library stays
 // build-step-free for consumers.
 
-import React, { useEffect, useRef, useState } from 'react';
-import { useSupports } from '../appcontext.js';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useApp, useSupports } from '../appcontext.js';
 import { useTheme } from './theme.js';
 import {
   DEFAULT_LABEL_SIZE,
@@ -53,6 +53,33 @@ const AUTO_SIDES = ['top', 'bottom', 'right', 'left'];
 // `anchorRect`'s own 2px gap, and enough left over that the hint is not
 // jammed flush against the edge of the screen.
 const AUTO_MARGIN = 8;
+
+/**
+ * The one hint that is up, per connection.
+ *
+ * A tooltip belongs to where the pointer is, and there is one pointer — so
+ * two of them on screen at once is never a state anything meant to produce.
+ * It happens anyway without a rule like this, because each `Tooltip` only
+ * watches its own trigger: the safe-polygon grace that lets a hint with
+ * content in it be *reached* (docs/components.md) is exactly a window where
+ * one stays up while the pointer has already moved on, and moving on can
+ * mean arriving somewhere that shows another.
+ *
+ * So the trigger taking the hover dismisses whatever else is showing, and
+ * showing claims the slot. Keyed by connection, not module-global: one
+ * process can drive several roots on several displays, and each display has
+ * its own pointer. A WeakMap, so a closed connection takes its entry with
+ * it.
+ */
+const showing = new WeakMap();
+
+/** Hide the hint that is up, unless it is this one. */
+function dismissOthers(app, self) {
+  const current = showing.get(app);
+  if (!current || current === self) return;
+  showing.delete(app);
+  current();
+}
 
 /**
  * The side to hang a hint off when the caller has not named one.
@@ -194,6 +221,7 @@ export function Tooltip({
   ...boxProps
 }) {
   const theme = useTheme();
+  const app = useApp();
   const ref = useRef(null);
   const measureAnchor = useAnchor(ref);
   const [rect, setRect] = useState(null);
@@ -203,16 +231,21 @@ export function Tooltip({
   // question (`useSupports`) rather than the per-window style block.
   const composited = useSupports('transparency');
 
-  const cancel = () => {
+  // `cancel` and `hide` touch nothing but refs and a state setter, so they
+  // can hold still across renders — and `hide` has to: it is this tooltip's
+  // identity in the `showing` registry, and one that changed every render
+  // would leave the registry holding a stale closure.
+  const cancel = useCallback(() => {
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
     }
-  };
-  const hide = () => {
+  }, []);
+  const hide = useCallback(() => {
     cancel();
+    if (showing.get(app) === hide) showing.delete(app);
     setRect(null);
-  };
+  }, [app, cancel]);
 
   // safe-polygon hover (docs/components.md): leaving the trigger *toward*
   // the tooltip keeps it up, so a tooltip with content in it can be
@@ -222,7 +255,7 @@ export function Tooltip({
     cancel();
     timer.current = setTimeout(() => {
       timer.current = null;
-      setRect(null);
+      hide();
     }, SAFE_HOVER_DELAY);
   };
   const onMouseMove = (ev) => {
@@ -233,8 +266,14 @@ export function Tooltip({
     else hide();
   };
 
-  // a pending timer must not outlive the component
-  useEffect(() => cancel, []);
+  // neither a pending timer nor a claim on the one visible hint may outlive
+  // the component
+  useEffect(() => {
+    return () => {
+      cancel();
+      if (showing.get(app) === hide) showing.delete(app);
+    };
+  }, [app, cancel, hide]);
 
   // The bubble, which is the popup minus whatever the arrow takes.
   const bubbleSize = (node) => {
@@ -276,7 +315,12 @@ export function Tooltip({
     const options = tooltipAnchorOptions();
     if (!options) return;
     const next = measureAnchor(options);
-    if (next) setRect(next);
+    if (!next) return;
+    // claim the slot at the moment there is something to see, so a hint
+    // that never made it past its delay never took anything away
+    dismissOthers(app, hide);
+    showing.set(app, hide);
+    setRect(next);
   };
 
   // keeps the tooltip pinned to its trigger for as long as it is shown: a
@@ -289,6 +333,15 @@ export function Tooltip({
   useAnchorTracking(ref, Boolean(rect), tooltipAnchorOptions, setRect, hide);
 
   const onMouseEnter = () => {
+    // The pointer has arrived somewhere else, so whatever is still up
+    // belongs to where it *was* — drop it now rather than at the end of
+    // this one's delay, which would leave two on screen for half a second
+    // saying different things about the same pointer.
+    //
+    // This does not fight the safe polygon. A trigger under an open hint
+    // cannot be hovered — the popup is a window above it — so reaching for
+    // a hint never crosses the trigger this would fire for.
+    dismissOthers(app, hide);
     cancel();
     timer.current = setTimeout(() => {
       timer.current = null;

@@ -131,9 +131,24 @@ function gutterMark(item, { color, fontSize }) {
     : icon;
 }
 
+/**
+ * How a row is drawn, which is three states and not two.
+ *
+ * `'active'` is the selection: this row is where the menus are being driven
+ * from. `'path'` is a row whose submenu has taken that over — it is still
+ * the way back to where you are, and it still has to look chosen, but two
+ * selection-coloured rows in two menus would be claiming the same thing
+ * twice. Every desktop resolves that the same way: the trail goes quiet and
+ * only the live end of it stays lit.
+ */
+function rowState(index, active, handedOn) {
+  if (index !== active) return undefined;
+  return handedOn ? 'path' : 'active';
+}
+
 function MenuRow({
   item,
-  active,
+  state,
   onHover,
   onMove,
   onSelect,
@@ -141,6 +156,9 @@ function MenuRow({
   nodeRef,
 }) {
   const theme = useTheme();
+  // only the live end of the trail takes the selection colour, and with it
+  // the inverted label
+  const active = state === 'active';
   if (item.separator) {
     return h(
       'box',
@@ -175,7 +193,11 @@ function MenuRow({
         // now that the row is rounded, repainting it per row would be a
         // coverage mask drawn to change nothing — with four corners it
         // deliberately leaves out.
-        backgroundColor: active ? theme.hoverBackground : 'transparent',
+        backgroundColor: active
+          ? theme.hoverBackground
+          : state === 'path'
+            ? theme.surfaceActive
+            : 'transparent',
         // the item is already highlighted by the time it can be pressed, so
         // the press is a further step down rather than a first one — without
         // it the command runs on the release out of a picture that never
@@ -257,6 +279,10 @@ function MenuLevel({
   const active = path[depth] ?? -1;
   const childItems = items[active]?.items;
   const childOpen = path.length > depth + 1 && childItems?.length > 0;
+  // Has this level's selection handed over to the one below it? A submenu
+  // opened with nothing selected in it yet has not: the pointer is still on
+  // the row that opened it, and that row is still where the keys go.
+  const handedOn = childOpen && (path[depth + 1] ?? -1) >= 0;
 
   const activeRowRef = useRef(null);
   const listRef = useRef(null);
@@ -281,6 +307,13 @@ function MenuLevel({
         // two menus overlapped by five pixels.
         alignTo: node,
         align: 'start',
+        // Lined up on the *items*, not on the boxes: the submenu's own
+        // border and padding come before its first row, so a popup whose
+        // top edge is level with the parent row opens that row's
+        // continuation six pixels lower than the row itself. Shifting by
+        // the inset puts the first item exactly beside the item it came
+        // out of, which is where the eye is already looking.
+        alignOffset: -(MENU_BORDER + MENU_PAD),
         offset: 0,
         width: menuListWidth(node, childItems, fontSize),
         height: menuListHeight(childItems),
@@ -396,7 +429,7 @@ function MenuLevel({
         h(MenuRow, {
           key: item.separator ? `sep-${index}` : (item.key ?? item.label),
           item,
-          active: index === active,
+          state: rowState(index, active, handedOn),
           fontSize,
           nodeRef: index === active ? activeRowRef : undefined,
           onHover: (ev) => hover(index, ev),

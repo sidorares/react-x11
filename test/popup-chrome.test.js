@@ -55,7 +55,15 @@ test('the popup radii come from the text size, and an explicit one pins it', () 
 const MENUS = [
   {
     label: 'File',
-    items: [{ label: 'New' }, { separator: true }, { label: 'Quit' }],
+    items: [
+      { label: 'New' },
+      { separator: true },
+      {
+        label: 'Export',
+        items: [{ label: 'PNG' }, { label: 'SVG' }],
+      },
+      { label: 'Quit' },
+    ],
   },
 ];
 
@@ -78,6 +86,20 @@ async function openMenu({ composited = true } = {}) {
   await tick();
   const menu = app.windows[1];
   return { app, x11Root, wnd, menu, list: menu?._reactX11Node.children[0] };
+}
+
+/**
+ * Hover a row of an open menu popup (a mock window), by list index.
+ *
+ * Generous with ticks: a mousemove is scheduled at continuous priority
+ * rather than flushed, and opening a submenu is then a render, an effect
+ * that measures, and a second render to place what it measured.
+ */
+async function hoverRow(popup, index) {
+  const row = popup._reactX11Node.children[0].children[index];
+  moveMouse(popup, row.abs.x + 4, row.abs.y + 4);
+  for (let i = 0; i < 6; i++) await tick();
+  return row;
 }
 
 test('a menu is an ARGB window and the sheet inside it is rounded', async () => {
@@ -135,6 +157,58 @@ test('a menu row is a rounded pill, inset, and paints nothing at rest', async ()
     theme.hoverBackground,
     'the selection colour, shared with Select and Table',
   );
+
+  await x11Root.unmount();
+});
+
+test('a submenu lines its first item up with the row that opened it', async () => {
+  const { app, x11Root, menu } = await openMenu();
+  const parent = await hoverRow(menu, 2); // 'Export', which has a submenu
+
+  const sub = app.windows[2];
+  assert.ok(sub, 'the submenu opened');
+  const first = sub._reactX11Node.children[0].children[0];
+
+  // both in screen coordinates: the popup's own y plus the row's y in it
+  const parentTop = menu.y + parent.abs.y;
+  const firstTop = sub.y + first.abs.y;
+  assert.equal(
+    firstTop,
+    parentTop,
+    'the items line up, not the popup edges — the submenu sits a border and ' +
+      'a padding higher to pay for its own chrome',
+  );
+  assert.ok(sub.y < menu.y + parent.abs.y, 'which means the popup is higher');
+
+  await x11Root.unmount();
+});
+
+test('only the live end of the trail is selection-coloured', async () => {
+  const { app, x11Root, menu, list } = await openMenu();
+  const theme = list.theme;
+  await hoverRow(menu, 2); // 'Export' — its submenu opens with nothing chosen
+  const sub = app.windows[2];
+
+  // the pointer is still on the parent row, and so are the keys: it stays lit
+  assert.equal(
+    list.children[2].style.backgroundColor,
+    theme.hoverBackground,
+    'a submenu with nothing selected has not taken over',
+  );
+
+  await hoverRow(sub, 0); // into the submenu
+  assert.equal(
+    sub._reactX11Node.children[0].children[0].style.backgroundColor,
+    theme.hoverBackground,
+    'the row now driving the menus',
+  );
+  assert.equal(
+    list.children[2].style.backgroundColor,
+    theme.surfaceActive,
+    'and the row it came out of goes quiet rather than claiming it too',
+  );
+  // quiet, not unselected: it still has to read as the way back
+  assert.notEqual(list.children[2].style.backgroundColor, 'transparent');
 
   await x11Root.unmount();
 });
@@ -281,6 +355,51 @@ test('direction="auto" changes axis when neither top nor bottom fits', async () 
     0,
     'arrow on the left, pointing back at the trigger',
   );
+
+  await x11Root.unmount();
+});
+
+test('a second hint dismisses the first — there is only one pointer', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const trigger = (key) =>
+    h(
+      Tooltip,
+      { key, label: `hint ${key}`, delay: 10 },
+      h('box', { style: { width: 70, height: 24 } }),
+    );
+  x11Root.render(
+    h(
+      'window',
+      { width: 300, height: 200 },
+      h('box', { style: { flexGrow: 1, padding: 20, gap: 30 } }, [
+        trigger('a'),
+        trigger('b'),
+      ]),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const [first, second] = wnd._reactX11Node.children[0].children;
+
+  moveMouse(wnd, first.abs.x + 5, first.abs.y + 5);
+  await after(40);
+  await tick();
+  assert.equal(app.windows.length, 2, 'the first hint is up');
+  const one = app.windows[1];
+
+  // straight onto the other trigger: the pointer is somewhere else now, so
+  // the hint that belongs to where it was goes at once — not at the end of
+  // the second one's delay, which would show two at a time
+  moveMouse(wnd, second.abs.x + 5, second.abs.y + 5);
+  await tick();
+  await tick();
+  assert.equal(one.destroyed, true, 'the first is gone before the second');
+
+  await after(40);
+  await tick();
+  const up = app.windows.filter((w) => !w.destroyed && w !== wnd);
+  assert.equal(up.length, 1, 'and exactly one hint is showing');
 
   await x11Root.unmount();
 });
