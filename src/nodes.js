@@ -1829,23 +1829,39 @@ export class Node {
   }
 
   /**
-   * Entirely outside the window, so there is nothing to draw. Worth doing
-   * for its own sake, but it is also a correctness fix: X's render traps
-   * are 16.16 fixed point, so a coordinate past ±32767 overflows the
+   * Entirely outside the window, or entirely outside some nearer ancestor
+   * that clips its children — either way there is nothing to draw. Worth
+   * doing for its own sake, but it is also a correctness fix: X's render
+   * traps are 16.16 fixed point, so a coordinate past ±32767 overflows the
    * request. A scrolled list is exactly how you get there — the frame
    * between a scroll and the re-render that follows it can hold rows
    * ninety thousand pixels above the viewport.
+   *
+   * The ancestor walk matters on its own (issue #211): a `<scrollview>`'s
+   * own box is often much smaller than the window around it, and its
+   * `ctx.clip()` in `_paintChildren` only keeps the *pixels* off the visible
+   * surface — every child below the fold still ran its full paint (canvas
+   * `onDraw`, text/tex layout, the XRender/PutImage requests that go with
+   * them) for the server to then discard. Checking the window alone missed
+   * that: a node can sit well inside the window and still be entirely past
+   * a `<scrollview>` ancestor whose own bounds are the real limit.
    */
   _offscreen() {
     const window = this.root?.abs;
     if (!window) return false;
     const { x, y, width, height } = this.abs;
-    return (
+    if (
       x + width <= 0 ||
       y + height <= 0 ||
       x >= window.width ||
       y >= window.height
-    );
+    ) {
+      return true;
+    }
+    for (let n = this.parent; n && n !== this.root; n = n.parent) {
+      if (n.clipsChildren() && !rectsOverlap(this.abs, n.abs)) return true;
+    }
+    return false;
   }
 }
 
