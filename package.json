@@ -14,6 +14,7 @@
     "format:check": "prettier --check .",
     "examples:app": "tsx examples/app.jsx",
     "examples:theming": "tsx examples/theming.jsx",
+    "examples:appearance": "tsx examples/appearance.jsx",
     "examples:simple": "tsx examples/simple.jsx",
     "examples:simple-nojsx": "node examples/simple-nojsx.js",
     "examples:xeyes": "tsx examples/xeyes.jsx",
@@ -64,7 +65,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^6.6.0",
+    "ntk": "^6.6.1",
     "react-reconciler": "^0.33.0"
   },
   "optionalDependencies": {

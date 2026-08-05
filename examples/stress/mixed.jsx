@@ -26,8 +26,8 @@ import {
 
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 10, gap: 8 },
-  head: { fontSize: 15, color: '#2d3436' },
-  hint: { fontSize: 10, color: '#7f8c8d' },
+  head: { fontSize: 15, color: '$text' },
+  hint: { fontSize: 10, color: '$dim' },
   cols: { flexDirection: 'row', gap: 8, flexGrow: 1, minHeight: 0 },
   col: { flexGrow: 1, flexBasis: 0, minWidth: 0, minHeight: 0, gap: 8 },
   // The fixed column deliberately does *not* reuse `col`: flexBasis wins over
@@ -35,17 +35,17 @@ const s = createStyles({
   // that also has `flexGrow: 0` collapses it to nothing.
   fixedCol: { width: 200, flexShrink: 0, minHeight: 0, gap: 8 },
   card: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '$background',
     borderWidth: 1,
-    borderColor: '#dfe6e9',
+    borderColor: '$track',
     borderRadius: 4,
     padding: 8,
     gap: 6,
     minHeight: 0,
   },
-  title: { fontSize: 11, color: '#b2bec3' },
+  title: { fontSize: 11, color: '$border' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  clock: { fontSize: 30, fontFamily: 'monospace', color: '#2d3436' },
+  clock: { fontSize: 30, fontFamily: 'monospace', color: '$text' },
 });
 
 const DOC = `### Release notes
@@ -249,7 +249,7 @@ export function MixedPanel() {
                     width: 6,
                     height: 6,
                     borderRadius: 3,
-                    backgroundColor: i % 3 ? '#dfe6e9' : '#00b894',
+                    backgroundColor: i % 3 ? '$track' : '#00b894',
                   }}
                 />
                 <text style={s.hint}>filler row {String(i)}</text>

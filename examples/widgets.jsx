@@ -20,7 +20,7 @@ import {
 function Row({ label, children, alignItems = 'center' }) {
   return (
     <box style={{ flexDirection: 'row', alignItems: alignItems, gap: 12 }}>
-      <text style={{ color: '#7f8c8d', width: 90 }}>{label}</text>
+      <text style={{ color: '$dim', width: 90 }}>{label}</text>
       {children}
     </box>
   );
@@ -52,7 +52,7 @@ export function WidgetsPanel() {
 
   return (
     <box style={{ flexGrow: 1, padding: 16, gap: 14 }}>
-      <text style={{ fontSize: 20, color: '#2d3436' }}>Widget gallery</text>
+      <text style={{ fontSize: 20, color: '$text' }}>Widget gallery</text>
 
       <Row label="Button">
         <Button primary onPress={() => setPresses((n) => n + 1)}>
@@ -62,7 +62,7 @@ export function WidgetsPanel() {
           <Button onPress={() => setPresses(0)}>Reset</Button>
         </Tooltip>
         <Button disabled>Disabled</Button>
-        <text style={{ color: '#2d3436' }}>{`${presses}×`}</text>
+        <text style={{ color: '$text' }}>{`${presses}×`}</text>
       </Row>
 
       <Row label="Checkbox">
@@ -86,7 +86,7 @@ export function WidgetsPanel() {
 
       <Row label="Switch">
         <Switch checked={notify} onChange={(ev) => setNotify(ev.value)} />
-        <text style={{ color: '#2d3436' }}>
+        <text style={{ color: '$text' }}>
           {notify ? 'notifications on' : 'off'}
         </text>
       </Row>
@@ -100,7 +100,7 @@ export function WidgetsPanel() {
           onChange={(ev) => setVolume(ev.value)}
           style={{ width: 200 }}
         />
-        <text style={{ color: '#2d3436' }}>{`${volume}`}</text>
+        <text style={{ color: '$text' }}>{`${volume}`}</text>
       </Row>
 
       <Row label="Progress">
@@ -108,7 +108,7 @@ export function WidgetsPanel() {
           <ProgressBar value={progress} />
         </box>
         <text
-          style={{ color: '#7f8c8d' }}
+          style={{ color: '$dim' }}
         >{`${Math.round(progress * 100)}%`}</text>
       </Row>
 
@@ -129,8 +129,8 @@ export function WidgetsPanel() {
             padding: 8,
             borderRadius: 4,
             borderWidth: 1,
-            borderColor: '#b2bec3',
-            backgroundColor: 'white',
+            borderColor: '$border',
+            backgroundColor: '$background',
           }}
         />
       </Row>
@@ -153,8 +153,8 @@ export function WidgetsPanel() {
               padding: 8,
               borderRadius: 4,
               borderWidth: 1,
-              borderColor: '#b2bec3',
-              backgroundColor: 'white',
+              borderColor: '$border',
+              backgroundColor: '$background',
             }}
           />
           <scrollview
@@ -163,7 +163,11 @@ export function WidgetsPanel() {
               padding: 4,
               borderRadius: 4,
               borderWidth: 1,
-              borderColor: '#dfe6e9',
+              borderColor: '$track',
+              // `<markdown>` draws with ntk's own document palette — its own
+              // colours for headings, code, links and quotes — and does not
+              // follow this one, so the surface under it stays light. That
+              // is what "override if needed" is for.
               backgroundColor: 'white',
             }}
           >
@@ -181,7 +185,7 @@ function App() {
       width={460}
       height={720}
       title="widgets"
-      style={{ backgroundColor: '#f5f6fa' }}
+      style={{ backgroundColor: '$surfaceHover' }}
     >
       <WidgetsPanel />
     </window>

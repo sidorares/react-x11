@@ -185,7 +185,7 @@ const SOURCES = Object.fromEntries(
 // --- the cell --------------------------------------------------------------
 
 const s = createStyles({
-  window: { backgroundColor: '#f5f6fa' },
+  window: { backgroundColor: '$surfaceHover' },
   head: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -193,13 +193,13 @@ const s = createStyles({
     paddingLeft: 12,
     paddingRight: 12,
     height: 30,
-    backgroundColor: '#ffffff',
+    backgroundColor: '$background',
   },
-  title: { fontSize: 12, color: '#2d3436', width: 84 },
-  hint: { fontSize: 11, color: '#7f8c8d' },
+  title: { fontSize: 12, color: '$text', width: 84 },
+  hint: { fontSize: 11, color: '$dim' },
   ctl: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ctlLabel: { fontSize: 11, color: '#7f8c8d' },
-  ctlValue: { fontSize: 11, color: '#2d3436', width: 30 },
+  ctlLabel: { fontSize: 11, color: '$dim' },
+  ctlValue: { fontSize: 11, color: '$text', width: 30 },
   // The viewport: it takes the space the header leaves and lets the wall
   // overflow it. ScrollViewNode supplies the `flex-basis: 0` and the
   // `min-height: 0` that a scroll container always wants, so `flexGrow` is
@@ -218,7 +218,7 @@ const s = createStyles({
     padding: 6,
   },
   cell: { alignItems: 'center', justifyContent: 'center' },
-  glyph: { color: '#2d3436' },
+  glyph: { color: '$text' },
 });
 
 function IconCell({ name, mode, size, cell }) {

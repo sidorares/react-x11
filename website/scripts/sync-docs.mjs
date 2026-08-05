@@ -188,6 +188,7 @@ const ORDER = [
   'desktop.md',
   'dbus.md',
   'filedialog.md',
+  'appearance.md',
   'remote.md',
   'security.md',
   'packaging.md',

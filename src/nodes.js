@@ -21,14 +21,15 @@ import {
   ease,
   isLayoutProp,
   styleUsesTokens,
-  tokenNames,
   resolveTokens,
   styleHasSizeQueries,
   styleHasSupportsQueries,
   resolveQueries,
   DEFAULT_FOCUS_RING,
   resolveHitSlop,
+  tint,
 } from './styles.js';
+import { cssColorStraight } from 'ntk';
 import { EventManager, discrete } from './events.js';
 import {
   DropSession,
@@ -40,6 +41,7 @@ import {
 } from './dnd.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
 import { compositingActive, watchCompositing } from './compositing.js';
+import { baseTheme } from './palette.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
 import { paintCacheFor } from './paintcache.js';
@@ -88,13 +90,6 @@ const STACK_BELOW = 1;
 // Windows whose child stacking order may have gone stale during the commit
 // in progress; drained by flushWindowRestacks from resetAfterCommit.
 const pendingRestack = new Set();
-
-// DEV: nodes that found no theme to resolve their `$tokens` against. The
-// verdict has to wait for the end of the commit, because a node's ancestry
-// is not complete before it — a <popup> is its own root from the moment it
-// is created, and only learns where in the tree it was written when it is
-// attached. Drained by flushTokenChecks from resetAfterCommit.
-const pendingTokenChecks = new Set();
 
 // --- damage -------------------------------------------------------------
 //
@@ -408,15 +403,44 @@ export function flushWindowRestacks() {
   for (const node of nodes) node._restackWindowChildren();
 }
 
-/** DEV: the commit is over, so every node knows its ancestors — a node that
- * still has no theme never had one, and its tokens went nowhere. */
-export function flushTokenChecks() {
-  const nodes = [...pendingTokenChecks];
-  pendingTokenChecks.clear();
-  for (const node of nodes) {
-    if (!node.destroyed && node.root && node._usesTokens && !node.theme) {
-      node._warnTokensWithoutTheme();
-    }
+/**
+ * A CSS colour as an X pixel value.
+ *
+ * The 24-bit TrueColor layout, which is what `redMask`/`greenMask`/`blueMask`
+ * say on every server a client meets today and what ntk's own ARGB visual
+ * uses. Alpha is dropped: this is the *window background attribute*, a single
+ * opaque pixel the server repeats, not something composited.
+ */
+function pixelFor(color) {
+  const rgba = cssColorStraight(color);
+  if (!rgba) return null;
+  const [r, g, b] = rgba;
+  const byte = (c) => Math.max(0, Math.min(255, Math.round(c * 255)));
+  return ((byte(r) << 16) | (byte(g) << 8) | byte(b)) >>> 0;
+}
+
+/**
+ * The desktop switched between light and dark: every node that inherited its
+ * palette rather than being given one has a different one now.
+ *
+ * `_themeChanged()` drops the cached theme and restyles the tokens; the
+ * invalidate is for everything else, above all the window background, which
+ * is read from the palette at paint time and belongs to no style object.
+ *
+ * Widgets do not need this — they read the palette through `useTheme()` and
+ * React re-renders them. This is the other route: an app's own
+ * `backgroundColor: '$background'`, and the window fill under it.
+ */
+export function appearanceChanged(app) {
+  // A desktop change arrives whenever the user makes it, which can be while
+  // the app is shutting down. An invalidate *schedules* a frame, so a repaint
+  // started here would reach the connection a tick after it closed and throw
+  // out of the frame clock, where nothing is waiting to catch it.
+  if (!app || app.X?._closing) return;
+  for (const node of app._rootChildren ?? []) {
+    if (node.destroyed) continue;
+    node._themeChanged();
+    node.root?.invalidate(true, null, 'theme');
   }
 }
 
@@ -658,12 +682,11 @@ export class Node {
     this._usesTokens = this.stylable && styleUsesTokens(this._baseStyle);
     if (this._usesTokens) {
       const theme = this.theme;
-      if (DEV && !theme) pendingTokenChecks.add(this);
       this._baseStyle = resolveTokens(
         this._baseStyle,
         theme,
         `<${this.kind} style>`,
-        Boolean(this.root),
+        this.placed,
       );
     }
     // `disabled` is a prop, not something the pointer does, so it is read
@@ -843,17 +866,65 @@ export class Node {
    * or two without repeating a palette. Popups resolve through their place
    * in the *tree*, not their window, so a menu inherits the theme of the UI
    * that opened it even though it is a separate X window.
+   *
+   * **With no `theme` prop anywhere above, it is the desktop's palette.** So
+   * `backgroundColor: '$background'` works in an app that never wrote a
+   * `<ThemeProvider>`, and means "whatever this desktop's is" — which is the
+   * same answer `useTheme()` gives the widgets, by the other route.
+   *
+   * A detached node has no ancestors yet and so cannot see a provider two
+   * levels up; it still resolves, against the base, and `_themeChanged()` on
+   * attach re-resolves it against the real one.
    */
   get theme() {
     if (this._theme !== undefined) return this._theme;
-    const inherited = this.parent?.theme;
+    const inherited = this.parent ? this.parent.theme : baseTheme();
     const own = this.props.theme;
-    this._theme = own
-      ? inherited
-        ? { ...inherited, ...own }
-        : own
-      : (inherited ?? null);
+    this._theme = own ? { ...inherited, ...own } : inherited;
     return this._theme;
+  }
+
+  /**
+   * The text style a node inherits when nothing named one.
+   *
+   * The ink is the **palette's**, not a fixed black: a `<text>` or a
+   * `<textinput>` that never mentions a colour has to be readable on the
+   * surface it is drawn on, and that surface follows the desktop now. Black
+   * on `#1e2228` is invisible, which is the whole bug.
+   *
+   * Cached per node so the object identity is stable while the palette is —
+   * the layouts below are keyed on style and a fresh base each call would
+   * miss the cache every time.
+   */
+  get inheritedTextStyle() {
+    const color = this.theme.text;
+    if (this._textBase?.color !== color) {
+      this._textBase = { ...DEFAULT_TEXT_STYLE, color };
+    }
+    return this._textBase;
+  }
+
+  /**
+   * Whether this node's ancestry is complete, so a `$token` that does not
+   * resolve is a mistake rather than a node that has not been placed yet.
+   *
+   * For a drawn node that is `root` — set by `_setRoot` when the subtree is
+   * attached to the window that owns it, which is exactly when no further
+   * `theme` prop can appear above it. React builds bottom-up, so having a
+   * *parent* proves nothing: the parent may itself be floating.
+   *
+   * The exception is a `<popup>`, which is its own root from the moment it is
+   * created and only learns where in the tree it was written when it is
+   * attached. Until then its subtree would be judged against the base palette
+   * alone, and a `$panel` from the provider two levels up would throw. Those
+   * resolve provisionally instead, and `_themeChanged()` on attach re-resolves
+   * them. Known tokens resolve either way, so only the *error* is ever
+   * deferred, never the value.
+   */
+  get placed() {
+    const owner = this.isWindow ? this : this.root;
+    if (!owner) return false;
+    return owner.isPopup ? owner.parent != null : true;
   }
 
   /** The owning window resized: re-resolve, since a query block may now
@@ -868,31 +939,22 @@ export class Node {
     }
   }
 
-  /**
-   * A `$token` with no theme anywhere above it. That is the one theming
-   * mistake nothing else reports: a token the theme does not *have* throws,
-   * but with no theme at all the whole style is quietly stripped and the
-   * node paints its defaults. Once per node — the style stays wrong until
-   * it is edited, and a warning per render would bury it.
-   */
-  _warnTokensWithoutTheme() {
-    if (this._warnedNoTheme) return;
-    this._warnedNoTheme = true;
-    const names = [...tokenNames(flattenStyle(this.props.style))];
-    if (!names.length) return;
-    const [was, they] = names.length > 1 ? ['were', 'they'] : ['was', 'it'];
-    console.warn(
-      `react-x11: <${this.kind}> uses ${names.join(', ')} but no theme is ` +
-        `in force here, so ${they} ${was} dropped. Wrap the tree in ` +
-        '<ThemeProvider value={palette}>, or put a `theme` prop on an ' +
-        'ancestor.',
-    );
-  }
-
   /** The theme above or on this node changed: drop the caches and restyle
    * the subtree, since a token can appear at any depth. */
   _themeChanged() {
+    const wasInk = this._theme?.text;
     this._theme = undefined;
+    // A `<window>` with no `backgroundColor` of its own follows the palette,
+    // and the server's copy of that colour has to follow with it — otherwise
+    // the next resize fills the new area in the old scheme.
+    if (this.isWindow) this._syncWindowBackground();
+    // The inherited ink is not in any style object, so `_usesTokens` does not
+    // see it move — but a cached layout carries the colour it was shaped
+    // with, and would keep painting the old one.
+    if (wasInk !== undefined && wasInk !== this.theme.text) {
+      this._textContentChanged();
+      this.root?.invalidate(true, null, 'theme');
+    }
     if (this._usesTokens) {
       const before = this.style;
       this._syncStyle(this.props);
@@ -1979,8 +2041,9 @@ export class TextNode extends Node {
     const key = String(maxWidth);
     let layout = this._layouts.get(key);
     if (!layout) {
-      const spans = this.collectSpans(DEFAULT_TEXT_STYLE, []);
-      const base = textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
+      const inherited = this.inheritedTextStyle;
+      const spans = this.collectSpans(inherited, []);
+      const base = textStyleFrom(this.style, inherited);
       layout = fonts.layout(spans, base, {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
         align: this.style.textAlign,
@@ -2013,7 +2076,7 @@ export class TextNode extends Node {
     if (this.style.textBoxTrim !== 'cap-alphabetic') return null;
     const lines = layout?.lines;
     if (!lines?.length) return null;
-    const base = textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
+    const base = textStyleFrom(this.style, this.inheritedTextStyle);
     const font = this.app?.fonts?.match?.(base.family, {
       weight: base.weight,
       style: base.style,
@@ -2903,7 +2966,7 @@ export class TextInputNode extends Node {
   }
 
   _textStyle() {
-    return textStyleFrom(this.style, DEFAULT_TEXT_STYLE);
+    return textStyleFrom(this.style, this.inheritedTextStyle);
   }
 
   _layoutOf(text) {
@@ -3681,7 +3744,7 @@ export class TextInputNode extends Node {
     const isEmpty = text.length === 0;
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
     const color = isEmpty
-      ? (this.props.placeholderColor ?? '#9aa0a6')
+      ? (this.props.placeholderColor ?? this.theme.dim)
       : style.color;
     const layout = fonts.layout([{ text: shown, ...style, color }], style);
     // Center the glyph ink (ascent + descent) rather than layout.height:
@@ -3729,7 +3792,14 @@ export class TextInputNode extends Node {
     if (this._showsSelection() && a !== b && !isEmpty) {
       const selStart = this._prefixWidth(a);
       const selEnd = this._prefixWidth(b);
-      ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
+      // A **translucent** accent rather than an opaque light blue. The ink
+      // on top is `style.color`, which this fill does not control, so an
+      // opaque highlight has to be picked to contrast with it — and no one
+      // colour does that on both a light and a dark palette. `#b3d4fc`
+      // under the dark palette's near-white ink is 1.3:1, which is nothing.
+      // Tinting the surface instead leaves the ink's own contrast intact.
+      ctx.fillStyle =
+        this.props.selectionColor ?? tint(this.theme.accent, 0.35);
       ctx.fillRect(originX + selStart, markY, selEnd - selStart, markHeight);
     }
 
@@ -3833,7 +3903,7 @@ export class TextAreaNode extends TextInputNode {
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
     const s = this._textStyle();
     const color = isEmpty
-      ? (this.props.placeholderColor ?? '#9aa0a6')
+      ? (this.props.placeholderColor ?? this.theme.dim)
       : s.color;
     const width = this.contentBox().width || undefined;
     const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}`;
@@ -4007,7 +4077,14 @@ export class TextAreaNode extends TextInputNode {
     if (this._showsSelection() && a !== b && !isEmpty) {
       const posA = layout.caretPosition(a);
       const posB = layout.caretPosition(b);
-      ctx.fillStyle = this.props.selectionColor ?? '#b3d4fc';
+      // A **translucent** accent rather than an opaque light blue. The ink
+      // on top is `style.color`, which this fill does not control, so an
+      // opaque highlight has to be picked to contrast with it — and no one
+      // colour does that on both a light and a dark palette. `#b3d4fc`
+      // under the dark palette's near-white ink is 1.3:1, which is nothing.
+      // Tinting the surface instead leaves the ink's own contrast intact.
+      ctx.fillStyle =
+        this.props.selectionColor ?? tint(this.theme.accent, 0.35);
       for (let li = posA.line; li <= posB.line; li++) {
         const line = layout.lines[li];
         const x0 = li === posA.line ? posA.x : line.x;
@@ -4089,9 +4166,21 @@ export class WindowNode extends Node {
     if (parentWindow) {
       attributes.parent = parentWindow;
     }
+    // **What the server paints into newly exposed area.** A resize enlarges
+    // the window before the app can possibly have drawn the new part, and X
+    // fills it with this attribute in the meantime — so without one, growing
+    // a window flashes whatever the server's default is, which on a dark
+    // palette is a bright rectangle. Setting it to the colour that is about
+    // to be painted there makes the flash the same colour as the result.
+    const pixel = pixelFor(this._windowBackground());
+    if (pixel !== null) {
+      attributes.backgroundPixel = pixel;
+      this._backgroundPixel = pixel;
+    }
     // Before the window exists, because a visual is a CreateWindow field: a
     // window cannot become transparent later, which is also why `transparent`
-    // is read here and never in the update path.
+    // is read here and never in the update path. It overrides the pixel above
+    // with 0 — transparent black — when the ARGB visual is really there.
     if (this.props.transparent)
       Object.assign(attributes, this._argbAttributes());
     const wnd = this.app.createWindow(attributes);
@@ -4226,6 +4315,32 @@ export class WindowNode extends Node {
    * window that cannot be transparent is a square opaque one, not a broken
    * one — and the alternative, black corners, is worse than square.
    */
+  /** What this window paints as its background — its own, or the palette's. */
+  _windowBackground() {
+    return this.style.backgroundColor || this.theme.background;
+  }
+
+  /**
+   * Keep the server's idea of the background in step with ours. Called when
+   * the palette moves under an unstyled window and when the style names a new
+   * colour; a `transparent` window keeps its 0, which means transparent.
+   */
+  _syncWindowBackground() {
+    if (this._transparent || !this.window || this.destroyed) return;
+    const pixel = pixelFor(this._windowBackground());
+    if (pixel === null || pixel === this._backgroundPixel) return;
+    if (this.app?.X?._closing) return;
+    this._backgroundPixel = pixel;
+    // One call for both halves, because a double-buffered window has two
+    // backgrounds: the X window attribute the server paints into exposed
+    // area, and the colour ntk's backing store clears the part a resize
+    // grows into. They used to be free to disagree — the backing store
+    // cleared to the screen's white whatever the window said — which is why
+    // enlarging a dark window flashed a white strip that survived until
+    // something damaged it (ntk#209, 6.6.1).
+    this.window.setBackgroundPixel?.(pixel);
+  }
+
   _argbAttributes() {
     const argb = this.app?.findArgbVisual?.();
     if (!argb) {
@@ -4724,6 +4839,9 @@ export class WindowNode extends Node {
     if (newProps.title !== before.title) {
       wnd.setTitle?.(newProps.title || '');
     }
+    // The colour the server fills a resize with, kept in step with the one
+    // the app paints.
+    this._syncWindowBackground();
     // a popup is a child of the screen root, not of the node it is written
     // under, so its zIndex means nothing — and its parent here may well be
     // a drawn node with no children to stack
@@ -5409,7 +5527,10 @@ export class WindowNode extends Node {
           ctx.fillRect(0, 0, width, height);
         }
       }
-      ctx.fillStyle = backgroundColor || 'white';
+      // No `backgroundColor` means the desktop's, not white: a window whose
+      // widgets went dark on a dark desktop must not leave a white rectangle
+      // behind them. An app that named a colour gets the colour it named.
+      ctx.fillStyle = backgroundColor || this.theme.background;
     }
     // repainting the background only where it is about to be drawn over is
     // the other half of the win: a full-window fill is a full-window

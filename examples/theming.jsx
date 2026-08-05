@@ -20,6 +20,7 @@ import {
   Switch,
   Tabs,
   ThemeProvider,
+  useSystemAppearance,
 } from '../src/index.js';
 import { THEME_OPTIONS, themeFor } from './themes.js';
 
@@ -102,7 +103,14 @@ function ModeIcon({ mode, color }) {
 
 export function ThemingPanel() {
   const [name, setName] = useState('github');
-  const [mode, setMode] = useState('light');
+  // **The desktop until the user picks.** `null` means "follow"; the toggle
+  // in the header sets an explicit mode and takes over from there. Starting
+  // on a hardcoded 'light' is what makes this panel a light rectangle inside
+  // a dark app when it is hosted by examples/app.jsx.
+  const system = useSystemAppearance();
+  const [picked, setPicked] = useState(null);
+  const mode = picked ?? (system.colorScheme === 'dark' ? 'dark' : 'light');
+  const setMode = setPicked;
   const [agreed, setAgreed] = useState(true);
   const [notify, setNotify] = useState(false);
   const [flavour, setFlavour] = useState('vanilla');
@@ -113,9 +121,15 @@ export function ThemingPanel() {
   const theme = themeFor(name, mode);
 
   return (
-    // one provider, both channels: the widgets read it with useTheme() and
-    // `$canvas`/`$panel` below resolve against the same palette
-    <ThemeProvider value={theme} style={s.root}>
+    // One provider, both channels: the widgets read it with useTheme() and
+    // `$canvas`/`$panel` below resolve against the same palette.
+    //
+    // `colorScheme={mode}` pins the subtree to whichever scheme this palette
+    // *is*, which is what stops a light theme being layered over a dark base
+    // and producing a window of mixed controls. `mode` follows the desktop
+    // until the header toggle picks one — the shape an app with its own theme
+    // preference wants.
+    <ThemeProvider value={theme} colorScheme={mode} style={s.root}>
       <box style={s.bar}>
         <text style={s.title}>Theme</text>
         <Select

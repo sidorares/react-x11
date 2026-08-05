@@ -16,19 +16,19 @@ import { createStyles, Slider } from '../../src/index.js';
 
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 16, gap: 12 },
-  head: { fontSize: 18, color: '#2d3436' },
-  hint: { fontSize: 11, color: '#7f8c8d' },
+  head: { fontSize: 18, color: '$text' },
+  hint: { fontSize: 11, color: '$dim' },
   row: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
   col: { flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 8 },
   card: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '$background',
     borderWidth: 1,
-    borderColor: '#dfe6e9',
+    borderColor: '$track',
     borderRadius: 4,
     padding: 12,
     gap: 6,
   },
-  label: { fontSize: 10, color: '#b2bec3' },
+  label: { fontSize: 10, color: '$border' },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',

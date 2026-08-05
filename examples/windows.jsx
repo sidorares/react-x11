@@ -22,9 +22,9 @@ function Satellite({ id, index, clicks, onClick, onClose }) {
       <box
         style={{ flexGrow: 1, padding: 14, gap: 10, alignItems: 'flex-start' }}
       >
-        <text style={{ color: '#2d3436' }}>{`I am window #${id}.`}</text>
+        <text style={{ color: '$text' }}>{`I am window #${id}.`}</text>
         <text
-          style={{ color: '#7f8c8d' }}
+          style={{ color: '$dim' }}
         >{`${clicks} clicks — in every window`}</text>
         <box style={{ flexDirection: 'row', gap: 8 }}>
           <Button primary onPress={onClick}>
@@ -52,7 +52,7 @@ function App() {
         height={200}
         title="windows"
         onCloseRequest={() => process.exit(0)}
-        style={{ backgroundColor: '#f5f6fa' }}
+        style={{ backgroundColor: '$surfaceHover' }}
       >
         <box
           style={{
@@ -62,10 +62,10 @@ function App() {
             alignItems: 'flex-start',
           }}
         >
-          <text style={{ fontSize: 18, color: '#2d3436' }}>
+          <text style={{ fontSize: 18, color: '$text' }}>
             One React tree, many windows
           </text>
-          <text style={{ color: '#7f8c8d' }}>
+          <text style={{ color: '$dim' }}>
             {`${wins.length} satellite${wins.length === 1 ? '' : 's'} open, ${clicks} clicks total`}
           </text>
           <Button primary onPress={open}>

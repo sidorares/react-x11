@@ -423,7 +423,7 @@ const s = createStyles({
   // padding means the same above the letters as below them
   trimmed: { textBoxTrim: 'cap-alphabetic' },
 
-  section: { fontSize: 13, color: '#3f3f46', paddingBottom: 2 },
+  section: { fontSize: 13, color: '$text', paddingBottom: 2 },
   spacer: { flexGrow: 1 },
   divider: { height: 18 },
 
@@ -532,7 +532,7 @@ const s = createStyles({
     borderRadius: 6,
     flexShrink: 0,
     cursor: 'pointer',
-    ':hover': { backgroundColor: '#ececee' },
+    ':hover': { backgroundColor: '$surfaceActive' },
   },
 
   // a value that is not a menu: free text, in a pill the same shape as one
@@ -590,7 +590,7 @@ const s = createStyles({
     justifyContent: 'center',
     borderRadius: 4,
     cursor: 'pointer',
-    ':hover': { backgroundColor: '#ececee' },
+    ':hover': { backgroundColor: '$surfaceActive' },
   },
   placeholder: { fontSize: 13, color: C.faint, paddingLeft: 4 },
 
@@ -611,7 +611,7 @@ const s = createStyles({
     paddingRight: 10,
     borderRadius: 6,
     cursor: 'pointer',
-    ':hover': { backgroundColor: '#f4f4f5' },
+    ':hover': { backgroundColor: '$surfaceHover' },
   },
   menuText: { fontSize: 13, color: C.text },
 
@@ -641,7 +641,7 @@ const s = createStyles({
     borderRadius: 8,
     backgroundColor: C.card,
     cursor: 'pointer',
-    ':hover': { backgroundColor: '#f9f9fa', borderColor: C.faint },
+    ':hover': { backgroundColor: '$background', borderColor: C.faint },
   },
   ghostText: { fontSize: 14, color: C.text },
 
@@ -1353,7 +1353,10 @@ export function RulesPanel() {
   // the widget palette wraps the panel rather than the window, so the panel
   // still looks like itself wherever it is dropped
   return (
-    <ThemeProvider value={UI}>
+    // This app styles everything from its own `C` palette, so it pins rather
+    // than half-following: layering a light design over a dark base is what
+    // produces a window of mixed light and dark controls.
+    <ThemeProvider value={UI} colorScheme="light">
       <scrollview style={s.page}>
         <box style={s.sheet}>
           <Label style={s.section}>WHEN</Label>

@@ -4,6 +4,7 @@
  */
 
 import type { ComponentType, ReactNode, RefObject } from 'react';
+import type { ColorSchemePreference } from './appearance.js';
 import type { Color, StyleProp } from './style.js';
 import type { BoxProps, GlAreaProps, Vec3 } from './elements.js';
 import type { DrawnNode, Rect } from './nodes.js';
@@ -58,8 +59,25 @@ export interface Theme {
 }
 
 export interface ThemeProviderProps {
-  /** Merges over the defaults, and over an outer provider. */
+  /**
+   * Merges over the scheme in force — the desktop's palette, or an outer
+   * provider's. So a partial palette names what this app changes and
+   * everything else keeps following the desktop.
+   */
   value?: Partial<Theme>;
+  /**
+   * A palette layered on only when the scheme in force is dark — for a design
+   * whose two schemes are not one recolour of the other. Usually unnecessary:
+   * `value` already layers over the desktop's own light or dark palette.
+   */
+  dark?: Partial<Theme>;
+  /**
+   * `'system'` (the default) follows the desktop. `'light'` and `'dark'` pin
+   * this subtree, for an app whose own settings own the choice — and pinning
+   * is the complete opt-out: nothing under a pinned provider asks the desktop
+   * anything.
+   */
+  colorScheme?: ColorSchemePreference;
   /**
    * Style for the box the provider renders to carry the palette into the
    * node tree. Defaults to `{ flexGrow: 1 }` — an app-level provider fills

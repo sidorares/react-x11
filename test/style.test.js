@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot, ThemeProvider, useTheme } from '../src/index.js';
+import { DefaultTheme } from '../src/palette.js';
 import { createStyles, flattenStyle, resolveTokens } from '../src/styles.js';
 import { createMockApp, pressButton, moveMouse } from './helpers/mock-app.js';
 
@@ -854,7 +855,13 @@ test('an unknown token is an error naming what the theme has', async () => {
     console.error = orig;
   }
   assert.match(errors.join('\n'), /unknown theme token "\$pannel"/);
-  assert.match(errors.join('\n'), /theme has panel, ink, gutter, accent/);
+  // The palette a node sees is the built-in one with this `theme` prop
+  // merged over it — the app's own tokens *and* everything it inherited from
+  // the scheme in force — so the report names both. Listing only the four
+  // this window declared would send someone looking for a `$background` that
+  // is right there.
+  assert.match(errors.join('\n'), /theme has border, borderFocus, background/);
+  assert.match(errors.join('\n'), /panel, ink, gutter\)/);
 });
 
 test('tokens keep the identity fast path: same style, same theme, same object', async () => {
@@ -1003,36 +1010,53 @@ test('a ThemeProvider above a <window> plants the palette on the window', async 
   await x11Root.unmount();
 });
 
-test('a $token with no theme anywhere is reported once, not silently dropped', async () => {
+test('a $token with no provider resolves against the desktop’s palette', async () => {
+  // There is no such thing as "no theme in force" any more: with nothing
+  // said, the palette is the desktop's, and a `$background` in an app that
+  // never wrote a <ThemeProvider> is how that app blends in.
   const app = createMockApp();
   const x11Root = await createRoot({ app });
-  const warnings = [];
-  const orig = console.warn;
-  console.warn = (...a) => warnings.push(a.join(' '));
+  x11Root.render(
+    h(
+      'window',
+      { width: 100, height: 100 },
+      h('box', { style: { backgroundColor: '$background', flexGrow: 1 } }),
+    ),
+  );
+  await tick();
+  assert.strictEqual(
+    nodeOf(app).children[0].style.backgroundColor,
+    DefaultTheme.background,
+    'the built-in light palette, since the mock app pins "no desktop said"',
+  );
+  await x11Root.unmount();
+});
+
+test('a $token nothing defines is still an error, provider or not', async () => {
+  const app = createMockApp();
+  const errors = [];
+  const x11Root = await createRoot({
+    app,
+    onUncaughtError: (err) => errors.push(String(err?.message ?? err)),
+  });
+  const orig = console.error;
+  console.error = (...a) => errors.push(a.join(' '));
   try {
-    const render = (color) =>
-      x11Root.render(
-        h(
-          'window',
-          { width: 100, height: 100 },
-          h('box', {
-            style: { backgroundColor: '$panel', color, flexGrow: 1 },
-          }),
-        ),
-      );
-    render('red');
-    await tick();
-    render('blue'); // a re-render must not warn again
+    x11Root.render(
+      h(
+        'window',
+        { width: 100, height: 100 },
+        h('box', { style: { backgroundColor: '$panel', flexGrow: 1 } }),
+      ),
+    );
     await tick();
   } finally {
-    console.warn = orig;
+    console.error = orig;
   }
-
-  assert.strictEqual(warnings.length, 1, 'once per node, not once per render');
-  assert.match(warnings[0], /<box> uses \$panel but no theme is in force/);
-  assert.match(warnings[0], /ThemeProvider/, 'it names the fix');
-
-  await x11Root.unmount();
+  // It used to be a one-off warning and a silently dropped property, because
+  // there was no palette to check against. Now there always is, so this is
+  // the same mistake as any other misspelled token and gets the same error.
+  assert.match(errors.join('\n'), /unknown theme token "\$panel"/);
 });
 
 test('a popup written under a theme does not trip the no-theme warning', async () => {

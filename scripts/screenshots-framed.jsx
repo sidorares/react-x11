@@ -25,6 +25,10 @@ import { captureDrawable, toPng } from './capture.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../src/index.js');
+// Pinned light for the same reason as scripts/screenshots.jsx: the built-in
+// palette follows the desktop and these images are committed.
+const { setAppearanceForTests } = await import('../src/appearance.js');
+setAppearanceForTests({});
 
 const outDir =
   process.env.SHOT_DIR ??

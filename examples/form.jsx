@@ -55,7 +55,7 @@ export function FormPanel() {
 
   return (
     <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
-      <text style={{ fontSize: 20, color: '#2d3436' }}>Sign the guestbook</text>
+      <text style={{ fontSize: 20, color: '$text' }}>Sign the guestbook</text>
 
       <textinput
         autoFocus
@@ -67,8 +67,8 @@ export function FormPanel() {
           padding: 8,
           borderRadius: 4,
           borderWidth: 1,
-          borderColor: '#b2bec3',
-          backgroundColor: 'white',
+          borderColor: '$border',
+          backgroundColor: '$background',
         }}
       />
 
@@ -91,7 +91,7 @@ export function FormPanel() {
       </box>
 
       <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <text style={{ color: '#636e72' }}>size</text>
+        <text style={{ color: '$dim' }}>size</text>
         <Slider
           min={12}
           max={32}
@@ -99,7 +99,7 @@ export function FormPanel() {
           onChange={(ev) => setSize(ev.value)}
           style={{ flexGrow: 1 }}
         />
-        <text style={{ color: '#636e72' }}>{String(size)}</text>
+        <text style={{ color: '$dim' }}>{String(size)}</text>
       </box>
 
       <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -160,7 +160,7 @@ function App() {
       width={420}
       height={380}
       title="form"
-      style={{ backgroundColor: '#f5f6fa' }}
+      style={{ backgroundColor: '$surfaceHover' }}
     >
       <FormPanel />
     </window>

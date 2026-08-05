@@ -3,6 +3,7 @@
 import React from 'react';
 import { loadLayout } from 'ntk';
 
+import { setAppearanceForTests } from '../appearance.js';
 import { setCompositingForTests } from '../compositing.js';
 
 // ntk 5 loads the layout engine's WebAssembly in createClient() rather than
@@ -341,6 +342,13 @@ export function createMockApp() {
   // where a transparent corner would render black — call
   // `setCompositingForTests(app, false)` before rendering.
   setCompositingForTests(app, true);
+  // And the desktop's appearance, for the same reason and a sharper one: the
+  // built-in palette follows the system, so an unpinned test renders in
+  // whatever colours the developer's own desktop happens to be in. Pinned to
+  // "no desktop said anything", which is the truth here and resolves to the
+  // light palette. `setAppearanceForTests({ colorScheme: 'dark' })` is the
+  // other half of the matrix.
+  setAppearanceForTests({});
   return app;
 }
 

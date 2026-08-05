@@ -23,19 +23,11 @@ import { WidgetsPanel } from './widgets.jsx';
 import { TasksPanel } from './tasks.jsx';
 import { ThemingPanel } from './theming.jsx';
 
-const PALETTE = {
-  bg: '#f5f6fa',
-  panel: '#ffffff',
-  text: '#2d3436',
-  dim: '#7f8c8d',
-  edge: '#dfe6e9',
-};
-
 const s = createStyles({
-  window: { backgroundColor: '$bg' },
+  window: { backgroundColor: '$surfaceHover' },
   sidebar: {
     flexGrow: 1,
-    backgroundColor: '$panel',
+    backgroundColor: '$background',
     paddingTop: 12,
     paddingBottom: 12,
   },
@@ -52,7 +44,7 @@ const s = createStyles({
     flexGrow: 1,
     minHeight: 0,
     minWidth: 0,
-    backgroundColor: '$panel',
+    backgroundColor: '$background',
   },
   status: {
     flexDirection: 'row',
@@ -62,7 +54,7 @@ const s = createStyles({
     paddingRight: 12,
     height: 24,
     flexShrink: 0,
-    backgroundColor: '$panel',
+    backgroundColor: '$background',
   },
   statusText: { fontSize: 11, color: '$dim' },
   treePanel: { flexGrow: 1, minHeight: 0, padding: 12, gap: 8 },
@@ -194,7 +186,6 @@ function App() {
       height={520}
       minWidth={420}
       minHeight={320}
-      theme={PALETTE}
       style={s.window}
     >
       <SplitPane

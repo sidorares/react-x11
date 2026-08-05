@@ -120,7 +120,7 @@ function App() {
           flexGrow: 1,
           padding: 12,
           gap: 12,
-          backgroundColor: '#f4f6f8',
+          backgroundColor: '$surfaceHover',
         }}
       >
         <Scene spinning={spinning} />

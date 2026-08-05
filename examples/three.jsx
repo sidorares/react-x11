@@ -108,7 +108,7 @@ function App() {
           flexGrow: 1,
           padding: 12,
           gap: 12,
-          backgroundColor: '#f4f6f8',
+          backgroundColor: '$surfaceHover',
         }}
       >
         <Canvas3D
@@ -179,7 +179,7 @@ function App() {
           <Switch checked={textured} onChange={(ev) => setTextured(ev.value)} />
           <text style={{ fontSize: 13 }}>Texture</text>
           <box style={{ flexGrow: 1 }} />
-          <text style={{ fontSize: 13, color: '#5b6570' }}>
+          <text style={{ fontSize: 13, color: '$dim' }}>
             {picked ? `picked: ${picked}` : 'click a shape'}
           </text>
           <Button onPress={() => setRunning((r) => !r)}>

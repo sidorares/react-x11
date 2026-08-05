@@ -18,22 +18,22 @@ import { createStyles, Slider, Switch } from '../../src/index.js';
 
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 16, gap: 12 },
-  head: { fontSize: 18, color: '#2d3436' },
-  hint: { fontSize: 11, color: '#7f8c8d' },
+  head: { fontSize: 18, color: '$text' },
+  hint: { fontSize: 11, color: '$dim' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   card: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '$background',
     borderWidth: 1,
-    borderColor: '#dfe6e9',
+    borderColor: '$track',
     borderRadius: 4,
     padding: 10,
     gap: 8,
     width: 300,
   },
-  title: { fontSize: 12, color: '#2d3436' },
+  title: { fontSize: 12, color: '$text' },
   ctl: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  ctlLabel: { fontSize: 10, color: '#7f8c8d', width: 62 },
-  ctlValue: { fontSize: 10, color: '#2d3436', width: 34, textAlign: 'right' },
+  ctlLabel: { fontSize: 10, color: '$dim', width: 62 },
+  ctlValue: { fontSize: 10, color: '$text', width: 34, textAlign: 'right' },
 });
 
 function Control({ label, value, min, max, step, onChange, format }) {

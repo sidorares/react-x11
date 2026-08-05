@@ -44,6 +44,12 @@ import { blit, captureWindow } from './capture.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../src/index.js');
+// The built-in palette follows the desktop, and these PNGs are committed —
+// so without a pin, regenerating them on a dark desktop rewrites every one of
+// them in dark and the diff says the examples changed. Light, deliberately,
+// the same way the fonts and the clock above are pinned.
+const { setAppearanceForTests } = await import('../src/appearance.js');
+setAppearanceForTests({});
 const { editMenuGeometry } = await import('../src/editmenu.js');
 const Dashboard = (await import('../examples/dashboard.jsx')).default;
 const Tasks = (await import('../examples/tasks.jsx')).default;

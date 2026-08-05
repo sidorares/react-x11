@@ -21,8 +21,14 @@ reconciler support involved. They live in the package root export.
 
 ## Theming
 
+**Widgets follow the desktop with nothing declared** — dark on a dark desktop,
+light on a light one, the same way a GTK or Qt app does. See
+[system appearance](appearance.md) for how that is worked out and how to pin
+or override it.
+
 `<ThemeProvider value={palette}>` gives every widget beneath it a palette,
-and a partial one merges over the defaults. It carries **shape as well as
+layered over the scheme in force — so a partial one names what your app
+changes and everything else keeps following. It carries **shape as well as
 colour** — corner radius, border weight, text size and the padding inside a
 control are most of what separates one platform's controls from another's:
 
