@@ -520,6 +520,15 @@ export function busIsDead(kind) {
 }
 
 /**
+ * Live refs on the current generation. Not public — it exists so a test can
+ * assert that a *subscription* did not leave one behind, since a held ref is
+ * a `ref()`d socket and an app that never exits.
+ */
+export function busRefs(kind) {
+  return state[kind].refs;
+}
+
+/**
  * Test seam, not public: forget every connection without closing anything.
  * `withBus()` hard-closes first and then calls this, so that no match rule or
  * exported object survives into the next test.

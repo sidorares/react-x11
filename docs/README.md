@@ -50,6 +50,11 @@
   `useFileDialog()`, the three-rung ladder (the desktop's own portal,
   `osascript` on macOS, a browser react-x11 draws itself), why cancelling is
   `null` rather than a throw, and the places the backends genuinely differ.
+- [appearance.md](appearance.md) — light or dark, the accent colour,
+  contrast and reduced motion: `useSystemAppearance()`, `<ThemeProvider dark>`
+  for apps that only want to follow the desktop, why the answer is remembered
+  on disk so the first frame is not a flash, and what each rung of the ladder
+  can actually answer.
 - [remote.md](remote.md) — the flagship case: running the app on one
   machine and drawing to a display on another. `ssh -X` vs `-Y`, what the
   protocol costs on a link, the other X servers, and why Xwayland works

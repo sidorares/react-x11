@@ -4,6 +4,7 @@
  */
 
 import type { ComponentType, ReactNode, RefObject } from 'react';
+import type { ColorSchemePreference } from './appearance.js';
 import type { Color, StyleProp } from './style.js';
 import type { BoxProps, GlAreaProps, Vec3 } from './elements.js';
 import type { DrawnNode, Rect } from './nodes.js';
@@ -60,6 +61,17 @@ export interface Theme {
 export interface ThemeProviderProps {
   /** Merges over the defaults, and over an outer provider. */
   value?: Partial<Theme>;
+  /**
+   * The dark-mode palette, layered over `value` — so it names only what
+   * changes. **Giving it is what makes the app follow the desktop**: with no
+   * `dark` palette nothing is probed and no D-Bus connection is opened.
+   */
+  dark?: Partial<Theme>;
+  /**
+   * `'system'` (the default) follows the desktop. `'light'` and `'dark'` pin
+   * it, for an app whose own settings own the choice.
+   */
+  colorScheme?: ColorSchemePreference;
   /**
    * Style for the box the provider renders to carry the palette into the
    * node tree. Defaults to `{ flexGrow: 1 }` — an app-level provider fills

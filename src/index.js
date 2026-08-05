@@ -20,6 +20,8 @@ export {
   selectFolder,
 } from './filedialog.js';
 export { useFileDialog } from './filedialoghooks.js';
+export { systemAppearance } from './appearance.js';
+export { useSystemAppearance } from './appearancehooks.js';
 export {
   useDropTarget,
   useDragSource,

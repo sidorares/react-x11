@@ -3,6 +3,7 @@
 // build-step-free for consumers.
 
 import React, { useContext, useMemo, useState } from 'react';
+import { useAppearanceWhen } from '../appearancehooks.js';
 import { stepBeyond } from '../styles.js';
 import { XK_RETURN } from './keys.js';
 
@@ -115,10 +116,50 @@ const FILL = Object.freeze({ flexGrow: 1 });
  * merged palette goes on the context *and* onto a real node in the tree.
  * Skip the second and `<ThemeProvider value={dark}>` over
  * `<box style={{ color: '$text' }}>` silently paints nothing (#119).
+ *
+ * ## Following the desktop
+ *
+ * ```jsx
+ * <ThemeProvider value={light} dark={{ background: '#1e1e1e', text: '#eceff4' }}>
+ * ```
+ *
+ * `dark` **layers over `value`**, so it names only what changes — shape
+ * tokens, the accent, anything the design shares across both schemes stays
+ * written once.
+ *
+ * Giving it is what opts an app in: with no `dark` palette nothing is probed,
+ * no D-Bus connection is opened, and this behaves exactly as it always has.
+ * `colorScheme` pins the choice — `'light'` or `'dark'` — where the app owns
+ * it rather than the desktop, which is what a preference in the app's own
+ * settings wants. `'system'` is the default and means follow.
+ *
+ * The desktop's **accent** is deliberately not adopted on its own: an app
+ * that asked for dark mode did not ask for its buttons to change colour. Take
+ * it explicitly where you want it, and keep a fallback, because most portal
+ * backends do not implement it:
+ *
+ * ```jsx
+ * const { accent } = useSystemAppearance();
+ * <ThemeProvider value={{ ...light, accent: accent ?? light.accent }} dark={dark}>
+ * ```
  */
-export function ThemeProvider({ value, style, children }) {
+export function ThemeProvider({
+  value,
+  dark,
+  colorScheme = 'system',
+  style,
+  children,
+}) {
   const outer = useContext(ThemeContext);
-  const theme = useMemo(() => resolveTheme(value, outer), [outer, value]);
+  // Only an app with somewhere to switch *to* pays for finding out.
+  const follows = Boolean(dark) && colorScheme === 'system';
+  const system = useAppearanceWhen(follows);
+  const wantsDark =
+    colorScheme === 'dark' || (follows && system.colorScheme === 'dark');
+  const theme = useMemo(() => {
+    const base = resolveTheme(value, outer);
+    return dark && wantsDark ? resolveTheme(dark, base) : base;
+  }, [outer, value, dark, wantsDark]);
   const boxStyle = useMemo(() => (style ? [FILL, style] : FILL), [style]);
   return h(
     ThemeContext.Provider,

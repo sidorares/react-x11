@@ -28,6 +28,7 @@ Roughly in the order worth reading them:
 | [`widgets.jsx`](widgets.jsx)         | the gallery: every standard component in one window, with a live `<markdown>` preview                                  |
 | [`menu.jsx`](menu.jsx)               | `MenuBar` and `ContextMenu` over real `<popup>` windows that flip at screen edges — File → Open… is a real file dialog |
 | [`theming.jsx`](theming.jsx)         | the style engine end to end: three themes in light and dark, switched at runtime                                       |
+| [`appearance.jsx`](appearance.jsx)   | follows the desktop's light/dark, accent, contrast and reduced motion — change your theme while it runs                |
 | [`richtext.jsx`](richtext.jsx)       | `<markdown>` with highlighted and math fences, a live `<tex>` formula, JSX `<svg>`, `<image>`                          |
 | [`windows.jsx`](windows.jsx)         | many top-level windows from one React tree, sharing state, closing via `onCloseRequest`                                |
 | [`app.jsx`](app.jsx)                 | the showcase: `SplitPane` + `Tabs` hosting `form`, `widgets` and `tasks` as panels                                     |
