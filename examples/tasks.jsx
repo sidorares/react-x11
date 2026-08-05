@@ -69,8 +69,8 @@ function AddTask() {
           padding: 8,
           borderRadius: 4,
           borderWidth: 1,
-          borderColor: '#b2bec3',
-          backgroundColor: 'white',
+          borderColor: '$border',
+          backgroundColor: '$background',
         }}
       />
       <Button primary label="Add" onPress={add} />
@@ -93,12 +93,10 @@ function TaskRow({ task }) {
       style={{
         padding: 8,
         borderRadius: 4,
-        backgroundColor: hover ? '#eaf2f8' : 'white',
+        backgroundColor: hover ? '$surfaceHover' : '$background',
       }}
     >
-      <text style={{ color: task.done ? '#95a5a6' : '#2d3436' }}>
-        {task.label}
-      </text>
+      <text style={{ color: task.done ? '$dim' : '$text' }}>{task.label}</text>
     </Checkbox>
   );
 }
@@ -130,7 +128,7 @@ export function TasksPanel() {
   return (
     <DispatchContext.Provider value={dispatch}>
       <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
-        <text style={{ fontSize: 20, color: '#2d3436' }}>Tasks</text>
+        <text style={{ fontSize: 20, color: '$text' }}>Tasks</text>
 
         <AddTask />
 
@@ -143,10 +141,10 @@ export function TasksPanel() {
         <scrollview
           style={{
             flexGrow: 1,
-            backgroundColor: 'white',
+            backgroundColor: '$background',
             borderRadius: 8,
             borderWidth: 1,
-            borderColor: '#dfe6e9',
+            borderColor: '$track',
             padding: 6,
             gap: 2,
           }}
@@ -156,7 +154,7 @@ export function TasksPanel() {
           ))}
         </scrollview>
 
-        <text style={{ color: '#7f8c8d' }}>
+        <text style={{ color: '$dim' }}>
           {String(remaining)} remaining — click or Tab + Space to toggle, wheel
           to scroll
         </text>
@@ -171,7 +169,7 @@ function App() {
       width={420}
       height={400}
       title="tasks"
-      style={{ backgroundColor: '#f5f6fa' }}
+      style={{ backgroundColor: '$surfaceHover' }}
     >
       <TasksPanel />
     </window>

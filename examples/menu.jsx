@@ -323,7 +323,7 @@ function App() {
       width={520}
       height={300}
       title="menus"
-      style={{ backgroundColor: '#f5f6fa' }}
+      style={{ backgroundColor: '$surfaceHover' }}
     >
       <box style={{ flexGrow: 1 }}>
         <MenuBar menus={menus} />
@@ -336,18 +336,18 @@ function App() {
             gap: 10,
           }}
         >
-          <text style={{ fontSize: 18, color: '#2d3436' }}>
+          <text style={{ fontSize: 18, color: '$text' }}>
             Right-click anywhere below the bar
           </text>
-          <text style={{ color: '#7f8c8d' }}>
-            last choice: <text style={{ color: '#2980b9' }}>{last}</text>
+          <text style={{ color: '$dim' }}>
+            last choice: <text style={{ color: '$accent' }}>{last}</text>
           </text>
-          <text style={{ color: '#7f8c8d' }}>
+          <text style={{ color: '$dim' }}>
             wrap lines: {wrap ? 'on' : 'off'}
           </text>
-          <text style={{ color: '#7f8c8d' }}>
+          <text style={{ color: '$dim' }}>
             File → Open/Save runs a real dialog, on this machine's{' '}
-            <text style={{ color: '#2980b9' }}>{backend}</text> backend
+            <text style={{ color: '$accent' }}>{backend}</text> backend
           </text>
         </ContextMenu>
       </box>

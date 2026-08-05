@@ -10,6 +10,7 @@
 import React from 'react';
 import { createRoot } from '../Reconciler.js';
 import { setAnimationClock } from '../nodes.js';
+import { setAppearanceForTests } from '../appearance.js';
 
 // x11 and pngjs arrive through ntk rather than as direct dependencies, so
 // they are imported lazily: an app that never runs a pixel test should not
@@ -130,6 +131,7 @@ export async function renderX11(element, options = {}) {
     fonts = null,
     wrap = element?.type !== 'window',
     title = 'react-x11 test',
+    colorScheme = 'light',
     ...rootOptions
   } = options;
 
@@ -143,6 +145,21 @@ export async function renderX11(element, options = {}) {
       ({ server, app } = await createXServerApp({ screen: screenSize, fonts }));
     }
   }
+
+  // **Pinned, and light by default.** react-x11's built-in palette follows
+  // the desktop, so without this every pixel assertion in this suite and in
+  // every application's would be a function of whose machine ran it — green
+  // on a light desktop, red on a dark one, with nothing in the test saying
+  // so. After the app exists, so it wins over `createMockApp`'s own pin.
+  // `colorScheme: 'dark'` renders the other palette; `'system'` releases the
+  // pin, for a test that is *about* what the desktop reports.
+  setAppearanceForTests(
+    colorScheme === 'system'
+      ? null
+      : colorScheme === 'dark'
+        ? { colorScheme: 'dark' }
+        : {},
+  );
 
   const root = await createRoot({ app, ...rootOptions });
   const tree = wrap
@@ -327,6 +344,10 @@ async function unmountEntry(entry) {
 export async function cleanup() {
   restoreFrameClock();
   for (const entry of [...mounted]) await unmountEntry(entry);
+  // Released **after** the roots are down, not before: releasing publishes a
+  // change, every mounted root repaints on one, and a repaint scheduled onto
+  // a connection that is about to close lands after it has.
+  setAppearanceForTests(null);
 }
 
 // --- the animation clock ---------------------------------------------------

@@ -12,7 +12,7 @@ function App() {
       width: 320,
       height: 200,
       title: 'react-x11',
-      style: { backgroundColor: '#f4f4f4' },
+      style: { backgroundColor: '$surfaceHover' },
     },
     h(
       'box',
@@ -27,15 +27,19 @@ function App() {
       },
       h(
         'text',
-        { style: { fontSize: 24, color: '#222' } },
+        { style: { fontSize: 24, color: '$text' } },
         'Hello, ',
         h('text', { style: { color: '#c0392b' } }, 'X11'),
         '!',
       ),
       h(
         'box',
-        { style: { backgroundColor: '#3498db', borderRadius: 6, padding: 10 } },
-        h('text', { style: { color: 'white' } }, 'flexbox via yoga-layout'),
+        { style: { backgroundColor: '$accent', borderRadius: 6, padding: 10 } },
+        h(
+          'text',
+          { style: { color: '$accentText' } },
+          'flexbox via yoga-layout',
+        ),
       ),
     ),
   );

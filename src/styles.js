@@ -549,8 +549,9 @@ export function styleUsesTokens(style) {
   return false;
 }
 
-/** Every `$name` a style mentions, for the DEV report when none of them
- * had a theme to resolve against. */
+/** Every `$name` a style mentions. Not used internally any more — a token
+ * that does not resolve now throws, naming itself — but it is part of the
+ * style surface `src/style.js` publishes for tooling. */
 export function tokenNames(style, out = new Set()) {
   for (const key of Object.keys(style)) {
     const v = style[key];

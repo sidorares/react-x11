@@ -293,6 +293,12 @@ makes provider and token one mechanism rather than two
 palette on their root node as well, so `$tokens` work inside a widget
 subtree — and in a style you pass one — with no provider anywhere.
 
+With no `theme` prop above it at all, a token resolves against **the
+desktop's palette** — `backgroundColor: '$background'` in an app that never
+wrote a `<ThemeProvider>` is dark on a dark desktop, which is how that app
+blends in ([appearance.md](appearance.md)). A token no palette defines is an
+error naming every token the one in force does have.
+
 ## Transitions
 
 `transition` names how long a change takes. A number covers every animatable

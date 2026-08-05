@@ -27,18 +27,18 @@ import { Button, createStyles, Slider, Switch } from '../../src/index.js';
 
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 12, gap: 8 },
-  head: { fontSize: 16, color: '#2d3436' },
-  hint: { fontSize: 11, color: '#7f8c8d' },
+  head: { fontSize: 16, color: '$text' },
+  hint: { fontSize: 11, color: '$dim' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
-  label: { fontSize: 11, color: '#7f8c8d' },
+  label: { fontSize: 11, color: '$dim' },
   grid: {
     flexGrow: 1,
     minHeight: 0,
     gap: 1,
     padding: 4,
-    backgroundColor: '#ffffff',
+    backgroundColor: '$background',
     borderWidth: 1,
-    borderColor: '#dfe6e9',
+    borderColor: '$track',
     borderRadius: 3,
   },
   gridRow: { flexDirection: 'row', gap: 1, flexGrow: 1, flexBasis: 0 },
@@ -178,7 +178,7 @@ export function DamagePanel() {
                     <text
                       style={{
                         ...s.cellText,
-                        color: on ? '#ffffff' : '#b2bec3',
+                        color: on ? '$background' : '$border',
                       }}
                     >
                       {String(j)}

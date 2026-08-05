@@ -27,8 +27,8 @@ import {
   ScrollViewNode,
   TextInputNode,
   TextAreaNode,
+  appearanceChanged,
   flushWindowRestacks,
-  flushTokenChecks,
   windowAttributes,
 } from './nodes.js';
 import { hasDropProps } from './dnd.js';
@@ -41,6 +41,7 @@ import {
 } from './trace-registry.js';
 import { beginStartup } from './startup.js';
 import { beginCompositing, endCompositing } from './compositing.js';
+import { watchAppearance } from './appearance.js';
 import { GlAreaNode } from './glnodes.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
 import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
@@ -160,11 +161,9 @@ const HostConfig = {
   },
 
   // child <window>s that moved in the tree restack here, so a reorder costs
-  // one pass instead of one per insertBefore. The tree is settled here, so
-  // it is also where DEV reports a `$token` that found no theme.
+  // one pass instead of one per insertBefore.
   resetAfterCommit() {
     flushWindowRestacks();
-    flushTokenChecks();
     traceHooks.commitEnd?.();
   },
 
@@ -669,6 +668,14 @@ export async function createRoot(options = {}) {
   // correct itself visibly. One round trip, on a path that is already async.
   await beginCompositing(app);
 
+  // The desktop switching between light and dark reaches the widgets through
+  // React — `useTheme()` subscribes — but the other theme route is the node
+  // tree, which React does not re-render. This is that half: drop the cached
+  // palettes and repaint, above all the window background, which is read from
+  // the palette at paint time. Not awaited, and it starts nothing: the store
+  // is seeded from disk and the ladder runs when something asks.
+  const stopAppearance = watchAppearance(() => appearanceChanged(app));
+
   return {
     app,
     render(element, callback) {
@@ -698,6 +705,7 @@ export async function createRoot(options = {}) {
       Renderer.updateContainerSync(null, container, null, null);
       Renderer.flushSyncWork();
       if (rest.onUncaughtError) setErrorHandler(app, null);
+      stopAppearance();
       endCompositing(app);
       if (owned) {
         unregisterApp(app);

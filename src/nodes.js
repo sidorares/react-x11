@@ -21,7 +21,6 @@ import {
   ease,
   isLayoutProp,
   styleUsesTokens,
-  tokenNames,
   resolveTokens,
   styleHasSizeQueries,
   styleHasSupportsQueries,
@@ -40,6 +39,7 @@ import {
 } from './dnd.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
 import { compositingActive, watchCompositing } from './compositing.js';
+import { baseTheme } from './palette.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
 import { paintCacheFor } from './paintcache.js';
@@ -88,13 +88,6 @@ const STACK_BELOW = 1;
 // Windows whose child stacking order may have gone stale during the commit
 // in progress; drained by flushWindowRestacks from resetAfterCommit.
 const pendingRestack = new Set();
-
-// DEV: nodes that found no theme to resolve their `$tokens` against. The
-// verdict has to wait for the end of the commit, because a node's ancestry
-// is not complete before it — a <popup> is its own root from the moment it
-// is created, and only learns where in the tree it was written when it is
-// attached. Drained by flushTokenChecks from resetAfterCommit.
-const pendingTokenChecks = new Set();
 
 // --- damage -------------------------------------------------------------
 //
@@ -408,15 +401,28 @@ export function flushWindowRestacks() {
   for (const node of nodes) node._restackWindowChildren();
 }
 
-/** DEV: the commit is over, so every node knows its ancestors — a node that
- * still has no theme never had one, and its tokens went nowhere. */
-export function flushTokenChecks() {
-  const nodes = [...pendingTokenChecks];
-  pendingTokenChecks.clear();
-  for (const node of nodes) {
-    if (!node.destroyed && node.root && node._usesTokens && !node.theme) {
-      node._warnTokensWithoutTheme();
-    }
+/**
+ * The desktop switched between light and dark: every node that inherited its
+ * palette rather than being given one has a different one now.
+ *
+ * `_themeChanged()` drops the cached theme and restyles the tokens; the
+ * invalidate is for everything else, above all the window background, which
+ * is read from the palette at paint time and belongs to no style object.
+ *
+ * Widgets do not need this — they read the palette through `useTheme()` and
+ * React re-renders them. This is the other route: an app's own
+ * `backgroundColor: '$background'`, and the window fill under it.
+ */
+export function appearanceChanged(app) {
+  // A desktop change arrives whenever the user makes it, which can be while
+  // the app is shutting down. An invalidate *schedules* a frame, so a repaint
+  // started here would reach the connection a tick after it closed and throw
+  // out of the frame clock, where nothing is waiting to catch it.
+  if (!app || app.X?._closing) return;
+  for (const node of app._rootChildren ?? []) {
+    if (node.destroyed) continue;
+    node._themeChanged();
+    node.root?.invalidate(true, null, 'theme');
   }
 }
 
@@ -658,12 +664,11 @@ export class Node {
     this._usesTokens = this.stylable && styleUsesTokens(this._baseStyle);
     if (this._usesTokens) {
       const theme = this.theme;
-      if (DEV && !theme) pendingTokenChecks.add(this);
       this._baseStyle = resolveTokens(
         this._baseStyle,
         theme,
         `<${this.kind} style>`,
-        Boolean(this.root),
+        this.placed,
       );
     }
     // `disabled` is a prop, not something the pointer does, so it is read
@@ -843,17 +848,45 @@ export class Node {
    * or two without repeating a palette. Popups resolve through their place
    * in the *tree*, not their window, so a menu inherits the theme of the UI
    * that opened it even though it is a separate X window.
+   *
+   * **With no `theme` prop anywhere above, it is the desktop's palette.** So
+   * `backgroundColor: '$background'` works in an app that never wrote a
+   * `<ThemeProvider>`, and means "whatever this desktop's is" — which is the
+   * same answer `useTheme()` gives the widgets, by the other route.
+   *
+   * A detached node has no ancestors yet and so cannot see a provider two
+   * levels up; it still resolves, against the base, and `_themeChanged()` on
+   * attach re-resolves it against the real one.
    */
   get theme() {
     if (this._theme !== undefined) return this._theme;
-    const inherited = this.parent?.theme;
+    const inherited = this.parent ? this.parent.theme : baseTheme();
     const own = this.props.theme;
-    this._theme = own
-      ? inherited
-        ? { ...inherited, ...own }
-        : own
-      : (inherited ?? null);
+    this._theme = own ? { ...inherited, ...own } : inherited;
     return this._theme;
+  }
+
+  /**
+   * Whether this node's ancestry is complete, so a `$token` that does not
+   * resolve is a mistake rather than a node that has not been placed yet.
+   *
+   * For a drawn node that is `root` — set by `_setRoot` when the subtree is
+   * attached to the window that owns it, which is exactly when no further
+   * `theme` prop can appear above it. React builds bottom-up, so having a
+   * *parent* proves nothing: the parent may itself be floating.
+   *
+   * The exception is a `<popup>`, which is its own root from the moment it is
+   * created and only learns where in the tree it was written when it is
+   * attached. Until then its subtree would be judged against the base palette
+   * alone, and a `$panel` from the provider two levels up would throw. Those
+   * resolve provisionally instead, and `_themeChanged()` on attach re-resolves
+   * them. Known tokens resolve either way, so only the *error* is ever
+   * deferred, never the value.
+   */
+  get placed() {
+    const owner = this.isWindow ? this : this.root;
+    if (!owner) return false;
+    return owner.isPopup ? owner.parent != null : true;
   }
 
   /** The owning window resized: re-resolve, since a query block may now
@@ -866,27 +899,6 @@ export class Node {
     if (this.yoga && this.style !== before) {
       applyLayoutStyle(this.yoga, this.style, before);
     }
-  }
-
-  /**
-   * A `$token` with no theme anywhere above it. That is the one theming
-   * mistake nothing else reports: a token the theme does not *have* throws,
-   * but with no theme at all the whole style is quietly stripped and the
-   * node paints its defaults. Once per node — the style stays wrong until
-   * it is edited, and a warning per render would bury it.
-   */
-  _warnTokensWithoutTheme() {
-    if (this._warnedNoTheme) return;
-    this._warnedNoTheme = true;
-    const names = [...tokenNames(flattenStyle(this.props.style))];
-    if (!names.length) return;
-    const [was, they] = names.length > 1 ? ['were', 'they'] : ['was', 'it'];
-    console.warn(
-      `react-x11: <${this.kind}> uses ${names.join(', ')} but no theme is ` +
-        `in force here, so ${they} ${was} dropped. Wrap the tree in ` +
-        '<ThemeProvider value={palette}>, or put a `theme` prop on an ' +
-        'ancestor.',
-    );
   }
 
   /** The theme above or on this node changed: drop the caches and restyle
@@ -5362,7 +5374,10 @@ export class WindowNode extends Node {
           ctx.fillRect(0, 0, width, height);
         }
       }
-      ctx.fillStyle = backgroundColor || 'white';
+      // No `backgroundColor` means the desktop's, not white: a window whose
+      // widgets went dark on a dark desktop must not leave a white rectangle
+      // behind them. An app that named a colour gets the colour it named.
+      ctx.fillStyle = backgroundColor || this.theme.background;
     }
     // repainting the background only where it is about to be drawn over is
     // the other half of the win: a full-window fill is a full-window

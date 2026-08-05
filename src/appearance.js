@@ -121,7 +121,9 @@ function publish(values, source) {
   const next = Object.freeze({ ...NOTHING, ...values, source });
   if (SAME(next, snapshot)) return;
   snapshot = next;
-  if (source !== 'cache') save(next);
+  // What came *off* the disk does not go back onto it, and a pinned test
+  // value must never reach a developer's real cache file.
+  if (source !== 'cache' && source !== 'test') save(next);
   for (const fn of [...watchers]) {
     try {
       fn(snapshot);
@@ -129,6 +131,39 @@ function publish(values, source) {
       // a subscriber that throws must not take the others with it
     }
   }
+}
+
+/**
+ * Pin the appearance, and stop the ladder from running at all.
+ *
+ * `react-x11/test`'s `renderX11` calls this, and that is not a convenience —
+ * it is what keeps a test suite from rendering differently on a developer's
+ * dark desktop. The default palette now follows the system, so without a pin
+ * every pixel assertion in every suite, here and in applications, would be a
+ * function of whoever ran it.
+ *
+ * Pass `null` to release the pin and let the ladder run again.
+ */
+export function setAppearanceForTests(values) {
+  probe = null;
+  // Never touch the developer's own remembered answer either, in either
+  // direction: `publish` will not write a pinned value, and marking the cache
+  // as already checked keeps `load()` from reading one back over it.
+  cacheChecked = true;
+  if (values === null) {
+    cacheChecked = false;
+    // Releasing undoes a *pin*, and only a pin. A real rung's answer is not
+    // this function's to throw away: `cleanup()` releases after every test,
+    // and a suite that resolved the appearance for real would otherwise find
+    // it wiped by the harness that was meant to leave it alone.
+    if (owner === 'test') {
+      owner = null;
+      publish({}, null);
+    }
+    return;
+  }
+  owner = 'test';
+  publish(values, 'test');
 }
 
 // --------------------------------------------------------------------------

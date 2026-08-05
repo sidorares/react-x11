@@ -35,26 +35,26 @@ const s = createStyles({
     flexDirection: 'column',
     gap: 6,
     padding: 10,
-    backgroundColor: '#ffffff',
-    borderColor: '#dfe6e9',
+    backgroundColor: '$background',
+    borderColor: '$track',
     borderWidth: 1,
     borderRadius: 6,
     flexGrow: 1,
     minWidth: 0,
   },
-  heading: { color: '#2d3436', fontSize: 13 },
-  dim: { color: '#7f8c8d', fontSize: 11 },
+  heading: { color: '$text', fontSize: 13 },
+  dim: { color: '$dim', fontSize: 11 },
   button: {
     padding: 6,
-    backgroundColor: '#f5f6fa',
-    borderColor: '#b2bec3',
+    backgroundColor: '$surfaceHover',
+    borderColor: '$border',
     borderWidth: 1,
     borderRadius: 4,
-    color: '#2d3436',
-    ':hover': { backgroundColor: '#e8eaf0' },
+    color: '$text',
+    ':hover': { backgroundColor: '$surfaceActive' },
   },
-  mono: { color: '#2d3436', fontSize: 11 },
-  empty: { color: '#b2bec3', fontSize: 11 },
+  mono: { color: '$text', fontSize: 11 },
+  empty: { color: '$border', fontSize: 11 },
 });
 
 function Button({ label, onClick }) {
@@ -232,7 +232,7 @@ function Inspector() {
       width={720}
       height={420}
       title="react-x11 — clipboard"
-      style={{ backgroundColor: '#f5f6fa' }}
+      style={{ backgroundColor: '$surfaceHover' }}
     >
       <App />
     </window>

@@ -22,20 +22,20 @@ import { createStyles, Switch, Table } from '../../src/index.js';
 
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 16, gap: 10 },
-  head: { fontSize: 18, color: '#2d3436' },
-  hint: { fontSize: 11, color: '#7f8c8d' },
+  head: { fontSize: 18, color: '$text' },
+  hint: { fontSize: 11, color: '$dim' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
   split: { flexDirection: 'row', gap: 12, flexGrow: 1, minHeight: 0 },
   card: {
-    backgroundColor: '#ffffff',
+    backgroundColor: '$background',
     borderWidth: 1,
-    borderColor: '#dfe6e9',
+    borderColor: '$track',
     borderRadius: 4,
     padding: 8,
     gap: 6,
     minHeight: 0,
   },
-  title: { fontSize: 12, color: '#2d3436', flexShrink: 0 },
+  title: { fontSize: 12, color: '$text', flexShrink: 0 },
 });
 
 // --- the big one -----------------------------------------------------------

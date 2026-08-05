@@ -115,7 +115,11 @@ export function ThemingPanel() {
   return (
     // one provider, both channels: the widgets read it with useTheme() and
     // `$canvas`/`$panel` below resolve against the same palette
-    <ThemeProvider value={theme} style={s.root}>
+    // Pinned to this app's own switch, not the desktop's: the whole point
+    // of the example is the toggle in the header. `colorScheme` is how an app
+    // whose settings own the choice says so — and it is the complete opt-out,
+    // so nothing here asks the desktop anything.
+    <ThemeProvider value={theme} colorScheme={mode} style={s.root}>
       <box style={s.bar}>
         <text style={s.title}>Theme</text>
         <Select

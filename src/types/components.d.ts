@@ -59,17 +59,23 @@ export interface Theme {
 }
 
 export interface ThemeProviderProps {
-  /** Merges over the defaults, and over an outer provider. */
+  /**
+   * Merges over the scheme in force — the desktop's palette, or an outer
+   * provider's. So a partial palette names what this app changes and
+   * everything else keeps following the desktop.
+   */
   value?: Partial<Theme>;
   /**
-   * The dark-mode palette, layered over `value` — so it names only what
-   * changes. **Giving it is what makes the app follow the desktop**: with no
-   * `dark` palette nothing is probed and no D-Bus connection is opened.
+   * A palette layered on only when the scheme in force is dark — for a design
+   * whose two schemes are not one recolour of the other. Usually unnecessary:
+   * `value` already layers over the desktop's own light or dark palette.
    */
   dark?: Partial<Theme>;
   /**
    * `'system'` (the default) follows the desktop. `'light'` and `'dark'` pin
-   * it, for an app whose own settings own the choice.
+   * this subtree, for an app whose own settings own the choice — and pinning
+   * is the complete opt-out: nothing under a pinned provider asks the desktop
+   * anything.
    */
   colorScheme?: ColorSchemePreference;
   /**

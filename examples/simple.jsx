@@ -9,7 +9,7 @@ function App() {
       width={320}
       height={200}
       title="react-x11"
-      style={{ backgroundColor: '#f4f4f4' }}
+      style={{ backgroundColor: '$surfaceHover' }}
     >
       <box
         style={{
@@ -20,13 +20,13 @@ function App() {
           padding: 16,
         }}
       >
-        <text style={{ fontSize: 24, color: '#222' }}>
+        <text style={{ fontSize: 24, color: '$text' }}>
           Hello, <text style={{ color: '#c0392b' }}>X11</text>!
         </text>
         <box
-          style={{ backgroundColor: '#3498db', borderRadius: 6, padding: 10 }}
+          style={{ backgroundColor: '$accent', borderRadius: 6, padding: 10 }}
         >
-          <text style={{ color: 'white' }}>flexbox via yoga-layout</text>
+          <text style={{ color: '$accentText' }}>flexbox via yoga-layout</text>
         </box>
       </box>
     </window>

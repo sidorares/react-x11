@@ -31,6 +31,7 @@ import {
 } from '../src/xsettings.js';
 import { useSystemAppearance } from '../src/appearancehooks.js';
 import { ThemeProvider, useTheme } from '../src/components/theme.js';
+import { DarkTheme, DefaultTheme } from '../src/palette.js';
 import { _resetBusState, busRefs, closeBus } from '../src/bus.js';
 import {
   act,
@@ -774,7 +775,13 @@ describe('useSystemAppearance', () => {
         return React.createElement('text', null, colorScheme);
       }
       const app = {};
-      await renderX11(React.createElement(Probe), { fonts: FONTS });
+      // `colorScheme: 'system'` releases the harness pin: every other test in
+      // the repo wants a deterministic palette, and this one is about what the
+      // ladder reports.
+      await renderX11(React.createElement(Probe), {
+        fonts: FONTS,
+        colorScheme: 'system',
+      });
       // The first render happens before anything can have answered — which is
       // the whole reason `systemAppearance()` exists as an imperative call.
       assert.equal(seen[0], 'null:no-preference:null');
@@ -830,7 +837,7 @@ describe('ThemeProvider following the desktop', () => {
             React.createElement(Swatch),
           ),
         ),
-        { fonts: FONTS },
+        { fonts: FONTS, colorScheme: 'system' },
       );
       await settle();
       // radius came from `value`: `dark` names only what changes
@@ -856,7 +863,7 @@ describe('ThemeProvider following the desktop', () => {
           },
           React.createElement(Swatch),
         ),
-        { fonts: FONTS },
+        { fonts: FONTS, colorScheme: 'system' },
       );
       await settle();
       assert.equal(shown(), 'white|12');
@@ -864,11 +871,11 @@ describe('ThemeProvider following the desktop', () => {
     });
   });
 
-  // The opt-in that matters: a provider with one palette must not open a
-  // D-Bus connection, which is what every app that themes its widgets and
-  // does not care about dark mode looks like.
+  // **Pinning is the opt-out**, and it has to be a complete one: an app that
+  // says which scheme it is in should not have react-x11 opening a D-Bus
+  // connection behind it to ask a question whose answer it will ignore.
   test(
-    'no dark palette probes nothing',
+    'a pinned provider probes nothing at all',
     { concurrency: 1, ...needsBroker },
     async () => {
       await withBus(async (address, broker) => {
@@ -878,10 +885,13 @@ describe('ThemeProvider following the desktop', () => {
           await renderX11(
             React.createElement(
               ThemeProvider,
-              { value: { background: 'white', radius: 12 } },
+              {
+                value: { background: 'white', radius: 12 },
+                colorScheme: 'light',
+              },
               React.createElement(Swatch),
             ),
-            { fonts: FONTS },
+            { fonts: FONTS, colorScheme: 'system' },
           );
           await settle();
           await new Promise((r) => setTimeout(r, 60));
@@ -891,10 +901,47 @@ describe('ThemeProvider following the desktop', () => {
             'no connection opened',
           );
           assert.equal(appearanceSnapshot().source, null, 'nothing was probed');
+          assert.equal(shown(), 'white|12');
         } finally {
           await portal.stop();
         }
       });
     },
   );
+
+  // The headline of the whole change: no provider, no props, nothing said —
+  // and the app is dark because the desktop is.
+  test('with no provider at all, the widgets follow the desktop', async () => {
+    const { ctx } = await renderX11(
+      React.createElement(
+        'box',
+        { style: { flexGrow: 1 } },
+        React.createElement(Swatch),
+      ),
+      { fonts: FONTS, colorScheme: 'dark' },
+    );
+    await settle();
+    assert.equal(
+      shown(),
+      `${DarkTheme.background}|${DarkTheme.radius}`,
+      'useTheme() answers with the built-in dark palette',
+    );
+    // And the window fill under them, which is the other route and the one
+    // that would otherwise leave a white rectangle behind dark widgets.
+    await expectPixel(ctx, 2, 2, DarkTheme.background, { tolerance: 2 });
+  });
+
+  test('and light on a light desktop, with the same tree', async () => {
+    const { ctx } = await renderX11(
+      React.createElement(
+        'box',
+        { style: { flexGrow: 1 } },
+        React.createElement(Swatch),
+      ),
+      { fonts: FONTS, colorScheme: 'light' },
+    );
+    await settle();
+    assert.equal(shown(), `${DefaultTheme.background}|${DefaultTheme.radius}`);
+    await expectPixel(ctx, 2, 2, '#ffffff', { tolerance: 2 });
+  });
 });

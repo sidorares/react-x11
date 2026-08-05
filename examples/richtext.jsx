@@ -109,7 +109,7 @@ function App() {
       width={560}
       height={640}
       title={doc.from ? `rich content — ${doc.from}` : 'rich content'}
-      style={{ backgroundColor: 'white' }}
+      style={{ backgroundColor: '$background' }}
     >
       <box
         style={{
@@ -117,7 +117,7 @@ function App() {
           alignItems: 'center',
           gap: 12,
           padding: 12,
-          backgroundColor: '#f4f4f4',
+          backgroundColor: '$surfaceHover',
         }}
       >
         <Logo spin={n * 15} />
@@ -132,7 +132,10 @@ function App() {
           onPress={() => setN((v) => (v % 9) + 1)}
         />
       </box>
-      <scrollview style={{ flexGrow: 1 }}>
+      {/* `<markdown>` draws with ntk's own document palette — its own colours
+          for headings, code, links and quotes — and does not follow this one,
+          so the page it sits on stays light whatever the desktop is. */}
+      <scrollview style={{ flexGrow: 1, backgroundColor: 'white' }}>
         <markdown
           onLink={(href) => console.log('link clicked:', href)}
           style={{ padding: 16 }}
@@ -147,13 +150,13 @@ function App() {
           alignItems: 'center',
           gap: 12,
           padding: 12,
-          backgroundColor: '#f4f4f4',
+          backgroundColor: '$surfaceHover',
         }}
       >
         {/* <image> decodes PNG/JPEG through ntk and uploads once; with only
             one dimension given it keeps the aspect ratio */}
         <image src={PICTURE} style={{ height: 64, borderRadius: 4 }} />
-        <text style={{ color: '#636e72' }}>
+        <text style={{ color: '$dim' }}>
           {
             '<image> — PNG/JPEG, sized by the layout, uploaded to the server once'
           }

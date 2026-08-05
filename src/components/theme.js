@@ -1,104 +1,29 @@
 // Widget components built purely on the host primitives — no reconciler
 // support needed. Plain createElement (no JSX) so the library stays
 // build-step-free for consumers.
+//
+// The palettes themselves are in `../palette.js`, one layer down: a `$token`
+// in a style is resolved by walking the *node* tree, which knows nothing
+// about React, and both routes have to agree on what "no theme was given"
+// means.
 
 import React, { useContext, useMemo, useState } from 'react';
 import { useAppearanceWhen } from '../appearancehooks.js';
-import { stepBeyond } from '../styles.js';
+import { DarkTheme, DefaultTheme, resolveTheme } from '../palette.js';
 import { XK_RETURN } from './keys.js';
 
 const h = React.createElement;
 
-/**
- * The palette every widget reads, and the shape of the controls with it.
- * A theme overrides what it cares about and inherits the rest, so the
- * defaults here are the look the widgets have always had.
- *
- * The shape tokens are what let a theme be more than a recolour: corner
- * radius, border weight, text size and the padding inside a control are
- * most of what separates one platform's buttons from another's.
- */
-const DefaultTheme = {
-  // colour
-  border: '#b2bec3',
-  borderFocus: '#2980b9',
-  background: 'white',
-  text: '#2d3436',
-  dim: '#7f8c8d',
-  hoverBackground: '#2980b9',
-  hoverText: 'white',
-  accent: '#2980b9',
-  accentHover: '#1f6693',
-  accentText: 'white',
-  surfaceHover: '#f1f2f6',
-  track: '#dfe6e9',
-  // The pressed step of each fill family: rest → …Hover → …Active. Every
-  // family that has a hover needs one, because a press is the state a
-  // control has to show *before* it has done anything — the activation
-  // itself only happens on the release, and half a second can pass in
-  // between.
-  //
-  // Written out here, but a theme almost never sets them: `resolveTheme`
-  // takes the step the palette's own hover made and takes it again. So a
-  // palette that names `accentHover` and stops there — which is every theme
-  // in `examples/themes.js` and every recipe in docs/ecosystem/theming.md —
-  // gets a press that matches it rather than one inherited from these.
-  accentActive: '#154c6d',
-  surfaceActive: '#e3e5ed',
-  dimActive: '#4c5a57',
-  // The keyboard focus ring. Read by the renderer, not by the widgets: any
-  // focusable node under this palette draws it on `:focus-visible`, so a
-  // plain `<box focusable>` an application writes is indicated too, and a
-  // theme restyles every ring in the app from here.
-  focusRing: '#2980b9',
-  focusRingWidth: 2,
-  focusRingOffset: 1,
-  // shape
-  radius: 4,
-  radiusSmall: 3,
-  borderWidth: 1,
-  fontSize: 14,
-  paddingX: 16,
-  paddingY: 8,
-};
+export { DarkTheme, DefaultTheme, resolveTheme };
 
-// Which pressed token is derived from which pair, when the palette does not
-// name it: the resting colour of the family and the hover it steps to.
-const PRESSED_FROM = {
-  accentActive: ['accent', 'accentHover'],
-  surfaceActive: ['background', 'surfaceHover'],
-  dimActive: ['border', 'dim'],
-};
-
-/**
- * Merge a partial palette, filling in the pressed step for any family whose
- * colours moved without it.
- *
- * The rule per token: an explicit value wins; otherwise, if this palette
- * touched either colour the step is measured between, it is re-derived; and
- * otherwise whatever was already in force stands. That last clause is what
- * keeps an inner `<ThemeProvider value={{ fontSize: 18 }}>` from throwing
- * away a pressed colour an outer one set by hand.
- *
- * The alternative was three more tokens every theme has to remember, and a
- * theme that forgets one does not fail loudly — it just stops answering
- * presses, in the one state a control has to show while nothing else can.
- */
-export function resolveTheme(value, base = DefaultTheme) {
-  if (!value) return base;
-  const merged = { ...base, ...value };
-  for (const [token, [rest, hover]] of Object.entries(PRESSED_FROM)) {
-    if (value[token] != null) continue;
-    if (value[rest] == null && value[hover] == null) continue;
-    merged[token] = stepBeyond(merged[rest], merged[hover]);
-  }
-  return merged;
-}
-
-// Always a complete palette: the context default is the full DefaultTheme
-// and `ThemeProvider` merges before it publishes, so nothing downstream has
-// to merge again.
-const ThemeContext = React.createContext(DefaultTheme);
+// `null` means **no provider above here**, which is different from "the
+// default palette": with nothing said, the palette to use is the desktop's,
+// and that is not a constant. `useTheme()` substitutes it, and subscribes so
+// the widget re-renders when the desktop changes.
+//
+// A provider always publishes a complete palette, so nothing downstream ever
+// has to merge again.
+const ThemeContext = React.createContext(null);
 
 // The provider's box fills its parent, which is what an app-level provider
 // wants; `style` is there for the ones that wrap a single control.
@@ -106,8 +31,8 @@ const FILL = Object.freeze({ flexGrow: 1 });
 
 /**
  * <ThemeProvider value={palette}> — the palette everything below reads, by
- * both routes at once. A partial palette merges over the defaults, and over
- * an outer provider, exactly as a nested `theme` prop merges in the tree.
+ * both routes at once. A partial palette merges over whatever is already in
+ * force, exactly as a nested `theme` prop merges in the tree.
  *
  * There are two consumers and they are not the same mechanism: widgets read
  * React context through `useTheme()`, while a `$token` in a style resolves
@@ -117,30 +42,39 @@ const FILL = Object.freeze({ flexGrow: 1 });
  * Skip the second and `<ThemeProvider value={dark}>` over
  * `<box style={{ color: '$text' }}>` silently paints nothing (#119).
  *
- * ## Following the desktop
+ * ## What "already in force" means
+ *
+ * **The desktop's palette.** With no provider at all an app is dark on a dark
+ * desktop, so a provider that names an accent and a corner radius keeps
+ * following the desktop for everything it did not name — which is what an app
+ * that wants to look like it belongs there wants, and what it would have had
+ * to write `dark={…}` by hand for otherwise.
+ *
+ * `colorScheme` is the override, for an app that owns the choice rather than
+ * the desktop — a preference in its own settings, or a design that only works
+ * one way:
  *
  * ```jsx
- * <ThemeProvider value={light} dark={{ background: '#1e1e1e', text: '#eceff4' }}>
+ * <ThemeProvider value={brand} colorScheme="light">   // never follows
+ * <ThemeProvider value={brand} colorScheme={settings.theme}>
  * ```
  *
- * `dark` **layers over `value`**, so it names only what changes — shape
- * tokens, the accent, anything the design shares across both schemes stays
- * written once.
+ * `dark` is the other half: a palette layered on only when the scheme in
+ * force is dark, for a design whose two schemes are not one recolour of the
+ * other.
  *
- * Giving it is what opts an app in: with no `dark` palette nothing is probed,
- * no D-Bus connection is opened, and this behaves exactly as it always has.
- * `colorScheme` pins the choice — `'light'` or `'dark'` — where the app owns
- * it rather than the desktop, which is what a preference in the app's own
- * settings wants. `'system'` is the default and means follow.
+ * ```jsx
+ * <ThemeProvider value={light} dark={{ background: '#101418' }}>
+ * ```
  *
- * The desktop's **accent** is deliberately not adopted on its own: an app
- * that asked for dark mode did not ask for its buttons to change colour. Take
- * it explicitly where you want it, and keep a fallback, because most portal
- * backends do not implement it:
+ * The desktop's **accent** is deliberately not adopted on its own: an app in
+ * dark mode did not ask for its buttons to change colour, and most portal
+ * backends report no accent at all. Take it explicitly where you want it, and
+ * keep a fallback:
  *
  * ```jsx
  * const { accent } = useSystemAppearance();
- * <ThemeProvider value={{ ...light, accent: accent ?? light.accent }} dark={dark}>
+ * <ThemeProvider value={{ ...brand, accent: accent ?? brand.accent }}>
  * ```
  */
 export function ThemeProvider({
@@ -151,15 +85,25 @@ export function ThemeProvider({
   children,
 }) {
   const outer = useContext(ThemeContext);
-  // Only an app with somewhere to switch *to* pays for finding out.
-  const follows = Boolean(dark) && colorScheme === 'system';
+  // **Pinning is the complete opt-out.** A provider that names its own scheme
+  // subscribes to nothing, and the widgets under it read the provided palette
+  // rather than the store — so an app that does not want react-x11 asking the
+  // desktop anything says `colorScheme="light"` once at the top.
+  const follows = colorScheme === 'system';
   const system = useAppearanceWhen(follows);
   const wantsDark =
     colorScheme === 'dark' || (follows && system.colorScheme === 'dark');
-  const theme = useMemo(() => {
-    const base = resolveTheme(value, outer);
-    return dark && wantsDark ? resolveTheme(dark, base) : base;
-  }, [outer, value, dark, wantsDark]);
+  const theme = useMemo(
+    () =>
+      // An outer provider is the base; with none, the base is the scheme's
+      // own built-in palette. So `value` names what this app changes and
+      // everything else keeps following the desktop.
+      resolveTheme(
+        dark && wantsDark ? { ...value, ...dark } : value,
+        outer ?? (wantsDark ? DarkTheme : DefaultTheme),
+      ),
+    [outer, value, dark, wantsDark],
+  );
   const boxStyle = useMemo(() => (style ? [FILL, style] : FILL), [style]);
   return h(
     ThemeContext.Provider,
@@ -188,16 +132,25 @@ function planted(children, theme, style) {
 }
 
 /**
- * The palette in force here — already merged over the defaults and over any
- * outer provider, and the same object the provider planted in the tree, so
- * `useTheme()` and a `$token` always read one palette.
+ * The palette in force here — already merged over any outer provider, and the
+ * same object the provider planted in the tree, so `useTheme()` and a `$token`
+ * always read one palette.
+ *
+ * **With no provider it is the desktop's**, and this re-renders when the
+ * desktop changes, which is what makes a react-x11 app that says nothing
+ * about colour go dark on a dark desktop. `node.theme` in `nodes.js` answers
+ * the same question for the other route.
  *
  * Identity matters: widgets plant what this returns on their own root node,
  * and a fresh object every render would re-resolve every `$token` beneath it
- * and defeat the resolution cache.
+ * and defeat the resolution cache. Both built-in palettes are module
+ * constants, so the unprovided answer is stable too.
  */
 export function useTheme() {
-  return useContext(ThemeContext);
+  const provided = useContext(ThemeContext);
+  const system = useAppearanceWhen(provided == null);
+  if (provided) return provided;
+  return system.colorScheme === 'dark' ? DarkTheme : DefaultTheme;
 }
 
 /**

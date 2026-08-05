@@ -217,11 +217,11 @@ function Cell({ index, value, gaugeHeight, gaugeSvg }) {
         padding: 8,
         borderRadius: 10,
         borderWidth: 1,
-        borderColor: '#dfe6e9',
-        backgroundColor: 'white',
+        borderColor: '$track',
+        backgroundColor: '$background',
       }}
     >
-      <text style={{ fontSize: 11, color: '#7f8c8d' }}>{`#${index}`}</text>
+      <text style={{ fontSize: 11, color: '$dim' }}>{`#${index}`}</text>
       {kind === 0 && <Gauge value={value} height={gaugeHeight} />}
       {kind === 1 && (
         <Slider value={Math.round(value * 100)} min={0} max={100} />
@@ -337,7 +337,7 @@ function useChurn(running, windowRef) {
 function Field({ label, children }) {
   return (
     <box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      <text style={{ color: '#7f8c8d', fontSize: 12 }}>{label}</text>
+      <text style={{ color: '$dim', fontSize: 12 }}>{label}</text>
       {children}
     </box>
   );
@@ -352,19 +352,19 @@ function Readout({ stats, routing }) {
         gap: 16,
         padding: 8,
         borderRadius: 6,
-        backgroundColor: '#2d3436',
+        backgroundColor: '$text',
       }}
     >
-      <text style={{ color: '#dfe6e9', fontSize: 12 }}>
+      <text style={{ color: '$track', fontSize: 12 }}>
         {cold ? 'idle — turn on churn' : `${stats.fps} fps`}
       </text>
-      <text style={{ color: '#dfe6e9', fontSize: 12 }}>
+      <text style={{ color: '$track', fontSize: 12 }}>
         {`paint ${stats.paint.toFixed(2)}ms`}
       </text>
-      <text style={{ color: '#74b9ff', fontSize: 12 }}>
+      <text style={{ color: '$accent', fontSize: 12 }}>
         {`server fence ${stats.fence.toFixed(2)}ms (p95 ${stats.p95.toFixed(1)})`}
       </text>
-      <text style={{ color: '#b2bec3', fontSize: 12 }}>{routing}</text>
+      <text style={{ color: '$border', fontSize: 12 }}>{routing}</text>
     </box>
   );
 }
@@ -422,7 +422,7 @@ function App() {
       width={1000}
       height={780}
       title="react-x11 — rasterization gate"
-      style={{ backgroundColor: '#f5f6fa' }}
+      style={{ backgroundColor: '$surfaceHover' }}
       // Without this the WM's close button takes the window away and leaves
       // the process running: `useFrameStats` holds a 250ms interval, which
       // is enough to keep node's event loop alive on its own. Opting into
@@ -438,7 +438,7 @@ function App() {
       }}
     >
       <box style={{ padding: 12, gap: 10 }}>
-        <text style={{ fontSize: 18, color: '#2d3436' }}>
+        <text style={{ fontSize: 18, color: '$text' }}>
           Rasterization gate — ntk#177
         </text>
         <box style={{ flexDirection: 'row', gap: 20, alignItems: 'center' }}>
@@ -468,7 +468,7 @@ function App() {
               onChange={(ev) => setCount(ev.value)}
               style={{ width: 130 }}
             />
-            <text style={{ color: '#2d3436', fontSize: 12 }}>{`${count}`}</text>
+            <text style={{ color: '$text', fontSize: 12 }}>{`${count}`}</text>
           </Field>
         </box>
 
@@ -485,7 +485,7 @@ function App() {
               onChange={(ev) => setGaugeHeight(ev.value)}
               style={{ width: 180 }}
             />
-            <text style={{ color: '#2d3436', fontSize: 12 }}>
+            <text style={{ color: '$text', fontSize: 12 }}>
               {`${gaugeWidth(gaugeHeight)}×${gaugeHeight} = ${
                 gaugeWidth(gaugeHeight) * gaugeHeight
               }px`}
@@ -512,7 +512,7 @@ function App() {
                 onChange={(ev) => setMaxAreaSide(ev.value)}
                 style={{ width: 180 }}
               />
-              <text style={{ color: '#2d3436', fontSize: 12 }}>
+              <text style={{ color: '$text', fontSize: 12 }}>
                 {`${maxAreaSide}² = ${maxAreaSide * maxAreaSide}px`}
               </text>
             </Field>
@@ -526,7 +526,7 @@ function App() {
                 style={{ width: 180 }}
               />
               <text
-                style={{ color: '#2d3436', fontSize: 12 }}
+                style={{ color: '$text', fontSize: 12 }}
               >{`${bytesPerEdge}`}</text>
             </Field>
           </box>
