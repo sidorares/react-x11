@@ -155,7 +155,11 @@ test('a tracked popup follows a scrolled ancestor, while the trigger stays visib
     () => popupRef.current.y === before.y - 30,
     `the popup following the scroll (got ${popupRef.current.y}, want ${before.y - 30})`,
   );
-  assert.strictEqual(popupRef.current.x, before.x, 'x unaffected by a vertical scroll');
+  assert.strictEqual(
+    popupRef.current.x,
+    before.x,
+    'x unaffected by a vertical scroll',
+  );
 
   await x11Root.unmount();
 });
@@ -221,7 +225,11 @@ test("a tracked popup follows the trigger's own layout moving under it", async (
     () => popupRef.current.y === before.y + 40,
     `the popup following the trigger down (got ${popupRef.current.y}, want ${before.y + 40})`,
   );
-  assert.strictEqual(popupRef.current.x, before.x, 'x unaffected by a vertical reflow');
+  assert.strictEqual(
+    popupRef.current.x,
+    before.x,
+    'x unaffected by a vertical reflow',
+  );
 
   await x11Root.unmount();
 });
@@ -286,7 +294,10 @@ test('a tracked popup follows the owner window when it moves', async () => {
     await settle(app);
 
     const before = { x: popupRef.current.x, y: popupRef.current.y };
-    assert.ok(before.x > 0 || before.y > 0, 'the popup measured somewhere real');
+    assert.ok(
+      before.x > 0 || before.y > 0,
+      'the popup measured somewhere real',
+    );
 
     app.X.ConfigureWindow(wnd.id, { x: 90, y: 55 });
     await waitFor(() => wnd.x === 90, 'the move ConfigureNotify');
