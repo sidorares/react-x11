@@ -160,15 +160,22 @@ const { accent } = useSystemAppearance();
 ### Resizing
 
 The colour a window is _painted_ is only half of it. Dragging a window larger
-exposes area before the app can possibly have drawn it, and X fills that area
-with the window's background **attribute** in the meantime — so a window that
-never set one flashes the server's default on every drag of the corner, which
-on a dark palette is a bright rectangle.
+exposes area before the app can possibly have drawn it, and something has to
+be in that area meanwhile — so a window that never says what flashes a default
+on every drag of the corner, which on a dark palette is a bright rectangle.
 
-react-x11 sets it to the colour that is about to be painted there — the
-window's own `backgroundColor`, or the palette's — and keeps it in step when
-either moves. Nothing to do; it is worth knowing only because it is the one
-piece of the palette the _server_ holds a copy of.
+There are two copies of that colour, because a window here is double-buffered:
+the X **attribute** the server paints exposed area with, and the colour ntk
+clears the part of its backing store that a grow adds. react-x11 sets both —
+to the window's own `backgroundColor`, or the palette's — and keeps them in
+step when either moves. Nothing to do; it is worth knowing only because they
+are the pieces of the palette that live outside this renderer.
+
+Needs **ntk >= 6.6.1**, where `setBackgroundPixel` sets the pair together.
+Before that the backing store cleared to the screen's white whatever the
+window said, so enlarging a dark window flashed a white strip — and it
+survived, because a grow inside the pixmap's headroom reallocates nothing and
+so nothing damages it.
 
 ### What does not follow
 

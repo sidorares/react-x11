@@ -1053,9 +1053,10 @@ describe('ThemeProvider following the desktop', () => {
 
   // **The strip a resize exposes**, measured where it actually comes from.
   // The X window's background attribute is not what is on screen: ntk
-  // double-buffers, grows its backing pixmap when the window outgrows it, and
-  // fills the new part through a GC it creates once at the screen's *white*
-  // pixel. That fill is what a drag of the corner shows until the next frame.
+  // double-buffers, and it is the backing pixmap's newly grown area that a
+  // drag of the corner shows until the next frame. It used to be cleared to
+  // the screen's white whatever the window said — `setBackgroundPixel` sets
+  // both halves at once now.
   test('a resize does not expose white', async () => {
     const { app } = await renderX11(
       React.createElement('box', { style: { flexGrow: 1 } }),
@@ -1064,11 +1065,9 @@ describe('ThemeProvider following the desktop', () => {
     await settle();
     const wnd = app._rootChildren[0].window;
     const X = app.X;
-    if (wnd._clearGc == null || wnd._backing == null) {
-      // ntk's internals moved; the fix is aimed at something that is not
-      // there any more, and saying so beats passing quietly.
-      assert.fail('ntk no longer has _clearGc/_backing — revisit the fix');
-    }
+    // The pixmap is what is on screen, so it is what has to be inspected;
+    // nothing here depends on it any more, ntk owns the clearing (ntk#209).
+    assert.ok(wnd._backing != null, 'ntk still double-buffers');
 
     // Past the 128px backing granularity, so this is a *reallocation* and not
     // spare headroom being used up.
