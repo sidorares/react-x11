@@ -5,7 +5,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTheme } from './theme.js';
 import { changeEvent } from './change.js';
-import { measureLabel, screenOf, useAnchor } from './anchor.js';
+import {
+  measureLabel,
+  screenOf,
+  useAnchor,
+  useAnchorTracking,
+} from './anchor.js';
 import { DEFAULT_TEXT_STYLE } from '../styles.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
@@ -158,18 +163,20 @@ export function Select({
   const menuHeight = Math.min(contentHeight, MAX_MENU_HEIGHT);
   const scrolls = contentHeight > MAX_MENU_HEIGHT;
 
+  // shared anchoring: also flips the menu above the trigger when there is
+  // no room below, and slides it left when the menu is wider than the
+  // trigger and would otherwise open off the right edge
+  const menuAnchorOptions = () => ({
+    placement: 'bottom',
+    height: menuHeight + 2,
+    width: menuWidth(triggerRef.current, normalized, value, scrolls),
+  });
+
   const close = () => setOpen(false);
   const openMenu = () => {
     const node = triggerRef.current;
     if (!node) return;
-    // shared anchoring: also flips the menu above the trigger when there is
-    // no room below, and slides it left when the menu is wider than the
-    // trigger and would otherwise open off the right edge
-    const rect = measureAnchor({
-      placement: 'bottom',
-      height: menuHeight + 2,
-      width: menuWidth(node, normalized, value, scrolls),
-    });
+    const rect = measureAnchor(menuAnchorOptions());
     if (!rect) return;
     setAnchor(rect);
     const selected = normalized.findIndex((o) => o.value === value);
@@ -177,6 +184,16 @@ export function Select({
     setOpen(true);
   };
   const toggle = () => (open ? close() : openMenu());
+
+  // keeps the menu under the trigger for as long as it is open: a scrolled
+  // ancestor, the trigger's own layout moving it (a neighbouring field
+  // wrapping to a second line), or the owner window being nudged by the
+  // window manager or a script would otherwise leave it hanging in place.
+  // If the trigger itself scrolls out of view, the menu closes instead of
+  // following it there — a popup is a real window, not something clipped
+  // by the trigger's ancestors, so it would otherwise hang over content it
+  // no longer points at.
+  useAnchorTracking(triggerRef, open, menuAnchorOptions, setAnchor, close);
 
   const emit = (next) => onChange?.(changeEvent('select-one', name, next));
 

@@ -1,7 +1,7 @@
 // Popup geometry: where to put a <popup> anchored to a drawn node, and
 // how big to make it around a measured label.
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 /** The X screen the node's window lives on, if reachable (the smoke-test
  *  mock app has no screen geometry — callers must cope with null). */
@@ -143,6 +143,81 @@ export function centerRect(node, { width, height }) {
  */
 export function useAnchor(ref) {
   return useCallback((options) => anchorRect(ref.current, options), [ref]);
+}
+
+function sameAnchorRect(a, b) {
+  return (
+    a === b ||
+    (a != null &&
+      b != null &&
+      a.x === b.x &&
+      a.y === b.y &&
+      a.width === b.width &&
+      a.height === b.height &&
+      a.placement === b.placement)
+  );
+}
+
+/**
+ * useAnchorTracking(ref, active, getOptions, setRect, onOutOfView) — keeps a
+ * popup's `anchorRect` live for as long as `active`, instead of the one-shot
+ * measure every caller used to take at open time. A trigger inside a
+ * scrolled viewport, one whose own layout moves it (a neighbouring field
+ * wrapping to a second line), or an owner window nudged by the window
+ * manager or a script all leave a popup that was only ever measured once
+ * hanging over stale ground.
+ *
+ * Subscribes to the anchoring node's owner window (`WindowNode.onAnchorChange`,
+ * `nodes.js`) rather than polling: that fires exactly on the events which
+ * can actually move the rect — a layout pass and a fresh `_screenOrigin` —
+ * so a still trigger costs nothing and a moved one is caught the same frame.
+ * `getOptions` is read fresh through a ref on every notification, so callers
+ * do not need to memoize it; returning a falsy value skips that tick (the
+ * ref not being ready yet, say). `setRect` only runs when the measured rect
+ * actually differs, so it will not re-render (or re-`ConfigureWindow` the
+ * popup) for a change that turned out not to move anything.
+ *
+ * A popup is a real X window, not a web element clipped by its ancestors'
+ * overflow — following a trigger that has scrolled out of view would leave
+ * it floating over content it no longer belongs to, detached from anything
+ * the user can see it points at. So once the trigger is entirely past a
+ * clipping ancestor's own bounds or past the owner window itself
+ * (`Node._offscreen()`, the same check paint culling uses), tracking calls
+ * `onOutOfView` instead of measuring — closing the popup, or hiding it, is
+ * the caller's call — and does not resume until re-opened. With no
+ * `onOutOfView` this just stops updating rather than snapping to a rect
+ * that no longer means anything.
+ */
+export function useAnchorTracking(
+  ref,
+  active,
+  getOptions,
+  setRect,
+  onOutOfView,
+) {
+  const measure = useAnchor(ref);
+  const getOptionsRef = useRef(getOptions);
+  getOptionsRef.current = getOptions;
+  const onOutOfViewRef = useRef(onOutOfView);
+  onOutOfViewRef.current = onOutOfView;
+
+  useEffect(() => {
+    if (!active) return undefined;
+    const root = ref.current?.root;
+    if (!root?.onAnchorChange) return undefined;
+    return root.onAnchorChange(() => {
+      const node = ref.current;
+      if (node?._offscreen?.()) {
+        onOutOfViewRef.current?.();
+        return;
+      }
+      const options = getOptionsRef.current();
+      if (!options) return;
+      const next = measure(options);
+      if (!next) return;
+      setRect((prev) => (sameAnchorRect(prev, next) ? prev : next));
+    });
+  }, [active, ref, measure, setRect]);
 }
 
 /** Measured size of a single-line label, for sizing a popup around it.

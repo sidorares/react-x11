@@ -11,6 +11,7 @@ import {
   SAFE_HOVER_DELAY,
   screenPoint,
   useAnchor,
+  useAnchorTracking,
 } from './anchor.js';
 
 const h = React.createElement;
@@ -80,15 +81,30 @@ export function Tooltip({
   // a pending timer must not outlive the component
   useEffect(() => cancel, []);
 
-  const show = () => {
+  const tooltipAnchorOptions = () => {
     const node = ref.current;
-    if (!node || !label) return;
+    if (!node || !label) return null;
     const text = measureLabel(node, label, { size: fontSize });
     const width = Math.ceil(text.width) + TOOLTIP_PADDING_X * 2 + 2;
     const height = Math.ceil(text.height) + TOOLTIP_PADDING_Y * 2 + 2;
-    const next = measureAnchor({ placement, align: 'center', width, height });
+    return { placement, align: 'center', width, height };
+  };
+
+  const show = () => {
+    const options = tooltipAnchorOptions();
+    if (!options) return;
+    const next = measureAnchor(options);
     if (next) setRect(next);
   };
+
+  // keeps the tooltip pinned to its trigger for as long as it is shown: a
+  // scrolled ancestor, the trigger's own layout moving it, or the owner
+  // window being nudged by the window manager or a script would otherwise
+  // leave it pointing at empty space. If the trigger scrolls out of view
+  // entirely, the tooltip hides instead of following it there — unlike a
+  // web tooltip it is a real window and can drift past the edge of the
+  // document it annotates, which reads as a stray popup rather than a hint.
+  useAnchorTracking(ref, Boolean(rect), tooltipAnchorOptions, setRect, hide);
 
   const onMouseEnter = () => {
     cancel();

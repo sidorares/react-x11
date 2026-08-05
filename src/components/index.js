@@ -3,7 +3,12 @@
 // theme.js (palette + control props), anchor.js (popup geometry),
 // typeahead.js and keys.js.
 export { ThemeProvider, useTheme } from './theme.js';
-export { anchorRect, centerRect, useAnchor } from './anchor.js';
+export {
+  anchorRect,
+  centerRect,
+  useAnchor,
+  useAnchorTracking,
+} from './anchor.js';
 export { useDropTarget, useDragSource } from './dnd.js';
 export { Button } from './Button.js';
 export { Dialog } from './Dialog.js';
