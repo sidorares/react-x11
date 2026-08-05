@@ -7,6 +7,20 @@ export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
 export { useSessionBus, useSystemBus } from './bushooks.js';
 export {
+  NoPortalError,
+  PortalCancelledError,
+  hasService,
+  portalRequest,
+} from './portal.js';
+export {
+  NoFileDialogError,
+  fileDialogBackend,
+  openFile,
+  saveFile,
+  selectFolder,
+} from './filedialog.js';
+export { useFileDialog } from './filedialoghooks.js';
+export {
   useDropTarget,
   useDragSource,
   Select,

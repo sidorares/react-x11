@@ -7,6 +7,7 @@ export { anchorRect, centerRect, useAnchor } from './anchor.js';
 export { useDropTarget, useDragSource } from './dnd.js';
 export { Button } from './Button.js';
 export { Dialog } from './Dialog.js';
+export { FileDialog } from './FileDialog.js';
 export { Checkbox } from './Checkbox.js';
 export { Radio, RadioGroup } from './Radio.js';
 export { Switch } from './Switch.js';
