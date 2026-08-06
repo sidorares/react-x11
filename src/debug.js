@@ -239,6 +239,63 @@ function stackForSeq(X, seq16) {
   return null;
 }
 
+// --- the rounded-box fast path ------------------------------------------
+
+/**
+ * Every 2d context this app paints windows through. react-x11 caches one
+ * per window node (nodes.js), which is where ntk keeps `shapeStats`.
+ */
+function contextsOf(app) {
+  return (app?._rootChildren ?? [])
+    .map((node) => node?._ctx)
+    .filter((ctx) => ctx?.shapeStats);
+}
+
+/** `{ hits, misses }` summed over an app's contexts; zeroes on older ntk. */
+function readShapes(app) {
+  const total = { hits: 0, misses: {} };
+  for (const ctx of contextsOf(app)) {
+    const { hits = 0, misses = {} } = ctx.shapeStats;
+    total.hits += hits;
+    for (const [reason, count] of Object.entries(misses)) {
+      total.misses[reason] = (total.misses[reason] ?? 0) + count;
+    }
+  }
+  return total;
+}
+
+/**
+ * One human line for a `stats.shapes` tally, or null when nothing drew a
+ * rounded box at all. A bail-out is a silent perf cliff — a box that misses
+ * the fast path is rasterized as a polygon instead — so the reasons are
+ * spelled out rather than summed: `gradient`, `transform`, `clip-mask`,
+ * `fractional`, `dashes`, `radius-cap`, `composite-op`, `geometry`,
+ * `radii-mix`, `join`. docs/debugging.md explains what each one means.
+ */
+export function formatShapes(shapes) {
+  if (!shapes) return null;
+  const missed = Object.entries(shapes.misses ?? {}).sort(
+    (a, b) => b[1] - a[1],
+  );
+  const total = missed.reduce((sum, [, count]) => sum + count, 0);
+  if (!shapes.hits && !total) return null;
+  const why = missed.map(([reason, count]) => `${reason} ${count}`).join(', ');
+  return (
+    `${shapes.hits} fast (glyph+rect), ${total} fell back` +
+    (total ? ` (${why})` : '')
+  );
+}
+
+/** b - a, clamped at zero: a context replaced mid-trace restarts at 0. */
+function shapesDelta(a, b) {
+  const delta = { hits: Math.max(0, b.hits - a.hits), misses: {} };
+  for (const [reason, count] of Object.entries(b.misses)) {
+    const grew = count - (a.misses[reason] ?? 0);
+    if (grew > 0) delta.misses[reason] = grew;
+  }
+  return delta;
+}
+
 // --- the session --------------------------------------------------------
 
 const usec = () => Math.round(performance.now() * 1000);
@@ -256,7 +313,17 @@ function createSession({ sink, path }) {
     bytesIn: 0,
     /** decoded request name -> count, e.g. 'Render.CompositeGlyphs32' */
     byOpcode: new Map(),
+    /**
+     * ntk's rounded-rect fast path (ntk >= 6.7.0): boxes drawn as cached
+     * corner glyphs + FillRectangles, and the ones that fell back to
+     * polygon rasterization, by reason. Zeroes when the toolkit predates
+     * it — see collectShapes.
+     */
+    shapes: { hits: 0, misses: {} },
   };
+  /** app -> per-context shapeStats at attach time, so a trace started mid
+   * session reports its own window rather than the process's history */
+  const shapeBaselines = new Map();
   const chrome = sink === 'chrome' ? [] : null;
   let dropped = 0;
   let frames = 0;
@@ -276,6 +343,15 @@ function createSession({ sink, path }) {
 
   return {
     stats,
+
+    /**
+     * Take an app's fast-path counters as the zero point. Contexts are
+     * created lazily on first paint, so a window that has not painted yet
+     * simply has no baseline and counts in full.
+     */
+    watchApp(app) {
+      if (app) shapeBaselines.set(app, readShapes(app));
+    },
 
     request(name, bytes) {
       stats.requests += 1;
@@ -382,6 +458,14 @@ function createSession({ sink, path }) {
     finish() {
       if (finished) return stats;
       finished = true;
+      for (const [app, baseline] of shapeBaselines) {
+        const delta = shapesDelta(baseline, readShapes(app));
+        stats.shapes.hits += delta.hits;
+        for (const [reason, count] of Object.entries(delta.misses)) {
+          stats.shapes.misses[reason] =
+            (stats.shapes.misses[reason] ?? 0) + count;
+        }
+      }
       if (sink === 'summary') {
         const top = [...stats.byOpcode.entries()]
           .sort((a, b) => b[1] - a[1])
@@ -395,6 +479,8 @@ function createSession({ sink, path }) {
         for (const [name, count] of top) {
           line(`  ${String(count).padStart(7)}  ${name}`);
         }
+        const shapeLine = formatShapes(stats.shapes);
+        if (shapeLine) line(`  rounded boxes: ${shapeLine}`);
       }
       if (chrome) {
         if (dropped) {
@@ -494,6 +580,10 @@ export function startTrace(options = {}) {
   const attach = (a) => {
     const detach = attachApp(a, session, { seq2stack });
     if (detach) detachers.push(detach);
+    // independent of the pack-stream hook: the fast path is counted by the
+    // toolkit, not observed on the wire, so a mock app with no stream to
+    // wrap can still report it
+    session.watchApp(a);
   };
   const unsubscribe = app ? null : onApp(attach);
   if (app) attach(app);
