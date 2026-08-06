@@ -146,6 +146,10 @@ export const TEXT_LAYOUT_PROPS = new Set([
   'fontSize',
   'fontWeight',
   'fontStyle',
+  // a variable font's axes, `{ wght: 460 }` — the `wght` axis is already
+  // driven by `fontWeight`, so this is for the rest. Compared by value, not
+  // identity, since it is written as an object literal in a render
+  'fontVariationSettings',
   'textAlign',
   'lineHeight',
   // read by TextNode rather than passed to ntk: it trims the box the layout
@@ -672,6 +676,9 @@ export function textStyleFrom(props, inherited) {
     size: props.fontSize ?? inherited.size,
     weight: props.fontWeight ?? inherited.weight,
     style: props.fontStyle ?? inherited.style,
+    // ntk's name for it is `variations`; the prop is spelled after the CSS
+    // property, like every other name in this vocabulary
+    variations: props.fontVariationSettings ?? inherited.variations,
     color: props.color ?? inherited.color,
   };
 }
@@ -681,6 +688,7 @@ export const DEFAULT_TEXT_STYLE = {
   size: 14,
   weight: 'normal',
   style: 'normal',
+  variations: undefined,
   color: 'black',
 };
 

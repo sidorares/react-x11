@@ -550,8 +550,44 @@ run list so wrapping spans the whole content.
 | --------------------------------------------------- | ------------------------------------------------------ |
 | `color`                                             | text color (inherited by spans)                        |
 | `fontSize`, `fontFamily`, `fontWeight`, `fontStyle` | ntk font style (fontconfig lookup + fallback)          |
+| `fontVariationSettings`                             | a variable font's axes — see below                     |
 | `textAlign`                                         | `left`, `right`, `center`, `start`, `end` (bidi-aware) |
 | `lineHeight`                                        | multiplier over the natural font line height           |
+
+### Variable fonts
+
+A variable font is one file with a continuous design space, and
+`fontWeight` already drives its `wght` axis — so a family with one variable
+file behaves like a family with nine faces, and like nine hundred, since
+the weights between the named instances are the point of an axis:
+
+```jsx
+<text style={{ fontFamily: 'Inter', fontWeight: 460 }}>
+  Serious by default.
+</text>
+```
+
+`fontVariationSettings` is for the other axes, by OpenType tag:
+
+```jsx
+<text style={{ fontVariationSettings: { wdth: 87.5, slnt: -8 } }}>
+  condensed
+</text>
+```
+
+It inherits into spans like any other text style prop, and a span may
+override it. Axes the font does not have are ignored and values are clamped
+to each axis's range, so it is safe to set without checking the face first.
+It is compared **by value**, so the object literal above is fine — a fresh
+one with the same numbers on the next render costs nothing.
+
+ntk instantiates on demand and rasterizes only the glyphs actually drawn,
+at the size drawn; both its caches are bounded. What it does not do is
+quantize for you, so a slider bound straight to an axis with `step={1}`
+really will ask for hundreds of distinct faces as it is dragged — step the
+control, not the font. See ntk's `docs/fonts.md` for the whole picture,
+including why a variable `.woff2` cannot be instantiated and you want the
+`.ttf`.
 
 ## `<textinput>`
 
