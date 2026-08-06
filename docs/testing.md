@@ -231,7 +231,8 @@ stays flaky on pixel assertions:
    overtake them and `act` would return before the pointer move had been
    dispatched at all, which looks exactly like a hover that does not work.
 3. **ntk's frame clock** — painting is scheduled through
-   `requestAnimationFrame`, paced behind a server fence. Synthetic input can
+   `requestAnimationFrame`, paced behind the display's vertical blank (or a
+   server round trip where there is no Present extension). Synthetic input can
    leave a frame scheduled and never run, so `act` runs the frame directly
    rather than waiting for it, then round-trips so the server has actually
    processed the drawing.

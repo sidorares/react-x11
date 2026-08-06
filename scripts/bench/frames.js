@@ -13,16 +13,22 @@
 // two numbers that separate client cost from server cost:
 //
 //   paint    how long the client spent building each frame's requests
-//   fence    ntk's measured GetInputFocus round trip after each frame —
-//            how long the server took to drain them
+//   landed   how long the frame took to be answered — ntk's frameLatency,
+//            whose meaning follows the clock the window is on
 //
-// A healthy local server holds the fence well under a millisecond. A fence
-// that dwarfs paint is a server-side bottleneck: RENDER ops falling back to
-// software (glamor has no AddTraps acceleration — every rounded rectangle
-// pays it), a virtualized GPU, a compositor recomposite per blit. Run
-// `move` against `move --square` to see exactly what one rounded corner
-// mask costs on your setup; on glamor/virgl it has been measured at 10-40x
-// the fence of the square run.
+// On ntk >= 7 a window presents by default and its frames end on the
+// display, so `landed` is time-to-display and reads about one refresh
+// period: 16ms on a 60Hz screen is the system working, not a stall. What to
+// watch there is `fps` against the refresh rate, and `dropped`.
+//
+// On the fence clock (`frameClock: 'fence'`) it is a server round trip
+// instead, and a healthy local server holds it well under a millisecond;
+// one that dwarfs paint is a server-side bottleneck — RENDER ops falling
+// back to software (glamor has no AddTraps acceleration, so every rounded
+// rectangle pays it), a virtualized GPU, a compositor recomposite per blit.
+// That is the arm to use for server-cost questions: run `move` against
+// `move --square` to see what one rounded corner mask costs on your setup,
+// where on glamor/virgl it has been measured at 10-40x the square run.
 //
 // The damage columns catch the other regression class: `color` must stay
 // rect-bounded (~the box's own area), while `move`/`text` currently degrade
@@ -188,8 +194,8 @@ unlinkSync(tracePath);
 
 const frames = events.filter((ev) => ev.name === 'frame');
 const paint = frames.map((f) => f.dur / 1000).sort((a, b) => a - b);
-const fence = frames
-  .map((f) => f.args?.fenceMs)
+const landed = frames
+  .map((f) => f.args?.landedMs)
   .filter((v) => typeof v === 'number')
   .sort((a, b) => a - b);
 const full = frames.filter((f) => f.args?.full).length;
@@ -219,7 +225,7 @@ console.log(
 console.log(
   `           min    avg    p95    max   (ms)\n` +
     `  paint  ${ms(paint[0])} ${ms(avg(paint))} ${ms(q(paint, 0.95))} ${ms(paint[paint.length - 1])}\n` +
-    `  fence  ${ms(fence[0])} ${ms(avg(fence))} ${ms(q(fence, 0.95))} ${ms(fence[fence.length - 1])}`,
+    `  landed ${ms(landed[0])} ${ms(avg(landed))} ${ms(q(landed, 0.95))} ${ms(landed[landed.length - 1])}`,
 );
 // per frame, not per run: when a route change moves the frame rate by 10x,
 // the totals compare different numbers of frames and say nothing

@@ -115,7 +115,7 @@ export function setClickToComponentHandler(fn) {
  * ntk presents a window's dirty backing rects when its event handler
  * returns, so the blit goes out in the same event-loop turn as the press
  * that caused it. `flushPendingFrames` decides *whether* to paint now; see
- * frames.js for the fence gate that keeps a burst from painting ten times.
+ * frames.js for the frame gate that keeps a burst from painting ten times.
  */
 export function discrete(fn) {
   return (ev) => {

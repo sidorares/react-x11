@@ -308,15 +308,15 @@ test('maxRadius: 0 turns the route off without changing what is drawn', async ()
   );
 });
 
-// The cliff this repo found on ntk 6.7.0, pinned so it cannot regress
-// silently — and so that relaxing it upstream fails here loudly rather than
-// passing unnoticed. `_paintBorder` strokes the box inset by half the
-// border width, which is right; the centre-line radius that follows from it
-// is `borderRadius - borderWidth/2`, half-integer whenever the border width
-// is odd, and ntk's stroke path requires an integer radius even though the
-// band it covers, `r ± bw/2`, lands on whole pixels either way.
-// See docs/debugging.md.
-test('an odd border width keeps the stroke on the polygon route', async () => {
+// The cliff this repo found on ntk 6.7.0, and which ntk 7 removed
+// (sidorares/ntk#218). `_paintBorder` strokes the box inset by half the
+// border width, so the centre-line radius is `borderRadius - borderWidth/2`,
+// half-integer whenever the border width is odd — which the stroke path used
+// to decline even though the band it covers, `r ± bw/2`, lands on whole
+// pixels either way. It now takes them, so a 1px border is as cheap as a 2px
+// one and this pins the *absence* of the cliff: an odd border reappearing in
+// the bail-out counts is the regression to catch. See docs/debugging.md.
+test('an odd border width is on the fast path, like an even one', async () => {
   const app = await headlessApp();
   const odd = await mount(
     app,
@@ -346,13 +346,13 @@ test('an odd border width keeps the stroke on the polygon route', async () => {
 
   assert.equal(
     oddStats.fractional ?? 0,
-    1,
-    'a 1px rounded border still bails as fractional',
+    0,
+    'a 1px rounded border no longer bails as fractional',
   );
   assert.equal(
     evenRoot._ctx.shapeStats.misses.fractional ?? 0,
     0,
-    'a 2px rounded border does not',
+    'and neither does a 2px one',
   );
 });
 

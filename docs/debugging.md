@@ -36,12 +36,17 @@ REACT_X11_TRACE=summary npm run examples:dashboard
   stderr when the process exits.
 - `requests` — one stderr line per request as it is sent
   (`x11 → Render.FillRectangles 36B`), plus one line per painted frame
-  (`frame 412: 320x24@8,40 reasons=style-state fence=0.4ms`). X errors are
-  decoded and name the failing request. `fence` is ntk's measured server
-  round trip after the previous frame — how long the server took to drain
-  what that frame drew. Client work and server work separate here: a paint
-  that builds in 0.3ms against a fence of 20ms is a server-side problem
-  (software-fallback RENDER ops, a virtualized GPU), not a renderer one.
+  (`frame 412: 320x24@8,40 reasons=style-state landed=16.4ms`). X errors are
+  decoded and name the failing request. `landed` is ntk's `frameLatency`:
+  how long the previous frame took to be answered, which means different
+  things on the two frame clocks. On ntk >= 7 a window presents by default
+  and its frames end on the display, so this is time-to-display and reads
+  about **one refresh period** — 16ms on a 60Hz screen is the system
+  working. Client work and server work still separate here, but the question
+  to ask of a large number is which clock produced it: on `frameClock: 'fence'`
+  it is a server round trip, and a paint that builds in 0.3ms
+  against 20ms there _is_ a server-side problem (software-fallback RENDER
+  ops, a virtualized GPU) rather than a renderer one.
   `npm run bench:frames` reports the same split as a summary.
 - `chrome:/tmp/trace.json` — [Chrome Trace Event
   JSON](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU),
@@ -209,10 +214,14 @@ takes the route with no change to your code.
 What it is worth, measured on this repo's `bench:frames` cards mode against
 a glamor/virgl server — 48 cards, all recoloured every frame:
 
-|                          | fps  | paint   | fence   | wire/frame |
+|                          | fps  | paint   | landed  | wire/frame |
 | ------------------------ | ---- | ------- | ------- | ---------- |
 | `--border=2` (fast path) | 57.8 | 0.78 ms | 0.70 ms | 13 KB      |
 | `--border=2 --no-glyphs` | 3.8  | 7.53 ms | 287 ms  | 342 KB     |
+
+(measured on the fence clock, where the column is server drain — on the
+default vertical-blank clock the fast-path row would read about one refresh
+period instead, and the cliff would show in `fps` and `dropped`)
 
 A bail-out is a silent perf cliff — the box still renders, identically,
 just via the route above — so the counters matter more than usual.
@@ -240,16 +249,20 @@ histogram the route shows up directly: `Render.CompositeGlyphs8` and
 `misses` counts by reason. In rough order of how often they bite:
 
 - `fractional` — the box, or the stroke's band, is not on whole pixels.
-  **The one to know:** `_paintBorder` strokes the box inset by half the
-  border width, which puts the stroke's centre-line radius at
-  `borderRadius - borderWidth/2` — half-integer whenever the border width
-  is **odd**, and ntk requires an integer radius. So a 1px or 3px rounded
-  border keeps its corners on the polygon route while the background fill
-  underneath takes the fast one. On the 48-card wall that is 26x the wire
-  per frame (341 KB against 13 KB) and 5x the client paint. A 2px border
-  costs nothing extra and avoids it entirely; the fill is unaffected either
-  way. Fractional layout geometry lands here too — a box laid out on a
-  half-pixel bails even with an even border.
+  Usually **fractional layout geometry**: a box laid out on a half-pixel
+  bails whatever its border width is.
+
+  On ntk < 7 an _odd_ border width bailed too, and it was the one to know
+  about. `_paintBorder` strokes the box inset by half the border width,
+  putting the stroke's centre-line radius at `borderRadius - borderWidth/2`
+  — half-integer whenever the border is odd — and the stroke path wanted an
+  integer radius. A 1px or 3px rounded border therefore kept its corners on
+  the polygon route while the fill underneath took the fast one, which on
+  the 48-card wall was 26x the wire per frame (341 KB against 13 KB) and 5x
+  the client paint. ntk 7 takes those radii (sidorares/ntk#218), so a 1px
+  border is now as cheap as a 2px one and no border width needs choosing
+  around this.
+
 - `radius-cap` — the corner radius is over `shapePolicy.maxRadius` (64 by
   default; glyph-atlas behaviour past that is driver-specific). Also what
   the off switch reports.

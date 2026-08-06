@@ -507,8 +507,12 @@ const SCENARIOS = [
       return {
         prepare: async (app, x11Root) => {
           ctl = await mounted(x11Root, rowsWindow(40));
-          // pace frames on the fence alone — deterministic under test, no
-          // 16ms wall-clock timer between the event and any (wrong) repaint
+          // Pace frames on the round trip alone — deterministic under test,
+          // with no wall-clock timer between the event and any (wrong)
+          // repaint. `frameClock: 'fence'` as well as the zero interval,
+          // since on ntk >= 7 the default clock waits for the display to
+          // report each frame, which the in-process server does not model.
+          ctl.root.window.frameClock = 'fence';
           ctl.root.window.frameInterval = 0;
         },
         run: async (app) => {
