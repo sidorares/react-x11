@@ -14,6 +14,19 @@ export interface TraceStats {
   /** Decoded request name — e.g. 'CopyArea', 'Render.CompositeGlyphs32' —
    * to how many times it was sent. */
   byOpcode: Map<string, number>;
+  /** ntk's rounded-rect fast path (ntk >= 6.7.0): boxes emitted as cached
+   * corner glyphs + FillRectangles, against those that fell back to
+   * polygon rasterization, counted by reason. Both zero on older ntk. */
+  shapes: ShapeStats;
+}
+
+export interface ShapeStats {
+  /** Rounded boxes drawn as corner glyphs + rects. */
+  hits: number;
+  /** Bail-out reason — 'fractional', 'gradient', 'clip-mask', 'dashes',
+   * 'transform', 'radius-cap', 'composite-op', 'geometry', 'radii-mix',
+   * 'join' — to how many draws took it. */
+  misses: Record<string, number>;
 }
 
 export interface TraceOptions {
@@ -42,3 +55,9 @@ export function startTrace(options?: TraceOptions): TraceSession;
 /** What `REACT_X11_TRACE=<spec>` calls at startup. Grammar:
  * `summary` | `requests[+stacks]` | `chrome[+stacks]:<path>`. */
 export function startEnvTrace(spec: string): TraceSession | null;
+
+/** The one-line rounded-box tally the 'summary' sink prints, or null when
+ * nothing drew a rounded box. */
+export function formatShapes(
+  shapes: ShapeStats | null | undefined,
+): string | null;

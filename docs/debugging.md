@@ -189,6 +189,114 @@ Three switches, all read once at startup:
   means keys that change when they should not; rising `evictions` means the
   working set does not fit the budget.
 
+## Rounded boxes — the corner-glyph fast path
+
+A rounded box is the most common non-rectangular thing a UI draws and,
+historically, the most expensive: its corners become a polygon, and a
+polygon becomes either server-side trapezoids (which glamor does not
+accelerate — measured at ~5.6ms per operation on a virtualized GPU) or a
+client-side coverage mask that is uploaded again every frame.
+
+ntk 6.7.0 recognizes the shape instead. A `fill()` or `stroke()` whose path
+is exactly one axis-aligned `roundRect` on integer geometry goes out as
+**four cached corner glyphs plus `FillRectangles`** — the corners ride the
+glyph path every X server optimizes, cached server-side after first use,
+and the straight runs between them are plain rectangles. Nothing is
+rasterized or uploaded in steady state. `_paintBackground` and
+`_paintBorder` already draw exactly that shape, so every `borderRadius` box
+takes the route with no change to your code.
+
+What it is worth, measured on this repo's `bench:frames` cards mode against
+a glamor/virgl server — 48 cards, all recoloured every frame:
+
+|                          | fps  | paint   | fence   | wire/frame |
+| ------------------------ | ---- | ------- | ------- | ---------- |
+| `--border=2` (fast path) | 57.8 | 0.78 ms | 0.70 ms | 13 KB      |
+| `--border=2 --no-glyphs` | 3.8  | 7.53 ms | 287 ms  | 342 KB     |
+
+A bail-out is a silent perf cliff — the box still renders, identically,
+just via the route above — so the counters matter more than usual.
+
+### Seeing which boxes took it
+
+`REACT_X11_TRACE=summary` ends its histogram with the tally:
+
+```sh
+REACT_X11_TRACE=summary npm run examples:tasks
+# react-x11 trace: 83 requests (15.6KB out), 32 replies, ...
+#        6  Render.CompositeGlyphs8
+#        6  Render.FillRectangles
+#   rounded boxes: 6 fast (glyph+rect), 2 fell back (fractional 2)
+```
+
+The same tally is on `trace.stop().shapes` as `{ hits, misses }`, and ntk
+prints a process-wide version under `NTK_DEBUG_SHAPES=1`. In the opcode
+histogram the route shows up directly: `Render.CompositeGlyphs8` and
+`Render.FillRectangles` where `Render.Trapezoids`, `Render.AddTraps` or a
+`PutImage`-heavy `Render.Composite` used to be.
+
+### Why a box falls back
+
+`misses` counts by reason. In rough order of how often they bite:
+
+- `fractional` — the box, or the stroke's band, is not on whole pixels.
+  **The one to know:** `_paintBorder` strokes the box inset by half the
+  border width, which puts the stroke's centre-line radius at
+  `borderRadius - borderWidth/2` — half-integer whenever the border width
+  is **odd**, and ntk requires an integer radius. So a 1px or 3px rounded
+  border keeps its corners on the polygon route while the background fill
+  underneath takes the fast one. On the 48-card wall that is 26x the wire
+  per frame (341 KB against 13 KB) and 5x the client paint. A 2px border
+  costs nothing extra and avoids it entirely; the fill is unaffected either
+  way. Fractional layout geometry lands here too — a box laid out on a
+  half-pixel bails even with an even border.
+- `radius-cap` — the corner radius is over `shapePolicy.maxRadius` (64 by
+  default; glyph-atlas behaviour past that is driver-specific). Also what
+  the off switch reports.
+- `gradient` — the fill or stroke style is not a solid colour.
+- `clip-mask` — a non-rectangular clip is in effect. Rectangular clips are
+  fine; they go out as picture clip rectangles.
+- `dashes` — `borderStyle: 'dashed'`.
+- `transform` — the context's matrix is not translate-only.
+- `composite-op`, `geometry`, `radii-mix`, `join` — a non-`source-over`
+  operation, a degenerate or oversized box, mixed per-corner radii on a
+  stroke, a non-miter join on a square one.
+
+### Turning it off
+
+`app.shapePolicy` sits beside `rasterPolicy` and `textPolicy`:
+
+```js
+const root = await createRoot();
+root.app.shapePolicy = { maxRadius: 0 }; // off; every box goes back to polygons
+root.app.shapePolicy = { maxRadius: 32, cacheBytes: 128 << 10 };
+```
+
+`NTK_NO_SHAPE_GLYPHS=1` does the same from the environment. Both are for
+A/B measurement and for cornering a suspected rendering difference — the
+route is not something an application should need to turn off.
+
+```sh
+npm run bench:frames -- cards 8 --border=2              # fast path
+npm run bench:frames -- cards 8 --border=2 --no-glyphs  # same scene, polygons
+npm run bench:frames -- cards 8 --border=1              # the odd-width cliff
+```
+
+The two routes are not bit-identical: they rasterize the same arc by
+different means, so corner pixels differ by antialiasing — under 4/255 for
+fills, up to 48/255 on a stroked corner. Everything outside the corner
+boxes is exact, which is the property the decomposition rests on (the
+glyphs and the rectangles partition the pixels, so no pixel is painted
+twice and translucent colours are safe). `test/rounded-box-glyphs.test.js`
+asserts exactly that split.
+
+In practice the difference does not reach a screenshot: regenerating
+`docs/img/*.png` with the route off moves between 0 and 0.06% of pixels,
+by at most 8/255. If `npm run screenshots` ever produces a bigger diff than
+that after a toolkit bump, the cause is somewhere else — ntk 6.7.0's other
+change, an arc flattener that subdivides curves more exactly, moved those
+same screenshots far more than this route did.
+
 ## Invalidation reasons
 
 Every internal `invalidate()` call now names why it ran, from a small

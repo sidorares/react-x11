@@ -340,6 +340,36 @@ const SCENARIOS = [
       }
     },
   ],
+  // The two halves of a card's chrome, split out because ntk 6.7.0 routes
+  // them differently for the border width react-x11 defaults to. Both draw
+  // the same box; only the stroke's centre-line radius differs, and with it
+  // whether the corners go out as cached glyphs or as a rasterized polygon.
+  // The gap between these two rows is the cost of one bail-out, in bytes.
+  ...[2, 1].map((bw) => [
+    `shapes: 24 rounded bordered cards, ${bw}px border`,
+    async (app) => {
+      const ctx = pixmapCtx(app);
+      for (let i = 0; i < 24; i++) {
+        const x = 4 + (i % 6) * 62;
+        const y = 4 + Math.floor(i / 6) * 46;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.roundRect(x, y, 58, 42, 8);
+        ctx.fill();
+        ctx.strokeStyle = '#c3ccd8';
+        ctx.lineWidth = bw;
+        ctx.beginPath();
+        ctx.roundRect(
+          x + bw / 2,
+          y + bw / 2,
+          58 - bw,
+          42 - bw,
+          Math.max(0, 8 - bw / 2),
+        );
+        ctx.stroke();
+      }
+    },
+  ]),
   [
     'mount: window with 40 boxes and labels',
     async (app, x11Root) => {
