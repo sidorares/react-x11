@@ -2021,7 +2021,22 @@ export class TextNode extends Node {
   applyProps(newProps, oldProps) {
     const before = this.style;
     super.applyProps(newProps, oldProps);
-    if (textStyleChanged(this.style, before)) this._textContentChanged();
+    if (!textStyleChanged(this.style, before)) return;
+    this._textContentChanged();
+    // `super.applyProps` has already committed this frame, and it decided
+    // there was nothing to re-lay-out: none of `fontSize`, `fontWeight`,
+    // `fontFamily`, `fontStyle`, `lineHeight` or `textAlign` is a yoga
+    // property, so `applyLayoutStyle` saw nothing move, and none of them is
+    // a paint prop either, so the node contributed no damage. They are all
+    // inputs to the *measure function*, though — the dirty flag
+    // `_textContentChanged` just set is only read by a layout pass, and
+    // without asking for one the cleared layout is never rebuilt and the
+    // old glyphs stay on screen. A new string reaches the same conclusion
+    // through `TextChunkNode.setText`; this is that path for a new style.
+    let owner = this;
+    while (owner && !owner.yoga) owner = owner.parent;
+    if (owner) owner._invalidateLayout('text');
+    else this.root?.invalidate(true, null, 'text');
   }
 
   collectSpans(inherited, out) {
