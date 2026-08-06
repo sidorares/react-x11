@@ -32,7 +32,8 @@
     "examples:widgets": "tsx examples/widgets.jsx",
     "examples:react-features": "tsx examples/react-features.jsx",
     "examples:icons": "tsx examples/icons.jsx",
-    "examples:raster-gate": "tsx examples/raster-gate.jsx",
+    "examples:raster-gate": "tsx examples/raster-gate/index.jsx",
+    "examples:sysprobe": "tsx examples/sysprobe/index.js",
     "examples:stress": "tsx examples/stress/index.jsx",
     "examples:gl": "tsx examples/gl.jsx",
     "examples:three": "tsx examples/three.jsx",
@@ -46,6 +47,7 @@
     "screenshots:framed": "tsx scripts/screenshots-framed.jsx",
     "bench": "tsx scripts/bench/protocol.js",
     "bench:frames": "tsx scripts/bench/frames.js",
+    "bench:raster": "tsx scripts/bench/raster-sweep.js",
     "docs:dev": "npm --prefix website start",
     "docs:build": "npm --prefix website run build",
     "docs:test": "npm --prefix website test"

@@ -42,7 +42,9 @@ REACT_X11_TRACE=summary npm run examples:dashboard
   what that frame drew. Client work and server work separate here: a paint
   that builds in 0.3ms against a fence of 20ms is a server-side problem
   (software-fallback RENDER ops, a virtualized GPU), not a renderer one.
-  `npm run bench:frames` reports the same split as a summary.
+  `npm run bench:frames` reports the same split as a summary, and
+  [`npm run bench:raster`](#is-it-the-rasterization-gate) answers the follow-up
+  question of what to do about it.
 - `chrome:/tmp/trace.json` — [Chrome Trace Event
   JSON](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU),
   written at exit. Open it in Perfetto or `about:tracing`: React commits
@@ -109,6 +111,71 @@ Full repaints are the renderer's main performance bug class (see
 "Protocol efficiency" in AGENTS.md); before this switch nothing surfaced
 them. Expected full repaints exist too — a resize, the first frame after a
 mount, ntk invalidating its backing store — and their reasons say so.
+
+## Is it the rasterization gate?
+
+When `fence` dwarfs paint, the next question is _which_ requests the server
+is struggling with, and on a glamor-class server the answer is usually
+trapezoids. ntk decides per drawing whether to rasterize coverage on the
+client and upload an a8 mask or to hand the shape over as
+`Render.AddTraps` — `routeRaster`, tuned by `app.rasterPolicy`. Its
+defaults were measured against a software server, where the trapezoid path
+is fast; where it is a software _fallback_ they can be badly wrong.
+
+`npm run bench:raster` measures the crossover on the machine you run it on
+and prints the policy that fits what it found:
+
+```sh
+npm run bench:raster                    # ~20s against $DISPLAY
+npm run bench:raster -- --json out.json # keep the raw samples
+```
+
+It sweeps a grid of probe shapes with independently controlled bounding
+box and edge count, times each one with routing pinned local and pinned
+server, and fits `maxArea`/`bytesPerEdge` to whichever won. The output
+ends with a line to paste:
+
+```js
+root.app.options.rasterPolicy = { maxArea: 1 << 20, bytesPerEdge: 10000 };
+```
+
+`npm run examples:raster-gate` is the same measurement with a window
+around it: sliders for the drawing's size, its triangle count and how many
+of them a frame issues, the fitted policy behind a button, and the fence
+updating live as you move them.
+
+## Which part of the machine is slow — `examples:sysprobe`
+
+The routing question above is one of several, and a frame can be slow for
+reasons that have nothing to do with it. `npm run examples:sysprobe`
+measures each link of the chain separately and says which one is in the
+way:
+
+```sh
+npm run examples:sysprobe                     # ~35s, no window
+npm run examples:sysprobe -- --window         # watch it, + a present-rate probe
+npm run examples:sysprobe -- --json out.json  # for comparing two machines
+```
+
+- **client CPU** — coverage rasterization throughput, in ns per pixel and
+  per edge, plus a scalar baseline. This is the cost of routing a drawing
+  locally, and it is synchronous: it blocks the main thread.
+- **transport** — round-trip latency, per-request cost when pipelined,
+  upload and download bandwidth, and whether MIT-SHM can take the pixels
+  off the socket at all.
+- **the server** — fill, composite, masked composite, `CopyArea`,
+  trapezoids and glyphs, each as a fixed per-operation cost plus a
+  per-pixel one. An operation whose cost does not move with its size is
+  paying a fixed toll rather than doing work, which is what a software
+  fallback looks like.
+- **concurrency** — whether client and server work actually proceed at
+  once. On a local connection they compete for the same cores, so moving
+  work from one to the other can buy nothing.
+
+It ends with a two-line cost model, the `rasterPolicy` derived from it,
+and the bottlenecks worst-first with the number that put each one there.
+Progress goes to stderr and the report to stdout, so `> machine.txt`
+captures the result and nothing else.
 
 ## `REACT_X11_NO_SCROLL_BLIT=1`
 

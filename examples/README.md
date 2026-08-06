@@ -39,7 +39,8 @@ Roughly in the order worth reading them:
 | [`icons.jsx`](icons.jsx)                   | 400 icon-sized `<svg>`s that reflow and scroll, with a cached-glyph control — a paint benchmark                        |
 | [`dnd-source.jsx`](dnd-source.jsx)         | **drag out of the app** (XDND) + in-app drags with live payloads, a `<popup>` drag preview                             |
 | [`dnd-target.jsx`](dnd-target.jsx)         | drop zones: `dropAccept` groups, parsed `e.files`, custom MIME types, `useDropTarget` state                            |
-| [`raster-gate.jsx`](raster-gate.jsx)       | a wall of live controls with ntk's local/server rasterization routing on a switch (ntk#177)                            |
+| [`raster-gate/`](raster-gate/index.jsx)    | ntk's local/server rasterization routing on a switch, and a sweep that fits it to your server (ntk#177)                |
+| [`sysprobe/`](sysprobe/index.js)           | **what is slow about this machine**: client CPU, wire, server, SHM, and whether they share a core                      |
 | [`dbus.jsx`](dbus.jsx)                     | a D-Bus explorer: `useSessionBus()`/`useSystemBus()`, a `Tree` of live introspection, a detail pane                    |
 | [`stress/`](stress/index.jsx)              | **the big one**: six panels to poke at by hand, with a frame log — see below                                           |
 | [`wm.jsx`](wm.jsx)                         | **a reparenting window manager** — see below                                                                           |
