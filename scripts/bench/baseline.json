@@ -40,18 +40,18 @@
     "compositePixels": 160000
   },
   "shapes: 24 rounded bordered cards, 1px border": {
-    "requests": 82,
-    "bytesOut": 28140,
+    "requests": 107,
+    "bytesOut": 6776,
     "bytesIn": 32,
     "replies": 1,
     "composites": 1,
     "compositePixels": 160000
   },
   "mount: window with 40 boxes and labels": {
-    "requests": 101,
-    "bytesOut": 3928,
-    "bytesIn": 768,
-    "replies": 22,
+    "requests": 104,
+    "bytesOut": 3976,
+    "bytesIn": 864,
+    "replies": 25,
     "composites": 21,
     "compositePixels": 298240
   },

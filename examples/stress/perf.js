@@ -138,11 +138,25 @@ export function watchFrames(root, { label = '', quiet = 0 } = {}) {
       if (frames === 0) return 'no frames painted';
       const bounded = frames - fullFrames;
       const pct = ((bounded / frames) * 100).toFixed(0);
-      return [
+      const line = [
         `${frames} frames, ${bounded} bounded (${pct}%), ${fullFrames} full`,
         `mean ${(totalArea / frames / 1000).toFixed(1)}kpx`,
         `mean ${(totalMs / frames).toFixed(2)}ms`,
-      ].join(' · ');
+      ];
+      // What the display made of them, where ntk >= 7 can say: the clock in
+      // effect, the refresh period it measured, and the vertical blanks that
+      // went past without a frame from us. `dropped` is the number to watch
+      // when chasing jank — it says the frame was late, which the ms column
+      // above can only hint at.
+      const wnd = root.window;
+      if (wnd?.frameClock) {
+        const refresh = wnd.refreshInterval
+          ? `${wnd.refreshInterval.toFixed(1)}ms (${(1000 / wnd.refreshInterval).toFixed(0)}Hz)`
+          : 'unmeasured';
+        line.push(`clock ${wnd.frameClock}, refresh ${refresh}`);
+        if (wnd.droppedFrames) line.push(`${wnd.droppedFrames} dropped`);
+      }
+      return line.join(' · ');
     },
     get frames() {
       return frames;

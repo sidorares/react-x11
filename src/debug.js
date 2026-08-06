@@ -399,7 +399,7 @@ function createSession({ sink, path }) {
       }
     },
 
-    frame({ rects, reasons, start, end, fence }) {
+    frame({ rects, reasons, start, end, landed }) {
       frames += 1;
       const full = !rects;
       const area = full
@@ -410,13 +410,17 @@ function createSession({ sink, path }) {
           ? 'FULL WINDOW'
           : rects.map((r) => `${r.width}x${r.height}@${r.x},${r.y}`).join(' ');
         const why = reasons?.length ? ` reasons=${reasons.join('+')}` : '';
-        // the previous frame's measured server drain: on a healthy local
-        // server it sits well under a millisecond, and a fence that grows
-        // with window area is the signature of a server-side bottleneck
-        // (software-fallback RENDER ops, a virtualized GPU) that client
-        // timings cannot show
+        // How long the previous frame took to be answered — ntk's
+        // `frameLatency`, whose meaning follows the clock it is on. On the
+        // vertical-blank clock (ntk >= 7, the default) it is time-to-display
+        // and reads about one refresh period, so a 16ms figure on a 60Hz
+        // screen is the system working. On the fence clock it is a server
+        // round trip and sits under a millisecond locally, where a figure
+        // that grows with window area is a server-side bottleneck —
+        // software-fallback RENDER ops, a virtualized GPU — that client
+        // timings cannot show. Either way it is paint-vs-everything-else.
         const wait =
-          typeof fence === 'number' ? ` fence=${fence.toFixed(1)}ms` : '';
+          typeof landed === 'number' ? ` landed=${landed.toFixed(1)}ms` : '';
         line(`frame ${frames}: ${where}${why}${wait}`);
       }
       record({
@@ -432,7 +436,7 @@ function createSession({ sink, path }) {
           rects: rects?.length ?? 0,
           area,
           reasons: reasons ?? [],
-          fenceMs: typeof fence === 'number' ? +fence.toFixed(2) : undefined,
+          landedMs: typeof landed === 'number' ? +landed.toFixed(2) : undefined,
         },
       });
     },
