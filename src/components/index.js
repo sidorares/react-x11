@@ -12,6 +12,8 @@ export {
 } from './anchor.js';
 export { useDropTarget, useDragSource } from './dnd.js';
 export { Button } from './Button.js';
+export { Calendar } from './Calendar.js';
+export { DatePicker } from './DatePicker.js';
 export { Dialog } from './Dialog.js';
 export { FileDialog } from './FileDialog.js';
 export { Checkbox } from './Checkbox.js';

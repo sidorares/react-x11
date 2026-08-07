@@ -20,6 +20,12 @@ process.memoryUsage = () => ({
   heapUsed: 42 * 1024 * 1024,
   heapTotal: 64 * 1024 * 1024,
 });
+// Freezing `Date.now()` also freezes every `transition`: `nodes.js` drives
+// them off it, so an animation started by one of the scenes below stalls at
+// t=0 and photographs the colour a control was leaving rather than the one it
+// landed on. Harmless for these scenes, which capture at rest — but a new one
+// that clicks something with a transitioned colour needs a real clock for the
+// paint to be honest.
 const FROZEN_MS = Date.UTC(2026, 0, 1, 9, 41, 0);
 const RealDate = Date;
 globalThis.Date = class extends RealDate {

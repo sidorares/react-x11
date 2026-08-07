@@ -339,6 +339,134 @@ single letter cycles through the options starting with it.
 while open, the chevron and the placeholder text are `dim`, and the menu
 highlight is `hoverBackground`/`hoverText`.
 
+## `Calendar` / `DatePicker`
+
+A month grid — one date or a range, with any day blockable. `Calendar` is the
+grid on its own; `DatePicker` hangs the same grid off a field, on a real
+`<popup>` window, and every calendar prop passes straight through it.
+
+```jsx
+<DatePicker value={day} onChange={(ev) => setDay(ev.value)} />
+
+<Calendar
+  mode="range"
+  value={stay}
+  onChange={(ev) => setStay(ev.value)}
+  min="2026-08-01"
+  isDateBlocked={(day) => booked.has(day)}
+/>
+```
+
+| prop                                      |                                                         |
+| ----------------------------------------- | ------------------------------------------------------- |
+| `mode`                                    | `'single'` (default) or `'range'`                       |
+| `value` / `defaultValue`                  | a day, or `{ start, end }` in range mode                |
+| `onChange(ev)`                            | `ev.value` is the new selection                         |
+| `min` / `max`                             | the bounds; days outside them are blocked               |
+| `isDateBlocked(day, parts)`               | everything the bounds cannot say                        |
+| `spanBlocked`                             | let a range run **across** blocked days                 |
+| `dayContent(day, state)`                  | drawn under the number — the seam for per-day marks     |
+| `month` / `defaultMonth`                  | visible month, `'2026-08'`; reported by `onMonthChange` |
+| `locale` / `weekStartsOn`                 | month and weekday names; which day a week starts on     |
+| `format(value)` _(DatePicker)_            | the trigger's label                                     |
+| `placeholder` / `disabled` _(DatePicker)_ | an empty field, and one that does not open              |
+
+### A day is a string
+
+`'2026-08-07'`, in and out — not a `Date`. A square on a wall calendar is not
+an instant: it has no time, no zone and no length that survives a DST
+boundary, so two `Date`s for "the 7th" are only equal if both were built the
+same way (`new Date(2026, 7, 7)` and `new Date('2026-08-07')` are eleven hours
+apart in Sydney, and neither is wrong). As a string, `a === b` is "the same
+day", `a < b` is "earlier", it is a `Set` key with no codec, and it is already
+the shape a calendar API answers in.
+
+A `Date` is accepted anywhere a day is taken and read as its **local**
+calendar day — the day you were looking at when you built it. Anything else
+throws, and so does a date that does not exist: `'2026-02-30'` is a typo, and
+sliding it quietly to March 2nd the way `new Date()` does is how a booking
+ends up a day out.
+
+### Blocking days
+
+`min`/`max` for the bounds, `isDateBlocked(day, parts)` for the rest. `parts`
+is `{ year, month, day, weekday, date }`, so the common cases do not parse the
+string back apart:
+
+```jsx
+<Calendar
+  min={today}
+  isDateBlocked={(day, { weekday }) =>
+    weekday === 0 || weekday === 6 || holidays.has(day)
+  }
+/>
+```
+
+A blocked day is dimmed, is not clickable, and cannot be reached by Enter —
+but the keyboard still **moves through** it, so a blocked week is not a wall
+the arrows cannot cross.
+
+**A range may not contain a blocked day.** The preview stops at the first one
+and an end past it is refused, because an app that blocked a date did not mean
+"unless it is in the middle", and a selection that quietly included it would
+have to be validated all over again on the way out. `spanBlocked` is the other
+reading — only the two ends must be free — for the holidays a stay is allowed
+to run across.
+
+### Picking a range
+
+The first click sets the start and reports `{ start, end: null }`; the second
+completes it. Reporting the half-picked state is what lets a controlled
+picker drive the whole interaction from its own value — there is no hidden
+"pending" state to get out of step with — and it is what a form shows while it
+waits for the other end. Clicking **before** the start re-anchors rather than
+selecting backwards, and the pointer previews the end it would land on.
+
+### Marking days
+
+`dayContent(day, state)` renders inside the cell, under the number, in a strip
+the grid reserves only when the prop is there. `state` is
+`{ selected, inRange, blocked, outside, today, focused, color }`, and `color`
+is what the number itself is being drawn in — a marker that follows it stays
+legible on the filled ends of a range.
+
+```jsx
+<Calendar
+  dayContent={(day, state) =>
+    events.has(day) && (
+      <box
+        style={{
+          width: 4,
+          height: 4,
+          borderRadius: 2,
+          backgroundColor: state.color,
+        }}
+      />
+    )
+  }
+/>
+```
+
+### Keyboard
+
+The grid is a **single tab stop**. Arrows move by a day and by a week,
+Home/End go to the ends of the week, PageUp/PageDown change month — with
+Shift, year — and Enter or Space takes the day under the cursor. Moving off
+the edge of the month turns the page, and so does clicking one of the
+neighbouring days the grid's corners are filled with.
+
+A `DatePicker` opens on Down, Up, Enter or Space, and its **trigger keeps the
+keyboard** while the calendar is up: a `<popup>` is override-redirect and
+never takes focus, so the trigger feeds the grid its keys through the
+`handleKey` on its ref and keeps Escape and Tab for itself. That ref is
+public — `useRef<CalendarHandle>` — for anything else that has to drive a
+calendar it does not focus.
+
+The calendar opens on the **press**, as `Select`'s menu does: a control whose
+whole purpose is to be looked at gains nothing by waiting out the length of
+the click. It closes on the pick — on the _second_ end of a range — on Escape,
+on a second press of the trigger, and when the window loses focus.
+
 ## `Slider`
 
 A draggable value control.

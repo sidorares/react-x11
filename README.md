@@ -188,9 +188,11 @@ and [docs/](docs/README.md) for the full API reference.
 Widget **components** (plain React on top of the primitives, themable via
 `ThemeProvider`): `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch`,
 `Slider`, `ProgressBar`, `Select`, `Tooltip`, `MenuBar`/`ContextMenu`,
-`Dialog` — a modal built on `<popup trapFocus>`, which traps Tab and
-restores focus when it closes — plus the two containers an application
-window is built from: `Tabs`, `Tree` and `SplitPane`. See
+`Calendar`/`DatePicker` — one date or a range, with days blockable and a
+seam for drawing into the cells — `Dialog` — a modal built on
+`<popup trapFocus>`, which traps Tab and restores focus when it closes —
+plus the two containers an application window is built from: `Tabs`, `Tree`
+and `SplitPane`. See
 [docs/components.md](docs/components.md).
 
 **Drag and drop** works with the rest of the desktop: `<box dropAccept={['files']}
@@ -256,6 +258,7 @@ npm run examples:tasks         # useReducer, textinput, scrollview
 npm run examples:menu          # right-click context menu via <popup>
 npm run examples:transparent   # rounded translucent <popup transparent>
 npm run examples:form          # <textinput> + Select dropdowns
+npm run examples:datepicker    # Calendar/DatePicker: ranges, blocked days, events
 npm run examples:gl            # raw GL in a <glarea> (display-list cube)
 npm run examples:three         # <Canvas3D> scene: meshes, lights, textures
 npm run examples:wm            # a reparenting window manager (see below)
