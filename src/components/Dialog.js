@@ -52,8 +52,13 @@ const DEFAULT_HEIGHT = 170;
  * belongs to the `states` work; it means nothing without the
  * `WM_TRANSIENT_FOR` this now sets, which is why that had to come first.
  *
- * A `<popup>` is a real X window and needs its size up front, hence explicit
- * `width`/`height` rather than sizing to content.
+ * `width`/`height` are explicit rather than sized to content, and now only
+ * because of where the dialog is *placed*: `centeredRect` needs the size to
+ * work out the offset that centres it over its owner, and that is computed
+ * during the render that opens the popup, before anything has been laid out.
+ * The popup itself could size to its content — see "Natural size" in
+ * docs/elements.md — so this is the anchor math's constraint, not the X
+ * window's.
  */
 export function Dialog({
   open,

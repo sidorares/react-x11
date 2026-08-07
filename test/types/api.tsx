@@ -267,6 +267,16 @@ const _svg = <svg source="<svg/>" height={40} />;
 // @ts-expect-error — <tex> ink colour is style={{ color }}
 const _inked = <tex source="x^2" color="#222" />;
 
+// A <window> size is pixels or 'auto', and leaving it out is the same
+// request as 'auto' — the two axes are independent.
+const _natural = <window title="natural" />;
+const _autoBoth = <window width="auto" height="auto" />;
+const _heightForWidth = <window width={600} height="auto" maxHeight={800} />;
+// @ts-expect-error — 'fit-content' is what 'auto' already means here
+const _fitContent = <window width="fit-content" />;
+// @ts-expect-error — there is no containing block to be a percentage of
+const _percent = <window height="100%" />;
+
 // --- popups ----------------------------------------------------------------
 
 function Popup() {

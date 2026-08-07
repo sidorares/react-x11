@@ -241,10 +241,12 @@ function paintArrow(ctx, { width, height }, side, color) {
  * is given, so that nothing that named a side has to change.)
  *
  * `label` is usually a string, and then the popup is sized from the
- * **measured** text: a `<popup>` is a real X window and needs its size up
- * front rather than after layout. It can equally be an element — a swatch
- * and a hex code, a shortcut in its own type, a whole card — and then the
- * caller says how big with `width`/`height`, for the same reason. The
+ * **measured** text — not because a `<popup>` cannot size itself (it can,
+ * see "Natural size" in docs/elements.md) but because `anchorRect` needs the
+ * size to decide which side of the trigger the hint fits on, and that is
+ * decided during the render that opens it. It can equally be an element — a
+ * swatch and a hex code, a shortcut in its own type, a whole card — and then
+ * the caller says how big with `width`/`height`, for the same reason. The
  * element fills the bubble and draws its own padding; a string gets the
  * bubble's.
  *
