@@ -16,33 +16,34 @@ tests can import them without opening a window.
 
 Roughly in the order worth reading them:
 
-|                                            |                                                                                                                        |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| [`simple.jsx`](simple.jsx)                 | hello world: flex layout and text, no pixel math. `npm run examples:simple`                                            |
-| [`simple-nojsx.js`](simple-nojsx.js)       | the same thing in plain node with `React.createElement` — no build step at all                                         |
-| [`xeyes.jsx`](xeyes.jsx)                   | the `<canvas>` escape hatch: custom drawing plus hooks for state and polling                                           |
-| [`dashboard.jsx`](dashboard.jsx)           | context for theming, `useState`/`useEffect`/`useMemo`, a custom hook, hover and focus states                           |
-| [`tasks.jsx`](tasks.jsx)                   | `useReducer`, dispatch through context, list rendering, `<scrollview>`, keyboard throughout                            |
-| [`form.jsx`](form.jsx)                     | `<textinput>`, `Select`, `RadioGroup`, `Slider`, `Checkbox`, and a modal `Dialog`                                      |
-| [`rules.jsx`](rules.jsx)                   | a WHEN/THEN rule builder: a recursive tree that edits itself, with drag-to-reorder and `<svg>` icons                   |
-| [`widgets.jsx`](widgets.jsx)               | the gallery: every standard component in one window, with a live `<markdown>` preview                                  |
-| [`react-features.jsx`](react-features.jsx) | React itself: priority, `<Suspense>`, `useOptimistic`, `<Activity>`, and where an error boundary goes                  |
-| [`menu.jsx`](menu.jsx)                     | `MenuBar` and `ContextMenu` over real `<popup>` windows that flip at screen edges — File → Open… is a real file dialog |
-| [`tooltips.jsx`](tooltips.jsx)             | hints that are text and hints that are components, `direction="auto"`, and the arrow an ARGB popup can have            |
-| [`theming.jsx`](theming.jsx)               | the style engine end to end: three themes in light and dark, switched at runtime                                       |
-| [`appearance.jsx`](appearance.jsx)         | follows the desktop's light/dark, accent, contrast and reduced motion — change your theme while it runs                |
-| [`richtext.jsx`](richtext.jsx)             | `<markdown>` with highlighted and math fences, a live `<tex>` formula, JSX `<svg>`, `<image>`                          |
-| [`windows.jsx`](windows.jsx)               | many top-level windows from one React tree, sharing state, closing via `onCloseRequest`                                |
-| [`app.jsx`](app.jsx)                       | the showcase: `SplitPane` + `Tabs` hosting `form`, `widgets` and `tasks` as panels                                     |
-| [`gl.jsx`](gl.jsx)                         | raw GL in a `<glarea>`, compiled to a server-side display list                                                         |
-| [`three.jsx`](three.jsx)                   | a react-three-fiber-shaped `<Canvas3D>` scene: meshes, lights, textures                                                |
-| [`icons.jsx`](icons.jsx)                   | 400 icon-sized `<svg>`s that reflow and scroll, with a cached-glyph control — a paint benchmark                        |
-| [`dnd-source.jsx`](dnd-source.jsx)         | **drag out of the app** (XDND) + in-app drags with live payloads, a `<popup>` drag preview                             |
-| [`dnd-target.jsx`](dnd-target.jsx)         | drop zones: `dropAccept` groups, parsed `e.files`, custom MIME types, `useDropTarget` state                            |
-| [`raster-gate.jsx`](raster-gate.jsx)       | a wall of live controls with ntk's local/server rasterization routing on a switch (ntk#177)                            |
-| [`dbus.jsx`](dbus.jsx)                     | a D-Bus explorer: `useSessionBus()`/`useSystemBus()`, a `Tree` of live introspection, a detail pane                    |
-| [`stress/`](stress/index.jsx)              | **the big one**: six panels to poke at by hand, with a frame log — see below                                           |
-| [`wm.jsx`](wm.jsx)                         | **a reparenting window manager** — see below                                                                           |
+|                                            |                                                                                                                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`simple.jsx`](simple.jsx)                 | hello world: flex layout and text, no pixel math. `npm run examples:simple`                                                                                   |
+| [`simple-nojsx.js`](simple-nojsx.js)       | the same thing in plain node with `React.createElement` — no build step at all                                                                                |
+| [`xeyes.jsx`](xeyes.jsx)                   | the `<canvas>` escape hatch: custom drawing plus hooks for state and polling                                                                                  |
+| [`dashboard.jsx`](dashboard.jsx)           | context for theming, `useState`/`useEffect`/`useMemo`, a custom hook, hover and focus states                                                                  |
+| [`tasks.jsx`](tasks.jsx)                   | `useReducer`, dispatch through context, list rendering, `<scrollview>`, keyboard throughout                                                                   |
+| [`form.jsx`](form.jsx)                     | `<textinput>`, `Select`, `RadioGroup`, `Slider`, `Checkbox`, and a modal `Dialog`                                                                             |
+| [`rules.jsx`](rules.jsx)                   | a WHEN/THEN rule builder: a recursive tree that edits itself, with drag-to-reorder and `<svg>` icons                                                          |
+| [`widgets.jsx`](widgets.jsx)               | the gallery: every standard component in one window, with a live `<markdown>` preview                                                                         |
+| [`react-features.jsx`](react-features.jsx) | React itself: priority, `<Suspense>`, `useOptimistic`, `<Activity>`, and where an error boundary goes                                                         |
+| [`menu.jsx`](menu.jsx)                     | `MenuBar` and `ContextMenu` over real `<popup>` windows that flip at screen edges — File → Open… is a real file dialog                                        |
+| [`tooltips.jsx`](tooltips.jsx)             | hints that are text and hints that are components, `direction="auto"`, and the arrow an ARGB popup can have                                                   |
+| [`theming.jsx`](theming.jsx)               | the style engine end to end: three themes in light and dark, switched at runtime                                                                              |
+| [`appearance.jsx`](appearance.jsx)         | follows the desktop's light/dark, accent, contrast and reduced motion — change your theme while it runs                                                       |
+| [`richtext.jsx`](richtext.jsx)             | `<markdown>` with highlighted and math fences, a live `<tex>` formula, JSX `<svg>`, `<image>`                                                                 |
+| [`variable-fonts.jsx`](variable-fonts.jsx) | pick a font file and get a control per axis it actually has — sliders, a `Switch` for a binary axis, the named instances, and the `<text>` that would draw it |
+| [`windows.jsx`](windows.jsx)               | many top-level windows from one React tree, sharing state, closing via `onCloseRequest`                                                                       |
+| [`app.jsx`](app.jsx)                       | the showcase: `SplitPane` + `Tabs` hosting `form`, `widgets` and `tasks` as panels                                                                            |
+| [`gl.jsx`](gl.jsx)                         | raw GL in a `<glarea>`, compiled to a server-side display list                                                                                                |
+| [`three.jsx`](three.jsx)                   | a react-three-fiber-shaped `<Canvas3D>` scene: meshes, lights, textures                                                                                       |
+| [`icons.jsx`](icons.jsx)                   | 400 icon-sized `<svg>`s that reflow and scroll, with a cached-glyph control — a paint benchmark                                                               |
+| [`dnd-source.jsx`](dnd-source.jsx)         | **drag out of the app** (XDND) + in-app drags with live payloads, a `<popup>` drag preview                                                                    |
+| [`dnd-target.jsx`](dnd-target.jsx)         | drop zones: `dropAccept` groups, parsed `e.files`, custom MIME types, `useDropTarget` state                                                                   |
+| [`raster-gate.jsx`](raster-gate.jsx)       | a wall of live controls with ntk's local/server rasterization routing on a switch (ntk#177)                                                                   |
+| [`dbus.jsx`](dbus.jsx)                     | a D-Bus explorer: `useSessionBus()`/`useSystemBus()`, a `Tree` of live introspection, a detail pane                                                           |
+| [`stress/`](stress/index.jsx)              | **the big one**: six panels to poke at by hand, with a frame log — see below                                                                                  |
+| [`wm.jsx`](wm.jsx)                         | **a reparenting window manager** — see below                                                                                                                  |
 
 `app.jsx` is where a new control should get demonstrated: it imports the
 panel each of `form`, `widgets` and `tasks` exports, so adding a widget
