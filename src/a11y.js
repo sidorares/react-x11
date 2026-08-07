@@ -178,6 +178,28 @@ export const ATSPI_STATE_NICK = Object.freeze(
 );
 
 /**
+ * The AT-SPI role *name* for each role number — the constant lowercased
+ * with spaces ("check box", "page tab list"), which is what
+ * `atspi_role_get_name` produces and therefore what every AT means by a
+ * role name.
+ *
+ * This is deliberately **not** the ARIA role the app wrote. libatspi
+ * derives role names locally from the number, so a bridge that answered
+ * `GetRoleName` with its own vocabulary would be inconsistent with its own
+ * `GetRole` and nobody would notice until an AT asked over the wire. The
+ * app's ARIA role travels as the `xml-roles` attribute instead, which is
+ * where Chromium and Firefox put it and where Orca looks for it.
+ */
+export const ATSPI_ROLE_NICK = Object.freeze(
+  Object.fromEntries(
+    Object.entries(ATSPI_ROLE).map(([name, role]) => [
+      role,
+      name.toLowerCase().replaceAll('_', ' '),
+    ]),
+  ),
+);
+
+/**
  * ARIA role name → AT-SPI role. The mapping follows what the web engines
  * send to AT-SPI on Linux (Chromium's ax_platform_node_auralinux, Firefox's
  * nsRoleMap), so Orca sees from a react-x11 app exactly what it sees from a

@@ -38,8 +38,8 @@ import {
   ATSPI_ROLE,
   ATSPI_STATE,
   ATSPI_STATE_NICK,
+  ATSPI_ROLE_NICK,
   a11yRole,
-  roleNameOf,
   a11yErased,
   a11yPruned,
   a11yChildren,
@@ -426,11 +426,17 @@ const AccessibleImpl = {
   GetRole() {
     return a11yRole(this.n);
   },
+  // The AT-SPI role name, not the ARIA one the app wrote — see
+  // ATSPI_ROLE_NICK. The ARIA role is reported through `xml-roles` in
+  // GetAttributes, as the browsers do.
   GetRoleName() {
-    return roleNameOf(this.n) ?? this.n.kind;
+    return ATSPI_ROLE_NICK[a11yRole(this.n)] ?? 'unknown';
   },
   GetLocalizedRoleName() {
-    return roleNameOf(this.n) ?? this.n.kind;
+    // No localisation here: answering the untranslated name is what a
+    // toolkit with no message catalogue should do, and libatspi falls back
+    // to its own translations anyway.
+    return ATSPI_ROLE_NICK[a11yRole(this.n)] ?? 'unknown';
   },
   GetState() {
     return a11yStates(this.n);

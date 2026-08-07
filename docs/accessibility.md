@@ -251,8 +251,42 @@ with a stub `Embed`, and walk your app with real D-Bus calls —
 names, states as pure functions over the tree) needs no bus at all
 (`test/a11y.test.js`).
 
-Against a real desktop, the AT side of the stack is scriptable through the
-same library Orca uses:
+### Seeing it without learning a screen reader
+
+`npm run a11y:probe` is the client side of AT-SPI — the side Orca is on —
+with no GNOME libraries and nothing to configure:
+
+```bash
+npm run a11y:probe                       # what is on the accessibility bus
+npm run a11y:probe -- widgets            # dump that app's accessible tree
+npm run a11y:probe -- widgets --watch    # follow its events as you click
+npm run a11y:probe -- widgets --watch --speak   # ...said out loud
+npm run a11y:probe -- nautilus           # someone else's toolkit, for comparison
+```
+
+It talks to whatever is on the bus, so pointing it at a GTK app and at
+yours is the sharpest check available: if the shapes match, a screen reader
+will treat them the same. The `say:` lines it prints are a **toy** model —
+what Orca really utters is Orca's own policy — but they make a missing
+accessible name audible instead of merely absent, which is the failure that
+matters most and is easiest to miss.
+
+### With a real screen reader
+
+```bash
+orca --replace --debug-file=/tmp/orca.log     # then Tab through your app
+grep "SPEECH OUTPUT" /tmp/orca.log
+```
+
+The debug log is the ground truth, and it is easier to read than listening.
+For audio, speech-dispatcher does the talking (`spd-say hello` tests it on
+its own). Orca's own toggle is `gsettings set
+org.gnome.desktop.a11y.applications screen-reader-enabled true`; the GUI
+inspector, if you want one, is `accerciser`.
+
+### Scripting the AT side
+
+The AT stack is also scriptable through the same library Orca uses:
 
 ```python
 import gi; gi.require_version('Atspi', '2.0')

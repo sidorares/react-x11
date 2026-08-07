@@ -217,6 +217,28 @@ describe('the AT-SPI bridge', { concurrency: 1, ...needsBroker }, () => {
       await call(appBus, paths.button, ACCESSIBLE, 'GetRole'),
       ROLE.BUTTON,
     );
+    // GetRoleName is the AT-SPI name, not the ARIA one the app wrote:
+    // libatspi derives role names locally from the number, so a bridge
+    // answering its own vocabulary here is inconsistent with its own
+    // GetRole and nothing notices until an AT asks over the wire (which is
+    // how this was found — scripts/a11y-probe.mjs does ask).
+    assert.equal(
+      await call(appBus, paths.button, ACCESSIBLE, 'GetRoleName'),
+      'button',
+    );
+    assert.equal(
+      await call(appBus, framePath, ACCESSIBLE, 'GetRoleName'),
+      'frame',
+    );
+    // …and the ARIA role travels as an attribute, where the browsers put it.
+    // `a{ss}` reads back as pairs or as a plain object depending on the
+    // connection's value shapes, so normalise rather than pin one.
+    const attrs = await call(appBus, paths.button, ACCESSIBLE, 'GetAttributes');
+    const entries = Array.isArray(attrs) ? attrs : Object.entries(attrs);
+    assert.deepEqual(
+      entries.find(([k]) => k === 'xml-roles'),
+      ['xml-roles', 'button'],
+    );
     assert.equal(
       await getProp(appBus, paths.button, ACCESSIBLE, 'Name'),
       'Save',
