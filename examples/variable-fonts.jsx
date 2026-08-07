@@ -13,9 +13,9 @@
 // that is the axis react-x11 already drives, and everything else goes in
 // `fontVariationSettings`.
 //
-// There is also a switch for ntk's *text policy*, which is not about
-// variable fonts at all but is the other thing this window is good for
-// looking at closely. See TEXT_POLICY below.
+// The specimen also carries `textRendering: 'geometricPrecision'`, scoped to
+// that one <text>: it takes the precise glyph path while every control
+// around it keeps its glyph cache. See the note above the constant.
 //
 // Needs a variable font to be interesting. Most systems have one:
 //   /usr/share/fonts/truetype/ubuntu/Ubuntu[wdth,wght].ttf   (wdth + wght)
@@ -53,26 +53,28 @@ function stepFor(axis) {
 const isBinary = (axis) => axis.min === 0 && axis.max === 1;
 
 /**
- * ntk routes each (face, size) to one of two glyph paths, and `textPolicy`
- * is where the thresholds live:
+ * ntk draws each run through one of two glyph paths:
  *
- * - **bitmap** — glyphs rasterize once, upload to a server-side glyphset and
- *   composite by id. Cheap to draw repeatedly, and glyph origins are
- *   **rounded to whole pixels**, because a cached bitmap can only land on
- *   one.
- * - **vector** — outlines are flattened at the exact size, trapezoidated and
+ * - **cached bitmaps** — each glyph rasterizes once, uploads to a
+ *   server-side glyphset and composites by id. Cheap to redraw, and every
+ *   advance is baked in as a **whole number**, because a cached bitmap can
+ *   only land on a whole pixel.
+ * - **outlines** — flattened at the exact size, trapezoidated and
  *   composited through a scratch mask, every draw. Nothing is cached, and
- *   positions are deliberately *not* rounded.
+ *   positions are deliberately not rounded.
  *
- * Forcing everything to the vector path is how you see subpixel glyph
- * positioning: at a fractional size, or with a fractional origin, the
- * bitmap path snaps and the vector path does not. It costs a rasterization
- * per draw, which is the trade the thresholds exist to make for you.
+ * By default the size decides, which is right for UI text and wrong for the
+ * specimen above it: slide the `wght` slider and the true advances move by
+ * hundredths of a pixel, which the cached path cannot express. They
+ * accumulate along the line until one glyph crosses a rounding boundary and
+ * jumps a whole pixel by itself while its neighbours stand still.
+ *
+ * `textRendering` is how a `<text>` says which it wants, and it is scoped to
+ * that element rather than to the app — which is the whole reason it is a
+ * style prop. The specimen asks for outlines; every label, value and hint
+ * around it says nothing and keeps its glyph cache.
  */
-const TEXT_POLICY = {
-  bitmap: undefined, // ntk's defaults: bitmapMax 128, vectorFrom 256
-  vector: { bitmapMax: 0, vectorFrom: 0 },
-};
+const SPECIMEN_RENDERING = 'geometricPrecision';
 
 /** Axis order: the ones people reach for first, then whatever else exists. */
 const AXIS_ORDER = ['wght', 'wdth', 'opsz', 'slnt', 'ital', 'GRAD'];
@@ -192,6 +194,7 @@ function snippetFor({ font, size, values, sample }) {
     const pairs = others.map((tag) => `${tag}: ${num(values[tag])}`).join(', ');
     lines.push(`    fontVariationSettings: { ${pairs} },`);
   }
+  lines.push(`    textRendering: '${SPECIMEN_RENDERING}',`);
   lines.push('  }}', '>', `  ${sample}`, '</text>');
   return lines.join('\n');
 }
@@ -247,14 +250,6 @@ function Lab({ initialFont = null }) {
   const [size, setSize] = useState(64);
   const [sample, setSample] = useState('Handgloves');
   const [picked, setPicked] = useState(null); // the named instance, if any
-  const [vectorText, setVectorText] = useState(false);
-
-  // `textPolicy` is read at *draw* time, not at render time, so setting it
-  // changes nothing on its own — the frame already on screen was composited
-  // by whichever path was in force when it was drawn. Remounting the sample
-  // (`key` below) is the honest way to ask for it again from React, with no
-  // reach into renderer internals.
-  app.textPolicy = vectorText ? TEXT_POLICY.vector : TEXT_POLICY.bitmap;
 
   /** Register a file with the running app and read its axes off it. */
   const load = useCallback(
@@ -361,12 +356,17 @@ function Lab({ initialFont = null }) {
             <>
               <box style={[s.card, s.sample]}>
                 <text
-                  key={vectorText ? 'vector' : 'bitmap'}
                   style={{
                     fontFamily: font.name,
                     fontSize: size,
                     fontWeight: font.axes.wght ? values.wght : undefined,
                     fontVariationSettings: variations,
+                    // 'geometricPrecision' — the only element in the window
+                    // that says so. The controls below never mention it, so
+                    // they keep the cached glyph path this one opts out of.
+                    // Shared with the snippet panel, which prints what this
+                    // is actually styled with rather than a copy of it.
+                    textRendering: SPECIMEN_RENDERING,
                     color: '$text',
                   }}
                 >
@@ -396,10 +396,9 @@ function Lab({ initialFont = null }) {
                   </box>
                   <text style={s.value}>{num(size)}</text>
                   <text style={s.range}>8–200</text>
-                  {/* half-pixel steps, because a fractional size is what
-                      makes the two glyph paths differ: the bitmap path
-                      rounds each origin to a whole pixel, the vector path
-                      does not */}
+                  {/* half-pixel steps: the specimen is on the precise glyph
+                      path, so a fractional size is a size it can actually
+                      draw rather than one it rounds away */}
                   <Slider
                     value={size}
                     min={8}
@@ -408,26 +407,6 @@ function Lab({ initialFont = null }) {
                     onChange={(ev) => setSize(ev.value)}
                     style={{ flexGrow: 1, minWidth: 120 }}
                   />
-                </box>
-
-                <box style={s.row}>
-                  <box style={s.axisName}>
-                    <text style={s.axisTag}>glyph path</text>
-                    <text style={s.axisLabel}>app.textPolicy</text>
-                  </box>
-                  <text style={s.value}>{vectorText ? 'vector' : 'auto'}</text>
-                  <text style={s.range}>
-                    {vectorText ? 'subpixel' : 'pixel-snapped'}
-                  </text>
-                  <Switch
-                    checked={vectorText}
-                    onChange={(ev) => setVectorText(ev.value)}
-                  />
-                  <text style={s.dim}>
-                    {vectorText
-                      ? '{ bitmapMax: 0, vectorFrom: 0 } — outlines every draw, origins unrounded'
-                      : 'ntk defaults — cached glyph bitmaps, origins rounded to whole pixels'}
-                  </text>
                 </box>
 
                 {tags.length === 0 && (
