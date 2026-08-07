@@ -556,6 +556,8 @@ run list so wrapping spans the whole content.
 
 ### Variable fonts
 
+_ntk ≥ 7.1.0._
+
 A variable font is one file with a continuous design space, and
 `fontWeight` already drives its `wght` axis — so a family with one variable
 file behaves like a family with nine faces, and like nine hundred, since

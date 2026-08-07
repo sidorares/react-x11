@@ -2070,6 +2070,7 @@ export class TextNode extends Node {
           size: style.size,
           weight: style.weight,
           style: style.style,
+          variations: style.variations,
           color: style.color,
         });
       } else if (child.kind === 'text') {

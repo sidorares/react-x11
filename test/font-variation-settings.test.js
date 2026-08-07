@@ -2,12 +2,15 @@
 //
 // react-x11's share of this is small and worth stating exactly: it carries
 // the prop into the style ntk resolves a face from, and it decides when that
-// changed. Instancing, clamping, keys and glyph caching are ntk's (see its
-// docs/fonts.md); the tests here are about the seam.
+// changed. Instancing, clamping, keys and glyph caching are ntk's (ntk >=
+// 7.1.0, its docs/fonts.md); the tests here are about the seam.
 //
-// Two of them are pixel tests and need an ntk with variable-font support.
-// They skip, loudly, against one without it rather than asserting something
-// weaker — a green suite that proves nothing is worse than a skipped one.
+// "Carries it" has two halves that fail independently. `textStyleFrom` puts
+// it on the paragraph style, and `collectSpans` puts it on each span — that
+// second one enumerates its fields by hand, so a prop can be plumbed all the
+// way to `<text>` and still be dropped on the way to a *nested* `<text>`.
+// Hence the pixel tests: asserting on `textStyleFrom` alone passes while
+// span overrides silently do nothing.
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -17,7 +20,7 @@ import { test } from 'node:test';
 import React from 'react';
 
 import xserver from 'x11/lib/xserver/index.js';
-import { Font, StaticFontSource, createClient } from 'ntk';
+import { StaticFontSource, createClient } from 'ntk';
 
 import { createRoot } from '../src/index.js';
 import { DEFAULT_TEXT_STYLE, textStyleFrom } from '../src/styles.js';
@@ -34,13 +37,10 @@ const VF = join(
   'MonelogicsSubset[wght].ttf',
 );
 
-/** ntk gained `Font.variation()` with variable-font support; older ones
- *  ignore `variations` in a style, which no assertion here can survive. */
-const ntkHasVariations = typeof Font.prototype.variation === 'function';
-const NEEDS_NTK = 'needs an ntk with variable-font support (sidorares/ntk#227)';
-
 const W = 260;
 const H = 120;
+// Weight does not widen every string — in this face "flat span" *narrows*
+// as it gets heavier. This one widens, so the direction is safe to assert.
 const SAMPLE = 'Handgloves';
 
 // --- the seam ---------------------------------------------------------------
@@ -142,8 +142,7 @@ async function renderAndRead(app, root, element, ref) {
   return { image: await readPixels(ctx), node, width: node.abs.width };
 }
 
-test('moving an axis re-measures and repaints', async (t) => {
-  if (!ntkHasVariations) return t.skip(NEEDS_NTK);
+test('moving an axis re-measures and repaints', async () => {
   const app = await variableFontApp();
   const root = await createRoot({ app });
   try {
@@ -169,8 +168,55 @@ test('moving an axis re-measures and repaints', async (t) => {
   }
 });
 
-test('an equal object literal does not re-measure', async (t) => {
-  if (!ntkHasVariations) return t.skip(NEEDS_NTK);
+// A nested <text> is a style span, and spans are built by `collectSpans`,
+// which names the fields it copies one at a time. A prop can therefore be
+// plumbed correctly all the way to a top-level <text> and still vanish on a
+// nested one — as this did, with `textStyleFrom` asserting green throughout.
+test('a nested span carries its own axes', async () => {
+  const app = await variableFontApp();
+  const root = await createRoot({ app });
+  try {
+    const ref = React.createRef();
+    const paragraph = (spanAxes) =>
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+        React.createElement(
+          'text',
+          {
+            ref,
+            style: {
+              fontFamily: 'Test VF',
+              fontSize: 34,
+              color: '#000000',
+              alignSelf: 'flex-start',
+            },
+          },
+          React.createElement(
+            'text',
+            { style: { fontVariationSettings: spanAxes } },
+            SAMPLE,
+          ),
+        ),
+      );
+
+    const flat = await renderAndRead(app, root, paragraph(undefined), ref);
+    const heavy = await renderAndRead(app, root, paragraph({ wght: 900 }), ref);
+
+    assert.ok(
+      ink(heavy.image) > ink(flat.image) * 1.2,
+      `the span should be heavier, got ${ink(flat.image)} -> ${ink(heavy.image)}`,
+    );
+    assert.ok(
+      heavy.width > flat.width,
+      `and the paragraph re-wraps around it: ${flat.width} -> ${heavy.width}`,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('an equal object literal does not re-measure', async () => {
   const app = await variableFontApp();
   const root = await createRoot({ app });
   try {
@@ -199,8 +245,7 @@ test('an equal object literal does not re-measure', async (t) => {
   }
 });
 
-test('a static face ignores axes rather than failing on them', async (t) => {
-  if (!ntkHasVariations) return t.skip(NEEDS_NTK);
+test('a static face ignores axes rather than failing on them', async () => {
   const app = await variableFontApp();
   const root = await createRoot({ app });
   try {
