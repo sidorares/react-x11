@@ -485,12 +485,33 @@ export function setDebugPaint(mode) {
   debugPaint = mode || '';
 }
 
+/**
+ * Every text layout prop is a scalar and compares by value, except the one
+ * that is a bag of axis coordinates. `fontVariationSettings` is written as
+ * an object literal in a render, so a fresh one arrives on every commit and
+ * `!==` would call it a change every time — re-shaping the paragraph and
+ * re-rasterizing its glyphs to arrive at the same pixels. Small and flat, so
+ * comparing it is cheaper than believing it.
+ */
+function axesEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 /** Did anything the text stack measures or paints with change? */
 function textStyleChanged(style, before) {
   if (style === before) return false;
   if (style.color !== before.color) return true;
   for (const key of TEXT_LAYOUT_PROPS) {
-    if (style[key] !== before[key]) return true;
+    if (key === 'fontVariationSettings') {
+      if (!axesEqual(style[key], before[key])) return true;
+    } else if (style[key] !== before[key]) return true;
   }
   return false;
 }
@@ -2049,6 +2070,7 @@ export class TextNode extends Node {
           size: style.size,
           weight: style.weight,
           style: style.style,
+          variations: style.variations,
           color: style.color,
         });
       } else if (child.kind === 'text') {

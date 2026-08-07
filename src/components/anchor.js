@@ -309,6 +309,9 @@ export function measureLabel(node, text, style) {
     family: style?.family ?? 'sans-serif',
     size,
     weight: style?.weight ?? 'normal',
+    // dropping this would measure a different face from the one drawn, and
+    // the popup sized here would be the wrong width for its own label
+    variations: style?.variations,
   });
   return { width: layout.width, height: layout.height };
 }

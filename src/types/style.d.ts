@@ -156,6 +156,11 @@ export interface TextStyle {
   fontSize?: number;
   fontWeight?: FontWeight;
   fontStyle?: FontStyle;
+  /** A variable font's axes, by OpenType tag: `{ wdth: 87.5, slnt: -8 }`.
+   *  The `wght` axis is already driven by `fontWeight`, so this is for the
+   *  rest. Axes the font does not have are ignored and values clamp to each
+   *  axis's range. Compared by value, so an object literal is fine. */
+  fontVariationSettings?: Record<string, number>;
   textAlign?: TextAlign;
   lineHeight?: number;
   /** Default `'none'`. Applies to `<text>`; the editable controls keep their
