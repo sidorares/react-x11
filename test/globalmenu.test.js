@@ -10,7 +10,7 @@ import assert from 'node:assert';
 import { describe, test } from 'node:test';
 import React from 'react';
 
-import { _resetBusState, busRefs } from '../src/bus.js';
+import { _resetBusState, busRefs, sessionBus } from '../src/bus.js';
 import { createRoot } from '../src/index.js';
 import { GlobalMenuExport, REGISTRAR_NAME } from '../src/globalmenu.js';
 import { createMockApp } from './helpers/mock-app.js';
@@ -485,6 +485,106 @@ describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
         process.env.XDG_RUNTIME_DIR = savedRuntime;
       _resetBusState();
     }
+  });
+
+  test('stopping while the X properties are being written undoes them', async () => {
+    await withBus(async (address) => {
+      // Plasma prefers the KDE properties to the registrar, so a window left
+      // advertising an object path that is then unexported shows an empty
+      // menu for as long as it lives — the exact opposite of what they are
+      // for. `setProperty` is held open so the unmount lands *inside*
+      // `setWindowProperties`, which is the window `stop()` has to wait out
+      // rather than race.
+      const panel = await fakeRegistrar(address);
+      const calls = [];
+      const target = {
+        id: 0x99,
+        setProperty: async (name) => {
+          await new Promise((r) => setTimeout(r, 60));
+          calls.push(['set', name]);
+        },
+        deleteProperty: async (name) => {
+          calls.push(['delete', name]);
+        },
+      };
+      const owner = new GlobalMenuExport({
+        getMenus: () => MENUS(),
+        target,
+        onChange: () => {},
+      });
+
+      const started = owner.start();
+      await until(() => calls.length > 0, 'the first property write');
+      await owner.stop();
+      await started;
+
+      // Whatever the interleaving, the window must not be left carrying a
+      // property: every set is followed by its delete.
+      const sets = calls.filter((c) => c[0] === 'set').length;
+      const deletes = calls.filter((c) => c[0] === 'delete').length;
+      assert.ok(deletes >= sets, `${sets} set, only ${deletes} deleted`);
+      assert.equal(calls.at(-1)?.[0], 'delete', 'the last word is a delete');
+
+      await panel.stop();
+      await until(() => busRefs('session') === 0, 'the bus to be released');
+    });
+  });
+
+  test('a watch that resolves after stop() installs nothing', async () => {
+    await withBus(async (address) => {
+      const panel = await fakeRegistrar(address);
+      const owner = new GlobalMenuExport({
+        getMenus: () => MENUS(),
+        target: { id: 0x99 },
+        onChange: () => {},
+      });
+      await owner.start();
+      await owner.stop();
+
+      // The real sequence is an unmount inside the AddMatch round trip, which
+      // is a few milliseconds wide and cannot be hit reliably from outside —
+      // so the guard is exercised where it lives. Without it, `teardown()`
+      // has already run and found `subscription` null, and this call installs
+      // a match rule and a `NameOwnerChanged` listener that nothing will ever
+      // remove: the daemon keeps waking the process, and the listener pins
+      // this exporter, its snapshot and every item's `onSelect` for good.
+      const ref = await sessionBus();
+      owner.ref = ref;
+      await owner.watchRegistrar();
+      assert.equal(owner.subscription, null, 'no match rule installed');
+      assert.equal(owner.onOwnerChanged, undefined, 'no listener installed');
+
+      await ref.release();
+      await panel.stop();
+      await until(() => busRefs('session') === 0, 'the bus to be released');
+    });
+  });
+
+  test('a registrar that refuses the registration leaves nothing behind', async () => {
+    await withBus(async (address) => {
+      // The bar is drawn either way, which is the visible part. The part that
+      // is not visible is whether the attempt left a bus reference, a match
+      // rule and an orphan `com.canonical.dbusmenu` object behind for a
+      // registration that never happened — so `start()` has to be able to see
+      // that the sync failed, which means `sync()` must not swallow.
+      const panel = await fakeRegistrar(address, { refuseRegister: true });
+      // `dialsBus: false` because the teardown that follows the refusal can
+      // release the ref before a poll for "it acquired one" ever sees it —
+      // the refused call below is the better evidence that it dialled.
+      const bar = await mountBar(undefined, MENUS(), { dialsBus: false });
+      await until(() => panel.calls.length > 0, 'the refused RegisterWindow');
+      await until(() => busRefs('session') === 0, 'the bus to be let go');
+
+      assert.equal(bar.barIsDrawn(), true, 'the bar stays in the window');
+      assert.deepEqual(
+        bar.propertyCalls(),
+        [],
+        'and nothing was written to it',
+      );
+
+      await panel.stop();
+      await bar.root.unmount();
+    });
   });
 
   test('the registrar name is the one panels actually own', () => {

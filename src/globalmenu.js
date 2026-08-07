@@ -211,11 +211,23 @@ export class GlobalMenuExport {
    */
   async watchRegistrar() {
     const { bus } = this.ref;
-    this.subscription = await bus.watch(
+    const subscription = await bus.watch(
       "type='signal',sender='org.freedesktop.DBus'," +
         "interface='org.freedesktop.DBus',member='NameOwnerChanged'," +
         `arg0='${REGISTRAR_NAME}'`,
     );
+    // `AddMatch` is a round trip, and a window that opens and closes inside
+    // one — an unmount, a StrictMode remount — leaves `teardown()` already
+    // finished by the time it lands. Installing the rule and the listener now
+    // would leave both behind for good, since `stop()` is idempotent and has
+    // nothing left to run: the daemon would keep waking the process, and the
+    // listener would keep this exporter, its snapshot and every item's
+    // `onSelect` closure alive for the life of it.
+    if (this.stopped) {
+      await subscription.remove().catch(() => {});
+      return;
+    }
+    this.subscription = subscription;
     const key = bus.mangle(
       '/org/freedesktop/DBus',
       'org.freedesktop.DBus',
@@ -240,10 +252,18 @@ export class GlobalMenuExport {
    * of it. Serialising is the whole fix, and it costs a promise.
    */
   sync() {
-    this.syncing = (this.syncing ?? Promise.resolve())
-      .then(() => this._sync())
-      .catch(() => {});
-    return this.syncing;
+    // Two promises, deliberately. `syncing` is the queue and must never
+    // reject, or one failed sync would poison every later one; the returned
+    // promise is the caller's and must, or `start()` cannot tell that
+    // publishing failed and would leave a bus ref, a match rule and an orphan
+    // `com.canonical.dbusmenu` object behind for a registration that did not
+    // happen. The signal handler discards its own.
+    const done = (this.syncing ?? Promise.resolve()).then(
+      () => this._sync(),
+      () => this._sync(),
+    );
+    this.syncing = done.catch(() => {});
+    return done;
   }
 
   async _sync() {
@@ -256,7 +276,17 @@ export class GlobalMenuExport {
 
   async publish() {
     const { bus } = this.ref;
-    const xid = windowIdOf(this.target);
+    // Resolved **once**, and both answers taken from the same read.
+    // `useTopLevelWindow()` is a live getter — it recomputes from the app's
+    // window list and the X focus every time — so asking again after the
+    // registrar round trip can name a different window than the xid just
+    // registered, and the KDE properties would land on the wrong one.
+    const node =
+      this.target && 'current' in this.target
+        ? this.target.current
+        : this.target;
+    const xid = windowIdOf(node);
+    const wnd = ntkWindowOf(node);
     // A window that is not realized yet has no id to register. `sync()` runs
     // again on the next ownership change, and the effect that owns this runs
     // after the commit that creates the window, so this is the "closed mid
@@ -290,9 +320,14 @@ export class GlobalMenuExport {
     );
 
     // The window can close, or the panel exit, while that call is in flight.
+    // Bailing *before* the properties are written is what keeps a torn-down
+    // window from being left advertising an object path that is about to be
+    // unexported — Plasma prefers those properties to the registrar, so it
+    // would show that window an empty menu for as long as it lives.
     if (this.stopped) return void (await this.unpublish());
 
-    await this.setWindowProperties(bus.name, path);
+    await this.setWindowProperties(wnd, bus.name, path);
+    if (this.stopped) return void (await this.unpublish());
     this.exported = true;
     this.onChange(true);
   }
@@ -310,8 +345,7 @@ export class GlobalMenuExport {
    * about is already off it. Properties are cleared on the window they were
    * set on or not at all.
    */
-  async setWindowProperties(serviceName, path) {
-    const wnd = ntkWindowOf(this.target);
+  async setWindowProperties(wnd, serviceName, path) {
     if (!wnd?.setProperty) return;
     this.window = wnd;
     const opts = { type: 'STRING', format: 8 };
@@ -367,7 +401,15 @@ export class GlobalMenuExport {
 
   async stop() {
     if (this.stopped) return;
+    // Set first, so a publish already in flight sees it and undoes itself at
+    // its next checkpoint rather than finishing.
     this.stopped = true;
+    // Then wait for it. `teardown()` reads `registration`, `xid` and `window`
+    // across several awaits of its own, so running it *beside* a publish lets
+    // each undo the other's work: the classic end state is `exported === true`
+    // with the object unexported and the window unregistered — no bar in the
+    // window, nothing in the panel, and no event left that could recover it.
+    await this.syncing?.catch(() => {});
     await this.teardown();
   }
 
@@ -389,6 +431,9 @@ export class GlobalMenuExport {
       await this.subscription.remove().catch(() => {});
       this.subscription = null;
     }
+    // Dropped as well as removed: it closes over this exporter, so leaving it
+    // on the instance keeps the snapshot and every item's handler reachable.
+    this.onOwnerChanged = undefined;
     await this.ref?.release();
     this.ref = null;
   }
@@ -490,12 +535,16 @@ export class GlobalMenuExport {
           in: { id: 'i', name: 's' },
           out: { value: 'v' },
           handler: ({ id, name }) => {
-            const value = this.nodes.get(id)?.props?.[name];
-            const type = PROPERTY_TYPES[name];
+            const props = this.nodes.get(id)?.props;
+            // `hasOwn` on both, so a name like `constructor` reads as absent
+            // rather than as a function that then fails to marshal.
+            const known = Object.hasOwn(PROPERTY_TYPES, name);
+            const value =
+              props && Object.hasOwn(props, name) ? props[name] : undefined;
             // A property this item does not carry is at its default, and the
             // spec's own advice is to answer with it rather than to error.
-            if (value === undefined || !type) return new dbus.Variant('s', '');
-            return new dbus.Variant(type, value);
+            if (value === undefined || !known) return new dbus.Variant('s', '');
+            return new dbus.Variant(PROPERTY_TYPES[name], value);
           },
         },
         Event: {

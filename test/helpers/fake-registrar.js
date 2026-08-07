@@ -40,7 +40,10 @@ async function client(address) {
  * await panel.stop();          // the panel exits; the bar comes back
  * ```
  */
-export async function fakeRegistrar(address) {
+export async function fakeRegistrar(
+  address,
+  { registerDelay = 0, refuseRegister = false } = {},
+) {
   const { dbus, bus } = await client(address);
 
   /** xid → { service, path } — what `GetMenus` is made of. */
@@ -65,10 +68,20 @@ export async function fakeRegistrar(address) {
         // XML says it "assumes that the connection from the caller is the DBus
         // connection to use for the object". An exporter that passed a name
         // here would be talking to a registrar nobody has written.
-        handler: ({ windowId, menuObjectPath }, { sender, message }) => {
-          windows.set(windowId, { service: sender, path: menuObjectPath });
+        // `registerDelay` holds the reply open, which is the only way to get
+        // an exporter reliably *inside* publish() for the teardown races.
+        handler: async ({ windowId, menuObjectPath }, { sender, message }) => {
+          if (registerDelay) {
+            await new Promise((r) => setTimeout(r, registerDelay));
+          }
+          // Recorded before the refusal, so a test can wait for the attempt
+          // rather than for its (absent) effect.
           calls.push(['RegisterWindow', windowId, menuObjectPath, sender]);
           flags.push(['RegisterWindow', message?.flags ?? 0]);
+          // A registrar that answers the bus but refuses this call — a
+          // version mismatch, a policy, a panel shutting down.
+          if (refuseRegister) throw new Error('not accepting registrations');
+          windows.set(windowId, { service: sender, path: menuObjectPath });
         },
       },
       UnregisterWindow: {
