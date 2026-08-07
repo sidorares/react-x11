@@ -7,7 +7,7 @@
 //   font.fk.namedVariations                the designer's chosen points
 //
 // A slider per continuous axis, a Switch for a binary one, a readout for an
-// axis pinned to a single value, and a Select for the named instances. The
+// axis pinned to a single value, and radios for the named instances. The
 // panel at the bottom prints the `<text>` that would draw what you are
 // looking at — the point being that `wght` comes out as `fontWeight`, since
 // that is the axis react-x11 already drives, and everything else goes in
@@ -24,7 +24,8 @@ import { Font } from 'ntk';
 
 import {
   Button,
-  Select,
+  Radio,
+  RadioGroup,
   Slider,
   Switch,
   createRoot,
@@ -268,6 +269,8 @@ function Lab({ initialFont = null }) {
     [font],
   );
 
+  const namedNames = useMemo(() => Object.keys(font?.named ?? {}), [font]);
+
   // `wght` is spent on fontWeight; everything else is fontVariationSettings
   const variations = useMemo(() => {
     const out = {};
@@ -394,13 +397,26 @@ function Lab({ initialFont = null }) {
                         the designer&apos;s own points
                       </text>
                     </box>
-                    <Select
-                      style={{ width: 220 }}
+                    {/* Radios rather than a dropdown: these are the one
+                        genuinely discrete thing about a variable font, and
+                        seeing all of them at once — with the coordinates
+                        they stand for — is the point. A menu would hide
+                        both behind a click. */}
+                    <RadioGroup
                       value={picked}
-                      placeholder={`${Object.keys(font.named).length} to choose from…`}
-                      options={Object.keys(font.named)}
                       onChange={(ev) => applyNamed(ev.value)}
-                    />
+                      style={{
+                        flexDirection: 'row',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                        flexGrow: 1,
+                        flexShrink: 1,
+                      }}
+                    >
+                      {namedNames.map((name) => (
+                        <Radio key={name} value={name} label={name} />
+                      ))}
+                    </RadioGroup>
                   </box>
                 )}
               </box>
