@@ -20,6 +20,7 @@ import {
 } from '../src/index.js';
 import { FormPanel } from './form.jsx';
 import { WidgetsPanel } from './widgets.jsx';
+import { DatesPanel } from './datepicker.jsx';
 import { TasksPanel } from './tasks.jsx';
 import { ThemingPanel } from './theming.jsx';
 
@@ -68,6 +69,7 @@ const s = createStyles({
 const SECTIONS = [
   { id: 'form', label: 'Form' },
   { id: 'widgets', label: 'Widgets' },
+  { id: 'dates', label: 'Dates' },
   { id: 'tasks', label: 'Tasks' },
   { id: 'tree', label: 'Tree' },
   { id: 'table', label: 'Table' },
@@ -168,6 +170,7 @@ function TablePanel() {
 const PANELS = {
   form: () => <FormPanel />,
   widgets: () => <WidgetsPanel />,
+  dates: () => <DatesPanel />,
   tasks: () => <TasksPanel />,
   tree: () => <TreePanel />,
   table: () => <TablePanel />,

@@ -152,6 +152,13 @@ export function createMockApp() {
         fillRect(x, y, w, h) {
           ops.push(['fillRect', x, y, w, h, ctx.fillStyle]);
         },
+        // ntk's context has this beside `fillRect`, so an `onDraw` that
+        // outlines a box paints on a real server and used to crash on the
+        // mock — a missing method here is an app's headless test failing at
+        // something that works
+        strokeRect(x, y, w, h) {
+          ops.push(['strokeRect', x, y, w, h, ctx.strokeStyle, ctx.lineWidth]);
+        },
         beginPath() {},
         clearRect(x, y, w, h) {
           ops.push(['clearRect', x, y, w, h]);

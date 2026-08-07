@@ -146,6 +146,7 @@ const exercises = {
   'size-queries': (server) => click(server, 0x2980b9), // resize the window
   widgets: (server) => click(server, 0x0a84ff), // the primary "Mute" button
   events: (server) => click(server, 0x2980b9), // the inner box
+  dates: (server) => click(server, 0x2980b9), // the primary Clear button
   tasks(server) {
     click(server, 0x27ae60); // the done task's checkbox
     // and the editor: click into the input, then type

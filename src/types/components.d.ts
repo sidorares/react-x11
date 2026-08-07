@@ -3,7 +3,7 @@
  * `ThemeProvider`. See docs/components.md.
  */
 
-import type { ComponentType, ReactNode, RefObject } from 'react';
+import type { ComponentType, ReactNode, Ref, RefObject } from 'react';
 import type { ColorSchemePreference } from './appearance.js';
 import type { Color, StyleProp } from './style.js';
 import type { BoxProps, GlAreaProps, Vec3 } from './elements.js';
@@ -16,6 +16,7 @@ import type {
   DropAccept,
   DropEvent,
   DropTargetProps,
+  KeyboardEvent,
   MouseEvent,
 } from './events.js';
 
@@ -158,6 +159,121 @@ export interface ButtonProps extends WidgetProps {
   style?: StyleProp;
 }
 export const Button: ComponentType<ButtonProps>;
+
+/**
+ * A calendar day, `'2026-08-07'`. Not a `Date`: a square on a wall calendar
+ * has no time and no zone, and two of them compare equal only if both were
+ * built the same way. As a string, `===` is "the same day" and `<` is
+ * "earlier".
+ */
+export type CalendarDay = string;
+
+/** What a day prop takes: a day, or a `Date` read as its **local** day. */
+export type DayInput = CalendarDay | Date | null;
+
+/** A span. `end` is `null` while only one end has been picked. */
+export interface DateRange {
+  start: CalendarDay | null;
+  end: CalendarDay | null;
+}
+
+export interface DateRangeInput {
+  start?: DayInput;
+  end?: DayInput;
+}
+
+/** The day, taken apart — so `isDateBlocked` need not parse the string. */
+export interface DayParts {
+  year: number;
+  /** 1-based, unlike `Date`'s. */
+  month: number;
+  day: number;
+  /** `0` Sunday … `6` Saturday, as `Date#getDay()` counts. */
+  weekday: number;
+  /** The day as a UTC-midnight `Date`. */
+  date: Date;
+}
+
+/** What a cell is, when `dayContent` is asked what to draw in it. */
+export interface CalendarDayState {
+  blocked: boolean;
+  /** A day of the neighbouring month, filling a corner of the grid. */
+  outside: boolean;
+  today: boolean;
+  selected: boolean;
+  inRange: boolean;
+  /** Inside a range that is being previewed rather than picked. */
+  preview: boolean;
+  focused: boolean;
+  /** The colour the day's number is drawn in — a marker that follows it
+   * stays legible on the filled ends of a range. */
+  color: Color;
+}
+
+/** A `<Calendar>`'s imperative side, for a control that holds the keyboard on
+ * its behalf. `handleKey` reports whether the grid took the key. */
+export interface CalendarHandle {
+  handleKey: (ev: KeyboardEvent<DrawnNode>) => boolean;
+}
+
+interface CalendarCommonProps extends WidgetProps, NamedWidget {
+  /** Visible month, `'2026-08'`; controlled with `onMonthChange`. */
+  month?: string | null;
+  defaultMonth?: string | Date | null;
+  onMonthChange?: (month: string) => void;
+  min?: DayInput;
+  max?: DayInput;
+  /** Everything `min`/`max` cannot say — weekends, holidays, days the
+   * server reports as taken. */
+  isDateBlocked?: (day: CalendarDay, parts: DayParts) => boolean;
+  /** Let a range run across blocked days; only its ends must be free. */
+  spanBlocked?: boolean;
+  /** Drawn under the number, in a strip reserved only when this is given —
+   * the seam for event dots, prices, availability counts. */
+  dayContent?: (day: CalendarDay, state: CalendarDayState) => ReactNode;
+  /** BCP 47 tag for the month name, weekday names and the trigger's label.
+   * The system locale by default. */
+  locale?: string;
+  /** `0` Sunday … `6` Saturday. The locale's own answer by default, and
+   * Monday where the runtime does not know it. */
+  weekStartsOn?: number;
+  style?: StyleProp;
+}
+
+export interface SingleCalendarProps extends CalendarCommonProps {
+  mode?: 'single';
+  value?: DayInput;
+  defaultValue?: DayInput;
+  onChange?: (ev: WidgetChangeEvent<CalendarDay>) => void;
+}
+
+export interface RangeCalendarProps extends CalendarCommonProps {
+  mode: 'range';
+  value?: DateRangeInput | null;
+  defaultValue?: DateRangeInput | null;
+  onChange?: (ev: WidgetChangeEvent<DateRange>) => void;
+}
+
+export type CalendarProps = (SingleCalendarProps | RangeCalendarProps) & {
+  /** A tab stop by default. Off for a calendar whose keys come from
+   * elsewhere — a picker's trigger, which the popup cannot take focus
+   * from. */
+  focusable?: boolean;
+  /** Draw the day cursor even though this grid does not hold the focus,
+   * which is what that same case needs. */
+  focusVisible?: boolean;
+  ref?: Ref<CalendarHandle>;
+};
+export const Calendar: ComponentType<CalendarProps>;
+
+export type DatePickerProps = (SingleCalendarProps | RangeCalendarProps) & {
+  /** The trigger's label. The locale's medium date by default, and
+   * `Intl`'s own range format for two of them. */
+  format?: (value: unknown) => string | null | undefined;
+  placeholder?: string;
+  disabled?: boolean;
+};
+export const DatePicker: ComponentType<DatePickerProps>;
 
 export interface CheckboxProps extends WidgetProps, NamedWidget {
   children?: ReactNode;
