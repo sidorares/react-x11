@@ -383,7 +383,19 @@ export function Select({
           },
           h(
             'scrollview',
-            { ref: scrollRef, style: { flexGrow: 1, padding: MENU_PAD } },
+            {
+              ref: scrollRef,
+              // Not a tab stop, and not a focus target for a press either.
+              // A scrollview becomes focusable the moment its content
+              // overflows, so a menu long enough to scroll would take focus
+              // on mousedown — blurring the trigger, whose onBlur closes the
+              // menu, which unmounts the row under the pointer before the
+              // release can turn into a click. The trigger owns the keyboard
+              // for a Select; this pane is scrolled by wheel and by the
+              // arrow keys the trigger already handles.
+              focusable: false,
+              style: { flexGrow: 1, padding: MENU_PAD },
+            },
             normalized.map((option, index) =>
               h(Option, {
                 key: String(option.value),
