@@ -226,6 +226,43 @@ describe('stable ids', () => {
     assert.equal(sepAfter, sepBefore);
   });
 
+  test('a label containing a path separator cannot steal another item\u2019s id', () => {
+    // Labels are arbitrary text — an "Open Recent" menu is full of paths — so
+    // any character used to join a path is one a label can contain. Joining
+    // with `/`, the leaf below is `/p/a/b` by both routes.
+    const alloc = new IdAllocator();
+    const nodes = snapshot(
+      [
+        { label: 'p', items: [{ label: 'a/b' }] },
+        { label: 'p/a', items: [{ label: 'b' }] },
+      ],
+      alloc,
+    );
+    const leaves = [...nodes].filter(([, n]) => n.childIds.length === 0);
+    assert.equal(leaves.length, 2);
+    assert.notEqual(leaves[0][0], leaves[1][0], 'two leaves, two ids');
+  });
+
+  test('a sibling whose label looks like a disambiguated one is still distinct', () => {
+    // `A`, `A`, `A 1`: appending the occurrence count only to the duplicates
+    // would give `A`, `A<sep>1`, `A 1`, and the naive separator is a space.
+    const alloc = new IdAllocator();
+    const nodes = snapshot(
+      [
+        {
+          label: 'M',
+          items: [{ label: 'A' }, { label: 'A' }, { label: 'A 1' }],
+        },
+      ],
+      alloc,
+    );
+    const ids = [...nodes]
+      .filter(([, n]) => n.parent !== ROOT_ID && n.parent !== null)
+      .map(([id]) => id);
+    assert.equal(ids.length, 3);
+    assert.equal(new Set(ids).size, 3, 'three rows, three ids');
+  });
+
   test('the root is 0 and is not an item', () => {
     const nodes = snapshot(FILE_MENU(), new IdAllocator());
     const root = nodes.get(ROOT_ID);
