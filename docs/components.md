@@ -467,6 +467,103 @@ whole purpose is to be looked at gains nothing by waiting out the length of
 the click. It closes on the pick — on the _second_ end of a range — on Escape,
 on a second press of the trigger, and when the window loses focus.
 
+## `PasswordInput`
+
+A masked field whose mask is a **scribble**, not a row of bullets.
+
+```jsx
+<PasswordInput
+  value={secret}
+  onChange={(ev) => setSecret(ev.value)}
+  onSubmit={() => signIn()}
+/>
+```
+
+| prop                          |                                        |
+| ----------------------------- | -------------------------------------- |
+| `value` / `defaultValue`      | the secret; controlled with `onChange` |
+| `onChange(ev)`                | `ev.value` is the new value            |
+| `onSubmit(value)`             | Enter                                  |
+| `placeholder`                 | shown while empty (`'Password'`)       |
+| `revealable`                  | show the eye at all, default `true`    |
+| `revealed` / `onRevealChange` | drive the reveal yourself              |
+| `maxLength`                   | in code points                         |
+| `drawMask(ctx, info)`         | draw the mask yourself                 |
+| `disabled`                    | not focusable, not editable            |
+
+### Why a scribble
+
+Bullets answer the wrong question. They report **how many characters** have
+been typed — countably, from across the room — and they report almost nothing
+about the keystroke that just landed, because one more identical dot at the
+end of a row of identical dots is the least visible change a field could
+make. The feedback is weakest exactly where a password field needs it, and
+strongest exactly where it should not be.
+
+So the mask is a single stroke through points chosen by a generator seeded
+from the window id and a hash of the value. Every keystroke reseeds it, so
+**the whole curve moves on every character** — feedback you cannot miss — and
+nothing in the shape is per-character: the number of control points is fixed,
+so there is no wiggle to count.
+
+What does grow is the width, because a mask that did not would say nothing
+about progress. Each position contributes an advance drawn from a **second,
+window-seeded** stream, so the width only ever grows as you type, never
+twitches when a character is replaced, and is not a clean multiple of
+anything a glance could divide.
+
+The honest limit, since a mask that oversells itself is worse than one that
+does not: **this hides a glance, not a recording.** Someone watching the
+field grow keystroke by keystroke still counts the keystrokes, and a long
+password still sits in a visibly different bracket from a short one.
+
+### What it does not do
+
+Editing is smaller than `<textinput>`'s, because a scribble has nowhere to
+put a caret: type, Backspace, Ctrl+Backspace / Ctrl+U / Delete to clear,
+Ctrl+V or Shift+Insert to paste, Enter to submit. No caret, no selection, no
+undo history — a rewindable secret is not a feature — and **no copy**:
+Ctrl+C and Ctrl+X do nothing, and the field never takes the PRIMARY
+selection, so a middle click in another window cannot spend it.
+
+While the value is masked it is **never laid out and never drawn**: the mask
+is measured from one reference character, so the secret does not enter ntk's
+shaping cache and its glyphs never reach the X server. Revealing it costs
+what revealing it costs. The eye is a pointer affordance and not a tab stop,
+as GTK's peek icon is; `revealed` + `onRevealChange` put the toggle wherever
+your keyboard can reach it.
+
+Caps Lock is reported while it is on, from the modifier state on the keys as
+they arrive — the mistake that a masked field otherwise lets you make four
+times before telling you.
+
+### Drawing your own mask
+
+`drawMask(ctx, info)` replaces the scribble entirely; `info` is
+`{ width, height, seed, color, length }`, where `width` is the mask width the
+field worked out and `seed` is the value-and-window seed. The scribble itself
+is `strokeScribble` in `src/components/scribble.js`, which is worth reading
+before replacing it — the reasoning for each number is there.
+
+```jsx
+<PasswordInput
+  drawMask={(ctx, { width, height, color }) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, height / 2 - 1, width, 2);
+  }}
+/>
+```
+
+### Password managers
+
+Paste and typing are the two seams that reach a field on this desktop, and
+both work here: XTEST auto-type arrives as ordinary key events, and Ctrl+V
+takes a secret from the clipboard with control characters stripped so a
+manager's trailing newline stays out of it. Which manager does what, what the
+window title has to do with it, and the seams that are _not_ a field —
+Secret Service, the sandbox portal, AT-SPI — are in
+[desktop.md](desktop.md#password-fields-and-password-managers).
+
 ## `Slider`
 
 A draggable value control.

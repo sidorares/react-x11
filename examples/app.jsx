@@ -21,6 +21,7 @@ import {
 import { FormPanel } from './form.jsx';
 import { WidgetsPanel } from './widgets.jsx';
 import { DatesPanel } from './datepicker.jsx';
+import { PasswordPanel } from './password.jsx';
 import { TasksPanel } from './tasks.jsx';
 import { ThemingPanel } from './theming.jsx';
 
@@ -70,6 +71,7 @@ const SECTIONS = [
   { id: 'form', label: 'Form' },
   { id: 'widgets', label: 'Widgets' },
   { id: 'dates', label: 'Dates' },
+  { id: 'password', label: 'Password' },
   { id: 'tasks', label: 'Tasks' },
   { id: 'tree', label: 'Tree' },
   { id: 'table', label: 'Table' },
@@ -171,6 +173,7 @@ const PANELS = {
   form: () => <FormPanel />,
   widgets: () => <WidgetsPanel />,
   dates: () => <DatesPanel />,
+  password: () => <PasswordPanel />,
   tasks: () => <TasksPanel />,
   tree: () => <TreePanel />,
   table: () => <TablePanel />,

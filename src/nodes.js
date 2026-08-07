@@ -56,6 +56,7 @@ import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import { inputTime } from './inputtime.js';
 import { armPasteState, canPaste } from './pastestate.js';
+import { ctrlChordLetter } from './keysyms.js';
 import {
   editMenuColors,
   editMenuGeometry,
@@ -2971,18 +2972,6 @@ const SCROLL_KEY_PAGE_OVERLAP = 24;
 /** Undo entries kept per input. Snapshots of a single field are small; the
  * cap is what stops a long-lived form from growing without bound. */
 const UNDO_LIMIT = 200;
-
-/**
- * The letter of a Ctrl chord, independent of Shift. ntk derives `codepoint`
- * from the *shifted* keysym, so Ctrl+Shift+Z arrives as `Z` while Ctrl+Z
- * arrives as `z` — the keysym does not shift, so match on that and fall
- * back to the codepoint when the keymap has not been read yet.
- */
-function ctrlChordLetter(ev) {
-  const code = ev.keysym ?? ev.codepoint;
-  if (code == null) return null;
-  return code >= 0x41 && code <= 0x5a ? code + 0x20 : code;
-}
 
 /**
  * <textinput>: single-line editable text. Caret/selection via ntk TextLayout
