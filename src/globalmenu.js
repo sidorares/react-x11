@@ -170,6 +170,8 @@ export class GlobalMenuExport {
 
     this.stopped = false;
     this.exported = false;
+    /** The in-flight `sync()`, which the next one queues behind. */
+    this.syncing = null;
     this.ref = null;
     this.registration = null;
     this.subscription = null;
@@ -225,8 +227,26 @@ export class GlobalMenuExport {
     bus.signals.on(key, this.onOwnerChanged);
   }
 
-  /** Bring the export into line with whether a panel is currently listening. */
-  async sync() {
+  /**
+   * Bring the export into line with whether a panel is currently listening,
+   * **one at a time**.
+   *
+   * `exported` only turns true at the *end* of `publish()`, which is several
+   * awaits long — the transport import, the export, the registrar round trip.
+   * A panel that restarts quickly, or any two `NameOwnerChanged` signals close
+   * together, would otherwise put two `publish()` runs in flight against the
+   * same window: two `RegisterWindow` calls, and the first `iface` and
+   * registration orphaned by the second. `withdraw()` has the mirror version
+   * of it. Serialising is the whole fix, and it costs a promise.
+   */
+  sync() {
+    this.syncing = (this.syncing ?? Promise.resolve())
+      .then(() => this._sync())
+      .catch(() => {});
+    return this.syncing;
+  }
+
+  async _sync() {
     if (this.stopped || !this.ref) return;
     const live = await registrarIsLive(this.ref.bus);
     if (this.stopped) return;

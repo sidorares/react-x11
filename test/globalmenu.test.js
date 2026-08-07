@@ -12,7 +12,7 @@ import React from 'react';
 
 import { _resetBusState, busRefs } from '../src/bus.js';
 import { createRoot } from '../src/index.js';
-import { REGISTRAR_NAME } from '../src/globalmenu.js';
+import { GlobalMenuExport, REGISTRAR_NAME } from '../src/globalmenu.js';
 import { createMockApp } from './helpers/mock-app.js';
 import { fakeRegistrar } from './helpers/fake-registrar.js';
 import { transportAvailable, until, withBus } from './helpers/with-bus.js';
@@ -130,6 +130,11 @@ describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
 
       await until(() => panel.windows.size === 1, 'the window to register');
       assert.deepEqual(panel.calls[0].slice(0, 2), ['RegisterWindow', bar.xid]);
+      assert.equal(
+        panel.calls.filter((c) => c[0] === 'RegisterWindow').length,
+        1,
+        'registered once',
+      );
 
       // `exported` is only true once RegisterWindow has *answered*, so the bar
       // disappears on evidence rather than on a guess.
@@ -307,6 +312,38 @@ describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
 
       await panel.stop();
       await bar.unmount();
+    });
+  });
+
+  test('concurrent syncs register the window once, not once each', async () => {
+    await withBus(async (address) => {
+      // Driven straight at the exporter, because the race needs several
+      // `sync()`s in flight *before* the first finishes — `exported` only
+      // turns true at the end of publish(), several awaits in, so an
+      // unserialised version puts two publishes on the same window.
+      const owner = new GlobalMenuExport({
+        getMenus: () => MENUS(),
+        target: { id: 0x4242 },
+        onChange: () => {},
+      });
+      await owner.start(); // a bus, but no panel yet: nothing exported
+      assert.equal(owner.exported, false);
+
+      const panel = await fakeRegistrar(address);
+      // the NameOwnerChanged one, plus three piled on top of it
+      await Promise.all([owner.sync(), owner.sync(), owner.sync()]);
+      await until(() => panel.windows.size === 1, 'registration');
+      await tick();
+
+      assert.equal(
+        panel.calls.filter((c) => c[0] === 'RegisterWindow').length,
+        1,
+        'exactly one RegisterWindow',
+      );
+
+      await owner.stop();
+      await panel.stop();
+      await until(() => busRefs('session') === 0, 'the bus to be released');
     });
   });
 
