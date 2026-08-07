@@ -9,6 +9,7 @@ import {
   textStyleFrom,
   DEFAULT_TEXT_STYLE,
   TEXT_LAYOUT_PROPS,
+  TEXT_PAINT_PROPS,
   flattenStyle,
   validateStyle,
   resolveStyleStates,
@@ -502,6 +503,15 @@ function axesEqual(a, b) {
     if (a[key] !== b[key]) return false;
   }
   return true;
+}
+
+/** Did anything that only changes how the text is *drawn* change? */
+function textPaintStyleChanged(style, before) {
+  if (style === before) return false;
+  for (const key of TEXT_PAINT_PROPS) {
+    if (style[key] !== before[key]) return true;
+  }
+  return false;
 }
 
 /** Did anything the text stack measures or paints with change? */
@@ -2039,10 +2049,37 @@ export class TextNode extends Node {
     if (this.yoga) this.yoga.markDirty();
   }
 
+  /**
+   * The cached layout is stale, but the box it reported cannot have moved.
+   *
+   * `textRendering` rides on the spans inside a layout, so a cached one keeps
+   * answering with the old value and has to go — but it decides only how
+   * glyph origins are rounded at draw time, and ntk's layout measures
+   * byte-identically whichever way it is set. So the layout is dropped
+   * without marking yoga dirty: the next paint calls `_layoutFor` and
+   * rebuilds it, and nothing reflows on the way.
+   */
+  _textPaintChanged() {
+    if (this.isSpan) {
+      this.parent?._textPaintChanged();
+      return;
+    }
+    this._layouts.clear();
+  }
+
   applyProps(newProps, oldProps) {
     const before = this.style;
     super.applyProps(newProps, oldProps);
-    if (!textStyleChanged(this.style, before)) return;
+    if (!textStyleChanged(this.style, before)) {
+      if (!textPaintStyleChanged(this.style, before)) return;
+      this._textPaintChanged();
+      // damage belongs to the node that owns the box; a span has none of its
+      // own. `false` is the whole point of this branch — no layout pass.
+      let owner = this;
+      while (owner && !owner.yoga) owner = owner.parent;
+      this.root?.invalidate(false, owner ?? NO_DAMAGE, 'text');
+      return;
+    }
     this._textContentChanged();
     // `super.applyProps` has already committed this frame, and it decided
     // there was nothing to re-lay-out: none of `fontSize`, `fontWeight`,
@@ -2071,6 +2108,7 @@ export class TextNode extends Node {
           weight: style.weight,
           style: style.style,
           variations: style.variations,
+          textRendering: style.textRendering,
           color: style.color,
         });
       } else if (child.kind === 'text') {

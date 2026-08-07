@@ -68,7 +68,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^7.1.0",
+    "ntk": "^7.2.0",
     "react-reconciler": "^0.33.0"
   },
   "optionalDependencies": {

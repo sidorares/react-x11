@@ -149,6 +149,9 @@ export interface PaintStyle {
  */
 export type TextBoxTrim = 'none' | 'cap-alphabetic';
 
+export type TextRendering =
+  'auto' | 'optimizeSpeed' | 'optimizeLegibility' | 'geometricPrecision';
+
 /** Text properties. All affect measurement except `color`. */
 export interface TextStyle {
   color?: Color;
@@ -161,6 +164,13 @@ export interface TextStyle {
    *  rest. Axes the font does not have are ignored and values clamp to each
    *  axis's range. Compared by value, so an object literal is fine. */
   fontVariationSettings?: Record<string, number>;
+  /** CSS's `text-rendering`, picking the glyph path (ntk >= 7.2.0).
+   *  `'geometricPrecision'` puts glyph origins exactly where shaping asked —
+   *  what display text and animated variable fonts want, since cached glyphs
+   *  can only land on whole pixels. `'optimizeSpeed'` keeps the cached path
+   *  at any size. `'auto'` (default) lets size decide. Changing it repaints
+   *  without reflowing: it cannot move anything. */
+  textRendering?: TextRendering;
   textAlign?: TextAlign;
   lineHeight?: number;
   /** Default `'none'`. Applies to `<text>`; the editable controls keep their
