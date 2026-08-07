@@ -1272,3 +1272,62 @@ test('textBoxTrim: cap-alphabetic centres a label on its capitals', async () => 
     await app.close();
   }
 });
+
+test('a window with no size fits its text, and wraps to fit the screen', async () => {
+  // The claim the mock-app tests cannot make: an auto size measured through
+  // real glyph metrics, and the height-for-width pass that a wrapping
+  // paragraph is the whole reason for.
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const label = 'Fit me';
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { title: 'natural' },
+        React.createElement(
+          'text',
+          { style: { padding: 10, fontSize: 20 } },
+          label,
+        ),
+      ),
+      x11Root,
+    );
+    await settle(app);
+
+    const node = wnd._reactX11Node;
+    const text = node.children[0];
+    // the window is the text's own box, padding included — no screen
+    // involved, since the label is nowhere near 640 wide
+    assert.strictEqual(wnd.width, Math.ceil(text.abs.width));
+    assert.strictEqual(wnd.height, Math.ceil(text.abs.height));
+    assert.ok(wnd.width > 20 && wnd.height > 20, 'the glyphs were measured');
+    assert.ok(wnd.width < 640, 'and it did not need the whole screen');
+
+    // A paragraph with no line breaks in it: max-content is far wider than
+    // the 640x480 server, so the width clamps and the height has to come
+    // from a second pass at the clamped width. A window sized from the
+    // max-content height would be one line tall and cut off every line
+    // after the first.
+    const long = `${label} `.repeat(200);
+    const wide = await render(
+      React.createElement(
+        'window',
+        { key: 'wide', title: 'wrapped' },
+        React.createElement('text', { style: { fontSize: 20 } }, long),
+      ),
+      x11Root,
+    );
+    await settle(app);
+    assert.strictEqual(wide.width, 640, 'capped at the screen');
+    assert.ok(
+      wide.height > 40,
+      `wrapped text is more than one line tall (got ${wide.height})`,
+    );
+    assert.ok(wide.height <= 480, 'and still no taller than the screen');
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+  }
+});

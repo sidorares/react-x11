@@ -93,9 +93,17 @@ export interface WindowProps
   ref?: Ref<NtkWindow>;
   /** Window title (UTF-8, via `WM_NAME` + `_NET_WM_NAME`). */
   title?: string;
-  /** Window geometry — window state, not yoga style: the user may resize. */
-  width?: number;
-  height?: number;
+  /**
+   * Window geometry — window state, not yoga style: the user may resize.
+   *
+   * `'auto'`, which is also what leaving the prop out means, sizes the
+   * window from its content and caps it at the screen — CSS's `width: auto`
+   * for a box that shrinks to fit. The two axes are independent, so
+   * `width={600}` with no `height` gives a window whose height follows its
+   * content at that width.
+   */
+  width?: number | 'auto';
+  height?: number | 'auto';
   x?: number;
   y?: number;
   /** Palette that `$token` style values resolve against, for this subtree. */

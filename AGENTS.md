@@ -810,6 +810,21 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   strips `width`/`height` before feeding props to yoga and sizes the root
   yoga node from the _actual_ window size in `flush()` (the user may have
   resized the window).
+- **A `<window>` size may be `'auto'`, and leaving it out means `'auto'`** —
+  sized from its content, capped at the monitor's work area
+  (`src/screens.js`, read once during `createRoot` so the answer is
+  synchronous later). `WindowNode._measureNatural()` runs **before
+  `CreateWindow`**, which is the whole point: the window is born the right
+  size rather than resized into it after mapping. Two things about it are
+  easy to undo by accident. The **second layout pass is not redundant** —
+  the first has no available width so nothing wraps, and a height taken from
+  it cuts wrapped text off; and ntk must **never see the keyword**, so
+  `windowAttributes` drops an auto axis and `realize()` writes the resolved
+  number back. Afterwards `_refit()` keeps an auto window on its content
+  until `_userSized` — a ConfigureNotify that does not match
+  `_requestedSize`, i.e. the user dragging an edge or a WM overriding —
+  hands the size over for good. `_requestedSize` has to name **both** axes on
+  every configure, since the echo does.
 - Windows cannot be nested inside `<box>` (throws); raw strings are only
   legal inside `<text>` (throws otherwise).
 - **Never test an unreleased ntk by symlinking the checkout into

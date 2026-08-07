@@ -102,25 +102,94 @@ mount: [drag-and-drop.md](drag-and-drop.md).
 
 A real X11 window; the flex, paint and event root for its subtree.
 
-| prop                        |                                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `title`                     | window title (UTF-8, via `WM_NAME` + `_NET_WM_NAME`)                                  |
-| `width`, `height`, `x`, `y` | window geometry (window state, not yoga style — the user may resize)                  |
-| `backgroundColor`           | full-window clear color (default white)                                               |
-| `onResize(ev)`              | ConfigureNotify — the tree reflows automatically. Fires for **moves** too (see below) |
-| `onExpose(ev)`              | after a repaint was required                                                          |
-| `onCloseRequest(ev)`        | WM close button (opts into `WM_DELETE_WINDOW`)                                        |
-| `states`                    | EWMH `_NET_WM_STATE` — controlled, see below                                          |
-| `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                                 |
-| `decorations`               | `false` asks the WM for no titlebar or border                                         |
-| `transparent`               | 32-bit ARGB visual — rounded, translucent windows (below)                             |
-| `transientFor`              | ICCCM `WM_TRANSIENT_FOR` — the window this one belongs to (below)                     |
-| `onStatesChange(states)`    | what the window manager actually did                                                  |
-| `theme`                     | palette that `$token` style values resolve against, for this subtree                  |
+| prop                        |                                                                                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`                     | window title (UTF-8, via `WM_NAME` + `_NET_WM_NAME`)                                                                                          |
+| `width`, `height`, `x`, `y` | window geometry (window state, not yoga style — the user may resize). A size is pixels or `'auto'`, and leaving it out means `'auto'` (below) |
+| `backgroundColor`           | full-window clear color (default white)                                                                                                       |
+| `onResize(ev)`              | ConfigureNotify — the tree reflows automatically. Fires for **moves** too (see below)                                                         |
+| `onExpose(ev)`              | after a repaint was required                                                                                                                  |
+| `onCloseRequest(ev)`        | WM close button (opts into `WM_DELETE_WINDOW`)                                                                                                |
+| `states`                    | EWMH `_NET_WM_STATE` — controlled, see below                                                                                                  |
+| `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                                                                                         |
+| `decorations`               | `false` asks the WM for no titlebar or border                                                                                                 |
+| `transparent`               | 32-bit ARGB visual — rounded, translucent windows (below)                                                                                     |
+| `transientFor`              | ICCCM `WM_TRANSIENT_FOR` — the window this one belongs to (below)                                                                             |
+| `onStatesChange(states)`    | what the window manager actually did                                                                                                          |
+| `theme`                     | palette that `$token` style values resolve against, for this subtree                                                                          |
 
 Windows may be nested inside other windows (real X11 child windows).
 **Ref**: the live ntk `Window` — `getContext('2d')`,
 `requestAnimationFrame`, `setCursor`, the whole ntk API.
+
+### Natural size
+
+A window with no `width`/`height` is **sized from its content and capped at
+the screen**. `'auto'` says the same thing out loud, and the two axes are
+independent:
+
+```jsx
+<window title="prefs" />                               {/* natural, both ways */}
+<window width={600} height="auto" />                   {/* height follows the content */}
+<window width="auto" maxWidth={720} minHeight={200} /> {/* auto within your own bounds */}
+```
+
+This is CSS's `width: auto`, read the way CSS reads it for a box whose
+containing block is the viewport but which is not in flow — a float, an
+abspos, an inline-block: **shrink-to-fit**. A top-level window has no
+container to stretch into, and stretching into the screen is what
+`fullscreen` means.
+
+The size is worked out **before `CreateWindow`**, so the window is created
+the right size rather than resized into it after mapping. Nothing is ever on
+screen at the wrong size, and there is no jump to watch for.
+
+**How it is measured**, which is worth knowing because the second step is
+where the surprises are:
+
+1. The tree is laid out with no available width, so nothing wraps and the
+   root reports its **max-content** width.
+2. That is clamped into `[minWidth, min(maxWidth, the screen)]` — the same
+   size-hint props the window manager enforces also bound the auto size,
+   exactly as `min-width`/`max-width` bound `width: auto` in CSS. Where the
+   two disagree, `minWidth` wins, which is CSS's order too.
+3. The tree is laid out **again at that width**, and the height comes from
+   there. A paragraph that had to wrap is taller than step 1 said.
+
+Where this parts company with CSS: shrink-to-fit is
+`min(max(min-content, available), max-content)`, and that `max(…)` means a
+CSS box never shrinks below its min-content size even when it overflows. A
+window cannot be wider than the screen, so the cap wins and the content is
+cut instead.
+
+**The cap** is the usable area of the monitor the window will open on:
+Xinerama's per-monitor rects — so a window on a two-head desktop is bounded
+by one screen and not by both — with `_NET_WORKAREA` taken off it per axis,
+so a panel is not space to grow into. Both are read once while `createRoot()`
+connects. On a server with neither, the cap is the screen; with no display to
+ask at all — the headless mock — there is no cap. The window manager's frame
+is _not_ modelled, so a window that reaches the cap is a titlebar taller than
+the work area and the WM will trim it.
+
+**Afterwards, auto keeps up with the content until something else sets the
+size.** Add a row and the window grows; the moment the user drags an edge, or
+a window manager answers with a size of its own, the window is theirs and
+stops re-fitting. Setting `width` to a number is the app doing the same
+thing, and setting it back to `'auto'` hands it back.
+
+Three things worth knowing before reaching for it:
+
+- A `<scrollview>` reports its **content** height, not a viewport height, so
+  an auto window around a long list opens as tall as the screen. Give the
+  window a `height`, or the scrollview a `maxHeight`, if the scrolling is
+  meant to happen inside a smaller window.
+- With no available width nothing wraps (and yoga defaults `flexShrink` to
+  0 — see [styling.md](styling.md)), so an auto width is the **unwrapped**
+  row. That makes the width font-dependent: the same window is wider under a
+  wide UI face than under a narrow one.
+- Measuring costs an extra layout pass per frame that lays out, for as long
+  as the window is still tracking. A window with both sizes given pays
+  nothing.
 
 ### `onResize` fires for moves
 
@@ -186,7 +255,14 @@ are free, so no `sizeHints` object is needed.
 
 On a `<window>` these names are the window's, not yoga's: `width`/`height`
 are the real geometry the user can drag, and `minWidth`/`maxHeight` are what
-the WM enforces. A window's _contents_ are laid out by its `style`.
+the WM enforces. A window's _contents_ are laid out by its `style`. The size
+hints do double duty on an auto-sized window, where they also bound the
+natural size (above) — so `resizable={false}` pins the window at whatever its
+content measured, which is the fixed-size dialog:
+
+```jsx
+<window resizable={false} windowType="dialog" />
+```
 
 ### `transientFor` — a window that belongs to another
 

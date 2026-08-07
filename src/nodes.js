@@ -47,6 +47,7 @@ import {
   transparencyDisabled,
   watchCompositing,
 } from './compositing.js';
+import { availableArea } from './screens.js';
 import { baseTheme } from './palette.js';
 import { callHandler } from './errors.js';
 import { windowIdOf } from './windowid.js';
@@ -548,6 +549,43 @@ function assertNoFlatStyleProps(props, kind, semantic) {
 // style, and there is no element where a name means both.
 const NO_SEMANTIC_NAMES = new Set();
 
+// X window geometry is CARD16 and coordinates are INT16, so a window wider
+// than this cannot be positioned or damaged coherently even where the server
+// accepts it. Nothing sized from content should get near it; it is the
+// backstop for a measure function that answered Infinity.
+const MAX_WINDOW_EXTENT = 32767;
+
+/** One axis of an auto size, bounded the way CSS bounds `width: auto`. */
+function clampExtent(value, min, max) {
+  const v = Math.ceil(Number.isFinite(value) ? value : 0);
+  // CSS's resolution order: the max bound applies first and the min wins
+  // over it, so `minWidth` beats `maxWidth` where an app sets both and they
+  // disagree.
+  const bounded = Math.max(min ?? 0, Math.min(v, max ?? Infinity));
+  // A zero-dimension window is a BadValue outright, so a `<window>` with
+  // nothing in it is 1x1 rather than a protocol error.
+  return Math.max(1, Math.min(bounded, MAX_WINDOW_EXTENT));
+}
+
+/**
+ * Where a `transientFor` owner sits on screen, for picking the monitor a
+ * dialog should be sized against. Accepts everything `windowIdOf` does — a
+ * window ref, a node, a drawn node's ref — and answers null for a raw XID,
+ * which carries no geometry with it.
+ */
+function screenOriginOf(target) {
+  if (target == null || typeof target !== 'object') return null;
+  if ('current' in target && !target.isWindow) {
+    return screenOriginOf(target.current);
+  }
+  return (
+    target._screenOrigin ??
+    target.window?._screenOrigin ??
+    target.root?.window?._screenOrigin ??
+    null
+  );
+}
+
 // Everything a <window> owns: the real geometry, and the WM size hints that
 // constrain it. On a <window> these are never style.
 export const WINDOW_HINT_PROPS = [
@@ -565,10 +603,57 @@ export const WINDOW_HINT_PROPS = [
 ];
 
 /**
+ * A `<window width>`/`<height>` that is not a number: sized from its own
+ * content instead. CSS's initial value for `width`, and the same meaning —
+ * for a box whose containing block is the viewport but which is not in flow
+ * (a float, an abspos, an inline-block) `auto` is shrink-to-fit, and a
+ * top-level window is exactly that shape. It has no container to stretch
+ * into; stretching into the screen is what `fullscreen` means.
+ *
+ * Omitting the prop is the same thing, which is why this is a `??` rather
+ * than an `===`: leaving a size out cannot sensibly mean "some number
+ * somebody picked", and it used to mean ntk's 800x800.
+ */
+export const isAutoSize = (value) => (value ?? 'auto') === 'auto';
+
+/** A size prop reduced to what it means, so the two spellings of auto — the
+ *  keyword and the missing prop — compare equal. */
+const canonicalSize = (value) => (isAutoSize(value) ? 'auto' : value);
+
+/**
+ * A `<window>` size is a number of pixels or `'auto'`, and nothing else.
+ *
+ * Worth its own error because the near misses all come from CSS and all look
+ * reasonable: `'100%'` has no containing block to be a percentage of,
+ * `'fit-content'` is what `'auto'` already means here, and `'600px'` is the
+ * unit X11 works in anyway. Left to itself each of them reaches ntk as a
+ * string and comes back as a `BadValue` on CreateWindow with a sequence
+ * number and nothing else — an X protocol error for what is a typo in JSX.
+ */
+function assertWindowSize(props, kind) {
+  if (!DEV) return;
+  for (const axis of ['width', 'height']) {
+    const value = props[axis];
+    if (value === undefined || value === 'auto') continue;
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      continue;
+    }
+    throw new Error(
+      `react-x11: <${kind} ${axis}={${JSON.stringify(value)}}> — a window ` +
+        `size is a number of pixels or 'auto' (sized to its content, ` +
+        `capped at the screen), which is also what leaving ${axis} out ` +
+        'means. See docs/elements.md, "Natural size".',
+    );
+  }
+}
+
+/**
  * ntk's Window constructor takes every creation attribute up front. The
- * user-facing shape and ntk's differ in two places: size hints are flat
- * props here and a `sizeHints` object there, and the window background is
- * a style property here and a creation attribute there.
+ * user-facing shape and ntk's differ in three places: size hints are flat
+ * props here and a `sizeHints` object there, the window background is a
+ * style property here and a creation attribute there, and an `'auto'`
+ * width or height is resolved to a number by `realize()` — ntk is handed
+ * pixels or nothing, never the keyword.
  *
  * Event props never travel this way. ntk reads `onKeyDown` & co. off its
  * creation args and registers them as raw listeners (events_map.toSnake),
@@ -587,6 +672,9 @@ export function windowAttributes(props) {
   for (const key of Object.keys(props)) {
     if (key === 'children' || key === 'style' || isEventProp(key)) continue;
     if (key === 'transientFor' || key === 'transparent') continue;
+    if ((key === 'width' || key === 'height') && isAutoSize(props[key])) {
+      continue;
+    }
     if (WINDOW_HINT_PROPS.includes(key)) {
       hints[key] = props[key];
       continue;
@@ -4206,6 +4294,7 @@ export class TextAreaNode extends TextInputNode {
 export class WindowNode extends Node {
   constructor(app, attributes, props) {
     super('window', props, app, { yoga: true });
+    assertWindowSize(props, this.kind);
     this.root = this;
     this.attributes = attributes;
     this.window = null;
@@ -4238,6 +4327,155 @@ export class WindowNode extends Node {
     // Node._childListChanged)
     this._reflowed = new Set();
     this.querySize = null;
+    // The geometry we last asked the server for, and whether anything else
+    // has since decided otherwise. Together they are the rule for `'auto'`:
+    // it keeps up with the content until someone takes the size over, and
+    // the only thing that ever does is the user dragging an edge.
+    this._requestedSize = null;
+    this._userSized = false;
+  }
+
+  /**
+   * The size this window's content wants, for whichever of `width`/`height`
+   * is `'auto'` — CSS shrink-to-fit, then height-for-width.
+   *
+   * 1. Lay the tree out with **no available width**, which is what yoga's
+   *    `undefined` means: every measure function is asked in
+   *    `MEASURE_MODE_UNDEFINED`, text does not wrap, and the root reports
+   *    its max-content width.
+   * 2. Clamp that into `[minWidth, min(maxWidth, the screen)]`.
+   * 3. **Lay out again at the clamped width.** This is the pass that
+   *    matters and the one it is tempting to skip: a paragraph that had to
+   *    wrap at the clamped width is taller than the max-content pass said,
+   *    and a window sized from that first height would cut its own text off.
+   *
+   * Where CSS and X part ways: shrink-to-fit is
+   * `min(max(min-content, available), max-content)`, and that `max(...)`
+   * means a CSS box never goes below its min-content size even when it
+   * overflows. A window cannot be wider than the screen, so the clamp wins
+   * and the content is cut instead.
+   *
+   * Runs before `CreateWindow`, so it must not need one: text measures
+   * through `app.fonts`, which is the connection's, and the clamp was
+   * resolved during `createRoot`. That is the whole point — the window is
+   * *created* at its natural size rather than resized into it after mapping,
+   * so nothing is ever on screen at the wrong size.
+   */
+  _measureNatural() {
+    const props = this.props;
+    const autoW = isAutoSize(props.width);
+    const autoH = isAutoSize(props.height);
+    const yoga = this.yoga;
+    // Where the window will open, for picking a monitor: next to its owner
+    // where it has one, and wherever the WM puts it otherwise.
+    const area = availableArea(this.app, screenOriginOf(props.transientFor));
+    const limit = (max, screen) =>
+      Math.min(max ?? Infinity, screen ?? Infinity, MAX_WINDOW_EXTENT);
+    const availW = limit(props.maxWidth, area?.width);
+    const availH = limit(props.maxHeight, area?.height);
+    if (!yoga) {
+      // Only reachable on a torn-down window, and a size still has to be a
+      // size: fall back to the space on offer rather than handing `'auto'`
+      // through to CreateWindow.
+      return {
+        width: autoW
+          ? clampExtent(availW, props.minWidth, availW)
+          : props.width,
+        height: autoH
+          ? clampExtent(availH, props.minHeight, availH)
+          : props.height,
+      };
+    }
+    if (!autoW && !autoH) return { width: props.width, height: props.height };
+
+    // The root carries whatever size the last flush() pinned on it; clearing
+    // an axis is what makes yoga measure it rather than fill it.
+    yoga.setWidth(autoW ? undefined : props.width);
+    yoga.setHeight(autoH ? undefined : props.height);
+
+    const measure = () => {
+      let width = props.width;
+      if (autoW) {
+        yoga.calculateLayout(
+          undefined,
+          autoH ? undefined : props.height,
+          Yoga.DIRECTION_LTR,
+        );
+        width = clampExtent(yoga.getComputedWidth(), props.minWidth, availW);
+      }
+      // The height-for-width pass. Run even when only the width is auto: it
+      // is the layout the window is about to be created at, so leaving the
+      // tree holding the max-content one would hand `flush()` a stale
+      // arrangement.
+      yoga.calculateLayout(
+        width,
+        autoH ? undefined : props.height,
+        Yoga.DIRECTION_LTR,
+      );
+      const height = autoH
+        ? clampExtent(yoga.getComputedHeight(), props.minHeight, availH)
+        : props.height;
+      return { width, height };
+    };
+
+    // `@width`/`@height` blocks and an auto size are mutually circular: the
+    // query wants a size the measurement has not produced yet. Broken the way
+    // CSS breaks the same cycle for container queries — measure against the
+    // space on offer, then re-resolve against the answer, and measure once
+    // more if that moved anything. **Once**: a second look settles the common
+    // case (a block that turns on below the width the content would have
+    // taken) and a third would only be chasing a layout that oscillates,
+    // which no size can satisfy.
+    this._resolveSizeQueries(
+      autoW ? availW : props.width,
+      autoH ? availH : props.height,
+    );
+    let size = measure();
+    if (this._resolveSizeQueries(size.width, size.height)) size = measure();
+    return size;
+  }
+
+  /**
+   * Keep an `'auto'` window the size of its content while it still owns its
+   * own size. Called from `flush()` on any frame that lays out, which is
+   * every frame where the natural size could have moved.
+   *
+   * One rule covers both kinds of window, which is why it is a rule and not
+   * two behaviours: **auto tracks the content until something else sets the
+   * size.** A `<window>` grows as rows are added to it and stops the moment
+   * the user drags an edge — GTK's behaviour, and right for the same reason:
+   * the size is the app's opinion until it is the user's. Nothing can ever
+   * take a `<popup>`'s size over — it is override-redirect and has no
+   * resize handles — so a menu tracks its items for good.
+   *
+   * The result is applied through the window rather than through props: an
+   * auto size is not something React said, so nothing about it should read
+   * as a prop change or wait for one.
+   */
+  _refit() {
+    if (this._userSized || this.destroyed) return;
+    if (!isAutoSize(this.props.width) && !isAutoSize(this.props.height)) return;
+    const wnd = this.window;
+    if (!wnd) return;
+    const asked = this._requestedSize;
+    const next = this._measureNatural();
+    if (asked && next.width === asked.width && next.height === asked.height) {
+      return;
+    }
+    this._requestedSize = { width: next.width, height: next.height };
+    // Asked for, not assumed. `window.width` stays what the server last said
+    // until the ConfigureNotify lands, and this frame lays out against that
+    // — the echo brings `needsLayout` and an unbounded repaint with it (see
+    // the 'resize' listener), which is the same one-frame settle a
+    // controlled `width` prop change has always had. Writing the new size
+    // onto the window here would be worse than the wait: ntk allocates the
+    // backing pixmap from the resize event, so a frame painted at a size the
+    // pixmap has not reached yet is a frame clipped to the old one.
+    if (typeof wnd.setState === 'function') {
+      wnd.setState({ width: next.width, height: next.height });
+    } else {
+      wnd.resize?.(next.width, next.height);
+    }
   }
 
   /** Create the real X11 window (commit phase only). Children windows are
@@ -4249,6 +4487,13 @@ export class WindowNode extends Node {
     if (parentWindow) {
       attributes.parent = parentWindow;
     }
+    // Before CreateWindow, so an auto-sized window is *born* the right size.
+    // Doing it after would mean a window mapped at 800x800 and corrected a
+    // frame later, which is the jump this exists to avoid.
+    const natural = this._measureNatural();
+    attributes.width = natural.width;
+    attributes.height = natural.height;
+    this._requestedSize = { width: natural.width, height: natural.height };
     // **What the server paints into newly exposed area.** A resize enlarges
     // the window before the app can possibly have drawn the new part, and X
     // fills it with this attribute in the meantime — so without one, growing
@@ -4746,6 +4991,21 @@ export class WindowNode extends Node {
         this.needsLayout = true;
         this.invalidate(true, null, 'resize');
       }
+      // The end of an `'auto'` window's authority over its own size. A
+      // ConfigureNotify that does not match what we last asked for is
+      // somebody else's decision — the user dragging an edge, or a window
+      // manager applying a policy of its own — and from here on the window
+      // is theirs. Growing it back under a user who has just made it smaller
+      // is the one behaviour worse than not fitting the content.
+      //
+      // Checked against `_requestedSize` rather than ntk's `ev.resized`
+      // because our own configures come back as echoes, and every one of
+      // them would otherwise read as the user taking over on the first
+      // re-fit.
+      const asked = this._requestedSize;
+      if (asked && (ev.width !== asked.width || ev.height !== asked.height)) {
+        this._userSized = true;
+      }
       // Where the window sits on screen decides where popups anchored to it
       // belong — and finding that out is a server round trip
       // (TranslateCoordinates), so it is worth not making one per frame of a
@@ -4930,6 +5190,7 @@ export class WindowNode extends Node {
 
   applyProps(newProps, oldProps) {
     const before = oldProps ?? this.props;
+    assertWindowSize(newProps, this.kind);
     const beforeStyle = this.style;
     const themeChanged = newProps.theme !== before.theme;
     this.props = newProps;
@@ -4976,22 +5237,47 @@ export class WindowNode extends Node {
     // only a size change re-lays-out — the window's own coordinate space is
     // untouched by where the window sits on screen, so a pointer-tracking
     // popup does not repaint itself per motion.
+    // Compared after normalising, so that an app switching between an
+    // omitted size and a spelled-out `'auto'` — the same request written two
+    // ways — is not a change and does not reset the state below.
     const sizeChanged =
-      newProps.width !== before.width || newProps.height !== before.height;
+      canonicalSize(newProps.width) !== canonicalSize(before.width) ||
+      canonicalSize(newProps.height) !== canonicalSize(before.height);
     const geometryChanged =
       sizeChanged || newProps.x !== before.x || newProps.y !== before.y;
+    // A size that became a number is the app taking the size over, which is
+    // exactly the state `_userSized` names — and one that became `'auto'` is
+    // the app handing it back, so the window fits its content again on the
+    // next layout even if the user had resized it before.
+    //
+    // The record moves with it, and an axis still on `'auto'` records the
+    // size the window *has*, because that is the one this configure is not
+    // about to change. Without that the echo of a one-axis configure would
+    // disagree with the record on the other axis and read as somebody else
+    // setting the size — locking the window on the app's own update.
+    if (sizeChanged) {
+      this._userSized = false;
+      this._requestedSize = {
+        width: isAutoSize(newProps.width) ? wnd.width : newProps.width,
+        height: isAutoSize(newProps.height) ? wnd.height : newProps.height,
+      };
+    }
     if (geometryChanged) {
       if (typeof wnd.setState === 'function') {
         wnd.setState({
           x: newProps.x,
           y: newProps.y,
-          width: newProps.width,
-          height: newProps.height,
+          // `'auto'` is not a geometry ntk can be given: an axis the app has
+          // handed back is left alone here and resolved by `_refit()` on the
+          // layout this same commit is about to schedule.
+          width: isAutoSize(newProps.width) ? undefined : newProps.width,
+          height: isAutoSize(newProps.height) ? undefined : newProps.height,
         });
       } else {
         if (
-          newProps.width !== before.width ||
-          newProps.height !== before.height
+          sizeChanged &&
+          !isAutoSize(newProps.width) &&
+          !isAutoSize(newProps.height)
         ) {
           wnd.resize?.(newProps.width, newProps.height);
         }
@@ -5030,16 +5316,20 @@ export class WindowNode extends Node {
   _resolveSizeQueries(width, height) {
     if (this._sizeQueryNodes.size === 0) {
       this.querySize = this.querySize ?? { width, height };
-      return;
+      return false;
     }
     if (this.querySize?.width === width && this.querySize?.height === height) {
-      return;
+      return false;
     }
     this.querySize = { width, height };
     for (const node of [...this._sizeQueryNodes]) {
       if (node.destroyed) this._sizeQueryNodes.delete(node);
       else node._sizeQueriesChanged();
     }
+    // Whether the layout may have moved under this, which is what an
+    // auto-sizing pass needs to know: it resolves these against a size it is
+    // still working out, and has to look again if the answer changed.
+    return true;
   }
 
   /** A node in this window started a transition. */
@@ -5221,8 +5511,9 @@ export class WindowNode extends Node {
       this._applyTransientFor(this._pendingTransientFor);
     }
     this._advanceAnimations(now());
-    const width = this.window.width ?? this.props.width ?? 0;
-    const height = this.window.height ?? this.props.height ?? 0;
+    if (this.needsLayout) this._refit();
+    const width = this.window.width ?? this._requestedSize?.width ?? 0;
+    const height = this.window.height ?? this._requestedSize?.height ?? 0;
     let layoutMoved = false;
     // captured before the branch clears it: whether *this* flush ran a
     // layout pass is what decides whether an anchored popup needs a look,

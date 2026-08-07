@@ -5,6 +5,7 @@ import { loadLayout } from 'ntk';
 
 import { setAppearanceForTests } from '../appearance.js';
 import { setCompositingForTests } from '../compositing.js';
+import { setScreensForTests } from '../screens.js';
 
 // ntk 5 loads the layout engine's WebAssembly in createClient() rather than
 // at import time — that is what keeps top-level await out of the bundle, and
@@ -349,6 +350,16 @@ export function createMockApp() {
   // light palette. `setAppearanceForTests({ colorScheme: 'dark' })` is the
   // other half of the matrix.
   setAppearanceForTests({});
+  // And a monitor, for the third reason of the same kind: a `<window>` with
+  // no size is sized from its content and capped at the screen, and a mock
+  // with no screen to cap against would let a headless test grow a window to
+  // a size no desktop would ever have given it. One 1280x800 output, which
+  // is a modest laptop — big enough not to be in the way of a test that is
+  // about something else, small enough that a test about the cap can reach
+  // it. `setScreensForTests(app, {})` takes it away again.
+  setScreensForTests(app, {
+    monitors: [{ x: 0, y: 0, width: 1280, height: 800 }],
+  });
   return app;
 }
 

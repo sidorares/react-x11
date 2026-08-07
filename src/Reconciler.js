@@ -41,6 +41,7 @@ import {
 } from './trace-registry.js';
 import { beginStartup } from './startup.js';
 import { beginCompositing, endCompositing } from './compositing.js';
+import { beginScreens, endScreens } from './screens.js';
 import { watchAppearance } from './appearance.js';
 import { GlAreaNode } from './glnodes.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
@@ -668,6 +669,14 @@ export async function createRoot(options = {}) {
   // correct itself visibly. One round trip, on a path that is already async.
   await beginCompositing(app);
 
+  // Awaited for the same reason, and it is the same shape of question: a
+  // `<window>` with no size given is sized from its content and capped at the
+  // screen, and the cap has to be a *synchronous* answer because the size is
+  // resolved before CreateWindow. One round trip for the monitor layout and
+  // one for the work area, on a path that is already async, and after this
+  // no window ever has to wait to know how big it is allowed to be.
+  await beginScreens(app);
+
   // The desktop switching between light and dark reaches the widgets through
   // React — `useTheme()` subscribes — but the other theme route is the node
   // tree, which React does not re-render. This is that half: drop the cached
@@ -707,6 +716,7 @@ export async function createRoot(options = {}) {
       if (rest.onUncaughtError) setErrorHandler(app, null);
       stopAppearance();
       endCompositing(app);
+      endScreens(app);
       if (owned) {
         unregisterApp(app);
         await app.close();
