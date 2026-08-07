@@ -7,11 +7,15 @@
 //   font.fk.namedVariations                the designer's chosen points
 //
 // A slider per continuous axis, a Switch for a binary one, a readout for an
-// axis pinned to a single value, and radios for the named instances. The
+// axis pinned to a single value, and a Select for the named instances. The
 // panel at the bottom prints the `<text>` that would draw what you are
 // looking at — the point being that `wght` comes out as `fontWeight`, since
 // that is the axis react-x11 already drives, and everything else goes in
 // `fontVariationSettings`.
+//
+// There is also a switch for ntk's *text policy*, which is not about
+// variable fonts at all but is the other thing this window is good for
+// looking at closely. See TEXT_POLICY below.
 //
 // Needs a variable font to be interesting. Most systems have one:
 //   /usr/share/fonts/truetype/ubuntu/Ubuntu[wdth,wght].ttf   (wdth + wght)
@@ -24,8 +28,7 @@ import { Font } from 'ntk';
 
 import {
   Button,
-  Radio,
-  RadioGroup,
+  Select,
   Slider,
   Switch,
   createRoot,
@@ -48,6 +51,28 @@ function stepFor(axis) {
 
 /** An axis of 0..1 is the `ital` convention: a switch, not a slider. */
 const isBinary = (axis) => axis.min === 0 && axis.max === 1;
+
+/**
+ * ntk routes each (face, size) to one of two glyph paths, and `textPolicy`
+ * is where the thresholds live:
+ *
+ * - **bitmap** — glyphs rasterize once, upload to a server-side glyphset and
+ *   composite by id. Cheap to draw repeatedly, and glyph origins are
+ *   **rounded to whole pixels**, because a cached bitmap can only land on
+ *   one.
+ * - **vector** — outlines are flattened at the exact size, trapezoidated and
+ *   composited through a scratch mask, every draw. Nothing is cached, and
+ *   positions are deliberately *not* rounded.
+ *
+ * Forcing everything to the vector path is how you see subpixel glyph
+ * positioning: at a fractional size, or with a fractional origin, the
+ * bitmap path snaps and the vector path does not. It costs a rasterization
+ * per draw, which is the trade the thresholds exist to make for you.
+ */
+const TEXT_POLICY = {
+  bitmap: undefined, // ntk's defaults: bitmapMax 128, vectorFrom 256
+  vector: { bitmapMax: 0, vectorFrom: 0 },
+};
 
 /** Axis order: the ones people reach for first, then whatever else exists. */
 const AXIS_ORDER = ['wght', 'wdth', 'opsz', 'slnt', 'ital', 'GRAD'];
@@ -222,6 +247,14 @@ function Lab({ initialFont = null }) {
   const [size, setSize] = useState(64);
   const [sample, setSample] = useState('Handgloves');
   const [picked, setPicked] = useState(null); // the named instance, if any
+  const [vectorText, setVectorText] = useState(false);
+
+  // `textPolicy` is read at *draw* time, not at render time, so setting it
+  // changes nothing on its own — the frame already on screen was composited
+  // by whichever path was in force when it was drawn. Remounting the sample
+  // (`key` below) is the honest way to ask for it again from React, with no
+  // reach into renderer internals.
+  app.textPolicy = vectorText ? TEXT_POLICY.vector : TEXT_POLICY.bitmap;
 
   /** Register a file with the running app and read its axes off it. */
   const load = useCallback(
@@ -328,6 +361,7 @@ function Lab({ initialFont = null }) {
             <>
               <box style={[s.card, s.sample]}>
                 <text
+                  key={vectorText ? 'vector' : 'bitmap'}
                   style={{
                     fontFamily: font.name,
                     fontSize: size,
@@ -360,16 +394,40 @@ function Lab({ initialFont = null }) {
                     <text style={s.axisTag}>size → fontSize</text>
                     <text style={s.axisLabel}>not an axis; px</text>
                   </box>
-                  <text style={s.value}>{size}</text>
+                  <text style={s.value}>{num(size)}</text>
                   <text style={s.range}>8–200</text>
+                  {/* half-pixel steps, because a fractional size is what
+                      makes the two glyph paths differ: the bitmap path
+                      rounds each origin to a whole pixel, the vector path
+                      does not */}
                   <Slider
                     value={size}
                     min={8}
                     max={200}
-                    step={2}
+                    step={0.5}
                     onChange={(ev) => setSize(ev.value)}
                     style={{ flexGrow: 1, minWidth: 120 }}
                   />
+                </box>
+
+                <box style={s.row}>
+                  <box style={s.axisName}>
+                    <text style={s.axisTag}>glyph path</text>
+                    <text style={s.axisLabel}>app.textPolicy</text>
+                  </box>
+                  <text style={s.value}>{vectorText ? 'vector' : 'auto'}</text>
+                  <text style={s.range}>
+                    {vectorText ? 'subpixel' : 'pixel-snapped'}
+                  </text>
+                  <Switch
+                    checked={vectorText}
+                    onChange={(ev) => setVectorText(ev.value)}
+                  />
+                  <text style={s.dim}>
+                    {vectorText
+                      ? '{ bitmapMax: 0, vectorFrom: 0 } — outlines every draw, origins unrounded'
+                      : 'ntk defaults — cached glyph bitmaps, origins rounded to whole pixels'}
+                  </text>
                 </box>
 
                 {tags.length === 0 && (
@@ -397,26 +455,13 @@ function Lab({ initialFont = null }) {
                         the designer&apos;s own points
                       </text>
                     </box>
-                    {/* Radios rather than a dropdown: these are the one
-                        genuinely discrete thing about a variable font, and
-                        seeing all of them at once — with the coordinates
-                        they stand for — is the point. A menu would hide
-                        both behind a click. */}
-                    <RadioGroup
+                    <Select
+                      style={{ width: 240 }}
                       value={picked}
+                      placeholder={`${namedNames.length} to choose from…`}
+                      options={namedNames}
                       onChange={(ev) => applyNamed(ev.value)}
-                      style={{
-                        flexDirection: 'row',
-                        flexWrap: 'wrap',
-                        gap: 10,
-                        flexGrow: 1,
-                        flexShrink: 1,
-                      }}
-                    >
-                      {namedNames.map((name) => (
-                        <Radio key={name} value={name} label={name} />
-                      ))}
-                    </RadioGroup>
+                    />
                   </box>
                 )}
               </box>
