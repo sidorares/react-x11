@@ -227,6 +227,31 @@ payload by reference. A drop from _another application_ needs a second X
 connection playing the foreign source — see
 [drag-and-drop.md](drag-and-drop.md).
 
+## What a screen reader would hear
+
+`renderX11(element, { a11y: true })` adds `at` to the result: the
+assistive-technology spy, an in-process log of the same semantic feed the
+AT-SPI bridge serves to Orca — focus, state changes, text edits,
+announcements — observed at the hook seam, before any D-Bus. Synchronous,
+bus-free, and it runs wherever the suite runs.
+
+```js
+const { at } = await renderX11(<App />, { a11y: true });
+await userEvent.tab();
+assert.equal(at.focused().utterance, 'Save, button');
+await userEvent.key(XK_SPACE);
+assert.ok(at.since().some((e) => e.type === 'state' && e.state === 'checked'));
+```
+
+`at.events()` / `at.since()` are precise facts, `at.transcript()` the
+one-line summaries, `at.focusables()` every keyboard stop in Tab order with
+its utterance — a nameless control reads `"(no accessible name)"`, which
+turns the most-missed accessibility bug into a one-line audit. The four
+canonical tests (focus order, keyboard trap, nothing nameless, states
+announced) live in `test/a11y-spy.test.js`, written to be copied; the model
+behind the wording is [accessibility.md](accessibility.md)'s own, not an
+imitation of Orca's.
+
 ## `act`, and the three clocks
 
 `act(fn)` flushes everything between a state update and a pixel. There are

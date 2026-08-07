@@ -21,19 +21,22 @@
 //   node scripts/a11y-probe.mjs widgets --watch --speak   # ...out loud
 //   node scripts/a11y-probe.mjs nautilus            # someone else's toolkit
 //
-// **The `say:` lines are a toy, and mean it.** What Orca actually utters is
+// **The `say:` lines are a model, not Orca.** What Orca actually utters is
 // Orca's policy — verbosity settings, locale, punctuation level, its own
-// per-role scripts — and it changes between releases. This file models the
-// bit everyone agrees on (name, role, the states that changed) so that a
-// missing accessible name is *audible* rather than merely absent from a
-// table. Treat a `say:` line as "there is enough here to say something",
-// never as "Orca will say this".
+// per-role scripts — and it changes between releases. The lines here follow
+// react-x11's own documented utterance model (`utteranceOf`, shared with
+// the `renderX11({ a11y: true })` test spy, which is what makes a probe
+// session and a test suite agree on wording) so that a missing accessible
+// name is *audible* rather than merely absent from a table. Treat a `say:`
+// line as "there is enough here to say something", never as "Orca will say
+// this".
 //
 // See docs/accessibility.md; the design record is
 // docs/architecture/accessibility.md.
 
 import { execFile } from 'node:child_process';
 import { ATSPI_STATE, ATSPI_STATE_NICK } from '../src/a11y.js';
+import { utteranceOf } from '../src/testing/a11y.js';
 
 const REGISTRY = 'org.a11y.atspi.Registry';
 const ROOT = '/org/a11y/atspi/accessible/root';
@@ -145,50 +148,27 @@ async function applications(bus) {
   );
 }
 
-// --- the toy utterance model ------------------------------------------------
+// --- the utterance, over the wire -------------------------------------------
 
-/** States worth saying, and how. Everything else stays quiet — a screen
- * reader that read out every flag would be unusable, which is the first
- * thing you notice writing one. */
-const SPOKEN_STATES = [
-  ['checked', 'checked'],
-  ['indeterminate', 'partially checked'],
-  ['pressed', 'pressed'],
-  ['expanded', 'expanded'],
-  ['collapsed', 'collapsed'],
-  ['selected', 'selected'],
-  ['editable', null],
-  ['sensitive', null],
-];
-
+/** Gather a remote accessible's parts and hand them to the shared model —
+ * the same `utteranceOf` the test spy uses on live nodes, fed here from
+ * real D-Bus replies so the two can never drift apart. */
 async function utterance(node) {
-  const [name, role, states] = await Promise.all([
+  const [name, role, states, ifaces] = await Promise.all([
     node.name().catch(() => ''),
     node.roleName().catch(() => ''),
     node.states().catch(() => []),
+    node.interfaces().catch(() => []),
   ]);
-  const words = [];
-  if (name) words.push(name);
-  if (role && role !== 'filler') words.push(role);
-  if (!states.includes('sensitive')) words.push('unavailable');
-  for (const [state, said] of SPOKEN_STATES) {
-    if (said && states.includes(state)) words.push(said);
-  }
-  const ifaces = await node.interfaces().catch(() => []);
+  let value = null;
   if (ifaces.includes(VALUE)) {
     const [now, max] = await Promise.all([
       node.value().catch(() => null),
       node.valueMax().catch(() => null),
     ]);
-    if (typeof now === 'number') {
-      words.push(
-        max ? `${Math.round((now / max) * 100)} percent` : String(now),
-      );
-    }
+    if (typeof now === 'number') value = { now, min: 0, max: max ?? 0 };
   }
-  // A control with nothing but a role is the bug this line exists to make
-  // loud: "button" on its own is what a blind user gets, and it is useless.
-  return words.length ? words.join(', ') : '(no accessible name)';
+  return utteranceOf({ name, role, states, value });
 }
 
 let speaking = Promise.resolve();

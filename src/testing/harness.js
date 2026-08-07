@@ -140,6 +140,7 @@ export async function renderX11(element, options = {}) {
     wrap = element?.type !== 'window',
     title = 'react-x11 test',
     colorScheme = 'light',
+    a11y = false,
     ...rootOptions
   } = options;
 
@@ -170,6 +171,17 @@ export async function renderX11(element, options = {}) {
   );
 
   const root = await createRoot({ app, ...rootOptions });
+
+  // Installed **before** the mount, so the initial tree is baselined and
+  // the first render is not reported as a wall of changes — and after
+  // everything that can fail without an entry to hang the teardown on.
+  // `cleanup()` takes it down with the render it belongs to.
+  let at = null;
+  if (a11y) {
+    const { installA11ySpy } = await import('./a11y.js');
+    at = installA11ySpy();
+  }
+
   const tree = wrap
     ? React.createElement('window', { width, height, title }, element)
     : element;
@@ -181,6 +193,7 @@ export async function renderX11(element, options = {}) {
     ownsApp: !options.app,
     unmounted: false,
     windowNode: null,
+    at,
   };
   mounted.add(entry);
 
@@ -235,6 +248,9 @@ export async function renderX11(element, options = {}) {
     get ctx() {
       return windowNode?.window?.getContext?.('2d') ?? null;
     },
+    /** The assistive-technology spy, when `a11y: true` asked for one —
+     * what a screen reader would have been told (docs/accessibility.md). */
+    at,
     /** Re-render into the same root, then settle. */
     rerender: (next) =>
       act(() => {
@@ -326,6 +342,8 @@ async function unmountEntry(entry) {
   if (entry.unmounted) return;
   entry.unmounted = true;
   mounted.delete(entry);
+  // before the unmount, so the teardown's own hook traffic is not recorded
+  entry.at?.uninstall();
   try {
     entry.root.unmount?.();
   } catch {

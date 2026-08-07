@@ -244,12 +244,62 @@ whatever the tree says. The seams, in increasing order of involvement:
 
 ## Testing and verifying
 
-The bridge is testable without a desktop: point `AT_SPI_BUS_ADDRESS` at an
-in-process bus (dbus-native's broker), own `org.a11y.atspi.Registry` on it
-with a stub `Embed`, and walk your app with real D-Bus calls —
-`test/atspi.test.js` is the worked example, and the model half (roles,
-names, states as pure functions over the tree) needs no bus at all
-(`test/a11y.test.js`).
+### Asserting what a screen reader would hear
+
+`renderX11(element, { a11y: true })` hands back `at`, an in-process
+assistive-technology spy: the same semantic feed the AT-SPI bridge serves
+to Orca, observed before it becomes D-Bus — so it is synchronous, needs no
+bus, and runs everywhere the test suite runs (the mock backend, Node 20,
+macOS included). Input stays real: `userEvent.tab()` is a Tab through the
+in-process X server's focus machinery, not a shortcut around it.
+
+```js
+import { renderX11, userEvent, cleanup, XK_SPACE } from 'react-x11/test';
+
+const { at } = await renderX11(<Preferences />, { a11y: true });
+
+await userEvent.tab();
+assert.equal(at.focused().utterance, 'Save, button');
+
+await userEvent.tab();
+await userEvent.key(XK_SPACE);
+assert.ok(at.since().some((e) => e.type === 'state' && e.state === 'checked'));
+```
+
+Every entry is a precise fact (`{ type, state, on, node, … }`) plus a
+one-line `summary`; `at.transcript()` is the summaries, made for
+`deepEqual`. `at.focused()` and `at.focusables()` describe nodes the way an
+AT would — name, role, states, and an `utterance` string following the
+model documented on this page (name, role, the states worth speaking, a
+value as a percentage). The utterance is deliberately **this library's
+model, not an imitation of Orca**, whose wording is presentation policy;
+what it buys you is that a control nobody named renders as
+`"(no accessible name)"` instead of passing because no assertion happened
+to mention its name.
+
+Four tests worth copying into any application — each one a check a sighted
+test author cannot make by looking (`test/a11y-spy.test.js` is the worked
+example of all four):
+
+- **Focus order** — tab through, `deepEqual` the focus summaries.
+- **No keyboard trap** — `at.focusables().length` + 1 Tabs lands back on
+  the first stop, and Shift+Tab wraps the other way.
+- **Nothing nameless** — for each of `at.focusables()`, assert the
+  utterance is not `"(no accessible name)"`. The highest value per line in
+  this document.
+- **State changes are announced** — press Space on a checkbox, assert a
+  `checked` state entry arrived; a widget that repaints without one is the
+  most common accessibility regression there is.
+
+### Testing the bridge itself
+
+The wire half is testable without a desktop too: point
+`AT_SPI_BUS_ADDRESS` at an in-process bus (dbus-native's broker), own
+`org.a11y.atspi.Registry` on it with a stub `Embed`, and walk your app with
+real D-Bus calls — `test/atspi.test.js` is the worked example, and the
+model half (roles, names, states as pure functions over the tree) needs no
+bus at all (`test/a11y.test.js`). Applications rarely need this layer; it
+is how react-x11 proves the transport.
 
 ### Seeing it without learning a screen reader
 

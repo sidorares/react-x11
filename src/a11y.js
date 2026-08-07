@@ -672,6 +672,63 @@ export function a11yActivatable(node) {
 }
 
 // --------------------------------------------------------------------------
+// Text state — shared by the AT-SPI bridge's Text interface and the test
+// spy, because both answer the same question: what would an assistive
+// technology read out of this control right now?
+// --------------------------------------------------------------------------
+
+/** Kinds whose value is editable text with a caret. */
+export const isTextControl = (node) =>
+  node.kind === 'textinput' || node.kind === 'textarea';
+
+/** Kinds that expose the AT-SPI Text interface at all — the editable
+ * controls plus `<text>` labels, which are readable but caret-less. */
+export const hasTextInterface = (node) =>
+  isTextControl(node) || node.kind === 'text';
+
+/**
+ * The code points and caret/selection of anything with a Text interface —
+ * offsets in AT-SPI are code points, which is also exactly what
+ * TextInputNode's `_chars()`/`_caret` already count.
+ */
+export function textStateOf(node) {
+  if (isTextControl(node)) {
+    return {
+      chars: node._chars(),
+      caret: node._caret ?? 0,
+      selection: node._selection?.() ?? [0, 0],
+    };
+  }
+  const spans = node.collectSpans?.(node.inheritedTextStyle, []) ?? [];
+  const chars = Array.from(spans.map((s) => s.text).join(''));
+  return { chars, caret: 0, selection: [0, 0] };
+}
+
+/** Common-prefix/suffix diff of two code-point arrays →
+ * `{ offset, removed, inserted }`, the exact shape AT-SPI text-changed
+ * events want. Null when equal. */
+export function diffChars(before, after) {
+  const bn = before.length;
+  const an = after.length;
+  let prefix = 0;
+  const max = Math.min(bn, an);
+  while (prefix < max && before[prefix] === after[prefix]) prefix++;
+  let suffix = 0;
+  while (
+    suffix < max - prefix &&
+    before[bn - 1 - suffix] === after[an - 1 - suffix]
+  ) {
+    suffix++;
+  }
+  if (prefix === bn && prefix === an) return null;
+  return {
+    offset: prefix,
+    removed: before.slice(prefix, bn - suffix),
+    inserted: after.slice(prefix, an - suffix),
+  };
+}
+
+// --------------------------------------------------------------------------
 // DEV validation
 // --------------------------------------------------------------------------
 

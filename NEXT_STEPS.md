@@ -933,6 +933,13 @@ where it follows the research below and where it deliberately does not:
   Orca speaks the widget gallery — "Press me — button", "check box
   checked", "horizontal slider, 80 percent" — and can press, adjust and
   type into it over the bus.
+- **The testing story ships with it.** `renderX11({ a11y: true })` returns
+  the assistive-technology spy — the same hook feed the bridge consumes,
+  observed in-process with no bus, so an app asserts focus order, keyboard
+  cycling, "nothing nameless" and announced state changes synchronously
+  (`test/a11y-spy.test.js` is the copyable set). `npm run a11y:probe` is
+  the same idea against a live desktop: the AT side of the wire in
+  dbus-native, sharing the spy's `utteranceOf` model.
 - **Deferred, recorded in the docs page**: relations (needs an id
   registry), the Selection and Table container interfaces, key-event
   forwarding via DeviceEventController, soft-wrap line granularity in

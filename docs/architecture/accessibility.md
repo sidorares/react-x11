@@ -280,11 +280,23 @@ exactly as the GTK bridge does.
 
 ## 9. Testing
 
-Three layers, each catching what the one below cannot:
+Four layers, each catching what the one below cannot:
 
 1. **Model** (`test/a11y.test.js`) — no bus: roles, names, states,
    projection, widget wiring, over the mock app.
-2. **Hermetic bridge** (`test/atspi.test.js`) — dbus-native's
+2. **The spy** (`src/testing/a11y.js`, `test/a11y-spy.test.js`, and the
+   layer applications are meant to use via `renderX11({ a11y: true })`) —
+   the hook slots are the seam the bridge itself consumes, so a spy
+   filling the same slots observes the same contract with no transport:
+   synchronous, bus-free, Node-20-and-macOS-safe. It reuses the bridge's
+   own snapshot-and-diff idea in miniature, and it doubles as a renderer
+   regression net — a chokepoint that stops calling its hook fails these
+   tests exactly as it would silence Orca. The utterance strings it (and
+   `scripts/a11y-probe.mjs`) produce come from one shared `utteranceOf`,
+   deliberately documented as react-x11's model rather than an imitation
+   of Orca's wording, which is presentation policy that shifts between
+   releases.
+3. **Hermetic bridge** (`test/atspi.test.js`) — dbus-native's
    `createBroker()` is a real in-process message bus (routing, names, match
    rules); a stub client owns `org.a11y.atspi.Registry` and answers
    `Embed`; `AT_SPI_BUS_ADDRESS` points the bridge at it, so everything
@@ -293,13 +305,20 @@ Three layers, each catching what the one below cannot:
    wire-level facts: struct shapes, state bits, text-diff offsets, the
    press gesture, cache items. Skips itself on Node 20 where the transport
    legitimately is not installed.
-3. **Live** — not automated, but scripted and repeatable: python3
-   `gi.repository.Atspi` is libatspi, Orca's own client stack, so
+4. **Live** — not automated, but scripted and repeatable:
+   `scripts/a11y-probe.mjs` is the AT side of the wire in dbus-native
+   (tree dumps, an event tail, `--speak` through speech-dispatcher), and
+   python3 `gi.repository.Atspi` is libatspi, Orca's own client stack —
    `get_desktop(0)` → find the app → walk/`do_action`/`set_current_value`
-   exercises the real registry, and `orca --debug-file=…` grepped for
-   `SPEECH OUTPUT` is ground truth. That run is what confirmed the whole
-   chain: "Press me — button", "check box checked", "horizontal slider —
-   80 percent", menus opening from AT activation with their rows readable.
+   exercises the real registry, with `orca --debug-file=…` grepped for
+   `SPEECH OUTPUT` as ground truth. Those runs confirmed the whole chain
+   ("Press me — button", "check box checked", "horizontal slider — 80
+   percent", menus opening from AT activation) — and found a real bug on
+   first contact: `GetRoleName` answered the ARIA vocabulary while
+   `GetRole` answered the AT-SPI number. Invisible to libatspi, which
+   derives role names locally from the number and never asks — exactly
+   the class of defect only a second, independent client exposes, and the
+   argument for the probe existing at all.
 
 ## 10. Alternatives rejected, for the record
 

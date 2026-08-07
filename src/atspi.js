@@ -51,6 +51,10 @@ import {
   a11yValue,
   a11yAttributes,
   a11yActivatable,
+  isTextControl,
+  hasTextInterface,
+  textStateOf,
+  diffChars,
 } from './a11y.js';
 import { onApp } from './trace-registry.js';
 import { discrete } from './events.js';
@@ -239,28 +243,9 @@ const CACHE_DESC = {
 };
 
 // --------------------------------------------------------------------------
-// Helpers over the node tree
+// Helpers over the node tree. `textStateOf`/`diffChars` live in a11y.js —
+// they answer "what would an AT read here", which the test spy asks too.
 // --------------------------------------------------------------------------
-
-const isTextControl = (node) =>
-  node.kind === 'textinput' || node.kind === 'textarea';
-const hasTextInterface = (node) => isTextControl(node) || node.kind === 'text';
-
-/** The code points and caret/selection of anything with a Text interface —
- * offsets in AT-SPI are code points, which is also exactly what
- * TextInputNode's `_chars()`/`_caret` already count. */
-function textStateOf(node) {
-  if (isTextControl(node)) {
-    return {
-      chars: node._chars(),
-      caret: node._caret ?? 0,
-      selection: node._selection?.() ?? [0, 0],
-    };
-  }
-  const spans = node.collectSpans?.(node.inheritedTextStyle, []) ?? [];
-  const chars = Array.from(spans.map((s) => s.text).join(''));
-  return { chars, caret: 0, selection: [0, 0] };
-}
 
 function clampOffset(offset, length) {
   return Math.max(0, Math.min(offset | 0, length));
@@ -339,30 +324,6 @@ function boundaryToGranularity(type) {
   if (type === 0) return 0; // CHAR
   if (type === 1 || type === 2) return 1; // WORD_START / WORD_END
   return 3; // SENTENCE_* and LINE_* answer as lines
-}
-
-/** Common-prefix/suffix diff of two code-point arrays →
- * `{ offset, removed, inserted }`, the exact shape AT-SPI text-changed
- * events want. Null when equal. */
-function diffChars(before, after) {
-  const bn = before.length;
-  const an = after.length;
-  let prefix = 0;
-  const max = Math.min(bn, an);
-  while (prefix < max && before[prefix] === after[prefix]) prefix++;
-  let suffix = 0;
-  while (
-    suffix < max - prefix &&
-    before[bn - 1 - suffix] === after[an - 1 - suffix]
-  ) {
-    suffix++;
-  }
-  if (prefix === bn && prefix === an) return null;
-  return {
-    offset: prefix,
-    removed: before.slice(prefix, bn - suffix),
-    inserted: after.slice(prefix, an - suffix),
-  };
 }
 
 /** The best guess at what the desktop calls this program. */
