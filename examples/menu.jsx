@@ -9,6 +9,14 @@
 // Right opens a submenu and Left leaves it, Enter picks, Escape closes one
 // level at a time.
 //
+// **On a desktop with a global menu the bar is not here at all** — it is in
+// the panel, and the app said nothing to make that happen. `menus` is a plain
+// data array in dbusmenu's own vocabulary, so the same array that draws the
+// bar serialises straight to `com.canonical.dbusmenu`. To see it without such
+// a desktop, run `npm run globalmenu:host` in another terminal: it owns the
+// registrar name, so this window's bar disappears and the menu shows up
+// there. See docs/globalmenu.md.
+//
 // **File → Open… is the real thing**, through `useFileDialog()`: the
 // desktop's own dialog over xdg-desktop-portal where there is one,
 // `NSOpenPanel` through `osascript` on a Mac, and a browser react-x11 draws
@@ -98,6 +106,10 @@ const ICONS = {
 function App() {
   const [last, setLast] = useState('(none)');
   const [wrap, setWrap] = useState(true);
+  // Only so this example can *say* which way it went. An app needs none of
+  // it: `<MenuBar menus={menus} />` is the whole integration, and the bar
+  // moves to the panel or stays here without the app being told.
+  const [inPanel, setInPanel] = useState(false);
   const note = (label) => () => setLast(label);
 
   // The File menu drives real dialogs. Nothing to pass: the dialog is
@@ -142,13 +154,13 @@ function App() {
         {
           label: 'New',
           icon: ICONS.page,
-          shortcut: 'Ctrl+N',
+          shortcut: [['Control', 'N']],
           onSelect: note('New'),
         },
         {
           label: 'Open…',
           icon: ICONS.folder,
-          shortcut: 'Ctrl+O',
+          shortcut: [['Control', 'O']],
           onSelect: open(),
         },
         {
@@ -181,15 +193,15 @@ function App() {
                 { label: 'todo.md', onSelect: note('Recent → todo.md') },
               ],
             },
-            { separator: true },
+            { type: 'separator' },
             { label: 'Clear list', onSelect: note('Recent → clear') },
           ],
         },
-        { separator: true },
+        { type: 'separator' },
         {
           label: 'Save',
           icon: ICONS.save,
-          shortcut: 'Ctrl+S',
+          shortcut: [['Control', 'S']],
           onSelect: note('Save'),
         },
         { label: 'Save As…', icon: ICONS.save, onSelect: save() },
@@ -201,7 +213,7 @@ function App() {
               items: [
                 { label: 'PNG', onSelect: note('Export → PNG') },
                 { label: 'JPEG', onSelect: note('Export → JPEG') },
-                { label: 'WebP', disabled: true },
+                { label: 'WebP', enabled: false },
               ],
             },
             {
@@ -211,15 +223,15 @@ function App() {
                 { label: 'EPS', onSelect: note('Export → EPS') },
               ],
             },
-            { separator: true },
-            { label: 'PDF', disabled: true },
+            { type: 'separator' },
+            { label: 'PDF', enabled: false },
           ],
         },
-        { separator: true },
+        { type: 'separator' },
         {
           label: 'Quit',
           icon: ICONS.power,
-          shortcut: 'Ctrl+Q',
+          shortcut: [['Control', 'Q']],
           onSelect: note('Quit'),
         },
       ],
@@ -230,27 +242,32 @@ function App() {
         {
           label: 'Undo',
           icon: ICONS.undo,
-          shortcut: 'Ctrl+Z',
+          shortcut: [['Control', 'Z']],
           onSelect: note('Undo'),
         },
-        { label: 'Redo', icon: ICONS.redo, shortcut: 'Ctrl+Y', disabled: true },
-        { separator: true },
+        {
+          label: 'Redo',
+          icon: ICONS.redo,
+          shortcut: [['Control', 'Y']],
+          enabled: false,
+        },
+        { type: 'separator' },
         {
           label: 'Cut',
           icon: ICONS.scissors,
-          shortcut: 'Ctrl+X',
+          shortcut: [['Control', 'X']],
           onSelect: note('Cut'),
         },
         {
           label: 'Copy',
           icon: ICONS.copy,
-          shortcut: 'Ctrl+C',
+          shortcut: [['Control', 'C']],
           onSelect: note('Copy'),
         },
         {
           label: 'Paste',
           icon: ICONS.clipboard,
-          shortcut: 'Ctrl+V',
+          shortcut: [['Control', 'V']],
           onSelect: note('Paste'),
         },
       ],
@@ -263,7 +280,8 @@ function App() {
           // is state and the icon is only identity
           label: 'Wrap lines',
           icon: ICONS.page,
-          checked: wrap,
+          toggleType: 'checkmark',
+          toggleState: wrap ? 1 : 0,
           onSelect: () => {
             setWrap((w) => !w);
             setLast('Wrap lines');
@@ -272,13 +290,13 @@ function App() {
         {
           label: 'Zoom in',
           icon: ICONS.zoomIn,
-          shortcut: 'Ctrl++',
+          shortcut: [['Control', 'plus']],
           onSelect: note('Zoom in'),
         },
         {
           label: 'Zoom out',
           icon: ICONS.zoomOut,
-          shortcut: 'Ctrl+-',
+          shortcut: [['Control', 'minus']],
           onSelect: note('Zoom out'),
         },
       ],
@@ -289,17 +307,17 @@ function App() {
     {
       label: 'Cut',
       icon: ICONS.scissors,
-      shortcut: 'Ctrl+X',
+      shortcut: [['Control', 'X']],
       onSelect: note('Cut (context)'),
     },
     {
       label: 'Copy',
       icon: ICONS.copy,
-      shortcut: 'Ctrl+C',
+      shortcut: [['Control', 'C']],
       onSelect: note('Copy (context)'),
     },
-    { label: 'Paste', icon: ICONS.clipboard, disabled: true },
-    { separator: true },
+    { label: 'Paste', icon: ICONS.clipboard, enabled: false },
+    { type: 'separator' },
     {
       label: 'Convert',
       items: [
@@ -314,7 +332,7 @@ function App() {
         { label: 'Tabs to spaces', onSelect: note('Convert → tabs') },
       ],
     },
-    { separator: true },
+    { type: 'separator' },
     { label: 'Delete', icon: '\u2717', onSelect: note('Delete (context)') },
   ];
 
@@ -326,7 +344,7 @@ function App() {
       style={{ backgroundColor: '$surfaceHover' }}
     >
       <box style={{ flexGrow: 1 }}>
-        <MenuBar menus={menus} />
+        <MenuBar menus={menus} onGlobalMenuChange={setInPanel} />
         <ContextMenu
           items={contextItems}
           style={{
@@ -337,7 +355,9 @@ function App() {
           }}
         >
           <text style={{ fontSize: 18, color: '$text' }}>
-            Right-click anywhere below the bar
+            {inPanel
+              ? 'The menu is in the panel — right-click here'
+              : 'Right-click anywhere below the bar'}
           </text>
           <text style={{ color: '$dim' }}>
             last choice: <text style={{ color: '$accent' }}>{last}</text>
@@ -348,6 +368,12 @@ function App() {
           <text style={{ color: '$dim' }}>
             File → Open/Save runs a real dialog, on this machine's{' '}
             <text style={{ color: '$accent' }}>{backend}</text> backend
+          </text>
+          <text style={{ color: '$dim' }}>
+            menu bar:{' '}
+            <text style={{ color: '$accent' }}>
+              {inPanel ? "the desktop's panel" : 'drawn in this window'}
+            </text>
           </text>
         </ContextMenu>
       </box>

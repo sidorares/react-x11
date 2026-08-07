@@ -197,6 +197,16 @@ plus the two containers an application window is built from: `Tabs`, `Tree`
 and `SplitPane`. See
 [docs/components.md](docs/components.md).
 
+**The menu bar goes where the desktop keeps menus.** On Plasma, on a panel
+running `vala-panel-appmenu`, or under one of the GNOME extensions that add a
+menu bar, `<MenuBar menus={…}/>` hands its menu to the panel over
+`com.canonical.dbusmenu` and stops drawing one; everywhere else it draws the
+bar itself. No configuration, and the same line of JSX either way — the item
+descriptors are dbusmenu's own vocabulary, so the array that draws the menu is
+the array that serialises. `npm run globalmenu:host` is a panel in a terminal,
+for seeing it work on a desktop that has none. See
+[docs/globalmenu.md](docs/globalmenu.md).
+
 **Drag and drop** works with the rest of the desktop: `<box dropAccept={['files']}
 onDrop={…}>` takes a file dragged out of Nautilus, and `<box draggable dragData={…}>`
 can be dropped into a file manager or an editor. Drags that stay inside the

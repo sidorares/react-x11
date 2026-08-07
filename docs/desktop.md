@@ -5,6 +5,12 @@ is startup notification, which is on by default and has nothing to call, and
 what a password field has to do to be reachable by the desktop's password
 managers.
 
+The menu bar is the other half of this and has a page of its own —
+[globalmenu.md](globalmenu.md) — because on a desktop that shows application
+menus in its panel, `MenuBar` hands the menu over and stops drawing. Same
+default shape as startup notification: on with no configuration, and one
+switch to turn it off.
+
 ## Startup notification
 
 When a launcher spawns an app it opens a **startup sequence** — that is what

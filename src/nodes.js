@@ -3680,14 +3680,19 @@ export class TextInputNode extends Node {
     const hasSelection = a !== b;
     const length = this._chars().length;
     return [
-      { id: 'undo', label: 'Undo', shortcut: 'Ctrl+Z', enabled: this.canUndo },
+      {
+        id: 'undo',
+        label: 'Undo',
+        shortcut: [['Control', 'Z']],
+        enabled: this.canUndo,
+      },
       {
         id: 'redo',
         label: 'Redo',
-        shortcut: 'Ctrl+Shift+Z',
+        shortcut: [['Control', 'Shift', 'Z']],
         enabled: this.canRedo,
       },
-      { separator: true },
+      { type: 'separator' },
       // A `sensitive` field offers neither: they are not disabled rows, they
       // are absent, because a greyed Copy over a password reads as a bug in
       // the application rather than as a decision.
@@ -3697,29 +3702,29 @@ export class TextInputNode extends Node {
             {
               id: 'cut',
               label: 'Cut',
-              shortcut: 'Ctrl+X',
+              shortcut: [['Control', 'X']],
               enabled: hasSelection,
             },
             {
               id: 'copy',
               label: 'Copy',
-              shortcut: 'Ctrl+C',
+              shortcut: [['Control', 'C']],
               enabled: hasSelection,
             },
           ]),
       {
         id: 'paste',
         label: 'Paste',
-        shortcut: 'Ctrl+V',
+        shortcut: [['Control', 'V']],
         // greyed only when the server has told us the selection is unowned
         // (pastestate.js). Never a round trip on the way to opening a menu.
         enabled: Boolean(this._clipboardApi()) && canPaste(this.app),
       },
-      { separator: true },
+      { type: 'separator' },
       {
         id: 'selectAll',
         label: 'Select All',
-        shortcut: 'Ctrl+A',
+        shortcut: [['Control', 'A']],
         enabled: length > 0 && !(a === 0 && b === length),
       },
     ];

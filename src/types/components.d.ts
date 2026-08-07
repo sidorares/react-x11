@@ -436,16 +436,62 @@ export interface SelectProps<T = unknown> extends WidgetProps, NamedWidget {
 }
 export function Select<T = unknown>(props: SelectProps<T>): ReactNode;
 
+/** dbusmenu's `toggle-type`. */
+export type MenuToggleType = 'checkmark' | 'radio';
+
+/** dbusmenu's `toggle-state`: off, on, and "on for part of the selection". */
+export type MenuToggleState = 0 | 1 | -1;
+
+/** dbusmenu's `disposition` — what kind of attention the item wants. */
+export type MenuDisposition = 'normal' | 'informative' | 'warning' | 'alert';
+
+/**
+ * One `aas` shortcut: a list of **alternatives**, each a list of modifier
+ * tokens (`Control`, `Alt`, `Shift`, `Super`) ending in the key.
+ *
+ * ```ts
+ * shortcut: [['Control', 'S']]
+ * ```
+ *
+ * The key is named the way GDK names it — `plus`, not `+` — because that is
+ * what a panel's importer parses. Menus print the friendly form.
+ */
+export type MenuShortcut = readonly (readonly string[])[];
+
+/**
+ * An item in a menu.
+ *
+ * The vocabulary is `com.canonical.dbusmenu`'s, so the identical array
+ * serialises to the desktop's global menu with no translation and there is
+ * no second authoring model. See docs/globalmenu.md.
+ */
 export interface MenuItem {
   label?: string;
-  /** Present and truthy makes this a submenu parent. */
+  /** `'separator'` draws a rule instead of a row. Absent means `'standard'`. */
+  type?: 'standard' | 'separator';
+  /** Present and non-empty makes this a submenu parent. */
   items?: MenuItem[];
-  disabled?: boolean;
-  /** Shown right-aligned; purely a label, not a binding. */
-  shortcut?: string;
+  /** Defaults to `true`; `false` dims the row and makes it inert. */
+  enabled?: boolean;
+  /** Defaults to `true`; `false` removes the row from the menu entirely. */
+  visible?: boolean;
+  /** Shown right-aligned, and sent to the panel. Not a binding either way. */
+  shortcut?: MenuShortcut;
+  /** With `toggleState`, draws a check mark or a radio dot in the gutter. */
+  toggleType?: MenuToggleType;
+  toggleState?: MenuToggleState;
+  /** An icon-theme name, for the desktop's menu. Ignored by the drawn one. */
+  iconName?: string;
+  /** Raw PNG bytes, for an icon that is not in a theme. */
+  iconData?: Uint8Array;
+  disposition?: MenuDisposition;
   /**
-   * Drawn in the 16px column left of the label — the same column the check
+   * Drawn in the 16px column left of the label — the same column the toggle
    * mark uses, so an item that is both checked and iconned shows the check.
+   *
+   * **Local only**, and the one deliberate departure from the dbusmenu
+   * vocabulary: the desktop cannot call a function, so an item that wants an
+   * icon in both menus carries `icon` for ours and `iconName` for the panel's.
    *
    * A string is drawn as text, which is a one-liner but only as good as the
    * font: an exotic glyph is tofu on a machine without it. A **function**
@@ -459,10 +505,9 @@ export interface MenuItem {
     | number
     | ReactNode
     | ((state: { color: string; size: number }) => ReactNode);
-  checked?: boolean;
-  /** A horizontal rule instead of an item. */
-  separator?: boolean;
-  onSelect?: () => void;
+  /** Identity for React keys and for the exported item's stable integer id. */
+  key?: string;
+  onSelect?: (item: MenuItem) => void;
   [key: string]: unknown;
 }
 
@@ -478,11 +523,25 @@ export const ContextMenu: ComponentType<ContextMenuProps>;
 export interface MenuBarMenu {
   label: string;
   items: MenuItem[];
+  visible?: boolean;
+  key?: string;
 }
 
 export interface MenuBarProps extends WidgetProps {
   menus?: readonly MenuBarMenu[];
   onSelect?: (item: MenuItem) => void;
+  /**
+   * Hand the bar to the desktop's panel where there is one. On by default,
+   * and `false` keeps it in the window. See docs/globalmenu.md.
+   */
+  globalMenu?: boolean;
+  /**
+   * Called with `true` when the desktop's panel takes the menu and `false`
+   * when it gives it back. The one fact about this an app cannot work out for
+   * itself: calling `useGlobalMenu` beside a `MenuBar` would export the menu
+   * twice.
+   */
+  onGlobalMenuChange?: (exported: boolean) => void;
   fontSize?: number;
   style?: StyleProp;
 }
