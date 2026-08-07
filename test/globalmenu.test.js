@@ -10,7 +10,7 @@ import assert from 'node:assert';
 import { describe, test } from 'node:test';
 import React from 'react';
 
-import { busRefs } from '../src/bus.js';
+import { _resetBusState, busRefs } from '../src/bus.js';
 import { createRoot } from '../src/index.js';
 import { REGISTRAR_NAME } from '../src/globalmenu.js';
 import { createMockApp } from './helpers/mock-app.js';
@@ -420,6 +420,34 @@ describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
 
       await panel.stop();
     });
+  });
+
+  test('with no bus at all, the bar draws and nothing is attempted', async () => {
+    // react-x11's flagship persona: an ssh session, a bare startx, a
+    // container, CI. "No bus" is a first-class configuration rather than a
+    // degraded one (docs/dbus.md), so this must be indistinguishable from a
+    // desktop that simply has no panel — no throw, no log, no missing menu.
+    const saved = process.env.DBUS_SESSION_BUS_ADDRESS;
+    const savedRuntime = process.env.XDG_RUNTIME_DIR;
+    process.env.DBUS_SESSION_BUS_ADDRESS =
+      'unix:path=/nonexistent/react-x11-no-such-bus';
+    delete process.env.XDG_RUNTIME_DIR;
+    _resetBusState();
+    try {
+      const bar = await mountBar(undefined, MENUS(), { dialsBus: false });
+      await tick();
+      await tick();
+      assert.equal(bar.barIsDrawn(), true);
+      assert.deepEqual(bar.propertyCalls(), []);
+      assert.equal(busRefs('session'), 0);
+      await bar.root.unmount();
+    } finally {
+      if (saved === undefined) delete process.env.DBUS_SESSION_BUS_ADDRESS;
+      else process.env.DBUS_SESSION_BUS_ADDRESS = saved;
+      if (savedRuntime !== undefined)
+        process.env.XDG_RUNTIME_DIR = savedRuntime;
+      _resetBusState();
+    }
   });
 
   test('the registrar name is the one panels actually own', () => {

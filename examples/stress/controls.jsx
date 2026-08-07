@@ -96,7 +96,7 @@ const OUTLINE = [
     ],
   },
   { id: 'b', label: 'Chapter two', children: [] },
-  { id: 'c', label: 'Appendix', enabled: false },
+  { id: 'c', label: 'Appendix', disabled: true },
 ];
 
 export function ControlsPanel() {
