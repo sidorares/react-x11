@@ -22,6 +22,7 @@
     "examples:tasks": "tsx examples/tasks.jsx",
     "examples:tasks:hot": "node --enable-source-maps --import ./examples/hmr-register.mjs examples/tasks-hot.jsx",
     "examples:menu": "tsx examples/menu.jsx",
+    "examples:variable-fonts": "tsx examples/variable-fonts.jsx",
     "examples:tooltips": "tsx examples/tooltips.jsx",
     "examples:clipboard": "tsx examples/clipboard.jsx",
     "examples:dbus": "tsx examples/dbus.jsx",
