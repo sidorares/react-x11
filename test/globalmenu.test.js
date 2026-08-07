@@ -210,6 +210,70 @@ describe('the global menu', { concurrency: 1, ...needsBroker }, () => {
     });
   });
 
+  test('a click from the panel produces exactly one property signal', async () => {
+    await withBus(async (address) => {
+      // The whole round trip on the real path: the panel activates a row, the
+      // app's handler flips state, React re-renders, and the diff decides what
+      // to say. Every render rebuilds this `menus` array, so `update()` runs
+      // several times — only the one that actually changed something may put a
+      // signal on the wire.
+      const panel = await fakeRegistrar(address);
+      let wrap = 0;
+      const { MenuBar } = await import('../src/index.js');
+      const app = createMockApp();
+      const root = await createRoot({ app });
+      const draw = () =>
+        root.render(
+          h(
+            'window',
+            { width: 400, height: 200 },
+            h(MenuBar, {
+              menus: [
+                {
+                  label: 'View',
+                  items: [
+                    {
+                      label: 'Wrap',
+                      toggleType: 'checkmark',
+                      toggleState: wrap,
+                      onSelect: () => {
+                        wrap = wrap ? 0 : 1;
+                        draw();
+                      },
+                    },
+                  ],
+                },
+              ],
+            }),
+          ),
+        );
+      draw();
+      await tick();
+      await until(() => busRefs('session') === 1, 'the bus');
+      await until(() => panel.windows.size === 1, 'registration');
+
+      const menu = await panel.readMenu();
+      const watch = await panel.watchSignals();
+      await panel.click(menu.children[0].children[0].id);
+      await until(() => watch.seen.length > 0, 'the property signal');
+      // Let any further renders settle before counting.
+      await tick();
+      await tick();
+      await new Promise((r) => setTimeout(r, 50));
+
+      assert.deepEqual(
+        watch.seen.map((s) => s[0]),
+        ['ItemsPropertiesUpdated'],
+        'one signal, and it is the cheap one',
+      );
+
+      await watch.stop();
+      await panel.stop();
+      await root.unmount();
+      await until(() => busRefs('session') === 0, 'the bus to be released');
+    });
+  });
+
   test('a toggle flipping patches properties and does not bump the revision', async () => {
     await withBus(async (address) => {
       const panel = await fakeRegistrar(address);
