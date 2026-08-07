@@ -157,6 +157,21 @@ export const TEXT_LAYOUT_PROPS = new Set([
   'textBoxTrim',
 ]);
 
+/**
+ * Text style props that change how the text is **drawn** and provably not
+ * where any of it lands. They still invalidate the cached layout — the value
+ * rides on the spans inside it — but never the box, so changing one repaints
+ * without reflowing.
+ *
+ * `textRendering` is CSS's, and picks the glyph path: `geometricPrecision`
+ * puts glyph origins exactly where shaping asked, `optimizeSpeed` keeps them
+ * on ntk's cached-bitmap path, `auto` lets size decide. Only rounding at
+ * draw time differs — ntk's layout answers byte-identically for all three,
+ * down to per-run offsets — which is what makes it safe to keep out of the
+ * measurement set.
+ */
+export const TEXT_PAINT_PROPS = new Set(['textRendering']);
+
 export const isLayoutProp = (name) =>
   Object.prototype.hasOwnProperty.call(LAYOUT_APPLIERS, name);
 export const isPaintProp = (name) => PAINT_PROPS.has(name);
@@ -193,6 +208,7 @@ const STYLE_PROPS = new Set([
   ...Object.keys(LAYOUT_APPLIERS),
   ...PAINT_PROPS,
   ...TEXT_LAYOUT_PROPS,
+  ...TEXT_PAINT_PROPS,
   'color',
   'borderStyle',
   'transition',
@@ -679,6 +695,7 @@ export function textStyleFrom(props, inherited) {
     // ntk's name for it is `variations`; the prop is spelled after the CSS
     // property, like every other name in this vocabulary
     variations: props.fontVariationSettings ?? inherited.variations,
+    textRendering: props.textRendering ?? inherited.textRendering,
     color: props.color ?? inherited.color,
   };
 }
@@ -689,6 +706,7 @@ export const DEFAULT_TEXT_STYLE = {
   weight: 'normal',
   style: 'normal',
   variations: undefined,
+  textRendering: undefined,
   color: 'black',
 };
 

@@ -551,6 +551,7 @@ run list so wrapping spans the whole content.
 | `color`                                             | text color (inherited by spans)                        |
 | `fontSize`, `fontFamily`, `fontWeight`, `fontStyle` | ntk font style (fontconfig lookup + fallback)          |
 | `fontVariationSettings`                             | a variable font's axes — see below                     |
+| `textRendering`                                     | which glyph path to draw with — see below              |
 | `textAlign`                                         | `left`, `right`, `center`, `start`, `end` (bidi-aware) |
 | `lineHeight`                                        | multiplier over the natural font line height           |
 
@@ -590,6 +591,45 @@ really will ask for hundreds of distinct faces as it is dragged — step the
 control, not the font. See ntk's `docs/fonts.md` for the whole picture,
 including why a variable `.woff2` cannot be instantiated and you want the
 `.ttf`.
+
+### `textRendering`
+
+_ntk ≥ 7.2.0._ CSS's property, picking which glyph path draws the text.
+
+| value                |                                                           |
+| -------------------- | --------------------------------------------------------- |
+| `auto` (default)     | ntk decides from the size — right for UI text             |
+| `geometricPrecision` | glyph origins exactly where shaping asked; nothing cached |
+| `optimizeSpeed`      | ntk's cached glyph bitmaps, at any size                   |
+| `optimizeLegibility` | accepted, means `auto` — there is no hinting to turn on   |
+
+```jsx
+<text style={{ fontSize: 96, textRendering: 'geometricPrecision' }}>
+  Serious by default.
+</text>
+```
+
+**Why display text wants it.** On the cached path a glyph's advance is baked
+into the server-side glyphset as a whole number, because a cached bitmap can
+only land on a whole pixel. Animate a variable font's `wght` and the true
+advances move by hundredths of a pixel — hundredths that accumulate along
+the line until one glyph crosses a rounding boundary and jumps a whole pixel
+on its own while its neighbours stand still. `geometricPrecision` puts every
+glyph where shaping asked, so the line slides instead of stepping.
+
+It inherits into spans and a span may override it, so a headline and the
+body text under it can take different paths in one paragraph.
+
+**It never reflows.** Only draw-time rounding differs; ntk's layout measures
+byte-identically for every value, down to per-run offsets. Changing it drops
+the cached layout — the value rides on the spans inside it — and repaints,
+without marking anything dirty for yoga. So it is safe to flip on a state
+change without the tree moving.
+
+The cost is real: the precise path rasterizes outlines on every draw and
+caches nothing. That is the right trade for text being animated and the
+wrong one for a paragraph that never changes, which is why `auto` is the
+default rather than the other way round.
 
 ## `<textinput>`
 
