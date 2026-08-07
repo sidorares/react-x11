@@ -444,6 +444,7 @@ export function Tooltip({
       h(
         'box',
         {
+          role: 'tooltip',
           onMouseEnter: cancel,
           onMouseLeave: hide,
           style: {

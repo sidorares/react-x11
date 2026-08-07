@@ -90,7 +90,16 @@ function menuWidth(node, options, value, scrolls) {
   return screen ? Math.min(width, screen.pixel_width) : width;
 }
 
-function Option({ option, selected, active, onPick, onHover, nodeRef }) {
+function Option({
+  option,
+  selected,
+  active,
+  onPick,
+  onHover,
+  nodeRef,
+  posinset,
+  setsize,
+}) {
   const theme = useTheme();
   // one highlight, shared by pointer and keyboard: hovering moves the
   // active index rather than tracking a second, competing state
@@ -99,6 +108,9 @@ function Option({ option, selected, active, onPick, onHover, nodeRef }) {
     {
       theme,
       role: 'option',
+      'aria-selected': selected,
+      'aria-posinset': posinset,
+      'aria-setsize': setsize,
       ref: nodeRef,
       onMouseEnter: () => onHover?.(),
       onClick: () => onPick(option),
@@ -288,6 +300,8 @@ export function Select({
     {
       theme,
       role: 'combobox',
+      'aria-expanded': open,
+      'aria-haspopup': 'listbox',
       ref: triggerRef,
       focusable: true,
       onMouseDown: toggle,
@@ -385,6 +399,7 @@ export function Select({
             'scrollview',
             {
               ref: scrollRef,
+              role: 'listbox',
               // Not a tab stop, and not a focus target for a press either.
               // A scrollview becomes focusable the moment its content
               // overflows, so a menu long enough to scroll would take focus
@@ -402,6 +417,8 @@ export function Select({
                 option,
                 selected: option.value === value,
                 active: index === activeIndex,
+                posinset: index + 1,
+                setsize: normalized.length,
                 nodeRef: index === activeIndex ? activeRef : undefined,
                 onHover: () => setActiveIndex(index),
                 onPick: pick,

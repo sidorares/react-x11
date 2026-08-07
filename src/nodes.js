@@ -50,6 +50,11 @@ import {
 import { availableArea } from './screens.js';
 import { baseTheme } from './palette.js';
 import { callHandler } from './errors.js';
+import {
+  hooks as a11yHooks,
+  isFocusable as a11yFocusable,
+  devCheckA11yProps,
+} from './a11y.js';
 import { windowIdOf } from './windowid.js';
 import { paintCacheFor } from './paintcache.js';
 import { hooks as traceHooks } from './trace-registry.js';
@@ -791,6 +796,7 @@ export class Node {
     if (this.yoga) {
       applyLayoutStyle(this.yoga, this.style);
     }
+    if (DEV) devCheckA11yProps(this);
   }
 
   /**
@@ -1145,6 +1151,7 @@ export class Node {
       this._spliceChild(child, beforeChild);
       child.parent = this;
       if (this.theme || child.props.theme) child._themeChanged();
+      a11yHooks.attached?.(this, child);
       return;
     }
     if (child.isWindow) {
@@ -1183,6 +1190,7 @@ export class Node {
     if (this.theme || child.props.theme) child._themeChanged();
     this._textContentChanged();
     this._childListChanged(before);
+    a11yHooks.attached?.(this, child);
   }
 
   /**
@@ -1211,6 +1219,9 @@ export class Node {
   removeChild(child) {
     const index = this.children.indexOf(child);
     if (index === -1) return;
+    // told while the child is still wired, so the bridge can compute the
+    // index the AT will see the removal at
+    a11yHooks.detach?.(this, child);
     // captured while the child is still attached, so it covers the rect the
     // child is about to stop occupying
     const before = this.paintBounds();
@@ -1287,6 +1298,8 @@ export class Node {
         'props',
       );
     }
+    if (DEV) devCheckA11yProps(this);
+    a11yHooks.propsChanged?.(this);
   }
 
   /**
@@ -1774,15 +1787,12 @@ export class Node {
     return outline ? outline.width + Math.max(0, outline.offset) : 0;
   }
 
-  /** Would a keyboard focus land here? Mirrors `EventManager._isFocusable`;
-   * kept as its own method because the ring is decided during paint, where
-   * the event manager is not in hand. */
+  /** Would a keyboard focus land here? The one rule lives in a11y.js —
+   * `EventManager._isFocusable` and the AT-SPI FOCUSABLE state read the
+   * same function, so the ring, the keyboard and the screen reader cannot
+   * disagree. */
   _focusableForRing() {
-    if (this.props.disabled) return false;
-    return Boolean(
-      this.props.focusable ??
-      (this.props.tabIndex != null ? true : (this.focusableByDefault ?? false)),
-    );
+    return Boolean(a11yFocusable(this));
   }
 
   contentBox() {
@@ -2085,6 +2095,7 @@ export class TextChunkNode extends Node {
   setText(text) {
     this.text = String(text);
     this.parent?._textContentChanged();
+    a11yHooks.textContent?.(this);
     // the chunk has no geometry of its own — the ancestor that owns a yoga
     // node is the box that rewraps, and its before/after rects are the
     // bound on what a new string can repaint
@@ -3192,6 +3203,8 @@ export class TextInputNode extends Node {
   _repaint() {
     this._caretOn = true;
     this.root?.invalidate(false, this, 'text');
+    // every edit, caret move and selection change funnels through here
+    a11yHooks.textState?.(this);
   }
 
   /**

@@ -22,9 +22,13 @@
 > **Plan (next session):**
 >
 > 1. Decide on **2.0.0** and merge #69.
-> 2. **§11 accessibility (AT-SPI)** is next and now unblocked: it depended on
->    window-level focus, which shipped. §11.3 scopes it out; a
->    `@react-x11/a11y` sibling package is the likely shape.
+> 2. **§11 accessibility (AT-SPI) — DONE, and in core rather than the
+>    sibling package this line used to predict.** Orca reads the widget
+>    gallery: roles, names, states, live text editing, AT-driven activation
+>    and value changes. Standard `role`/`aria-*` props on every element,
+>    `src/a11y.js` (the model) + `src/atspi.js` (the bridge) on the D-Bus
+>    layer that was already here, off silently wherever there is no bus.
+>    See [docs/accessibility.md](docs/accessibility.md) and §11.3.
 > 3. The two oldest open issues, both real and both mine to fix: **#86**
 >    (`sans-serif` resolves to a CJK font on macOS) and **#85** (keyboard
 >    layout switching ignored — needs the Linux group bits _and_ XQuartz's
@@ -737,14 +741,15 @@ menus/tooltips.
   and the siblings that do get split out live in this repo as npm
   workspaces.** The widgets are plain React over the primitives with no
   extra dependency, so splitting them buys nothing and costs a
-  peer-version matrix. The packages that genuinely want to be separate are
-  the ones with dependencies core must not take — `@react-x11/desktop`
-  (D-Bus: portals, notifications, tray, global menu, #129) and
-  `@react-x11/a11y` (AT-SPI, §11.3) — and each of those in its own
-  repository turns every change into another land-release-bump chain on
-  top of the node-x11 → ntk → here one that already exists. Workspaces
-  with release-please's manifest mode, versioned in lockstep, keeps it to
-  one release.
+  peer-version matrix. The one package that still wants to be separate is
+  `@react-x11/desktop` (D-Bus: portals, notifications, tray, global menu,
+  #129) — and in its own repository every change becomes another
+  land-release-bump chain on top of the node-x11 → ntk → here one that
+  already exists. Workspaces with release-please's manifest mode,
+  versioned in lockstep, keeps it to one release. (`@react-x11/a11y` used
+  to be the second name on this list; AT-SPI shipped in core instead —
+  §11.3 records why, and the D-Bus floor it rides on is core's own
+  optionalDependency, so the dependency argument no longer applied.)
 - Where do the rich-content formats belong — ntk, here, or their own module?
   Analysed in [RICH_CONTENT.md](RICH_CONTENT.md); the decision and the staged
   plan live in [sidorares/ntk#106](https://github.com/sidorares/ntk/issues/106).
@@ -889,9 +894,53 @@ The gaps, roughly in the order they bite:
    it into view even though `scrollIntoView(node)` exists.
 6. **Focus is not restored** when a popup closes; menus do it by hand.
 
-### 11.3 Accessibility — what the target actually is
+### 11.3 Accessibility — DONE, in core
 
-Research, not a plan yet. Conclusion first: **being a pure-JS X11 client
+Shipped: a full AT-SPI2 bridge inside react-x11 itself —
+[docs/accessibility.md](docs/accessibility.md) is the reference. The shape,
+where it follows the research below and where it deliberately does not:
+
+- **In core, not `@react-x11/a11y`.** The dependency argument for a sibling
+  package dissolved when the D-Bus layer landed in core as an
+  `optionalDependency` (docs/dbus.md): the bridge rides the same
+  `dbus-native`, is dynamically imported only when a root exists, and adds
+  nothing to the install closure. A sibling package would have bought a
+  peer-version matrix and a "why is my app not accessible" FAQ entry
+  (answer: you did not install the extra package), and an accessibility
+  layer that is opt-in is an accessibility failure.
+- **The prop shape is the web's, not React Native's.** The research below
+  recommended `accessibilityRole`/`accessibilityState`; by the time the
+  bridge landed, RN 0.71+ itself had adopted `role`/`aria-*`, and the
+  widgets here had been carrying web-style `role` strings for months. So:
+  `role`, `aria-label`, `aria-checked`, `aria-valuenow`, … on every host
+  element, plus `onAccessibilityAction` for AT-driven value writes and
+  `announce()` for live-region-style messages.
+- **No mirror.** `src/a11y.js` computes roles/names/states as pure
+  functions over the retained tree (unit-testable with no bus);
+  `src/atspi.js` answers D-Bus calls from the live tree and keeps only a
+  per-exported-node snapshot to diff precise events from. Renderer hot
+  paths pay one nullable hook slot each, trace-registry style.
+- **The ladder is small**: dbus-native installed → session bus →
+  `org.a11y.Bus.GetAddress` → connect + `Embed`. Every rung fails into a
+  silent, costless off (ssh, CI, macOS/Windows X servers). `NO_AT_BRIDGE`
+  is honoured (and set by `react-x11/test`, so suites do not parade
+  phantom apps through a live screen reader); `AT_SPI_BUS_ADDRESS` is the
+  test seam; `REACT_X11_A11Y=1` makes the climb explain itself.
+- **Coverage**: Accessible/Component/Action/Value/Text/EditableText +
+  Cache and the event streams (focus, state-changed, text-changed with
+  real diffs, children-changed, window activate, announcements). Verified
+  hermetically against an in-process bus (`test/atspi.test.js`), and live:
+  Orca speaks the widget gallery — "Press me — button", "check box
+  checked", "horizontal slider, 80 percent" — and can press, adjust and
+  type into it over the bus.
+- **Deferred, recorded in the docs page**: relations (needs an id
+  registry), the Selection and Table container interfaces, key-event
+  forwarding via DeviceEventController, soft-wrap line granularity in
+  `<textarea>`.
+
+The original research follows.
+
+Conclusion first: **being a pure-JS X11 client
 does not block accessibility**, because Linux a11y does not go over the X
 protocol at all.
 
@@ -950,11 +999,12 @@ not acting on it:
   targets against WCAG 2.2 SC 2.5.8's 24, and both now answer over 24
   without a pixel of the drawing or the layout moving.
 
-What is still missing locally, and is the natural next step here rather than
-in a sibling package: **`accessibilityRole` and friends as props**. The
-widgets already carry a `role` prop that nothing reads; §11.3's RN-shaped
-vocabulary would give the AT-SPI bridge a tree to mirror instead of one to
-infer.
+What this section called "the natural next step" — role props something
+actually reads — is done as part of §11.3: the widgets' `role` strings
+turned out to be the right vocabulary (the web's), the `aria-*` props
+joined them, and the AT-SPI bridge mirrors the tree they describe. The
+test queries' `roleOf` now answers from the same model, so tests select by
+exactly what a screen reader hears.
 
 ## 12. Before 2.0.0 freezes the API
 

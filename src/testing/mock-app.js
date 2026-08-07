@@ -7,6 +7,10 @@ import { setAppearanceForTests } from '../appearance.js';
 import { setCompositingForTests } from '../compositing.js';
 import { setScreensForTests } from '../screens.js';
 
+// As in harness.js: a mock-app test must not register with a live AT-SPI
+// registry on the machine running it.
+process.env.NO_AT_BRIDGE ??= '1';
+
 // ntk 5 loads the layout engine's WebAssembly in createClient() rather than
 // at import time — that is what keeps top-level await out of the bundle, and
 // so lets an app ship as a single executable (see docs/packaging.md). A mock

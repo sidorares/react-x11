@@ -276,6 +276,10 @@ export function Table({
     'box',
     {
       theme,
+      // The grid role, with the honest caveat that virtualization keeps
+      // only the rendered rows in the accessible tree — the same rows a
+      // sighted user can see. `aria-label` via boxProps names the table.
+      role: 'table',
       // the *table* takes focus, not the row: a virtualized row is
       // unmounted as soon as it scrolls out, and focus would go with it
       focusable: true,
@@ -296,6 +300,7 @@ export function Table({
             'box',
             {
               key: column.id,
+              role: 'columnheader',
               style: [s.header, { width: columnWidth(column) }],
               focusable: true,
               onClick: () => toggleSort(column),
@@ -356,11 +361,15 @@ export function Table({
         { style: [s.rows, { width: totalWidth }] },
         first > 0 &&
           h('box', { style: [s.spacer, { height: first * rowHeight }] }),
-        slice.map((row) =>
+        slice.map((row, sliceIndex) =>
           h(
             'box',
             {
               key: row.id,
+              role: 'row',
+              'aria-selected': row.id === current,
+              'aria-posinset': first + sliceIndex + 1,
+              'aria-setsize': sorted.length,
               style: [
                 s.row,
                 { height: rowHeight },

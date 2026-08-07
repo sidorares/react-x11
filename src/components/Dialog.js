@@ -143,6 +143,9 @@ export function Dialog({
           'box',
           {
             ref: surface,
+            role: 'dialog',
+            'aria-modal': true,
+            'aria-label': typeof title === 'string' ? title : undefined,
             tabIndex: -1,
             ...boxProps,
             style: [

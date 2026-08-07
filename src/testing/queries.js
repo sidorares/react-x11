@@ -15,6 +15,7 @@
 //   findBy*   getBy*, retried until it appears or the timeout expires
 
 import { queryAllByComponent, componentInventory } from './components.js';
+import { roleNameOf } from '../a11y.js';
 
 const DEFAULT_TIMEOUT = 1000;
 
@@ -55,31 +56,14 @@ function matches(actual, expected, exact) {
 }
 
 /**
- * The role a node reports. There is no accessibility tree yet (NEXT_STEPS
- * §11.3), so this is the honest subset: the host element kind, plus an
- * explicit `role` prop, which is how a widget names itself until AT-SPI
- * lands. `Button` and friends set it.
+ * The role a node reports: the `role` prop, else the same kind → role-name
+ * table the AT-SPI bridge reads (src/a11y.js), so what a test selects by
+ * and what a screen reader hears cannot drift apart. Kinds with no
+ * accessibility default (`box`, `canvas`, …) answer their kind, which is
+ * what queries were written against.
  */
 export function roleOf(node) {
-  if (node.props?.role) return String(node.props.role);
-  switch (node.kind) {
-    case 'textinput':
-      return 'textbox';
-    case 'textarea':
-      return 'textbox';
-    case 'window':
-      return 'window';
-    case 'popup':
-      return 'dialog';
-    case 'scrollview':
-      return 'scrollable';
-    case 'image':
-      return 'img';
-    case 'text':
-      return 'text';
-    default:
-      return node.kind;
-  }
+  return roleNameOf(node) ?? node.kind;
 }
 
 function describe(node) {

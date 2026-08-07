@@ -194,6 +194,8 @@ function NavButton({ direction, disabled, onPress, theme }) {
     'box',
     {
       role: 'button',
+      'aria-label': direction < 0 ? 'Previous month' : 'Next month',
+      disabled: disabled || undefined,
       onClick: disabled ? undefined : onPress,
       style: [
         s.nav,
@@ -222,7 +224,13 @@ function DayCell({ day, state, theme, band, onPick, onHover, dayContent }) {
 
   return h(
     'box',
-    { role: 'gridcell', style: s.cell },
+    {
+      role: 'gridcell',
+      'aria-label': day,
+      'aria-selected': selected,
+      disabled: blocked || undefined,
+      style: s.cell,
+    },
     // Behind the pill and out of flow, so an end of the range keeps its own
     // fill while the band still runs out of it towards the next day. Half a
     // cell at each end is what joins one pill to the next without drawing

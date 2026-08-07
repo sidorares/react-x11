@@ -91,14 +91,22 @@ getByPlaceholder('Your name');
 - A miss prints the tree it searched, rather than leaving you with
   `undefined is not an object`.
 
-**About roles.** There is no accessibility tree yet (NEXT_STEPS §11.3), so
-`roleOf` is the honest subset: an explicit `role` prop if there is one, else
-the element kind — `textinput` and `textarea` report `textbox`, `popup`
-reports `dialog`. The widgets set their own: `Button` is `button`,
-`Checkbox` `checkbox`, `Switch` `switch`, `Radio` `radio`, `RadioGroup`
-`radiogroup`, `Select` `combobox` (its options `option`), `Slider` `slider`,
-`ProgressBar` `progressbar`. When AT-SPI lands, these are the names it will
-publish.
+**About roles.** `roleOf` answers from the same model the AT-SPI bridge
+publishes ([accessibility.md](accessibility.md)): an explicit `role` prop
+if there is one, else the element's own semantics — `textinput` and
+`textarea` report `textbox`, `window` and `popup` `window`, `image` `img`,
+`text` `text`; kinds with no accessibility meaning (`box`, `canvas`)
+answer their kind. The widgets name themselves — `Button` is `button`,
+`Checkbox` `checkbox`, `Switch` `switch`, `Radio` `radio`, `Select`
+`combobox` (its options `option`), `Slider` `slider`, `Tabs` `tablist`/
+`tab`/`tabpanel`, `Tree` `tree`/`treeitem`, `Dialog` `dialog` — so what a
+test selects by is exactly what a screen reader hears.
+
+**And the bridge itself.** Importing `react-x11/test` sets `NO_AT_BRIDGE`,
+so a test run on a desktop never registers phantom applications with the
+live screen-reader registry. Tests that exercise the bridge deliberately
+point `AT_SPI_BUS_ADDRESS` at an in-process bus instead — see
+[accessibility.md](accessibility.md#testing-and-verifying).
 
 ## Components
 

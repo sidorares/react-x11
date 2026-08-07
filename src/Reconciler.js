@@ -39,6 +39,7 @@ import {
   unregisterApp,
   hooks as traceHooks,
 } from './trace-registry.js';
+import { hooks as a11yHooks, startA11y } from './a11y.js';
 import { beginStartup } from './startup.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
@@ -166,6 +167,8 @@ const HostConfig = {
   resetAfterCommit() {
     flushWindowRestacks();
     traceHooks.commitEnd?.();
+    // the AT-SPI bridge flushes its queued tree/state diffs per commit
+    a11yHooks.commit?.();
   },
 
   createInstance(type, props, rootContainer, hostContext, internalHandle) {
@@ -355,6 +358,7 @@ const HostConfig = {
     // null — the container keeps the list instead. Same answer as before:
     // the first top-level node the tree put here.
     (container._rootChildren ??= []).push(child);
+    a11yHooks.rootMounted?.(child);
   },
 
   insertBefore(parentInstance, child, beforeChild) {
@@ -373,6 +377,8 @@ const HostConfig = {
     const roots = container._rootChildren;
     const at = roots ? roots.indexOf(child) : -1;
     if (at !== -1) roots.splice(at, 1);
+    // before the destroy, while the subtree is still walkable
+    a11yHooks.rootUnmounted?.(child);
     child.destroySubtree();
   },
 
@@ -657,6 +663,12 @@ export async function createRoot(options = {}) {
   // borrowed or owned, this is now a connection the renderer draws through,
   // which is what a REACT_X11_TRACE / startTrace() session follows
   registerApp(app);
+
+  // Climb toward the accessibility bus, once per process and off the
+  // critical path — every rung that fails is a normal, silent "off"
+  // (docs/accessibility.md). Deliberately not awaited: a root must not
+  // wait on a bus that is not there.
+  startA11y();
 
   // Before anything renders: the launch id has to be on the first toplevel
   // before it maps, and the environment variable has to be consumed whether

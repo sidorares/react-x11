@@ -62,6 +62,7 @@ export function Checkbox({
     {
       theme,
       role: 'checkbox',
+      'aria-checked': checked,
       ...props,
       ...boxProps,
       style: [

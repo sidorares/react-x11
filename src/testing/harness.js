@@ -12,6 +12,14 @@ import { createRoot } from '../Reconciler.js';
 import { setAnimationClock } from '../nodes.js';
 import { setAppearanceForTests } from '../appearance.js';
 
+// A test process must not register with the desktop's live AT-SPI registry —
+// a suite on a developer desktop would otherwise parade hundreds of phantom
+// applications through a running screen reader. NO_AT_BRIDGE is the
+// ecosystem-wide way to say so (GTK's own test suite sets it); `??=` so an
+// explicit environment still wins, and an explicit AT_SPI_BUS_ADDRESS (the
+// hermetic bridge tests) overrides it inside startA11y anyway.
+process.env.NO_AT_BRIDGE ??= '1';
+
 // x11 and pngjs arrive through ntk rather than as direct dependencies, so
 // they are imported lazily: an app that never runs a pixel test should not
 // pay for them, and a hoisting layout that hides them should say so clearly
