@@ -74,9 +74,8 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^7.3.0",
-    "react-reconciler": "^0.33.0",
-    "x11-dri": "^0.4.0"
+    "ntk": "^7.3.1",
+    "react-reconciler": "^0.33.0"
   },
   "optionalDependencies": {
     "dbus-native": "^0.15.1"
