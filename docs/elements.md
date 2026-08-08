@@ -90,6 +90,12 @@ stay inside it, focus is restored when it unmounts), `disabled` (never
 focusable, and the trigger for a `:disabled` style block), and the event
 handlers listed in [events.md](events.md).
 
+Every element also takes `role` and the `aria-*` props — the web's
+accessibility vocabulary, read by the built-in AT-SPI bridge so screen
+readers see the tree. They are inert where no assistive technology is
+listening, and the defaults already say something sensible for every
+element: [accessibility.md](accessibility.md).
+
 Drag and drop is two more prop families on the same elements —
 `dropAccept` + `onDrop` to accept a drop, `draggable` + `dragData` to start
 a drag — and works with other X11 applications as well as inside the app.
@@ -857,9 +863,10 @@ scrolls too).
 
 ## `<image>`
 
-| prop  |                                     |
-| ----- | ----------------------------------- |
-| `src` | file path (PNG/JPEG, decoded in JS) |
+| prop  |                                                                                        |
+| ----- | -------------------------------------------------------------------------------------- |
+| `src` | file path (PNG/JPEG, decoded in JS)                                                    |
+| `alt` | the accessible name — what a screen reader says ([accessibility.md](accessibility.md)) |
 
 Sized by style — `style={{ width, height }}`, never flat props, since both
 are style names. With only one of the two set the other follows the natural

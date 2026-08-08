@@ -18,6 +18,7 @@ import {
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import { useGlobalMenu } from '../globalmenu.js';
 import {
+  ariaKeyShortcuts,
   checkShortcut,
   formatShortcut,
   hasSubmenu,
@@ -123,6 +124,19 @@ function nextSelectable(items, from, dir) {
 }
 
 /**
+ * dbusmenu's `toggle-state` as ARIA's, which happens to have the same three.
+ *
+ * That correspondence is the reason `-1` is worth carrying rather than
+ * flattening to off: `'mixed'` is how a screen reader says "on for part of
+ * the selection", and it has no other way to hear it.
+ */
+function ariaChecked(state) {
+  if (state === 1) return true;
+  if (state === -1) return 'mixed';
+  return false;
+}
+
+/**
  * The glyph for a `toggleType`/`toggleState` pair, or `null` for an item that
  * is not a toggle at all.
  *
@@ -207,6 +221,7 @@ function MenuRow({
       'box',
       {
         theme,
+        role: 'separator',
         style: { height: MENU_SEPARATOR_HEIGHT, justifyContent: 'center' },
       },
       h('box', { style: { height: 1, backgroundColor: theme.border } }),
@@ -219,6 +234,25 @@ function MenuRow({
   return h(
     'box',
     {
+      // dbusmenu's three toggle states map onto ARIA's three exactly, which
+      // is the reason `toggleState: -1` is worth carrying: `'mixed'` is how a
+      // screen reader says "on for part of the selection", and it has no
+      // other way to hear it.
+      role: item.toggleType
+        ? item.toggleType === 'radio'
+          ? 'menuitemradio'
+          : 'menuitemcheckbox'
+        : 'menuitem',
+      // the label alone: without it, name-from-contents would read the
+      // shortcut and the submenu arrow into the name ("New Ctrl+N")
+      'aria-label': typeof item.label === 'string' ? item.label : undefined,
+      'aria-keyshortcuts': ariaKeyShortcuts(item.shortcut),
+      'aria-checked': item.toggleType
+        ? ariaChecked(item.toggleState)
+        : undefined,
+      'aria-haspopup': submenu ? 'menu' : undefined,
+      'aria-expanded': submenu ? state === 'path' : undefined,
+      disabled: dim || undefined,
       ref: nodeRef,
       onMouseEnter: dim ? undefined : onHover,
       onMouseMove: dim ? undefined : onMove,
@@ -466,6 +500,7 @@ function MenuLevel({
       'box',
       {
         ref: listRef,
+        role: 'menu',
         style: {
           flexGrow: 1,
           flexShrink: 1,
@@ -856,6 +891,7 @@ export function MenuBar({
     'box',
     {
       theme,
+      role: 'menubar',
       ...boxProps,
       style: [
         {
@@ -876,6 +912,9 @@ export function MenuBar({
         'box',
         {
           key: menu.label,
+          role: 'menuitem',
+          'aria-haspopup': 'menu',
+          'aria-expanded': openIndex === index,
           ref: (node) => {
             refs.current[index] = node;
           },

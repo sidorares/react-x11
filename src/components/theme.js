@@ -187,7 +187,10 @@ export function useControl(disabled, onActivate, { styled = false } = {}) {
     },
   };
   const props = disabled
-    ? {}
+    ? // the node still has to *say* it is disabled: `:disabled` style
+      // blocks, the focus rule and the AT-SPI ENABLED state all read the
+      // prop off the node, not off the widget's closure
+      { disabled: true }
     : styled
       ? activation
       : {

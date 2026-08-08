@@ -124,6 +124,38 @@ export function formatShortcut(shortcut) {
   return formatChord(first);
 }
 
+// What UI Events calls the modifiers, which is what `aria-keyshortcuts` is
+// specified in terms of. Only `Super` differs from dbusmenu's spelling.
+const ARIA_MODIFIERS = {
+  Control: 'Control',
+  Alt: 'Alt',
+  Shift: 'Shift',
+  Super: 'Meta',
+};
+
+/**
+ * `item.shortcut` as `aria-keyshortcuts`, or `undefined`.
+ *
+ * A space-delimited list of `+`-joined chords, which is exactly the shape
+ * dbusmenu's `aas` already has — so unlike the drawn menu, **every**
+ * alternative is announced rather than only the first: a screen reader is
+ * reading them out, not fitting them in a column.
+ */
+export function ariaKeyShortcuts(shortcut) {
+  if (!isValidShortcut(shortcut)) return undefined;
+  return shortcut
+    .map((chord) =>
+      chord
+        .map((token) =>
+          MODIFIERS.has(token)
+            ? ARIA_MODIFIERS[token]
+            : (KEY_LABELS[token] ?? token),
+        )
+        .join('+'),
+    )
+    .join(' ');
+}
+
 /**
  * Is this a well-formed `aas`? Used by the development-time check below, and
  * by the exporter, which must not put a malformed shortcut on the wire —

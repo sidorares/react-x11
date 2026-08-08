@@ -201,6 +201,7 @@ export function Tree({
     'scrollview',
     {
       theme,
+      role: 'tree',
       ref: scroller,
       ...boxProps,
       style: [s.root, style],
@@ -211,6 +212,10 @@ export function Tree({
         'box',
         {
           key: item.id,
+          role: 'treeitem',
+          'aria-level': depth + 1,
+          'aria-selected': item.id === current,
+          'aria-expanded': branch ? openSet.has(item.id) : undefined,
           ref: (node) => {
             if (node) rowRefs.current.set(item.id, node);
             else rowRefs.current.delete(item.id);

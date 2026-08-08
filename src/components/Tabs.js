@@ -145,6 +145,8 @@ export function Tabs({
     h(
       'box',
       {
+        role: 'tablist',
+        'aria-orientation': orientation,
         style: [s.strip, { flexDirection: vertical ? 'column' : 'row' }],
         onKeyDown,
       },
@@ -153,6 +155,8 @@ export function Tabs({
           'box',
           {
             key: item.id,
+            role: 'tab',
+            'aria-selected': item.id === selected,
             ref: (node) => {
               if (node) tabRefs.current.set(item.id, node);
               else tabRefs.current.delete(item.id);
@@ -202,6 +206,6 @@ export function Tabs({
         ),
       ),
     ),
-    h('box', { style: s.panel }, content ?? null),
+    h('box', { role: 'tabpanel', style: s.panel }, content ?? null),
   );
 }

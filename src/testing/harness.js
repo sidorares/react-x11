@@ -12,6 +12,14 @@ import { createRoot } from '../Reconciler.js';
 import { setAnimationClock } from '../nodes.js';
 import { setAppearanceForTests } from '../appearance.js';
 
+// A test process must not register with the desktop's live AT-SPI registry —
+// a suite on a developer desktop would otherwise parade hundreds of phantom
+// applications through a running screen reader. NO_AT_BRIDGE is the
+// ecosystem-wide way to say so (GTK's own test suite sets it); `??=` so an
+// explicit environment still wins, and an explicit AT_SPI_BUS_ADDRESS (the
+// hermetic bridge tests) overrides it inside startA11y anyway.
+process.env.NO_AT_BRIDGE ??= '1';
+
 // x11 and pngjs arrive through ntk rather than as direct dependencies, so
 // they are imported lazily: an app that never runs a pixel test should not
 // pay for them, and a hoisting layout that hides them should say so clearly
@@ -132,6 +140,7 @@ export async function renderX11(element, options = {}) {
     wrap = element?.type !== 'window',
     title = 'react-x11 test',
     colorScheme = 'light',
+    a11y = false,
     ...rootOptions
   } = options;
 
@@ -162,6 +171,17 @@ export async function renderX11(element, options = {}) {
   );
 
   const root = await createRoot({ app, ...rootOptions });
+
+  // Installed **before** the mount, so the initial tree is baselined and
+  // the first render is not reported as a wall of changes — and after
+  // everything that can fail without an entry to hang the teardown on.
+  // `cleanup()` takes it down with the render it belongs to.
+  let at = null;
+  if (a11y) {
+    const { installA11ySpy } = await import('./a11y.js');
+    at = installA11ySpy();
+  }
+
   const tree = wrap
     ? React.createElement('window', { width, height, title }, element)
     : element;
@@ -173,6 +193,7 @@ export async function renderX11(element, options = {}) {
     ownsApp: !options.app,
     unmounted: false,
     windowNode: null,
+    at,
   };
   mounted.add(entry);
 
@@ -227,6 +248,9 @@ export async function renderX11(element, options = {}) {
     get ctx() {
       return windowNode?.window?.getContext?.('2d') ?? null;
     },
+    /** The assistive-technology spy, when `a11y: true` asked for one —
+     * what a screen reader would have been told (docs/accessibility.md). */
+    at,
     /** Re-render into the same root, then settle. */
     rerender: (next) =>
       act(() => {
@@ -318,6 +342,8 @@ async function unmountEntry(entry) {
   if (entry.unmounted) return;
   entry.unmounted = true;
   mounted.delete(entry);
+  // before the unmount, so the teardown's own hook traffic is not recorded
+  entry.at?.uninstall();
   try {
     entry.root.unmount?.();
   } catch {

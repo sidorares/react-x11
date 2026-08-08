@@ -20,6 +20,14 @@
   `scripts/` for seeing it work without such a desktop.
 - [events.md](events.md) — the synthetic event system: dispatch phases,
   event object shape, focus, cursors, default actions.
+- [accessibility.md](accessibility.md) — screen readers see react-x11 apps:
+  the built-in AT-SPI2 bridge, the standard `role`/`aria-*` props on every
+  element, what the defaults already say, what each widget announces,
+  `announce()`, driving controls from assistive technology, the no-bus
+  compatibility ladder, and how to test all of it without a desktop. The
+  design record behind it — no mirror tree, the event pipeline, what was
+  rejected — is
+  [architecture/accessibility.md](architecture/accessibility.md).
 - [react-features.md](react-features.md) — what your React knowledge buys
   you here and where a DOM habit breaks: `useLayoutEffect` vs `useEffect`,
   measuring a node without `getBoundingClientRect()`, what a `ref` hands
