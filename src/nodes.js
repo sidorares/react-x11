@@ -3367,7 +3367,22 @@ export class TextInputNode extends Node {
     return this.app?.clipboard ?? null;
   }
 
+  /**
+   * Put the selection on a selection — unless this input is `sensitive`.
+   *
+   * Every route out of the field funnels through here: Ctrl+C, the copy half
+   * of Ctrl+X, the right-click menu, and the select-to-own that hands PRIMARY
+   * to a middle click in some other application. One gate covers them all,
+   * which is the reason the field is the thing that knows it holds a secret
+   * rather than each of the six callers.
+   *
+   * The reason a *revealed* password field still refuses: what is on screen
+   * stops being on screen when the field is hidden again, and what is on the
+   * clipboard does not. Any client on the display can ask for it, and a
+   * clipboard manager will have written it down.
+   */
   _copySelection(selection = 'CLIPBOARD') {
+    if (this.props.sensitive) return;
     const text = this._selectedText();
     if (!text) return;
     this._clipboardApi()
@@ -3673,8 +3688,25 @@ export class TextInputNode extends Node {
         enabled: this.canRedo,
       },
       { separator: true },
-      { id: 'cut', label: 'Cut', shortcut: 'Ctrl+X', enabled: hasSelection },
-      { id: 'copy', label: 'Copy', shortcut: 'Ctrl+C', enabled: hasSelection },
+      // A `sensitive` field offers neither: they are not disabled rows, they
+      // are absent, because a greyed Copy over a password reads as a bug in
+      // the application rather than as a decision.
+      ...(this.props.sensitive
+        ? []
+        : [
+            {
+              id: 'cut',
+              label: 'Cut',
+              shortcut: 'Ctrl+X',
+              enabled: hasSelection,
+            },
+            {
+              id: 'copy',
+              label: 'Copy',
+              shortcut: 'Ctrl+C',
+              enabled: hasSelection,
+            },
+          ]),
       {
         id: 'paste',
         label: 'Paste',

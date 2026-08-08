@@ -220,17 +220,58 @@ test('maxLength holds, and the placeholder shows only while empty', async () => 
   await root.unmount();
 });
 
-test('the eye reveals the text, and blurring the field hides it again', async () => {
+const inputs = (app) => nodes(treeOf(app), (n) => n.kind === 'textinput');
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('the eye swaps the mask for a real input, and leaving hides it again', async () => {
   const { app, root } = await mount({ defaultValue: 'letmein' });
 
   const eye = nodes(treeOf(app), (n) => n.props?.role === 'button')[0];
   click(app, eye);
   await settle();
-  assert.deepStrictEqual(texts(app), ['letmein'], 'revealed on the click');
 
-  field(app).blur();
+  const [input] = inputs(app);
+  assert.ok(input, 'revealed, the field is an ordinary <textinput>');
+  assert.strictEqual(input.value, 'letmein');
+  assert.strictEqual(canvases(app).length, 1, 'and the mask is gone: only the eye');
+
+  // …with everything a text input has, the caret included
+  input.focus();
+  input.setSelection?.(0, 3);
+  assert.strictEqual(typeof input._caret, 'number', 'it has a caret');
+
+  input.blur();
+  await sleep(5);
   await settle();
-  assert.deepStrictEqual(texts(app), [], 'and hidden on the way out');
+  assert.deepStrictEqual(inputs(app), [], 'hidden on the way out of the widget');
+  assert.deepStrictEqual(texts(app), [], 'and the secret is not drawn as text');
+
+  await root.unmount();
+});
+
+test('a revealed field still lets nothing out by a selection', async () => {
+  const { app, root } = await mount({ defaultValue: 'letmein' });
+
+  const eye = nodes(treeOf(app), (n) => n.props?.role === 'button')[0];
+  click(app, eye);
+  await settle();
+  const [input] = inputs(app);
+  input.focus();
+
+  // select everything and copy it, by the two routes a user has
+  type(app, 'a', { ctrl: true });
+  type(app, 'c', { ctrl: true });
+  type(app, 'x', { ctrl: true });
+  await settle();
+  assert.deepStrictEqual(
+    app.clipboard.writes,
+    [],
+    'neither Ctrl+C nor Ctrl+X put the secret on a selection, and Ctrl+A took no PRIMARY',
+  );
+
+  const menu = input._editMenuItems().map((item) => item.id);
+  assert.ok(!menu.includes('copy') && !menu.includes('cut'), 'nor does the menu');
+  assert.ok(menu.includes('paste'), 'but pasting in is still there');
 
   await root.unmount();
 });

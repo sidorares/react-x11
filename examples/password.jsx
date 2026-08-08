@@ -70,8 +70,10 @@ export function PasswordPanel() {
       <text style={s.hint}>
         Type into the field. Every keystroke reseeds the curve, so the whole
         mask moves; the width grows with what you have typed, but by an uneven
-        step, so it is not a ruler. Enter submits, Ctrl+U clears, Ctrl+V pastes,
-        and the eye reveals while you hold the field.
+        step, so it is not a ruler. Enter submits, Ctrl+U clears, Ctrl+V pastes.
+        Press the eye and the mask gives way to an ordinary text input — caret,
+        selection, arrows, click into the middle of a word — which hides itself
+        again when the keyboard leaves. Copy is off in both states.
       </text>
 
       <box style={[s.card, s.form]}>

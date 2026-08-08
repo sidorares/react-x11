@@ -517,6 +517,7 @@ function Widgets() {
       />
       {/* @ts-expect-error the value is a string, not a number */}
       <PasswordInput value={42} />
+      <textinput sensitive value="s3cret" onChange={() => {}} />
 
       <Tabs
         items={[{ id: 'a', label: 'A', content: <box /> }]}

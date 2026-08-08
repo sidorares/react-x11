@@ -528,14 +528,27 @@ does not: **this hides a glance, not a recording.** Someone watching the
 field grow keystroke by keystroke still counts the keystrokes, and a long
 password still sits in a visibly different bracket from a short one.
 
-### What it does not do
+### Two states, and what holds across both
 
-Editing is smaller than `<textinput>`'s, because a scribble has nowhere to
-put a caret: type, Backspace, Ctrl+Backspace / Ctrl+U / Delete to clear,
-Ctrl+V or Shift+Insert to paste, Enter to submit. No caret, no selection, no
-undo history — a rewindable secret is not a feature — and **no copy**:
-Ctrl+C and Ctrl+X do nothing, and the field never takes the PRIMARY
-selection, so a middle click in another window cannot spend it.
+**Masked**, editing is smaller than `<textinput>`'s, because a scribble has
+nowhere to put a caret: type, Backspace, Ctrl+Backspace / Ctrl+U / Delete to
+clear, Ctrl+V or Shift+Insert to paste, Enter to submit. No caret, no
+selection, no undo history — a rewindable secret is not a feature.
+
+**Revealed**, it is an ordinary text input, because that is what it looks
+like and anything else would be a trap. A real `<textinput>` takes the mask's
+place: caret, selection, arrow keys, a click into the middle of the word,
+undo, the edit menu. Focus follows the swap in both directions, and the
+reveal ends when the keyboard leaves the widget — not when it moves between
+the field and the input inside it.
+
+What holds in **both** states is that nothing leaves by a selection. Ctrl+C
+and Ctrl+X do nothing, the revealed input carries
+[`sensitive`](elements.md#sensitive) so its menu has no Cut or Copy, and
+neither state ever takes PRIMARY, so a middle click in another window cannot
+spend it. The line is between what is on screen and what is on the clipboard:
+the first stops being visible when the field is hidden, the second is
+readable by every client on the display until something else takes it.
 
 While the value is masked it is **never laid out and never drawn**: the mask
 is measured from one reference character, so the secret does not enter ntk's

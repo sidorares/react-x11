@@ -2,7 +2,7 @@
 // support needed. Plain createElement (no JSX) so the library stays
 // build-step-free for consumers.
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { DEFAULT_TEXT_STYLE, createStyles } from '../styles.js';
 import { useClipboard } from '../appcontext.js';
 import { windowIdOf } from '../windowid.js';
@@ -142,13 +142,23 @@ const chars = (text) => Array.from(text);
  * ntk's shaping cache and its glyphs never reach the X server. Revealing it
  * costs exactly what revealing it costs.
  *
- * Editing is deliberately smaller than `<textinput>`'s, because a scribble
- * has nowhere to put a caret: type, Backspace, Ctrl+Backspace or Ctrl+U or
- * Delete to clear, Ctrl+V or Shift+Insert to paste, Enter for `onSubmit`.
- * There is no caret, no selection, no undo history — a rewindable secret is
- * not a feature — and **no copy**: Ctrl+C and Ctrl+X do nothing, and the
- * field never takes the PRIMARY selection, so a middle-click in another
- * application cannot spill it.
+ * **While it is masked** editing is smaller than `<textinput>`'s, because a
+ * scribble has nowhere to put a caret: type, Backspace, Ctrl+Backspace or
+ * Ctrl+U or Delete to clear, Ctrl+V or Shift+Insert to paste, Enter for
+ * `onSubmit`. No caret, no selection, no undo history — a rewindable secret
+ * is not a feature.
+ *
+ * **Revealed it is an ordinary text input**, because that is what it looks
+ * like and anything else would be a trap: a real `<textinput>` takes its
+ * place, with a caret, a selection, the arrow keys, a click into the middle
+ * of the word, undo and the edit menu. Focus follows the swap in both
+ * directions.
+ *
+ * What holds in both states is that **nothing leaves by a selection**:
+ * Ctrl+C and Ctrl+X do nothing, the revealed input carries `sensitive` so its
+ * menu has no Cut or Copy, and neither state ever takes PRIMARY — so a middle
+ * click in another application cannot spill the secret. What is on screen
+ * stops being on screen; what is on the clipboard does not.
  *
  * Those two exclusions are also the integration story, which is why they are
  * exactly this shape: **paste** is how every password manager on the desktop
@@ -178,11 +188,15 @@ export function PasswordInput({
 }) {
   const theme = useTheme();
   const fieldRef = useRef(null);
+  const inputRef = useRef(null);
+  const hideTimer = useRef(null);
   const clipboard = useClipboard();
   const [ownValue, setOwnValue] = useState(defaultValue ?? '');
   const [ownRevealed, setOwnRevealed] = useState(false);
   const [focused, setFocused] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
+  const wasShowing = useRef(false);
+  const leaving = useRef(false);
 
   const text = String(value ?? ownValue ?? '');
   const length = chars(text).length;
@@ -211,6 +225,44 @@ export function PasswordInput({
     onRevealChange?.(on);
   };
 
+  // Revealing swaps the mask for a real <textinput>, so focus has to move
+  // with it — twice, and back again — while "hide it on the way out" must not
+  // fire for a move *within* the widget. The blur schedules the hide and any
+  // focus inside cancels it, which is the plain version of `:focus-within`
+  // for two nodes that know about each other.
+  const cancelHide = () => {
+    if (hideTimer.current == null) return;
+    clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+  };
+  const scheduleHide = () => {
+    cancelHide();
+    hideTimer.current = setTimeout(() => {
+      hideTimer.current = null;
+      leaving.current = true;
+      reveal(false);
+      setCapsLock(false);
+    }, 0);
+  };
+  useEffect(() => cancelHide, []);
+  useEffect(() => {
+    if (showing) {
+      // the input is the keyboard from here, and it has just mounted
+      inputRef.current?.focus();
+    } else if (wasShowing.current && !leaving.current) {
+      // hidden while the widget still has the keyboard — the eye was pressed,
+      // or the app moved `revealed` — so the mask takes it back. Hidden
+      // *because* the keyboard left is the other case, and taking focus back
+      // there would drag it out of whatever the user had just moved to.
+      fieldRef.current?.focus();
+    }
+    wasShowing.current = showing;
+    leaving.current = false;
+    // `showing` alone: this is about the *swap*, not about anything the refs
+    // hold, and a dependency on them would move the focus again for a render
+    // that only changed the value.
+  }, [showing]);
+
   const paste = (selection) => {
     try {
       clipboard
@@ -227,7 +279,7 @@ export function PasswordInput({
   };
 
   const onKeyDown = (ev) => {
-    if (disabled) return;
+    if (disabled || showing) return;
     setCapsLock(Boolean(ev.nativeEvent?.buttons & MOD.Lock));
 
     if (ev.keysym === XK_RETURN || ev.keysym === XK_KP_ENTER) {
@@ -290,14 +342,21 @@ export function PasswordInput({
       ref: fieldRef,
       focusable: !disabled,
       onKeyDown: disabled ? undefined : onKeyDown,
-      onFocus: () => setFocused(true),
+      onFocus: () => {
+        cancelHide();
+        setFocused(true);
+        // The box stays focusable while revealed so that a press on the eye
+        // lands *inside* the widget rather than nowhere — but the input is
+        // the keyboard then, so hand it straight on.
+        if (showing) inputRef.current?.focus();
+      },
       onBlur: () => {
         setFocused(false);
         // A field nobody is in should not still be showing the secret: the
-        // reveal is for the moment you are looking at it, not a mode. The eye
-        // is not focusable, so this only fires on the way out of the widget.
-        reveal(false);
-        setCapsLock(false);
+        // reveal is for the moment you are looking at it, not a mode. A move
+        // to the revealed input is not leaving, which is what the deferred
+        // hide and its cancel are for.
+        scheduleHide();
       },
       ...boxProps,
       style: [
@@ -315,10 +374,45 @@ export function PasswordInput({
     h(
       'box',
       { style: [s.slot, { height: lineHeight }] },
-      length === 0
-        ? h('text', { style: { color: theme.dim } }, placeholder)
-        : showing
-          ? h('text', { style: { color: theme.text } }, text)
+      showing
+        ? // Revealed, the field is an ordinary text input and behaves like
+          // one: a caret, a selection, the arrow keys, a click into the
+          // middle of the word, undo, the edit menu. `sensitive` is the one
+          // thing it is not allowed — nothing here reaches a selection, in
+          // either direction out — because what is on screen stops being on
+          // screen and what is on the clipboard does not.
+          h('textinput', {
+            ref: inputRef,
+            sensitive: true,
+            value: text,
+            placeholder,
+            maxLength,
+            name,
+            onChange: (ev) => commit(ev.value),
+            onSubmit: () => onSubmit?.(text),
+            onFocus: () => {
+              cancelHide();
+              setFocused(true);
+            },
+            onBlur: () => {
+              setFocused(false);
+              scheduleHide();
+            },
+            style: {
+              flexGrow: 1,
+              minWidth: 0,
+              height: lineHeight,
+              backgroundColor: 'transparent',
+              // No ring of its own: the field around it already borders in
+              // `borderFocus` while the keyboard is inside, and a second ring
+              // an inch inside the first reads as two controls. It earns the
+              // opt-out because focus here is never ambiguous — the input only
+              // exists while it is the thing being typed into.
+              outlineWidth: 0,
+            },
+          })
+        : length === 0
+          ? h('text', { style: { color: theme.dim } }, placeholder)
           : h('canvas', {
               // `onDraw` is a plain prop compared by identity, so a fresh
               // closure each render is what repaints the mask — and it
