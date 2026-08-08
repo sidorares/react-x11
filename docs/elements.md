@@ -1125,6 +1125,46 @@ the first light's ambient term. A lit material in a scene with no lights
 falls back to flat colour rather than rendering black. Light positions are
 world space, so a light inside a rotating `<group>` moves with it.
 
+### Drawables that are not triangles
+
+`<points>` draws one dot per vertex, sized by `<pointsMaterial size>`;
+`<line>`, `<lineSegments>` and `<lineLoop>` read the same vertex list as a
+connected strip, disjoint pairs or a closed strip, styled by
+`<lineBasicMaterial>`. Both work on **either** backend — fixed-function GL
+compiles them into a display list opened with the matching `Begin` mode, and
+the shader backend draws them with the matching ES 2 mode.
+
+```jsx
+<points>
+  <bufferGeometry position={cloud} />
+  <pointsMaterial color="#ffd166" size={3} />
+</points>
+```
+
+`<instancedMesh instances={[…]}>` draws one geometry at many transforms. The
+array is declarative rather than three.js's imperative `setMatrixAt`, and each
+entry takes `<mesh>`'s transform props plus an optional `color` that overrides
+the material's:
+
+```jsx
+<instancedMesh instances={[{ position: [-1, 0, 0], color: '#e0533d' }, …]}>
+  <boxGeometry args={[1, 1, 1]} />
+  <meshBasicMaterial color="#ffffff" />
+</instancedMesh>
+```
+
+What that saves is the **geometry**, which is uploaded or compiled once
+however many instances there are. Each instance still costs a transform and a
+draw: neither backend has GPU instancing — ES 2 guarantees none and GLX
+encodes none — so this is not the way to draw a hundred thousand of anything.
+
+Picking skips all three. A `<points>` or `<line>` has no surface for a ray to
+meet, and an `<instancedMesh>` is drawn at each instance's transform rather
+than at its own, so testing its geometry there would report hits where nothing
+was drawn.
+
+### Shaders
+
 `<shaderMaterial>` and `<rawShaderMaterial>` run your own GLSL, and need the
 **direct** backend — the GLX protocol encodes no shader objects, so there is
 nothing for them to compile to over the wire. Turn it on with

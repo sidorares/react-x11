@@ -1,6 +1,7 @@
-import { createElement as h, useCallback, useState } from 'react';
+import { createElement as h, useCallback, useMemo, useState } from 'react';
 
 import { useAppOrNull } from '../appcontext.js';
+import { FrameContext, createFrameBus } from '../frame3d.js';
 import { glxFailure } from '../glnodes.js';
 
 /**
@@ -73,6 +74,11 @@ export function Canvas3D({ children, style, fallback, onError, ...props }) {
     [onError, fallback],
   );
 
+  // The frame clock lives on the host node, which the children cannot reach:
+  // it is handed to the surface as a prop and published on a context, so
+  // `useFrame` anywhere inside subscribes to this surface's frames.
+  const frames = useMemo(() => createFrameBus(), []);
+
   if (error && fallback !== undefined) {
     return h(
       'box',
@@ -80,7 +86,11 @@ export function Canvas3D({ children, style, fallback, onError, ...props }) {
       typeof fallback === 'function' ? fallback(error) : fallback,
     );
   }
-  return h('glarea', { ...props, style, onError: handleError }, children);
+  return h(
+    'glarea',
+    { ...props, style, frames, onError: handleError },
+    h(FrameContext.Provider, { value: frames }, children),
+  );
 }
 
 export default Canvas3D;

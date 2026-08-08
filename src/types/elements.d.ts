@@ -597,6 +597,37 @@ export interface GroupProps extends Object3DProps {}
 /** One geometry child and one material child. */
 export interface MeshProps extends Object3DProps {}
 
+/** `<points>` — one dot per vertex. Pair with `<pointsMaterial>`. */
+export interface PointsProps extends Object3DProps {}
+
+/**
+ * `<line>` (a connected strip), `<lineSegments>` (disjoint pairs) and
+ * `<lineLoop>` (a closed strip) — the three ways three.js reads a vertex
+ * list as lines. Pair with `<lineBasicMaterial>`.
+ */
+export interface LineProps extends Object3DProps {}
+
+/** One entry of `<instancedMesh instances>`. */
+export interface InstanceProps {
+  position?: Vec3;
+  rotation?: Vec3;
+  scale?: Vec3 | number;
+  /** Overrides the material's colour for this instance only. */
+  color?: Color;
+}
+
+/**
+ * `<instancedMesh>` — one geometry drawn at many transforms.
+ *
+ * Declarative rather than three.js's imperative `setMatrixAt`. What it saves
+ * is the geometry, which is uploaded (or compiled into a display list) once;
+ * each instance still costs a transform and a draw, since neither backend
+ * does GPU instancing.
+ */
+export interface InstancedMeshProps extends Object3DProps {
+  instances?: readonly InstanceProps[];
+}
+
 export interface GeometryProps {
   key?: Key;
 }
@@ -645,6 +676,21 @@ export interface MaterialProps {
   opacity?: number;
   transparent?: boolean;
   side?: MaterialSide;
+}
+
+/** `<pointsMaterial>` — unlit, one flat colour, `size` in pixels. */
+export interface PointsMaterialProps extends MaterialProps {
+  /** Dot size in pixels. */
+  size?: number;
+}
+
+/**
+ * `<lineBasicMaterial>` — unlit, one flat colour. `linewidth` is three.js's
+ * spelling; most drivers only honour 1, which is a GL limitation rather than
+ * a react-x11 one.
+ */
+export interface LineBasicMaterialProps extends MaterialProps {
+  linewidth?: number;
 }
 export interface MeshBasicMaterialProps extends MaterialProps {}
 export interface MeshLambertMaterialProps extends MaterialProps {
@@ -728,6 +774,11 @@ export interface ReactX11Elements {
 
   group: GroupProps;
   mesh: MeshProps;
+  instancedMesh: InstancedMeshProps;
+  points: PointsProps;
+  line: LineProps;
+  lineSegments: LineProps;
+  lineLoop: LineProps;
   boxGeometry: BoxGeometryProps;
   planeGeometry: PlaneGeometryProps;
   sphereGeometry: SphereGeometryProps;
@@ -737,6 +788,8 @@ export interface ReactX11Elements {
   meshBasicMaterial: MeshBasicMaterialProps;
   meshLambertMaterial: MeshLambertMaterialProps;
   meshPhongMaterial: MeshPhongMaterialProps;
+  pointsMaterial: PointsMaterialProps;
+  lineBasicMaterial: LineBasicMaterialProps;
   shaderMaterial: ShaderMaterialProps;
   rawShaderMaterial: RawShaderMaterialProps;
   ambientLight: AmbientLightProps;

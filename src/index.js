@@ -11,6 +11,8 @@ export {
 export { useAppActivate, useAppOpen } from './apphooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
+// the per-surface frame clock; only usable inside a <Canvas3D>
+export { useFrame } from './frame3d.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
 export { announce } from './a11y.js';
 export { useSessionBus, useSystemBus } from './bushooks.js';

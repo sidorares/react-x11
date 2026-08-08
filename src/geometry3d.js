@@ -171,12 +171,14 @@ export const GEOMETRY_BUILDERS = {
 };
 
 /** `<bufferGeometry position={…} normal={…} uv={…} index={…} />` */
-export function bufferGeometry(props) {
+export function bufferGeometry(props, { normals: wantNormals = true } = {}) {
   const positions = props.position ?? props.positions ?? [];
   const count = positions.length / 3;
   let normals = props.normal ?? props.normals;
   const index = props.index ?? null;
-  if (!normals) normals = faceNormals(positions, index, count);
+  // `wantNormals: false` comes from `<points>`/`<line>`, which nothing shades
+  if (!normals)
+    normals = wantNormals ? faceNormals(positions, index, count) : [];
   return {
     positions,
     normals,
