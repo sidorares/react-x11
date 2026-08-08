@@ -32,10 +32,12 @@ There are **no GLSL shaders, no VBOs, no vertex arrays** (`DrawArrays` and
 instancing**. `ProgramString`/`BindProgram` expose ARB _assembly_ programs,
 which are out of scope.
 
-That rules out, permanently and by protocol: shader materials,
-post-processing, shadow maps, instanced meshes and GPU picking. Each throws
-an error naming the reason rather than rendering something that only looks
-right — `UNSUPPORTED_KINDS` in `src/scene3d.js` is the list.
+That rules out, permanently and by protocol: shader materials and
+post-processing. Both are implemented on the direct backend, and asking for
+one here throws an error naming the reason rather than rendering something
+that only looks right — `DIRECT_ONLY_KINDS` in `src/scene3d.js` is the list.
+(`<instancedMesh>` works on both, but as a loop over transforms rather than
+as hardware instancing, which GLX also encodes no way to ask for.)
 
 ## Why display lists are mandatory
 

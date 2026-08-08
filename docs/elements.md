@@ -1171,10 +1171,34 @@ nothing for them to compile to over the wire. Turn it on with
 `createRoot({ glPolicy: 'auto' })`; using one without it throws when the
 element is created, naming the reason. See [gl.md](gl.md).
 
-Still not implemented, and failing with an error naming the reason:
-`<instancedMesh>`, `<points>`, `<line>`, post-processing — and no shadows.
-There are no camera _elements_ either: the `camera` prop is the whole camera
-API.
+### Post-processing
+
+`<effectComposer>` renders the scene into a texture and runs it through its
+child passes, in tree order:
+
+```jsx
+<Canvas3D>
+  <mesh>…</mesh>
+  <effectComposer>
+    <bloomPass threshold={0.6} strength={1.2} />
+    <vignettePass />
+  </effectComposer>
+</Canvas3D>
+```
+
+`<bloomPass>`, `<vignettePass>`, `<fxaaPass>` and `<shaderPass>` — the last
+being your own full-screen GLSL over `tDiffuse`. There is no `<renderPass>`
+as in three.js: the surface's own scene is always the input.
+
+Also **direct** only, for the same kind of reason as shaders: reading the
+image you are modifying means rendering to a framebuffer object first, and
+GLX encodes none. `enabled={false}` on the composer or on any pass is the
+runtime switch; `useSupports('shaders')` is the compile-time one.
+
+### What is still missing
+
+No shadows, and no GPU picking. There are no camera _elements_ either: the
+`camera` prop is the whole camera API.
 
 ---
 

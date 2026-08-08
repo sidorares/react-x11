@@ -756,6 +756,69 @@ export interface ShaderMaterialProps extends MaterialProps {
 /** `<rawShaderMaterial>` — the same, with nothing declared for you. */
 export interface RawShaderMaterialProps extends ShaderMaterialProps {}
 
+/**
+ * `<effectComposer>` — post-processing: the scene is rendered to a texture
+ * and then through its child passes, in order. **Direct** backend only, since
+ * the GLX protocol encodes no framebuffer objects.
+ *
+ * There is no `<renderPass>`: the surface's own scene is always the input.
+ */
+export interface EffectComposerProps {
+  /** false runs the scene straight to the window, passes and all. */
+  enabled?: boolean;
+  children?: ReactNode;
+}
+
+/** What every pass takes. */
+export interface PassProps {
+  /** false skips this pass; the rest of the chain still runs. */
+  enabled?: boolean;
+}
+
+/**
+ * `<shaderPass>` — your own full-screen GLSL. Declare
+ * `uniform sampler2D tDiffuse` for the incoming image and
+ * `varying vec2 vUv`, exactly as a three.js `ShaderPass` shader does.
+ *
+ * `resolution` (pixels), `texelSize` (1/pixels) and `time` (seconds) are set
+ * if you declare them.
+ */
+export interface ShaderPassProps extends PassProps {
+  fragmentShader?: string;
+  /** replaces the built-in full-screen quad shader; must write `vUv`. */
+  vertexShader?: string;
+  uniforms?: ShaderUniforms;
+}
+
+/**
+ * `<bloomPass>` — bright areas bleed into their surroundings. Four draws:
+ * a threshold pass, a separable blur at half resolution, then a composite.
+ */
+export interface BloomPassProps extends PassProps {
+  /** luminance above which a pixel blooms (default 0.75). */
+  threshold?: number;
+  /** how much of the blurred result is added back (default 0.8). */
+  strength?: number;
+  /** blur width, in half-resolution texels (default 1). */
+  radius?: number;
+}
+
+/** `<vignettePass>` — darkens towards the corners. */
+export interface VignettePassProps extends PassProps {
+  /** how far out the darkening starts: 0 at the centre, 1 at the corners
+   * (default 0.5). */
+  offset?: number;
+  /** how dark the corners get, 0 to 1 (default 0.5). */
+  darkness?: number;
+}
+
+/**
+ * `<fxaaPass>` — antialiasing, in one full-screen pass. The direct backend
+ * has no multisampling (an MSAA attachment is an ES 3 feature), so this is
+ * the only antialiasing a composed scene can get.
+ */
+export interface FxaaPassProps extends PassProps {}
+
 /** Every host element react-x11 renders. */
 export interface ReactX11Elements {
   window: WindowProps;
@@ -796,4 +859,9 @@ export interface ReactX11Elements {
   directionalLight: DirectionalLightProps;
   pointLight: PointLightProps;
   spotLight: SpotLightProps;
+  effectComposer: EffectComposerProps;
+  shaderPass: ShaderPassProps;
+  bloomPass: BloomPassProps;
+  vignettePass: VignettePassProps;
+  fxaaPass: FxaaPassProps;
 }

@@ -33,6 +33,7 @@ import {
   materialColors,
 } from './scene3d.js';
 import { identity, invert, multiply } from './mat4.js';
+import { PostProcessor } from './postprocess3d.js';
 
 /**
  * The default float precision, injected into **both** stages.
@@ -256,6 +257,33 @@ export class ShaderSceneRenderer {
     this.textures = new Map(); // image -> { texture, unit }
     this.camera = null;
     this.failed = new Set(); // shader sources already reported as broken
+    this.post = null; // the <effectComposer> chain, made on first use
+  }
+
+  /** The `<effectComposer>` in this surface, if it has one. */
+  get composer() {
+    return this.surface.children.find((child) => child.isComposer) ?? null;
+  }
+
+  /**
+   * Bind the composer's render target, so the surface's clear and every draw
+   * that follows land in a texture rather than in the window. Returns whether
+   * anything was bound — false means the frame proceeds as an ordinary one.
+   *
+   * This is a hook `<glarea>` calls before it clears, rather than something
+   * `render` does, because the clear and `onDraw` sit either side of it and
+   * both belong to the composed image.
+   */
+  beginFrame(gl, info) {
+    const composer = this.composer;
+    if (!composer || !this.usable(gl)) return false;
+    this.post ??= new PostProcessor(this);
+    return this.post.begin(gl, info, composer);
+  }
+
+  /** Run the pass chain, ending with a draw into the window. */
+  endFrame(gl, info) {
+    return this.post?.end(gl, info) ?? false;
   }
 
   render(gl, info) {
@@ -305,16 +333,16 @@ export class ShaderSceneRenderer {
     ].filter((name) => typeof gl[name] !== 'function');
     this._usable = missing.length === 0;
     if (!this._usable) {
-      const err = new Error(
-        `react-x11: this GL context is missing ${missing.join(', ')}, so the 3D ` +
-          'scene cannot be drawn.\n' +
+      this.report(
+        'gl-incomplete',
+        `this GL context is missing ${missing.join(', ')}, so the 3D scene ` +
+          'cannot be drawn.\n' +
           'The direct backend exposes whatever the x11-dri addon provides, and ' +
           'this one is too old — it needs >= 0.3.0. npm may have nested an older ' +
           "copy under node_modules/ntk to satisfy ntk's declared range; check " +
           'with `npm ls x11-dri`.',
+        'GL_CONTEXT_INCOMPLETE',
       );
-      err.code = 'GL_CONTEXT_INCOMPLETE';
-      this.report('gl-incomplete', err.message);
     }
     return this._usable;
   }
@@ -686,14 +714,20 @@ export class ShaderSceneRenderer {
    * frame would bury the message it came with — which is the compiler's own
    * log, and the only thing that says what to fix.
    */
-  report(signature, message) {
+  report(signature, message, code = 'GL_SHADER_FAILED') {
     if (this.failed.has(signature)) return;
     this.failed.add(signature);
     const onError = this.surface.props.onError;
     const err = new Error(`react-x11: ${message}`);
-    err.code = 'GL_SHADER_FAILED';
+    err.code = code;
     if (onError) onError(err);
     else console.warn(err.message);
+  }
+
+  /** Lent to `PostProcessor`, so `<shaderPass uniforms>` reads like a
+   * `<shaderMaterial>`'s. */
+  setUniform(gl, location, value) {
+    return setUniform(gl, location, value);
   }
 
   applyMaterial(gl, program, material, lights) {
@@ -857,6 +891,8 @@ export class ShaderSceneRenderer {
       for (const { texture } of this.textures.values())
         gl.deleteTexture(texture);
     }
+    this.post?.dispose(gl);
+    this.post = null;
     this.geometries.clear();
     this.programs.clear();
     this.textures.clear();

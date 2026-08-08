@@ -42,13 +42,34 @@ export const MATERIAL_KINDS = new Set([
 ]);
 
 /**
+ * `<effectComposer>` and the passes that go inside it. Post-processing is a
+ * chain of full-screen shaders run over the rendered scene — see
+ * `src/postprocess3d.js`.
+ */
+export const PASS_KINDS = new Set([
+  'shaderPass',
+  'bloomPass',
+  'vignettePass',
+  'fxaaPass',
+]);
+export const COMPOSER_KINDS = new Set(['effectComposer', ...PASS_KINDS]);
+
+const NO_SHADERS = 'GLSL shaders: the GLX protocol encodes no shader objects';
+const NO_FRAMEBUFFERS =
+  'post-processing renders the scene to a texture first, and the GLX ' +
+  'protocol encodes no framebuffer objects';
+
+/**
  * Scene elements only the direct backend can render, with the reason the
- * indirect one cannot. The GLX protocol encodes no shader objects at all, so
- * this is a property of the transport rather than a gap someone could fill.
+ * indirect one cannot. Both reasons are properties of the transport rather
+ * than gaps someone could fill: the GLX protocol has no shader objects to
+ * encode and no framebuffer objects to render into.
  */
 export const DIRECT_ONLY_KINDS = {
-  shaderMaterial: 'GLSL shaders: the GLX protocol encodes no shader objects',
-  rawShaderMaterial: 'GLSL shaders: the GLX protocol encodes no shader objects',
+  shaderMaterial: NO_SHADERS,
+  rawShaderMaterial: NO_SHADERS,
+  effectComposer: NO_FRAMEBUFFERS,
+  ...Object.fromEntries([...PASS_KINDS].map((kind) => [kind, NO_FRAMEBUFFERS])),
 };
 export const LIGHT_KINDS = new Set([
   'ambientLight',
@@ -74,6 +95,7 @@ export const SCENE_KINDS = new Set([
   ...GEOMETRY_KINDS,
   ...MATERIAL_KINDS,
   ...OBJECT_KINDS,
+  ...COMPOSER_KINDS,
 ]);
 
 /** Materials with no surface to shade, which lighting never applies to. */
@@ -91,15 +113,12 @@ export const MAX_LIGHTS = 8;
  * react-three-fiber names no backend implements yet, with the reason. These
  * fail loudly instead of rendering something that only looks right.
  *
- * The list used to include the shader materials, and shrank when the direct
- * backend arrived: what is impossible over the GLX wire is merely unwritten
- * on the GPU. `DIRECT_ONLY_KINDS` is the middle ground — implemented, but
- * only where the pipeline can run it.
+ * Empty, as of post-processing — everything named so far is either
+ * implemented on both backends or in `DIRECT_ONLY_KINDS`, the middle ground
+ * for what runs on the GPU and cannot cross the GLX wire. The mechanism
+ * stays: shadow maps and GPU picking are the next names likely to want it.
  */
-export const UNSUPPORTED_KINDS = {
-  effectComposer:
-    'post-processing needs a render-target pipeline, which neither backend has yet',
-};
+export const UNSUPPORTED_KINDS = {};
 
 const asTriple = (value, fallback) => {
   if (value == null) return fallback;
@@ -364,6 +383,59 @@ export class MaterialNode extends Object3DNode {
   }
 }
 
+/**
+ * `<effectComposer>` — the pass chain that runs over the rendered scene.
+ *
+ * Not an object in the scene: it has no transform and nothing to draw, so
+ * the render walk steps over it exactly as it steps over a material. What it
+ * holds is an ordered list of passes, and the order is the tree's.
+ *
+ * There is no `<renderPass>` as in three.js's composer. The surface's own
+ * scene is always the input — a composer that did not compose *this* scene
+ * would have nothing to be — so the first pass reads it and the last one
+ * writes the window.
+ */
+export class EffectComposerNode extends Object3DNode {
+  constructor(props, app) {
+    super('effectComposer', props, app);
+  }
+
+  get isObject3D() {
+    return false;
+  }
+
+  get isComposer() {
+    return true;
+  }
+
+  get enabled() {
+    return this.props.enabled !== false;
+  }
+
+  get passes() {
+    return this.children.filter((child) => child.isPass);
+  }
+}
+
+/** One full-screen pass: `<bloomPass>`, `<shaderPass>` and friends. */
+export class PassNode extends Object3DNode {
+  constructor(kind, props, app) {
+    super(kind, props, app);
+  }
+
+  get isObject3D() {
+    return false;
+  }
+
+  get isPass() {
+    return true;
+  }
+
+  get enabled() {
+    return this.props.enabled !== false;
+  }
+}
+
 export function createSceneNode(kind, props, app) {
   if (kind === 'mesh') return new MeshNode(props, app);
   if (kind === 'instancedMesh') return new InstancedMeshNode(props, app);
@@ -375,6 +447,8 @@ export function createSceneNode(kind, props, app) {
   if (LIGHT_KINDS.has(kind)) return new LightNode(kind, props, app);
   if (GEOMETRY_KINDS.has(kind)) return new GeometryNode(kind, props, app);
   if (MATERIAL_KINDS.has(kind)) return new MaterialNode(kind, props, app);
+  if (kind === 'effectComposer') return new EffectComposerNode(props, app);
+  if (PASS_KINDS.has(kind)) return new PassNode(kind, props, app);
   return null;
 }
 

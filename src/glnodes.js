@@ -303,6 +303,11 @@ export class GlAreaNode extends Node {
     // frame later still.
     const animating = this._runFrameCallbacks(info, gl);
     const [r, g, b, a] = clearColorOf(this.props);
+    // An <effectComposer> redirects the frame into a texture, and it has to
+    // happen before the clear: the clear colour is the composed image's
+    // background, and `onDraw` is part of what gets composed. The renderer
+    // says whether it took the frame — the indirect one has no such hook.
+    this.scene.beginFrame?.(gl, info);
     // The two backends spell GL differently — PascalCase OpenGL 1.x against
     // camelCase ES 2 — and neither pretends to be the other, so the handful
     // of calls this element makes itself are written both ways.
@@ -317,6 +322,8 @@ export class GlAreaNode extends Node {
     }
     this.scene.render(gl, info);
     this.props.onDraw?.(gl, info);
+    // and the pass chain runs here, ending with a draw into the window
+    this.scene.endFrame?.(gl, info);
     gl.SwapBuffers();
     // A surface with `useFrame` subscribers animates: a demand-driven clock
     // would tick once and stop, which is never what subscribing meant.
