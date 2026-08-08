@@ -8,6 +8,8 @@ import { createMockApp } from './helpers/mock-app.js';
 import {
   hash32,
   maskWidth,
+  scribblePath,
+  scribblePointCount,
   scribblePoints,
   seededRandom,
 } from '../src/components/scribble.js';
@@ -307,18 +309,68 @@ test('the scribble is a pure function of its seed, and stays in its box', () => 
 
   assert.deepStrictEqual(a, again, 'a repaint draws the same curve');
   assert.notDeepStrictEqual(a, other, 'a keystroke draws a different one');
-  assert.strictEqual(
-    a.length,
-    7,
-    'a fixed number of points, whatever is typed',
-  );
   for (const p of a) {
     assert.ok(p.x >= 0 && p.x <= box.width, `x ${p.x} inside the box`);
     assert.ok(p.y >= 0 && p.y <= box.height, `y ${p.y} inside the box`);
   }
-  // and x marches across it, so the stroke reads as writing rather than a
-  // tangle in one corner
-  assert.ok(a[6].x > a[0].x);
+
+  const path = scribblePath(a, box);
+  assert.ok(
+    path.length > a.length * 2,
+    'sampled densely enough to look smooth',
+  );
+});
+
+test('the drawn path is clamped inside the box, not merely likely to be', () => {
+  // A spline through shuffled points overshoots on the sharp reversals — 78
+  // seeds in 200 do, in a box this short — and the stroke has width on top of
+  // that, so the ink would be shaved by the node's own clip. The clamp is what
+  // makes staying inside arithmetic rather than luck.
+  const box = { width: 160, height: 18 };
+  const inset = 2;
+  for (let seed = 0; seed < 200; seed++) {
+    for (const p of scribblePath(scribblePoints({ ...box, seed }), box)) {
+      assert.ok(p.x >= 0 && p.x <= box.width, `x ${p.x} (seed ${seed})`);
+      assert.ok(
+        p.y >= inset && p.y <= box.height - inset,
+        `y ${p.y} inside the inset box (seed ${seed})`,
+      );
+    }
+  }
+});
+
+test('the pen doubles back rather than plotting a function of x', () => {
+  const box = { width: 160, height: 18 };
+  let reversing = 0;
+  for (let seed = 0; seed < 40; seed++) {
+    const pts = scribblePoints({ ...box, seed });
+    const backwards = pts.filter((p, i) => i > 0 && p.x < pts[i - 1].x).length;
+    if (backwards >= 2) reversing++;
+    // whichever order it visits them in, it still covers the width it was
+    // given rather than knotting itself in one corner
+    const xs = pts.map((p) => p.x);
+    assert.ok(Math.min(...xs) < box.width * 0.2, 'reaches the left');
+    assert.ok(Math.max(...xs) > box.width * 0.8, 'and the right');
+  }
+  assert.ok(
+    reversing >= 38,
+    `${reversing}/40 seeds double back at least twice — a monotonic x would be a waveform`,
+  );
+});
+
+test('how many points there are follows the width, not what was typed', () => {
+  // same width, any seed: the same count. A count that moved with the value
+  // would be something to read the value off.
+  const counts = [1, 2, 3].map(
+    (seed) => scribblePoints({ width: 90, height: 18, seed }).length,
+  );
+  assert.deepStrictEqual(counts, [counts[0], counts[0], counts[0]]);
+  assert.ok(scribblePointCount(200) > scribblePointCount(60), 'denser masks');
+  assert.strictEqual(
+    scribblePointCount(4),
+    scribblePointCount(20),
+    'and a floor under it, so a two-character mask is still a scrawl',
+  );
 });
 
 test('the generator is deterministic and spread over the unit interval', () => {

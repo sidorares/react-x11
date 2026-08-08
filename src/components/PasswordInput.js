@@ -127,11 +127,15 @@ const chars = (text) => Array.from(text);
  *
  * Here one stroke is drawn through points from a generator seeded by the
  * window and the value, so **every keystroke redraws the whole curve** and
- * nothing in the shape is per-character. The width grows with what has been
- * typed — a mask that did not would say nothing about progress — by a
- * per-position advance from a *window*-seeded stream, so it is monotonic
- * without being a ruler. `scribble.js` carries the reasoning and the limits;
- * the headline limit is that this hides a glance, not a recording.
+ * nothing in the shape is per-character. It is a scribble rather than a wave
+ * on purpose: the pen visits its points out of order, so it doubles back,
+ * crosses what it has drawn and leaves loops, where a stroke whose `x` only
+ * increases would be read as the plot of a function. The width grows with
+ * what has been typed — a mask that did not would say nothing about progress
+ * — by a per-position advance from a *window*-seeded stream, so it is
+ * monotonic without being a ruler. `scribble.js` carries the reasoning and
+ * the limits; the headline limit is that this hides a glance, not a
+ * recording.
  *
  * **The secret is never laid out or drawn while it is masked.** The mask's
  * width comes from one reference character, so the password never enters

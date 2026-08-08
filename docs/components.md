@@ -503,8 +503,19 @@ strongest exactly where it should not be.
 So the mask is a single stroke through points chosen by a generator seeded
 from the window id and a hash of the value. Every keystroke reseeds it, so
 **the whole curve moves on every character** — feedback you cannot miss — and
-nothing in the shape is per-character: the number of control points is fixed,
-so there is no wiggle to count.
+nothing in the shape is per-character: the pen visits a number of points taken
+from the mask's _width_, where a character is worth about half a point, so no
+part of the stroke can be matched to anything typed.
+
+It is a **scribble rather than a waveform**, and that is a decision rather
+than a look. A stroke whose `x` only ever increases is the plot of a
+function, and the eye reads it as one — value against position, meaning in
+the peaks — however wild the `y` is. So the points are laid out one per
+column, which is what makes the stroke cover the width it was given, and then
+visited **out of order**: the pen doubles back, crosses what it has already
+drawn, and leaves loops. The shuffle is local rather than global, because in
+a box seventeen pixels tall a jump right across it is a long shallow scratch,
+and a maskful of those is not a scribble either.
 
 What does grow is the width, because a mask that did not would say nothing
 about progress. Each position contributes an advance drawn from a **second,

@@ -9,8 +9,16 @@
 // This inverts both. A stroke is drawn through points chosen by a generator
 // seeded from the window and the value, so **every keystroke redraws the
 // whole curve**: the feedback is the entire mask moving, not a mark
-// appearing. And nothing in the shape is per-character — a fixed number of
-// control points, whatever the length — so there is nothing to count.
+// appearing. And nothing in the shape is per-character — the pen visits a
+// number of points taken from the mask's *width*, where a character is worth
+// about half a point, so no part of the stroke can be matched to anything
+// that was typed.
+//
+// It is a scribble rather than a wave, and that is a decision rather than a
+// look: a stroke whose `x` only ever increases is the plot of a function, and
+// the eye reads it as one — value against position, meaning in the peaks —
+// however wild the `y` is. So the pen doubles back, crosses what it has
+// already drawn, and leaves loops. `scribblePoints` is where that happens.
 //
 // What does grow is the width, because a mask that did not grow would say
 // nothing about progress at all. It grows by a per-position advance drawn
@@ -55,9 +63,37 @@ export function seededRandom(seed) {
   };
 }
 
-/** How many control points a scribble is drawn through, whatever its length
- *  — a count that grew with the value would be a character count. */
-export const SCRIBBLE_POINTS = 7;
+/**
+ * How many points the pen visits, per pixel of mask.
+ *
+ * Deriving the count from the **width** rather than fixing it keeps the
+ * scrawl at one density: a fixed count stretches into a few long shallow
+ * strokes as the field fills, which both stops looking like a scribble and —
+ * since density would then fall with length — says as much about the length
+ * as the count would. Width is already on show; density does not have to be.
+ *
+ * The count is not per-character either way. At this rate a character is
+ * worth about half a point, so nothing in the stroke can be matched to
+ * anything that was typed.
+ */
+const PX_PER_POINT = 9;
+const MIN_POINTS = 7;
+
+/** How far apart, in pixels, the curve is sampled when it is drawn. */
+const SAMPLE_PX = 2;
+const MAX_POINTS = 30;
+
+/** How many points a mask this wide is drawn through. */
+export function scribblePointCount(width) {
+  return Math.max(
+    MIN_POINTS,
+    Math.min(MAX_POINTS, Math.round(width / PX_PER_POINT)),
+  );
+}
+
+/** How far the pen may jump out of order: the width of the window the
+ *  visiting order is shuffled inside. See `scribblePoints`. */
+export const SCRIBBLE_GROUP = 3;
 
 /** The narrowest and widest a character may push the mask, as a fraction of
  *  the reference advance. Wide enough that the steps do not read as a ruler,
@@ -91,73 +127,121 @@ export function maskWidth(length, unit, seed, max = Infinity) {
 }
 
 /**
- * The points the curve runs through, inside a `width` × `height` box.
+ * The points the pen visits, inside a `width` × `height` box.
  *
- * `x` marches across the box so the stroke reads left to right like writing,
- * with enough jitter that the columns are not a grid; `y` is free within the
- * box, which is what makes it a scribble rather than a wave.
+ * **Not in left-to-right order.** A stroke whose `x` only ever increases is a
+ * plot of a function — a waveform, a time series — and it reads as one however
+ * wild the `y` is: the eye follows it as "value against position" and starts
+ * looking for meaning in the peaks. A pen moved at random over a piece of
+ * paper does not do that. It doubles back, crosses what it has already drawn,
+ * and leaves loops.
+ *
+ * So the points are laid out in **columns** — one per column, which is what
+ * guarantees the stroke covers the width it was given rather than knotting
+ * itself in one corner — and then the *visiting order is shuffled*. The pen
+ * therefore starts somewhere in the middle, sweeps across, comes back, and
+ * crosses itself on the way.
  */
 export function scribblePoints({
   width,
   height,
   seed,
-  points = SCRIBBLE_POINTS,
+  points = scribblePointCount(width),
+  group = SCRIBBLE_GROUP,
   inset = 2,
 }) {
   const rnd = seededRandom(seed);
   const span = Math.max(1, height - inset * 2);
-  const drift = width / (points * 2);
-  // Which half the first point sits in; after that they alternate. Free `y`
-  // in the whole box reads as a gentle wave once the field is wide — seven
-  // points over two hundred pixels rarely happen to zigzag — and a mask that
-  // relaxes into a line as the password gets longer is saying something about
-  // the password. Alternating halves keeps the stroke oscillating at every
-  // width, with the randomness spent on *where* in the half it lands.
-  let high = rnd() < 0.5;
+  const usable = Math.max(1, width - inset * 2);
+  const column = usable / points;
   const out = [];
   for (let i = 0; i < points; i++) {
-    const t = points === 1 ? 0.5 : i / (points - 1);
-    const x = t * (width - inset * 2) + inset + (rnd() - 0.5) * drift;
-    const y = inset + (high ? rnd() * 0.42 : 0.58 + rnd() * 0.42) * span;
-    high = !high;
     out.push({
-      x: Math.min(width - inset, Math.max(inset, x)),
-      y,
+      // inside its own column, so no two points share a place and the whole
+      // width is used, but nowhere near the middle of it
+      x: inset + i * column + rnd() * column,
+      y: inset + rnd() * span,
     });
+  }
+  // Fisher-Yates within a sliding group rather than over the whole list. A
+  // full shuffle puts consecutive points a third of the width apart on
+  // average, and in a box this short every one of those moves is a long
+  // shallow sweep — the stroke ends up a bundle of near-horizontal scratches.
+  // Shuffling locally keeps the moves short, so the pen has room to go up and
+  // down between them, and it still doubles back and crosses itself.
+  for (let start = 0; start < out.length; start += group) {
+    const end = Math.min(out.length, start + group);
+    for (let i = end - 1; i > start; i--) {
+      const j = start + Math.floor(rnd() * (i - start + 1));
+      const swap = out[i];
+      out[i] = out[j];
+      out[j] = swap;
+    }
   }
   return out;
 }
 
 /**
- * Stroke the scribble for `seed` into a `width` × `height` box.
+ * The pen's path as a **dense polyline**, sampled off a Catmull-Rom spline
+ * through the points — a curve that passes through every one of them rather
+ * than being pulled towards it.
  *
- * Catmull-Rom through the points, converted to the cubic béziers the context
- * actually draws: a curve that passes *through* every point rather than
- * being pulled towards it, which is what keeps the stroke inside the box it
- * was given.
+ * Sampled here rather than handed to the context as béziers, which is what
+ * this did first. A mask is 17 pixels tall, its control points land within a
+ * pixel of each other constantly, and ntk's stroker answers a curve that
+ * small with the occasional spike: a stray tail shooting out of the field,
+ * several times the width of the mask. The same points drawn as line segments
+ * are exact at any size, and a curve sampled every couple of pixels is
+ * smooth long before anyone can see the difference. (The béziers themselves
+ * are fine — the shape is right when it is drawn eight times bigger — so this
+ * is a workaround for the stroker, not for the geometry.)
+ *
+ * Every sample is clamped into the box, so "the stroke stays in the field" is
+ * arithmetic rather than a hope.
  */
-export function strokeScribble(ctx, { width, height, seed, color, lineWidth }) {
-  if (!(width > 2) || !(height > 2)) return;
-  const pts = scribblePoints({ width, height, seed });
-  ctx.strokeStyle = color;
-  ctx.lineWidth = lineWidth ?? 1.5;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.beginPath();
-  ctx.moveTo(pts[0].x, pts[0].y);
+export function scribblePath(pts, { width, height, inset = 2 }) {
+  const clampX = (v) => Math.min(width, Math.max(0, v));
+  const clampY = (v) => Math.min(height - inset, Math.max(inset, v));
+  const out = [{ x: clampX(pts[0].x), y: clampY(pts[0].y) }];
   for (let i = 0; i < pts.length - 1; i++) {
     const p0 = pts[i - 1] ?? pts[i];
     const p1 = pts[i];
     const p2 = pts[i + 1];
     const p3 = pts[i + 2] ?? p2;
-    ctx.bezierCurveTo(
-      p1.x + (p2.x - p0.x) / 6,
-      p1.y + (p2.y - p0.y) / 6,
-      p2.x - (p3.x - p1.x) / 6,
-      p2.y - (p3.y - p1.y) / 6,
-      p2.x,
-      p2.y,
-    );
+    const span = Math.abs(p2.x - p1.x) + Math.abs(p2.y - p1.y);
+    const steps = Math.max(3, Math.min(14, Math.round(span / SAMPLE_PX)));
+    for (let step = 1; step <= steps; step++) {
+      const t = step / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      // Catmull-Rom basis, uniform parameterisation
+      const at = (a, b, c, d) =>
+        0.5 *
+        (2 * b +
+          (c - a) * t +
+          (2 * a - 5 * b + 4 * c - d) * t2 +
+          (3 * b - a - 3 * c + d) * t3);
+      out.push({
+        x: clampX(at(p0.x, p1.x, p2.x, p3.x)),
+        y: clampY(at(p0.y, p1.y, p2.y, p3.y)),
+      });
+    }
   }
+  return out;
+}
+
+/** Stroke the scribble for `seed` into a `width` × `height` box. */
+export function strokeScribble(ctx, { width, height, seed, color, lineWidth }) {
+  if (!(width > 2) || !(height > 2)) return;
+  const inset = 2;
+  const pts = scribblePoints({ width, height, seed, inset });
+  const path = scribblePath(pts, { width, height, inset });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth ?? 1.5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(path[0].x, path[0].y);
+  for (const point of path.slice(1)) ctx.lineTo(point.x, point.y);
   ctx.stroke();
 }
