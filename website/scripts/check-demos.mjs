@@ -147,6 +147,10 @@ const exercises = {
   widgets: (server) => click(server, 0x0a84ff), // the primary "Mute" button
   events: (server) => click(server, 0x2980b9), // the inner box
   dates: (server) => click(server, 0x2980b9), // the primary Clear button
+  password(server) {
+    click(server, 0xeef4fb); // the field, which is the one thing painted in it
+    type(server, 'hunter2');
+  },
   tasks(server) {
     click(server, 0x27ae60); // the done task's checkbox
     // and the editor: click into the input, then type

@@ -38,6 +38,7 @@ import {
   ContextMenu,
   createRoot,
   DatePicker,
+  PasswordInput,
   createStyles,
   Dialog,
   flattenStyle,
@@ -500,6 +501,23 @@ function Widgets() {
       />
       {/* @ts-expect-error a range value needs mode="range" */}
       <Calendar value={{ start: '2026-08-01', end: null }} />
+
+      <PasswordInput
+        name="password"
+        value=""
+        placeholder="Passphrase"
+        maxLength={64}
+        onChange={(ev) => void ev.value.length}
+        onSubmit={(secret) => void secret.length}
+        onRevealChange={(on) => void on}
+        drawMask={(ctx, { width, height, color }) => {
+          ctx.fillStyle = color;
+          ctx.fillRect(0, height / 2, width, 2);
+        }}
+      />
+      {/* @ts-expect-error the value is a string, not a number */}
+      <PasswordInput value={42} />
+      <textinput sensitive value="s3cret" onChange={() => {}} />
 
       <Tabs
         items={[{ id: 'a', label: 'A', content: <box /> }]}

@@ -5,6 +5,7 @@ import sizeQueries from './size-queries.js';
 import widgets from './widgets.js';
 import events from './events.js';
 import dates from './dates.js';
+import password from './password.js';
 import tasks from './tasks.js';
 import canvas from './canvas.js';
 import menu from './menu.js';
@@ -25,6 +26,7 @@ const demos = [
   widgets,
   events,
   dates,
+  password,
   tasks,
   canvas,
   menu,

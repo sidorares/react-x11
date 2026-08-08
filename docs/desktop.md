@@ -1,7 +1,9 @@
 # Desktop integration
 
 What an app has to tell the desktop about itself, beyond drawing. Today that
-is startup notification; it is on by default and there is nothing to call.
+is startup notification, which is on by default and has nothing to call, and
+what a password field has to do to be reachable by the desktop's password
+managers.
 
 ## Startup notification
 
@@ -139,3 +141,107 @@ it. On X11 that is the pre-existing no-isolation story rather than a new
 exposure — see [security.md](security.md) — but it is the reason the
 messages carry the id the launcher gave us and nothing invented, and the
 reason the variable's value is never logged.
+
+## Password fields and password managers
+
+There is **no password-field protocol on the Linux desktop.** No toolkit
+publishes "this is a password field, fill it", and no manager asks. What
+exists instead are four seams, none of which a widget can opt into by
+declaring itself — they are things an application either supports or does
+not. `PasswordInput` supports the two that reach a field, and this is what
+they turn out to be.
+
+### 1. Typing — XTEST auto-type, and the keymap race
+
+The mechanism nearly every desktop manager uses is **auto-type**: KeePassXC
+matches the focused window's **title** against its entries, then synthesises
+the keystrokes. Its X11 backend is the whole of the story — `SendKeyEvent()`
+sends `XTestFakeKeyEvent()`, and for a character the current layout cannot
+type, `RemapKeycode()` writes the keysym into a spare keycode with
+`XkbSetMap()` first, `XSync`ing before it types.
+
+For us that is good news and one hazard:
+
+- **A faked key is an ordinary key.** XTEST events are delivered by the
+  server through the normal event path, so `PasswordInput` — and every other
+  focusable node — cannot tell auto-type from a person, and nothing has to be
+  done to support it. An auto-type sequence of `{USERNAME}{TAB}{PASSWORD}
+{ENTER}` walks a react-x11 form because Tab moves focus and Enter reaches
+  `onSubmit`.
+- **The window needs a title worth matching.** Auto-type's default matching is
+  on the window title, so `<window title="…">` is the integration surface.
+  A window titled after the document with nothing identifying the app is one
+  a user cannot write an auto-type rule for; `wmClass` is worth setting too,
+  since a manager that grew a smarter matcher would read that.
+- **The keymap race is real.** ntk refetches the mapping when the server sends
+  `MappingNotify`, which is what makes a remapped keycode decode correctly —
+  but the refetch is a round trip, and a manager that remaps, syncs and types
+  immediately can land its key before the reply does. The window is small and
+  only affects characters outside the user's layout, but a password of ASCII
+  is not the case that fails. Nothing here can close it; the fix belongs where
+  the map lives.
+
+### 2. Pasting — the clipboard, and the hint that keeps it out of history
+
+The other path every manager offers is copy-to-clipboard, usually with a
+countdown before it clears. That is ordinary `CLIPBOARD` interop
+([clipboard.md](clipboard.md)); `PasswordInput` takes Ctrl+V and
+Shift+Insert, and strips control characters so a manager's trailing newline
+does not end up inside the secret.
+
+If your app ever puts a secret **on** the clipboard — this widget never does
+— offer `x-kde-passwordManagerHint` with the value `secret` beside the text.
+Klipper drops such an offer from its history, KDE Connect refuses to forward
+it, and `wl-clipboard` marks the state sensitive. It is a convention rather
+than a specification, and it is the only thing standing between a copied
+password and a clipboard manager's on-disk history:
+
+```js
+clipboard.write({ UTF8_STRING: secret, 'x-kde-passwordManagerHint': 'secret' });
+```
+
+`PasswordInput` also never takes the **PRIMARY** selection, which a
+`<textinput>` does on every selection: PRIMARY is pasted by a middle click in
+any window on the display, and a secret does not belong in a selection that
+can be spent by accident.
+
+### 3. Fetching it yourself — the Secret Service
+
+When the app has an account of its own to unlock, the seam is not a field at
+all: the **Secret Service** D-Bus API, `org.freedesktop.secrets`, which
+gnome-keyring, KWallet and KeePassXC all implement, and which `libsecret`
+speaks for C applications. react-x11 has no wrapper for it and does not need
+one — `useSessionBus()` reaches it directly ([dbus.md](dbus.md)) — and the
+shape is: search by attributes, unlock the collection if it is locked, read
+the secret back. An app that does this shows no password field on most
+launches, which is a better outcome than any field can offer.
+
+Inside a sandbox that name is not there. Flatpak's answer is
+`org.freedesktop.portal.Secret`, whose `RetrieveSecret` hands the app a
+per-application master secret down a pipe; libsecret switches to it
+automatically and encrypts a local store with it.
+
+### 4. Reading the field — AT-SPI, which we do not implement
+
+The accessibility bus is the only channel through which an outside program
+can see a field's _contents and role_ rather than guess at a window title:
+AT-SPI2 gives a password entry the role `password text`, which is how a
+screen reader knows to announce "bullet" instead of the character. Some
+automation leans on the same tree. react-x11 has no accessibility tree yet
+(NEXT_STEPS §11.3) — `role` is a prop the testing queries read and nothing
+else — so this seam is closed here for now, and worth reopening as one piece
+with the rest of AT-SPI rather than as a password-shaped hole in it.
+
+### What a field can still do wrong
+
+None of the above stops the field itself from leaking. What `PasswordInput`
+does about that, and what it cannot:
+
+- the masked value is **never laid out or drawn** — no glyphs of the secret
+  reach ntk's shaping cache or the X server, and the mask's width is measured
+  from one reference character;
+- there is **no copy, no selection, no undo history**;
+- the value is still a JavaScript string, and strings are immutable. It
+  cannot be zeroed, it lives until the garbage collector takes it, and every
+  intermediate value typed on the way lives alongside it. A design that needs
+  more than that needs the secret to never enter this process.

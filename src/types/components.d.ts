@@ -275,6 +275,42 @@ export type DatePickerProps = (SingleCalendarProps | RangeCalendarProps) & {
 };
 export const DatePicker: ComponentType<DatePickerProps>;
 
+/** What a `drawMask` is told about the mask it is painting. */
+export interface PasswordMaskInfo {
+  /** How wide the mask should be — what the field worked out from the
+   * length, not the width of the box. */
+  width: number;
+  height: number;
+  /** Seeded from the window and a hash of the value, so it changes on every
+   * keystroke and repaints identically in between. */
+  seed: number;
+  color: Color;
+  length: number;
+}
+
+export interface PasswordInputProps extends WidgetProps, NamedWidget {
+  value?: string;
+  defaultValue?: string;
+  onChange?: (ev: WidgetChangeEvent<string>) => void;
+  /** Enter. */
+  onSubmit?: (value: string) => void;
+  placeholder?: string;
+  /** Show the reveal eye at all. Default `true`, as GTK's peek icon is. */
+  revealable?: boolean;
+  /** Drive the reveal yourself — for a toggle the keyboard can reach, the
+   * built-in eye being a pointer affordance. */
+  revealed?: boolean;
+  onRevealChange?: (revealed: boolean) => void;
+  /** In code points, not UTF-16 units. */
+  maxLength?: number;
+  /** Draw the mask instead of the scribble. `ctx` is ntk's canvas-like 2d
+   * context, translated to the mask's origin. */
+  drawMask?: (ctx: any, info: PasswordMaskInfo) => void;
+  disabled?: boolean;
+  style?: StyleProp;
+}
+export const PasswordInput: ComponentType<PasswordInputProps>;
+
 export interface CheckboxProps extends WidgetProps, NamedWidget {
   children?: ReactNode;
   label?: string;

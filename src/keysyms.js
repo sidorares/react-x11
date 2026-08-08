@@ -80,6 +80,22 @@ export const XK_F11 = 0xffc8;
 export const XK_F12 = 0xffc9;
 
 /**
+ * The letter of a Ctrl chord, independent of Shift. ntk derives `codepoint`
+ * from the *shifted* keysym, so Ctrl+Shift+Z arrives as `Z` while Ctrl+Z
+ * arrives as `z` — the keysym does not shift, so match on that and fall back
+ * to the codepoint when the keymap has not been read yet.
+ *
+ * Here rather than beside its first caller because both layers need it: the
+ * `<textinput>` node reads Ctrl+C/V/Z, and so does any widget that answers a
+ * chord of its own.
+ */
+export function ctrlChordLetter(ev) {
+  const code = ev.keysym ?? ev.codepoint;
+  if (code == null) return null;
+  return code >= 0x41 && code <= 0x5a ? code + 0x20 : code;
+}
+
+/**
  * The X11 modifier mask bits, as they arrive on `ev.nativeEvent.buttons`
  * and as `fireEvent` takes them. Bit 3 (Mod1) is Alt on virtually every
  * layout; the renderer reads Shift, Control and Mod1.

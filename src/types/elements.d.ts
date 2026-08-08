@@ -303,6 +303,17 @@ export interface TextInputProps extends DrawnProps<TextInputNode> {
    * you replace it with your own rather than suppressing it per-event.
    */
   contextMenu?: false;
+  /**
+   * The text is a secret: **nothing here reaches a selection.** Ctrl+C and
+   * the copy half of Ctrl+X do nothing, the edit menu offers neither Cut nor
+   * Copy, and selecting text does not take PRIMARY — so a middle click in
+   * another window cannot spend it. Pasting *in*, editing, undo and the caret
+   * are untouched.
+   *
+   * What is on screen stops being on screen; what is on the clipboard does
+   * not. `PasswordInput` sets this on the input it shows while revealed.
+   */
+  sensitive?: boolean;
 }
 
 export interface TextAreaProps extends TextInputProps {

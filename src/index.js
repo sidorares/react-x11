@@ -35,6 +35,7 @@ export {
   Button,
   Calendar,
   DatePicker,
+  PasswordInput,
   Checkbox,
   Radio,
   RadioGroup,

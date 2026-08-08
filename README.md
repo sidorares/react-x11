@@ -189,7 +189,9 @@ Widget **components** (plain React on top of the primitives, themable via
 `ThemeProvider`): `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch`,
 `Slider`, `ProgressBar`, `Select`, `Tooltip`, `MenuBar`/`ContextMenu`,
 `Calendar`/`DatePicker` — one date or a range, with days blockable and a
-seam for drawing into the cells — `Dialog` — a modal built on
+seam for drawing into the cells — `PasswordInput`, whose mask is a scribble
+that moves on every keystroke rather than a countable row of bullets —
+`Dialog` — a modal built on
 `<popup trapFocus>`, which traps Tab and restores focus when it closes —
 plus the two containers an application window is built from: `Tabs`, `Tree`
 and `SplitPane`. See
@@ -259,6 +261,7 @@ npm run examples:menu          # right-click context menu via <popup>
 npm run examples:transparent   # rounded translucent <popup transparent>
 npm run examples:form          # <textinput> + Select dropdowns
 npm run examples:datepicker    # Calendar/DatePicker: ranges, blocked days, events
+npm run examples:password      # PasswordInput: the scribble mask, and a custom one
 npm run examples:gl            # raw GL in a <glarea> (display-list cube)
 npm run examples:three         # <Canvas3D> scene: meshes, lights, textures
 npm run examples:wm            # a reparenting window manager (see below)

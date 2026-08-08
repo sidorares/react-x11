@@ -56,6 +56,7 @@ import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import { inputTime } from './inputtime.js';
 import { armPasteState, canPaste } from './pastestate.js';
+import { ctrlChordLetter } from './keysyms.js';
 import {
   editMenuColors,
   editMenuGeometry,
@@ -2973,18 +2974,6 @@ const SCROLL_KEY_PAGE_OVERLAP = 24;
 const UNDO_LIMIT = 200;
 
 /**
- * The letter of a Ctrl chord, independent of Shift. ntk derives `codepoint`
- * from the *shifted* keysym, so Ctrl+Shift+Z arrives as `Z` while Ctrl+Z
- * arrives as `z` — the keysym does not shift, so match on that and fall
- * back to the codepoint when the keymap has not been read yet.
- */
-function ctrlChordLetter(ev) {
-  const code = ev.keysym ?? ev.codepoint;
-  if (code == null) return null;
-  return code >= 0x41 && code <= 0x5a ? code + 0x20 : code;
-}
-
-/**
  * <textinput>: single-line editable text. Caret/selection via ntk TextLayout
  * prefix measurement, editing via the EventManager default-action hooks
  * (user onKeyDown/onMouseDown handlers run first and can preventDefault).
@@ -3378,7 +3367,22 @@ export class TextInputNode extends Node {
     return this.app?.clipboard ?? null;
   }
 
+  /**
+   * Put the selection on a selection — unless this input is `sensitive`.
+   *
+   * Every route out of the field funnels through here: Ctrl+C, the copy half
+   * of Ctrl+X, the right-click menu, and the select-to-own that hands PRIMARY
+   * to a middle click in some other application. One gate covers them all,
+   * which is the reason the field is the thing that knows it holds a secret
+   * rather than each of the six callers.
+   *
+   * The reason a *revealed* password field still refuses: what is on screen
+   * stops being on screen when the field is hidden again, and what is on the
+   * clipboard does not. Any client on the display can ask for it, and a
+   * clipboard manager will have written it down.
+   */
   _copySelection(selection = 'CLIPBOARD') {
+    if (this.props.sensitive) return;
     const text = this._selectedText();
     if (!text) return;
     this._clipboardApi()
@@ -3684,8 +3688,25 @@ export class TextInputNode extends Node {
         enabled: this.canRedo,
       },
       { separator: true },
-      { id: 'cut', label: 'Cut', shortcut: 'Ctrl+X', enabled: hasSelection },
-      { id: 'copy', label: 'Copy', shortcut: 'Ctrl+C', enabled: hasSelection },
+      // A `sensitive` field offers neither: they are not disabled rows, they
+      // are absent, because a greyed Copy over a password reads as a bug in
+      // the application rather than as a decision.
+      ...(this.props.sensitive
+        ? []
+        : [
+            {
+              id: 'cut',
+              label: 'Cut',
+              shortcut: 'Ctrl+X',
+              enabled: hasSelection,
+            },
+            {
+              id: 'copy',
+              label: 'Copy',
+              shortcut: 'Ctrl+C',
+              enabled: hasSelection,
+            },
+          ]),
       {
         id: 'paste',
         label: 'Paste',

@@ -804,6 +804,23 @@ To replace it with your own, set `contextMenu={false}` and render a
 `ContextMenu` — `onContextMenu` still fires. To suppress it for one event,
 call `ev.preventDefault()` in an `onContextMenu` handler.
 
+### `sensitive`
+
+`<textinput sensitive>` is a field whose text **never reaches a selection**.
+Ctrl+C and the copy half of Ctrl+X do nothing, the menu offers neither Cut
+nor Copy — absent rows rather than greyed ones, because a greyed Copy over a
+password reads as a bug in the application — and selecting text does not take
+PRIMARY, so a middle click in another window cannot spend it. Everything else
+is untouched: the caret, the selection itself, the arrows, undo, and pasting
+_in_.
+
+The line it draws is between what is on screen and what is on the clipboard.
+The first stops being visible when the field is hidden or the window closes;
+the second is readable by every client on the display until something else
+takes the selection, and a clipboard manager will have written it down.
+`PasswordInput` sets it on the input it shows while the secret is revealed —
+see [components.md](components.md#passwordinput).
+
 **Ref**: the node, plus `value`, `undo()` / `redo()` and `canUndo` /
 `canRedo` — enough for a toolbar button beside the field.
 
