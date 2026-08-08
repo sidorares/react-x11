@@ -1313,6 +1313,15 @@ startupWmClass })`, with the icon PNGs generated from a React component
 through the offscreen renderer (#124) so the app icon, `_NET_WM_ICON` and
 the launcher icon all come from one source.
 
+The generator now has a second customer and therefore a second reason to
+exist: custom URI schemes (#173) need `MimeType=x-scheme-handler/…`,
+`DBusActivatable=true` and a `StartupWMClass` that matches the window's
+`wmClass` prop, and [docs/uri-schemes.md](docs/uri-schemes.md) currently ships
+that as a snippet to paste. It stays prose deliberately — a library that writes
+into `~/.local/share` on import is a surprise, and it cannot work for a
+system-installed or Flatpak app — so whatever this becomes must be a command
+the **app author** runs, never something that happens implicitly.
+
 Finally, a CI `bundle` job that runs the esbuild build and executes the
 result against Xvfb. It is the only way the two blockers stay fixed; both
 were introduced silently by transitive dependencies and neither was noticed

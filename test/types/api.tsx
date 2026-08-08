@@ -22,9 +22,14 @@ import {
   BusUnavailableError,
   Calendar,
   Canvas3D,
+  activateWindow,
   Checkbox,
   closeBus,
   fileDialogBackend,
+  onAppOpen,
+  registerApplication,
+  useAppActivate,
+  useAppOpen,
   NoFileDialogError,
   openFile,
   saveFile,
@@ -707,6 +712,52 @@ function _GlobalMenu() {
   return <MenuBar menus={menus} globalMenu={false} />;
 }
 
+// custom URI schemes: registration, the two inbound events, and the raise
+function _DeepLinks() {
+  const win = useRef<NtkWindow | null>(null);
+
+  useAppOpen((uris, ctx) => {
+    const first: string = uris[0];
+    // `null` is a real answer, and it is what activateWindow takes
+    const when: number | null = ctx.timestamp;
+    const raw: unknown = ctx.platformData['desktop-startup-id'];
+    activateWindow(win, { timestamp: when });
+    void [first, raw, ctx.startupId, ctx.activationToken];
+  });
+  useAppActivate(
+    (ctx) => void activateWindow(win, { timestamp: ctx.timestamp }),
+  );
+
+  async function go() {
+    const app = await registerApplication({
+      appId: 'com.example.myapp',
+      schemes: ['com.example.myapp'],
+      onOpen: (uris) => void uris,
+      onAction: (name, params) => void [name, params],
+    });
+    // null until it is checked — there may be no session bus
+    if (app?.role === 'secondary') return;
+    const path: string | undefined = app?.objectPath;
+    await app?.release();
+
+    // @ts-expect-error — role is a closed set
+    void (app?.role === 'tertiary');
+    // @ts-expect-error — appId is required
+    await registerApplication({ schemes: ['com.example.myapp'] });
+
+    const stop = onAppOpen(() => {});
+    stop();
+
+    const issued: boolean = activateWindow();
+    activateWindow(0x1a00007, { timestamp: null, source: 2 });
+    // @ts-expect-error — EWMH names two source indications
+    activateWindow(win, { source: 3 });
+    void [path, issued];
+  }
+  void go;
+  return null;
+}
+
 // the bus floor: the hooks, the imperative pair, and the `required` overload
 function _Bus() {
   const session: BusHandle = useSessionBus();
@@ -798,6 +849,7 @@ function _Files() {
 
 void _Files;
 void _Bus;
+void _DeepLinks;
 void _Clip;
 void main;
 void grow;

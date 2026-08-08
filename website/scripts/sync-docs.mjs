@@ -189,6 +189,7 @@ const ORDER = [
   'desktop.md',
   'dbus.md',
   'globalmenu.md',
+  'uri-schemes.md',
   'filedialog.md',
   'appearance.md',
   'remote.md',

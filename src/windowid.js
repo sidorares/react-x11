@@ -70,8 +70,12 @@ export function useWindowId(ref) {
  * which makes "what windows does this tree have" answerable without the app
  * author wiring anything. Popups are excluded: a `<popup>` is
  * override-redirect and never what a dialog should be transient for.
+ *
+ * Not public: `useTopLevelWindow()` is the shape a component wants.
+ * `activate.js` needs the list itself, to pick the window a raise with no
+ * argument goes to.
  */
-function topLevelWindows(app) {
+export function topLevelWindows(app) {
   if (!app) return [];
   return (app._rootChildren ?? []).filter(
     (node) => node?.isWindow && !node.isPopup && node.window?.id,
