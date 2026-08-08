@@ -10,6 +10,7 @@ import { cssColorStraight } from 'ntk';
 import { Node } from './nodes.js';
 import { ScenePointer, sceneWantsPointer } from './pointer3d.js';
 import { SceneRenderer } from './scene3d.js';
+import { ShaderSceneRenderer } from './scene3d-shader.js';
 
 // One visual query per (app, spec): GetFBConfigs is a round trip and every
 // <glarea> in an app wants the same answer.
@@ -33,23 +34,49 @@ function recordGlxFailure(app, err) {
   if (app && err && !glxFailures.has(app)) glxFailures.set(app, err);
 }
 
+/**
+ * The visual and depth to create the GL child window with.
+ *
+ * `chooseGLConfig` answers for whichever backend ntk's `glPolicy` selected
+ * and tags the result with `backend`; it is the newer name and the one to
+ * prefer, because asking the older `chooseGLXConfig` would pin the surface to
+ * indirect GLX no matter what the policy says. The fallback keeps `<glarea>`
+ * working on an ntk that predates the direct backend.
+ */
 export function glxConfig(app, spec) {
   const key = JSON.stringify(spec ?? null);
   let perApp = configCache.get(app);
   if (!perApp) configCache.set(app, (perApp = new Map()));
   let promise = perApp.get(key);
   if (!promise) {
-    promise =
-      typeof app.chooseGLXConfig === 'function'
-        ? app.chooseGLXConfig(spec)
-        : Promise.reject(
-            new Error(
-              'react-x11: <glarea> needs ntk >= 3.6.0 (app.chooseGLXConfig)',
-            ),
-          );
+    if (typeof app.chooseGLConfig === 'function') {
+      promise = app.chooseGLConfig(spec);
+    } else if (typeof app.chooseGLXConfig === 'function') {
+      promise = app
+        .chooseGLXConfig(spec)
+        .then((config) => ({ backend: 'indirect', ...config }));
+    } else {
+      promise = Promise.reject(
+        new Error(
+          'react-x11: <glarea> needs ntk >= 3.6.0 (app.chooseGLConfig)',
+        ),
+      );
+    }
     perApp.set(key, promise);
   }
   return promise;
+}
+
+/**
+ * Is the direct backend available on this connection?
+ *
+ * Answered synchronously from what ntk resolved during its connect handshake,
+ * so element creation can decide whether a `<shaderMaterial>` is going to have
+ * a pipeline to run on. `false` covers "not known yet" too, which is the
+ * honest answer for a policy raised after connecting.
+ */
+export function hasDirectGL(app) {
+  return !!app?._glCapsResolved?.direct;
 }
 
 /**
@@ -187,6 +214,17 @@ export class GlAreaNode extends Node {
     this.config = config;
     wnd._reactX11Node = this;
     this.gl = wnd.getContext('opengl', config);
+    // Which renderer draws the scene follows the context, not the config:
+    // ntk decides the backend and the context says which one it is, so a
+    // policy that resolved differently than expected cannot leave a shader
+    // renderer driving a fixed-function pipeline.
+    if (this.gl?.backend === 'direct') {
+      this.scene = new ShaderSceneRenderer(this);
+    }
+    // a buffer freed by the display is a frame that can be drawn again
+    if (typeof this.gl?.onFrameAvailable !== 'undefined') {
+      this.gl.onFrameAvailable = () => this.requestFrame();
+    }
     // The context is only usable once MakeCurrent has answered, and that is
     // where a server refusing indirect GLX says so (ntk gives the rejection
     // an err.code — see GLXError). Nothing here awaits it: GL calls queue
@@ -253,6 +291,15 @@ export class GlAreaNode extends Node {
   _drawFrame() {
     const gl = this.gl;
     if (!gl || this.destroyed) return;
+    const direct = gl.backend === 'direct';
+    // On the direct backend every buffer may still be held by the display,
+    // and drawing into one before it comes back would paint what is on
+    // screen. `onFrameAvailable` asks for this frame again when one frees.
+    if (direct && gl.canRender && !gl.canRender()) return;
+    // binds this surface — the GPU context is shared between every <glarea>
+    // on the connection — and picks up a resize
+    gl.makeCurrent?.();
+
     const { width, height } = this.rect;
     const info = { width, height, node: this };
     if (!this._created) {
@@ -260,10 +307,19 @@ export class GlAreaNode extends Node {
       this.props.onCreated?.(gl, info);
     }
     this._syncPointerListeners();
-    gl.Viewport(0, 0, width, height);
     const [r, g, b, a] = clearColorOf(this.props);
-    gl.ClearColor(r, g, b, a);
-    gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    // The two backends spell GL differently — PascalCase OpenGL 1.x against
+    // camelCase ES 2 — and neither pretends to be the other, so the handful
+    // of calls this element makes itself are written both ways.
+    if (direct) {
+      gl.viewport(0, 0, width, height);
+      gl.clearColor(r, g, b, a);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    } else {
+      gl.Viewport(0, 0, width, height);
+      gl.ClearColor(r, g, b, a);
+      gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
     this.scene.render(gl, info);
     this.props.onDraw?.(gl, info);
     gl.SwapBuffers();

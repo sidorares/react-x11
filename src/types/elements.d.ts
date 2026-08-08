@@ -679,6 +679,37 @@ export interface SpotLightProps extends PointLightProps {
   target?: Vec3;
 }
 
+/**
+ * A uniform for `<shaderMaterial>`: three.js's `{ value }` wrapper, or the
+ * value on its own. The setter follows the type — a number goes out as
+ * `uniform1f`, three numbers as a `vec3`, sixteen as a `mat4`, and anything
+ * with `{ width, height, data }` is uploaded as a texture. See docs/gl.md.
+ */
+export type ShaderUniformValue =
+  | number
+  | boolean
+  | readonly number[]
+  | Float32Array
+  | { width: number; height: number; data: ArrayLike<number> };
+export type ShaderUniforms = Record<
+  string,
+  ShaderUniformValue | { value: ShaderUniformValue }
+>;
+
+/**
+ * `<shaderMaterial>` — your own GLSL, on the **direct** backend only (the GLX
+ * protocol encodes no shader objects). `position`, `normal`, `uv` and
+ * three.js's matrix uniforms are declared for you.
+ */
+export interface ShaderMaterialProps extends MaterialProps {
+  vertexShader?: string;
+  fragmentShader?: string;
+  uniforms?: ShaderUniforms;
+}
+
+/** `<rawShaderMaterial>` — the same, with nothing declared for you. */
+export interface RawShaderMaterialProps extends ShaderMaterialProps {}
+
 /** Every host element react-x11 renders. */
 export interface ReactX11Elements {
   window: WindowProps;
@@ -706,6 +737,8 @@ export interface ReactX11Elements {
   meshBasicMaterial: MeshBasicMaterialProps;
   meshLambertMaterial: MeshLambertMaterialProps;
   meshPhongMaterial: MeshPhongMaterialProps;
+  shaderMaterial: ShaderMaterialProps;
+  rawShaderMaterial: RawShaderMaterialProps;
   ambientLight: AmbientLightProps;
   directionalLight: DirectionalLightProps;
   pointLight: PointLightProps;

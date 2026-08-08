@@ -56,7 +56,11 @@ export function Canvas3D({ children, style, fallback, onError, ...props }) {
   const [error, setError] = useState(() => glxFailure(app));
   const handleError = useCallback(
     (err) => {
-      setError(err);
+      // The fallback means "this surface has no GL", so only a failure to get
+      // a context switches to it. A shader that will not compile is a bug in
+      // one material, not a machine without 3D — replacing the whole scene
+      // with "no 3D here" would send the reader off to check their drivers.
+      if (err?.code !== 'GL_SHADER_FAILED') setError(err);
       onError?.(err);
     },
     [onError],

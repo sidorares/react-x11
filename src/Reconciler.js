@@ -43,9 +43,14 @@ import { beginStartup } from './startup.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
 import { watchAppearance } from './appearance.js';
-import { GlAreaNode } from './glnodes.js';
+import { GlAreaNode, hasDirectGL } from './glnodes.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
-import { SCENE_KINDS, UNSUPPORTED_KINDS, createSceneNode } from './scene3d.js';
+import {
+  DIRECT_ONLY_KINDS,
+  SCENE_KINDS,
+  UNSUPPORTED_KINDS,
+  createSceneNode,
+} from './scene3d.js';
 import {
   MarkdownNode,
   HtmlNode,
@@ -191,6 +196,18 @@ const HostConfig = {
       );
     }
     if (hostContext.isInside3d) {
+      // A shader material needs a pipeline that has shaders. Whether this
+      // connection has one is already known — ntk settles it during connect —
+      // so the answer arrives here rather than as a blank surface later.
+      if (DIRECT_ONLY_KINDS[type] && !hasDirectGL(rootContainer)) {
+        throw new Error(
+          `react-x11: <${type}> needs direct rendering, and this connection ` +
+            `does not have it — ${DIRECT_ONLY_KINDS[type]}.\n` +
+            'Direct rendering is ntk\'s GPU backend: createClient({ glPolicy: "auto" }) ' +
+            'turns it on where a local DRI3 server and the x11-dri addon are both ' +
+            'present. app.glCapabilities() says why not. See docs/gl.md.',
+        );
+      }
       const scene = createSceneNode(type, props, rootContainer);
       if (scene) {
         scene._reactFiber = internalHandle;
@@ -198,8 +215,8 @@ const HostConfig = {
       }
       if (UNSUPPORTED_KINDS[type]) {
         throw new Error(
-          `react-x11: <${type}> cannot work over indirect GLX — ` +
-            `${UNSUPPORTED_KINDS[type]}. See docs/glx-plan.md.`,
+          `react-x11: <${type}> is not supported — ` +
+            `${UNSUPPORTED_KINDS[type]}. See docs/gl.md.`,
         );
       }
       throw new Error(
@@ -572,6 +589,11 @@ const CONNECT_OPTIONS = [
   'stream',
   'fontSource',
   'glxVisual',
+  // which OpenGL backend <glarea>/<Canvas3D> draw through: 'indirect' (ntk's
+  // default), 'auto', 'direct' or 'off'. It has to be passed at connect time
+  // rather than set later, because ntk probes for the direct backend during
+  // the handshake — see docs/gl.md.
+  'glPolicy',
   'onXError',
 ];
 

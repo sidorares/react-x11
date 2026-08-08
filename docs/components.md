@@ -1190,7 +1190,18 @@ Xwayland :5 +iglx & DISPLAY=:5 npm run examples:three
 
 Be warned that on current Linux distros the indirect GL engine behind those
 contexts is frequently missing even with `+iglx` — contexts are created and
-nothing rasterizes. See [3D over indirect GLX](glx.md).
+nothing rasterizes.
+
+**On a modern Linux desktop the better answer is the other backend.** Those
+same servers that refuse indirect GLX generally do have DRI3, which is what
+direct rendering needs, so a scene that shows the fallback here often just
+works with:
+
+```jsx
+const root = await createRoot({ glPolicy: 'auto' });
+```
+
+That also unlocks `<shaderMaterial>`. See [the two backends](gl.md).
 
 ## `useAnchor(ref)` / `anchorRect(node, options)`
 

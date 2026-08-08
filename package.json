@@ -42,6 +42,7 @@
     "examples:stress": "tsx examples/stress/index.jsx",
     "examples:gl": "tsx examples/gl.jsx",
     "examples:three": "tsx examples/three.jsx",
+    "examples:shader": "tsx examples/shader.jsx",
     "examples:transparent": "tsx examples/transparent.jsx",
     "examples:windows": "tsx examples/windows.jsx",
     "examples:wm": "tsx examples/wm.jsx",
@@ -73,7 +74,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^7.2.0",
+    "ntk": "^7.3.0",
     "react-reconciler": "^0.33.0"
   },
   "optionalDependencies": {

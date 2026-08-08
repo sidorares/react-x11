@@ -174,5 +174,7 @@ ntk's frame clock.
 | `REACT_X11_CLICK_TO_COMPONENT=1` | Alt+Click opens the clicked element's source, using `cursor` (see click-to-component.md) |
 | `REACT_X11_EDITOR`               | editor CLI for click-to-component — setting this alone also enables it                   |
 
+- [gl.md](gl.md) — the two 3D backends: `glPolicy`, what each can draw, and
+  `<shaderMaterial>` — GLSL with three.js's names, on the direct one
 - [glx.md](glx.md) — how the 3D scene works over indirect GLX: what the
   protocol encodes, why display lists are mandatory, and what can never work
