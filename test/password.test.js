@@ -233,7 +233,11 @@ test('the eye swaps the mask for a real input, and leaving hides it again', asyn
   const [input] = inputs(app);
   assert.ok(input, 'revealed, the field is an ordinary <textinput>');
   assert.strictEqual(input.value, 'letmein');
-  assert.strictEqual(canvases(app).length, 1, 'and the mask is gone: only the eye');
+  assert.strictEqual(
+    canvases(app).length,
+    1,
+    'and the mask is gone: only the eye',
+  );
 
   // …with everything a text input has, the caret included
   input.focus();
@@ -243,7 +247,11 @@ test('the eye swaps the mask for a real input, and leaving hides it again', asyn
   input.blur();
   await sleep(5);
   await settle();
-  assert.deepStrictEqual(inputs(app), [], 'hidden on the way out of the widget');
+  assert.deepStrictEqual(
+    inputs(app),
+    [],
+    'hidden on the way out of the widget',
+  );
   assert.deepStrictEqual(texts(app), [], 'and the secret is not drawn as text');
 
   await root.unmount();
@@ -270,7 +278,10 @@ test('a revealed field still lets nothing out by a selection', async () => {
   );
 
   const menu = input._editMenuItems().map((item) => item.id);
-  assert.ok(!menu.includes('copy') && !menu.includes('cut'), 'nor does the menu');
+  assert.ok(
+    !menu.includes('copy') && !menu.includes('cut'),
+    'nor does the menu',
+  );
   assert.ok(menu.includes('paste'), 'but pasting in is still there');
 
   await root.unmount();
