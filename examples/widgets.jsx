@@ -85,7 +85,13 @@ export function WidgetsPanel() {
       </Row>
 
       <Row label="Switch">
-        <Switch checked={notify} onChange={(ev) => setNotify(ev.value)} />
+        {/* the label beside it is a sibling, not a name a screen reader
+            can find — a control with no text of its own needs one */}
+        <Switch
+          aria-label="Notifications"
+          checked={notify}
+          onChange={(ev) => setNotify(ev.value)}
+        />
         <text style={{ color: '$text' }}>
           {notify ? 'notifications on' : 'off'}
         </text>
@@ -93,6 +99,7 @@ export function WidgetsPanel() {
 
       <Row label="Slider">
         <Slider
+          aria-label="Volume"
           value={volume}
           min={0}
           max={100}
@@ -105,7 +112,7 @@ export function WidgetsPanel() {
 
       <Row label="Progress">
         <box style={{ flexGrow: 1 }}>
-          <ProgressBar value={progress} />
+          <ProgressBar aria-label="Download" value={progress} />
         </box>
         <text
           style={{ color: '$dim' }}

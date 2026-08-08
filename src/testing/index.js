@@ -37,6 +37,7 @@ export {
 } from './harness.js';
 
 export { within, textOf, roleOf } from './queries.js';
+export { installA11ySpy, nodeUtterance, utteranceOf } from './a11y.js';
 export { inspect, ownerChainOf, sourceOf } from './components.js';
 export {
   fireEvent,

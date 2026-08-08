@@ -86,6 +86,7 @@ export function Switch({
     {
       theme,
       role: 'switch',
+      'aria-checked': checked,
       ...control.props,
       ...boxProps,
       style: [

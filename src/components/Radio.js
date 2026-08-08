@@ -92,6 +92,7 @@ export function Radio({ value, children, label, disabled = false }) {
     {
       theme,
       role: 'radio',
+      'aria-checked': selected,
       ...props,
       style: [
         controlStyle,

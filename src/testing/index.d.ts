@@ -59,6 +59,84 @@ export interface RenderX11Options {
   title?: string;
   /** Render into a connection you already have. */
   app?: NtkApp;
+  /**
+   * Install the assistive-technology spy before the mount and hand it back
+   * as `at`: an in-process log of everything a screen reader would have
+   * been told — focus, state changes, text edits, announcements — with no
+   * D-Bus anywhere. See docs/accessibility.md.
+   */
+  a11y?: boolean;
+}
+
+/** One recorded assistive-technology fact, plus its one-line `summary`. */
+export interface A11ySpyEvent {
+  type:
+    | 'focus'
+    | 'blur'
+    | 'state'
+    | 'name'
+    | 'value'
+    | 'text-insert'
+    | 'text-delete'
+    | 'caret'
+    | 'selection'
+    | 'announce'
+    | 'window';
+  /** The transcript line — `"focus: Save, button"`, `"state: checked"`. */
+  summary: string;
+  node?: DrawnNode | null;
+  /** For `focus`. */
+  utterance?: string;
+  /** For `state`: the AT-SPI state nick, and whether it turned on. */
+  state?: string;
+  on?: boolean;
+  /** For `name` / `announce` / `text-*`. */
+  name?: string;
+  text?: string;
+  assertive?: boolean;
+  /** For `value`. */
+  value?: number;
+  /** For `text-*` / `caret`. */
+  offset?: number;
+  /** For `selection`. */
+  start?: number;
+  end?: number;
+  /** For `window`. */
+  focused?: boolean;
+}
+
+/** A focusable (or focused) node as an AT would describe it. */
+export interface A11yDescription {
+  node: DrawnNode;
+  name: string;
+  /** The AT-SPI role name — `"check box"`, `"entry"`. */
+  role: string;
+  /** The set state nicks — `"focusable"`, `"checked"`, `"sensitive"`, … */
+  states: string[];
+  /** `"(no accessible name)"` when there is nothing to say. */
+  utterance: string;
+}
+
+/**
+ * The in-process assistive-technology spy: the same semantic feed the
+ * AT-SPI bridge serves, observed at the hook seam with no bus. Assert on
+ * `events()`/`since()` for exact facts, on `transcript()` for "what would
+ * a user have been told".
+ */
+export interface A11ySpy {
+  /** Every entry recorded so far, oldest first. */
+  events(): A11ySpyEvent[];
+  /** Entries since the previous `since()` (or `clear()`). */
+  since(): A11ySpyEvent[];
+  /** The `summary` of every entry — made for `assert.deepEqual`. */
+  transcript(): string[];
+  clear(): void;
+  /** The focused node as an AT would describe it, or null. */
+  focused(): A11yDescription | null;
+  /** Every keyboard-reachable node, in Tab order, focus scopes included. */
+  focusables(): A11yDescription[];
+  /** Put the hook slots back; `cleanup()` does this for you. */
+  uninstall(): void;
 }
 
 export interface Queries {
@@ -161,9 +239,27 @@ export interface RenderX11Result extends Queries {
   window: NtkWindow | null;
   /** The window's 2d context, which is what pixel assertions read. */
   readonly ctx: TestContext2D;
+  /** The assistive-technology spy, when `a11y: true` asked for one. */
+  at: A11ySpy | null;
   rerender(element: ReactNode): Promise<void>;
   unmount(): Promise<void>;
 }
+
+/** Install a spy outside `renderX11` — install **before** rendering, and
+ * uninstall yourself. Prefer `renderX11(el, { a11y: true })`. */
+export function installA11ySpy(): A11ySpy;
+
+/** The utterance for a live node, through the shared model. */
+export function nodeUtterance(node: DrawnNode): string;
+
+/** The utterance formatter itself, for callers that gathered the parts
+ * elsewhere (scripts/a11y-probe.mjs reads them over real D-Bus). */
+export function utteranceOf(parts: {
+  name: string;
+  role?: string;
+  states?: string[];
+  value?: { now: number; min?: number; max?: number } | null;
+}): string;
 
 /**
  * Mount a tree against a real in-process X server and return a handle plus

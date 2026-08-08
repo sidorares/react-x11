@@ -134,8 +134,12 @@ export async function loadTransport() {
  * Deliberately no `busAddress` parameter on the public API: a per-call
  * address is incoherent under sharing. Two callers, two addresses, one
  * socket — which would win? Tests use this same seam.
+ *
+ * Not public, but exported for atspi.js, whose one-shot discovery probe
+ * dials its own short-lived connection rather than the shared one — see
+ * the note in `accessibilityBusAddress`.
  */
-function addressFor(kind) {
+export function addressFor(kind) {
   if (kind === 'system') {
     return (
       process.env.DBUS_SYSTEM_BUS_ADDRESS ||

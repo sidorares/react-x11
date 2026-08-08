@@ -905,11 +905,13 @@ The right-click edit menu for the text controls is done too (#90,
 `src/editmenu.js`), which closed **#88** — including its second half, where
 right-click used to collapse the selection.
 
-Next: a generic Popover, a file open/save dialog, and the AT-SPI
-accessibility work (NEXT_STEPS §11.3), which the focus work has unblocked.
-Open GitHub issues, both real: **#85** keyboard layout switching is ignored
-(non-Latin layouts always type Latin), **#86** `sans-serif` resolves to a
-CJK font on macOS.
+The AT-SPI accessibility work is done and in core (NEXT_STEPS §11.3,
+[docs/accessibility.md](docs/accessibility.md)): standard `role`/`aria-*`
+props on every element, `src/a11y.js` (the model) + `src/atspi.js` (the
+bridge), Orca-verified. Next: a generic Popover and a file open/save
+dialog. Open GitHub issues, both real: **#85** keyboard layout switching
+is ignored (non-Latin layouts always type Latin), **#86** `sans-serif`
+resolves to a CJK font on macOS.
 
 ## Pull requests
 
