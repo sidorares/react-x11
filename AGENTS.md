@@ -53,6 +53,21 @@ no override-redirect staging (issue #4).
   the shared plumbing in `theme.js` (palette, `useTheme`, `useControl`),
   `anchor.js` (popup placement + label measurement), `typeahead.js` and
   `keys.js`. `index.js` re-exports the public names.
+- `src/menuitem.js`, `src/dbusmenu.js`, `src/globalmenu.js` — the global
+  menu (#112). `menuitem.js` is the item vocabulary, which is
+  `com.canonical.dbusmenu`'s rather than one of our own **so that the array
+  `MenuBar` draws is the array that serialises** — one authoring model, no
+  translation layer. `dbusmenu.js` is pure: stable ids across re-renders, and
+  the diff that decides between `ItemsPropertiesUpdated` (revision unchanged)
+  and `LayoutUpdated`, which is a performance decision rather than a
+  cosmetic one. `globalmenu.js` is the wire: registrar detection, the export,
+  the KDE window properties, and `useGlobalMenu`. Two traps live there and
+  are commented at length — detection means a **live owner** (the opposite of
+  `hasService()`'s rule, because a registrar is a directory rather than a
+  feature), and every call to it carries `NO_AUTO_START`, without which
+  tidying up after a dead panel launches a new registrar nobody reads.
+  `scripts/globalmenu-host.mjs` is a panel in a terminal; there is no
+  installable dbusmenu client to test against otherwise.
 - `src/styles.js` — flat style props → yoga setters; paint prop
   classification; text style resolution.
 - `src/events.js` — `EventManager`: ntk window events → synthetic events

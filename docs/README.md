@@ -12,6 +12,12 @@
   `Radio`/`RadioGroup`, `Switch`, `ProgressBar`), `Select`, `Slider`,
   `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `Tree`,
   `SplitPane`, `Canvas3D`, and the `useAnchor` popup placement hook.
+- [globalmenu.md](globalmenu.md) — handing a window's menu bar to the
+  desktop's panel where there is one, with no configuration: the dbusmenu
+  item vocabulary `MenuBar` shares with it, why detection means "a panel is
+  running" rather than "one could be started", the diff that decides between
+  patching properties and invalidating a layout, and the menu host in
+  `scripts/` for seeing it work without such a desktop.
 - [events.md](events.md) — the synthetic event system: dispatch phases,
   event object shape, focus, cursors, default actions.
 - [react-features.md](react-features.md) — what your React knowledge buys

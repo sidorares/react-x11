@@ -60,12 +60,12 @@ async function showBuiltin(app, theme, props) {
  * ```jsx
  * const { openFile, saveFile } = useFileDialog();
  *
- * <MenuBar onSelect={async (id) => {
- *   if (id === 'open') {
- *     const files = await openFile({ filters: [{ name: 'Text', extensions: ['txt', 'md'] }] });
- *     if (files) load(files[0]);       // null means the user cancelled
- *   }
- * }} />
+ * const open = async () => {
+ *   const files = await openFile({ filters: [{ name: 'Text', extensions: ['txt', 'md'] }] });
+ *   if (files) load(files[0]);         // null means the user cancelled
+ * };
+ *
+ * <MenuBar menus={[{ label: 'File', items: [{ label: 'Open…', onSelect: open }] }]} />
  * ```
  *
  * **No arguments needed.** The dialog is parented to the window this

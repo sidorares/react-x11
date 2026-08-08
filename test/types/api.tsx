@@ -33,6 +33,7 @@ import {
   useApp,
   useClipboard,
   useFileDialog,
+  useGlobalMenu,
   useSessionBus,
   useSystemBus,
   ContextMenu,
@@ -551,13 +552,44 @@ function Widgets() {
         <box />
         <box />
       </SplitPane>
+      {/* The item vocabulary is dbusmenu's, so the same array both draws and
+          exports to the desktop's panel. */}
       <MenuBar
         menus={[
-          { label: 'File', items: [{ label: 'Open' }, { separator: true }] },
+          {
+            label: 'File',
+            items: [
+              {
+                label: 'Open',
+                shortcut: [['Control', 'O']],
+                iconName: 'document-open',
+              },
+              { type: 'separator' },
+              { label: 'Save As…', enabled: false },
+              { label: 'Hidden', visible: false },
+              {
+                label: 'Wrap lines',
+                toggleType: 'checkmark',
+                toggleState: 1,
+              },
+              { label: 'Discard', disposition: 'warning' },
+              {
+                label: 'Recent',
+                items: [
+                  { key: 'r1', label: 'notes.md', onSelect: (i) => void i },
+                ],
+              },
+            ],
+          },
         ]}
         onSelect={(item) => void item.label}
       />
-      <ContextMenu items={[{ label: 'Copy', shortcut: 'Ctrl+C' }]}>
+      <MenuBar
+        menus={[]}
+        globalMenu={false}
+        onGlobalMenuChange={(exported: boolean) => void exported}
+      />
+      <ContextMenu items={[{ label: 'Copy', shortcut: [['Control', 'C']] }]}>
         <box />
       </ContextMenu>
       <Dialog
@@ -662,6 +694,17 @@ function _Clip() {
   }
   void go;
   return null;
+}
+
+// the global menu: a component drawing its own bar, delegating like MenuBar
+function _GlobalMenu() {
+  const menus = [{ label: 'File', items: [{ label: 'Quit' }] }];
+  const exported: boolean = useGlobalMenu(menus, {
+    onSelect: (item) => void item.label,
+    onAboutToShow: (item) => void item.items,
+  });
+  if (exported) return null; // the panel has it
+  return <MenuBar menus={menus} globalMenu={false} />;
 }
 
 // the bus floor: the hooks, the imperative pair, and the `required` overload

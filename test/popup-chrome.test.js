@@ -57,7 +57,7 @@ const MENUS = [
     label: 'File',
     items: [
       { label: 'New' },
-      { separator: true },
+      { type: 'separator' },
       {
         label: 'Export',
         items: [{ label: 'PNG' }, { label: 'SVG' }],
@@ -75,7 +75,10 @@ async function openMenu({ composited = true } = {}) {
     h(
       'window',
       { width: 300, height: 200 },
-      h(MenuBar, { menus: MENUS, fontSize: 13 }),
+      // `globalMenu: false` because this is a test about the bar we draw:
+      // on a developer's machine running a panel that shows application
+      // menus, the real `MenuBar` would correctly render nothing at all.
+      h(MenuBar, { menus: MENUS, fontSize: 13, globalMenu: false }),
     ),
   );
   await tick();

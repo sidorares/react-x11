@@ -27,6 +27,7 @@
     "examples:clipboard": "tsx examples/clipboard.jsx",
     "examples:dbus": "tsx examples/dbus.jsx",
     "filedialog:probe": "node scripts/filedialog-probe.mjs",
+    "globalmenu:host": "node scripts/globalmenu-host.mjs",
     "examples:form": "tsx examples/form.jsx",
     "examples:rules": "tsx examples/rules.jsx",
     "examples:richtext": "tsx examples/richtext.jsx",

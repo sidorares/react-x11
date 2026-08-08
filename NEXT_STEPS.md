@@ -739,7 +739,9 @@ menus/tooltips.
   extra dependency, so splitting them buys nothing and costs a
   peer-version matrix. The packages that genuinely want to be separate are
   the ones with dependencies core must not take — `@react-x11/desktop`
-  (D-Bus: portals, notifications, tray, global menu, #129) and
+  (D-Bus: portals, notifications, tray, #129; the global menu landed in
+  core with #112, since `MenuBar` is in core and the feature is a property
+  of `MenuBar`) and
   `@react-x11/a11y` (AT-SPI, §11.3) — and each of those in its own
   repository turns every change into another land-release-bump chain on
   top of the node-x11 → ntk → here one that already exists. Workspaces

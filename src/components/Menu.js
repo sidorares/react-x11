@@ -16,6 +16,16 @@ import {
   useDismissOnWindowBlur,
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
+import { useGlobalMenu } from '../globalmenu.js';
+import {
+  checkShortcut,
+  formatShortcut,
+  hasSubmenu,
+  isEnabled,
+  isSelectable,
+  isSeparator,
+  visibleItems,
+} from '../menuitem.js';
 import {
   XK_DOWN,
   XK_END,
@@ -70,13 +80,11 @@ const MENU_SHORTCUT_GAP = 24;
 // stride — deriving one from the menu height would just equal Home/End
 const MENU_PAGE_ROWS = 10;
 
-const isSelectable = (item) => item && !item.separator && !item.disabled;
-
 /** Total popup height for a menu's items (separators are shorter). */
 function menuListHeight(items) {
-  const body = items.reduce(
+  const body = visibleItems(items).reduce(
     (sum, item) =>
-      sum + (item.separator ? MENU_SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT),
+      sum + (isSeparator(item) ? MENU_SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT),
     0,
   );
   return body + (MENU_PAD + MENU_BORDER) * 2;
@@ -85,13 +93,14 @@ function menuListHeight(items) {
 /** Widest label + shortcut, measured, so the popup can be sized up front. */
 function menuListWidth(node, items, fontSize) {
   let widest = 0;
-  for (const item of items) {
-    if (item.separator) continue;
+  for (const item of visibleItems(items)) {
+    if (isSeparator(item)) continue;
     const label = measureLabel(node, item.label ?? '', {
       size: fontSize,
     }).width;
-    const shortcut = item.shortcut
-      ? measureLabel(node, item.shortcut, { size: fontSize }).width +
+    const accelerator = formatShortcut(item.shortcut);
+    const shortcut = accelerator
+      ? measureLabel(node, accelerator, { size: fontSize }).width +
         MENU_SHORTCUT_GAP
       : 0;
     widest = Math.max(widest, label + shortcut);
@@ -114,7 +123,27 @@ function nextSelectable(items, from, dir) {
 }
 
 /**
- * What goes in the column to the left of the label: a check mark, or the
+ * The glyph for a `toggleType`/`toggleState` pair, or `null` for an item that
+ * is not a toggle at all.
+ *
+ * Three states rather than two, because dbusmenu has three and the third is
+ * not "off": `-1` is **indeterminate** — a "Bold" that is on for part of the
+ * selection — and drawing it as unchecked would answer a question the item is
+ * explicitly declining to answer. GTK draws a dash for it, so a dash it is.
+ *
+ * An item whose `toggleState` is 0 draws nothing and keeps its gutter, which
+ * is what stops a menu of checkboxes from shuffling sideways as they are
+ * ticked.
+ */
+function toggleMark(item) {
+  if (!item.toggleType) return null;
+  if (item.toggleState === -1) return '–';
+  if (item.toggleState !== 1) return null;
+  return item.toggleType === 'radio' ? '●' : '✓';
+}
+
+/**
+ * What goes in the column to the left of the label: a toggle mark, or the
  * item's `icon`.
  *
  * One column for both, because that is the choice every desktop toolkit
@@ -133,7 +162,8 @@ function nextSelectable(items, from, dir) {
  * highlighted, disabled or at rest.
  */
 function gutterMark(item, { color, fontSize }) {
-  if (item.checked) return h('text', { style: { color, fontSize } }, '✓');
+  const toggle = toggleMark(item);
+  if (toggle) return h('text', { style: { color, fontSize } }, toggle);
   const { icon } = item;
   if (icon == null) return null;
   if (typeof icon === 'string' || typeof icon === 'number') {
@@ -172,7 +202,7 @@ function MenuRow({
   // only the live end of the trail takes the selection colour, and with it
   // the inverted label
   const active = state === 'active';
-  if (item.separator) {
+  if (isSeparator(item)) {
     return h(
       'box',
       {
@@ -182,8 +212,10 @@ function MenuRow({
       h('box', { style: { height: 1, backgroundColor: theme.border } }),
     );
   }
-  const dim = item.disabled;
-  const hasSubmenu = item.items?.length > 0;
+  const dim = !isEnabled(item);
+  const submenu = hasSubmenu(item);
+  const accelerator = formatShortcut(item.shortcut);
+  if (process.env.NODE_ENV !== 'production') checkShortcut(item);
   return h(
     'box',
     {
@@ -239,7 +271,7 @@ function MenuRow({
       item.label,
     ),
     h('box', { style: { flexGrow: 1 } }),
-    item.shortcut &&
+    accelerator &&
       h(
         'text',
         {
@@ -248,9 +280,9 @@ function MenuRow({
             fontSize: fontSize,
           },
         },
-        item.shortcut,
+        accelerator,
       ),
-    hasSubmenu &&
+    submenu &&
       h('text', {
         children: '\u25b8',
         style: {
@@ -261,10 +293,16 @@ function MenuRow({
   );
 }
 
-/** Items at `depth`, walking `path` down through nested `items`. */
+/**
+ * Items at `depth`, walking `path` down through nested `items`.
+ *
+ * Hidden items are dropped **here**, at the single point every level is read
+ * through, so `path` indexes the rows that exist. Filtering at the draw call
+ * instead would leave the keyboard walking a list the eye cannot see.
+ */
 function levelItems(rootItems, path, depth) {
-  let items = rootItems;
-  for (let d = 0; d < depth; d++) items = items[path[d]]?.items ?? [];
+  let items = visibleItems(rootItems);
+  for (let d = 0; d < depth; d++) items = visibleItems(items[path[d]]?.items);
   return items;
 }
 
@@ -290,8 +328,8 @@ function MenuLevel({
   const theme = useTheme();
   const items = levelItems(rootItems, path, depth);
   const active = path[depth] ?? -1;
-  const childItems = items[active]?.items;
-  const childOpen = path.length > depth + 1 && childItems?.length > 0;
+  const childItems = visibleItems(items[active]?.items);
+  const childOpen = path.length > depth + 1 && childItems.length > 0;
   // Has this level's selection handed over to the one below it? A submenu
   // opened with nothing selected in it yet has not: the pointer is still on
   // the row that opened it, and that row is still where the keys go.
@@ -356,7 +394,7 @@ function MenuLevel({
   const applyHover = (index) => {
     const base = [...path.slice(0, depth), index];
     // hovering a parent row opens its submenu with nothing selected inside
-    setPath(items[index]?.items?.length ? [...base, -1] : base);
+    setPath(hasSubmenu(items[index]) ? [...base, -1] : base);
   };
 
   const hover = (index, ev) => {
@@ -394,7 +432,7 @@ function MenuLevel({
   };
 
   const choose = (item) => {
-    if (item.items?.length) {
+    if (hasSubmenu(item)) {
       setPath([...path.slice(0, depth), items.indexOf(item), -1]);
       return;
     }
@@ -440,7 +478,7 @@ function MenuLevel({
       },
       items.map((item, index) =>
         h(MenuRow, {
-          key: item.separator ? `sep-${index}` : (item.key ?? item.label),
+          key: isSeparator(item) ? `sep-${index}` : (item.key ?? item.label),
           item,
           state: rowState(index, active, handedOn),
           fontSize,
@@ -484,8 +522,8 @@ function handleMenuKey(
   const active = path[depth];
   const setActive = (i) => setPath([...path.slice(0, depth), i]);
   const enterSubmenu = () => {
-    const sub = items[active]?.items;
-    if (!sub?.length) return false;
+    const sub = visibleItems(items[active]?.items);
+    if (!sub.length) return false;
     setPath([...path, nextSelectable(sub, -1, 1)]);
     return true;
   };
@@ -659,10 +697,18 @@ export function ContextMenu({
  * <MenuBar menus={[{ label, items }]}/> — a horizontal bar of pull-down
  * menus. Click or Enter opens; with one open, hovering another switches to
  * it and Left/Right walk the bar; the usual menu keys work inside.
+ *
+ * **On a desktop with a global menu, this renders nothing** and the panel
+ * shows the menu instead — automatically, with no configuration, because the
+ * `menus` array is a plain data prop and serialises to `com.canonical.dbusmenu`
+ * unchanged (`src/globalmenu.js`). `globalMenu={false}` keeps the bar in the
+ * window on a desktop that would otherwise take it.
  */
 export function MenuBar({
   menus = [],
   onSelect,
+  globalMenu = true,
+  onGlobalMenuChange,
   fontSize = DEFAULT_LABEL_SIZE,
   style,
   ...boxProps
@@ -681,7 +727,25 @@ export function MenuBar({
   // and close the menu the switch had just opened.
   const openRef = useRef(-1);
 
-  const items = openIndex >= 0 ? (menus[openIndex]?.items ?? []) : [];
+  // Drawn from the visible menus, exported from all of them: dbusmenu carries
+  // `visible` as a property, so hiding one there is a patch the panel applies
+  // rather than a structural change that renumbers everything after it.
+  const bar = useMemo(() => visibleItems(menus), [menus]);
+  const delegated = useGlobalMenu(menus, { onSelect, enabled: globalMenu });
+
+  // The one thing about this an app cannot find out for itself: calling
+  // `useGlobalMenu` a second time would export the menu twice, on two paths,
+  // with the second registration displacing the first. So the answer is
+  // reported rather than left to be re-derived. It is worth having — a window
+  // sized to its content is a menu bar shorter when the panel takes it, and
+  // copy that says "the bar above" is wrong the moment there is not one.
+  const notifyDelegation = useRef(onGlobalMenuChange);
+  notifyDelegation.current = onGlobalMenuChange;
+  useEffect(() => {
+    notifyDelegation.current?.(delegated);
+  }, [delegated]);
+
+  const items = openIndex >= 0 ? (bar[openIndex]?.items ?? []) : [];
 
   const close = () => {
     openRef.current = -1;
@@ -689,6 +753,13 @@ export function MenuBar({
     setRect(null);
     setPath([]);
   };
+
+  // A panel taking the menu over while one is pulled down would otherwise
+  // leave `openIndex` set, so the bar would come back open if the panel later
+  // went away — and the popup holds a pointer grab until something closes it.
+  useEffect(() => {
+    if (delegated) close();
+  }, [delegated]);
 
   /**
    * `reason` is the gesture that opened the menu, and it decides the ring.
@@ -700,8 +771,8 @@ export function MenuBar({
    */
   const openMenu = (index, reason = 'key') => {
     const node = refs.current[index];
-    const menu = menus[index];
-    if (!node || !menu?.items?.length) return;
+    const menu = bar[index];
+    if (!node || !hasSubmenu(menu)) return;
     const width = menuListWidth(node, menu.items, fontSize);
     const height = menuListHeight(menu.items);
     const next = anchorRect(node, { placement: 'bottom', width, height });
@@ -746,8 +817,8 @@ export function MenuBar({
     openIndex >= 0,
     () => {
       const node = refs.current[openRef.current];
-      const menu = menus[openRef.current];
-      if (!node || !menu?.items?.length) return null;
+      const menu = bar[openRef.current];
+      if (!node || !hasSubmenu(menu)) return null;
       return {
         placement: 'bottom',
         width: menuListWidth(node, menu.items, fontSize),
@@ -770,10 +841,16 @@ export function MenuBar({
   };
 
   const moveMenu = (dir) => {
-    if (!menus.length) return;
-    const n = menus.length;
+    if (!bar.length) return;
+    const n = bar.length;
     openMenu((openIndex + dir + n) % n);
   };
+
+  // The desktop is drawing this menu, so we must not. After every hook, and
+  // only on evidence — `delegated` is false until the registrar has answered
+  // `RegisterWindow`, so a machine with no panel, no bus, or a panel that
+  // refused the registration all keep the bar where the app put it.
+  if (delegated) return null;
 
   return h(
     'box',
@@ -789,7 +866,7 @@ export function MenuBar({
         style,
       ],
     },
-    menus.map((menu, index) => {
+    bar.map((menu, index) => {
       // The bar is the first level of the same trail: while its menu is open
       // with nothing chosen in it the item is the selection, and the moment a
       // row down there takes over it goes quiet — the same handover, drawn
