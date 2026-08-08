@@ -259,6 +259,14 @@ export interface Root {
  */
 export function createRoot(options?: RootOptions): Promise<Root>;
 
+/**
+ * Say something through the screen reader without moving focus — the
+ * explicit counterpart of an ARIA live region ("saved", "3 results").
+ * Returns `true` when an AT-SPI bridge was live to carry it; `false` means
+ * nobody was listening and a visible fallback may be warranted.
+ */
+export function announce(text: string, opts?: { assertive?: boolean }): boolean;
+
 /** The react-reconciler instance. Escape hatch; not a stable API. */
 export const Renderer: any;
 

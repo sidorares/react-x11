@@ -78,9 +78,16 @@ export function Slider({
   };
 
   const controlProps = disabled
-    ? {}
+    ? { disabled: true }
     : {
         focusable: true,
+        // the AT-SPI Value interface writes land here (Orca adjusting the
+        // slider): same clamp/quantize/emit as every other input route
+        onAccessibilityAction: ({ action, value: next }) => {
+          if (action === 'setValue' && typeof next === 'number') {
+            emit(quantize(clamp(next)));
+          }
+        },
         onFocus: () => setFocused(true),
         onBlur: () => setFocused(false),
         onMouseDown: (ev) => {
@@ -126,6 +133,10 @@ export function Slider({
     {
       theme,
       role: 'slider',
+      'aria-valuenow': clamp(value),
+      'aria-valuemin': min,
+      'aria-valuemax': max,
+      'aria-orientation': 'horizontal',
       ref: trackRef,
       ...controlProps,
       ...boxProps,

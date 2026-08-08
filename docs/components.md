@@ -19,6 +19,11 @@ with it). Everything else is forwarded to the host box. See
 Widget components are plain React built on the host elements — no
 reconciler support involved. They live in the package root export.
 
+All of them are screen-reader ready: roles, names, states and AT-driven
+control come built in, and an `aria-label` (or a label child) is the only
+thing a widget can need from you — [accessibility.md](accessibility.md)
+lists what each one announces.
+
 ## Theming
 
 **Widgets follow the desktop with nothing declared** — dark on a dark desktop,

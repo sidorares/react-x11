@@ -31,6 +31,9 @@ export function ProgressBar({
     {
       theme,
       role: 'progressbar',
+      'aria-valuenow': clamped,
+      'aria-valuemin': 0,
+      'aria-valuemax': 1,
       ...boxProps,
       style: [
         {

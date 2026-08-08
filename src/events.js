@@ -12,6 +12,7 @@ import { flushPendingFrames } from './frames.js';
 import { callHandler } from './errors.js';
 import { armDrag } from './dnd.js';
 import { noteInputTime } from './inputtime.js';
+import { hooks as a11yHooks, isFocusable } from './a11y.js';
 
 const XK_TAB = 0xff09;
 const WHEEL_BUTTONS = { 4: [0, -48], 5: [0, 48], 6: [-48, 0], 7: [48, 0] };
@@ -236,6 +237,7 @@ export class EventManager {
     // of this one having focus — a menu, a dropdown — which the focused node
     // keeping its focus would otherwise never tell (`WindowNode`, nodes.js)
     this.node._notifyWindowFocus?.(focused);
+    a11yHooks.windowFocus?.(this.node, focused);
     runWithPriority(DiscreteEventPriority, () => {
       const prop = focused ? 'onFocus' : 'onBlur';
       this.node.props[prop]?.(
@@ -497,13 +499,11 @@ export class EventManager {
 
   /** Focusable: `focusable`, an explicit `tabIndex` (including a negative
    * one, focusable but not tabbable), or a kind that is focusable by default
-   * (`<textinput>`). `focusable={false}` and `disabled` opt back out. */
+   * (`<textinput>`). `focusable={false}` and `disabled` opt back out. The
+   * rule itself lives in a11y.js, shared with the focus ring and the
+   * AT-SPI FOCUSABLE state. */
   _isFocusable(node) {
-    if (node.props.disabled) return false;
-    return (
-      node.props.focusable ??
-      (node.props.tabIndex != null ? true : (node.focusableByDefault ?? false))
-    );
+    return isFocusable(node);
   }
 
   _onMouseOut(native) {
@@ -680,6 +680,7 @@ export class EventManager {
       node.props.onFocus?.(this._makeEvent('focus', null, node));
       node.root?.invalidate(false, node, 'focus');
     }
+    a11yHooks.focus?.(old, node);
   }
 
   /**

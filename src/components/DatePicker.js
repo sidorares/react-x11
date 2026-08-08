@@ -184,6 +184,9 @@ export function DatePicker({
     {
       theme,
       role: 'combobox',
+      'aria-expanded': Boolean(open),
+      'aria-haspopup': 'dialog',
+      disabled: disabled || undefined,
       ref: triggerRef,
       focusable: !disabled,
       onMouseDown: disabled ? undefined : toggle,

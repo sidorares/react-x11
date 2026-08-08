@@ -41,12 +41,143 @@ export interface InteractionProps {
    * when it unmounts. This is what makes a modal.
    */
   trapFocus?: boolean;
-  /** Never focusable, and the trigger for a `:disabled` style block. */
+  /** Never focusable, and the trigger for a `:disabled` style block. Also
+   * clears the AT-SPI ENABLED/SENSITIVE states. */
   disabled?: boolean;
 }
 
+/**
+ * The ARIA role vocabulary the AT-SPI bridge maps (src/a11y.js). An
+ * unknown string falls back to the element default and warns in DEV; the
+ * open union keeps forward compatibility.
+ */
+export type A11yRole =
+  | 'alert'
+  | 'alertdialog'
+  | 'article'
+  | 'banner'
+  | 'blockquote'
+  | 'button'
+  | 'caption'
+  | 'cell'
+  | 'checkbox'
+  | 'columnheader'
+  | 'combobox'
+  | 'comment'
+  | 'complementary'
+  | 'contentinfo'
+  | 'dialog'
+  | 'document'
+  | 'form'
+  | 'grid'
+  | 'gridcell'
+  | 'group'
+  | 'heading'
+  | 'img'
+  | 'link'
+  | 'list'
+  | 'listbox'
+  | 'listitem'
+  | 'log'
+  | 'main'
+  | 'marquee'
+  | 'math'
+  | 'menu'
+  | 'menubar'
+  | 'menuitem'
+  | 'menuitemcheckbox'
+  | 'menuitemradio'
+  | 'meter'
+  | 'navigation'
+  | 'none'
+  | 'note'
+  | 'option'
+  | 'paragraph'
+  | 'presentation'
+  | 'progressbar'
+  | 'radio'
+  | 'radiogroup'
+  | 'region'
+  | 'row'
+  | 'rowheader'
+  | 'scrollbar'
+  | 'search'
+  | 'searchbox'
+  | 'separator'
+  | 'slider'
+  | 'spinbutton'
+  | 'status'
+  | 'switch'
+  | 'tab'
+  | 'table'
+  | 'tablist'
+  | 'tabpanel'
+  | 'term'
+  | 'textbox'
+  | 'timer'
+  | 'toolbar'
+  | 'tooltip'
+  | 'tree'
+  | 'treegrid'
+  | 'treeitem'
+  | 'window'
+  | (string & {});
+
+/** An action assistive technology asked the app to perform. */
+export interface A11yActionEvent {
+  action: 'setValue';
+  /** For `setValue`: the value the AT wants (AT-SPI `Value.CurrentValue`). */
+  value?: number;
+}
+
+/**
+ * Accessibility, in the web's vocabulary — the same `role` / `aria-*`
+ * names react-dom accepts. Read by the AT-SPI bridge (docs/accessibility.md);
+ * inert (and harmless) where there is no accessibility bus. Every host
+ * element takes these, which is the whole seam a component library needs.
+ */
+export interface A11yProps {
+  /** What this element *is* to a screen reader. */
+  role?: A11yRole;
+  /** The accessible name, above every other name source. */
+  'aria-label'?: string;
+  /** Supplementary description (AT-SPI `Description`). */
+  'aria-description'?: string;
+  /** Remove this subtree from the accessible tree entirely. */
+  'aria-hidden'?: boolean;
+  'aria-checked'?: boolean | 'mixed';
+  'aria-selected'?: boolean;
+  'aria-expanded'?: boolean;
+  'aria-pressed'?: boolean | 'mixed';
+  'aria-busy'?: boolean;
+  'aria-modal'?: boolean;
+  'aria-readonly'?: boolean;
+  'aria-required'?: boolean;
+  /** Truthy exposes HAS_POPUP; the string names what opens. */
+  'aria-haspopup'?: boolean | 'menu' | 'listbox' | 'dialog' | 'grid' | 'tree';
+  'aria-orientation'?: 'horizontal' | 'vertical';
+  /** Present ⇒ the element exposes the AT-SPI Value interface. */
+  'aria-valuenow'?: number;
+  'aria-valuemin'?: number;
+  'aria-valuemax'?: number;
+  'aria-valuetext'?: string;
+  /** Outline level, for `role="heading"` and tree items. */
+  'aria-level'?: number;
+  'aria-posinset'?: number;
+  'aria-setsize'?: number;
+  /** The shortcut that triggers this ("Ctrl+N"), announced with the item. */
+  'aria-keyshortcuts'?: string;
+  /**
+   * Assistive technology drove the control — Orca setting a slider's value
+   * through the AT-SPI Value interface. Wire it to the same state setter
+   * as the pointer and the keyboard. Activation needs no handler here: the
+   * bridge dispatches a synthetic click through the normal event path.
+   */
+  onAccessibilityAction?: (ev: A11yActionEvent) => void;
+}
+
 export interface DrawnProps<T = DrawnNode>
-  extends CommonProps, InteractionProps, EventHandlers<T> {
+  extends CommonProps, InteractionProps, A11yProps, EventHandlers<T> {
   ref?: Ref<T>;
 }
 
@@ -88,6 +219,7 @@ export interface WindowProps
   extends
     CommonProps,
     InteractionProps,
+    A11yProps,
     EventHandlers<DrawnNode>,
     SizeHintProps {
   ref?: Ref<NtkWindow>;
@@ -324,6 +456,8 @@ export interface TextAreaProps extends TextInputProps {
 export interface ImageProps extends DrawnProps<DrawnNode> {
   /** File path; PNG or JPEG, decoded in JS. */
   src: string;
+  /** The accessible name — what a screen reader says for this image. */
+  alt?: string;
 }
 // Size is `style={{ width, height }}`, like every other element: `width`
 // and `height` are style names, so they are not declared here.

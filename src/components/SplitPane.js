@@ -156,6 +156,12 @@ export function SplitPane({
     h(
       'box',
       {
+        // the ARIA window-splitter pattern: a separator whose value is the
+        // primary pane's size
+        role: 'separator',
+        'aria-orientation': vertical ? 'vertical' : 'horizontal',
+        'aria-valuenow': current,
+        'aria-valuemin': min,
         ...dividerProps,
         style: [
           s.divider,

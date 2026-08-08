@@ -177,6 +177,7 @@ function MenuRow({
       'box',
       {
         theme,
+        role: 'separator',
         style: { height: MENU_SEPARATOR_HEIGHT, justifyContent: 'center' },
       },
       h('box', { style: { height: 1, backgroundColor: theme.border } }),
@@ -187,6 +188,16 @@ function MenuRow({
   return h(
     'box',
     {
+      role: item.checked !== undefined ? 'menuitemcheckbox' : 'menuitem',
+      // the label alone: without it, name-from-contents would read the
+      // shortcut and the submenu arrow into the name ("New Ctrl+N")
+      'aria-label': typeof item.label === 'string' ? item.label : undefined,
+      'aria-keyshortcuts':
+        typeof item.shortcut === 'string' ? item.shortcut : undefined,
+      'aria-checked': item.checked !== undefined ? item.checked : undefined,
+      'aria-haspopup': hasSubmenu ? 'menu' : undefined,
+      'aria-expanded': hasSubmenu ? state === 'path' : undefined,
+      disabled: dim || undefined,
       ref: nodeRef,
       onMouseEnter: dim ? undefined : onHover,
       onMouseMove: dim ? undefined : onMove,
@@ -428,6 +439,7 @@ function MenuLevel({
       'box',
       {
         ref: listRef,
+        role: 'menu',
         style: {
           flexGrow: 1,
           flexShrink: 1,
@@ -779,6 +791,7 @@ export function MenuBar({
     'box',
     {
       theme,
+      role: 'menubar',
       ...boxProps,
       style: [
         {
@@ -799,6 +812,9 @@ export function MenuBar({
         'box',
         {
           key: menu.label,
+          role: 'menuitem',
+          'aria-haspopup': 'menu',
+          'aria-expanded': openIndex === index,
           ref: (node) => {
             refs.current[index] = node;
           },
