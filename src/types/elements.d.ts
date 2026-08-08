@@ -9,7 +9,7 @@ import type { Color, Cursor, StyleProp } from './style.js';
 import type {
   DrawnNode,
   NtkWindow,
-  ScrollViewNode,
+  ScrollableNode,
   TextInputNode,
 } from './nodes.js';
 import type {
@@ -221,7 +221,8 @@ export interface WindowProps
     InteractionProps,
     A11yProps,
     EventHandlers<DrawnNode>,
-    SizeHintProps {
+    SizeHintProps,
+    ScrollProps {
   ref?: Ref<NtkWindow>;
   /** Window title (UTF-8, via `WM_NAME` + `_NET_WM_NAME`). */
   title?: string;
@@ -389,12 +390,28 @@ export interface PopupProps extends WindowProps {
 
 // --- drawn elements --------------------------------------------------------
 
-export interface BoxProps extends DrawnProps<DrawnNode> {}
+/**
+ * The flex container — and, with `style={{overflow: 'scroll'}}`, the scroll
+ * container. The scrolling props below do nothing until the style says so.
+ */
+export interface BoxProps
+  extends Omit<DrawnProps<DrawnNode>, 'ref'>, ScrollProps {
+  /**
+   * Either node type, because a `<box>` is both: `DrawnNode` is what most
+   * refs want and what every existing one already is, and `ScrollableNode`
+   * is the same node with `scrollTo` / `scrollX` / `contentHeight` on it.
+   * Reach for the second only on a box you actually scroll —
+   * `useRef<ScrollableNode>(null)`.
+   */
+  ref?: Ref<ScrollableNode> | Ref<DrawnNode>;
+}
 
-export interface ScrollViewProps extends DrawnProps<ScrollViewNode> {
+/** What `overflow: 'scroll'` adds, on a `<box>` or a `<window>`. */
+export interface ScrollProps {
   onScroll?: (ev: ScrollEvent) => void;
   /** Fired from layout, so it arrives for a list nobody has scrolled yet. */
   onViewport?: (ev: ViewportEvent) => void;
+  /** Hide the drawn scrollbars; the content still scrolls. */
   scrollbar?: boolean;
   scrollbarColor?: Color;
 }
@@ -667,7 +684,6 @@ export interface ReactX11Elements {
   window: WindowProps;
   popup: PopupProps;
   box: BoxProps;
-  scrollview: ScrollViewProps;
   text: TextProps;
   textinput: TextInputProps;
   textarea: TextAreaProps;

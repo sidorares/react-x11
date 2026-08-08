@@ -32,8 +32,8 @@ async function mount({
       'window',
       { width: 400, height: 400, ...windowProps },
       h(
-        'scrollview',
-        { ref, style: { flexGrow: 1 }, ...scrollProps },
+        'box',
+        { ref, style: { overflow: 'scroll', flexGrow: 1 }, ...scrollProps },
         ...Array.from({ length: 20 }, (_, i) =>
           h('box', {
             key: i,
@@ -140,8 +140,8 @@ test('a small viewport is not worth the bookkeeping', async () => {
       'window',
       { width: 200, height: 100 },
       h(
-        'scrollview',
-        { ref, style: { flexGrow: 1 } },
+        'box',
+        { ref, style: { overflow: 'scroll', flexGrow: 1 } },
         ...Array.from({ length: 10 }, (_, i) =>
           h('box', { key: i, style: { height: 40, flexShrink: 0 } }),
         ),
@@ -165,7 +165,7 @@ test('a page-sized jump repaints instead of blitting a sliver', async () => {
   assert.strictEqual(blits(wnd).length, 0);
 });
 
-test('a border on the scrollview keeps the full repaint', async () => {
+test('a border on the scroll box keeps the full repaint', async () => {
   const { wnd, ref } = await mount({
     scrollProps: {
       style: { flexGrow: 1, borderWidth: 2, borderColor: '#333333' },
@@ -300,8 +300,8 @@ test('a blitted scroll is byte-identical to the repaint it replaced', async (t) 
           'window',
           { width: 400, height: 300, style: { backgroundColor: '#f5f6fa' } },
           h(
-            'scrollview',
-            { ref, style: { flexGrow: 1 } },
+            'box',
+            { ref, style: { overflow: 'scroll', flexGrow: 1 } },
             ...Array.from({ length: 40 }, (_, i) =>
               h(
                 'box',

@@ -43,7 +43,7 @@ is _boring_ to a screen reader rather than broken:
 | `<textinput>`           | entry: editable, single-line, caret and selection live      |
 | `<textarea>`            | entry: editable, multi-line                                 |
 | `<image>` / `<svg>`     | image, named by `alt`                                       |
-| `<scrollview>`          | scroll pane (and a tab stop when it can scroll — see below) |
+| `overflow: 'scroll'`    | scroll pane (and a tab stop when it can scroll — see below) |
 | `<canvas>` / `<glarea>` | drawing area / canvas — name them if they carry meaning     |
 | `<markdown>` / `<html>` | document                                                    |
 

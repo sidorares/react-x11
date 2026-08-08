@@ -299,7 +299,7 @@ const SCENARIOS = [
   ],
   [
     // Nested clips, which every real frame has and no scenario above had: the
-    // window clips to the damaged region, a <scrollview> clips to its
+    // window clips to the damaged region, a scrolling <box> clips to its
     // viewport, and each cell clips its own content. Intersecting clips used
     // to allocate a full-surface a8 pixmap, rasterize into it and Composite
     // the whole surface *per clip*, so this scenario is where that shows up.
@@ -402,8 +402,8 @@ const SCENARIOS = [
                 'window',
                 { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
                 React.createElement(
-                  'scrollview',
-                  { style: { flexGrow: 1 } },
+                  'box',
+                  { style: { flexGrow: 1, overflow: 'scroll' } },
                   Array.from({ length: 500 }, (_, i) =>
                     React.createElement(
                       'box',

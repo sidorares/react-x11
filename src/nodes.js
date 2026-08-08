@@ -13,6 +13,7 @@ import {
   flattenStyle,
   validateStyle,
   resolveStyleStates,
+  resolveScrollContainer,
   hasStateStyles,
   isStyleProp,
   isEventProp,
@@ -82,7 +83,6 @@ export const DRAWN_KINDS = new Set([
   'text',
   'image',
   'canvas',
-  'scrollview',
   'textinput',
   'textarea',
   'markdown',
@@ -860,9 +860,11 @@ export class Node {
     }
     this._stateful = hasStateStyles(this._baseStyle);
     return this._retarget(
-      this._stateful
-        ? resolveStyleStates(this._baseStyle, this.states)
-        : this._baseStyle,
+      resolveScrollContainer(
+        this._stateful
+          ? resolveStyleStates(this._baseStyle, this.states)
+          : this._baseStyle,
+      ),
     );
   }
 
@@ -912,6 +914,11 @@ export class Node {
     ) {
       this._clearHitBounds();
     }
+    // …and a node that just stopped being a scroll container has an offset
+    // nothing will ever clamp again (see Scrollable._overflowChanged)
+    if (displayed.overflow !== this.style.overflow) {
+      this._overflowChanged?.(displayed.overflow);
+    }
     return this.style;
   }
 
@@ -956,7 +963,9 @@ export class Node {
     if (this.states[name] === on) return;
     this.states[name] = on;
     if (!this._stateful || this.destroyed) return;
-    const next = resolveStyleStates(this._baseStyle, this.states);
+    const next = resolveScrollContainer(
+      resolveStyleStates(this._baseStyle, this.states),
+    );
     if (shallowEqual(next, this._targetStyle)) return;
     this._retarget(next);
     // a state block may only set paint properties, so the node's own region
@@ -1707,7 +1716,7 @@ export class Node {
    *
    * A node that clips its children ends the walk at its own rect: whatever
    * they do beyond it never reaches the surface, so counting it would inflate
-   * every bound built from here. That matters most for `<scrollview>`, whose
+   * every bound built from here. That matters most for a scrolling box, whose
    * content is routinely thousands of pixels taller than the viewport — and
    * can be ninety thousand pixels away mid-scroll (see `_offscreen`). Without
    * this, damage claimed for a scrolled subtree covers the content extent
@@ -2037,14 +2046,14 @@ export class Node {
    * between a scroll and the re-render that follows it can hold rows
    * ninety thousand pixels above the viewport.
    *
-   * The ancestor walk matters on its own (issue #211): a `<scrollview>`'s
+   * The ancestor walk matters on its own (issue #211): a scrolling box's
    * own box is often much smaller than the window around it, and its
    * `ctx.clip()` in `_paintChildren` only keeps the *pixels* off the visible
    * surface — every child below the fold still ran its full paint (canvas
    * `onDraw`, text/tex layout, the XRender/PutImage requests that go with
    * them) for the server to then discard. Checking the window alone missed
    * that: a node can sit well inside the window and still be entirely past
-   * a `<scrollview>` ancestor whose own bounds are the real limit.
+   * a scrolling ancestor whose own bounds are the real limit.
    */
   _offscreen() {
     const window = this.root?.abs;
@@ -2062,12 +2071,6 @@ export class Node {
       if (n.clipsChildren() && !rectsOverlap(this.abs, n.abs)) return true;
     }
     return false;
-  }
-}
-
-export class BoxNode extends Node {
-  constructor(props, app) {
-    super('box', props, app);
   }
 }
 
@@ -2388,9 +2391,14 @@ const SCROLLBAR_SLOP = 4;
 
 const clampScroll = (v, max) => Math.min(Math.max(0, v), max);
 
+// Every box and every window now answers `_scrollbars()`, and almost none of
+// them has any: the shared empty keeps that answer allocation-free on a path
+// walked per node per hit test.
+const EMPTY_SCROLLBARS = Object.freeze([]);
+
 /**
  * Geometry of a scrollbar on either axis, or null when there is nothing to
- * scroll along it. Shared by `<scrollview>` and `<textarea>` so what is
+ * scroll along it. Shared by scrolling boxes and `<textarea>` so what is
  * painted and what the pointer hits cannot drift apart — and written once
  * for both axes so the two cannot drift from each other either.
  *
@@ -2469,400 +2477,474 @@ function paintScrollbarThumb(ctx, bar, color) {
 }
 
 /**
- * <scrollview>: a clipped viewport over its (overflowing) children. The
- * scroll offset is applied during absolutize, so painting and hit testing
- * see already-shifted rects. Wheel events scroll it by default (see
- * EventManager); scrollTo/scrollBy are available on the ref.
+ * Scrolling, as a style rather than as a species of node.
+ *
+ * `overflow: 'scroll'` turns a `<box>` — or a `<window>` — into a clipped
+ * viewport over its own overflowing content: the offset is applied during
+ * absolutize, so painting and hit testing see already-shifted rects. Wheel
+ * events scroll the nearest one by default (see EventManager), and
+ * `scrollTo`/`scrollBy`/`scrollIntoView` are on the ref.
+ *
+ * Everything here is **inert until the style says scroll**, which is what
+ * lets it live on the ordinary container instead of behind an element of its
+ * own: `_maxScroll` answers 0, so `scrollTo` is a no-op, no bar has geometry,
+ * nothing is a tab stop, and `absolutize` takes the plain path. A second gate
+ * sits behind the first — most of the visible behaviour also asks whether
+ * there is anything to scroll *right now* — so a viewport whose content fits
+ * really is an ordinary clipped box, and grows a thumb and a tab stop the
+ * moment its content outgrows it.
+ *
+ * A mixin rather than a base class because the two elements that scroll do
+ * not share one: `<box>` extends Node directly and `<window>` is its own
+ * world. Deliberately not on Node itself — `<textinput>`/`<textarea>` carry
+ * their own `_scrollbar` and `focusableByDefault` with different meanings,
+ * and inheriting these would collide with both.
  */
-export class ScrollViewNode extends Node {
-  constructor(props, app) {
-    super('scrollview', props, app);
-    this.scrollY = 0;
-    this.scrollX = 0;
-    this.contentHeight = 0;
-    this.contentWidth = 0;
-    // these defaults fill in for style the author did not set, so they read
-    // the resolved style, not the props
-    const style = this.style;
-    if (style.overflow === undefined) {
-      this.yoga.setOverflow(Yoga.OVERFLOW_SCROLL);
+export const Scrollable = (Base) =>
+  class extends Base {
+    constructor(...args) {
+      super(...args);
+      this.scrollY = 0;
+      this.scrollX = 0;
+      this.contentHeight = 0;
+      this.contentWidth = 0;
     }
-    // yoga's default flexShrink is 0, which would size the viewport to its
-    // content; a scroll container must yield to the outer layout instead
-    if (style.flexShrink === undefined) {
-      this.yoga.setFlexShrink(1);
-    }
-    // …and flexShrink alone is not enough. A flex item's base size is its
-    // content, and yoga (unlike CSS) does not shrink items by default — so
-    // a window whose scrollview holds more rows than fit grew *past* the
-    // window, pushing the footer out of view, however small the window got.
-    // `flex-basis: 0` is what CSS's `flex: 1` means, and for a scroll
-    // container it is always what is wanted: take the space that is left,
-    // and let the content overflow into a scroll. It also fixes the whole
-    // ancestor chain at once, since the content no longer counts towards
-    // any of their heights.
-    const sized = style.height !== undefined || style.width !== undefined;
-    if (style.flexBasis === undefined && !sized && (style.flexGrow ?? 0) > 0) {
-      this.yoga.setFlexBasis(0);
-    }
-    // the CSS `min-height: 0` idiom, for the layouts flex-basis cannot save
-    if (style.minHeight === undefined) this.yoga.setMinHeight(0);
-    if (style.minWidth === undefined) this.yoga.setMinWidth(0);
-  }
 
-  clipsChildren() {
-    return true;
-  }
-
-  absolutize(originX, originY) {
-    if (!this.yoga) return;
-    this._assignAbs(
-      originX + this.yoga.getComputedLeft(),
-      originY + this.yoga.getComputedTop(),
-      this.yoga.getComputedWidth(),
-      this.yoga.getComputedHeight(),
-    );
-    const { right, bottom } = this._measureContent();
-    this.contentHeight =
-      bottom + this.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
-    this.contentWidth = right + this.yoga.getComputedPadding(Yoga.EDGE_RIGHT);
-    this._resolveScrollIntoView();
-    this.scrollY = Math.min(Math.max(0, this.scrollY), this._maxScroll('y'));
-    this.scrollX = Math.min(Math.max(0, this.scrollX), this._maxScroll('x'));
-    this._reportViewport();
-    const ox = this.abs.x - this.scrollX;
-    const oy = this.abs.y - this.scrollY;
-    // The layout diff and a scroll would double-report each other: a scroll
-    // is a uniform shift of everything below this viewport, already claimed
-    // as the viewport itself (or narrowed to the exposed strip by the blit),
-    // and per-child old/new claims would re-widen the very frame the blit
-    // narrows. So when the children's origin moved, the walk below runs
-    // with the diff off. When it did not move, a child that moved did so by
-    // real layout — claim it, but clipped to the viewport: ink below the
-    // fold never reaches the surface, and an unclipped claim would repaint
-    // whatever unrelated UI sits under this node's off-viewport extent.
-    const shifted =
-      this._childOrigin &&
-      (this._childOrigin.x !== ox || this._childOrigin.y !== oy);
-    this._childOrigin = { x: ox, y: oy };
-    const outer = layoutDiffSink;
-    if (outer) {
-      if (shifted) {
-        layoutDiffSink = null;
-      } else {
-        const vp = insetRect(this.abs, -DAMAGE_SLOP);
-        layoutDiffSink = (rect) => {
-          const clipped = intersectRects(rect, vp);
-          if (clipped) outer(clipped);
-        };
-      }
+    /**
+     * Does this node scroll what overflows it? The one gate everything below
+     * reads, and the reason `overflow: 'scroll'` and `overflow: 'hidden'`
+     * are now genuinely different things: both clip, only this one scrolls.
+     *
+     * The layout defaults that go with it — `flex-basis: 0`, `min-height: 0`,
+     * `flexShrink: 1` — are folded into the resolved style by
+     * `resolveScrollContainer` (styles.js), so they travel through the same
+     * diff as any other style and come back off when the overflow does.
+     */
+    isScroller() {
+      return this.style.overflow === 'scroll';
     }
-    try {
-      for (const child of this.children) {
-        if (!child.isWindow) {
-          child.absolutize(ox, oy);
+
+    /**
+     * Stopped being a scroll container: an offset nothing will clamp again
+     * would otherwise keep the content shifted forever. CSS loses the scroll
+     * position the same way when a box stops scrolling.
+     */
+    _overflowChanged() {
+      if (this.isScroller()) return;
+      this._scrollIntoViewTarget = null;
+      this._childOrigin = null;
+      if (this.scrollX === 0 && this.scrollY === 0) return;
+      this.scrollX = 0;
+      this.scrollY = 0;
+      this._invalidateLayout('scroll');
+    }
+
+    absolutize(originX, originY) {
+      if (!this.yoga) return;
+      this._assignAbs(
+        originX + this.yoga.getComputedLeft(),
+        originY + this.yoga.getComputedTop(),
+        this.yoga.getComputedWidth(),
+        this.yoga.getComputedHeight(),
+      );
+      this._absolutizeChildren(this.abs.x, this.abs.y);
+    }
+
+    /**
+     * Place the children, shifted by the scroll offset when there is one.
+     * Split out of `absolutize` because a `<window>` writes its own `abs`
+     * during flush and then walks its children from (0, 0) — the same walk,
+     * reached by a different route.
+     */
+    _absolutizeChildren(originX, originY) {
+      if (!this.isScroller()) {
+        for (const child of this.children) {
+          if (!child.isWindow) child.absolutize(originX, originY);
         }
-      }
-    } finally {
-      layoutDiffSink = outer;
-    }
-  }
-
-  /**
-   * Tell the owner how big the viewport and the content turned out, when
-   * either changes. Layout happens on the frame clock, *after* the commit
-   * that mounted the node, so an effect cannot read this off the ref —
-   * which is exactly what a list needs before it can decide how many rows
-   * are worth building. Fired from layout rather than from scrolling, so
-   * it also arrives for a list nobody has scrolled yet.
-   */
-  _reportViewport() {
-    const next = {
-      width: this.abs.width,
-      height: this.abs.height,
-      contentWidth: this.contentWidth,
-      contentHeight: this.contentHeight,
-    };
-    const last = this._lastViewport;
-    if (
-      last &&
-      last.width === next.width &&
-      last.height === next.height &&
-      last.contentWidth === next.contentWidth &&
-      last.contentHeight === next.contentHeight
-    ) {
-      return;
-    }
-    this._lastViewport = next;
-    // during layout: defer, or a setState from the handler would re-enter
-    // the pass that is still running
-    const notify = this.props.onViewport;
-    if (notify) setImmediate(() => !this.destroyed && notify(next));
-  }
-
-  /**
-   * How far the content actually reaches, measured through the subtree
-   * rather than off the direct children. A row that stretches to the
-   * viewport while its own cells overflow it — a table, in other words —
-   * reports the viewport width at the top level and says nothing about the
-   * cells, so a shallow measurement would find nothing to scroll. This is
-   * what `scrollWidth`/`scrollHeight` mean in a browser.
-   *
-   * Anything that clips its own children ends the walk: their overflow is
-   * that node's business, not ours.
-   */
-  _measureContent() {
-    let right = 0;
-    let bottom = 0;
-    const walk = (node, dx, dy) => {
-      for (const child of node.children) {
-        if (child.isWindow || !child.yoga || child.hidden) continue;
-        const x = dx + child.yoga.getComputedLeft();
-        const y = dy + child.yoga.getComputedTop();
-        right = Math.max(right, x + child.yoga.getComputedWidth());
-        bottom = Math.max(bottom, y + child.yoga.getComputedHeight());
-        if (!child.clipsChildren()) walk(child, x, y);
-      }
-    };
-    walk(this, 0, 0);
-    return { right, bottom };
-  }
-
-  _maxScroll(axis) {
-    return axis === 'x'
-      ? Math.max(0, this.contentWidth - this.abs.width)
-      : Math.max(0, this.contentHeight - this.abs.height);
-  }
-
-  /**
-   * `scrollTo(y)` scrolls vertically, as it always has; `scrollTo({x, y})`
-   * moves either axis, leaving out whichever is omitted.
-   */
-  scrollTo(to) {
-    const want = typeof to === 'number' ? { y: to } : { x: to?.x, y: to?.y };
-    const next = {
-      x:
-        want.x == null
-          ? this.scrollX
-          : clampScroll(want.x, this._maxScroll('x')),
-      y:
-        want.y == null
-          ? this.scrollY
-          : clampScroll(want.y, this._maxScroll('y')),
-    };
-    if (next.x === this.scrollX && next.y === this.scrollY) return;
-    const root = this.root;
-    if (root) {
-      // The offsets whose pixels are on screen, captured before the first
-      // change of the frame: the frame's blit fast path (issue #138) shifts
-      // from *these* to wherever layout settles, however many scrollTo
-      // calls land in between.
-      this._pendingBlitFrom ??= { x: this.scrollX, y: this.scrollY };
-      (root._pendingScrolls ??= new Set()).add(this);
-      // ... and the claim about to be recorded is the scroll itself, not a
-      // reason to un-blit it
-      root._scrollClaim = this;
-    }
-    this.scrollX = next.x;
-    this.scrollY = next.y;
-    this.props.onScroll?.({
-      scrollX: next.x,
-      scrollY: next.y,
-      contentWidth: this.contentWidth,
-      contentHeight: this.contentHeight,
-      viewportWidth: this.abs.width,
-      viewportHeight: this.abs.height,
-    });
-    // A scroll reflows this viewport's contents and nothing else, and the
-    // viewport clips them, so the damage is this node's own rect. It is a
-    // layout change all the same — children's absolute positions move — hence
-    // both arguments. Unbounded, every wheel notch repainted the whole window,
-    // which is the whole cost of scrolling: the client work is negligible next
-    // to what the server then has to redraw. (When the frame turns out to be
-    // a *pure* scroll, _applyScrollBlits later narrows this claim to the
-    // exposed strip and blits the rest — see WindowNode.)
-    this.root?.invalidate(true, this, 'scroll');
-    if (root) root._scrollClaim = null;
-  }
-
-  /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. */
-  scrollBy(by) {
-    if (typeof by === 'number') return this.scrollTo(this.scrollY + by);
-    this.scrollTo({
-      x: by?.x == null ? undefined : this.scrollX + by.x,
-      y: by?.y == null ? undefined : this.scrollY + by.y,
-    });
-  }
-
-  /**
-   * A scrollview with something to scroll is a tab stop, so a pane of
-   * *unfocusable* content — a log, a long `<text>`, a `<markdown>` — can be
-   * read without a pointer. Before this the only way to scroll one was the
-   * wheel, which is a WCAG 2.1.1 failure on the most ordinary layout the
-   * library has.
-   *
-   * Conditional on purpose: a scrollview that fits its content is a `<box>`
-   * with a clip, and stopping Tab on it would be a tab stop that does
-   * nothing. It is answered from the current layout, so a pane that grows
-   * past its viewport becomes reachable the moment it does.
-   */
-  get focusableByDefault() {
-    return this._maxScroll('y') > 0 || this._maxScroll('x') > 0;
-  }
-
-  /**
-   * The keys a scroll pane answers, matching what every desktop toolkit
-   * does: arrows by a wheel notch, PageUp/PageDown by a viewport, Home/End
-   * to the ends, Space and Shift+Space as a second pair of page keys
-   * because that is what a reader's hand is already on.
-   *
-   * Runs after the application's own `onKeyDown`, and not at all if that
-   * called `preventDefault` — the same contract `<textinput>` editing has.
-   */
-  _defaultKeyDown(ev) {
-    const page = Math.max(1, this.abs.height - SCROLL_KEY_PAGE_OVERLAP);
-    switch (ev.keysym) {
-      case XK_DOWN:
-        return this.scrollBy({ y: SCROLL_KEY_STEP });
-      case XK_UP:
-        return this.scrollBy({ y: -SCROLL_KEY_STEP });
-      case XK_RIGHT:
-        return this.scrollBy({ x: SCROLL_KEY_STEP });
-      case XK_LEFT:
-        return this.scrollBy({ x: -SCROLL_KEY_STEP });
-      case XK_PAGE_DOWN:
-        return this.scrollBy({ y: page });
-      case XK_PAGE_UP:
-        return this.scrollBy({ y: -page });
-      case XK_HOME:
-        return this.scrollTo({ y: 0 });
-      case XK_END:
-        return this.scrollTo({ y: this._maxScroll('y') });
-      case XK_SPACE:
-        return this.scrollBy({ y: ev.shiftKey ? -page : page });
-      default:
-        return undefined;
-    }
-  }
-
-  /**
-   * Scroll the minimum amount that brings a descendant fully into view.
-   * The request is queued rather than applied immediately: absolute rects
-   * only exist after a layout pass, so a caller reacting to a mount (a
-   * list widget moving its selection, say) would otherwise measure a node
-   * that has no geometry yet. `absolutize` resolves it against freshly
-   * computed yoga positions.
-   */
-  scrollIntoView(node) {
-    if (!node) return;
-    this._scrollIntoViewTarget = node;
-    // whatever the resolved scroll moves is inside this clipped viewport,
-    // so the viewport's own before/after rects bound the frame
-    this._invalidateLayout('scroll');
-  }
-
-  _resolveScrollIntoView() {
-    const target = this._scrollIntoViewTarget;
-    if (!target) return;
-    this._scrollIntoViewTarget = null;
-    if (target.destroyed || !target.yoga) return;
-    // offset of the target within our content box, summed up the chain so
-    // targets nested below a direct child work too
-    let top = 0;
-    let left = 0;
-    for (let n = target; n && n !== this; n = n.parent) {
-      if (!n.yoga) return; // not (or no longer) inside this scrollview
-      top += n.yoga.getComputedTop();
-      left += n.yoga.getComputedLeft();
-      if (!n.parent) return;
-    }
-    const bottom = top + target.yoga.getComputedHeight();
-    const rightEdge = left + target.yoga.getComputedWidth();
-    if (bottom > this.scrollY + this.abs.height) {
-      this.scrollY = bottom - this.abs.height;
-    }
-    if (top < this.scrollY) this.scrollY = top;
-    if (rightEdge > this.scrollX + this.abs.width) {
-      this.scrollX = rightEdge - this.abs.width;
-    }
-    if (left < this.scrollX) this.scrollX = left;
-  }
-
-  paint(ctx) {
-    super.paint(ctx);
-    for (const bar of this._scrollbars()) {
-      paintScrollbarThumb(ctx, bar, this.props.scrollbarColor);
-    }
-  }
-
-  /** null when the bar is switched off or there is nothing to scroll on
-   * that axis. */
-  _scrollbar(axis = 'y') {
-    if (this.props.scrollbar === false) return null;
-    const horizontal = axis === 'x';
-    // when both bars show, each stops short of the other's corner
-    const other = horizontal
-      ? this.contentHeight > this.abs.height
-      : this.contentWidth > this.abs.width;
-    return scrollbarGeometry({
-      axis,
-      start: horizontal ? this.abs.x : this.abs.y,
-      viewport: horizontal ? this.abs.width : this.abs.height,
-      content: horizontal ? this.contentWidth : this.contentHeight,
-      across: horizontal ? this.abs.y : this.abs.x,
-      crossSize: horizontal ? this.abs.height : this.abs.width,
-      scroll: horizontal ? this.scrollX : this.scrollY,
-      inset: 2,
-      shorten: other ? SCROLLBAR_WIDTH + 2 : 0,
-    });
-  }
-
-  _scrollbars() {
-    return [this._scrollbar('y'), this._scrollbar('x')].filter(Boolean);
-  }
-
-  /**
-   * The bar belongs to the scroller, not to the content under it — the same
-   * rule a browser applies. Without this a press on the thumb would be
-   * delivered to whatever child happens to be painted beneath it.
-   */
-  hitTest(x, y) {
-    for (const bar of this._scrollbars()) {
-      if (scrollbarHit(bar, x, y)) return this;
-    }
-    return super.hitTest(x, y);
-  }
-
-  _defaultMouseDown(ev) {
-    for (const bar of this._scrollbars()) {
-      const hit = scrollbarHit(bar, ev.x, ev.y);
-      if (!hit) continue;
-      const at = along(bar, ev.x, ev.y);
-      if (hit === 'thumb') {
-        // remember where in the thumb it was grabbed, so it does not jump
-        this._barGrab = { axis: bar.axis, offset: at - bar.thumbStart };
-        ev.capturePointer();
         return;
       }
-      // a press on the track pages towards it, like PageUp/PageDown
-      const page = bar.axis === 'x' ? this.abs.width : this.abs.height;
-      const delta = at < bar.thumbStart ? -page : page;
-      this.scrollBy(bar.axis === 'x' ? { x: delta } : { y: delta });
-      return;
+      const { right, bottom } = this._measureContent();
+      this.contentHeight =
+        bottom + this.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
+      this.contentWidth = right + this.yoga.getComputedPadding(Yoga.EDGE_RIGHT);
+      this._resolveScrollIntoView();
+      this.scrollY = clampScroll(this.scrollY, this._maxScroll('y'));
+      this.scrollX = clampScroll(this.scrollX, this._maxScroll('x'));
+      this._reportViewport();
+      const ox = originX - this.scrollX;
+      const oy = originY - this.scrollY;
+      // The layout diff and a scroll would double-report each other: a scroll
+      // is a uniform shift of everything below this viewport, already claimed
+      // as the viewport itself (or narrowed to the exposed strip by the blit),
+      // and per-child old/new claims would re-widen the very frame the blit
+      // narrows. So when the children's origin moved, the walk below runs
+      // with the diff off. When it did not move, a child that moved did so by
+      // real layout — claim it, but clipped to the viewport: ink below the
+      // fold never reaches the surface, and an unclipped claim would repaint
+      // whatever unrelated UI sits under this node's off-viewport extent.
+      const shifted =
+        this._childOrigin &&
+        (this._childOrigin.x !== ox || this._childOrigin.y !== oy);
+      this._childOrigin = { x: ox, y: oy };
+      const outer = layoutDiffSink;
+      if (outer) {
+        if (shifted) {
+          layoutDiffSink = null;
+        } else {
+          const vp = insetRect(this.abs, -DAMAGE_SLOP);
+          layoutDiffSink = (rect) => {
+            const clipped = intersectRects(rect, vp);
+            if (clipped) outer(clipped);
+          };
+        }
+      }
+      try {
+        for (const child of this.children) {
+          if (!child.isWindow) {
+            child.absolutize(ox, oy);
+          }
+        }
+      } finally {
+        layoutDiffSink = outer;
+      }
     }
-  }
 
-  _defaultMouseDrag(ev) {
-    if (this._barGrab == null) return;
-    const bar = this._scrollbar(this._barGrab.axis);
-    if (!bar || bar.travel <= 0) return;
-    const at = along(bar, ev.x, ev.y) - this._barGrab.offset - bar.trackStart;
-    const to = (at / bar.travel) * bar.range;
-    this.scrollTo(bar.axis === 'x' ? { x: to } : { y: to });
-  }
+    /**
+     * Tell the owner how big the viewport and the content turned out, when
+     * either changes. Layout happens on the frame clock, *after* the commit
+     * that mounted the node, so an effect cannot read this off the ref —
+     * which is exactly what a list needs before it can decide how many rows
+     * are worth building. Fired from layout rather than from scrolling, so
+     * it also arrives for a list nobody has scrolled yet.
+     */
+    _reportViewport() {
+      const next = {
+        width: this.abs.width,
+        height: this.abs.height,
+        contentWidth: this.contentWidth,
+        contentHeight: this.contentHeight,
+      };
+      const last = this._lastViewport;
+      if (
+        last &&
+        last.width === next.width &&
+        last.height === next.height &&
+        last.contentWidth === next.contentWidth &&
+        last.contentHeight === next.contentHeight
+      ) {
+        return;
+      }
+      this._lastViewport = next;
+      // during layout: defer, or a setState from the handler would re-enter
+      // the pass that is still running
+      const notify = this.props.onViewport;
+      if (notify) setImmediate(() => !this.destroyed && notify(next));
+    }
 
-  _defaultMouseUp() {
-    this._barGrab = null;
+    /**
+     * How far the content actually reaches, measured through the subtree
+     * rather than off the direct children. A row that stretches to the
+     * viewport while its own cells overflow it — a table, in other words —
+     * reports the viewport width at the top level and says nothing about the
+     * cells, so a shallow measurement would find nothing to scroll. This is
+     * what `scrollWidth`/`scrollHeight` mean in a browser.
+     *
+     * Anything that clips its own children ends the walk: their overflow is
+     * that node's business, not ours.
+     */
+    _measureContent() {
+      let right = 0;
+      let bottom = 0;
+      const walk = (node, dx, dy) => {
+        for (const child of node.children) {
+          if (child.isWindow || !child.yoga || child.hidden) continue;
+          const x = dx + child.yoga.getComputedLeft();
+          const y = dy + child.yoga.getComputedTop();
+          right = Math.max(right, x + child.yoga.getComputedWidth());
+          bottom = Math.max(bottom, y + child.yoga.getComputedHeight());
+          if (!child.clipsChildren()) walk(child, x, y);
+        }
+      };
+      walk(this, 0, 0);
+      return { right, bottom };
+    }
+
+    /**
+     * How far this axis can scroll — 0 for a node the style does not make a
+     * scroll container, which is the gate the whole public surface rests on:
+     * `scrollTo` clamps to nothing, no bar has geometry, and nothing is a
+     * tab stop, without any of them testing the style themselves.
+     */
+    _maxScroll(axis) {
+      if (!this.isScroller()) return 0;
+      return axis === 'x'
+        ? Math.max(0, this.contentWidth - this.abs.width)
+        : Math.max(0, this.contentHeight - this.abs.height);
+    }
+
+    /**
+     * `scrollTo(y)` scrolls vertically, as it always has; `scrollTo({x, y})`
+     * moves either axis, leaving out whichever is omitted.
+     */
+    scrollTo(to) {
+      const want = typeof to === 'number' ? { y: to } : { x: to?.x, y: to?.y };
+      const next = {
+        x:
+          want.x == null
+            ? this.scrollX
+            : clampScroll(want.x, this._maxScroll('x')),
+        y:
+          want.y == null
+            ? this.scrollY
+            : clampScroll(want.y, this._maxScroll('y')),
+      };
+      if (next.x === this.scrollX && next.y === this.scrollY) return;
+      const root = this.root;
+      if (root) {
+        // The offsets whose pixels are on screen, captured before the first
+        // change of the frame: the frame's blit fast path (issue #138) shifts
+        // from *these* to wherever layout settles, however many scrollTo
+        // calls land in between.
+        this._pendingBlitFrom ??= { x: this.scrollX, y: this.scrollY };
+        (root._pendingScrolls ??= new Set()).add(this);
+        // ... and the claim about to be recorded is the scroll itself, not a
+        // reason to un-blit it
+        root._scrollClaim = this;
+      }
+      this.scrollX = next.x;
+      this.scrollY = next.y;
+      this.props.onScroll?.({
+        scrollX: next.x,
+        scrollY: next.y,
+        contentWidth: this.contentWidth,
+        contentHeight: this.contentHeight,
+        viewportWidth: this.abs.width,
+        viewportHeight: this.abs.height,
+      });
+      // A scroll reflows this viewport's contents and nothing else, and the
+      // viewport clips them, so the damage is this node's own rect. It is a
+      // layout change all the same — children's absolute positions move — hence
+      // both arguments. Unbounded, every wheel notch repainted the whole window,
+      // which is the whole cost of scrolling: the client work is negligible next
+      // to what the server then has to redraw. (When the frame turns out to be
+      // a *pure* scroll, _applyScrollBlits later narrows this claim to the
+      // exposed strip and blits the rest — see WindowNode.)
+      this.root?.invalidate(true, this, 'scroll');
+      if (root) root._scrollClaim = null;
+    }
+
+    /**
+     * Is there room to move on the axis this delta names? What the wheel's
+     * default action chains on: a scroll container that fits its content
+     * hands the gesture to the next one out, the way a browser does.
+     */
+    _canScroll(dx, dy) {
+      if (dx && this._maxScroll('x') > 0) return true;
+      if (dy && this._maxScroll('y') > 0) return true;
+      return false;
+    }
+
+    /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. */
+    scrollBy(by) {
+      if (typeof by === 'number') return this.scrollTo(this.scrollY + by);
+      this.scrollTo({
+        x: by?.x == null ? undefined : this.scrollX + by.x,
+        y: by?.y == null ? undefined : this.scrollY + by.y,
+      });
+    }
+
+    /**
+     * A box with something to scroll is a tab stop, so a pane of
+     * *unfocusable* content — a log, a long `<text>`, a `<markdown>` — can be
+     * read without a pointer. Before this the only way to scroll one was the
+     * wheel, which is a WCAG 2.1.1 failure on the most ordinary layout the
+     * library has.
+     *
+     * Conditional on purpose: a scroll box that fits its content is an
+     * ordinary clipped box, and stopping Tab on it would be a tab stop that
+     * does nothing. It is answered from the current layout, so a pane that
+     * grows past its viewport becomes reachable the moment it does.
+     */
+    get focusableByDefault() {
+      return this._maxScroll('y') > 0 || this._maxScroll('x') > 0;
+    }
+
+    /**
+     * The keys a scroll pane answers, matching what every desktop toolkit
+     * does: arrows by a wheel notch, PageUp/PageDown by a viewport, Home/End
+     * to the ends, Space and Shift+Space as a second pair of page keys
+     * because that is what a reader's hand is already on.
+     *
+     * Runs after the application's own `onKeyDown`, and not at all if that
+     * called `preventDefault` — the same contract `<textinput>` editing has.
+     */
+    _defaultKeyDown(ev) {
+      // nothing to scroll, nothing to swallow: a plain box must leave the
+      // arrows and Page keys to whatever else would answer them
+      if (!this.focusableByDefault) return undefined;
+      const page = Math.max(1, this.abs.height - SCROLL_KEY_PAGE_OVERLAP);
+      switch (ev.keysym) {
+        case XK_DOWN:
+          return this.scrollBy({ y: SCROLL_KEY_STEP });
+        case XK_UP:
+          return this.scrollBy({ y: -SCROLL_KEY_STEP });
+        case XK_RIGHT:
+          return this.scrollBy({ x: SCROLL_KEY_STEP });
+        case XK_LEFT:
+          return this.scrollBy({ x: -SCROLL_KEY_STEP });
+        case XK_PAGE_DOWN:
+          return this.scrollBy({ y: page });
+        case XK_PAGE_UP:
+          return this.scrollBy({ y: -page });
+        case XK_HOME:
+          return this.scrollTo({ y: 0 });
+        case XK_END:
+          return this.scrollTo({ y: this._maxScroll('y') });
+        case XK_SPACE:
+          return this.scrollBy({ y: ev.shiftKey ? -page : page });
+        default:
+          return undefined;
+      }
+    }
+
+    /**
+     * Scroll the minimum amount that brings a descendant fully into view.
+     * The request is queued rather than applied immediately: absolute rects
+     * only exist after a layout pass, so a caller reacting to a mount (a
+     * list widget moving its selection, say) would otherwise measure a node
+     * that has no geometry yet. `absolutize` resolves it against freshly
+     * computed yoga positions.
+     */
+    scrollIntoView(node) {
+      if (!node || !this.isScroller()) return;
+      this._scrollIntoViewTarget = node;
+      // whatever the resolved scroll moves is inside this clipped viewport,
+      // so the viewport's own before/after rects bound the frame
+      this._invalidateLayout('scroll');
+    }
+
+    _resolveScrollIntoView() {
+      const target = this._scrollIntoViewTarget;
+      if (!target) return;
+      this._scrollIntoViewTarget = null;
+      if (target.destroyed || !target.yoga) return;
+      // offset of the target within our content box, summed up the chain so
+      // targets nested below a direct child work too
+      let top = 0;
+      let left = 0;
+      for (let n = target; n && n !== this; n = n.parent) {
+        if (!n.yoga) return; // not (or no longer) inside this viewport
+        top += n.yoga.getComputedTop();
+        left += n.yoga.getComputedLeft();
+        if (!n.parent) return;
+      }
+      const bottom = top + target.yoga.getComputedHeight();
+      const rightEdge = left + target.yoga.getComputedWidth();
+      if (bottom > this.scrollY + this.abs.height) {
+        this.scrollY = bottom - this.abs.height;
+      }
+      if (top < this.scrollY) this.scrollY = top;
+      if (rightEdge > this.scrollX + this.abs.width) {
+        this.scrollX = rightEdge - this.abs.width;
+      }
+      if (left < this.scrollX) this.scrollX = left;
+    }
+
+    paint(ctx) {
+      super.paint(ctx);
+      this._paintScrollbars(ctx);
+    }
+
+    /** Over the content and outside the clip — a `<window>` reaches this by
+     * its own route, since it paints through `_paintRegion` and never
+     * through `Node.paint`. */
+    _paintScrollbars(ctx) {
+      for (const bar of this._scrollbars()) {
+        paintScrollbarThumb(ctx, bar, this.props.scrollbarColor);
+      }
+    }
+
+    /** null when this is not a scroll container, when the bar is switched
+     * off, or when there is nothing to scroll on that axis. */
+    _scrollbar(axis = 'y') {
+      if (!this.isScroller() || this.props.scrollbar === false) return null;
+      const horizontal = axis === 'x';
+      // when both bars show, each stops short of the other's corner
+      const other = horizontal
+        ? this.contentHeight > this.abs.height
+        : this.contentWidth > this.abs.width;
+      return scrollbarGeometry({
+        axis,
+        start: horizontal ? this.abs.x : this.abs.y,
+        viewport: horizontal ? this.abs.width : this.abs.height,
+        content: horizontal ? this.contentWidth : this.contentHeight,
+        across: horizontal ? this.abs.y : this.abs.x,
+        crossSize: horizontal ? this.abs.height : this.abs.width,
+        scroll: horizontal ? this.scrollX : this.scrollY,
+        inset: 2,
+        shorten: other ? SCROLLBAR_WIDTH + 2 : 0,
+      });
+    }
+
+    _scrollbars() {
+      if (!this.isScroller()) return EMPTY_SCROLLBARS;
+      return [this._scrollbar('y'), this._scrollbar('x')].filter(Boolean);
+    }
+
+    /**
+     * The bar belongs to the scroller, not to the content under it — the same
+     * rule a browser applies. Without this a press on the thumb would be
+     * delivered to whatever child happens to be painted beneath it.
+     */
+    hitTest(x, y) {
+      if (this.isScroller()) {
+        for (const bar of this._scrollbars()) {
+          if (scrollbarHit(bar, x, y)) return this;
+        }
+      }
+      return super.hitTest(x, y);
+    }
+
+    _defaultMouseDown(ev) {
+      for (const bar of this._scrollbars()) {
+        const hit = scrollbarHit(bar, ev.x, ev.y);
+        if (!hit) continue;
+        const at = along(bar, ev.x, ev.y);
+        if (hit === 'thumb') {
+          // remember where in the thumb it was grabbed, so it does not jump
+          this._barGrab = { axis: bar.axis, offset: at - bar.thumbStart };
+          ev.capturePointer();
+          return;
+        }
+        // a press on the track pages towards it, like PageUp/PageDown
+        const page = bar.axis === 'x' ? this.abs.width : this.abs.height;
+        const delta = at < bar.thumbStart ? -page : page;
+        this.scrollBy(bar.axis === 'x' ? { x: delta } : { y: delta });
+        return;
+      }
+    }
+
+    _defaultMouseDrag(ev) {
+      if (this._barGrab == null) return;
+      const bar = this._scrollbar(this._barGrab.axis);
+      if (!bar || bar.travel <= 0) return;
+      const at = along(bar, ev.x, ev.y) - this._barGrab.offset - bar.trackStart;
+      const to = (at / bar.travel) * bar.range;
+      this.scrollTo(bar.axis === 'x' ? { x: to } : { y: to });
+    }
+
+    _defaultMouseUp() {
+      this._barGrab = null;
+    }
+  };
+
+/**
+ * The flex container — and, with `overflow: 'scroll'`, the scroll container
+ * too. There is no separate scrolling element: see `Scrollable`.
+ */
+export class BoxNode extends Scrollable(Node) {
+  constructor(props, app) {
+    super('box', props, app);
   }
 }
 
@@ -4228,7 +4310,7 @@ export class TextAreaNode extends TextInputNode {
     super._editKeyDown(ev);
   }
 
-  /** Thumb for the vertical overflow, same look as <scrollview>'s. */
+  /** Thumb for the vertical overflow, same look as a scroll box's. */
   _paintScrollbar(ctx, layout) {
     const bar = this._scrollbar(layout);
     if (bar) paintScrollbarThumb(ctx, bar, this.props.scrollbarColor);
@@ -4330,7 +4412,7 @@ export class TextAreaNode extends TextInputNode {
  * from the start (no ReparentWindow, no override-redirect staging;
  * issue #4).
  */
-export class WindowNode extends Node {
+export class WindowNode extends Scrollable(Node) {
   constructor(app, attributes, props) {
     super('window', props, app, { yoga: true });
     assertWindowSize(props, this.kind);
@@ -4830,7 +4912,7 @@ export class WindowNode extends Node {
   /**
    * Subscribe to "something this window's popups might be anchored to just
    * moved" — a real layout pass (a trigger's own position changing: text
-   * wrapping, a sibling growing, an ancestor scrollview scrolling — scroll
+   * wrapping, a sibling growing, an ancestor viewport scrolling — scroll
    * offset is applied during absolutize, so it is a layout change too) or a
    * fresh `_screenOrigin` (the window manager or a script moving this window).
    * Returns an unsubscribe function.
@@ -5579,9 +5661,10 @@ export class WindowNode extends Node {
         };
       }
       try {
-        for (const child of this.children) {
-          if (!child.isWindow) child.absolutize(0, 0);
-        }
+        // `_absolutizeChildren`, not the loop it wraps: a `<window
+        // style={{overflow: 'scroll'}}>` is a scroll container like any box,
+        // and this is where its offset gets applied to the children
+        this._absolutizeChildren(0, 0);
       } finally {
         layoutDiffSink = null;
       }
@@ -5823,19 +5906,22 @@ export class WindowNode extends Node {
   /**
    * May the viewport's pixels be moved wholesale? Only if every pixel in it
    * belongs to the scrolled content (or to a plain solid fill behind it):
-   * any node outside the scrollview's subtree whose drawing reaches into
+   * any node outside the scroller's subtree whose drawing reaches into
    * the viewport — an overlapping sibling, an ancestor's border ring or
-   * rounded corner, an enclosing scrollview's scrollbar — would have its
+   * rounded corner, an enclosing viewport's scrollbar — would have its
    * pixels dragged along by the blit, so any of them is a no.
    */
-  _scrollBlitSafe(scrollview, vp) {
+  _scrollBlitSafe(scroller, vp) {
+    // the window itself scrolls: everything inside it *is* the scrolled
+    // content, so there is nothing that could be dragged along
+    if (scroller === this) return true;
     const ancestors = new Set();
-    for (let n = scrollview.parent; n && n !== this; n = n.parent) {
+    for (let n = scroller.parent; n && n !== this; n = n.parent) {
       ancestors.add(n);
     }
     const check = (parent) => {
       for (const child of parent.children) {
-        if (child === scrollview) continue; // the scrolled content itself
+        if (child === scroller) continue; // the scrolled content itself
         if (child.isWindow || !child.yoga || child.hidden) continue;
         if (child.style?.display === 'none') continue;
         if (ancestors.has(child)) {
@@ -5903,6 +5989,9 @@ export class WindowNode extends Node {
     this._paintDamage = damage;
     try {
       this._paintChildren(ctx);
+      // a scrolling window draws its own bars, which `Node.paint` would have
+      // done for a box — the window never goes through it
+      this._paintScrollbars(ctx);
       if (process.env.REACT_X11_DEBUG_LAYOUT) {
         this._paintDebugOverlay(ctx, this, 0);
       }

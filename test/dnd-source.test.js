@@ -271,7 +271,7 @@ test('preventDefault in onDragStart cancels: the gesture stays a click', async (
 // agnostic: both halves route through DropSession._overAt, and the timer is
 // what advances a drag whose pointer has stopped moving.
 
-/** Render a draggable row above a short scrollview of drop targets, and
+/** Render a draggable row above a short scroll box of drop targets, and
  * hand back the pieces a test needs to poke at. */
 async function renderScrollList(app) {
   const rows = Array.from({ length: 40 }, (_, i) =>
@@ -292,12 +292,12 @@ async function renderScrollList(app) {
         dragData: { 'text/plain': 'row' },
         style: { height: 20 },
       }),
-      h('scrollview', { style: { height: 100 } }, ...rows),
+      h('box', { style: { overflow: 'scroll', height: 100 } }, ...rows),
     ),
   );
   const wnd = app.windows[0];
   const windowNode = wnd._reactX11Node;
-  const scroller = windowNode.children.find((n) => n.kind === 'scrollview');
+  const scroller = windowNode.children.find((n) => n.isScroller?.());
   return { x11Root, wnd, windowNode, scroller };
 }
 
@@ -312,7 +312,7 @@ async function waitFor(predicate, what, ms = 1000) {
   assert.fail(`timed out waiting for ${what}`);
 }
 
-test('a drag resting near a scrollview edge scrolls it, and stops when it leaves', async () => {
+test('a drag resting near a scroll box edge scrolls it, and stops when it leaves', async () => {
   const app = createMockApp();
   const { x11Root, wnd, scroller } = await renderScrollList(app);
   assert.equal(scroller.scrollY, 0, 'starts unscrolled');
@@ -363,7 +363,7 @@ test('auto-scroll stops at the end of the drag, and holds no timer open', async 
   await x11Root.unmount();
 });
 
-test('a drag in the middle of a scrollview does not scroll it', async () => {
+test('a drag in the middle of a scroll box does not scroll it', async () => {
   const app = createMockApp();
   const { x11Root, wnd, windowNode, scroller } = await renderScrollList(app);
   down(wnd, 10, 10);

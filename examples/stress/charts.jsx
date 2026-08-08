@@ -322,7 +322,7 @@ function BarsCard() {
 
 export function ChartsPanel() {
   return (
-    <scrollview style={s.panel}>
+    <box style={[s.panel, { overflow: 'scroll' }]}>
       <text style={s.head}>Charts — SVG from state</text>
       <text style={s.hint}>
         Every drawing is rebuilt from slider values. Watch the frame log while
@@ -335,6 +335,6 @@ export function ChartsPanel() {
         <BezierCard />
         <BarsCard />
       </box>
-    </scrollview>
+    </box>
   );
 }

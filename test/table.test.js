@@ -128,7 +128,7 @@ test('the scrollbar still measures the whole list', async () => {
   const app = await mount({}, 10_000);
   const x11Root = await createRoot({ app });
   await settle();
-  const body = find(root(app), (n) => n.kind === 'scrollview');
+  const body = find(root(app), (n) => n.isScroller?.());
 
   assert.strictEqual(
     body.contentHeight,
@@ -143,7 +143,7 @@ test('scrolling swaps which rows exist', async () => {
   const app = await mount({}, 10_000);
   const x11Root = await createRoot({ app });
   await settle();
-  const body = find(root(app), (n) => n.kind === 'scrollview');
+  const body = find(root(app), (n) => n.isScroller?.());
 
   body.scrollTo({ y: 24 * 500 });
   await settle();
@@ -228,7 +228,7 @@ test('the selection is kept on screen, even when it is not built yet', async () 
   const app = await mount({ defaultSelected: 0 }, 10_000);
   const x11Root = await createRoot({ app });
   await settle();
-  const body = find(root(app), (n) => n.kind === 'scrollview');
+  const body = find(root(app), (n) => n.isScroller?.());
   focusTable(app);
 
   press(app, XK.END);
@@ -273,7 +273,7 @@ test('the header scrolls sideways with the body but not down', async () => {
   const app = await mount({}, 40, 120);
   const x11Root = await createRoot({ app });
   await settle();
-  const body = find(root(app), (n) => n.kind === 'scrollview');
+  const body = find(root(app), (n) => n.isScroller?.());
   const header = find(
     root(app),
     (n) => n.kind === 'text' && String(n.props.children) === 'Name',

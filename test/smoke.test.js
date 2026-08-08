@@ -501,7 +501,7 @@ test('zIndex controls hit testing order', async () => {
   await x11Root.unmount();
 });
 
-test('scrollview scrolls, clamps and offsets hit testing', async () => {
+test('a scroll box scrolls, clamps and offsets hit testing', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
   const clicks = [];
@@ -510,8 +510,8 @@ test('scrollview scrolls, clamps and offsets hit testing', async () => {
       'window',
       { width: 100, height: 100 },
       React.createElement(
-        'scrollview',
-        { style: { flexGrow: 1 } },
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
         [0, 1, 2].map((i) =>
           React.createElement('box', {
             key: i,
@@ -548,7 +548,7 @@ test('scrollview scrolls, clamps and offsets hit testing', async () => {
   await x11Root.unmount();
 });
 
-test('a shrinking window shrinks the scrollview, not the footer out of view', async () => {
+test('a shrinking window shrinks the scroll box, not the footer out of view', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
   const Host = ({ height }) =>
@@ -560,8 +560,8 @@ test('a shrinking window shrinks the scrollview, not the footer out of view', as
         { style: { flexGrow: 1 } },
         React.createElement('box', { style: { height: 30 } }), // header
         React.createElement(
-          'scrollview',
-          { style: { flexGrow: 1 } },
+          'box',
+          { style: { overflow: 'scroll', flexGrow: 1 } },
           ...Array.from({ length: 10 }, (_, i) =>
             React.createElement('box', {
               key: i,
@@ -600,7 +600,7 @@ test('a shrinking window shrinks the scrollview, not the footer out of view', as
   assert.strictEqual(
     scroll.abs.height,
     160 - 30 - 24,
-    'the scrollview took the squeeze',
+    'the scroll box took the squeeze',
   );
   assert.ok(
     scroll.contentHeight > scroll.abs.height,
@@ -610,7 +610,7 @@ test('a shrinking window shrinks the scrollview, not the footer out of view', as
   await x11Root.unmount();
 });
 
-test('scrollview scrollIntoView scrolls the minimum amount', async () => {
+test('scrollIntoView scrolls the minimum amount', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
   x11Root.render(
@@ -618,8 +618,8 @@ test('scrollview scrollIntoView scrolls the minimum amount', async () => {
       'window',
       { width: 100, height: 100 },
       React.createElement(
-        'scrollview',
-        { style: { flexGrow: 1 } },
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
         [0, 1, 2].map((i) =>
           React.createElement('box', { key: i, style: { height: 60 } }),
         ),
@@ -644,7 +644,7 @@ test('scrollview scrollIntoView scrolls the minimum amount', async () => {
   await tick();
   assert.strictEqual(sv.scrollY, 0);
 
-  // a node outside this scrollview is ignored
+  // a node outside this scroll box is ignored
   sv.scrollIntoView(app.windows[0]._reactX11Node);
   await tick();
   assert.strictEqual(sv.scrollY, 0);
@@ -1383,7 +1383,7 @@ test('Select: arrow keys move the active option, Enter picks it', async () => {
     const popup = app.windows.at(-1);
     let scroller = null;
     const walk = (n) => {
-      if (n.kind === 'scrollview') scroller = n;
+      if (n.isScroller?.()) scroller = n;
       else n.children.forEach(walk);
     };
     walk(popup._reactX11Node);
@@ -1443,7 +1443,7 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
   const XK_DOWN = 0xff54;
   const XK_END = 0xff57;
   const ITEM_HEIGHT = 28;
-  // the scrollview's own padding, which the menu's chrome is measured from
+  // the scroll box's own padding, which the menu's chrome is measured from
   // (`Select.js`, MENU_PAD — the same inset the menus use)
   const MENU_PAD = 5;
   const options = Array.from({ length: 12 }, (_, i) => `option-${i}`);
@@ -1499,7 +1499,7 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
   const scroller = (() => {
     let found = null;
     const walk = (n) => {
-      if (n.kind === 'scrollview') found = n;
+      if (n.isScroller?.()) found = n;
       else n.children.forEach(walk);
     };
     walk(app.windows[1]._reactX11Node);
@@ -2802,7 +2802,7 @@ test('focus(): ref API, autoFocus, and blur', async () => {
   await x11Root.unmount();
 });
 
-test('Tab into a scrollview scrolls the focused node into view', async () => {
+test('Tab into a scroll box scrolls the focused node into view', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
   x11Root.render(
@@ -2810,8 +2810,8 @@ test('Tab into a scrollview scrolls the focused node into view', async () => {
       'window',
       { width: 200, height: 100 },
       React.createElement(
-        'scrollview',
-        { style: { flexGrow: 1 } },
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
         ...Array.from({ length: 12 }, (_, i) =>
           React.createElement('box', {
             key: i,
@@ -4295,7 +4295,7 @@ test('Select: type-ahead jumps, refines and cycles', async () => {
     const popup = app.windows.at(-1);
     let scroller = null;
     const walk = (n) => {
-      if (n.kind === 'scrollview') scroller = n;
+      if (n.isScroller?.()) scroller = n;
       else n.children.forEach(walk);
     };
     walk(popup._reactX11Node);
@@ -5174,7 +5174,7 @@ test('Select: PageDown/PageUp move by a menu viewport, clamped at the ends', asy
   const scroller = (() => {
     let found = null;
     const walk = (n) => {
-      if (n.kind === 'scrollview') found = n;
+      if (n.isScroller?.()) found = n;
       else n.children.forEach(walk);
     };
     walk(app.windows[1]._reactX11Node);

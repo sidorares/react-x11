@@ -269,7 +269,7 @@ test("a Select's menu is the same surface as a menu, and its options the same pi
   assert.equal(sheet.style.borderRadius, RADIUS_POPUP);
   assert.equal(sheet.style.borderWidth, 1, 'the same hairline edge');
 
-  const rows = sheet.children[0].children; // through the scrollview
+  const rows = sheet.children[0].children; // through the scroll box
   const theme = sheet.theme;
   assert.equal(rows[0].style.borderRadius, RADIUS_ITEM);
   assert.equal(

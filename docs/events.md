@@ -12,7 +12,7 @@ events dispatched over the drawn node tree with DOM-like semantics.
    the target.
 3. **Target + bubble phase**: `on<Event>` handlers from the target up.
 4. **Default action**: the element's built-in behavior (textinput editing,
-   scrollview wheel scrolling) — skipped if any handler called
+   wheel scrolling) — skipped if any handler called
    `ev.preventDefault()`.
 
 `ev.stopPropagation()` stops the walk. Handlers always read from current
@@ -97,18 +97,18 @@ const root = await createRoot({
 
 ## Handlers
 
-| handler                                     | notes                                                                                 |
-| ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `onClick`                                   | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks |
-| `onMouseDown` / `onMouseUp` / `onMouseMove` | move is coalesced to once per frame by ntk                                            |
-| `onMouseEnter` / `onMouseLeave`             | do not propagate; synthesized by hover-path diffing                                   |
-| `onWheel`                                   | X buttons 4–7; default action scrolls the nearest `<scrollview>`                      |
-| `onContextMenu`                             | right-click (button 3), after `onMouseDown`; default action opens the element's menu  |
-| `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus in `tabIndex` order   |
-| `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal              |
-| `onDragEnter` / `onDragLeave`               | do not propagate; drag-path diffing, the same shape as the hover pair above           |
-| `onDragOver` / `onDrop`                     | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)        |
-| `onDragStart` / `onDrag` / `onDragEnd`      | on a `draggable` node; the press is a click until it moves 4px                        |
+| handler                                     | notes                                                                                   |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `onClick`                                   | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks   |
+| `onMouseDown` / `onMouseUp` / `onMouseMove` | move is coalesced to once per frame by ntk                                              |
+| `onMouseEnter` / `onMouseLeave`             | do not propagate; synthesized by hover-path diffing                                     |
+| `onWheel`                                   | X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go |
+| `onContextMenu`                             | right-click (button 3), after `onMouseDown`; default action opens the element's menu    |
+| `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus in `tabIndex` order     |
+| `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                |
+| `onDragEnter` / `onDragLeave`               | do not propagate; drag-path diffing, the same shape as the hover pair above             |
+| `onDragOver` / `onDrop`                     | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)          |
+| `onDragStart` / `onDrag` / `onDragEnd`      | on a `draggable` node; the press is a click until it moves 4px                          |
 
 ## Pointer capture
 
@@ -134,10 +134,10 @@ light up every widget the pointer crosses.
 ## Focus
 
 `focusable` opts a node into focus (`<textinput>` is focusable by
-default, and so is a `<scrollview>` with somewhere to scroll), `autoFocus`
+default, and so is a scroll container with somewhere to scroll), `autoFocus`
 takes it at mount, and every drawn node has
 `focus()` / `blur()` / `focused` on its ref. Focusing a node inside a
-`<scrollview>` scrolls it into view. Mousedown focuses the nearest
+scroll container scrolls it into view. Mousedown focuses the nearest
 focusable ancestor of the hit node; Tab / Shift+Tab cycle through focusable
 nodes in tree order. Keyboard
 events route to the focused node's ancestor chain. `disabled` opts a node

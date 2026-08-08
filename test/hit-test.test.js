@@ -161,8 +161,8 @@ test('scrolling re-aims the pointer at the row that moved under it', async () =>
     const rows = Array.from({ length: 10 }, () => React.createRef());
     await mountStateful(x11Root, () =>
       React.createElement(
-        'scrollview',
-        { ref: sv, style: { width: 200, height: 100 } },
+        'box',
+        { ref: sv, style: { overflow: 'scroll', width: 200, height: 100 } },
         rows.map((ref, i) =>
           React.createElement('box', {
             key: i,

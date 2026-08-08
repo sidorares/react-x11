@@ -136,9 +136,10 @@ have opened windows on your screen.
 ## The feature set
 
 - **[Elements](/docs/reference/elements)** — `<window>`, `<popup>`, `<box>`,
-  `<scrollview>`, `<text>`, `<textinput>`, `<textarea>`, `<image>`,
-  `<canvas>`, plus rich-content wrappers `<markdown>`, `<html>`, `<svg>` and
-  `<tex>` around ntk's document widgets.
+  `<text>`, `<textinput>`, `<textarea>`, `<image>`, `<canvas>`, plus
+  rich-content wrappers `<markdown>`, `<html>`, `<svg>` and `<tex>` around
+  ntk's document widgets. Any `<box>` or `<window>` scrolls with
+  `overflow: 'scroll'`.
 - **[Widget components](/docs/reference/components)** — `Button`,
   `Checkbox`, `Radio`, `Switch`, `Slider`, `ProgressBar`, `Select`,
   `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Tree`, `SplitPane`

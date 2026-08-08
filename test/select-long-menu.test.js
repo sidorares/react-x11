@@ -3,10 +3,10 @@
 // It was not, and the mechanism is worth writing down because every step of
 // it is something a component is supposed to do:
 //
-//   1. a `<scrollview>` becomes focusable the moment its content overflows —
+//   1. a scroll box becomes focusable the moment its content overflows —
 //      that is what makes a pane of unfocusable content keyboard-reachable
 //   2. so a press inside a menu tall enough to scroll moves focus to the
-//      menu's own scrollview
+//      menu's own scroll box
 //   3. which blurs the trigger, back in the owner window
 //   4. whose `onBlur` closes the menu — correct, and how a click elsewhere
 //      dismisses it

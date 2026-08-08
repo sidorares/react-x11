@@ -849,7 +849,7 @@ function TokenField({ options, values, onChange }) {
           }}
         >
           <box style={s.menu}>
-            <scrollview style={{ flexGrow: 1, padding: 4 }}>
+            <box style={{ overflow: 'scroll', flexGrow: 1, padding: 4 }}>
               {options.map((option) => {
                 const on = values.includes(option);
                 return (
@@ -873,7 +873,7 @@ function TokenField({ options, values, onChange }) {
                   </box>
                 );
               })}
-            </scrollview>
+            </box>
           </box>
         </popup>
       )}
@@ -1411,7 +1411,7 @@ export function RulesPanel() {
   // can read a token this palette defines.
   return (
     <ThemeProvider value={LIGHT} dark={DARK}>
-      <scrollview style={s.page}>
+      <box style={[s.page, { overflow: 'scroll' }]}>
         <box style={s.sheet}>
           <Label style={s.section}>WHEN</Label>
 
@@ -1478,7 +1478,7 @@ export function RulesPanel() {
             onNodes={(nodes) => setBranch('no', { nodes })}
           />
         </box>
-      </scrollview>
+      </box>
     </ThemeProvider>
   );
 }

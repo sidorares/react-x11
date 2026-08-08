@@ -258,9 +258,9 @@ exactly the distinction it exists to draw:
 
 ### Scrolling while dragging
 
-A drag that rests near the top or bottom edge of a `<scrollview>` scrolls
+A drag that rests near the top or bottom edge of a scroll container scrolls
 it, so a drop target below the fold can be reached without letting go.
-Nothing opts in: it applies to any `<scrollview>` a drag passes over,
+Nothing opts in: it applies to any scroll container a drag passes over,
 from this application or another one.
 
 The viewport it scrolls is the nearest one enclosing the pointer — the
@@ -274,7 +274,7 @@ Two consequences worth knowing:
   `onDragLeave` and `onDragOver` keep firing while it scrolls, and
   `:drag-over` follows. That is the point — the node under the pointer
   really is changing.
-- **Do not `e.freeze()` a zone inside a scrollview.** Freezing tells the
+- **Do not `e.freeze()` a zone inside a scroll container.** Freezing tells the
   source to stop sending positions, and for a drag from another
   application those positions are what start the scrolling in the first
   place.

@@ -61,7 +61,7 @@ Shipped in `src/richnodes.js`: `<markdown>`,
 `<html>`, `<svg>`, `<tex>` wrap the ntk document widgets in standalone
 mode — `layout(width)`/`contentHeight` feed a yoga measure function,
 `draw(ctx, x, y)` paints into the window context, `linkAt` is wired into
-the mousedown default action (`onLink` prop), and `<scrollview>` wrapping
+the mousedown default action (`onLink` prop), and a scrolling `<box>` wrapping
 works via the normal measured-height path. Async content (HTML images)
 reflows through the widgets' `onInvalidate` hook — implemented upstream as
 sidorares/ntk#75, released in **ntk 3.4.0** (the dependency is bumped).
@@ -122,7 +122,7 @@ merged theme (`ThemeProvider`, `useTheme`) and a
   a right-click inside a selection keeps it, only one outside moves the
   caret (`_defaultMouseDown`), which is what GTK and Qt do. Still missing:
   a generic Popover, and a file open/save dialog
-- **Horizontal scrolling — DONE.** `<scrollview>` scrolls on both axes:
+- **Horizontal scrolling — DONE.** A scroll container scrolls on both axes:
   `scrollX`/`contentWidth`, a second draggable bar, `scrollTo({x, y})`,
   horizontal wheel and Shift+wheel, and `scrollIntoView` on both axes. The
   extent is measured through the subtree the way `scrollWidth` is, so a row
@@ -141,7 +141,7 @@ merged theme (`ThemeProvider`, `useTheme`) and a
 - **Multi-line `<textarea>`** — DONE (#32), and the polish that was listed
   here after it (Ctrl+arrow word movement, PageUp/Down, Shift+click extend,
   the drawn scrollbar) has since landed too. The scrollbar is draggable in
-  both `<textarea>` and `<scrollview>`
+  both `<textarea>` and a scrolling `<box>`
 - **Bidi caret polish** — caret positions are bidi-correct now (ntk
   caret API), but arrow keys still move logically; visual-order movement
   - split caret at direction boundaries is a later refinement
@@ -331,7 +331,7 @@ react-nodegui, react-native-gtk4, React Native Fabric, react-three-fiber,
   - An in-process pure-JS X server (in node-x11) with XRender — hermetic
     tests with pixel readback, no `$DISPLAY` (already used by
     `test/integration.test.js`).
-- What ntk does **not** have: interactive widgets (no button/input/scrollview),
+- What ntk does **not** have: interactive widgets (no button/input/scroll pane),
   a retained scene graph, rect-level damage tracking (presentation is a
   full-window `CopyArea`), or any hit-testing/spatial index.
 - Known bug found during this review: `Window` creation **silently drops
@@ -449,7 +449,7 @@ frame pacing/fencing, input masks — all already in ntk.
 `<box>`, `<text>`, `<image>`, `<canvas>`, buttons, inputs, scroll content.
 Reasons: free overlap with antialiasing and alpha, zero per-element server
 cost, animatable without flicker, one damage/paint pipeline, and hit testing
-we control (§5). A scrollview is a clip rect + translation on the render
+we control (§5). A scroll pane is a clip rect + translation on the render
 list, not a child window (optionally optimized later with `CopyArea`
 scrolling inside the same window).
 
@@ -526,7 +526,7 @@ Primitives (the renderer core):
 - `<canvas onDraw={ctx => …}>` — the escape hatch; a retained render-list
   node whose paint calls back into user code (replaces today's raw
   `onExpose` idiom, keeps xeyes-style apps possible).
-- `<scrollview>` — clip + offset + wheel handling (buttons 4/5 already
+- Scrolling — clip + offset + wheel handling (buttons 4/5 already
   arrive as mousedown), drawn scrollbars.
 - `<window>` (kept), `<popup>`, `<glarea>`, `<foreign>` — the real-window
   set from §4.
@@ -702,7 +702,7 @@ integration test asserting pixels via the in-process X server.
 **Phase 2 — interaction:**
 synthetic event system (capture/bubble, enter/leave, pointer capture), hit
 testing per §5, hover/active/focus state, Tab traversal; `<button>`,
-`<checkbox>`, `<slider>`, `<scrollview>`, `<canvas>`.
+`<checkbox>`, `<slider>`, a scroll pane, `<canvas>`.
 
 **Phase 3 — text input & popups:**
 `<textinput>` (with ntk clipboard + cursor work), `<popup>`, `<select>`,
@@ -822,7 +822,7 @@ plus a small close delay as the fallback. Notes for the implementation:
 Done since: X `FocusIn`/`FocusOut` and `SetInputFocus` are exposed by ntk
 (sidorares/ntk#89) and used here — the focused node keeps focus across a
 window blur but stops looking active; `focus()`/`blur()`/`focused` and
-`autoFocus` are public; focusing inside a `<scrollview>` scrolls into view;
+`autoFocus` are public; focusing inside a scroll container scrolls into view;
 and popups can hold a pointer grab so a press anywhere else dismisses them
 (gap 3's real fix, and the cause of menus surviving a click on the window
 frame).
@@ -892,7 +892,7 @@ The gaps, roughly in the order they bite:
    `ref.blur()`, an `autoFocus` prop, and `document.activeElement`-ish
    access for widgets that need it.
 5. **Tab traversal is thin**: no `tabIndex` ordering, no focus trap for
-   modal popups, and focusing a node inside a `<scrollview>` does not scroll
+   modal popups, and focusing a node inside a scroll container does not scroll
    it into view even though `scrollIntoView(node)` exists.
 6. **Focus is not restored** when a popup closes; menus do it by hand.
 
@@ -1001,7 +1001,7 @@ not acting on it:
   keyboard and not for the mouse. **Every focusable node draws one without
   opting in**, from `focusRing`/`focusRingWidth`/`focusRingOffset` on the
   theme, because a keyboard user cannot opt into needing it.
-- **`<scrollview>` answers the keyboard** and is a tab stop whenever it has
+- **A scroll container answers the keyboard** and is a tab stop whenever it has
   somewhere to scroll, so a pane of unfocusable content is readable without
   a pointer — WCAG 2.1.1, and previously a wheel or nothing.
 - **`hitSlop`**, hit testing only: `Switch` and `Slider` were 20px and 16px

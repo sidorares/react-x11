@@ -49,7 +49,7 @@ const s = createStyles({
     cursor: 'col-resize',
     alignSelf: 'stretch',
   },
-  body: { flexGrow: 1, minHeight: 0 },
+  body: { flexGrow: 1, minHeight: 0, overflow: 'scroll' },
   rows: { flexDirection: 'column', flexShrink: 0 },
   row: {
     flexDirection: 'row',
@@ -288,7 +288,7 @@ export function Table({
       onKeyDown,
     },
     // the header scrolls sideways with the body but never vertically, so it
-    // lives outside the scrollview and is shifted by the body's scrollX
+    // lives outside the scrolling pane and is shifted by the body's scrollX
     h(
       'box',
       { style: [s.headerClip, { backgroundColor: theme.surfaceHover }] },
@@ -339,7 +339,7 @@ export function Table({
       ),
     ),
     h(
-      'scrollview',
+      'box',
       {
         ref: body,
         style: s.body,

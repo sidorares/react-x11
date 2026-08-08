@@ -103,10 +103,10 @@ function Harness({ triggerRef, popupRef, closedRef }) {
 }
 
 // Layout shared by both scroll tests: a couple of short rows, then the
-// trigger (visible in the scrollview's own 100px viewport at scrollY 0),
+// trigger (visible in the scroll box's own 100px viewport at scrollY 0),
 // then enough rows after it that the view has 160px left to scroll through
 // — some of that keeps the trigger visible and moved, the rest scrolls it
-// entirely past the scrollview's own bottom edge.
+// entirely past the scroll box's own bottom edge.
 function renderScrolledTrigger(app, popup) {
   const rowsBefore = Array.from({ length: 2 }, (_, i) =>
     h('box', { key: `before-${i}`, style: { height: 20 } }),
@@ -120,8 +120,8 @@ function renderScrolledTrigger(app, popup) {
       'window',
       { width: 200, height: 150 },
       h(
-        'scrollview',
-        { style: { height: 100 } },
+        'box',
+        { style: { overflow: 'scroll', height: 100 } },
         ...rowsBefore,
         h('box', { ref: popup.triggerRef, style: { width: 80, height: 20 } }),
         ...rowsAfter,
@@ -142,13 +142,13 @@ test('a tracked popup follows a scrolled ancestor, while the trigger stays visib
 
   const wnd = app.windows[0];
   const windowNode = wnd._reactX11Node;
-  const scroller = windowNode.children.find((n) => n.kind === 'scrollview');
-  assert.ok(scroller, 'scrollview mounted');
+  const scroller = windowNode.children.find((n) => n.isScroller?.());
+  assert.ok(scroller, 'scroll box mounted');
   assert.ok(scroller.contentHeight > scroller.abs.height, 'content overflows');
 
   const before = { x: popupRef.current.x, y: popupRef.current.y };
   // the trigger sits at content y 40..60, so this leaves it at 10..30 —
-  // still inside the scrollview's [0, 100) viewport
+  // still inside the scroll box's [0, 100) viewport
   scroller.scrollTo({ y: 30 });
 
   await waitFor(
@@ -175,13 +175,11 @@ test('a tracked popup closes once its trigger scrolls entirely out of view', asy
   });
 
   const wnd = app.windows[0];
-  const scroller = wnd._reactX11Node.children.find(
-    (n) => n.kind === 'scrollview',
-  );
+  const scroller = wnd._reactX11Node.children.find((n) => n.kind === 'box');
   assert.ok(popupRef.current, 'the popup opened');
 
   // the trigger sits at content y 40..60; scrolling past 60 puts it entirely
-  // above the scrollview's own viewport, not merely moved within it
+  // above the scroll box's own viewport, not merely moved within it
   scroller.scrollTo({ y: 90 });
 
   await waitFor(

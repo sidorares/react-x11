@@ -351,9 +351,14 @@ export class EventManager {
           deltaY: dy,
         });
         if (!ev.defaultPrevented) {
-          // default action: scroll the nearest enclosing <scrollview>
+          // Default action: scroll the nearest enclosing scroll container
+          // that has somewhere to go on this axis. Chaining past one that
+          // fits its own content is what a browser does, and it matters now
+          // that any `<box>` can be a scroll container — a pane that happens
+          // to fit must not swallow the wheel the window would have answered.
+          // The `<window>` is the last candidate, then the walk stops.
           for (let n = target; n; n = n.parent) {
-            if (n.kind === 'scrollview') {
+            if (n.isScroller?.() && n._canScroll(ev.deltaX, ev.deltaY)) {
               n.scrollBy({ x: ev.deltaX, y: ev.deltaY });
               break;
             }
@@ -738,10 +743,16 @@ export class EventManager {
     return false;
   }
 
-  /** Tab to something inside a scrollview and it should be on screen. */
+  /**
+   * Tab to something inside a scrolling box and it should be on screen.
+   *
+   * Asks `isScroller()` rather than whether the method exists: every `<box>`
+   * carries `scrollIntoView` now, and one that is not a scroll container
+   * would end the walk without revealing anything.
+   */
   _scrollIntoView(node) {
     for (let n = node.parent; n; n = n.parent) {
-      if (typeof n.scrollIntoView === 'function') {
+      if (n.isScroller?.()) {
         n.scrollIntoView(node);
         return;
       }

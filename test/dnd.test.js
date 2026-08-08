@@ -280,7 +280,7 @@ test('top-level windows advertise XdndAware = 5; child windows do not', async ()
   }
 });
 
-test('a foreign drag resting near a scrollview edge scrolls it, silently', async () => {
+test('a foreign drag resting near a scroll box edge scrolls it, silently', async () => {
   // The timer scrolls and re-routes, but sends nothing: an XdndStatus is the
   // answer to an XdndPosition, and an unsolicited one is not in the
   // protocol. The source hears the new answer on its next real position.
@@ -299,12 +299,16 @@ test('a foreign drag resting near a scrollview edge scrolls it, silently', async
       React.createElement(
         'window',
         { width: 300, height: 200 },
-        React.createElement('scrollview', { style: { height: 100 } }, ...rows),
+        React.createElement(
+          'box',
+          { style: { overflow: 'scroll', height: 100 } },
+          ...rows,
+        ),
       ),
       x11Root,
     );
     const scroller = instance._reactX11Node.children.find(
-      (n) => n.kind === 'scrollview',
+      (n) => n.kind === 'box',
     );
     const src = new FakeSource(srcApp);
     await src.init({ 'text/uri-list': 'file:///tmp/x\r\n' });

@@ -3,7 +3,7 @@
 //
 // Three gaps, one theme: the renderer already *knew* everything needed and
 // simply did not act on it. It knew which node had focus but drew nothing;
-// it knew a `<scrollview>` had somewhere to scroll but answered no keys; it
+// it knew a scroll box had somewhere to scroll but answered no keys; it
 // knew where a node's box was but had no way to say the target was bigger
 // than the box.
 import { test } from 'node:test';
@@ -238,23 +238,23 @@ test('the claim that erases a ring is taken while the ring is still on', async (
   );
 });
 
-// --- 2. a keyboard-operable <scrollview> ------------------------------------
+// --- 2. a keyboard-operable scroll box ------------------------------------
 
 const scroller = (contentHeight, props) =>
   h(
-    'scrollview',
-    { style: { width: 100, height: 100 }, ...props },
+    'box',
+    { style: { overflow: 'scroll', width: 100, height: 100 }, ...props },
     h('box', { style: { height: contentHeight } }),
   );
 
-test('a scrollview is a tab stop only when it has somewhere to scroll', async () => {
+test('a scroll box is a tab stop only when it has somewhere to scroll', async () => {
   const { root } = await mount(h('box', null, scroller(400), scroller(20)));
   const [overflowing, fits] = root.children[0].children;
   assert.strictEqual(overflowing.focusableByDefault, true);
   assert.strictEqual(
     fits.focusableByDefault,
     false,
-    'a scrollview that fits its content is a box with a clip',
+    'a scroll box that fits its content is a box with a clip',
   );
 });
 

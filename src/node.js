@@ -9,11 +9,14 @@
 // kind and a `paint` that calls `super.paint(ctx)` first.
 export {
   Node,
+  // `class MyPane extends Scrollable(Node)` — the same mixin <box> and
+  // <window> use, so a registered element can honour `overflow: 'scroll'`
+  // with the wheel, the keys, the bars and the a11y role already wired.
+  Scrollable,
   BoxNode,
   TextNode,
   ImageNode,
   CanvasNode,
-  ScrollViewNode,
   TextInputNode,
   TextAreaNode,
   WindowNode,

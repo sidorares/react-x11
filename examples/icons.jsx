@@ -12,7 +12,7 @@
 // edge to reflow. The grid and the cell count stay identical throughout, so
 // frame logs from either side of the switch are directly comparable.
 //
-// The wall lives in a `<scrollview>`, which puts the *other* expensive frame
+// The wall lives in a scrolling `<box>`, which puts the *other* expensive frame
 // on the wheel: a scroll moves every cell without changing one of them. Those
 // frames log as `scroll`, and the damage column is where to look — the scroll
 // blit (issue #138) copies the surviving band in the backing pixmap and
@@ -201,14 +201,14 @@ const s = createStyles({
   ctlLabel: { fontSize: 11, color: '$dim' },
   ctlValue: { fontSize: 11, color: '$text', width: 30 },
   // The viewport: it takes the space the header leaves and lets the wall
-  // overflow it. ScrollViewNode supplies the `flex-basis: 0` and the
+  // overflow it. `overflow: 'scroll'` supplies the `flex-basis: 0` and the
   // `min-height: 0` that a scroll container always wants, so `flexGrow` is
   // the whole declaration.
-  scroller: { flexGrow: 1 },
+  scroller: { flexGrow: 1, overflow: 'scroll' },
   // `flexWrap` is the whole point: the column count is a function of the
   // window width, so every resize is a real reflow of all `count` cells
   // rather than a stretch of a fixed grid. The wrap still happens at the
-  // viewport width inside the scrollview — what the scroll container took
+  // viewport width inside the viewport — what the scroll container took
   // away is `flexGrow`, since in there the wall has to size to its content
   // or there would be nothing to scroll.
   grid: {
@@ -386,9 +386,9 @@ function App({
             drag an edge to reflow · wheel to scroll · 1 source · 2 jsx
           </text>
         </box>
-        <scrollview style={s.scroller}>
+        <box style={[s.scroller, { overflow: 'scroll' }]}>
           <box style={s.grid}>{cells}</box>
-        </scrollview>
+        </box>
       </box>
     </window>
   );

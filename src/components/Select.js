@@ -36,7 +36,7 @@ const MAX_MENU_HEIGHT = 220;
 // is measuring for clips the very labels it exists to fit.
 const ITEM_PAD_LEFT = 10;
 const ITEM_PAD_RIGHT = 10;
-// The scrollview's own padding, and so the inset between the sheet's edge
+// The scrolling pane's own padding, and so the inset between the edge
 // and an option — which is what makes the highlight read as a pill on the
 // menu rather than a band across it. The same number the menus use
 // (`Menu.js`): a dropdown is the same kind of surface and there is no
@@ -396,12 +396,12 @@ export function Select({
             },
           },
           h(
-            'scrollview',
+            'box',
             {
               ref: scrollRef,
               role: 'listbox',
               // Not a tab stop, and not a focus target for a press either.
-              // A scrollview becomes focusable the moment its content
+              // A scroll box becomes focusable the moment its content
               // overflows, so a menu long enough to scroll would take focus
               // on mousedown — blurring the trigger, whose onBlur closes the
               // menu, which unmounts the row under the pointer before the
@@ -409,7 +409,7 @@ export function Select({
               // for a Select; this pane is scrolled by wheel and by the
               // arrow keys the trigger already handles.
               focusable: false,
-              style: { flexGrow: 1, padding: MENU_PAD },
+              style: { flexGrow: 1, padding: MENU_PAD, overflow: 'scroll' },
             },
             normalized.map((option, index) =>
               h(Option, {

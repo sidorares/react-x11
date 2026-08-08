@@ -535,14 +535,14 @@ function App() {
         <Readout stats={stats} routing={routing} />
       </box>
 
-      <scrollview style={{ flexGrow: 1 }}>
+      <box style={{ overflow: 'scroll', flexGrow: 1 }}>
         <Wall
           count={count}
           phase={phase}
           gaugeHeight={gaugeHeight}
           gaugeSvg={gaugeSvg}
         />
-      </scrollview>
+      </box>
     </window>
   );
 }

@@ -44,7 +44,7 @@ content wider than the space available pushes the row past its container
 instead of being squeezed into it. Write `flex: 1` in full —
 `{ flexGrow: 1, flexBasis: 0, minWidth: 0 }` — for anything that should take
 the space that is left rather than the space its content wants.
-`<scrollview>` applies exactly that to itself by default.
+A box with `overflow: 'scroll'` applies exactly that to itself by default.
 
 ## Paint properties
 
@@ -185,9 +185,9 @@ thing, and setting it back to `'auto'` hands it back.
 
 Three things worth knowing before reaching for it:
 
-- A `<scrollview>` reports its **content** height, not a viewport height, so
-  an auto window around a long list opens as tall as the screen. Give the
-  window a `height`, or the scrollview a `maxHeight`, if the scrolling is
+- A scroll container reports its **content** height, not a viewport height,
+  so an auto window around a long list opens as tall as the screen. Give the
+  window a `height`, or the scrolling box a `maxHeight`, if the scrolling is
   meant to happen inside a smaller window.
 - With no available width nothing wraps (and yoga defaults `flexShrink` to
   0 — see [styling.md](styling.md)), so an auto width is the **unwrapped**
@@ -548,11 +548,27 @@ The flex container. All layout + paint + interaction props above.
 **Ref**: the retained node — `abs` (`{x, y, width, height}` within the
 window, valid after layout).
 
-## `<scrollview>`
+With `overflow: 'scroll'` it is also the **scroll container** — see below.
 
-A clipped viewport over its (overflowing) children, on **both axes**. Wheel
-events scroll it by default; a scrollbar thumb is drawn on each axis that
-overflows, and the thumb can be dragged.
+## Scrolling: `overflow: 'scroll'`
+
+There is no scrolling _element_. A `<box>` — or a `<window>` — whose style
+says `overflow: 'scroll'` becomes a clipped viewport over its own
+overflowing children, on **both axes**:
+
+```jsx
+<box style={{ overflow: 'scroll', flexGrow: 1 }}>{rows}</box>
+```
+
+Wheel events scroll it by default; a scrollbar thumb is drawn on each axis
+that overflows, and the thumb can be dragged. `overflow: 'hidden'` still
+means what it always did — clip and do not scroll.
+
+Because the switch is a style and not an element, a pane can start and stop
+scrolling without remounting, which is what makes `overflow={dense ?
+'scroll' : 'visible'}` cheap: the node, its children and their state all
+survive the change. When a box stops being a scroll container its offset
+resets to 0, as it does in CSS.
 
 **It is also a tab stop, and answers the keyboard**, whenever it has
 somewhere to scroll — which is what lets a pane of unfocusable content (a
@@ -565,10 +581,12 @@ log, a long `<text>`, a `<markdown>`) be read without a pointer at all:
 | Space / Shift+Space | the same, for the hand already there |
 | Home / End          | the top and the bottom               |
 
-One that fits its content is not a tab stop: it is a `<box>` with a clip,
-and stopping on it would be a stop that does nothing. The keys are a
-default action, so an `onKeyDown` of your own runs first and
-`preventDefault()` cancels them.
+One that fits its content is not a tab stop, answers no keys and takes no
+wheel: it is a box with a clip, and stopping on it would be a stop that does
+nothing. **The wheel chains past it** to the next scroll container out — the
+same thing a browser does — so declaring a pane scrollable never steals a
+gesture the window would have answered. The keys are a default action, so an
+`onKeyDown` of your own runs first and `preventDefault()` cancels them.
 
 The bar belongs to the scroller, not to the content painted under it — the
 same rule a browser applies — so a press on the thumb never reaches the row
@@ -577,12 +595,24 @@ jump to the pointer, and a press on the track pages towards it, like
 PageUp/PageDown. `<textarea>` behaves the same way, and there a bar press
 never moves the caret.
 
-With `flexGrow` and no explicit size it defaults to **`flex-basis: 0`** —
-what CSS's `flex: 1` means — so it takes the space left over instead of
-being sized by its content. Without that, a header/scrollview/footer window
-grows past its own bounds as rows are added and the footer is pushed out of
-view. `flexShrink` defaults to `1` and `minHeight`/`minWidth` to `0` for the
-same reason. Pass any of them explicitly to opt out.
+### The layout defaults it brings
+
+`overflow: 'scroll'` folds four CSS idioms into the resolved style, so a
+scroll container does not have to restate them:
+
+| default                        | when                                     |
+| ------------------------------ | ---------------------------------------- |
+| `flexBasis: 0`                 | `flexGrow > 0` and no `width` / `height` |
+| `flexShrink: 1`                | always (yoga's own default is `0`)       |
+| `minWidth: 0` / `minHeight: 0` | always                                   |
+
+`min-*: 0` is the CSS spec's own rule — `min-*: auto` computes to `0` on a
+flex item whose overflow is not `visible` — and the other two are what
+`flex: 1` means. Without them a header/scroll/footer window grows past its
+own bounds as rows are added and the footer is pushed out of view. Set any
+of them yourself to opt out; an explicit value always wins.
+
+### Props
 
 | prop                |                                                                                  |
 | ------------------- | -------------------------------------------------------------------------------- |
@@ -592,12 +622,13 @@ same reason. Pass any of them explicitly to opt out.
 | `scrollbarColor`    | thumb color                                                                      |
 
 **Ref**: the node, plus `scrollTo` / `scrollBy` / `scrollIntoView(node)` and
-`scrollX` / `scrollY` / `contentWidth` / `contentHeight`.
+`scrollX` / `scrollY` / `contentWidth` / `contentHeight`. In TypeScript,
+`useRef<ScrollableNode>(null)` types those in; `DrawnNode` still works for a
+box you do not scroll.
 
-`scrollTo(y)` takes a number for the vertical axis, as it always has;
-`scrollTo({x, y})` moves either, leaving alone whichever you omit.
-`scrollBy` matches. `scrollIntoView(node)` scrolls the minimum amount on
-both axes.
+`scrollTo(y)` takes a number for the vertical axis; `scrollTo({x, y})` moves
+either, leaving alone whichever you omit. `scrollBy` matches.
+`scrollIntoView(node)` scrolls the minimum amount on both axes.
 
 Horizontal content comes from children that will not shrink — a row of
 fixed-width cells, say. The extent is measured **through the subtree**, the
@@ -620,6 +651,14 @@ size off the ref. `Table` is built on it.
 node fully visible, and is safe to call from an effect right after that
 node mounts: the request is resolved on the next layout pass, when the
 node actually has geometry.
+
+### On a `<window>`
+
+`<window style={{ overflow: 'scroll' }}>` scrolls the window's own content,
+with no inner pane at all — the same wheel, keys and bars. The window stays
+a `frame` to a screen reader whatever its overflow says. Its ref is still
+ntk's `Window`, so reach the scroll API through a ref on a box inside it, or
+through the node in `onViewport`.
 
 ## `<text>`
 
@@ -1100,7 +1139,7 @@ forces all of this.
 Thin wrappers over ntk's document widgets in standalone mode. The widget's
 own layout feeds a yoga measure function: given the width the flexbox
 offers, the element reports the document's content height — so rich content
-participates in flex layout and scrolls naturally inside a `<scrollview>`.
+participates in flex layout and scrolls naturally inside a scrolling box.
 Spacing comes from the box model (`padding` prop), not a widget page margin.
 
 Async content — an `<img>` inside `<html>` — reflows when it arrives via

@@ -242,7 +242,7 @@ export interface SubmitEvent<T = TextInputNode> extends Omit<
   type: 'submit';
 }
 
-/** `<scrollview onScroll>`. */
+/** `<box onScroll>` — a scrolling box or window moved. */
 export interface ScrollEvent {
   scrollX: number;
   scrollY: number;
@@ -252,7 +252,7 @@ export interface ScrollEvent {
   viewportHeight: number;
 }
 
-/** `<scrollview onViewport>` — fired from layout, not from scrolling. */
+/** `<box onViewport>` — fired from layout, not from scrolling. */
 export interface ViewportEvent {
   width: number;
   height: number;

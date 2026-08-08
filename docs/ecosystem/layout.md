@@ -113,17 +113,17 @@ reconciler — see the
 [silent-failures table](../ecosystem.md#silent-failures). Everything the
 React wrapper adds is the hook below.
 
-Three seams wire to `<scrollview>`:
+Three seams wire to a scrolling `<box>`:
 
-- `observeElementRect` → `<scrollview onViewport>`, which fires from layout
+- `observeElementRect` → `<box onViewport>`, which fires from layout
   with `{width, height, contentWidth, contentHeight}` — including before any
   scroll, which is what a list needs on mount;
-- `observeElementOffset` → `<scrollview onScroll>` (`scrollY`);
+- `observeElementOffset` → `<box onScroll>` (`scrollY`);
 - `scrollToFn` → `ref.scrollTo(offset)`.
 
 One non-obvious requirement: `getScrollElement()` must return something with
 `scrollHeight`/`clientHeight`, because virtual-core duck-types Element vs
-Window with `'scrollHeight' in el`. A getter shim over the scrollview node's
+Window with `'scrollHeight' in el`. A getter shim over the scroll box node's
 `contentHeight`/`abs.height` satisfies it.
 
 ```jsx
@@ -172,7 +172,7 @@ function useX11Virtualizer({ count, estimateSize, overscan = 2 }) {
   React.useEffect(() => v._willUpdate());
   return {
     virtualizer: v,
-    scrollviewProps: {
+    scrollProps: {
       ref,
       onViewport: (r) => obs.current.rect?.(r),
       onScroll: (s) => obs.current.offset?.(s.scrollY, true),
@@ -183,12 +183,12 @@ function useX11Virtualizer({ count, estimateSize, overscan = 2 }) {
 
 ```jsx
 function BigList() {
-  const { virtualizer, scrollviewProps } = useX11Virtualizer({
+  const { virtualizer, scrollProps } = useX11Virtualizer({
     count: 10000,
     estimateSize: () => 24,
   });
   return (
-    <scrollview {...scrollviewProps} style={{ flexGrow: 1 }}>
+    <box {...scrollProps} style={{ flexGrow: 1, overflow: 'scroll' }}>
       <box style={{ height: virtualizer.getTotalSize() }}>
         {virtualizer.getVirtualItems().map((item) => (
           <text
@@ -199,7 +199,7 @@ function BigList() {
           </text>
         ))}
       </box>
-    </scrollview>
+    </box>
   );
 }
 ```

@@ -221,10 +221,10 @@ function App() {
           Changes since start — newest first. Flip your desktop theme now.
         </text>
         {/* The card owns the height and the border, so an empty log reads as
-            an empty box rather than as a gap; the scrollview inside takes
+            an empty box rather than as a gap; the scroll box inside takes
             over once there are more entries than fit. */}
         <box style={[s.card, { height: 104, padding: 0 }]}>
-          <scrollview style={{ flexGrow: 1 }}>
+          <box style={{ overflow: 'scroll', flexGrow: 1 }}>
             <box style={{ padding: 12, gap: 4 }}>
               {log.length === 0 ? (
                 <text style={s.logLine}>…</text>
@@ -239,7 +239,7 @@ function App() {
                 )
               )}
             </box>
-          </scrollview>
+          </box>
         </box>
 
         <box style={s.card}>

@@ -132,8 +132,8 @@ test('a frame collects reasons and clears them for the next one', async () => {
   const ref = React.createRef();
   const { root } = await mount(
     h(
-      'scrollview',
-      { ref, style: { flexGrow: 1 } },
+      'box',
+      { ref, style: { overflow: 'scroll', flexGrow: 1 } },
       ...Array.from({ length: 10 }, (_, i) =>
         h('box', { key: i, style: { height: 40, flexShrink: 0 } }),
       ),
