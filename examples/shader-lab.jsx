@@ -193,7 +193,7 @@ function Knob({ label, value, min, max, step, format, onChange }) {
         min={min}
         max={max}
         step={step}
-        onChange={onChange}
+        onChange={(ev) => onChange(ev.value)}
       />
     </box>
   );
@@ -202,7 +202,7 @@ function Knob({ label, value, min, max, step, format, onChange }) {
 function Toggle({ label, checked, onChange }) {
   return (
     <box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      <Switch checked={checked} onChange={onChange} />
+      <Switch checked={checked} onChange={(ev) => onChange(ev.value)} />
       <text style={{ fontSize: 12 }}>{label}</text>
     </box>
   );
@@ -291,7 +291,7 @@ function App() {
                 value: k,
                 label: k,
               }))}
-              onChange={setPalette}
+              onChange={(ev) => setPalette(ev.value)}
             />
           </box>
 
