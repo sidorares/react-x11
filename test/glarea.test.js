@@ -416,3 +416,41 @@ test('<Canvas3D fallback> ignores a shader failure and keeps the surface', async
     await app.close();
   }
 });
+
+// A surface with neither a fallback nor an onError used to fail in total
+// silence: <glarea> logs only when nothing claimed the error, and <Canvas3D>
+// always claims it. The symptom was a blank 3D area with nothing on the
+// console — indistinguishable from "my scene is wrong".
+test('<Canvas3D> with no fallback and no onError still says what went wrong', async () => {
+  const { app } = await createGlApp({ indirectContexts: false });
+  const x11Root = await createRoot({ app });
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          { style: { flexGrow: 1 } },
+          h('mesh', null, h('boxGeometry', { args: [1, 1, 1] })),
+        ),
+      ),
+      x11Root,
+    );
+    await waitFor(
+      () => warnings.some((w) => w.includes('Canvas3D')),
+      'the failure to reach the console',
+    );
+    await settle(app);
+    assert.match(warnings.join('\n'), /indirect GLX/, 'and names the cause');
+
+    await x11Root.unmount();
+    await settle(app);
+  } finally {
+    console.warn = realWarn;
+    await app.close();
+  }
+});

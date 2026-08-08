@@ -43,7 +43,8 @@ import { beginStartup } from './startup.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
 import { watchAppearance } from './appearance.js';
-import { GlAreaNode, hasDirectGL } from './glnodes.js';
+import { GlAreaNode } from './glnodes.js';
+import { directGLFailure, hasDirectGL } from './glbackend.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
 import {
   DIRECT_ONLY_KINDS,
@@ -200,13 +201,26 @@ const HostConfig = {
       // connection has one is already known — ntk settles it during connect —
       // so the answer arrives here rather than as a blank surface later.
       if (DIRECT_ONLY_KINDS[type] && !hasDirectGL(rootContainer)) {
-        throw new Error(
-          `react-x11: <${type}> needs direct rendering, and this connection ` +
-            `does not have it — ${DIRECT_ONLY_KINDS[type]}.\n` +
-            'Direct rendering is ntk\'s GPU backend: createClient({ glPolicy: "auto" }) ' +
-            'turns it on where a local DRI3 server and the x11-dri addon are both ' +
-            'present. app.glCapabilities() says why not. See docs/gl.md.',
+        // Say which of the several reasons it is. ntk worked it out during
+        // the connection handshake, and they call for different fixes — an
+        // addon to install, a display that cannot carry descriptors, a server
+        // without DRI3, or simply a policy left at its default.
+        const reason = directGLFailure(rootContainer);
+        const why = reason
+          ? `\n\n${reason.code}: ${reason.message}` +
+            (reason.hint ? `\n\n${reason.hint}` : '')
+          : '\n\nThe direct-rendering probe has not run on this connection. It runs ' +
+            'during createRoot() when glPolicy could select the direct backend, and ' +
+            'the default policy is "indirect":\n\n' +
+            "  const root = await createRoot({ glPolicy: 'auto' });";
+        const err = new Error(
+          `react-x11: <${type}> needs direct rendering — ${DIRECT_ONLY_KINDS[type]} — ` +
+            `and this connection does not have it.${why}\n\n` +
+            "useSupports('shaders') is the check to branch on if this scene should " +
+            'degrade rather than fail. See docs/gl.md.',
         );
+        err.code = reason?.code ?? 'GL_NO_DIRECT';
+        throw err;
       }
       const scene = createSceneNode(type, props, rootContainer);
       if (scene) {

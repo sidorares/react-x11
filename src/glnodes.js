@@ -7,6 +7,9 @@
 // that draws into it comes later (docs/glx-plan.md).
 import { cssColorStraight } from 'ntk';
 
+// re-exported so the GL element layer stays one import for consumers
+export { directGLFailure, hasDirectGL } from './glbackend.js';
+
 import { Node } from './nodes.js';
 import { ScenePointer, sceneWantsPointer } from './pointer3d.js';
 import { SceneRenderer } from './scene3d.js';
@@ -65,18 +68,6 @@ export function glxConfig(app, spec) {
     perApp.set(key, promise);
   }
   return promise;
-}
-
-/**
- * Is the direct backend available on this connection?
- *
- * Answered synchronously from what ntk resolved during its connect handshake,
- * so element creation can decide whether a `<shaderMaterial>` is going to have
- * a pipeline to run on. `false` covers "not known yet" too, which is the
- * honest answer for a policy raised after connecting.
- */
-export function hasDirectGL(app) {
-  return !!app?._glCapsResolved?.direct;
 }
 
 /**

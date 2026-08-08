@@ -131,8 +131,14 @@ export function useApp(): unknown;
 /** The clipboard, scoped to this tree's connection. */
 export function useClipboard(): Clipboard;
 
-/** Features `useSupports()` can be asked about. */
-export type SupportsFeature = 'transparency';
+/**
+ * Features `useSupports()` can be asked about.
+ *
+ * `'shaders'` is whether 3D can run your own GLSL — the direct rendering
+ * backend. Ask it before rendering a `<shaderMaterial>`, which throws where
+ * there is no pipeline to compile it. Needs `createRoot({ glPolicy: 'auto' })`.
+ */
+export type SupportsFeature = 'transparency' | 'shaders';
 
 /**
  * Can this **display** do something? `'transparency'` is true when the

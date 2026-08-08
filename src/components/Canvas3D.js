@@ -61,9 +61,16 @@ export function Canvas3D({ children, style, fallback, onError, ...props }) {
       // one material, not a machine without 3D — replacing the whole scene
       // with "no 3D here" would send the reader off to check their drivers.
       if (err?.code !== 'GL_SHADER_FAILED') setError(err);
-      onError?.(err);
+      if (onError) return onError(err);
+      // Nowhere else for it to go. `<glarea>` logs its own failures only when
+      // no onError is set, and this component always sets one — so without
+      // this an app that passed neither `fallback` nor `onError` gets a
+      // surface that draws nothing and says nothing, which is the worst of
+      // the three outcomes and exactly what a blank window looks like.
+      if (fallback === undefined)
+        console.warn(`react-x11: <Canvas3D>: ${err?.message ?? err}`);
     },
-    [onError],
+    [onError, fallback],
   );
 
   if (error && fallback !== undefined) {

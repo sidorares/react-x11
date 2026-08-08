@@ -108,9 +108,41 @@ the only thing that says what to fix — and that mesh is skipped rather than
 taking the render down.
 
 Asking for `<shaderMaterial>` on a connection with no direct backend throws
-when the element is created, naming `glPolicy` and `app.glCapabilities()`.
-That check happens up front rather than at draw time, because a blank surface
-is a much worse way to learn it.
+when the element is created, naming the actual reason ntk found. That check
+happens up front rather than at draw time, because a blank surface is a much
+worse way to learn it — but it does mean a scene that would rather degrade
+has to ask first:
+
+```jsx
+const shaders = useSupports('shaders');
+<mesh>
+  <boxGeometry args={[1, 1, 1]} />
+  {shaders ? (
+    <shaderMaterial {...glsl} />
+  ) : (
+    <meshPhongMaterial color="#e0533d" />
+  )}
+</mesh>;
+```
+
+`<Canvas3D fallback>` does not cover this: it is for a surface with no GL
+context at all, and a connection can have perfectly good indirect GL and no
+shaders.
+
+### Runtimes
+
+Direct rendering needs a runtime that can send a file descriptor over a unix
+socket, because that is how DRI3 hands the server a buffer. `x11` does it
+through Node's internal `process.binding('pipe_wrap')`:
+
+| runtime | direct                                                     | indirect |
+| ------- | ---------------------------------------------------------- | -------- |
+| Node    | yes                                                        | yes      |
+| Bun     | **no** — `process.binding('pipe_wrap')` is not implemented | yes      |
+
+Under Bun, `glPolicy: 'auto'` falls back to indirect GLX and
+`useSupports('shaders')` is false. `npm run examples:shader` shows what that
+looks like.
 
 ## What the direct backend does with the standard materials
 

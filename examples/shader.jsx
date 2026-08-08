@@ -11,7 +11,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 import { Button, Canvas3D } from '../src/components/index.js';
-import { createRoot } from '../src/index.js';
+import { createRoot, useApp, useSupports } from '../src/index.js';
 
 // three.js's names are declared for you: position/normal/uv and the matrices,
 // so this is the same shader you would write against react-three-fiber.
@@ -65,18 +65,58 @@ function useClock(running, windowRef) {
   return time;
 }
 
-function NoDirect(err) {
+/**
+ * What to show where GLSL cannot run. `useSupports('shaders')` is the check
+ * to make *before* rendering a `<shaderMaterial>` — the element throws when
+ * there is no pipeline for it, so a scene that wants to degrade has to ask
+ * first rather than catch afterwards.
+ */
+function NoShaders() {
+  const app = useApp();
+  const reason = app._glCapsResolved?.reason;
   return (
     <box style={{ padding: 24, gap: 10, flexDirection: 'column' }}>
       <text style={{ fontSize: 15, fontWeight: 'bold' }}>
-        No direct rendering on this display
+        No shaders on this connection
       </text>
-      <text style={{ color: '$dim' }}>{err?.message ?? String(err)}</text>
       <text style={{ color: '$dim' }}>
-        Shaders need the GPU backend. It wants a local connection to a server
-        with DRI3 and the x11-dri addon — see docs/gl.md.
+        {reason
+          ? `${reason.code}: ${reason.message}`
+          : 'The direct-rendering backend is not available.'}
+      </text>
+      <text style={{ color: '$dim' }}>
+        GLSL needs ntk's direct backend: a local connection to a server with
+        DRI3, the x11-dri addon, and a runtime that can pass file descriptors
+        over the socket — which today means Node, not Bun. See docs/gl.md.
       </text>
     </box>
+  );
+}
+
+function Scene({ time, warm }) {
+  // Ask before rendering: `<shaderMaterial>` throws where there is no
+  // pipeline to compile it, so a scene that wants to degrade cannot wait for
+  // `<Canvas3D fallback>` — that only covers a surface with no GL context.
+  if (!useSupports('shaders')) return <NoShaders />;
+  return (
+    <Canvas3D
+      style={{ flexGrow: 1 }}
+      clearColor="#0b1021"
+      camera={{ position: [0, 0, 3.4] }}
+    >
+      <mesh rotation={[0.4, time * 0.4, 0]}>
+        <torusGeometry args={[1, 0.38, 24, 64]} />
+        <shaderMaterial
+          vertexShader={VERTEX}
+          fragmentShader={FRAGMENT}
+          uniforms={{
+            uTime: { value: time },
+            uColorA: { value: warm ? [0.85, 0.2, 0.35] : [0.1, 0.3, 0.7] },
+            uColorB: { value: warm ? [0.95, 0.7, 0.2] : [0.2, 0.8, 0.75] },
+          }}
+        />
+      </mesh>
+    </Canvas3D>
   );
 }
 
@@ -94,25 +134,7 @@ function App() {
       title="react-x11 — shaders"
     >
       <box style={{ flexDirection: 'column', flexGrow: 1 }}>
-        <Canvas3D
-          style={{ flexGrow: 1 }}
-          clearColor="#0b1021"
-          camera={{ position: [0, 0, 3.4] }}
-          fallback={NoDirect}
-        >
-          <mesh rotation={[0.4, time * 0.4, 0]}>
-            <torusGeometry args={[1, 0.38, 24, 64]} />
-            <shaderMaterial
-              vertexShader={VERTEX}
-              fragmentShader={FRAGMENT}
-              uniforms={{
-                uTime: { value: time },
-                uColorA: { value: warm ? [0.85, 0.2, 0.35] : [0.1, 0.3, 0.7] },
-                uColorB: { value: warm ? [0.95, 0.7, 0.2] : [0.2, 0.8, 0.75] },
-              }}
-            />
-          </mesh>
-        </Canvas3D>
+        <Scene time={time} warm={warm} />
         <box
           style={{
             flexDirection: 'row',

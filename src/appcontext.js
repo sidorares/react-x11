@@ -26,6 +26,7 @@ import {
   compositingActive,
   watchCompositing,
 } from './compositing.js';
+import { hasDirectGL } from './glbackend.js';
 
 const AppContext = createContext(null);
 
@@ -56,7 +57,7 @@ export function useApp() {
   return app;
 }
 
-const SUPPORTS_FEATURES = new Set(['transparency']);
+const SUPPORTS_FEATURES = new Set(['transparency', 'shaders']);
 
 /**
  * Can this **display** do something, as a value a component can branch on?
@@ -82,6 +83,25 @@ const SUPPORTS_FEATURES = new Set(['transparency']);
  * and the translucent one inside a `<popup transparent>`, without being
  * told which it is. Reach for the style block first; this is for decisions
  * that are not styling.
+ *
+ * `'shaders'` is true when 3D can run your own GLSL — that is, when ntk
+ * resolved the **direct** rendering backend for this connection. It is the
+ * question to ask before rendering a `<shaderMaterial>`, which throws where
+ * there is no pipeline to compile it:
+ *
+ * ```jsx
+ * const shaders = useSupports('shaders');
+ * <mesh>
+ *   <boxGeometry args={[1, 1, 1]} />
+ *   {shaders ? <shaderMaterial {...glsl} /> : <meshPhongMaterial color="#e0533d" />}
+ * </mesh>
+ * ```
+ *
+ * It needs `createRoot({ glPolicy: 'auto' })` — the default policy is the
+ * indirect backend, which has no shaders at all. Unlike `'transparency'` it
+ * cannot change while the app runs, since the backend is settled during the
+ * connection handshake. `app.glCapabilities()` says *why* it is false; see
+ * docs/gl.md.
  */
 export function useSupports(feature) {
   const app = useApp();
@@ -91,15 +111,24 @@ export function useSupports(feature) {
         `(expected one of ${[...SUPPORTS_FEATURES].join(', ')})`,
     );
   }
+  // Both features go through the same store, so the hooks below run in the
+  // same order whatever is being asked about. 'shaders' has nothing to watch:
+  // ntk settles the backend during the connection handshake and it cannot
+  // change after that, so its subscribe is a no-op rather than a compositing
+  // watch this caller never asked for.
   const subscribe = useCallback(
-    (onChange) => watchCompositing(app, onChange),
-    [app],
+    (onChange) =>
+      feature === 'shaders' ? () => {} : watchCompositing(app, onChange),
+    [app, feature],
   );
   // a boolean, so the snapshot is stable for a given state — returning the
   // visual object here would tear on every render
   const snapshot = useCallback(
-    () => compositingActive(app) && Boolean(argbVisual(app)),
-    [app],
+    () =>
+      feature === 'shaders'
+        ? hasDirectGL(app)
+        : compositingActive(app) && Boolean(argbVisual(app)),
+    [app, feature],
   );
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
