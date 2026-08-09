@@ -23,7 +23,7 @@ const TWISTY = 12;
 const ROW_HEIGHT = 22;
 
 const s = createStyles({
-  root: { flexGrow: 1, minHeight: 0 },
+  root: { flexGrow: 1, minHeight: 0, overflow: 'scroll' },
   row: {
     height: ROW_HEIGHT,
     flexShrink: 0,
@@ -198,7 +198,7 @@ export function Tree({
   };
 
   return h(
-    'scrollview',
+    'box',
     {
       theme,
       role: 'tree',

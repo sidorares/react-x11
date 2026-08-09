@@ -150,7 +150,7 @@ export function ThemingPanel() {
         </text>
       </box>
 
-      <scrollview style={s.scroller}>
+      <box style={[s.scroller, { overflow: 'scroll' }]}>
         <box style={s.gallery}>
           <box style={s.column}>
             <box style={s.card}>
@@ -249,7 +249,7 @@ export function ThemingPanel() {
             </box>
           </box>
         </box>
-      </scrollview>
+      </box>
     </ThemeProvider>
   );
 }

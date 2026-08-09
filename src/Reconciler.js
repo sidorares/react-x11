@@ -24,7 +24,6 @@ import {
   TextChunkNode,
   ImageNode,
   CanvasNode,
-  ScrollViewNode,
   TextInputNode,
   TextAreaNode,
   appearanceChanged,
@@ -81,7 +80,6 @@ export const HOST_TYPES = [
   'text',
   'image',
   'canvas',
-  'scrollview',
   'textinput',
   'textarea',
   'markdown',
@@ -222,9 +220,6 @@ const HostConfig = {
         break;
       case 'box':
         node = new BoxNode(props, rootContainer);
-        break;
-      case 'scrollview':
-        node = new ScrollViewNode(props, rootContainer);
         break;
       case 'textinput':
         node = new TextInputNode(props, rootContainer);

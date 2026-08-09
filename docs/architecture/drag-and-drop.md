@@ -320,7 +320,7 @@ Consequences, and this is the direct answer to the question:
 
 - **`<glarea>`'s child window: nothing.** A drag over a `<glarea>` is found
   through the enclosing top-level and routed by our own hit test.
-- **A future windowed `<scrollview>` pane, or any `<box windowed>` that never
+- **A future windowed a scrolling `<box>` pane, or any `<box windowed>` that never
   ships: nothing.** The promotion decision in
   [windowed-regions.md](windowed-regions.md) §8 is invisible to XDND. That is
   a genuine argument _for_ that document's verdict — a feature that would have
@@ -812,7 +812,7 @@ and the app-facing API is complete. Phase 3 changes no application code.
     call, not the toolkit's. Reading the properties lazily, only when a
     position actually asks, keeps the two round trips off every other drag.
 19. A `react-dnd` backend (separate package) over the seam from §5.
-20. Auto-scroll on drag near a `<scrollview>` edge — a default action in the
+20. Auto-scroll on drag near a scroll container's edge — a default action in the
     router, the same shape as the existing wheel default
     ([events.js:294](../../src/events.js)). _Done._ It hangs off
     `_overAt`, so both transports get it from one implementation, and the

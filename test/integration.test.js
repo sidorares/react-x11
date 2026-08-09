@@ -208,7 +208,7 @@ test('paints a flex box tree and reflows on update', async () => {
   }
 });
 
-test('scrollview scrolls content (pixel-verified)', async () => {
+test('a scroll box scrolls its content (pixel-verified)', async () => {
   const { app } = await createHeadlessApp();
   const x11Root = await createRoot({ app });
   try {
@@ -218,8 +218,8 @@ test('scrollview scrolls content (pixel-verified)', async () => {
         'window',
         { width: 100, height: 100 },
         React.createElement(
-          'scrollview',
-          { ref, scrollbar: false, style: { flexGrow: 1 } },
+          'box',
+          { ref, scrollbar: false, style: { overflow: 'scroll', flexGrow: 1 } },
           React.createElement('box', {
             style: { height: 100, backgroundColor: 'red' },
           }),
@@ -624,13 +624,13 @@ test('centered text is vertically balanced (half-leading)', async () => {
   }
 });
 
-test('rich content scrolled out of a scrollview leaves no ink behind', async () => {
+test('rich content scrolled out of a scroll box leaves no ink behind', async () => {
   const { app } = await createHeadlessApp();
   const x11Root = await createRoot({ app });
   try {
     // a math fence: KaTeX draws glyph runs and vector shapes of its own,
     // which used to bypass the 2d clip and paint over whatever was above
-    // the scrollview once they were scrolled out (fixed in ntk 3.7.1)
+    // the scroll box once they were scrolled out (fixed in ntk 3.7.1)
     const source = `# Heading\n\n\`\`\`math\n\\sqrt{\\frac{x+1}{2}}\n\`\`\`\n\n${'filler paragraph. '.repeat(40)}\n`;
     const wnd = await render(
       React.createElement(
@@ -641,8 +641,8 @@ test('rich content scrolled out of a scrollview leaves no ink behind', async () 
           { style: { flexGrow: 1, padding: 20 } },
           React.createElement('box', { style: { height: 60 } }), // the band above it
           React.createElement(
-            'scrollview',
-            { style: { flexGrow: 1 } },
+            'box',
+            { style: { overflow: 'scroll', flexGrow: 1 } },
             React.createElement('markdown', { source }),
           ),
         ),
@@ -661,7 +661,7 @@ test('rich content scrolled out of a scrollview leaves no ink behind', async () 
       { x: 20, y: 80, width: 260, height: 200 },
       isDark,
       20,
-      'markdown ink inside the scrollview',
+      'markdown ink inside the scroll box',
     );
 
     const inkAbove = async () => {
@@ -680,7 +680,7 @@ test('rich content scrolled out of a scrollview leaves no ink behind', async () 
       assert.equal(
         await inkAbove(),
         0,
-        `nothing painted above the scrollview at offset ${offset}`,
+        `nothing painted above the scroll box at offset ${offset}`,
       );
     }
 
@@ -703,8 +703,8 @@ test('<markdown> survives a document being typed down to nothing', async () => {
         'window',
         { width: 300, height: 200, style: { backgroundColor: 'white' } },
         React.createElement(
-          'scrollview',
-          { style: { flexGrow: 1 } },
+          'box',
+          { style: { overflow: 'scroll', flexGrow: 1 } },
           React.createElement('markdown', { style: { padding: 6 } }, text),
         ),
       );

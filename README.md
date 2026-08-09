@@ -93,9 +93,9 @@ three:
   own layout engine and is not a browser.
 - **text entry outside Latin.** See [Known issues](#known-issues).
 
-| `examples/dashboard.jsx` — context theming, hooks | `examples/tasks.jsx` — useReducer, textinput, scrollview |
-| ------------------------------------------------- | -------------------------------------------------------- |
-| ![dashboard](docs/img/dashboard.png)              | ![tasks](docs/img/tasks.png)                             |
+| `examples/dashboard.jsx` — context theming, hooks | `examples/tasks.jsx` — useReducer, textinput, scrolling |
+| ------------------------------------------------- | ------------------------------------------------------- |
+| ![dashboard](docs/img/dashboard.png)              | ![tasks](docs/img/tasks.png)                            |
 
 | `examples/form.jsx` — textinput + Select | the open Select menu (a real `<popup>` window) |
 | ---------------------------------------- | ---------------------------------------------- |
@@ -169,21 +169,20 @@ Everything else is laid out by yoga and drawn client-side into the window's
 double-buffered 2d context — see [NEXT_STEPS.md](NEXT_STEPS.md) for the architecture rationale
 and [docs/](docs/README.md) for the full API reference.
 
-| element        | what it is                                                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `<window>`     | a real X11 window; the flex, paint and event root                                                                                                 |
-| `<popup>`      | an override-redirect window at screen coordinates — menus, tooltips, dropdowns                                                                    |
-| `<box>`        | flex container: layout props → yoga, plus backgrounds, borders (solid/dashed, radius), overflow clipping, zIndex                                  |
-| `<scrollview>` | clipped, wheel-scrollable viewport with a drawn scrollbar                                                                                         |
-| `<text>`       | shaped, wrapped text (bidi, ligatures, font fallback); nested `<text>` elements are style spans                                                   |
-| `<textinput>`  | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select, undo/redo, right-click menu |
-| `<image>`      | PNG/JPEG from `src`, natural-size aware                                                                                                           |
-| `<canvas>`     | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                                           |
-| `<markdown>`   | ntk MarkdownView: headings, tables, highlighted fences, math; `onLink`                                                                            |
-| `<html>`       | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                                                    |
-| `<svg>`        | static SVG through ntk SvgView, sized like `<image>`                                                                                              |
-| `<tex>`        | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                                                            |
-| `<glarea>`     | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                                                           |
+| element       | what it is                                                                                                                                                                                         |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<window>`    | a real X11 window; the flex, paint and event root                                                                                                                                                  |
+| `<popup>`     | an override-redirect window at screen coordinates — menus, tooltips, dropdowns                                                                                                                     |
+| `<box>`       | flex container: layout props → yoga, plus backgrounds, borders (solid/dashed, radius), overflow clipping, zIndex. `overflow: 'scroll'` makes it a wheel-scrollable viewport with a drawn scrollbar |
+| `<text>`      | shaped, wrapped text (bidi, ligatures, font fallback); nested `<text>` elements are style spans                                                                                                    |
+| `<textinput>` | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select, undo/redo, right-click menu                                                  |
+| `<image>`     | PNG/JPEG from `src`, natural-size aware                                                                                                                                                            |
+| `<canvas>`    | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                                                                                            |
+| `<markdown>`  | ntk MarkdownView: headings, tables, highlighted fences, math; `onLink`                                                                                                                             |
+| `<html>`      | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                                                                                                     |
+| `<svg>`       | static SVG through ntk SvgView, sized like `<image>`                                                                                                                                               |
+| `<tex>`       | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                                                                                                             |
+| `<glarea>`    | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                                                                                                            |
 
 Widget **components** (plain React on top of the primitives, themable via
 `ThemeProvider`): `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch`,
@@ -246,7 +245,7 @@ drawn tree: `onClick` (with DOM-style `detail` click counting),
 `focusable` + `onFocus`/`onBlur` + Tab traversal, and a `cursor` prop.
 User handlers run before element default actions and can
 `ev.preventDefault()` — stopping a `<textinput>` from editing or a
-`<scrollview>` from scrolling, like the DOM.
+a scroll container from scrolling, like the DOM.
 
 ## Examples
 
@@ -266,7 +265,7 @@ npm run examples:theming       # three themes x light/dark, and a size query
 npm run examples:simple-nojsx  # the same, plain node — no build step
 npm run examples:xeyes         # canvas drawing + hooks
 npm run examples:dashboard     # context theming, custom hooks, components
-npm run examples:tasks         # useReducer, textinput, scrollview
+npm run examples:tasks         # useReducer, textinput, scrolling
 npm run examples:menu          # right-click context menu via <popup>
 npm run examples:transparent   # rounded translucent <popup transparent>
 npm run examples:form          # <textinput> + Select dropdowns

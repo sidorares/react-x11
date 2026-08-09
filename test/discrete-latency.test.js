@@ -170,8 +170,8 @@ test('a wheel burst inside one round trip paints twice, not ten times', async ()
       'window',
       { width: 200, height: 200 },
       h(
-        'scrollview',
-        { style: { flexGrow: 1 } },
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
         ...Array.from({ length: 20 }, (_, i) =>
           h('box', {
             key: i,
@@ -325,8 +325,8 @@ test('real ntk: the press paints, and the present shuts the gate behind it', asy
       'window',
       { width: 200, height: 200 },
       h(
-        'scrollview',
-        { style: { flexGrow: 1 } },
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
         ...Array.from({ length: 20 }, (_, i) =>
           h('box', {
             key: i,

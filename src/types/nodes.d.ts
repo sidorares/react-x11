@@ -31,8 +31,12 @@ export interface ScrollTarget {
   y?: number;
 }
 
-/** `<scrollview>`: a node that also scrolls. */
-export interface ScrollViewNode extends DrawnNode {
+/**
+ * What a `<box>` ref is: a drawn node that also scrolls. The scrolling half
+ * is live only while the node's style says `overflow: 'scroll'` — before
+ * that `scrollTo` has nowhere to go and the offsets stay 0.
+ */
+export interface ScrollableNode extends DrawnNode {
   readonly scrollX: number;
   readonly scrollY: number;
   readonly contentWidth: number;

@@ -71,7 +71,7 @@ import type {
   MouseEvent,
   NtkWindow,
   ScrollEvent,
-  ScrollViewNode,
+  ScrollableNode,
   Style,
   StyleProp,
   TextInputNode,
@@ -134,7 +134,7 @@ createStyles({ bad: { ':focus-visible': { hitSlop: 4 } } });
 
 function Elements() {
   const boxRef = useRef<DrawnNode>(null);
-  const scrollRef = useRef<ScrollViewNode>(null);
+  const scrollRef = useRef<ScrollableNode>(null);
   const winRef = useRef<NtkWindow>(null);
   const inputRef = useRef<TextInputNode>(null);
   const [text, setText] = useState('');
@@ -167,16 +167,16 @@ function Elements() {
         <text>{42}</text>
       </box>
 
-      <scrollview
+      <box
         ref={scrollRef}
         scrollbar
         scrollbarColor="#ccc"
-        style={s.responsive}
+        style={[s.responsive, { overflow: 'scroll' }]}
         onScroll={(ev: ScrollEvent) => void ev.scrollY}
         onViewport={(ev) => void ev.contentHeight}
       >
         <box style={{ height: 800 }} />
-      </scrollview>
+      </box>
 
       <textinput
         ref={inputRef}

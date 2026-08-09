@@ -33,11 +33,11 @@ and how automatic should that be?
    would win the _wire_ (zero motion traffic, server-side Enter/Leave picking at ~3 ns per mapped
    sibling), which matters for remote X and battery, but they are not needed to fix the CPU cost.
 
-3. **The one region where a subwindow structurally wins is the scrollview.** Moving a child window
+3. **The one region where a subwindow structurally wins is the scroll pane.** Moving a child window
    is a server-side blit with Expose only for the revealed strip — verified on XQuartz and Xorg —
    i.e. exactly what the scroll-blit branch hand-builds, minus all ~12 purity gates, the per-frame
    O(N) safety walk, the scrollbar-repair choreography, and the per-notch full-tree
-   relayout+absolutize. A `viewport window + content window` scrollview turns a scroll into one
+   relayout+absolutize. A `viewport window + content window` scroll pane turns a scroll into one
    20-byte ConfigureWindow — and on Composite servers (**the deployment majority**: Xorg+
    compositor, XWayland), a `backing-store: WhenMapped` content pane scrolls with **zero Expose**:
    the server restores the revealed strip from its own backing. XQuartz (minority, no Composite)
@@ -52,7 +52,7 @@ and how automatic should that be?
    plus framework-inserted promotion at _known_ hotspots (Flutter's repaint boundaries around
    scrollables). Fully automatic promotion exists only in browsers and needed a decade of
    squashing heuristics. The concrete proposal is in §8: keep `<box windowed>` out of the public
-   API; instead (a) fix the client-side hit test, (b) make the scrollview internally windowed
+   API; instead (a) fix the client-side hit test, (b) make the scroll pane internally windowed
    behind a feature gate, (c) keep real windows implicit-by-capability (glarea, future
    `<foreign>`), and (d) optionally spike InputOnly hit-region windows for per-region cursors and
    hover-during-scroll correctness — the only subwindow variant with zero rendering downside.
@@ -75,7 +75,7 @@ queued-event storms; **(secondary) client CPU first, server CPU second.**
 | item                                   | input→photon latency                                                                   | stability                                                                         | client CPU                              | server CPU                           |
 | -------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | --------------------------------------- | ------------------------------------ |
 | A. hit-test caching/pruning            | small direct win; big _jitter_ win (less GC)                                           | **GC-pause stutter shrinks** (8–11 KB/event → ~1 KB)                              | the top measured win                    | —                                    |
-| B. windowed scrollview                 | **the headline win**: scroll applied at server speed, decoupled from React             | server blit is atomic; re-anchor seams and hover churn must be engineered (below) | deletes per-notch relayout + gate walks | small (blit + O(pane siblings) clip) |
+| B. windowed scroll pane                | **the headline win**: scroll applied at server speed, decoupled from React             | server blit is atomic; re-anchor seams and hover churn must be engineered (below) | deletes per-notch relayout + gate walks | small (blit + O(pane siblings) clip) |
 | C. capability windows (glarea/foreign) | n/a (capability, not perf)                                                             | airspace rules as documented                                                      | —                                       | —                                    |
 | D. InputOnly hit regions               | **cursor feedback becomes server-side-instant**, immune to client busyness             | Enter/Leave uncoalesced → needs frame debounce                                    | motion stream off when idle             | ~µs picking                          |
 | gravity (§5.5)                         | **upgraded under this lens**: "latency mask" _is_ the main goal during resize gestures | `winGravity: Unmap` prevents stale-position jumps                                 | —                                       | —                                    |
@@ -204,7 +204,7 @@ Four kinds of real X windows already work: nested `<window>` (prop-driven geomet
 synced via `_restackWindowChildren` with server-verified QueryTree tests), `<popup>`
 (override-redirect, focus-delegating), `<glarea>` (the **only layout-driven child window** —
 `absolutize → _syncGeometry` diffs the rounded rect and issues one setState; clipping vs
-scrollviews unsolved, stacking vs `<window>` siblings deliberately undefined), and foreign windows
+scroll panes unsolved, stacking vs `<window>` siblings deliberately undefined), and foreign windows
 (the WM example adopts other clients' windows). `NEXT_STEPS.md` §4 already states the policy this
 document mostly re-confirms: a real window **only when the server gives something the drawn path
 cannot** — "never because it has event handlers or a background color."
@@ -501,9 +501,9 @@ exactly one ConfigureWindow with zero inner relayout and zero repaint (the backi
 `_sizePinned` + the `_reflowed` contained-reflow machinery are the embryo of this boundary; a
 windowed region is `_sizePinned` made real, enforced by the server instead of damage arithmetic.
 
-The scrollview is where this bites hardest today: scroll offset baked into `abs` makes every
+The scroll pane is where this bites hardest today: scroll offset baked into `abs` makes every
 wheel notch a full-tree relayout + absolutize (~4 embind crossings × N per notch). A windowed
-scrollview deletes that: scroll stops touching layout at all. Short of windows, the same cheap
+scroll pane deletes that: scroll stops touching layout at all. Short of windows, the same cheap
 observation — "scroll is a translation, not a reflow" — could be exploited client-side by storing
 scroll offset as a paint/hit-test-time translation instead of re-absolutizing, at the cost of
 threading an offset through paint and hitTest (a mini transform stack — the thing the flat `abs`
@@ -527,7 +527,7 @@ stale-position jumps when relayout is coming anyway. **Under the project's goal 
 is not a dismissal — "latency mask" is the main goal during a resize gesture** (§0.1): resize is
 continuous direct manipulation, the client is structurally one frame late, and the server moving
 anchored windows instantly is "update instantly, catch up" in its purest form. It applies only
-to windows that already exist for other reasons (a windowed scrollview's panes and bars, capability
+to windows that already exist for other reasons (a windowed scroll pane's panes and bars, capability
 windows) and only to gravity-expressible positions — so it is a free rider on B, never a reason
 to create windows. ntk gap: gravity is creation-time only (no ChangeWindowAttributes path
 exposed; §9.10).
@@ -583,7 +583,7 @@ Every item below is verified (code, spec, or measured), not speculative:
     historically buggy path; toplevel resize is expensive and crash-prone; XTEST off by default
     (blocks input-injection tests on macOS — integration tests should target Xvfb/the JS server).
 11. **Stacking bookkeeping**: regions must join `_restackWindowChildren`-style ordering
-    (including vs `<glarea>`, whose stacking is currently undefined), and scrollview clipping of
+    (including vs `<glarea>`, whose stacking is currently undefined), and scroll pane clipping of
     a windowed region needs the server parent-child relationship to be the clip (viewport window),
     not `overflow: hidden` arithmetic.
 12. **Coordinate-space audit**: `_pressOutside`, popup anchoring (`_screenOrigin` composition),
@@ -592,7 +592,7 @@ Every item below is verified (code, spec, or measured), not speculative:
 13. **Cross-boundary bubbling and focus**: today capture/bubble stops dead at every window
     boundary (`_path` breaks at the owning window, [events.js:130](../../src/events.js)) and
     `_focusables` refuses to walk into `isWindow` children ([events.js:567](../../src/events.js)) —
-    a windowed scrollview needs row clicks to bubble to ancestors outside the region and Tab to
+    a windowed scroll pane needs row clicks to bubble to ancestors outside the region and Tab to
     traverse into it. The existing precedents are popup-style `focusManager` delegation and the
     key path's tree-walking dispatch; both must be generalized to pointer events (with
     child-local → owner coordinate translation) before any region ships.
@@ -610,9 +610,9 @@ free `child` field once regions exist; expose-rect granularity from ntk instead 
 **Do this regardless.** It attacks every _measured_ cost, needs no ntk release, and no design
 risk. Expected effect: motion frame from ~27 µs to low-µs; hover-flip flush from ~69 µs to ~30 µs.
 
-**B. Framework-internal promotion at known hotspots (invisible API).** The scrollview becomes
+**B. Framework-internal promotion at known hotspots (invisible API).** The scroll pane becomes
 `viewport window + content pane window + drawn rows` internally, feature-gated
-(`REACT_X11_WINDOWED_SCROLL=1` during bring-up, later a scrollview prop, eventually default where
+(`REACT_X11_WINDOWED_SCROLL=1` during bring-up, later a scroll pane prop, eventually default where
 safe). No user-facing "window" concept; identical JSX. This is Flutter's
 `addRepaintBoundaries`-around-scrollables move, and it lands on the only region with a measured
 structural win. Framed by the goals (§0.1): scroll is the most latency-sensitive gesture in the
@@ -626,10 +626,10 @@ Expose entirely — the server owns both the blit and the strip restore; XQuartz
 strip repaints from ntk's pixmap. Bring-up order: needs the ntk frame-clock/backing work (§9),
 the detail/mode hover fix, cross-boundary bubbling/focus (§7.13), INT16 re-anchoring, and honest
 fallbacks (small viewports and translucent-over-viewport layouts keep the drawn path — the
-scroll-blit gates shrink to "is this scrollview windowed or not").
+scroll-blit gates shrink to "is this scroll pane windowed or not").
 
 Two things to say out loud about B. First, **it reverses a recorded decision**: NEXT_STEPS §4
-states verbatim that a scrollview is "a clip rect + translation on the render list, not a child
+states verbatim that a scroll pane is "a clip rect + translation on the render list, not a child
 window (optionally optimized later with CopyArea scrolling inside the same window)" — the
 CopyArea option being exactly the scroll-blit branch B would supersede. This document argues the
 reversal on new measured evidence (server-side blit verified on both targets, per-notch relayout
@@ -682,7 +682,7 @@ phrased so they can be lifted directly into issue drafts (react-x11 / ntk / node
   windows for capability, never for "has handlers or a background"), the airspace constraints
   (currently documented only in `docs/glx.md`), and the hazard list from §7. This makes the
   policy user-visible instead of implicit in NEXT_STEPS.
-- **[react-x11 docs]** Annotate NEXT_STEPS §4's scrollview sentence with a pointer to this
+- **[react-x11 docs]** Annotate NEXT_STEPS §4's scroll pane sentence with a pointer to this
   document: the "clip rect + translation" decision is now conditional on the Phase-3 prototype's
   results, and should be amended (not silently contradicted) if B lands.
 
@@ -726,7 +726,7 @@ to full-window), plus a react-x11 consumer — partial restores without any wind
 screen's `backing-stores` field — enables the zero-Expose scroll tier on Composite servers. 10. **[ntk feat, optional]** post-create `ChangeWindowAttributes` for winGravity/bitGravity
 (TODO at `window.js:975`) — only if gravity latency-masking on anchored panes is pursued.
 
-**Phase 3 — the windowed scrollview prototype (react-x11, flagged, decision gate).** 11. **feat(scrollview): `REACT_X11_WINDOWED_SCROLL=1`** — viewport window + content pane window + drawn rows; pane sized viewport+overdraw with INT16 re-anchoring; scrollbars drawn on the
+**Phase 3 — the windowed scroll pane prototype (react-x11, flagged, decision gate).** 11. **feat(scroll pane): `REACT_X11_WINDOWED_SCROLL=1`** — viewport window + content pane window + drawn rows; pane sized viewport+overdraw with INT16 re-anchoring; scrollbars drawn on the
 viewport window; `serverBackingStore` tier on Composite servers, ntk-pixmap + expose-strip
 fallback on XQuartz. Two goal-driven behaviors are part of the design, not polish:
 **(latency)** the ConfigureWindow is written synchronously in the wheel/drag handler, before
@@ -741,7 +741,7 @@ beats the scroll-blit path on the `protocol.js` bench metrics and on Xvfb frame 
 Expose per notch with the backing-store tier; **(stability)** no visible re-anchor seam, one
 present per frame across viewport+bars (no cross-region tearing), hover changes from
 pane-moves-under-pointer debounced to frame rate; no parity regressions. **Decision gate:**
-if it wins, promote to a scrollview prop and amend NEXT_STEPS §4; if not, this document's
+if it wins, promote to a scroll pane prop and amend NEXT_STEPS §4; if not, this document's
 §5/§3 records why not, and the scroll-blit chain stands.
 
 **Phase 4 — optional, after Phase 3 evidence.** 12. **spike: InputOnly hit regions** (per-region cursors as server attributes, hover-during-
@@ -776,7 +776,7 @@ section is the ntk-release shopping list.) Fixes independent of any decision her
 7. ✱ Deliver ntk's coalesced expose-rect union to the renderer ('draw' with rects), so partial
    restores stop being full-window repaints.
 8. ✱ Ship `scrollRegion` (ntk#139) — the current chain's blit remains the right fallback for
-   non-windowed scrollviews.
+   non-windowed scroll panes.
 9. A way to set the X `backing-store` attribute — ntk deliberately does **not** forward it
    (its own `backingStore` creation option means client-side double buffering, and the comment
    at `window.js:112-121` excludes the X attribute to avoid a silent collision). The
@@ -819,7 +819,7 @@ store) and implements neither gravity nor Composite — its subwindow numbers ar
 
 Follow-up measurements worth running before committing to B:
 
-- windowed-scrollview prototype vs scroll-blit vs full repaint, same content, frame times +
+- windowed-scroll pane prototype vs scroll-blit vs full repaint, same content, frame times +
   protocol counts — on XQuartz _and_ on a Composite target (Xvfb or a Linux box/VM with
   Xorg+compositor), including the `backing-store: WhenMapped` zero-Expose tier, which is the
   majority-user path (verified only as an occlude/reveal probe on Xvfb so far, not as a scroll

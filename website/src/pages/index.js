@@ -130,7 +130,7 @@ const shots = [
   },
   {
     src: '/img/docs/tasks.png',
-    caption: 'examples/tasks.jsx — useReducer, <textinput>, <scrollview>',
+    caption: 'examples/tasks.jsx — useReducer, <textinput>, a scrolling <box>',
   },
   {
     src: '/img/docs/select-menu.png',

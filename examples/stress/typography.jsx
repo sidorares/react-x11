@@ -107,7 +107,7 @@ export function TypographyPanel() {
   const [width, setWidth] = useState(100);
 
   return (
-    <scrollview style={s.panel}>
+    <box style={[s.panel, { overflow: 'scroll' }]}>
       <text style={s.head}>Typography</text>
       <text style={s.hint}>
         Every style axis on the same paragraph. The sliders resize and re-column
@@ -223,6 +223,6 @@ export function TypographyPanel() {
           </box>
         </box>
       </box>
-    </scrollview>
+    </box>
   );
 }

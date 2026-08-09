@@ -74,7 +74,7 @@ test('kind defaults: an unlabelled tree is boring, not wrong', async () => {
       null,
       h('text', null, 'plain words'),
       h('textinput', { defaultValue: 'x' }),
-      h('scrollview', null, h('box')),
+      h('box', { style: { overflow: 'scroll' } }, h('box')),
     ),
   );
   assert.equal(a11yRole(root), ATSPI_ROLE.FRAME);
@@ -89,7 +89,7 @@ test('kind defaults: an unlabelled tree is boring, not wrong', async () => {
     ATSPI_ROLE.ENTRY,
   );
   assert.equal(
-    a11yRole(find(root, (n) => n.kind === 'scrollview')),
+    a11yRole(find(root, (n) => n.isScroller?.())),
     ATSPI_ROLE.SCROLL_PANE,
   );
 });

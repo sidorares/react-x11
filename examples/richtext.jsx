@@ -1,5 +1,5 @@
 // Rich content elements: <markdown> (with highlighted + math fences) in a
-// scrollview, a live-updating <tex> formula, a declarative JSX <svg> and an
+// scroll box, a live-updating <tex> formula, a declarative JSX <svg> and an
 // <image> — all drawn client-side through ntk's document widgets and image
 // pipeline.
 //
@@ -22,7 +22,7 @@ const MARKDOWN = `# react-x11 rich content
 
 Everything below is one \`<markdown>\` element (content as a string
 child, react-markdown style) — ntk's **MarkdownView** wrapped in a yoga
-measure function, scrolling inside a \`<scrollview>\`.
+measure function, scrolling inside a \`<box style={{overflow: 'scroll'}}>\`.
 
 ## Code
 
@@ -135,14 +135,16 @@ function App() {
       {/* `<markdown>` draws with ntk's own document palette — its own colours
           for headings, code, links and quotes — and does not follow this one,
           so the page it sits on stays light whatever the desktop is. */}
-      <scrollview style={{ flexGrow: 1, backgroundColor: 'white' }}>
+      <box
+        style={{ overflow: 'scroll', flexGrow: 1, backgroundColor: 'white' }}
+      >
         <markdown
           onLink={(href) => console.log('link clicked:', href)}
           style={{ padding: 16 }}
         >
           {doc.source}
         </markdown>
-      </scrollview>
+      </box>
 
       <box
         style={{

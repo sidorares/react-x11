@@ -324,7 +324,7 @@ function Lab({ initialFont = null }) {
       height={760}
       style={s.window}
     >
-      <scrollview style={{ flexGrow: 1 }}>
+      <box style={{ overflow: 'scroll', flexGrow: 1 }}>
         <box style={s.page}>
           <box style={s.header}>
             <text style={s.title}>Variable font lab</text>
@@ -456,7 +456,7 @@ function Lab({ initialFont = null }) {
             </>
           )}
         </box>
-      </scrollview>
+      </box>
     </window>
   );
 }

@@ -1,6 +1,6 @@
 // A task list showing useReducer, context-passed dispatch, component
 // composition, list rendering, and the widget components — Checkbox rows in
-// a <scrollview>, Buttons for the filters — with keyboard interaction
+// a scrolling <box>, Buttons for the filters — with keyboard interaction
 // throughout (Tab moves focus, Space/Enter toggles). Type a task and press
 // Enter or click Add; Ctrl+C/V and middle-click PRIMARY paste work in the
 // input. Run with: npm run examples:tasks  (needs an X server / DISPLAY)
@@ -17,7 +17,7 @@ const initialState = {
     { id: 2, label: 'Lay out boxes with yoga', done: true },
     { id: 3, label: 'Paint through XRender', done: true },
     { id: 4, label: 'Dispatch synthetic events', done: true },
-    { id: 5, label: 'Scroll with <scrollview>', done: true },
+    { id: 5, label: "Scroll with overflow: 'scroll'", done: true },
     { id: 6, label: 'Pop menus with <popup>', done: true },
     { id: 7, label: 'Ship a widget library', done: false },
     { id: 8, label: 'Add a <textinput> widget', done: false },
@@ -138,8 +138,9 @@ export function TasksPanel() {
           <FilterButton filter="done" current={state.filter} label="Done" />
         </box>
 
-        <scrollview
+        <box
           style={{
+            overflow: 'scroll',
             flexGrow: 1,
             backgroundColor: '$background',
             borderRadius: 8,
@@ -152,7 +153,7 @@ export function TasksPanel() {
           {visible.map((task) => (
             <TaskRow key={task.id} task={task} />
           ))}
-        </scrollview>
+        </box>
 
         <text style={{ color: '$dim' }}>
           {String(remaining)} remaining — click or Tab + Space to toggle, wheel

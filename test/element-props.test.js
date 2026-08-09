@@ -20,7 +20,6 @@ import { createRoot } from '../src/index.js';
 import { HOST_TYPES } from '../src/Reconciler.js';
 import {
   BoxNode,
-  ScrollViewNode,
   TextNode,
   TextInputNode,
   TextAreaNode,
@@ -44,7 +43,6 @@ const BUILD = {
   window: (app, props) => new WindowNode(app, {}, props),
   popup: (app, props) => new PopupNode(app, {}, props),
   box: (app, props) => new BoxNode(props, app),
-  scrollview: (app, props) => new ScrollViewNode(props, app),
   text: (app, props) => new TextNode(props, app, { span: false }),
   textinput: (app, props) => new TextInputNode(props, app),
   textarea: (app, props) => new TextAreaNode(props, app),

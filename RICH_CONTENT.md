@@ -52,9 +52,9 @@ correctly in ntk. Nothing about selectable text changes that.
 Layer 4 is where the gaps are — and layer 4 is _already_ split badly. ntk's
 `HtmlView` carries a whole second interaction model for "window mode":
 `scrollY`, `scrollBy`, `scrollTo`, `render()`, `destroy()`. react-x11 uses
-**none** of it — it wraps documents in `<scrollview>` and drives
+**none** of it — it wraps documents in a scrolling `<box>` and drives
 `layout(width)` / `draw(ctx, x, y)` directly (`src/richnodes.js:111`). Every
-`scrollBy`/`scrollTo` hit in this repo is `ScrollViewNode`'s own method, not
+`scrollBy`/`scrollTo` hit in this repo is the `Scrollable` mixin's own method, not
 the widget's.
 
 That is the actual finding: the seam is horizontal, not vertical. The

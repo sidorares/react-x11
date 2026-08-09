@@ -64,6 +64,26 @@ export declare class Node {
   getClientRects(): Rect[];
 }
 
+/**
+ * Scrolling as a mixin: `class Pane extends Scrollable(Node)` gives a
+ * registered element the same `overflow: 'scroll'` behaviour `<box>` and
+ * `<window>` have — wheel, keys, bars, and the AT-SPI scroll-pane role.
+ */
+export declare function Scrollable<T extends typeof Node>(
+  Base: T,
+): T & {
+  new (...args: any[]): {
+    scrollX: number;
+    scrollY: number;
+    contentWidth: number;
+    contentHeight: number;
+    isScroller(): boolean;
+    scrollTo(to: number | { x?: number; y?: number }): void;
+    scrollBy(by: number | { x?: number; y?: number }): void;
+    scrollIntoView(node: Node): void;
+  };
+};
+
 export declare class BoxNode extends Node {
   constructor(props: Record<string, unknown>, app: NtkApp);
 }
@@ -71,7 +91,6 @@ export declare class BoxNode extends Node {
 export declare class TextNode extends Node {}
 export declare class ImageNode extends Node {}
 export declare class CanvasNode extends Node {}
-export declare class ScrollViewNode extends Node {}
 export declare class TextInputNode extends Node {}
 export declare class TextAreaNode extends TextInputNode {}
 export declare class WindowNode extends Node {}

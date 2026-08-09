@@ -458,8 +458,11 @@ const ComponentImpl = {
     return 1.0;
   },
   ScrollTo() {
+    // `isScroller()`, not "has the method": every `<box>` carries
+    // `scrollIntoView` now, and one that is not a scroll container would end
+    // the walk having revealed nothing
     for (let p = this.n.parent; p; p = p.parent) {
-      if (typeof p.scrollIntoView === 'function') {
+      if (p.isScroller?.()) {
         p.scrollIntoView(this.n);
         return true;
       }

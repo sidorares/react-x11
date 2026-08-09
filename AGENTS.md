@@ -637,10 +637,10 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   A scroll is the one layout change that carries a damage bound:
   `invalidate(true, node)` asserts the reflow is confined to that node's
   subtree _and_ that the node clips its children, so both the old and the new
-  position of anything that moved are inside the bound. `ScrollViewNode` is the
+  position of anything that moved are inside the bound. the `Scrollable` mixin is the
   only caller. Everything else still passes no node and repaints in full.
   `_subtreeBounds()` stops at a node that `clipsChildren()` for the same
-  reason: a scrollview's content extent is not what reaches the surface, and
+  reason: a scroll pane's content extent is not what reaches the surface, and
   mid-scroll it can be ninety thousand pixels away.
 
   On top of that bound sits the **scroll-blit fast path** (issue #138,
@@ -657,7 +657,7 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   `SCROLL_BLIT_MIN_KEEP`), fractional offsets and diagonal deltas cannot
   blit, any other claim near the viewport (checked at `invalidate` time,
   _before_ rects coalesce and hide it), a border/borderRadius on the
-  scrollview, an overlapping non-descendant, a debug overlay or DevTools
+  scroll pane, an overlapping non-descendant, a debug overlay or DevTools
   highlight all bail. The invariant, pinned by a pixel test in
   `test/scroll-blit.test.js`, is that a blitted frame is byte-identical to
   the repaint it replaced; `REACT_X11_NO_SCROLL_BLIT=1` turns the path off
@@ -807,10 +807,10 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   windows.
 - `<popup>` is a `WindowNode` subclass with `isPopup = true`: allowed as a
   child of drawn nodes (bookkeeping only — no yoga, no reparent, own
-  paint/event root). `<scrollview>` applies its offset during `absolutize`,
+  paint/event root). A scrolling `<box>` applies its offset during `absolutize`,
   so painting and hit testing see shifted rects; it defaults `flexShrink`
   to 1 (yoga's 0 would size the viewport to its content). The wheel default
-  action (EventManager) scrolls the nearest enclosing scrollview unless
+  action (EventManager) scrolls the nearest enclosing scroll pane unless
   `preventDefault()` is called.
 - Closing an app right after `setTitle`/`setActions` crashed ntk <= 3.1.0
   (in-flight InternAtom chains, sidorares/ntk#62 / PR #63); the integration
@@ -902,10 +902,10 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
 
 See NEXT_STEPS.md (the "Roadmap refresh" section is the current
 source of truth for what's next). Done: phase 0 (ntk 3.1.0), phase 1 (drawn layer),
-phase 2 (events, `<scrollview>`), phase 3's `<popup>` and `<textinput>`
+phase 2 (events, scrolling), phase 3's `<popup>` and `<textinput>`
 (on ntk 3.2.0: clipboard, cursors, setLineDash), and the layout debug
 overlay (`REACT_X11_DEBUG_LAYOUT=1`). Element default actions (textinput
-editing, scrollview wheel) run via `_default*` hooks on nodes AFTER user
+editing, wheel scrolling) run via `_default*` hooks on nodes AFTER user
 prop handlers, skipped on `preventDefault()`. The window-manager example
 (issue #3) is done — on ntk 3.9.0 and node-x11 3.2.0, which grew the
 substructure-redirect support it needed. Also done since: the widget set

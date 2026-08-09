@@ -20,8 +20,8 @@ async function mount() {
       'window',
       { width: 200, height: 100 },
       h(
-        'scrollview',
-        { ref, style: { flexGrow: 1 } },
+        'box',
+        { ref, style: { overflow: 'scroll', flexGrow: 1 } },
         ...Array.from({ length: 10 }, (_, i) =>
           h('box', { key: i, style: { height: 40, flexShrink: 0 } }),
         ),
@@ -121,8 +121,8 @@ test('the bar takes the press even with content painted under it', async () => {
       'window',
       { width: 200, height: 100 },
       h(
-        'scrollview',
-        { style: { flexGrow: 1 } },
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
         ...Array.from({ length: 10 }, (_, i) =>
           h('box', {
             key: i,
@@ -223,8 +223,8 @@ async function mountWide() {
       'window',
       { width: 200, height: 100 },
       h(
-        'scrollview',
-        { ref, style: { flexGrow: 1 } },
+        'box',
+        { ref, style: { overflow: 'scroll', flexGrow: 1 } },
         h(
           'box',
           { style: { flexDirection: 'row', flexShrink: 0 } },
@@ -356,8 +356,8 @@ test('with both bars showing, neither runs into the other corner', async () => {
       'window',
       { width: 200, height: 100 },
       h(
-        'scrollview',
-        { style: { flexGrow: 1 } },
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
         ...Array.from({ length: 5 }, (_, i) =>
           h('box', {
             key: i,

@@ -164,8 +164,9 @@ export function WidgetsPanel() {
               backgroundColor: '$background',
             }}
           />
-          <scrollview
+          <box
             style={{
+              overflow: 'scroll',
               height: 110,
               padding: 4,
               borderRadius: 4,
@@ -179,7 +180,7 @@ export function WidgetsPanel() {
             }}
           >
             <markdown style={{ padding: 6 }}>{note}</markdown>
-          </scrollview>
+          </box>
         </box>
       </Row>
     </box>

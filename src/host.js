@@ -17,7 +17,6 @@ const BUILT_IN = Object.freeze([
   'text',
   'image',
   'canvas',
-  'scrollview',
   'textinput',
   'textarea',
   'markdown',

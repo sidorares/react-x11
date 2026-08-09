@@ -926,7 +926,7 @@ function App() {
             />
           </box>
 
-          <scrollview style={{ flexGrow: 1 }}>{detail()}</scrollview>
+          <box style={{ overflow: 'scroll', flexGrow: 1 }}>{detail()}</box>
         </SplitPane>
       </ThemeProvider>
     </window>

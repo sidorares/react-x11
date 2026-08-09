@@ -658,6 +658,46 @@ export function resolveTokens(style, theme, where = 'style', strict = true) {
 export { validateStyle };
 
 /**
+ * The layout defaults `overflow: 'scroll'` implies, folded into the resolved
+ * style so they travel through the ordinary diff — a scroll container is a
+ * *style*, not a species of node, and every one of these is a CSS idiom the
+ * author would otherwise have to remember.
+ *
+ * - **`min-width/height: 0`** is the spec's own rule, not an invention: CSS
+ *   computes `min-*: auto` to `0` on a flex item whose overflow is not
+ *   `visible`. Yoga does not, and without it the item's min-content size is
+ *   a floor the viewport cannot shrink below.
+ * - **`flexShrink: 1`** because yoga's default is `0`, which sizes the
+ *   viewport to its content — a scroll container has to yield to the layout
+ *   around it instead.
+ * - **`flexBasis: 0`** — what CSS's `flex: 1` means — only when the author
+ *   asked it to grow and gave it no size of its own. A flex item's base size
+ *   is its content, and a window whose scrolling pane holds more rows than
+ *   fit grew *past* the window, pushing the footer out of view however small
+ *   the window got. Zeroing the basis fixes the whole ancestor chain at once,
+ *   since the content stops counting towards any of their heights.
+ *
+ * Returns `style` itself when there is nothing to add, so identity comparisons
+ * upstream keep meaning "the style did not change".
+ */
+export function resolveScrollContainer(style) {
+  if (style.overflow !== 'scroll') return style;
+  const out = { ...style };
+  if (out.flexShrink === undefined) out.flexShrink = 1;
+  if (out.minWidth === undefined) out.minWidth = 0;
+  if (out.minHeight === undefined) out.minHeight = 0;
+  if (
+    out.flexBasis === undefined &&
+    out.width === undefined &&
+    out.height === undefined &&
+    (out.flexGrow ?? 0) > 0
+  ) {
+    out.flexBasis = 0;
+  }
+  return out;
+}
+
+/**
  * Apply changed layout props to a yoga node.
  * @returns true if any layout-affecting prop changed
  */

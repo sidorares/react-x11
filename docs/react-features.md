@@ -91,7 +91,7 @@ produced. On the very first render of a node, that is nothing yet.
 
 What to do instead:
 
-- **Let the element tell you.** `<scrollview onViewport>` fires when the
+- **Let the element tell you.** `<box onViewport>` fires when the
   viewport or content size changes, with `width`/`height`/`contentWidth`/
   `contentHeight`. `<window onResize>` fires when the window is resized.
   These are the supported way to react to a size.
@@ -104,9 +104,12 @@ What to do instead:
 ```jsx
 const [cols, setCols] = useState(1);
 
-<scrollview onViewport={({ width }) => setCols(Math.max(1, (width / 200) | 0))}>
+<box
+  style={{ overflow: 'scroll' }}
+  onViewport={({ width }) => setCols(Math.max(1, (width / 200) | 0))}
+>
   {items.map(…)}
-</scrollview>;
+</box>;
 ```
 
 If you are porting a component that measures itself and adjusts, this is the

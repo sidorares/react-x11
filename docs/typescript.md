@@ -78,7 +78,7 @@ declare module 'react-x11/jsx-runtime' {
 | --------------------------- | ----------------------------------------------------------------------------- |
 | `src/types/style.d.ts`      | `Style`, `StyleProp`, the yoga enums, state blocks, transitions, size queries |
 | `src/types/events.d.ts`     | `SyntheticEvent` and the mouse / wheel / keyboard / focus shapes              |
-| `src/types/nodes.d.ts`      | what a `ref` gives you: `DrawnNode`, `ScrollViewNode`, ntk's `Window`         |
+| `src/types/nodes.d.ts`      | what a `ref` gives you: `DrawnNode`, `ScrollableNode`, ntk's `Window`         |
 | `src/types/elements.d.ts`   | every host element's props, including the 3D scene                            |
 | `src/types/components.d.ts` | the widget set, `Theme`, the anchoring helpers                                |
 | `src/index.d.ts`            | the entry: `createRoot`, `render`, and re-exports of the above                |

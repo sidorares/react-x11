@@ -188,11 +188,11 @@ function actionAtom(atoms, name) {
 /** Decode selection bytes for a text-ish target; anything else stays a
  * Buffer. STRING is defined as latin-1; everything textual else is UTF-8. */
 /**
- * The viewport a drag over `path` scrolls: the nearest enclosing one,
- * found by walking out from the hit node the same way the wheel's default
- * action does ([events.js](./events.js)). Stopping at the first rather
- * than chaining to an outer viewport is that default's behaviour too, so
- * the two gestures agree about which viewport a point belongs to.
+ * The viewport a drag over `path` scrolls: the nearest enclosing scroll
+ * container with somewhere to go, found by walking out from the hit node the
+ * same way the wheel's default action does ([events.js](./events.js)) — and
+ * skipping the same ones, so the two gestures agree about which viewport a
+ * point belongs to.
  *
  * `<textarea>` scrolls under the wheel but not under a drag: nothing can
  * be dropped into one, so scrolling it would move text the drag cannot
@@ -200,7 +200,10 @@ function actionAtom(atoms, name) {
  */
 function scrollerIn(path) {
   for (let i = path.length - 1; i >= 0; i--) {
-    if (path[i].kind === 'scrollview') return path[i];
+    const n = path[i];
+    if (n.isScroller?.() && (n._maxScroll('x') > 0 || n._maxScroll('y') > 0)) {
+      return n;
+    }
   }
   return null;
 }

@@ -1,14 +1,14 @@
 // Interactive components, packed densely and with the awkward combinations
-// on purpose: a text field inside a scrollview inside a split pane, a menu
+// on purpose: a text field inside a scroll box inside a split pane, a menu
 // that has to escape its owner window, a dialog over the top of all of it.
 //
 // What to look for:
 //   - Tab walking focus in visual order, and the focus ring visible on each
-//   - a scrollview inside a scrollview scrolling the *inner* one under the
+//   - a scroll box inside a scroll box scrolling the *inner* one under the
 //     pointer, and the outer one only when the inner is at its end
 //   - the context menu and tooltips appearing outside the window edge when
 //     the window is dragged near the screen border
-//   - typing in the field inside the nested scrollview, with the caret
+//   - typing in the field inside the nested scroll box, with the caret
 //     staying visible as it scrolls
 //   - right-clicking the text field giving the *edit* menu (cut/copy/paste),
 //     not this panel's menu
@@ -217,7 +217,7 @@ export function ControlsPanel() {
           <text style={s.hint}>selected: {picked}</text>
         </box>
 
-        <scrollview style={s.body}>
+        <box style={[s.body, { overflow: 'scroll' }]}>
           <text style={s.head}>Controls</text>
           <text style={s.hint}>
             last menu action: {lastMenu} · presses: {String(presses)}
@@ -306,11 +306,11 @@ export function ControlsPanel() {
               </text>
             </box>
 
-            {/* A scrollview inside a scrollview: the wheel should reach the
+            {/* A scroll box inside a scroll box: the wheel should reach the
                 inner one first, and only fall through when it is at its end. */}
             <box style={{ ...s.card, width: 250 }}>
               <text style={s.title}>Nested scroll</text>
-              <scrollview style={s.inner}>
+              <box style={[s.inner, { overflow: 'scroll' }]}>
                 {Array.from({ length: 20 }, (_, i) => (
                   <box key={i} style={s.row}>
                     <text style={{ fontSize: 11, color: '$dim' }}>
@@ -322,7 +322,7 @@ export function ControlsPanel() {
                     />
                   </box>
                 ))}
-              </scrollview>
+              </box>
               <text style={s.hint}>wheel inside, then past the end</text>
             </box>
 
@@ -338,7 +338,7 @@ export function ControlsPanel() {
               </text>
             </ContextMenu>
           </box>
-        </scrollview>
+        </box>
       </SplitPane>
 
       {/* A popup is a real X window and needs its size before layout, so the

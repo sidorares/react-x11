@@ -4,8 +4,9 @@ export default {
   description:
     '<textinput> is a real editor: caret and selection through ntk text ' +
     'layout, word select, undo/redo, both X11 clipboards and a right-click ' +
-    'menu. <scrollview> is a clipped viewport with a drawn scrollbar that ' +
-    'the wheel scrolls by default — unless a handler calls preventDefault().',
+    "menu. A <box style={{overflow: 'scroll'}}> is a clipped viewport with a " +
+    'drawn scrollbar that the wheel scrolls by default — unless a handler ' +
+    'calls preventDefault().',
   code: `import React, { useReducer, useState } from 'react';
 import { createRoot } from 'react-x11';
 
@@ -105,7 +106,7 @@ function App() {
         </box>
       </box>
 
-      <scrollview style={{
+      <box style={{ overflow: 'scroll',
         flexGrow: 1,
         borderWidth: 1, borderColor: '#eef2f6', borderRadius: 8,
         padding: 4,
@@ -113,7 +114,7 @@ function App() {
         {tasks.map((task) => (
           <Row key={task.id} task={task} dispatch={dispatch} />
         ))}
-      </scrollview>
+      </box>
 
       <text style={{ fontSize: 12, color: '#9aa5b1' }}>
         {tasks.filter((t) => !t.done).length} left — try selecting text in the

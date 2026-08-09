@@ -301,7 +301,6 @@ const KIND_ROLES = {
   text: ATSPI_ROLE.LABEL,
   image: ATSPI_ROLE.IMAGE,
   canvas: ATSPI_ROLE.DRAWING_AREA,
-  scrollview: ATSPI_ROLE.SCROLL_PANE,
   textinput: ATSPI_ROLE.ENTRY,
   textarea: ATSPI_ROLE.ENTRY,
   markdown: ATSPI_ROLE.DOCUMENT_TEXT,
@@ -319,7 +318,6 @@ export const KIND_ROLE_NAMES = Object.freeze({
   text: 'text',
   image: 'img',
   canvas: 'canvas',
-  scrollview: 'scrollable',
   textinput: 'textbox',
   textarea: 'textbox',
 });
@@ -378,11 +376,22 @@ const INTERNAL_KINDS = new Set(['textchunk', 'svgchild']);
 // The tree projection
 // --------------------------------------------------------------------------
 
+/**
+ * A scroll pane is now a *style* on an ordinary container rather than an
+ * element of its own, so the role comes off `overflow` where it used to come
+ * off the kind. Deliberately `isScroller()` and not "is there anything to
+ * scroll right now": the role is what the node *is*, and a pane flickering
+ * between `scroll pane` and `filler` as its content grows would be reported
+ * to a screen reader as the object being replaced.
+ */
+const scrolls = (node) => !node.isWindow && node.isScroller?.() === true;
+
 /** The web role name in force on a node: the `role` prop, else the kind's
  * default name (only the kinds with real semantics have one). */
 export function roleNameOf(node) {
   const role = node.props?.role;
   if (typeof role === 'string' && role !== '') return role;
+  if (scrolls(node)) return 'scrollable';
   return KIND_ROLE_NAMES[node.kind] ?? null;
 }
 
@@ -396,6 +405,7 @@ export function a11yRole(node) {
     const mapped = ROLE_TO_ATSPI.get(role);
     if (mapped !== undefined) return mapped;
   }
+  if (scrolls(node)) return ATSPI_ROLE.SCROLL_PANE;
   return KIND_ROLES[node.kind] ?? ATSPI_ROLE.UNKNOWN;
 }
 
