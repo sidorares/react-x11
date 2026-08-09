@@ -131,8 +131,14 @@ export function useApp(): unknown;
 /** The clipboard, scoped to this tree's connection. */
 export function useClipboard(): Clipboard;
 
-/** Features `useSupports()` can be asked about. */
-export type SupportsFeature = 'transparency';
+/**
+ * Features `useSupports()` can be asked about.
+ *
+ * `'shaders'` is whether 3D can run your own GLSL — the direct rendering
+ * backend. Ask it before rendering a `<shaderMaterial>`, which throws where
+ * there is no pipeline to compile it. Needs `createRoot({ glPolicy: 'auto' })`.
+ */
+export type SupportsFeature = 'transparency' | 'shaders';
 
 /**
  * Can this **display** do something? `'transparency'` is true when the
@@ -166,6 +172,24 @@ export interface RootOptions {
   fontSource?: unknown;
   /** A visual id for `getContext('opengl')`, instead of querying for one. */
   glxVisual?: unknown;
+  /**
+   * Which OpenGL backend `<Canvas3D>`/`<glarea>` draw through — see
+   * docs/gl.md. `'indirect'` (the default) is indirect GLX; `'auto'` prefers
+   * the GPU where it is available, which is what `<shaderMaterial>` needs.
+   * It has to be set here rather than later: ntk probes for the direct
+   * backend during the connection handshake.
+   */
+  glPolicy?:
+    | 'auto'
+    | 'direct'
+    | 'indirect'
+    | 'off'
+    | {
+        mode?: 'auto' | 'direct' | 'indirect' | 'off';
+        devicePath?: string | null;
+        maxInFlight?: number;
+        linearFallback?: boolean;
+      };
   /** X protocol errors no request callback claimed. Default warns. */
   onXError?: (err: Error) => void;
   onUncaughtError?: (error: unknown, errorInfo: ErrorInfo) => void;

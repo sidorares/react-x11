@@ -1125,12 +1125,16 @@ the first light's ambient term. A lit material in a scene with no lights
 falls back to flat colour rather than rendering black. Light positions are
 world space, so a light inside a rotating `<group>` moves with it.
 
-Not implemented, and failing with an error naming the reason:
-`<shaderMaterial>` (the protocol encodes no shaders), `<instancedMesh>`,
-`<points>`, `<line>`, post-processing — and no shadows, which need
-framebuffer objects. There are no camera _elements_ either: the `camera`
-prop is the whole camera API. See [glx.md](glx.md) for why the transport
-forces all of this.
+`<shaderMaterial>` and `<rawShaderMaterial>` run your own GLSL, and need the
+**direct** backend — the GLX protocol encodes no shader objects, so there is
+nothing for them to compile to over the wire. Turn it on with
+`createRoot({ glPolicy: 'auto' })`; using one without it throws when the
+element is created, naming the reason. See [gl.md](gl.md).
+
+Still not implemented, and failing with an error naming the reason:
+`<instancedMesh>`, `<points>`, `<line>`, post-processing — and no shadows.
+There are no camera _elements_ either: the `camera` prop is the whole camera
+API.
 
 ---
 

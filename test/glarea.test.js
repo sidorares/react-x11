@@ -361,3 +361,96 @@ test('a second <Canvas3D> shows its fallback on the first frame', async () => {
     await app.close();
   }
 });
+
+// A shader that will not compile is a bug in one material, not a machine
+// without 3D. Swapping the whole scene for the fallback would send the reader
+// off to check their drivers, so the fallback stays reserved for a surface
+// that really has no context — src/components/Canvas3D.js.
+test('<Canvas3D fallback> ignores a shader failure and keeps the surface', async () => {
+  const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const seen = [];
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          {
+            style: { flexGrow: 1 },
+            onError: (err) => seen.push(err),
+            fallback: () => h('box', { name: 'no-gl' }),
+          },
+          h('mesh', null, h('boxGeometry', { args: [1, 1, 1] })),
+        ),
+      ),
+      x11Root,
+    );
+    await settle(app);
+
+    const surface = instance._reactX11Node.children[0];
+    assert.equal(surface.kind, 'glarea', 'GL works here, so the surface is up');
+
+    // exactly what the shader renderer does when a program will not build
+    const shaderError = Object.assign(new Error('bad shader'), {
+      code: 'GL_SHADER_FAILED',
+    });
+    surface.props.onError(shaderError);
+    await settle(app);
+
+    assert.deepEqual(
+      seen.map((e) => e.code),
+      ['GL_SHADER_FAILED'],
+      'the app still hears about it through onError',
+    );
+    assert.equal(
+      instance._reactX11Node.children[0].kind,
+      'glarea',
+      'but the surface stays, rather than being replaced by the fallback',
+    );
+
+    await x11Root.unmount();
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
+
+// A surface with neither a fallback nor an onError used to fail in total
+// silence: <glarea> logs only when nothing claimed the error, and <Canvas3D>
+// always claims it. The symptom was a blank 3D area with nothing on the
+// console — indistinguishable from "my scene is wrong".
+test('<Canvas3D> with no fallback and no onError still says what went wrong', async () => {
+  const { app } = await createGlApp({ indirectContexts: false });
+  const x11Root = await createRoot({ app });
+  const warnings = [];
+  const realWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          { style: { flexGrow: 1 } },
+          h('mesh', null, h('boxGeometry', { args: [1, 1, 1] })),
+        ),
+      ),
+      x11Root,
+    );
+    await waitFor(
+      () => warnings.some((w) => w.includes('Canvas3D')),
+      'the failure to reach the console',
+    );
+    await settle(app);
+    assert.match(warnings.join('\n'), /indirect GLX/, 'and names the cause');
+
+    await x11Root.unmount();
+    await settle(app);
+  } finally {
+    console.warn = realWarn;
+    await app.close();
+  }
+});

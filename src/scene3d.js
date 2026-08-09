@@ -33,7 +33,20 @@ export const MATERIAL_KINDS = new Set([
   'meshBasicMaterial',
   'meshLambertMaterial',
   'meshPhongMaterial',
+  // GLSL, so only the direct backend can draw these — see DIRECT_ONLY_KINDS
+  'shaderMaterial',
+  'rawShaderMaterial',
 ]);
+
+/**
+ * Scene elements only the direct backend can render, with the reason the
+ * indirect one cannot. The GLX protocol encodes no shader objects at all, so
+ * this is a property of the transport rather than a gap someone could fill.
+ */
+export const DIRECT_ONLY_KINDS = {
+  shaderMaterial: 'GLSL shaders: the GLX protocol encodes no shader objects',
+  rawShaderMaterial: 'GLSL shaders: the GLX protocol encodes no shader objects',
+};
 export const LIGHT_KINDS = new Set([
   'ambientLight',
   'directionalLight',
@@ -47,21 +60,24 @@ export const SCENE_KINDS = new Set([
   ...OBJECT_KINDS,
 ]);
 
-// fixed-function GL has exactly eight light units
-const MAX_LIGHTS = 8;
+// Fixed-function GL has exactly eight light units. The shader backend has no
+// such limit, but keeps the same cap so a scene lights identically on both.
+export const MAX_LIGHTS = 8;
 
 /**
- * react-three-fiber names that indirect GLX cannot implement — the protocol
- * encodes no shaders, no framebuffer objects and no instancing, so these
+ * react-three-fiber names no backend implements yet, with the reason. These
  * fail loudly instead of rendering something that only looks right.
+ *
+ * The list used to include the shader materials, and shrank when the direct
+ * backend arrived: what is impossible over the GLX wire is merely unwritten
+ * on the GPU. `DIRECT_ONLY_KINDS` is the middle ground — implemented, but
+ * only where the pipeline can run it.
  */
 export const UNSUPPORTED_KINDS = {
-  shaderMaterial: 'GLSL shaders: the GLX protocol encodes no shader objects',
-  rawShaderMaterial: 'GLSL shaders: the GLX protocol encodes no shader objects',
-  instancedMesh: 'instancing: no vertex arrays or instanced draw commands',
-  points: 'point clouds need vertex arrays, which GLX does not encode',
-  line: 'line geometry needs vertex arrays, which GLX does not encode',
-  effectComposer: 'post-processing needs framebuffer objects',
+  instancedMesh: 'instancing is not implemented yet',
+  points: 'point clouds are not implemented yet',
+  line: 'line geometry is not implemented yet',
+  effectComposer: 'post-processing is not implemented yet',
 };
 
 const asTriple = (value, fallback) => {
@@ -299,8 +315,35 @@ const rgba = (color, fallback = [1, 1, 1, 1]) => {
   return cssColorStraight(color) ?? fallback;
 };
 
+/**
+ * The colour reading both renderers share, so a material means the same
+ * thing whichever pipeline draws it.
+ */
+export const materialColors = {
+  /** a colour prop as [r, g, b], straight alpha dropped */
+  rgb(color, fallback = [1, 1, 1]) {
+    const [r, g, b] = rgba(color, [...fallback, 1]);
+    return [r, g, b];
+  },
+  /** the four colour-ish values every standard material has */
+  of(props) {
+    const [r, g, b, a] = rgba(props.color);
+    return {
+      color: new Float32Array([r, g, b]),
+      alpha: a * (props.opacity ?? 1),
+      emissive: new Float32Array(this.rgb(props.emissive, [0, 0, 0])),
+      specular: new Float32Array(
+        this.rgb(
+          props.specular === false ? undefined : props.specular,
+          [1, 1, 1],
+        ),
+      ),
+    };
+  },
+};
+
 /** Lights with their world matrices, in tree order. */
-function collectLights(nodes, parentMatrix, out = []) {
+export function collectLights(nodes, parentMatrix, out = []) {
   for (const node of nodes) {
     if (!node.isObject3D || !node.visible) continue;
     const world = multiply(parentMatrix, node.localMatrix());
@@ -324,6 +367,8 @@ const scaled = ([r, g, b], intensity) => [
 export class SceneRenderer {
   constructor(surface) {
     this.surface = surface;
+    this.backend = 'indirect';
+    this.warnedDirectOnly = false;
     this.lists = new Map(); // GeometryNode -> { id, version }
     this.nextList = 1;
     this.textures = new Map(); // image -> texture id
@@ -586,8 +631,21 @@ export class SceneRenderer {
 
   /** Material state is per frame, so one geometry list can serve many meshes. */
   applyMaterial(gl, material) {
-    const kind = material?.kind ?? 'meshBasicMaterial';
+    let kind = material?.kind ?? 'meshBasicMaterial';
     const props = material?.props ?? {};
+    // A mesh that reached this renderer with a shader material can only
+    // happen if the backend changed under a mounted tree; draw it flat rather
+    // than as whatever an unknown kind falls through to.
+    if (DIRECT_ONLY_KINDS[kind]) {
+      if (!this.warnedDirectOnly) {
+        this.warnedDirectOnly = true;
+        console.warn(
+          `react-x11: <${kind}> needs direct rendering — ${DIRECT_ONLY_KINDS[kind]}. ` +
+            'Drawing it as an unlit material instead.',
+        );
+      }
+      kind = 'meshBasicMaterial';
+    }
     const [r, g, b, a] = rgba(props.color);
     const opacity = props.opacity ?? 1;
     const alpha = a * opacity;
