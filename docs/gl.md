@@ -7,6 +7,7 @@ pipelines, and which one decides what the scene can contain:
 | -------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
 | how it draws   | OpenGL ES 2 on the GPU; frames reach the server as dma-buf descriptors over DRI3 + Present | GL commands encoded into the X connection                          |
 | shaders        | **yes** — `<shaderMaterial>`, GLSL ES 1.00                                                 | none; the protocol encodes no shader objects                       |
+| render targets | **yes** — framebuffer objects, so `<effectComposer>` works                                 | none; the protocol encodes no framebuffer objects                  |
 | geometry       | vertex buffers on the GPU                                                                  | immediate mode compiled into display lists                         |
 | lighting       | per fragment                                                                               | per vertex                                                         |
 | cost per frame | one Present request                                                                        | matrices, material state and one `CallList` per mesh               |
@@ -177,6 +178,116 @@ Two differences you can see, both improvements the GPU makes free:
   rather than wrapping — a `<sphereGeometry>` with enough segments really
   does get there.
 
+## Post-processing
+
+![The shader lab: a bloomed torus with a vignette, and the controls driving it](img/shader-lab.png)
+
+`<effectComposer>` renders the scene into a texture and runs it through a
+chain of full-screen passes. The picture above is `examples/shader-lab.jsx`
+with **Bloom** and **Vignette** on — the glow around the torus is light in
+pixels where no geometry was drawn, which is the thing a renderer that only
+ever draws to the window cannot produce.
+
+```jsx
+<Canvas3D clearColor="#0a0e18">
+  <mesh>…</mesh>
+  <effectComposer>
+    <bloomPass threshold={0.55} strength={0.9} radius={1.4} />
+    <vignettePass offset={0.45} darkness={0.65} />
+    <fxaaPass />
+  </effectComposer>
+</Canvas3D>
+```
+
+Passes run in tree order, and the order matters: bloom before the vignette,
+or the glow is darkened along with everything else; antialiasing last, on the
+image that is actually shown.
+
+There is **no `<renderPass>`** as in three.js's composer. The surface's own
+scene is always the input — a composer that did not compose this scene would
+have nothing to be — so the first pass reads it and the last one writes the
+window. `onDraw` output is part of what gets composed, since it draws into
+the same target the scene does.
+
+| pass             | props                                                         |
+| ---------------- | ------------------------------------------------------------- |
+| `<bloomPass>`    | `threshold` (0.75), `strength` (0.8), `radius` (1)            |
+| `<vignettePass>` | `offset` (0.5) — where the darkening starts; `darkness` (0.5) |
+| `<fxaaPass>`     | none                                                          |
+| `<shaderPass>`   | `fragmentShader`, `vertexShader`, `uniforms`                  |
+
+`enabled={false}` on any pass skips it and the rest of the chain still runs;
+on the composer it turns the whole thing off and the scene draws straight to
+the window. Both are ordinary prop changes, so a checkbox is the whole
+implementation of "turn bloom off".
+
+### `<shaderPass>`
+
+Your own GLSL over the whole frame. Declare `uniform sampler2D tDiffuse` for
+the incoming image and `varying vec2 vUv` yourself, exactly as a three.js
+`ShaderPass` shader does — nothing is injected but the precision line, so a
+shader copied from there compiles unchanged:
+
+```jsx
+<shaderPass
+  fragmentShader={`
+    uniform sampler2D tDiffuse;
+    uniform float uAmount;
+    varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      float grey = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+      gl_FragColor = vec4(mix(c.rgb, vec3(grey), uAmount), c.a);
+    }
+  `}
+  uniforms={{ uAmount: { value: 0.6 } }}
+/>
+```
+
+`uniforms` takes the same shape and the same type mapping as
+`<shaderMaterial>`'s. Three more are **set if you declare them**, and
+silently dropped if you do not: `resolution` (a `vec2` of pixels),
+`texelSize` (`vec2`, 1/pixels — what a pass that samples its neighbours
+needs) and `time` (`float`, seconds).
+
+`vertexShader` replaces the built-in full-screen quad shader, which is the
+only reason to pass one; it must declare `attribute vec2 position` and write
+`vUv`.
+
+### What it costs
+
+Two full-size RGBA targets, allocated at the surface's size and rebuilt on
+resize. Only the first has a depth buffer — everything after the scene is a
+quad drawn with the depth test off. `<bloomPass>` adds two more at half
+resolution and is four draws: a threshold pass, a separable blur across and
+down, then a composite that adds the blur back over the original. Blurring
+at half size is both cheaper and wider, since the same kernel reaches twice
+as far.
+
+The chain ping-pongs between the two targets — read one, write the other —
+so no pass ever samples the target it is writing, which is undefined
+behaviour in every GL there has ever been.
+
+### When it cannot run
+
+Same rule as `<shaderMaterial>`: asking for `<effectComposer>` on a
+connection with no direct backend throws when the element is created, because
+GLX has no framebuffer objects to render into. `useSupports('shaders')` is
+the check to branch on.
+
+Two failures are handled at draw time instead, because they are only
+discoverable once there is a context, and neither takes the scene down:
+
+- a pass whose shader will not compile is reported once through `onError`
+  with the driver's log, and **hands the image on unchanged** — the frame is
+  still the scene, minus that one effect.
+- a render target that comes back incomplete, or a `x11-dri` too old to have
+  framebuffer objects at all, is reported once and the scene draws straight
+  to the window.
+
+Neither switches `<Canvas3D fallback>` on: the fallback means "this machine
+has no 3D", and a typo in a pass shader is not that.
+
 ## `useFrame`
 
 The per-surface frame clock. `delta` is seconds since the previous frame, so
@@ -230,6 +341,11 @@ a frame never re-sends vertices:
   sources, the uniform mapping and the draw state. No X server, no GPU, no
   addon — it runs anywhere.
 - `test/scene3d.test.js` does the same for indirect, on the encoded GLX bytes.
+- `test/postprocess3d.test.js` uses a fake `gl` that tracks binding state
+  rather than logging calls, because what matters about a pass chain is the
+  state at draw time: which framebuffer a draw lands in, which texture it
+  samples, at what size. That is what makes "no pass samples the target it is
+  writing" an assertion rather than a hope.
 
 See also [glx.md](glx.md) for the indirect backend's design, and what its
 transport can never do.

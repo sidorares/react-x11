@@ -5,6 +5,19 @@ import { FrameContext, createFrameBus } from '../frame3d.js';
 import { glxFailure } from '../glnodes.js';
 
 /**
+ * Failures that mean "one thing in this scene is broken", not "this machine
+ * has no 3D". The fallback is for the second: replacing a whole scene with
+ * "no 3D here" because a pass shader has a typo would send the reader off to
+ * check their drivers.
+ */
+const SCENE_LEVEL = new Set([
+  'GL_SHADER_FAILED',
+  'GL_CONTEXT_INCOMPLETE',
+  'GL_POST_UNAVAILABLE',
+  'GL_POST_TARGET_FAILED',
+]);
+
+/**
  * `<Canvas3D>` — the react-three-fiber-shaped entry point to the 3D scene.
  * A thin wrapper over the `<glarea>` host element: it is the surface that
  * owns the GL context, and the scene lives in its children.
@@ -58,10 +71,8 @@ export function Canvas3D({ children, style, fallback, onError, ...props }) {
   const handleError = useCallback(
     (err) => {
       // The fallback means "this surface has no GL", so only a failure to get
-      // a context switches to it. A shader that will not compile is a bug in
-      // one material, not a machine without 3D — replacing the whole scene
-      // with "no 3D here" would send the reader off to check their drivers.
-      if (err?.code !== 'GL_SHADER_FAILED') setError(err);
+      // a context switches to it.
+      if (!SCENE_LEVEL.has(err?.code)) setError(err);
       if (onError) return onError(err);
       // Nowhere else for it to go. `<glarea>` logs its own failures only when
       // no onError is set, and this component always sets one — so without

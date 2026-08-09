@@ -13,6 +13,12 @@
 // halo, `<instancedMesh>` for the row of cubes — and `useFrame`, the
 // per-surface clock. Those three do work on both backends; the shader does
 // not, so the whole panel is gated on `useSupports('shaders')`.
+//
+// The bottom group is `<effectComposer>`: the whole frame rendered to a
+// texture and run through full-screen passes. Bloom is the one to turn on
+// first — it is what makes the crests of the ripple glow rather than just
+// being bright — and it is four draws at two resolutions, which is why the
+// pipeline underneath it is a pass graph and not a single blit.
 import React, { useState } from 'react';
 
 import {
@@ -111,6 +117,10 @@ function Lab({
   halo,
   cubes,
   running,
+  bloom,
+  glow,
+  vignette,
+  fxaa,
 }) {
   const [time, setTime] = useState(0);
   const colors = PALETTES[palette];
@@ -152,6 +162,15 @@ function Lab({
           <meshBasicMaterial color={colors.halo} />
         </instancedMesh>
       )}
+
+      {/* The passes run in tree order, over the frame above: bloom before
+          the vignette, or the glow would be darkened along with everything
+          else; antialiasing last, on the image that is actually shown. */}
+      <effectComposer>
+        {bloom && <bloomPass threshold={0.55} strength={glow} radius={1.4} />}
+        {vignette && <vignettePass offset={0.45} darkness={0.65} />}
+        {fxaa && <fxaaPass />}
+      </effectComposer>
     </Canvas3D>
   );
 }
@@ -219,9 +238,13 @@ function App() {
   const [halo, setHalo] = useState(true);
   const [cubes, setCubes] = useState(true);
   const [running, setRunning] = useState(true);
+  const [bloom, setBloom] = useState(true);
+  const [glow, setGlow] = useState(0.9);
+  const [vignette, setVignette] = useState(true);
+  const [fxaa, setFxaa] = useState(false);
 
   return (
-    <window width={860} height={560} title="react-x11 — shader lab">
+    <window width={860} height={740} title="react-x11 — shader lab">
       <box style={{ flexDirection: 'row', flexGrow: 1 }}>
         {shaders ? (
           <Lab
@@ -234,6 +257,10 @@ function App() {
             halo={halo}
             cubes={cubes}
             running={running}
+            bloom={bloom}
+            glow={glow}
+            vignette={vignette}
+            fxaa={fxaa}
           />
         ) : (
           <NoShaders />
@@ -299,6 +326,21 @@ function App() {
           <Toggle label="Checker" checked={checker} onChange={setChecker} />
           <Toggle label="Point halo" checked={halo} onChange={setHalo} />
           <Toggle label="Instanced cubes" checked={cubes} onChange={setCubes} />
+
+          <text style={{ fontSize: 14, fontWeight: 'bold' }}>Post</text>
+          <Toggle label="Bloom" checked={bloom} onChange={setBloom} />
+          {bloom && (
+            <Knob
+              label="Glow"
+              value={glow}
+              min={0}
+              max={2.5}
+              step={0.05}
+              onChange={setGlow}
+            />
+          )}
+          <Toggle label="Vignette" checked={vignette} onChange={setVignette} />
+          <Toggle label="FXAA" checked={fxaa} onChange={setFxaa} />
 
           <box style={{ flexGrow: 1 }} />
           <Button onPress={() => setRunning((r) => !r)}>

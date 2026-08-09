@@ -454,3 +454,148 @@ test('<Canvas3D> with no fallback and no onError still says what went wrong', as
     await app.close();
   }
 });
+
+/**
+ * Flush React the way the published harness does — `settle()` only drives the
+ * X connection, so a `setState` from an error handler is still in flight when
+ * it returns, and an assertion that the tree did *not* change would pass
+ * whether or not it was about to.
+ */
+async function flush(fn) {
+  const previous = globalThis.IS_REACT_ACT_ENVIRONMENT;
+  globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await React.act(async () => {
+      await fn?.();
+    });
+  } finally {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = previous;
+  }
+}
+
+// Post-processing needs a framebuffer object to render the scene into, and
+// GLX encodes none — so `<effectComposer>` is direct-only for the same kind
+// of reason `<shaderMaterial>` is, and fails the same way: when the element
+// is created, naming what is missing, rather than as a surface that quietly
+// composes nothing.
+//
+// The passes are direct-only in their own right, not merely by being inside
+// a composer — a `<bloomPass>` on its own has to say the same thing.
+for (const [what, scene] of [
+  ['effectComposer', () => h('effectComposer', null)],
+  ['bloomPass', () => h('bloomPass', null)],
+]) {
+  test(`<${what}> without direct rendering throws, naming the reason`, async () => {
+    const { app } = await createGlApp();
+    const x11Root = await createRoot({ app });
+    const realError = console.error;
+    console.error = () => {};
+    try {
+      await assert.rejects(
+        () =>
+          flush(() =>
+            x11Root.render(
+              h(
+                'window',
+                { width: 320, height: 240 },
+                h(
+                  Canvas3D,
+                  { style: { flexGrow: 1 } },
+                  h('mesh', null, h('boxGeometry', { args: [1, 1, 1] })),
+                  scene(),
+                ),
+              ),
+            ),
+          ),
+        (err) => {
+          assert.match(
+            err.message,
+            new RegExp(`<${what}> needs direct rendering`),
+          );
+          assert.match(err.message, /framebuffer objects/);
+          // and points at the check a scene that would rather degrade makes
+          assert.match(err.message, /useSupports\('shaders'\)/);
+          return true;
+        },
+      );
+    } finally {
+      console.error = realError;
+      await app.close();
+    }
+  });
+}
+
+// The fallback means "this machine has no 3D". A render target that came
+// back incomplete, or an addon too old to have framebuffer objects, is one
+// broken effect on a surface that is otherwise drawing — swapping the whole
+// scene for "no 3D here" would send the reader off to check their drivers.
+test('<Canvas3D fallback> ignores a post-processing failure too', async () => {
+  const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const seen = [];
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h(
+          Canvas3D,
+          {
+            style: { flexGrow: 1 },
+            onError: (err) => seen.push(err),
+            fallback: () => h('box', { name: 'no-gl' }),
+          },
+          h('mesh', null, h('boxGeometry', { args: [1, 1, 1] })),
+        ),
+      ),
+      x11Root,
+    );
+    await settle(app);
+
+    const surface = instance._reactX11Node.children[0];
+    assert.equal(surface.kind, 'glarea');
+
+    const codes = [
+      'GL_POST_TARGET_FAILED',
+      'GL_POST_UNAVAILABLE',
+      'GL_SHADER_FAILED',
+      'GL_CONTEXT_INCOMPLETE',
+    ];
+    for (const code of codes) {
+      await flush(() =>
+        surface.props.onError(Object.assign(new Error(code), { code })),
+      );
+      await settle(app);
+      assert.equal(
+        instance._reactX11Node.children[0].kind,
+        'glarea',
+        `${code} left the surface alone`,
+      );
+    }
+    assert.deepEqual(
+      seen.map((e) => e.code),
+      codes,
+      'and the app heard about every one of them',
+    );
+
+    // The control, and the reason the assertions above are not vacuous: a
+    // context that never came up *does* switch to the fallback, through this
+    // same handler and the same flush.
+    await flush(() =>
+      surface.props.onError(
+        Object.assign(new Error('no context'), {
+          code: 'GLX_INDIRECT_DISABLED',
+        }),
+      ),
+    );
+    await settle(app);
+    const [child] = instance._reactX11Node.children;
+    assert.equal(child.kind, 'box', 'the surface is gone, the fallback is up');
+    assert.equal(child.children[0].props.name, 'no-gl');
+
+    await x11Root.unmount();
+    await settle(app);
+  } finally {
+    await app.close();
+  }
+});
