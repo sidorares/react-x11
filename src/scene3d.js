@@ -33,6 +33,9 @@ export const MATERIAL_KINDS = new Set([
   'meshBasicMaterial',
   'meshLambertMaterial',
   'meshPhongMaterial',
+  // unlit by definition — a dot and a line have no surface to shade
+  'pointsMaterial',
+  'lineBasicMaterial',
   // GLSL, so only the direct backend can draw these — see DIRECT_ONLY_KINDS
   'shaderMaterial',
   'rawShaderMaterial',
@@ -53,11 +56,31 @@ export const LIGHT_KINDS = new Set([
   'pointLight',
   'spotLight',
 ]);
-export const OBJECT_KINDS = new Set(['mesh', 'group', ...LIGHT_KINDS]);
+/** Drawables: a geometry and a material, assembled into some primitive. */
+export const DRAWABLE_KINDS = new Set([
+  'mesh',
+  'instancedMesh',
+  'points',
+  'line',
+  'lineSegments',
+  'lineLoop',
+]);
+export const OBJECT_KINDS = new Set([
+  ...DRAWABLE_KINDS,
+  'group',
+  ...LIGHT_KINDS,
+]);
 export const SCENE_KINDS = new Set([
   ...GEOMETRY_KINDS,
   ...MATERIAL_KINDS,
   ...OBJECT_KINDS,
+]);
+
+/** Materials with no surface to shade, which lighting never applies to. */
+export const UNLIT_MATERIALS = new Set([
+  'meshBasicMaterial',
+  'pointsMaterial',
+  'lineBasicMaterial',
 ]);
 
 // Fixed-function GL has exactly eight light units. The shader backend has no
@@ -74,10 +97,8 @@ export const MAX_LIGHTS = 8;
  * only where the pipeline can run it.
  */
 export const UNSUPPORTED_KINDS = {
-  instancedMesh: 'instancing is not implemented yet',
-  points: 'point clouds are not implemented yet',
-  line: 'line geometry is not implemented yet',
-  effectComposer: 'post-processing is not implemented yet',
+  effectComposer:
+    'post-processing needs a render-target pipeline, which neither backend has yet',
 };
 
 const asTriple = (value, fallback) => {
@@ -163,9 +184,24 @@ export class Object3DNode extends Node {
   }
 }
 
+/**
+ * Anything that draws a geometry with a material: `<mesh>`, `<points>`,
+ * `<line>` and friends. They differ only in the primitive their vertices are
+ * assembled into, which both renderers read off `primitive` — the geometry,
+ * the material and the transform work identically for all of them.
+ */
 export class MeshNode extends Object3DNode {
-  constructor(props, app) {
-    super('mesh', props, app);
+  constructor(props, app, kind = 'mesh') {
+    super(kind, props, app);
+  }
+
+  get isDrawable() {
+    return true;
+  }
+
+  /** 'triangles' | 'points' | 'lines' | 'lineStrip' | 'lineLoop' */
+  get primitive() {
+    return 'triangles';
   }
 
   get geometry() {
@@ -174,6 +210,59 @@ export class MeshNode extends Object3DNode {
 
   get material() {
     return this.children.find((c) => c.isMaterial) ?? null;
+  }
+}
+
+/** `<points>` — one vertex, one dot. Size comes from `<pointsMaterial>`. */
+export class PointsNode extends MeshNode {
+  constructor(props, app) {
+    super(props, app, 'points');
+  }
+
+  get primitive() {
+    return 'points';
+  }
+}
+
+/**
+ * `<line>`, `<lineSegments>`, `<lineLoop>` — the three ways three.js reads a
+ * vertex list as lines: a connected strip, disjoint pairs, or a closed strip.
+ */
+export class LineNode extends MeshNode {
+  constructor(kind, props, app) {
+    super(props, app, kind);
+  }
+
+  get primitive() {
+    if (this.kind === 'lineSegments') return 'lines';
+    if (this.kind === 'lineLoop') return 'lineLoop';
+    return 'lineStrip';
+  }
+}
+
+/**
+ * `<instancedMesh instances={[{ position, rotation, scale, color }, …]}>` —
+ * one geometry drawn many times.
+ *
+ * The `instances` array is declarative rather than three.js's imperative
+ * `setMatrixAt`, for the same reason the camera here is a prop: the tree is
+ * the description, and a handle you have to mutate after the fact is not one.
+ * Each entry takes the transform props `<mesh>` takes, plus an optional
+ * `color` that overrides the material's.
+ *
+ * What it saves is the geometry, not the draw calls: the vertices are
+ * uploaded (or compiled into a display list) once, and each instance costs a
+ * transform and a draw. Neither backend does GPU instancing yet — ES 2 has
+ * none guaranteed, and GLX encodes none at all.
+ */
+export class InstancedMeshNode extends MeshNode {
+  constructor(props, app) {
+    super(props, app, 'instancedMesh');
+  }
+
+  get instances() {
+    const list = this.props.instances;
+    return Array.isArray(list) ? list : [];
   }
 }
 
@@ -221,15 +310,25 @@ export class GeometryNode extends Object3DNode {
     this.surface?.requestFrame();
   }
 
-  /** { positions, normals, uvs, index } — memoized per prop version. */
-  data() {
-    if (!this._data) {
+  /**
+   * `{ positions, normals, uvs, index }` — memoized per prop version.
+   *
+   * `normals: false` is what a point cloud or a line asks for: nothing shades
+   * them, and deriving face normals for a hundred thousand loose vertices is
+   * a pass and a megabyte spent on data no shader will read.
+   */
+  data({ normals = true } = {}) {
+    const key = normals ? 'shaded' : 'flat';
+    if (!this._data) this._data = new Map();
+    let built = this._data.get(key);
+    if (!built) {
       const build = GEOMETRY_BUILDERS[this.kind];
-      this._data = build
+      built = build
         ? build(this.props.args ?? [])
-        : buildBufferGeometry(this.props);
+        : buildBufferGeometry(this.props, { normals });
+      this._data.set(key, built);
     }
-    return this._data;
+    return built;
   }
 }
 
@@ -267,6 +366,11 @@ export class MaterialNode extends Object3DNode {
 
 export function createSceneNode(kind, props, app) {
   if (kind === 'mesh') return new MeshNode(props, app);
+  if (kind === 'instancedMesh') return new InstancedMeshNode(props, app);
+  if (kind === 'points') return new PointsNode(props, app);
+  if (kind === 'line' || kind === 'lineSegments' || kind === 'lineLoop') {
+    return new LineNode(kind, props, app);
+  }
   if (kind === 'group') return new GroupNode(props, app);
   if (LIGHT_KINDS.has(kind)) return new LightNode(kind, props, app);
   if (GEOMETRY_KINDS.has(kind)) return new GeometryNode(kind, props, app);
@@ -341,6 +445,32 @@ export const materialColors = {
     };
   },
 };
+
+/** The GL primitive a drawable's vertices are assembled into. */
+export function BEGIN_MODE(gl, primitive) {
+  switch (primitive) {
+    case 'points':
+      return gl.POINTS;
+    case 'lines':
+      return gl.LINES;
+    case 'lineStrip':
+      return gl.LINE_STRIP;
+    case 'lineLoop':
+      return gl.LINE_LOOP;
+    default:
+      return gl.TRIANGLES;
+  }
+}
+
+/** One `<instancedMesh>` entry's transform, in the parent's space. */
+export function instanceMatrix(instance, out = new Float32Array(16)) {
+  return compose(
+    asTriple(instance.position, [0, 0, 0]),
+    asTriple(instance.rotation, [0, 0, 0]),
+    asTriple(instance.scale, [1, 1, 1]),
+    out,
+  );
+}
 
 /** Lights with their world matrices, in tree order. */
 export function collectLights(nodes, parentMatrix, out = []) {
@@ -423,7 +553,7 @@ export class SceneRenderer {
     node._world = world;
     gl.PushMatrix();
     gl.MultMatrixf(node.localMatrix());
-    if (node.kind === 'mesh') this.drawMesh(gl, node);
+    if (node.isDrawable) this.drawMesh(gl, node);
     for (const child of node.children) {
       if (child.isObject3D) this.drawObject(gl, child, world);
     }
@@ -433,8 +563,33 @@ export class SceneRenderer {
   drawMesh(gl, mesh) {
     const geometry = mesh.geometry;
     if (!geometry) return;
-    this.applyMaterial(gl, mesh.material);
-    gl.CallList(this.listFor(gl, geometry));
+    const applied = this.applyMaterial(gl, mesh.material);
+    const list = this.listFor(gl, geometry, mesh.primitive);
+    const instances = mesh.instances;
+    if (!instances) return gl.CallList(list);
+
+    // One list, replayed under each instance's transform. The geometry is
+    // compiled once however many instances there are, which is the whole
+    // saving; the per-instance cost is a matrix and a CallList.
+    //
+    // Colour is GL state, and PopMatrix restores the matrix and nothing else —
+    // so once any instance has set one, every instance has to say what it
+    // wants or it inherits its predecessor's.
+    const colored = instances.some((instance) => instance.color);
+    for (const instance of instances) {
+      gl.PushMatrix();
+      gl.MultMatrixf(instanceMatrix(instance));
+      if (colored) {
+        const [r, g, b] = instance.color
+          ? rgba(instance.color)
+          : (applied?.color ?? [1, 1, 1]);
+        gl.Color3f(r, g, b);
+      }
+      gl.CallList(list);
+      gl.PopMatrix();
+    }
+    // the material's own colour is no longer what is current
+    if (colored) this.materialKey = null;
   }
 
   /**
@@ -469,21 +624,33 @@ export class SceneRenderer {
   }
 
   /** Compile once, replay forever — this is the whole point of the design. */
-  listFor(gl, geometry) {
-    const cached = this.lists.get(geometry);
+  listFor(gl, geometry, primitive = 'triangles') {
+    // Keyed by primitive as well as by geometry: the same vertices compiled
+    // as triangles and as points are two different lists, and a scene can
+    // legitimately use one geometry both ways.
+    let perPrimitive = this.lists.get(geometry);
+    if (!perPrimitive) this.lists.set(geometry, (perPrimitive = new Map()));
+    const cached = perPrimitive.get(primitive);
     if (cached && cached.version === geometry.version) return cached.id;
     const id = cached ? cached.id : this.nextList++;
-    const { positions, normals, uvs, index } = geometry.data();
-    const count = index ? index.length : positions.length / 3;
+
+    const shaded = primitive === 'triangles';
+    const { positions, normals, uvs, index } = geometry.data({
+      normals: shaded,
+    });
+    // Points ignore any index — every vertex is one dot, and running the
+    // triangle index over them would draw the shared ones repeatedly.
+    const useIndex = primitive === 'points' ? null : index;
+    const count = useIndex ? useIndex.length : positions.length / 3;
 
     gl.NewList(id, gl.COMPILE);
-    gl.Begin(gl.TRIANGLES);
+    gl.Begin(BEGIN_MODE(gl, primitive));
     for (let i = 0; i < count; i++) {
-      const v = index ? index[i] : i;
-      if (normals && normals.length > v * 3 + 2) {
+      const v = useIndex ? useIndex[i] : i;
+      if (shaded && normals && normals.length > v * 3 + 2) {
         gl.Normal3f(normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]);
       }
-      if (uvs && uvs.length > v * 2 + 1) {
+      if (shaded && uvs && uvs.length > v * 2 + 1) {
         gl.TexCoord2f(uvs[v * 2], uvs[v * 2 + 1]);
       }
       gl.Vertex3f(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2]);
@@ -491,7 +658,7 @@ export class SceneRenderer {
     gl.End();
     gl.EndList();
 
-    this.lists.set(geometry, { id, version: geometry.version });
+    perPrimitive.set(primitive, { id, version: geometry.version });
     return id;
   }
 
@@ -649,9 +816,10 @@ export class SceneRenderer {
     const [r, g, b, a] = rgba(props.color);
     const opacity = props.opacity ?? 1;
     const alpha = a * opacity;
-    // <meshBasicMaterial> is unlit by definition, and a lit material with no
-    // light in the scene would render black — fall back to flat colour
-    const lit = kind !== 'meshBasicMaterial' && this.lit;
+    // <meshBasicMaterial> is unlit by definition — and so are the point and
+    // line materials, which have no surface to shade. A lit material with no
+    // light in the scene would render black, so that falls back to flat too.
+    const lit = !UNLIT_MATERIALS.has(kind) && this.lit;
     // texturing is state like everything else here, so it is part of the key
     const map = props.map ?? null;
     const key = [
@@ -667,6 +835,8 @@ export class SceneRenderer {
       props.shininess,
       props.specular,
       props.emissive,
+      props.size,
+      props.linewidth,
       map ? (this.textures.get(map) ?? 'new') : 'none',
     ].join('|');
     if (key === this.materialKey) return;
@@ -723,6 +893,11 @@ export class SceneRenderer {
       gl.Disable(gl.TEXTURE_2D);
     }
 
+    // three.js's names: `size` on a points material, `linewidth` on a line
+    // one. Both are fixed-function state the GLX protocol does encode.
+    if (kind === 'pointsMaterial') gl.PointSize(props.size ?? 1);
+    if (kind === 'lineBasicMaterial') gl.LineWidth(props.linewidth ?? 1);
+
     gl.PolygonMode(gl.FRONT_AND_BACK, props.wireframe ? gl.LINE : gl.FILL);
     if (props.side === 'double') {
       gl.Disable(gl.CULL_FACE);
@@ -730,18 +905,23 @@ export class SceneRenderer {
       gl.Enable(gl.CULL_FACE);
       gl.CullFace(props.side === 'back' ? gl.FRONT : gl.BACK);
     }
+    // handed back so <instancedMesh> can put it back between instances that
+    // override the colour and instances that do not
+    return { color: [r, g, b] };
   }
 
-  /** Drop a removed geometry's list so the id can be reused. */
+  /** Drop a removed geometry's lists so the ids can be reused. */
   forget(gl, node) {
-    const entry = this.lists.get(node);
-    if (!entry) return;
+    const perPrimitive = this.lists.get(node);
+    if (!perPrimitive) return;
     this.lists.delete(node);
-    gl?.DeleteLists?.(entry.id, 1);
+    for (const { id } of perPrimitive.values()) gl?.DeleteLists?.(id, 1);
   }
 
   dispose(gl) {
-    for (const { id } of this.lists.values()) gl?.DeleteLists?.(id, 1);
+    for (const perPrimitive of this.lists.values()) {
+      for (const { id } of perPrimitive.values()) gl?.DeleteLists?.(id, 1);
+    }
     this.lists.clear();
     if (this.textures.size) gl?.DeleteTextures?.([...this.textures.values()]);
     this.textures.clear();

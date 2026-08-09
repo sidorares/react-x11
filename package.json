@@ -43,6 +43,7 @@
     "examples:gl": "tsx examples/gl.jsx",
     "examples:three": "tsx examples/three.jsx",
     "examples:shader": "tsx examples/shader.jsx",
+    "examples:shader-lab": "tsx examples/shader-lab.jsx",
     "examples:transparent": "tsx examples/transparent.jsx",
     "examples:windows": "tsx examples/windows.jsx",
     "examples:wm": "tsx examples/wm.jsx",

@@ -88,7 +88,19 @@ function pickable(nodes, inherited, out = []) {
   for (const node of nodes) {
     if (!node.isObject3D || !node.visible) continue;
     const listening = inherited || hasPointerHandlers(node);
-    if (listening && node.kind === 'mesh' && node.geometry) out.push(node);
+    // Triangles only, and only where the node's own transform is where the
+    // geometry really is. A `<points>` or `<line>` has no surface for a ray
+    // to meet, and an `<instancedMesh>` is drawn at each instance's transform
+    // rather than at its own — testing the base geometry there would report
+    // hits in a place nothing was drawn.
+    if (
+      listening &&
+      node.geometry &&
+      node.primitive === 'triangles' &&
+      !node.instances
+    ) {
+      out.push(node);
+    }
     pickable(node.children, listening, out);
   }
   return out;

@@ -298,6 +298,10 @@ export class GlAreaNode extends Node {
       this.props.onCreated?.(gl, info);
     }
     this._syncPointerListeners();
+    // `useFrame` subscribers run before the scene is drawn, so a callback
+    // that sets state has its change land on the next frame rather than a
+    // frame later still.
+    const animating = this._runFrameCallbacks(info, gl);
     const [r, g, b, a] = clearColorOf(this.props);
     // The two backends spell GL differently — PascalCase OpenGL 1.x against
     // camelCase ES 2 — and neither pretends to be the other, so the handful
@@ -314,7 +318,37 @@ export class GlAreaNode extends Node {
     this.scene.render(gl, info);
     this.props.onDraw?.(gl, info);
     gl.SwapBuffers();
-    if (this.props.frameLoop === 'always') this.requestFrame();
+    // A surface with `useFrame` subscribers animates: a demand-driven clock
+    // would tick once and stop, which is never what subscribing meant.
+    if (this.props.frameLoop === 'always' || animating) this.requestFrame();
+  }
+
+  /**
+   * Run this surface's `useFrame` subscribers. Returns whether any ran, which
+   * is what keeps the frame loop going.
+   */
+  _runFrameCallbacks(info, gl) {
+    const frames = this.props.frames;
+    if (!frames || frames.size === 0) return false;
+    const now = performance.now();
+    if (this._firstFrameAt === undefined) this._firstFrameAt = now;
+    // seconds, and clamped: a surface that was occluded or paused for a
+    // second should not teleport everything that integrates against delta
+    const delta = Math.min((now - (this._lastFrameAt ?? now)) / 1000, 0.1);
+    this._lastFrameAt = now;
+    return frames.run(
+      {
+        gl,
+        backend: gl.backend ?? 'indirect',
+        width: info.width,
+        height: info.height,
+        elapsed: (now - this._firstFrameAt) / 1000,
+        frame: (this._frameCount = (this._frameCount ?? 0) + 1),
+        camera: this.scene.camera ?? null,
+        node: this,
+      },
+      delta,
+    );
   }
 
   applyProps(newProps, oldProps) {

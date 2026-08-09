@@ -26,8 +26,10 @@
 
 import {
   MAX_LIGHTS,
+  UNLIT_MATERIALS,
   cameraMatrices,
   collectLights,
+  instanceMatrix,
   materialColors,
 } from './scene3d.js';
 import { identity, invert, multiply } from './mat4.js';
@@ -67,9 +69,10 @@ attribute vec2 uv;
  * shader has no lighting code at all rather than a loop that runs no
  * iterations, which keeps an unlit scene's program genuinely small.
  */
-function materialProgramSource({ kind, lit, textured, lights }) {
+function materialProgramSource({ kind, lit, textured, lights, primitive }) {
   const phong = kind === 'meshPhongMaterial';
-  const vertex = `${COMMON_VERTEX_UNIFORMS}
+  const points = primitive === 'points';
+  const vertex = `${COMMON_VERTEX_UNIFORMS}${points ? 'uniform float pointSize;\n' : ''}
 varying vec3 vNormal;
 varying vec3 vViewPosition;
 varying vec2 vUv;
@@ -81,7 +84,7 @@ void main() {
   // view space
   vViewPosition = -mvPosition.xyz;
   gl_Position = projectionMatrix * mvPosition;
-}`;
+${points ? '  // ES 2 has no glPointSize: a point sprite is sized by the vertex shader\n  gl_PointSize = pointSize;\n' : ''}}`;
 
   const lighting = lit
     ? `
@@ -163,6 +166,22 @@ ${props.vertexShader ?? ''}`;
     ? props.fragmentShader
     : `${PRECISION}${props.fragmentShader ?? ''}`;
   return { vertex, fragment };
+}
+
+/** The ES 2 draw mode a drawable's primitive assembles into. */
+function PRIMITIVE_MODE(gl, primitive) {
+  switch (primitive) {
+    case 'points':
+      return gl.POINTS;
+    case 'lines':
+      return gl.LINES;
+    case 'lineStrip':
+      return gl.LINE_STRIP;
+    case 'lineLoop':
+      return gl.LINE_LOOP;
+    default:
+      return gl.TRIANGLES;
+  }
 }
 
 const isTypedArray = (v) => ArrayBuffer.isView(v) && !(v instanceof DataView);
@@ -389,7 +408,7 @@ export class ShaderSceneRenderer {
     if (!node.visible) return;
     const world = multiply(parentWorld, node.localMatrix());
     node._world = world;
-    if (node.kind === 'mesh') this.drawMesh(gl, node, world, lights);
+    if (node.isDrawable) this.drawMesh(gl, node, world, lights);
     for (const child of node.children) {
       if (child.isObject3D) this.drawObject(gl, child, world, lights);
     }
@@ -398,22 +417,54 @@ export class ShaderSceneRenderer {
   drawMesh(gl, mesh, world, lights) {
     const geometry = mesh.geometry;
     if (!geometry) return;
-    const buffers = this.geometryFor(gl, geometry);
+    const primitive = mesh.primitive;
+    const buffers = this.geometryFor(gl, geometry, primitive);
     if (!buffers) return;
 
     const material = mesh.material;
-    const program = this.programFor(gl, material, lights);
+    const program = this.programFor(gl, material, lights, primitive);
     if (!program) return;
 
     gl.useProgram(program.program);
-    this.applyMaterial(gl, program, material, lights);
+    const applied = this.applyMaterial(gl, program, material, lights);
 
-    const modelView = multiply(this.camera.view, world);
     gl.uniformMatrix4fv(
       program.uniform('projectionMatrix'),
       false,
       this.camera.projection,
     );
+    gl.uniformMatrix4fv(program.uniform('viewMatrix'), false, this.camera.view);
+    this.bindAttributes(gl, program, buffers);
+
+    const instances = mesh.instances;
+    if (!instances) return this.drawOne(gl, program, buffers, world, primitive);
+
+    // One upload, many transforms. Neither backend does GPU instancing — ES 2
+    // guarantees none and GLX encodes none — so what this saves is the
+    // geometry, not the draw calls: each instance is a matrix and a draw.
+    const diffuse = program.uniform('diffuse');
+    for (const instance of instances) {
+      if (instance.color) {
+        gl.uniform3fv(
+          diffuse,
+          new Float32Array(materialColors.rgb(instance.color)),
+        );
+      } else if (applied?.color) {
+        gl.uniform3fv(diffuse, applied.color);
+      }
+      this.drawOne(
+        gl,
+        program,
+        buffers,
+        multiply(world, instanceMatrix(instance)),
+        primitive,
+      );
+    }
+  }
+
+  /** One draw of `buffers` at `world`, as whichever primitive. */
+  drawOne(gl, program, buffers, world, primitive) {
+    const modelView = multiply(this.camera.view, world);
     gl.uniformMatrix4fv(program.uniform('modelViewMatrix'), false, modelView);
     gl.uniformMatrix4fv(program.uniform('modelMatrix'), false, world);
     gl.uniformMatrix3fv(
@@ -421,14 +472,12 @@ export class ShaderSceneRenderer {
       false,
       normalMatrix(modelView),
     );
-    gl.uniformMatrix4fv(program.uniform('viewMatrix'), false, this.camera.view);
-
-    this.bindAttributes(gl, program, buffers);
+    const mode = PRIMITIVE_MODE(gl, primitive);
     if (buffers.index) {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffers.index);
-      gl.drawElements(gl.TRIANGLES, buffers.count, gl.UNSIGNED_SHORT, 0);
+      gl.drawElements(mode, buffers.count, gl.UNSIGNED_SHORT, 0);
     } else {
-      gl.drawArrays(gl.TRIANGLES, 0, buffers.count);
+      gl.drawArrays(mode, 0, buffers.count);
     }
   }
 
@@ -453,12 +502,23 @@ export class ShaderSceneRenderer {
    * the same reason — never send the vertices twice — and the cache is keyed
    * the same way, by node identity and prop version.
    */
-  geometryFor(gl, node) {
-    const cached = this.geometries.get(node);
+  geometryFor(gl, node, primitive = 'triangles') {
+    // Keyed by primitive as well as by node: points and lines want no
+    // normals and ignore the triangle index, so the same geometry used both
+    // ways is genuinely two uploads.
+    const shaded = primitive === 'triangles';
+    const key = shaded ? 'shaded' : 'flat';
+    let perPrimitive = this.geometries.get(node);
+    if (!perPrimitive) this.geometries.set(node, (perPrimitive = new Map()));
+    const cached = perPrimitive.get(key);
     if (cached && cached.version === node.version) return cached;
     if (cached) this.releaseGeometry(gl, cached);
 
-    const { positions, normals, uvs, index } = node.data();
+    const built = node.data({ normals: shaded });
+    const { positions, normals, uvs } = built;
+    // points are one dot per vertex; running a triangle index over them
+    // would draw every shared vertex again
+    const index = primitive === 'points' ? null : built.index;
     const vertexCount = positions.length / 3;
     if (vertexCount === 0) return null;
 
@@ -521,7 +581,7 @@ export class ShaderSceneRenderer {
       }
     }
 
-    this.geometries.set(node, entry);
+    perPrimitive.set(key, entry);
     return entry;
   }
 
@@ -533,7 +593,7 @@ export class ShaderSceneRenderer {
   }
 
   /** Compile once per material configuration, reuse for every mesh using it. */
-  programFor(gl, material, lights) {
+  programFor(gl, material, lights, primitive = 'triangles') {
     const kind = material?.kind ?? 'meshBasicMaterial';
     const props = material?.props ?? {};
     const user = kind === 'shaderMaterial' || kind === 'rawShaderMaterial';
@@ -544,15 +604,17 @@ export class ShaderSceneRenderer {
       signature = `${kind} ${props.vertexShader ?? ''} ${props.fragmentShader ?? ''}`;
       source = userProgramSource(props, kind === 'rawShaderMaterial');
     } else {
-      const lit =
-        kind !== 'meshBasicMaterial' && lights.lit && lights.count > 0;
+      const lit = !UNLIT_MATERIALS.has(kind) && lights.lit && lights.count > 0;
       const textured = !!(props.map?.width && props.map?.data);
-      signature = `${kind}|${lit}|${textured}|${lights.count}`;
+      // the primitive is part of the signature because only a points program
+      // declares (and writes) gl_PointSize
+      signature = `${kind}|${lit}|${textured}|${lights.count}|${primitive}`;
       source = materialProgramSource({
         kind,
         lit,
         textured,
         lights: lights.count,
+        primitive,
       });
     }
 
@@ -664,6 +726,11 @@ export class ShaderSceneRenderer {
 
     const { color, alpha, emissive, specular } = materialColors.of(props);
     gl.uniform3fv(program.uniform('diffuse'), color);
+    // three.js's names: `size` on a points material, `linewidth` on a line one
+    if (kind === 'pointsMaterial') {
+      gl.uniform1f(program.uniform('pointSize'), props.size ?? 1);
+    }
+    if (kind === 'lineBasicMaterial') gl.lineWidth(props.linewidth ?? 1);
     gl.uniform1f(program.uniform('opacity'), alpha);
     gl.uniform3fv(program.uniform('emissive'), emissive);
     if (kind === 'meshPhongMaterial') {
@@ -690,6 +757,9 @@ export class ShaderSceneRenderer {
     }
 
     this.applyDrawState(gl, props, alpha < 1 || props.transparent);
+    // handed back so <instancedMesh> can restore it between instances that
+    // override the colour and instances that do not
+    return { color };
   }
 
   /** Blending, culling and depth writes — the state a material implies. */
@@ -766,16 +836,21 @@ export class ShaderSceneRenderer {
 
   /** A removed geometry's buffers are no longer needed on the GPU. */
   forget(gl, node) {
-    const entry = this.geometries.get(node);
-    if (!entry) return;
+    const perPrimitive = this.geometries.get(node);
+    if (!perPrimitive) return;
     this.geometries.delete(node);
-    if (gl) this.releaseGeometry(gl, entry);
+    if (gl)
+      for (const entry of perPrimitive.values())
+        this.releaseGeometry(gl, entry);
   }
 
   dispose(gl) {
     if (gl) {
-      for (const entry of this.geometries.values())
-        this.releaseGeometry(gl, entry);
+      for (const perPrimitive of this.geometries.values()) {
+        for (const entry of perPrimitive.values()) {
+          this.releaseGeometry(gl, entry);
+        }
+      }
       for (const { program } of this.programs.values()) {
         if (program) gl.deleteProgram(program);
       }

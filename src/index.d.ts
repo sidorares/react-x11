@@ -152,6 +152,34 @@ export type SupportsFeature = 'transparency' | 'shaders';
  */
 export function useSupports(feature: SupportsFeature): boolean;
 
+/** What `useFrame` hands its callback: the surface, as it is this frame. */
+export interface FrameState {
+  /** The rendering context — camelCase ES 2, or PascalCase GL 1.x. */
+  gl: unknown;
+  backend: 'direct' | 'indirect';
+  width: number;
+  height: number;
+  /** Seconds since this surface's first frame. */
+  elapsed: number;
+  /** Frames drawn, starting at 1. */
+  frame: number;
+  /** The matrices this frame was drawn with, or null before the first. */
+  camera: { projection: Float32Array; view: Float32Array } | null;
+  node: DrawnNode;
+}
+
+/**
+ * Run `callback(state, delta)` on every frame of the enclosing `<Canvas3D>`,
+ * `delta` being seconds since the previous one.
+ *
+ * Subscribing makes the surface animate: a `<Canvas3D>` redraws on demand by
+ * default, and a clock nothing drives would tick once and stop. Throws
+ * outside a `<Canvas3D>`. See docs/gl.md.
+ */
+export function useFrame(
+  callback: (state: FrameState, delta: number) => void,
+): void;
+
 /** What React reports alongside an error it caught. */
 export interface ErrorInfo {
   componentStack?: string;

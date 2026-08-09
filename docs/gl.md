@@ -177,6 +177,30 @@ Two differences you can see, both improvements the GPU makes free:
   rather than wrapping — a `<sphereGeometry>` with enough segments really
   does get there.
 
+## `useFrame`
+
+The per-surface frame clock. `delta` is seconds since the previous frame, so
+motion runs at the same speed whatever the frame rate:
+
+```jsx
+function Spin() {
+  const [angle, setAngle] = useState(0);
+  useFrame((state, delta) => setAngle((a) => a + delta));
+  return <mesh rotation={[0, angle, 0]}>…</mesh>;
+}
+```
+
+`state` carries `{ gl, backend, width, height, elapsed, frame, camera }`.
+Subscribing **makes the surface animate**: a `<Canvas3D>` redraws on demand
+by default, and a clock nothing drives would tick once and stop. Unmount the
+subscriber and it goes quiet again.
+
+This is not r3f's escape from re-rendering. There, `useFrame` mutates an
+Object3D in place and React never hears about it; the scene here is described
+by props, so a callback that wants to move something sets state and the change
+lands on the next frame. What it replaces is a ref to the window and a raw
+`requestAnimationFrame`.
+
 ## Raw GL through `onDraw`
 
 `onDraw(gl, { width, height })` hands you the context itself, and the two
