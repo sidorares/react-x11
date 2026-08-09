@@ -740,8 +740,9 @@ export function ActivityPanel() {
 
       <box style={s.spacer} />
       <text style={s.hint}>
-        Around a toplevel {'<window>'} this is issue #201 and does not work yet:
-        the window stays on screen when a window manager is running.
+        Around a toplevel {'<window>'} the same switch unmaps the window — one
+        mounted hidden is never mapped at all, so the window manager first hears
+        about it on the reveal.
       </text>
     </box>
   );

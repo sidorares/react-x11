@@ -42,7 +42,7 @@ What differs is anything the DOM used to define for you:
 | `useTransition`, `startTransition`, `useDeferredValue`                     | work, and really do stay responsive                                        |
 | `useLayoutEffect` vs `useEffect`                                           | the difference is real — one paint versus two                              |
 | `<Suspense>`                                                               | works; read [Suspense and Activity](#suspense-and-activity) for `<window>` |
-| `<Activity>`                                                               | works for drawn nodes; known bug around a toplevel `<window>`              |
+| `<Activity>`                                                               | works; `mode="hidden"` around a `<window>` unmaps it                       |
 | Error boundaries                                                           | work — but **where you put one** decides if the window survives            |
 | `<StrictMode>`                                                             | safe to use; effects are not double-invoked on the first mount             |
 | `useId`                                                                    | works; there is very little here to use it for                             |
@@ -227,8 +227,12 @@ lost. Prefer suspending _inside_ a window over suspending the window itself.
 `import()` gets inlined — you keep lazy _evaluation_ but get no code
 splitting; see [packaging.md](packaging.md).
 
-`<Activity>` works for drawn content. Around a toplevel `<window>` it
-currently has a bug — see [Known gaps](#known-gaps).
+`<Activity>` works, and `mode="hidden"` around a toplevel `<window>` reads
+the same way `<Suspense>` does: the window is unmapped, and one mounted
+hidden is never mapped at all — it is created, laid out and kept, but the
+window manager only ever hears about it on the reveal. The same caveat
+applies: what the user did to the window before it was hidden is the window
+manager's to remember, and it may not.
 
 **Testing Suspense**: a promise that settles outside `act()` is not always
 picked up by an `await act()`, because React throttles the commit when a
@@ -372,9 +376,6 @@ unaffected and work normally.
 
 Open bugs where a React feature does not yet mean here what it should:
 
-- [#201](https://github.com/sidorares/react-x11/issues/201) — `<Activity
-mode="hidden">` around a toplevel `<window>` leaves the window **visible**
-  when a window manager is running.
 - [#202](https://github.com/sidorares/react-x11/issues/202) — hiding a
   subtree with `<Suspense>` or `<Activity>` does not move focus out of it, so
   a focused control keeps receiving keystrokes while invisible.

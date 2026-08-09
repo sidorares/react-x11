@@ -27,6 +27,8 @@ import {
   TextInputNode,
   TextAreaNode,
   appearanceChanged,
+  beginWindowMaps,
+  flushWindowMaps,
   flushWindowRestacks,
   windowAttributes,
 } from './nodes.js';
@@ -162,6 +164,10 @@ const HostConfig = {
   },
 
   prepareForCommit() {
+    // …so that a <window> realized during the mutation phase waits to be
+    // mapped until React has finished hiding whatever it hides (nodes.js,
+    // beginWindowMaps)
+    beginWindowMaps();
     traceHooks.commitStart?.();
     return null;
   },
@@ -170,6 +176,9 @@ const HostConfig = {
   // one pass instead of one per insertBefore.
   resetAfterCommit() {
     flushWindowRestacks();
+    // after the restacking, so a subtree of windows arrives on screen in its
+    // final order rather than shuffling once it is up
+    flushWindowMaps();
     traceHooks.commitEnd?.();
     // the AT-SPI bridge flushes its queued tree/state diffs per commit
     a11yHooks.commit?.();
