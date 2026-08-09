@@ -63,6 +63,11 @@ react-x11: onClick on <box> in Panel threw. It ran from an X event rather
 than a render, so no error boundary could catch it; dispatch continues.
 ```
 
+`onDrop` is the one handler that may be `async`, and a promise it rejects
+with arrives here too — same message, same channel — rather than becoming an
+unhandled rejection, which node exits on. It also refuses the drop; see
+[drag-and-drop.md](drag-and-drop.md#the-drop).
+
 `createRoot({ onUncaughtError })` takes it over completely, which is the
 point of it being overridable: for a kiosk, crashing loudly is correct.
 

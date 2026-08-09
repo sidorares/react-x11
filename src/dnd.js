@@ -526,7 +526,11 @@ export class DropSession {
     // in a drop handler means one thing across both. In-app handlers are
     // dispatched synchronously and not awaited, so only a synchronous
     // answer reaches `onDragEnd` — an async one is too late, exactly as it
-    // is for the rest of the in-app drop path.
+    // is for the rest of the in-app drop path. Not awaited is not the same
+    // as not observed, though: `_dispatchDrop` attaches to whatever a
+    // handler returns even with no `pending` array to collect it, because
+    // an unobserved rejection here is a dead process rather than a late
+    // answer (#203).
     const outcome = { accept: true, action, freeze: false };
     discrete(() => {
       runWithPriority(DiscreteEventPriority, () => {
@@ -546,7 +550,7 @@ export class DropSession {
           outcome,
         );
         Object.assign(drop, extras);
-        this._dispatchDrop(point.windowNode, targetNode, drop, []);
+        this._dispatchDrop(point.windowNode, targetNode, drop);
         this._clearPath();
       });
     })();
@@ -602,6 +606,9 @@ export class DropSession {
       // getData available for retries of other types
     }
 
+    // What XdndFinished waits for. `_dispatchDrop` fills it with promises
+    // whose rejections it has already turned into a reported, refused drop,
+    // so nothing here rejects and `finish` is reached either way.
     const pending = [];
     // What the handler settles on. `accept`/`reject` mean something
     // different at drop time than during a hover — "I took it, doing this"
@@ -731,9 +738,18 @@ export class DropSession {
     }
   }
 
-  /** onDrop dispatch that keeps the handlers' returned promises — the
-   * XdndFinished watchdog needs them, and events.dispatch discards return
-   * values. Same capture → target → bubble walk. */
+  /** onDrop dispatch that observes the handlers' returned promises, and
+   * hands them to a caller that has to *wait* for them —
+   * `events.dispatch` does neither. Same capture → target → bubble walk.
+   *
+   * Observing and waiting are separate, and only the waiting is optional:
+   * `_onDrop` passes `pending` because XdndFinished cannot go out until the
+   * handlers settle, `localDrop` passes nothing because nothing in-app
+   * waits (its `onDragEnd` follows immediately, by design). Observing is
+   * unconditional — an `async onDrop` that throws is a failed drop, and a
+   * failed drop nobody attached to is an unhandled rejection, which under
+   * node's default `--unhandled-rejections=throw` kills the application
+   * (#203). */
   _dispatchDrop(windowNode, targetNode, ev, pending) {
     const events = windowNode.events;
     const nodePath = events._path(targetNode);
@@ -741,9 +757,18 @@ export class DropSession {
       ev.currentTarget = events._public(n);
       try {
         const result = handler(ev);
-        if (result && typeof result.then === 'function') pending.push(result);
+        if (result && typeof result.then === 'function') {
+          // settled first, pushed second: `pending?.push(result.then(…))`
+          // would short-circuit the whole expression when there is no
+          // `pending`, which is the bug this is here to prevent.
+          const settled = result.then(
+            () => {},
+            (error) => this._dropFailed(ev, n, name, error),
+          );
+          pending?.push(settled);
+        }
       } catch (error) {
-        reportHandlerError(n, name, error);
+        this._dropFailed(ev, n, name, error);
       }
     };
     for (const n of nodePath) {
@@ -758,6 +783,21 @@ export class DropSession {
         if (ev.propagationStopped) return;
       }
     }
+  }
+
+  /** A drop handler that failed, whichever way it failed.
+   *
+   * Both halves matter. It is **reported** on the same channel as every
+   * other handler throw, so an `async onDrop` that rejects is as loud as a
+   * synchronous one rather than silent (or, before #203, fatal). And it
+   * **refuses the drop**: the handler did not store what it was given, and
+   * XdndFinished's accepted bit is what a `move` source deletes its own
+   * copy on — reporting success after the handler threw is how a failed
+   * drop turns into lost data. A later handler that succeeds may still
+   * accept, exactly as one may today. */
+  _dropFailed(ev, node, name, error) {
+    ev.reject();
+    reportHandlerError(node, name, error);
   }
 
   // -- edge auto-scroll ----------------------------------------------------
