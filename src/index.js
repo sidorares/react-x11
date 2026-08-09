@@ -2,6 +2,13 @@ export { createRoot, Renderer } from './Reconciler.js';
 export { createStyles, flattenStyle } from './styles.js';
 export { windowIdOf, useWindowId, useTopLevelWindow } from './windowid.js';
 export { launchTimestamp, notifyStartupComplete } from './startup.js';
+export { activateWindow } from './activate.js';
+export {
+  onAppActivate,
+  onAppOpen,
+  registerApplication,
+} from './application.js';
+export { useAppActivate, useAppOpen } from './apphooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';

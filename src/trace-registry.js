@@ -23,6 +23,18 @@ export function unregisterApp(app) {
 }
 
 /**
+ * The connections the renderer currently draws through.
+ *
+ * A snapshot, in registration order. `activate.js` uses it to answer "which
+ * server issued this XID" when a caller names a window by number and nothing
+ * else — one process usually has exactly one connection, and when it has
+ * several a bare XID is genuinely ambiguous.
+ */
+export function liveApps() {
+  return [...apps];
+}
+
+/**
  * Call `fn` for every current connection and every future one, until the
  * returned function is called. This is how a trace with no explicit `app`
  * follows the renderer: `createRoot()` may not have connected yet when the

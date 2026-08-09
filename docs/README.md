@@ -60,6 +60,12 @@
   `sessionBus()` pair underneath, why one process is one connection and one
   identity, and why "there is no bus" is a first-class configuration rather
   than an error.
+- [uri-schemes.md](uri-schemes.md) — being the app a `myapp://…` link opens:
+  `registerApplication()` and the two dispatch paths a real desktop uses (only
+  one of which is D-Bus), why a second copy of the app has to forward and
+  exit, `useAppOpen()`, and the timestamp without which the window does not
+  actually come forward. Also: why a loopback port is the better answer for a
+  login, and the `.desktop` half that is an install step rather than code.
 - [filedialog.md](filedialog.md) — open, save and pick a folder:
   `useFileDialog()`, the three-rung ladder (the desktop's own portal,
   `osascript` on macOS, a browser react-x11 draws itself), why cancelling is

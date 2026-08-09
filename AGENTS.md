@@ -68,6 +68,20 @@ no override-redirect staging (issue #4).
   tidying up after a dead panel launches a new registrar nobody reads.
   `scripts/globalmenu-host.mjs` is a panel in a terminal; there is no
   installable dbusmenu client to test against otherwise.
+- `src/application.js`, `src/activate.js`, `src/apphooks.js` — custom URI
+  schemes and single instances (#173). `application.js` is the bus half and
+  **imports neither react nor X11**, so the seam it would be extracted along
+  stays visible; what keeps it here is that `RequestName` has to land on the
+  same connection as the menu and the portals, or the desktop sees two
+  half-applications. Two traps live there: the object path is _derived_ from
+  the app id with dashes becoming underscores (get it wrong and the launch
+  reaches a path nobody serves, which looks like nothing happening), and the
+  interface is **exported before `RequestName`**, because the daemon delivers
+  the queued activating call the instant the name is owned. `activate.js` is
+  the raise, and it is the part users judge the feature by — `_NET_ACTIVE_WINDOW`
+  with a wrong timestamp is refused by the WM while every layer reports success.
+  `npm run examples:urischeme` is the manual harness for the two dispatch paths
+  a broker cannot fake.
 - `src/styles.js` — flat style props → yoga setters; paint prop
   classification; text style resolution.
 - `src/events.js` — `EventManager`: ntk window events → synthetic events

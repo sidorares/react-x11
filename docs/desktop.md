@@ -11,6 +11,13 @@ menus in its panel, `MenuBar` hands the menu over and stops drawing. Same
 default shape as startup notification: on with no configuration, and one
 switch to turn it off.
 
+Everything on this page is the app talking _outwards_. The one thing that
+comes the other way — the desktop handing the app a `myapp://…` link to open,
+and the single-instance question that goes with it — is
+[uri-schemes.md](uri-schemes.md). It shares the launch timestamp described
+below: `ctx.timestamp` there is the same `_TIME` suffix `launchTimestamp()`
+parses here, and for the same reason.
+
 ## Startup notification
 
 When a launcher spawns an app it opens a **startup sequence** — that is what

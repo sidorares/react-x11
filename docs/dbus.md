@@ -204,6 +204,14 @@ ref.bus.exportInterface(impl, '/org/example/MyApp', description);
 Holding the ref is not bookkeeping — it is the event-loop hold above. Release
 it and nothing keeps the process running.
 
+The one service react-x11 exports for you is `org.freedesktop.Application`, so
+that a `myapp://…` link opens the app that is already running —
+[uri-schemes.md](uri-schemes.md). It is on this connection for exactly the
+reason above: a separately-dialled one would own the app's name under a
+different unique name than the one the global menu registers under and the one
+portals build Request paths from, and the desktop's model of "this
+application" would come apart.
+
 ## Installing, and Node 20
 
 ```json

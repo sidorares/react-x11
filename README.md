@@ -206,6 +206,18 @@ the array that serialises. `npm run globalmenu:host` is a panel in a terminal,
 for seeing it work on a desktop that has none. See
 [docs/globalmenu.md](docs/globalmenu.md).
 
+**`myapp://` links open the app that is already running.**
+`registerApplication({ appId, schemes })` before `createRoot()` owns the app's
+name on the bus, exports `org.freedesktop.Application`, and — on the half of
+all desktops where `xdg-open` ignores D-Bus activation and spawns a second copy
+with the URI in `argv` — forwards it to the first copy and tells that copy to
+exit. `useAppOpen()` receives the link, buffered and replayed if it arrived
+before the tree mounted, and `activateWindow()` brings the window forward with
+the launch's own timestamp, without which a window manager declines and the
+taskbar entry just blinks. The OAuth redirect this is for has an easier answer
+that needs none of it, and the page says so first. See
+[docs/uri-schemes.md](docs/uri-schemes.md).
+
 **Drag and drop** works with the rest of the desktop: `<box dropAccept={['files']}
 onDrop={…}>` takes a file dragged out of Nautilus, and `<box draggable dragData={…}>`
 can be dropped into a file manager or an editor. Drags that stay inside the
