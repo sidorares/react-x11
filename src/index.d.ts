@@ -16,6 +16,7 @@ export * from './types/events.js';
 export * from './types/nodes.js';
 export * from './types/elements.js';
 export * from './types/components.js';
+export * from './types/globalmenu.js';
 export * from './types/dbus.js';
 export * from './types/filedialog.js';
 export * from './types/appearance.js';

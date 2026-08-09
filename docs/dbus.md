@@ -1,7 +1,8 @@
 # D-Bus
 
 Everything the desktop wants from an app beyond drawing — a native file
-dialog, the light/dark preference, notifications, a global menu, a tray icon
+dialog, the light/dark preference, notifications, a
+[global menu](globalmenu.md), a tray icon
 — is a D-Bus call. This page is the connection those features sit on, and
 nothing else: no service is spoken to here, and the only traffic this layer
 generates is its own handshake.

@@ -116,9 +116,17 @@ export function ControlsPanel() {
   const [lastMenu, setLastMenu] = useState('—');
 
   const menuItems = [
-    { label: 'Cut', shortcut: 'Ctrl+X', onSelect: () => setLastMenu('Cut') },
-    { label: 'Copy', shortcut: 'Ctrl+C', onSelect: () => setLastMenu('Copy') },
-    { separator: true },
+    {
+      label: 'Cut',
+      shortcut: [['Control', 'X']],
+      onSelect: () => setLastMenu('Cut'),
+    },
+    {
+      label: 'Copy',
+      shortcut: [['Control', 'C']],
+      onSelect: () => setLastMenu('Copy'),
+    },
+    { type: 'separator' },
     {
       label: 'Transform',
       items: [
@@ -133,11 +141,12 @@ export function ControlsPanel() {
         },
       ],
     },
-    { separator: true },
-    { label: 'Disabled row', disabled: true },
+    { type: 'separator' },
+    { label: 'Disabled row', enabled: false },
     {
       label: 'Checked row',
-      checked: toggle,
+      toggleType: 'checkmark',
+      toggleState: toggle ? 1 : 0,
       onSelect: () => setToggle((v) => !v),
     },
   ];
@@ -151,12 +160,12 @@ export function ControlsPanel() {
             items: [
               {
                 label: 'New',
-                shortcut: 'Ctrl+N',
+                shortcut: [['Control', 'N']],
                 onSelect: () => setLastMenu('New'),
               },
               { label: 'Open…', onSelect: () => setLastMenu('Open') },
-              { separator: true },
-              { label: 'Save As…', disabled: true },
+              { type: 'separator' },
+              { label: 'Save As…', enabled: false },
             ],
           },
           {
@@ -164,13 +173,14 @@ export function ControlsPanel() {
             items: [
               {
                 label: 'Undo',
-                shortcut: 'Ctrl+Z',
+                shortcut: [['Control', 'Z']],
                 onSelect: () => setLastMenu('Undo'),
               },
-              { separator: true },
+              { type: 'separator' },
               {
                 label: 'Wrap lines',
-                checked: toggle,
+                toggleType: 'checkmark',
+                toggleState: toggle ? 1 : 0,
                 onSelect: () => setToggle((v) => !v),
               },
             ],

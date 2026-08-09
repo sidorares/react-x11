@@ -799,10 +799,15 @@ import { MenuBar, ContextMenu } from 'react-x11';
     {
       label: 'File',
       items: [
-        { label: 'New', shortcut: 'Ctrl+N', onSelect: newFile },
-        { separator: true },
-        { label: 'Save As…', disabled: true },
-        { label: 'Wrap lines', checked: wrap, onSelect: toggleWrap },
+        { label: 'New', shortcut: [['Control', 'N']], onSelect: newFile },
+        { type: 'separator' },
+        { label: 'Save As…', enabled: false },
+        {
+          label: 'Wrap lines',
+          toggleType: 'checkmark',
+          toggleState: wrap ? 1 : 0,
+          onSelect: toggleWrap,
+        },
       ],
     },
   ]}
@@ -813,9 +818,20 @@ import { MenuBar, ContextMenu } from 'react-x11';
 </ContextMenu>;
 ```
 
-Item shape: `{ label, onSelect, shortcut, disabled, separator, checked,
-icon, items }`. Both take an `onSelect(item)` prop as well, fired after the
-item's own. A bar menu opens on the **press**, for the reason `Select` does.
+Item shape: `{ label, onSelect, type, items, enabled, visible, shortcut,
+toggleType, toggleState, icon, iconName, disposition, key }`. Both take an
+`onSelect(item)` prop as well, fired after the item's own. A bar menu opens on
+the **press**, for the reason `Select` does.
+
+**The vocabulary is `com.canonical.dbusmenu`'s**, and that is not incidental.
+On a desktop whose panel shows application menus, `MenuBar` hands this array
+straight over and stops drawing — no configuration, no second authoring model,
+the same line of JSX either way. `type: 'separator'` rather than
+`separator: true`, `enabled: false` rather than `disabled: true`,
+`toggleType`/`toggleState` rather than a bare `checked`, and `shortcut` as a
+list of modifier tokens rather than a display string, all follow from that.
+`toggleState` is `0`, `1` or `-1`, the last being indeterminate. See
+[globalmenu.md](globalmenu.md), which also covers `globalMenu={false}`.
 
 **The sheet.** Where the display composites, a menu is an ARGB window
 rounded at `radiusPopup` with a hairline border, and the highlight on a row
@@ -841,8 +857,10 @@ into the bar by a few pixels taken out of its own padding so the bar is the
 height it always was.
 
 **Icons.** `icon` fills the 16px column left of the label — the same column
-the check mark uses, so an item that is both checked and iconned shows the
-check: the check is state, the icon is only identity. One column rather than
+a `toggleType` mark uses, so an item that is both checked and iconned shows
+the check: the check is state, the icon is only identity. `icon` is drawn by
+react-x11 and never crosses the bus; `iconName` is the icon-theme name a
+panel uses ([globalmenu.md](globalmenu.md)). One column rather than
 two, because a second would indent every label in the menu to reserve room
 for icons most items do not have.
 
@@ -856,7 +874,7 @@ const save = ({ color, size }) => (
   <svg source={SAVE_SVG} style={{ width: size, height: size, color }} />
 );
 
-{ label: 'Save', icon: save, shortcut: 'Ctrl+S', onSelect: onSave }
+{ label: 'Save', icon: save, shortcut: [['Control', 'S']], onSelect: onSave }
 ```
 
 Paint the SVG in `currentColor` and the renderer caches it as coverage

@@ -742,14 +742,16 @@ menus/tooltips.
   workspaces.** The widgets are plain React over the primitives with no
   extra dependency, so splitting them buys nothing and costs a
   peer-version matrix. The one package that still wants to be separate is
-  `@react-x11/desktop` (D-Bus: portals, notifications, tray, global menu,
-  #129) — and in its own repository every change becomes another
-  land-release-bump chain on top of the node-x11 → ntk → here one that
-  already exists. Workspaces with release-please's manifest mode,
-  versioned in lockstep, keeps it to one release. (`@react-x11/a11y` used
-  to be the second name on this list; AT-SPI shipped in core instead —
-  §11.3 records why, and the D-Bus floor it rides on is core's own
-  optionalDependency, so the dependency argument no longer applied.)
+  `@react-x11/desktop` (D-Bus: portals, notifications, tray, #129) — and in
+  its own repository every change becomes another land-release-bump chain on
+  top of the node-x11 → ntk → here one that already exists. Workspaces with
+  release-please's manifest mode, versioned in lockstep, keeps it to one
+  release. (`@react-x11/a11y` used to be the second name on this list, and
+  the global menu used to be on `desktop`'s. Both shipped in core instead:
+  §11.3 records why for AT-SPI, and the global menu is a property of
+  `MenuBar`, which is core — #112. Both ride the same D-Bus floor, and that
+  floor is core's own optionalDependency, so the dependency argument no
+  longer applied to either.)
 - Where do the rich-content formats belong — ntk, here, or their own module?
   Analysed in [RICH_CONTENT.md](RICH_CONTENT.md); the decision and the staged
   plan live in [sidorares/ntk#106](https://github.com/sidorares/ntk/issues/106).

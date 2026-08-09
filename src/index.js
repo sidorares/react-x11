@@ -7,6 +7,7 @@ export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
 export { announce } from './a11y.js';
 export { useSessionBus, useSystemBus } from './bushooks.js';
+export { REGISTRAR_NAME, useGlobalMenu } from './globalmenu.js';
 export {
   NoPortalError,
   PortalCancelledError,

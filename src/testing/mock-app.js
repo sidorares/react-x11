@@ -310,6 +310,10 @@ export function createMockApp() {
           wnd.calls.push(['setProperty', name, value, options]);
           return Promise.resolve(wnd);
         },
+        deleteProperty(name) {
+          wnd.calls.push(['deleteProperty', name]);
+          return Promise.resolve(wnd);
+        },
         setActions() {
           wnd.calls.push(['setActions']);
         },

@@ -72,7 +72,7 @@ harmless) when no assistive technology is listening.
 | `aria-orientation`                                          | HORIZONTAL / VERTICAL                                |
 | `aria-valuenow` / `-valuemin` / `-valuemax` / `-valuetext`  | the Value interface (sliders, progress)              |
 | `aria-level`, `aria-posinset`, `aria-setsize`               | "level 2", "3 of 7" — headings, trees, lists         |
-| `aria-keyshortcuts`                                         | the shortcut announced with the item ("Ctrl+N")      |
+| `aria-keyshortcuts`                                         | the shortcut announced with the item ("Control+N")   |
 | `onAccessibilityAction`                                     | the AT drove the control (below)                     |
 
 Roles: `alert alertdialog article banner blockquote button caption cell
@@ -164,23 +164,23 @@ did not mean.)
 Every widget in [components.md](components.md) is wired; none of them need
 anything from you beyond their ordinary props. What a screen reader hears:
 
-| widget                    | reads as                                                                                                                                                  |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Button`                  | button, named by its label; disabled buttons say so                                                                                                       |
-| `Checkbox`                | check box, checked/unchecked, named by its label                                                                                                          |
-| `Radio` / `RadioGroup`    | radio buttons with the selected one checked                                                                                                               |
-| `Switch`                  | switch, on/off — **give it an `aria-label`**, it has no visible label of its own                                                                          |
-| `Slider`                  | horizontal slider with value and range; Orca can adjust it                                                                                                |
-| `ProgressBar`             | progress bar; the value reads as a percentage of its range                                                                                                |
-| `Select`                  | combo box named by the current choice, expanded/collapsed; its menu is a listbox of options, each "n of m" and the current one selected                   |
-| `MenuBar` / `ContextMenu` | menu bar and menus; items carry their shortcut ("Ctrl+N") as the standard `keyshortcuts` attribute, checkmarks as checked, submenus as expandable         |
-| `Tooltip`                 | tooltip                                                                                                                                                   |
-| `Dialog`                  | modal dialog, named by its title                                                                                                                          |
-| `Tabs`                    | tab list with orientation; each tab selected or not; the panel is a tab panel                                                                             |
-| `Tree`                    | tree of tree items with level, expanded/collapsed and selection                                                                                           |
-| `Table`                   | table with column headers and rows ("n of m", selected). Virtualization means only rendered rows exist in the tree — the same rows a sighted user can see |
-| `SplitPane`               | the divider is a separator with orientation and position — the ARIA window-splitter pattern                                                               |
-| `Calendar` / `DatePicker` | combo box opening a grid of date cells, each named by its date and marked selected; the month buttons are labelled                                        |
+| widget                    | reads as                                                                                                                                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Button`                  | button, named by its label; disabled buttons say so                                                                                                                                                                                             |
+| `Checkbox`                | check box, checked/unchecked, named by its label                                                                                                                                                                                                |
+| `Radio` / `RadioGroup`    | radio buttons with the selected one checked                                                                                                                                                                                                     |
+| `Switch`                  | switch, on/off — **give it an `aria-label`**, it has no visible label of its own                                                                                                                                                                |
+| `Slider`                  | horizontal slider with value and range; Orca can adjust it                                                                                                                                                                                      |
+| `ProgressBar`             | progress bar; the value reads as a percentage of its range                                                                                                                                                                                      |
+| `Select`                  | combo box named by the current choice, expanded/collapsed; its menu is a listbox of options, each "n of m" and the current one selected                                                                                                         |
+| `MenuBar` / `ContextMenu` | menu bar and menus; items carry their shortcut as the standard `keyshortcuts` attribute ("Control+N" — UI Events spelling, where the row draws "Ctrl+N"), a `toggleType` as checked/radio, `toggleState: -1` as `mixed`, submenus as expandable |
+| `Tooltip`                 | tooltip                                                                                                                                                                                                                                         |
+| `Dialog`                  | modal dialog, named by its title                                                                                                                                                                                                                |
+| `Tabs`                    | tab list with orientation; each tab selected or not; the panel is a tab panel                                                                                                                                                                   |
+| `Tree`                    | tree of tree items with level, expanded/collapsed and selection                                                                                                                                                                                 |
+| `Table`                   | table with column headers and rows ("n of m", selected). Virtualization means only rendered rows exist in the tree — the same rows a sighted user can see                                                                                       |
+| `SplitPane`               | the divider is a separator with orientation and position — the ARIA window-splitter pattern                                                                                                                                                     |
+| `Calendar` / `DatePicker` | combo box opening a grid of date cells, each named by its date and marked selected; the month buttons are labelled                                                                                                                              |
 
 ## Text controls
 

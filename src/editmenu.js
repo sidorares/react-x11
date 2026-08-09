@@ -13,7 +13,14 @@
  * function and a 2d context. It can be tested without a tree, and falls
  * back to fixed metrics when there are no fonts, which is how the headless
  * tests see it.
+ *
+ * The item vocabulary is the one `MenuBar` uses — `type: 'separator'`, a
+ * `shortcut` as dbusmenu's `aas` — even though these rows never reach a bus:
+ * two spellings for "separator" in one codebase is a trap for whoever writes
+ * the third menu. `editMenuGeometry` normalises both into the row it returns,
+ * so everything below it works on a boolean and a string.
  */
+import { formatShortcut, isSeparator } from './menuitem.js';
 
 const ROW_HEIGHT = 22;
 const SEPARATOR_HEIGHT = 7;
@@ -53,7 +60,7 @@ export function editMenuColors(theme) {
 /**
  * Lay the rows out and size the popup that holds them.
  *
- * @param {Array<{id?, label?, shortcut?, separator?, enabled?}>} items
+ * @param {Array<{id?, label?, shortcut?, type?, enabled?}>} items
  * @param {(text: string) => number|null} [measure] text width, or null when
  *   nothing can be measured yet
  */
@@ -69,14 +76,15 @@ export function editMenuGeometry(items, measure) {
   let y = PAD_Y;
   let widest = 0;
   for (const item of items) {
-    const height = item.separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
-    rows.push({ ...item, y, height });
+    const separator = isSeparator(item);
+    const shortcut = formatShortcut(item.shortcut);
+    const height = separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
+    rows.push({ ...item, separator, shortcut, y, height });
     y += height;
-    if (item.separator) continue;
+    if (separator) continue;
     widest = Math.max(
       widest,
-      widthOf(item.label) +
-        (item.shortcut ? SHORTCUT_GAP + widthOf(item.shortcut) : 0),
+      widthOf(item.label) + (shortcut ? SHORTCUT_GAP + widthOf(shortcut) : 0),
     );
   }
   return {

@@ -16,36 +16,41 @@ function App() {
   const fileMenu = {
     label: 'File',
     items: [
-      { label: 'New', shortcut: 'Ctrl+N', onSelect: () => setLast('New') },
-      { label: 'Open…', shortcut: 'Ctrl+O', onSelect: () => setLast('Open') },
-      { separator: true },
+      { label: 'New', shortcut: [['Control', 'N']], onSelect: () => setLast('New') },
+      { label: 'Open…', shortcut: [['Control', 'O']], onSelect: () => setLast('Open') },
+      { type: 'separator' },
       {
         label: 'Export',
         items: [
           { label: 'PNG', onSelect: () => setLast('Export PNG') },
           { label: 'SVG', onSelect: () => setLast('Export SVG') },
-          { label: 'PDF', disabled: true },
+          { label: 'PDF', enabled: false },
         ],
       },
-      { separator: true },
-      { label: 'Quit', shortcut: 'Ctrl+Q', onSelect: () => setLast('Quit') },
+      { type: 'separator' },
+      { label: 'Quit', shortcut: [['Control', 'Q']], onSelect: () => setLast('Quit') },
     ],
   };
 
   const viewMenu = {
     label: 'View',
     items: [
-      { label: 'Wrap lines', checked: wrap, onSelect: () => setWrap(!wrap) },
-      { label: 'Zoom in', shortcut: 'Ctrl++', onSelect: () => setLast('Zoom in') },
-      { label: 'Zoom out', shortcut: 'Ctrl+-', onSelect: () => setLast('Zoom out') },
+      {
+        label: 'Wrap lines',
+        toggleType: 'checkmark',
+        toggleState: wrap ? 1 : 0,
+        onSelect: () => setWrap(!wrap),
+      },
+      { label: 'Zoom in', shortcut: [['Control', 'plus']], onSelect: () => setLast('Zoom in') },
+      { label: 'Zoom out', shortcut: [['Control', 'minus']], onSelect: () => setLast('Zoom out') },
     ],
   };
 
   const contextItems = [
     { label: 'Cut', onSelect: () => setLast('Cut') },
     { label: 'Copy', onSelect: () => setLast('Copy') },
-    { label: 'Paste', disabled: true },
-    { separator: true },
+    { label: 'Paste', enabled: false },
+    { type: 'separator' },
     { label: 'Select all', onSelect: () => setLast('Select all') },
   ];
 

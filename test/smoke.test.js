@@ -3435,10 +3435,14 @@ test('Tooltip does not show if the pointer leaves before the delay', async () =>
 });
 
 const MENU_ITEMS = (picked) => [
-  { label: 'Cut', shortcut: 'Ctrl+X', onSelect: () => picked.push('Cut') },
+  {
+    label: 'Cut',
+    shortcut: [['Control', 'X']],
+    onSelect: () => picked.push('Cut'),
+  },
   { label: 'Copy', onSelect: () => picked.push('Copy') },
-  { separator: true },
-  { label: 'Paste', disabled: true, onSelect: () => picked.push('Paste') },
+  { type: 'separator' },
+  { label: 'Paste', enabled: false, onSelect: () => picked.push('Paste') },
   { label: 'Delete', onSelect: () => picked.push('Delete') },
 ];
 
@@ -3640,7 +3644,10 @@ test('MenuBar opens menus, switches on hover and walks with Left/Right', async (
     React.createElement(
       'window',
       { width: 320, height: 200 },
-      React.createElement(MenuBar, { menus }),
+      // the drawn bar is what this asserts on: on a machine running a panel
+      // that shows application menus, the real `MenuBar` correctly draws
+      // nothing at all. See test/globalmenu.test.js for that half.
+      React.createElement(MenuBar, { menus, globalMenu: false }),
     ),
   );
   await tick();
@@ -3716,7 +3723,7 @@ test('MenuBar: an open menu is always dismissible', async () => {
         React.createElement(
           'box',
           { style: { flexGrow: 1 } },
-          React.createElement(MenuBar, { menus }),
+          React.createElement(MenuBar, { menus, globalMenu: false }),
           React.createElement('box', { style: { flexGrow: 1 } }),
         ),
       ),
@@ -3962,9 +3969,9 @@ const NESTED_ITEMS = (picked) => [
     label: 'Export',
     items: [
       { label: 'PNG', onSelect: () => picked.push('PNG') },
-      { separator: true },
+      { type: 'separator' },
       { label: 'SVG', onSelect: () => picked.push('SVG') },
-      { label: 'PDF', disabled: true },
+      { label: 'PDF', enabled: false },
     ],
   },
   { label: 'Quit', onSelect: () => picked.push('Quit') },
@@ -4807,7 +4814,7 @@ test('textinput: right-click opens a menu whose rows match the state', async () 
   const rows = Object.fromEntries(
     input
       ._editMenuItems()
-      .filter((i) => !i.separator)
+      .filter((i) => i.type !== 'separator')
       .map((i) => [i.id, i.enabled]),
   );
   assert.deepStrictEqual(rows, {
@@ -5219,7 +5226,7 @@ test('menu: PageDown/PageUp land on a selectable row, never a separator', async 
   // a naive jump would land on something unselectable
   const items = Array.from({ length: 12 }, (_, i) =>
     i === 10
-      ? { separator: true }
+      ? { type: 'separator' }
       : { label: `entry-${i}`, onSelect: () => picked.push(i) },
   );
   x11Root.render(

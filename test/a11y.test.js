@@ -315,3 +315,74 @@ test('with no bridge, the hooks stay null and announce says so', async () => {
   }
   assert.equal(announce('nobody is listening'), false);
 });
+
+// The seam where the global menu meets the accessibility tree, and it is one
+// that has already broken once: the a11y pass was written against the old
+// item vocabulary (`item.checked`, a `shortcut` that was a display string),
+// and the dbusmenu vocabulary landed in the same release. Both merged
+// cleanly and both are wrong afterwards — a screen reader silently loses the
+// checkbox role, the checked state and every shortcut. Nothing else here
+// renders a real `MenuBar`, so nothing else would notice.
+test('a menu row announces its toggle, its shortcut and its submenu', async () => {
+  const { MenuBar } = await import('../src/index.js');
+  const { root } = await mount(
+    h(MenuBar, {
+      globalMenu: false, // the drawn bar is what has an a11y tree
+      menus: [
+        {
+          label: 'View',
+          items: [
+            { label: 'Wrap', toggleType: 'checkmark', toggleState: 1 },
+            { label: 'Layout', toggleType: 'radio', toggleState: 0 },
+            { label: 'Bold', toggleType: 'checkmark', toggleState: -1 },
+            { label: 'Save', shortcut: [['Control', 'S']] },
+            { label: 'Alt', shortcut: [['Super', 'plus'], ['F2']] },
+            { label: 'Plain' },
+          ],
+        },
+      ],
+    }),
+  );
+
+  // open the bar menu, so the rows exist
+  const bar = byRole(root, 'menubar');
+  assert.ok(bar, 'the bar has a role');
+  const trigger = find(bar, (n) => n.props?.role === 'menuitem');
+  trigger.props.onMouseDown?.({});
+  await settle();
+
+  const rows = [];
+  for (const app of [root.app]) {
+    for (const wnd of app.windows) {
+      const node = wnd._reactX11Node;
+      if (node && node !== root) {
+        find(node, (n) => {
+          if (String(n.props?.role ?? '').startsWith('menuitem')) rows.push(n);
+          return false;
+        });
+      }
+    }
+  }
+  const byLabel = (label) => rows.find((n) => n.props['aria-label'] === label);
+
+  assert.equal(byLabel('Wrap').props.role, 'menuitemcheckbox');
+  assert.equal(byLabel('Wrap').props['aria-checked'], true);
+  assert.equal(byLabel('Layout').props.role, 'menuitemradio');
+  assert.equal(byLabel('Layout').props['aria-checked'], false);
+  // dbusmenu's indeterminate is ARIA's `mixed`, and it is the whole reason
+  // the third toggle state is carried rather than flattened to off.
+  assert.equal(byLabel('Bold').props['aria-checked'], 'mixed');
+
+  assert.equal(byLabel('Save').props['aria-keyshortcuts'], 'Control+S');
+  // Super is Meta in UI Events, and every alternative is announced — a reader
+  // is reading them out, not fitting them in a column.
+  assert.equal(byLabel('Alt').props['aria-keyshortcuts'], 'Meta++ F2');
+
+  // A plain row is not a checkbox and claims no popup: `hasSubmenu` is an
+  // imported function, so a truthiness test on it would make every row say
+  // it has one.
+  assert.equal(byLabel('Plain').props.role, 'menuitem');
+  assert.equal(byLabel('Plain').props['aria-checked'], undefined);
+  assert.equal(byLabel('Plain').props['aria-haspopup'], undefined);
+  assert.equal(byLabel('Plain').props['aria-keyshortcuts'], undefined);
+});
