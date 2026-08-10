@@ -458,6 +458,61 @@ Two things the script has to get right:
   reparented the client is no longer a child of root and the request
   answers `BadWindow` (opcode 130).
 
+## The system icon set
+
+`src/components/Icon.js` holds the glyphs the widgets are drawn with, and
+they are the whole set: an icon added here is a decision about what the
+library is, not a convenience. Four rules, all of which someone will
+otherwise relitigate.
+
+**Affordances, not nouns.** The set holds glyphs that say something about
+_the control_ — there is more here, this one is chosen, this closes, this is
+hidden. It holds no nouns: no folder, no document, no save, no printer.
+Nouns belong to an icon theme (lucide, an XDG theme, the app's own art),
+they are unbounded in number, and a widget set that starts shipping them has
+taken on a design system. That single rule answers "should X be added?"
+without a debate; PasswordInput's Caps Lock key is drawn locally rather than
+here for exactly this reason.
+
+**One shape per idea.** Before the set, core drew a chevron four ways: a
+filled caret in Select, Tree and Table, a stroked chevron in Calendar, and a
+`▸` text glyph in Menu — tofu on a machine without it, which is the warning
+docs/components.md gives applications about string icons. The caret is gone.
+If a new widget needs a mark, it takes one from the set or the set grows by
+one, deliberately.
+
+**Colour and size are themable; geometry is not.** Colour rides `theme`, the
+one channel that walks the node tree, or is handed over at the call site;
+`size` derives from `theme.fontSize` the way the popup radii do. The
+_drawings_ are core's vocabulary, and an application that wants a different
+chevron wants an icon library — which it is welcome to bring, since a
+`<svg>` or a `<canvas>` goes anywhere an `<Icon>` does. There is
+deliberately no per-icon override slot: that is a registry, and a registry is
+the icon-library problem rather than this one.
+
+**A `mono` drawing never names a colour.** The glyphs ride `<canvas mono>`,
+whose whole promise is that the ink comes from `style.color` — which is what
+lets the paint cache keep one a8 coverage entry per name and size and apply
+the colour at composite time. A drawing that sets its own `fillStyle` breaks
+that silently in the direction of a wrong pixel; `REACT_X11_PAINT_CACHE=verify`
+is what catches it, and `test/icons.test.js` asserts it for every name.
+
+Two things follow that every call site has to know, because there is **no
+cascade**: an icon does not inherit `color` or `fontSize` from an ancestor
+box, and `:hover` marks the ancestor chain rather than the children, so a
+glyph inside a highlighted row is handed its ink in React. (If a real
+`color`/`fontSize` cascade lands, those become defaults inheritance fills in
+and nothing about the set changes — but until then, passing the colour is
+not boilerplate to be cleaned up. It is the only thing that works.)
+
+Not a font, and the reasoning is on record so it is not re-derived: ntk's
+FontManager does take font bytes, and glyphs composite through a solid source
+picture, so a column of chevrons would be one CompositeGlyphs. It loses on a
+binary artifact plus a generation toolchain in an otherwise pure-JS package,
+baseline rather than box alignment, unhinted mush at 12px, and an icon name
+routed through text layout and the accessibility tree. Revisit only if a
+profile of a large Tree shows composite count dominating.
+
 ## Protocol efficiency
 
 X11 is a network protocol even on a local socket. The three libraries have

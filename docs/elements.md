@@ -961,6 +961,52 @@ props.
 `<svg>` and `<tex>` do this automatically: their content is fully described by
 their props, so the renderer can build the key itself.
 
+### `mono` — one colour, and the colour out of the key
+
+`mono` is a promise about the drawing: **everything it paints is one colour,
+and it is not the drawing's to choose.** `onDraw` then names no colour at all
+— `fillStyle` and `strokeStyle` arrive preset from `style.color`:
+
+```jsx
+const chevron = (ctx, { width: w, height: h }) => {
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.25, h * 0.375);
+  ctx.lineTo(w * 0.5, h * 0.65);
+  ctx.lineTo(w * 0.75, h * 0.375);
+  ctx.stroke(); // no strokeStyle: the ink is style.color
+};
+
+<canvas
+  mono
+  cacheKey="chevron"
+  onDraw={chevron}
+  style={{
+    width: 12,
+    height: 12,
+    color: '$dim',
+    ':disabled': { color: '$border' },
+  }}
+/>;
+```
+
+What the promise buys is at the cache: a `mono` drawing is kept as **coverage**
+rather than as pixels, with the colour applied at composite time, so the colour
+leaves the key. One rendered copy then serves hover, `:disabled`, an accent
+change and both colour schemes — where without it each colour of the same shape
+is a separate rasterization and a separate pixmap. It is the trick the glyph
+cache runs on text, and the same one `<svg>` gets for a document that paints in
+one colour (`fill="currentColor"`); a closure cannot be scanned the way a
+document can, so here you say it.
+
+A `mono` drawing that sets its own `fillStyle` is a bug rather than an
+override — colour is out of the key, so two colours of it collide on one entry.
+`REACT_X11_PAINT_CACHE=verify` catches it.
+
+`mono` works without `cacheKey` (the ink is preset either way), but the two
+together are the point. The [system icon set](components.md#system-icons) is
+twelve of these.
+
 ---
 
 ## `<glarea>`
