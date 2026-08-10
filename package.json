@@ -7,7 +7,7 @@
     "src"
   ],
   "scripts": {
-    "test": "node --test",
+    "test": "node --test --test-timeout=60000",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",

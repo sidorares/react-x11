@@ -12,6 +12,10 @@ jobs:
     # making progress holds a runner for six hours and uploads no log at all,
     # so there is nothing to read afterwards — which is exactly the case this
     # exists for. Well clear of a slow runner, nowhere near the default.
+    #
+    # It is the outer fence, not the first line: `--test-timeout` in the test
+    # script fails the individual test by name, which is the thing you actually
+    # want in the log. This only catches a hang no per-test deadline can see.
     timeout-minutes: 10
     strategy:
       fail-fast: false
