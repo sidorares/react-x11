@@ -79,7 +79,13 @@ export const DefaultTheme = {
   borderWidth: 1,
   fontSize: 14,
   paddingX: 16,
-  paddingY: 8,
+  // Measured from the **letters**, not from the font's line box: widget
+  // labels are trimmed to the capitals down to the baseline, so this is the
+  // space you actually see above and below the text — see `capTrim` in
+  // components/theme.js for why a line box cannot give an even one. Larger
+  // than it looks next to a CSS padding for that reason: 12 here is about
+  // what 8 came to once a typical face's ascent had been added on.
+  paddingY: 12,
 };
 
 // Which pressed token is derived from which pair, when the palette does not

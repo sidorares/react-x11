@@ -14,7 +14,14 @@ const settle = async () => {
 };
 const root = (app) => app.windows[0]._reactX11Node;
 
-const XK = { HOME: 0xff50, UP: 0xff52, DOWN: 0xff54, END: 0xff57 };
+const XK = {
+  HOME: 0xff50,
+  LEFT: 0xff51,
+  UP: 0xff52,
+  RIGHT: 0xff53,
+  DOWN: 0xff54,
+  END: 0xff57,
+};
 
 /** The table holds the focus itself — see the note in Table.js. */
 const focusTable = (app) =>
@@ -24,6 +31,15 @@ function press(app, keysym) {
   const keycode = (keysym % 248) + 8;
   app.X.keycode2keysyms[keycode] = [keysym];
   app.windows[0].emit('keydown', { keycode, buttons: 0 });
+}
+
+/** One press/release pair on the middle of a node. Repeat it for a double
+ * click: the renderer counts clicks by time and distance, exactly as X does. */
+function click(app, node, { dx = 4 } = {}) {
+  const x = node.abs.x + dx;
+  const y = node.abs.y + node.abs.height / 2;
+  app.windows[0].emit('mousedown', { x, y, keycode: 1 });
+  app.windows[0].emit('mouseup', { x, y, keycode: 1 });
 }
 
 const find = (node, pred) =>
@@ -165,14 +181,8 @@ test('clicking a header sorts, and clicking again reverses', async () => {
     root(app),
     (n) => n.kind === 'text' && String(n.props.children) === 'Size',
   ).parent;
-  const click = (node) => {
-    const x = node.abs.x + 4;
-    const y = node.abs.y + node.abs.height / 2;
-    app.windows[0].emit('mousedown', { x, y, keycode: 1 });
-    app.windows[0].emit('mouseup', { x, y, keycode: 1 });
-  };
 
-  click(header);
+  click(app, header);
   await settle();
   assert.deepStrictEqual(changes.at(-1), { column: 'size', direction: 'asc' });
   const asc = texts(app)
@@ -184,7 +194,7 @@ test('clicking a header sorts, and clicking again reverses', async () => {
     'ascending',
   );
 
-  click(header);
+  click(app, header);
   await settle();
   assert.deepStrictEqual(changes.at(-1), { column: 'size', direction: 'desc' });
   const desc = texts(app)
@@ -266,6 +276,15 @@ test('dragging a header grip resizes that column', async () => {
   assert.strictEqual(cell.abs.width, 180, 'the body column followed');
 
   app.windows[0].emit('mouseup', { x: grip.abs.x + 62, y, keycode: 1 });
+
+  // the press left the handle focused, and a focus stop that answers no key
+  // is worse than no stop at all
+  press(app, XK.RIGHT);
+  press(app, XK.LEFT);
+  press(app, XK.LEFT);
+  await settle();
+  assert.deepStrictEqual(resized.at(-1), ['name', 164], '180 + 16 - 16 - 16');
+
   await x11Root.unmount();
 });
 
@@ -287,26 +306,108 @@ test('the header scrolls sideways with the body but not down', async () => {
   await x11Root.unmount();
 });
 
-test('clicking a row selects it', async () => {
-  const picked = [];
+test('a drag that ends over the header resizes without sorting', async () => {
+  // The grip used to live *inside* the header cell, so the click synthesized
+  // on the nearest common ancestor of press and release landed on the header
+  // and every resize finished by re-sorting the table.
+  const changes = [];
+  const resized = [];
   const app = await mount(
-    { onSelect: (id, row) => picked.push([id, row.name]) },
+    {
+      onSortChange: (next) => changes.push(next),
+      onColumnResize: (id, w) => resized.push([id, w]),
+    },
+    4,
+  );
+  const x11Root = await createRoot({ app });
+  await settle();
+
+  const grip = find(root(app), (n) => n.style.cursor === 'col-resize');
+  const y = grip.abs.y + grip.abs.height / 2;
+  app.windows[0].emit('mousedown', { x: grip.abs.x + 3, y, keycode: 1 });
+  app.windows[0].emit('mousemove', { x: grip.abs.x + 43, y });
+  await settle();
+  // released well inside the header it was dragged over, which is where a
+  // widening drag always ends up
+  app.windows[0].emit('mouseup', { x: grip.abs.x + 43, y, keycode: 1 });
+  await settle();
+
+  assert.deepStrictEqual(resized.at(-1), ['name', 160], 'the column resized');
+  assert.deepStrictEqual(changes, [], 'and nothing was sorted');
+
+  // and pressing the handle without moving is not a sort either
+  click(app, grip, { dx: 3 });
+  await settle();
+  assert.deepStrictEqual(
+    changes,
+    [],
+    'a click on the handle is not a click on the header',
+  );
+
+  await x11Root.unmount();
+});
+
+test('clicking a row selects it, and a second click opens it', async () => {
+  const picked = [];
+  const opened = [];
+  const app = await mount(
+    {
+      onSelect: (id, row) => picked.push([id, row.name]),
+      onActivate: (id, row) => opened.push([id, row.name]),
+    },
     6,
   );
   const x11Root = await createRoot({ app });
   await settle();
 
-  const cell = find(
-    root(app),
-    (n) => n.kind === 'text' && String(n.props.children) === 'file-0003.js',
-  ).parent;
-  const x = cell.abs.x + 10;
-  const y = cell.abs.y + cell.abs.height / 2;
-  app.windows[0].emit('mousedown', { x, y, keycode: 1 });
-  app.windows[0].emit('mouseup', { x, y, keycode: 1 });
+  const cellOf = (name) =>
+    find(
+      root(app),
+      (n) => n.kind === 'text' && String(n.props.children) === name,
+    ).parent;
+
+  click(app, cellOf('file-0003.js'), { dx: 10 });
+  await settle();
+  assert.deepStrictEqual(picked, [[3, 'file-0003.js']]);
+  assert.deepStrictEqual(opened, [], 'one click selects and no more');
+
+  // the second click of a double: same place, well inside the 400ms window
+  click(app, cellOf('file-0003.js'), { dx: 10 });
+  await settle();
+  assert.deepStrictEqual(opened, [[3, 'file-0003.js']], 'the double opens it');
+
+  await x11Root.unmount();
+});
+
+test('a cell that draws itself is told when its row is selected', async () => {
+  const seen = [];
+  const app = await mount(
+    {
+      defaultSelected: 2,
+      columns: [
+        {
+          id: 'name',
+          label: 'Name',
+          width: 120,
+          render: (row, { selected }) => {
+            seen.push([row.id, selected]);
+            return h('text', null, selected ? `[${row.name}]` : row.name);
+          },
+        },
+      ],
+    },
+    4,
+  );
+  const x11Root = await createRoot({ app });
   await settle();
 
-  assert.deepStrictEqual(picked, [[3, 'file-0003.js']]);
+  // the table renders twice — once blind, then once the viewport is measured
+  assert.deepStrictEqual(
+    [...new Set(seen.filter(([, selected]) => selected).map(([id]) => id))],
+    [2],
+    'exactly the selected row, and it is told',
+  );
+  assert.ok(texts(app).includes('[file-0002.js]'));
 
   await x11Root.unmount();
 });

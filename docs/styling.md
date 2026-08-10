@@ -193,8 +193,65 @@ Two things worth knowing:
   box, because their caret and selection geometry is measured against it.
 - Trimming removes real space, so a control gets shorter: size the padding
   for the result you want rather than to whatever the metrics happened to
-  add. The built-in widgets do not set it — a theme that wants it sets it on
-  the styles it passes.
+  add.
+
+**The built-in widgets set it on every label**, which is why `paddingY` in a
+palette is bigger than a CSS padding for the same look — it is the space you
+see, not the space plus whatever the ascent left over. Which way a face is
+off changes with the face: at 14px, SF NS leaves 3.7px above the capitals
+against 2.9px below the baseline, so an untrimmed label rides low, while
+Helvetica leaves 0.7 against 3.2 and it rides high. A widget cannot correct
+for that, because it does not know the face it will be drawn in.
+
+A glyph drawn as text — a check mark, a submenu arrow, an icon — is centred
+on its own middle rather than sitting on a baseline, so trimming its box
+moves it off centre. Those keep the full line box, and so should yours.
+
+`<textinput>` cannot trim — its caret and selection are measured against the
+full line box — so it reaches the same place from the other side: its **box**
+is the cap band, its baseline goes where the space above the capitals equals
+the space under it, and the glyphs are allowed to hang out of the box the way
+a trimmed label's descenders do. The drawing is clipped one step out, at the
+padding box, so an ascender and a descender are both there and neither can
+reach the border. The caret and the selection follow, being drawn from the
+same origin.
+
+That is what makes a field the same height as the controls beside it. Padding
+it with the palette's `paddingY` gives exactly the height a `<Button>` and a
+`<Select>` have, because all three are now the same sum — the capitals, plus
+that padding twice, plus the border:
+
+```jsx
+<textinput
+  style={{
+    paddingTop: '$paddingY',
+    paddingBottom: '$paddingY',
+    paddingLeft: 10,
+    paddingRight: 10,
+    borderWidth: '$borderWidth',
+  }}
+/>
+```
+
+`<textarea>` keeps its full line boxes, box and clip both: it is line spacing
+that a paragraph is made of, and nothing hangs out of a stack of them.
+
+## Keeping text on one line
+
+```jsx
+<text style={{ textWrap: 'nowrap' }}>{row.modified}</text>
+```
+
+`textWrap: 'nowrap'` is CSS's, and it is what separates a cell from a
+paragraph. A `<text>` measures height-for-width: hand it a narrow box and it
+wraps to fit, which is right for prose and wrong for a row of a fixed height —
+a date that wraps to two lines is not a taller row, it is a line and a half of
+date with the rest sliced off, top and bottom, spilling over the rows either
+side on the way. `'nowrap'` measures at unbounded width, so the overflow is
+horizontal, which `overflow: 'hidden'` on the box around it already knows what
+to do with. Default `'wrap'`.
+
+`<Table>` sets it on every cell and header for that reason.
 
 ## `createStyles`
 

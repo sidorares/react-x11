@@ -85,7 +85,7 @@ const LIGHT = {
   radiusSmall: 6,
   fontSize: 14,
   paddingX: 12,
-  paddingY: 7,
+  paddingY: 11,
 };
 
 // The same design in the dark scheme rather than a second one: same shapes,

@@ -8,6 +8,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The suite takes about 40 seconds. A job with no ceiling that stops
+    # making progress holds a runner for six hours and uploads no log at all,
+    # so there is nothing to read afterwards — which is exactly the case this
+    # exists for. Well clear of a slow runner, nowhere near the default.
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -19,7 +24,10 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
-      - run: npm test
+      # `--test-reporter=spec` so a run that stops making progress says which
+      # file it was in: the tap reporter buffers per file and prints nothing
+      # for the one that never finished.
+      - run: npm test -- --test-reporter=spec
 
   lint:
     runs-on: ubuntu-latest

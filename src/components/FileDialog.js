@@ -26,11 +26,15 @@ import { Button } from './Button.js';
 import { Checkbox } from './Checkbox.js';
 import { Select } from './Select.js';
 import { Table } from './Table.js';
-import { ThemeProvider, useTheme } from './theme.js';
+import { capTrim, ThemeProvider, useTheme } from './theme.js';
 
 const h = React.createElement;
 
 const ALL_FILES = '__all__';
+
+// A row is one line high, so a name longer than its column is clipped at the
+// column's edge rather than wrapped into a line and a half of name.
+const NOWRAP = Object.freeze({ textWrap: 'nowrap' });
 
 // Stat-ing every entry is one syscall each, which is nothing on a local
 // filesystem and very much something on a network mount with ten thousand
@@ -96,12 +100,22 @@ function useDirectory(dir) {
     (async () => {
       const fs = await import('node:fs/promises');
       const path = await import('node:path');
+      // The parent comes back with the listing rather than from a `dirname`
+      // of its own: it is the same answer, and one place that knows how a
+      // path is taken apart is one place to be wrong.
+      const above = path.dirname(dir);
+      const parent = above === dir ? null : above;
       let names;
       try {
         names = await fs.readdir(dir, { withFileTypes: true });
       } catch (err) {
         if (live)
-          setState({ status: 'error', message: err.message, entries: [] });
+          setState({
+            status: 'error',
+            message: err.message,
+            entries: [],
+            parent,
+          });
         return;
       }
       const withStats = names.length <= STAT_LIMIT;
@@ -134,7 +148,7 @@ function useDirectory(dir) {
           };
         }),
       );
-      if (live) setState({ status: 'ready', entries });
+      if (live) setState({ status: 'ready', entries, parent });
     })();
     return () => {
       live = false;
@@ -178,11 +192,14 @@ export function FileDialog({
   const [name, setName] = useState(defaultName);
   const [showHidden, setShowHidden] = useState(false);
   const [filterId, setFilterId] = useState(filters.length ? '0' : ALL_FILES);
+  // the whole row, not its path: "is this a directory" is the difference
+  // between opening a file and going into a folder, and the button that has
+  // to tell them apart only ever sees what is in here
   const [cursor, setCursor] = useState(null);
   const [picked, setPicked] = useState(() => new Set());
   const settled = useRef(false);
 
-  const { status, entries, message } = useDirectory(dir);
+  const { status, entries, message, parent } = useDirectory(dir);
 
   // `onDone` exactly once, however the dialog ends — a caller is awaiting a
   // promise, and settling it twice or not at all are both worse than any
@@ -215,8 +232,25 @@ export function FileDialog({
           : 1
         : a.name.localeCompare(b.name),
     );
-    return visible;
-  }, [entries, showHidden, matches, kind]);
+    // `..` first, and only where there is somewhere to go: at the root the
+    // parent is the root, and a row that does nothing is worse than no row.
+    // It is a real entry rather than a special case in the table, so it
+    // opens on the same double click and the same Enter as any directory.
+    return parent
+      ? [
+          {
+            id: parent,
+            name: '..',
+            path: parent,
+            directory: true,
+            parent: true,
+            size: null,
+            modified: 0,
+          },
+          ...visible,
+        ]
+      : visible;
+  }, [entries, showHidden, matches, kind, parent]);
 
   // A new directory is a new list; a stale cursor would point at a row that
   // is not there and a stale tick-set would return paths the user cannot see.
@@ -226,11 +260,9 @@ export function FileDialog({
     setTypedPath(dir);
   }, [dir]);
 
-  const goUp = useCallback(async () => {
-    const path = await import('node:path');
-    const parent = path.dirname(dir);
-    if (parent !== dir) setDir(parent);
-  }, [dir]);
+  const goUp = useCallback(() => {
+    if (parent) setDir(parent);
+  }, [parent]);
 
   const toggle = useCallback((row) => {
     setPicked((prev) => {
@@ -259,11 +291,16 @@ export function FileDialog({
       return finish([path.resolve(dir, name.trim())]);
     }
     if (kind === 'folder') {
-      const chosen = picked.size ? [...picked] : cursor ? [cursor] : [dir]; // no selection means "this one", which is what the path bar shows
+      // no selection means "this one", which is what the path bar shows
+      const chosen = picked.size ? [...picked] : cursor ? [cursor.path] : [dir];
       return finish(chosen);
     }
+    // Opening a *file*, with a directory under the cursor: go in. Returning
+    // the directory as the answer is what it used to do, which handed the
+    // caller a path that is not a file — and `..` made that one click away.
+    if (cursor?.directory) return void setDir(cursor.path);
     const chosen =
-      multiple && picked.size ? [...picked] : cursor ? [cursor] : [];
+      multiple && picked.size ? [...picked] : cursor ? [cursor.path] : [];
     if (!chosen.length) return;
     finish(chosen);
   }, [kind, name, dir, picked, cursor, multiple, finish]);
@@ -289,11 +326,32 @@ export function FileDialog({
       label: 'Name',
       width: 300,
       value: (row) => row.name,
-      render: (row) =>
+      // The accent that marks a directory is the *same value* as the fill the
+      // selected row gets — `accent` and `hoverBackground` are one colour in
+      // both built-in palettes — so a selected directory was accent on accent
+      // and could not be read at all. On the bar the selection's own text
+      // colour is the readable one in either scheme, and the trailing `/` is
+      // what still says "directory".
+      render: (row, { selected }) =>
         h(
           'text',
-          { style: { color: row.directory ? theme.accent : theme.text } },
-          row.directory ? `${row.name}/` : row.name,
+          {
+            style: [
+              capTrim,
+              NOWRAP,
+              {
+                color: selected
+                  ? theme.hoverText
+                  : row.directory
+                    ? theme.accent
+                    : theme.text,
+              },
+            ],
+          },
+          // `..` is already the name of a place, not a name that needs one:
+          // `../` reads as a path fragment where every other row reads as a
+          // thing in this directory.
+          row.directory && !row.parent ? `${row.name}/` : row.name,
         ),
     });
     cols.push({
@@ -305,8 +363,12 @@ export function FileDialog({
     });
     cols.push({
       id: 'modified',
+      // A locale date *and* time: 23 characters at the widest — "12/31/2026,
+      // 12:30:05 PM" — and a column that cannot hold one is the column that
+      // showed a sliced two-line date before cells stopped wrapping. Sized
+      // for the long form rather than for the short one.
       label: 'Modified',
-      width: 150,
+      width: 200,
       value: (row) =>
         row.modified ? new Date(row.modified).toLocaleString() : '',
     });
@@ -375,9 +437,9 @@ export function FileDialog({
         : h(Table, {
             columns,
             rows,
-            selected: cursor,
+            selected: cursor?.id ?? null,
             onSelect: (id, row) => {
-              setCursor(row?.path ?? null);
+              setCursor(row ?? null);
               if (multiple && kind !== 'save' && row && !row.directory)
                 toggle(row);
               if (kind === 'save' && row && !row.directory) setName(row.name);

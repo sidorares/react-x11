@@ -3,7 +3,7 @@
 // build-step-free for consumers.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useTheme } from './theme.js';
+import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
 import { changeEvent } from './change.js';
 import {
   measureLabel,
@@ -27,21 +27,25 @@ import {
 
 const h = React.createElement;
 
-const ITEM_HEIGHT = 28;
-
 const MAX_MENU_HEIGHT = 220;
 
 // The menu's chrome, named rather than inline because the width calculation
 // and the layout have to agree: a measurement that drifts from the padding it
 // is measuring for clips the very labels it exists to fit.
-const ITEM_PAD_LEFT = 10;
-const ITEM_PAD_RIGHT = 10;
+const ITEM_PAD = 10;
+const ITEM_PAD_LEFT = ITEM_PAD;
+const ITEM_PAD_RIGHT = ITEM_PAD;
+// A row is its label with even space all round — the same number left and
+// right as above and below, measured to the letters rather than to the
+// font's line box (`capTrim`). The menus derive their rows the same way.
+const ITEM_HEIGHT = capBand(DEFAULT_TEXT_STYLE.size) + ITEM_PAD * 2;
 // The scrolling pane's own padding, and so the inset between the edge
 // and an option — which is what makes the highlight read as a pill on the
-// menu rather than a band across it. The same number the menus use
-// (`Menu.js`): a dropdown is the same kind of surface and there is no
-// reading in which it wants a different one.
-const MENU_PAD = 5;
+// menu rather than a band across it, and what the pill's own corner radius
+// is derived from so the two curves share a centre. The same number the
+// menus use (`Menu.js`): a dropdown is the same kind of surface and there is
+// no reading in which it wants a different one.
+const MENU_PAD = 4;
 // A hairline, not `theme.borderWidth`: this border gives the sheet an edge
 // where it meets the desktop behind it, and a theme that draws 2px borders
 // on its *controls* does not mean a 2px outline around every popup.
@@ -120,10 +124,10 @@ function Option({
         paddingLeft: ITEM_PAD_LEFT,
         paddingRight: ITEM_PAD_RIGHT,
         cursor: 'pointer',
-        // the menus' pill, for the same reason and at the same radius: an
+        // the menus' pill, for the same reason and by the same rule: an
         // option list and a menu are one surface with rows in it, and two
         // shapes for that would only say the widgets were written apart
-        borderRadius: theme.radiusPopupItem,
+        borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
         // nothing at rest — the sheet under it is already that colour, and a
         // rounded fill of the same colour is a coverage mask drawn to change
         // nothing, with four corners it deliberately leaves out
@@ -133,10 +137,13 @@ function Option({
     h(
       'text',
       {
-        style: {
-          color: active ? theme.hoverText : theme.text,
-          fontWeight: selected ? 'bold' : 'normal',
-        },
+        style: [
+          capTrim,
+          {
+            color: active ? theme.hoverText : theme.text,
+            fontWeight: selected ? 'bold' : 'normal',
+          },
+        ],
       },
       option.label,
     ),
@@ -318,7 +325,13 @@ export function Select({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 8,
-          padding: 8,
+          // The vertical padding is the palette's, the same one a `<Button>`
+          // takes, because these are controls of one family and a form puts
+          // them in a row together. Horizontally it is its own, tighter
+          // number: a dropdown is a field with a value in it, not a button
+          // with a word centred on it.
+          paddingTop: theme.paddingY,
+          paddingBottom: theme.paddingY,
           paddingLeft: 10,
           paddingRight: 10,
           borderWidth: theme.borderWidth,
@@ -344,7 +357,7 @@ export function Select({
     },
     h(
       'text',
-      { style: { color: current ? theme.text : theme.dim } },
+      { style: [capTrim, { color: current ? theme.text : theme.dim }] },
       current ? current.label : placeholder,
     ),
     h('box', { style: { flexGrow: 1 } }),

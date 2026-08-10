@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
-import { createRoot } from '../src/index.js';
+import { Button, createRoot } from '../src/index.js';
 import { anchorRect } from '../src/components/anchor.js';
 
 // End-to-end test: react-x11 -> real ntk client -> node-x11's pure-JS
@@ -1269,6 +1269,208 @@ test('textBoxTrim: cap-alphabetic centres a label on its capitals', async () => 
 
     await x11Root.unmount();
   } finally {
+    await app.close();
+  }
+});
+
+// And the widgets do it for you. A label centred by `alignItems` is a *box*
+// centred in a box, which says nothing about where the letters are inside it:
+// the trim is what makes the two the same question. Measured on the ink for
+// the same reason the test above is, and on a control rather than a bare
+// `<text>` because "the widgets set it" is the claim.
+test('a button holds its label evenly on the capitals', async () => {
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  const W = 300;
+  const H = 160;
+
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+        React.createElement(
+          Button,
+          { style: { alignSelf: 'flex-start', fontSize: 40 } },
+          'HEX',
+        ),
+      ),
+      x11Root,
+    );
+    const ctx = wnd.getContext('2d');
+    await waitForPixel(ctx, W, H, 2, 2, [255, 255, 255], 'window painted');
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const button = wnd._reactX11Node.children[0];
+    const image = await readPixels(ctx, W, H);
+    // inside the border and the fill: only the glyphs are dark in here
+    const left = Math.round(button.abs.x) + 2;
+    const right = Math.round(button.abs.x + button.abs.width) - 2;
+    const top = Math.round(button.abs.y) + 2;
+    const bottom = Math.round(button.abs.y + button.abs.height) - 2;
+    const rows = [];
+    for (let y = top; y < bottom; y++) {
+      for (let x = left; x < right; x++) {
+        if (px(image, W, x, y)[0] < 120) {
+          rows.push(y);
+          break;
+        }
+      }
+    }
+    assert.ok(rows.length, 'the label drew something');
+
+    const above = rows[0] - button.abs.y;
+    const below =
+      button.abs.y + button.abs.height - (rows[rows.length - 1] + 1);
+    assert.ok(
+      Math.abs(above - below) <= 1,
+      `a button's label should sit evenly: ${above} above the caps, ${below} below the baseline`,
+    );
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+  }
+});
+
+// A form puts a field, a dropdown and a button in one row, so the three have
+// to be one height — and they are only one height if they measure the same
+// way. Every label is its capitals plus the padding; a field cannot trim its
+// box, since the caret is measured against the full line box, so it takes the
+// cap band as its box instead and lets the glyphs hang out of it. Get that
+// wrong and the field is the line box taller than everything beside it, which
+// is what happened the moment the labels were trimmed and this did not follow.
+test('a field, a dropdown and a button are the same height', async () => {
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  const { Button, Select } = await import('../src/index.js');
+  const field = {
+    paddingTop: '$paddingY',
+    paddingBottom: '$paddingY',
+    paddingLeft: 10,
+    paddingRight: 10,
+    borderWidth: '$borderWidth',
+  };
+
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        {
+          width: 420,
+          height: 200,
+          // in a row, sharing a top edge, which is both what a form does and
+          // what keeps yoga's pixel-grid rounding out of the comparison
+          style: {
+            padding: 8,
+            gap: 8,
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+          },
+        },
+        React.createElement('textinput', { value: 'Hg', style: field }),
+        React.createElement(Select, {
+          options: ['Blue', 'Red'],
+          value: 'Blue',
+          onChange: () => {},
+        }),
+        React.createElement(Button, null, 'Sign'),
+      ),
+      x11Root,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const all = [];
+    const walk = (n) => {
+      all.push(n);
+      for (const c of n.children) if (!c.isWindow) walk(c);
+    };
+    walk(wnd._reactX11Node);
+    const input = all.find((n) => n.kind === 'textinput');
+    const button = all.find((n) => n.props.role === 'button');
+    const select = all.find(
+      (n) =>
+        n.props.role === 'combobox' || n.props['aria-haspopup'] === 'listbox',
+    );
+    assert.ok(input && button && select, 'all three built');
+    assert.equal(input.abs.height, button.abs.height, 'field vs button');
+    assert.equal(select.abs.height, button.abs.height, 'dropdown vs button');
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+  }
+});
+
+// A row is a fixed height, so a cell that wraps is not a taller row — it is
+// a line and a half of text with the rest sliced off, top and bottom, and it
+// spills over the rows either side on the way. Needs real metrics: the mock
+// app has no fonts, so nothing there ever wraps.
+test('a table cell keeps its text on one line, inside its row', async () => {
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  const { Table } = await import('../src/index.js');
+
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement(Table, {
+          columns: [
+            { id: 'name', label: 'Name', width: 90 },
+            { id: 'when', label: 'Modified', width: 70 },
+          ],
+          rows: [
+            {
+              id: 1,
+              name: 'a-very-long-file-name.txt',
+              when: '8/10/2026, 10:30:05 AM',
+            },
+            { id: 2, name: 'b.txt', when: '8/10/2026, 10:10:25 AM' },
+          ],
+        }),
+      ),
+      x11Root,
+    );
+    // Wait for the rows rather than sleeping at them: the table builds what
+    // is in view only once layout has run and `onViewport` has come back,
+    // which is two frames, and a fixed sleep is a guess about how long a
+    // loaded CI runner takes to produce them.
+    const rowsNow = () => {
+      const found = [];
+      const walk = (n) => {
+        if (n.props.role === 'row') found.push(n);
+        for (const c of n.children) if (!c.isWindow) walk(c);
+      };
+      walk(wnd._reactX11Node);
+      return found;
+    };
+    let rows = [];
+    for (let i = 0; i < 100 && rows.length < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      rows = rowsNow();
+    }
+    assert.equal(rows.length, 2, 'both rows built');
+
+    for (const row of rows) {
+      for (const cell of row.children) {
+        const text = cell.children.find((n) => n.kind === 'text');
+        assert.ok(text, 'the cell drew its text');
+        assert.ok(
+          text.abs.y >= cell.abs.y &&
+            text.abs.y + text.abs.height <= cell.abs.y + cell.abs.height,
+          `text ${text.abs.y}..${text.abs.y + text.abs.height} escapes its ` +
+            `cell ${cell.abs.y}..${cell.abs.y + cell.abs.height}`,
+        );
+      }
+    }
+  } finally {
+    // Unmount **in the finally**, not after the assertions: a root left
+    // mounted keeps its frame clock and its X connection, and `app.close()`
+    // on a live one does not return — so a failed assertion here hung the
+    // whole file rather than reporting, and a hung file hangs `node --test`.
+    await x11Root.unmount().catch(() => {});
     await app.close();
   }
 });

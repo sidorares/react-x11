@@ -58,7 +58,7 @@ function radixTheme({ gray, accent }, dark = false) {
     borderWidth: 1,
     fontSize: 14,
     paddingX: 16,
-    paddingY: 6,
+    paddingY: 10,
   };
 }
 
@@ -128,7 +128,7 @@ function catppuccinTheme(flavor, accent = 'mauve') {
     borderWidth: 1,
     fontSize: 14,
     paddingX: 16,
-    paddingY: 6,
+    paddingY: 10,
   };
 }
 
@@ -193,7 +193,7 @@ function materialTheme(scheme) {
     borderWidth: 1,
     fontSize: 14,
     paddingX: 16,
-    paddingY: 6,
+    paddingY: 10,
   };
 }
 
@@ -347,7 +347,7 @@ const theme = {
   borderWidth: 1,
   fontSize: rem(OP['--font-size-1']),
   paddingX: 16,
-  paddingY: 6,
+  paddingY: 10,
 };
 ```
 
@@ -406,7 +406,7 @@ const theme = {
   borderWidth: 1,
   fontSize: 14,
   paddingX: 16,
-  paddingY: 6,
+  paddingY: 10,
 };
 ```
 

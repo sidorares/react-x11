@@ -4,7 +4,7 @@
 
 import React, { useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
-import { useTheme } from './theme.js';
+import { capTrim, useTheme } from './theme.js';
 import {
   useAnchor,
   useAnchorTracking,
@@ -222,6 +222,7 @@ export function DatePicker({
       'text',
       {
         style: [
+          capTrim,
           s.label,
           { color: disabled ? theme.dim : empty ? theme.dim : theme.text },
         ],

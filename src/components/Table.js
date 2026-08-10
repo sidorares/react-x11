@@ -4,22 +4,38 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
-import { useTheme } from './theme.js';
+import { capTrim, useTheme } from './theme.js';
 import {
   XK_DOWN,
   XK_END,
   XK_HOME,
+  XK_LEFT,
   XK_PAGE_DOWN,
   XK_PAGE_UP,
   XK_RETURN,
+  XK_RIGHT,
   XK_UP,
 } from './keys.js';
 
 const h = React.createElement;
 
 const ROW_HEIGHT = 24;
-const GRIP = 6;
+// The band you can grab, and the line you can see — two different sizes on
+// purpose. A separator wants to be a hairline; a resize handle wants to be
+// wide enough to hit without aiming. Drawing the handle is what made every
+// column boundary a 6px bar.
+//
+// The band is centred **on** the rule rather than sitting beside it: it is
+// the boundary that is being moved, so a band lying to one side of the line
+// lights up off-centre and reads as belonging to the column it covers.
+// `HALF` either side, which is why the columns on both sides of a rule give
+// up a little width to it.
+const RULE = 1;
+const HALF = 3;
+const GRIP = HALF + RULE + HALF;
 const MIN_COLUMN = 40;
+// what one Left/Right on a focused handle is worth
+const STEP = 16;
 // rows kept either side of the viewport, so a fast scroll does not show a
 // gap before the next frame catches up
 const OVERSCAN = 4;
@@ -42,13 +58,17 @@ const s = createStyles({
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
   },
-  headerLabel: { fontSize: 12 },
+  headerLabel: { fontSize: 12, textWrap: 'nowrap' },
   grip: {
-    width: GRIP,
     flexShrink: 0,
     cursor: 'col-resize',
     alignSelf: 'stretch',
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    transition: { backgroundColor: 80 },
   },
+  rule: { width: RULE, flexShrink: 0, alignSelf: 'stretch' },
   body: { flexGrow: 1, minHeight: 0, overflow: 'scroll' },
   rows: { flexDirection: 'column', flexShrink: 0 },
   row: {
@@ -65,7 +85,9 @@ const s = createStyles({
     flexShrink: 0,
     overflow: 'hidden',
   },
-  cellText: { fontSize: 12 },
+  // one line, always: a row is a fixed height, so a cell that wrapped
+  // would be sliced rather than shown — `textWrap` in styling.md
+  cellText: { fontSize: 12, textWrap: 'nowrap' },
   spacer: { flexShrink: 0 },
   sortMark: { width: 8, height: 5, marginLeft: 4 },
 });
@@ -88,8 +110,10 @@ function compare(a, b) {
  *   />
  *
  * Columns are `{ id, label, width, align, value, render }`. `value(row)`
- * feeds sorting and the default cell text; `render(row)` replaces the cell
- * entirely.
+ * feeds sorting and the default cell text; `render(row, { selected, column })`
+ * replaces the cell entirely — and gets told whether it is on the selected
+ * row, because that row is a filled bar and a colour chosen against the
+ * resting background is unreadable on it.
  *
  * **Rows must all be `rowHeight` tall** (24 by default). That is what lets
  * the table skip building the rows nobody can see: with ten thousand rows
@@ -99,7 +123,9 @@ function compare(a, b) {
  *
  * Sorting is uncontrolled unless you pass `sort`; the header reports
  * `onSortChange({ column, direction })` either way. Selection is
- * `selected` + `onSelect`, or uncontrolled with `defaultSelected`.
+ * `selected` + `onSelect`, or uncontrolled with `defaultSelected`, and
+ * `onActivate(id, row)` is the *open* gesture on top of it — a double click
+ * or Enter.
  */
 export function Table({
   columns = [],
@@ -222,6 +248,14 @@ export function Table({
     }
   };
 
+  const resize = (id, width) => {
+    const next = Math.max(MIN_COLUMN, width);
+    if (next === widthsRef.current[id]) return;
+    widthsRef.current = { ...widthsRef.current, [id]: next };
+    setWidths(widthsRef.current);
+    onColumnResize?.(id, next);
+  };
+
   const resizeProps = (column) => ({
     focusable: true,
     onMouseDown: (ev) => {
@@ -231,18 +265,23 @@ export function Table({
     onMouseMove: (ev) => {
       const d = drag.current;
       if (!d) return;
-      const next = Math.max(MIN_COLUMN, d.width + (ev.x - d.from));
-      if (next === widthsRef.current[d.id]) return;
-      widthsRef.current = { ...widthsRef.current, [d.id]: next };
-      setWidths(widthsRef.current);
-      onColumnResize?.(d.id, next);
+      resize(d.id, d.width + (ev.x - d.from));
     },
     onMouseUp: () => {
       drag.current = null;
     },
+    // The handle takes focus on the press, so it is in the tab order whether
+    // or not it answers a key — and a focus stop that does nothing is worse
+    // than no stop at all. Left/Right, the same pair `SplitPane`'s divider
+    // takes; the table's own keys are Up/Down and never collide.
+    onKeyDown: (ev) => {
+      if (ev.keysym === XK_LEFT) resize(column.id, columnWidth(column) - STEP);
+      else if (ev.keysym === XK_RIGHT)
+        resize(column.id, columnWidth(column) + STEP);
+    },
   });
 
-  const cell = (row, column) =>
+  const cell = (row, column, isSelected) =>
     h(
       'box',
       {
@@ -257,15 +296,18 @@ export function Table({
         ],
       },
       column.render
-        ? column.render(row)
+        ? // A cell that draws itself still has to know it is on the selected
+          // row: the selection is a filled bar, and a `render` that picked a
+          // colour for the resting background — a directory in the accent,
+          // a warning in red — paints it onto that bar unreadably otherwise.
+          column.render(row, { selected: isSelected, column })
         : h(
             'text',
             {
               style: [
+                capTrim,
                 s.cellText,
-                {
-                  color: row.id === current ? theme.hoverText : theme.text,
-                },
+                { color: isSelected ? theme.hoverText : theme.text },
               ],
             },
             String(value(row, column) ?? ''),
@@ -295,45 +337,93 @@ export function Table({
       h(
         'box',
         { style: [s.headerRow, { marginLeft: -scrollX, width: totalWidth }] },
-        columns.map((column) =>
+        columns.map((column, index) =>
+          // The header cell and the grab band are **siblings**, not a cell
+          // with a handle inside it. A click fires on the nearest common
+          // ancestor of press and release, so a grip nested in the header
+          // made every resize end in a sort: press the handle, release
+          // anywhere over the header, and the click lands on the header. As
+          // siblings the release cannot reach it — the pointer is captured by
+          // the grip for the whole drag, and even without the capture the
+          // common ancestor is the row rather than either header.
+          //
+          // A band centred on the rule takes `HALF` from the column to its
+          // left as well, so every header but the first is inset by that
+          // much; the last band has no column to its right and is the half
+          // that fits.
           h(
-            'box',
-            {
-              key: column.id,
-              role: 'columnheader',
-              style: [s.header, { width: columnWidth(column) }],
-              focusable: true,
-              onClick: () => toggleSort(column),
-            },
+            React.Fragment,
+            { key: column.id },
             h(
-              'text',
-              { style: [s.headerLabel, { color: theme.text }] },
-              column.label ?? column.id,
+              'box',
+              {
+                role: 'columnheader',
+                style: [
+                  s.header,
+                  {
+                    width: Math.max(
+                      0,
+                      columnWidth(column) - HALF - RULE - (index ? HALF : 0),
+                    ),
+                  },
+                ],
+                focusable: true,
+                onClick: () => toggleSort(column),
+              },
+              h(
+                'text',
+                { style: [capTrim, s.headerLabel, { color: theme.text }] },
+                column.label ?? column.id,
+              ),
+              activeSort?.column === column.id &&
+                h('canvas', {
+                  style: s.sortMark,
+                  onDraw: (ctx, { width: w, height: hgt }) => {
+                    ctx.fillStyle = theme.dim;
+                    ctx.beginPath();
+                    if (activeSort.direction === 'asc') {
+                      ctx.moveTo(0, hgt);
+                      ctx.lineTo(w, hgt);
+                      ctx.lineTo(w / 2, 0);
+                    } else {
+                      ctx.moveTo(0, 0);
+                      ctx.lineTo(w, 0);
+                      ctx.lineTo(w / 2, hgt);
+                    }
+                    ctx.closePath();
+                    ctx.fill();
+                  },
+                }),
+              h('box', { style: { flexGrow: 1 } }),
             ),
-            activeSort?.column === column.id &&
-              h('canvas', {
-                style: s.sortMark,
-                onDraw: (ctx, { width: w, height: hgt }) => {
-                  ctx.fillStyle = theme.dim;
-                  ctx.beginPath();
-                  if (activeSort.direction === 'asc') {
-                    ctx.moveTo(0, hgt);
-                    ctx.lineTo(w, hgt);
-                    ctx.lineTo(w / 2, 0);
-                  } else {
-                    ctx.moveTo(0, 0);
-                    ctx.lineTo(w, 0);
-                    ctx.lineTo(w / 2, hgt);
-                  }
-                  ctx.closePath();
-                  ctx.fill();
-                },
-              }),
-            h('box', { style: { flexGrow: 1 } }),
-            h('box', {
-              ...resizeProps(column),
-              style: [s.grip, { backgroundColor: theme.border }],
-            }),
+            // The band is invisible until the pointer is on it, and answers
+            // the press itself — a captured press keeps `:active` for the
+            // whole drag, wherever the pointer wanders, so the handle stays
+            // lit while the column follows it. The rule is its child, so the
+            // lit band is symmetric about the line it moves.
+            h(
+              'box',
+              {
+                ...resizeProps(column),
+                role: 'separator',
+                'aria-orientation': 'vertical',
+                'aria-label': `Resize ${column.label || column.id}`,
+                'aria-valuenow': columnWidth(column),
+                'aria-valuemin': MIN_COLUMN,
+                style: [
+                  s.grip,
+                  {
+                    width: index === columns.length - 1 ? HALF + RULE : GRIP,
+                    justifyContent:
+                      index === columns.length - 1 ? 'flex-end' : 'center',
+                  },
+                  { backgroundColor: 'transparent' },
+                  { ':hover': { backgroundColor: theme.track } },
+                  { ':active': { backgroundColor: theme.accent } },
+                ],
+              },
+              h('box', { style: [s.rule, { backgroundColor: theme.border }] }),
+            ),
           ),
         ),
       ),
@@ -361,42 +451,50 @@ export function Table({
         { style: [s.rows, { width: totalWidth }] },
         first > 0 &&
           h('box', { style: [s.spacer, { height: first * rowHeight }] }),
-        slice.map((row, sliceIndex) =>
-          h(
+        slice.map((row, sliceIndex) => {
+          const isSelected = row.id === current;
+          return h(
             'box',
             {
               key: row.id,
               role: 'row',
-              'aria-selected': row.id === current,
+              'aria-selected': isSelected,
               'aria-posinset': first + sliceIndex + 1,
               'aria-setsize': sorted.length,
               style: [
                 s.row,
                 { height: rowHeight },
                 {
-                  backgroundColor:
-                    row.id === current ? theme.hoverBackground : 'transparent',
+                  backgroundColor: isSelected
+                    ? theme.hoverBackground
+                    : 'transparent',
                 },
                 // pressed even on the selected row: a re-press on the row
                 // that is already current is the one click in the table
                 // that would otherwise look ignored
                 {
                   ':active': {
-                    backgroundColor:
-                      row.id === current
-                        ? theme.accentActive
-                        : theme.surfaceActive,
+                    backgroundColor: isSelected
+                      ? theme.accentActive
+                      : theme.surfaceActive,
                   },
                 },
-                row.id !== current && {
+                !isSelected && {
                   ':hover': { backgroundColor: theme.surfaceHover },
                 },
               ],
-              onClick: () => pick(row),
+              // Select on the first click, open on the second — the gesture
+              // every file list has. `detail` is the click count the renderer
+              // already counts for text selection, so a double click here is
+              // exactly the one a `<textinput>` calls a word select.
+              onClick: (ev) => {
+                pick(row);
+                if (ev.detail === 2) onActivate?.(row.id, row);
+              },
             },
-            columns.map((column) => cell(row, column)),
-          ),
-        ),
+            columns.map((column) => cell(row, column, isSelected)),
+          );
+        }),
         last < sorted.length &&
           h('box', {
             style: [s.spacer, { height: (sorted.length - last) * rowHeight }],

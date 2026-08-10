@@ -48,6 +48,19 @@ control are most of what separates one platform's controls from another's:
 | `radiusPopup` `radiusPopupItem` `radiusTooltip` | floating-surface shape         |
 | `fontSize` `paddingX` `paddingY`                | control size                   |
 
+`paddingY` is the space **you can see** — above the capitals and below the
+baseline — not the space plus whatever the font's ascent left over: every
+widget label is trimmed to its letters
+([styling.md](styling.md#measuring-text-to-its-letters)), so a control is its
+label band plus this twice. That makes it a larger number than the same look
+would need in CSS, and it makes it mean the same thing in every typeface.
+Rows on a popup follow the same rule — a menu row and a `Select` option are
+their label with `padding` all round, so the space above a row's text is the
+space beside it. So does `<textinput>`, which is what keeps a field the same
+height as the `Button` and the `Select` next to it on a form; give it
+`paddingY` and the three agree by construction
+([styling.md](styling.md#measuring-text-to-its-letters)).
+
 The `…Active` three are the colour a control takes **while it is held**, and
 a palette almost never sets them: each is derived from the step the palette's
 own hover already makes — `accent` → `accentHover` → one more of the same —
@@ -63,6 +76,14 @@ there, because a rounded thing inside a rounded thing needs the tighter
 curve: `radiusPopupItem` is the highlight on a menu row, `radiusTooltip` the
 tooltip bubble. A palette that moves `fontSize` and names none of them gets
 all three in proportion; naming one pins it.
+
+`radiusPopupItem` is a **ceiling**, not the radius a row gets. A rounded rect
+inside a rounded rect only reads as one shape when the two curves share a
+centre, which happens exactly when the inner radius is the outer one less the
+gap between them — so a row's corner is `radiusPopup` minus the sheet's
+hairline border minus the inset the row is padded in by, and the token caps
+it. A theme that wants rounder highlights rounds the sheet they sit on: that
+is the only change that can round both and keep them concentric.
 
 They are only ever _seen_ where the display composites — a popup gives up
 its corners by not painting them, and with nothing blending them those
@@ -1018,11 +1039,24 @@ view actually built.
 | `rowHeight`                    | every row is this tall (24 by default)              |
 | `sort` / `defaultSort`         | `{ column, direction }`; reported by `onSortChange` |
 | `selected` / `defaultSelected` | selected row id; reported by `onSelect(id, row)`    |
-| `onActivate(id, row)`          | Enter on the selection                              |
+| `onActivate(id, row)`          | a double click, or Enter on the selection           |
 | `onColumnResize(id, width)`    | after a header drag                                 |
 
-`value(row)` feeds sorting and the default cell text; `render(row)` replaces
-the cell contents entirely.
+`value(row)` feeds sorting and the default cell text; `render(row, { selected,
+column })` replaces the cell contents entirely.
+
+A `render` is **told when its row is selected**, because the selection is a
+filled bar and a colour picked against the resting background disappears
+into it — a directory in the accent, a failure in red. Fall back to
+`hoverText` there and let the glyph carry the meaning:
+
+```jsx
+render: (row, { selected }) => (
+  <text style={{ color: selected ? '$hoverText' : statusColour(row) }}>
+    {row.state}
+  </text>
+);
+```
 
 **Rows must all be `rowHeight` tall.** That is the price of the table only
 building what is on screen: with ten thousand rows it mounts the twenty or
@@ -1034,10 +1068,20 @@ list. Sorting a hundred thousand rows is still the caller's problem — pass
 The **table** holds the focus, not the row: a row is unmounted as soon as it
 scrolls out of view, and focus would go with it. Up/Down move the selection,
 PageUp/PageDown by a viewport, Home/End to the ends, and the selection is
-kept on screen without building the rows in between.
+kept on screen without building the rows in between. A click selects, a
+double click activates — the same `onActivate` Enter fires, counted from
+`ev.detail` like any other multi-click.
 
-The header scrolls sideways with the body but never vertically. Dragging the
-grip at a header's right edge resizes that column; the body follows.
+The header scrolls sideways with the body but never vertically. Between two
+headers there is a hairline rule and, just left of it, a grab band seven
+pixels wide: the separator you see and the handle you hit are not the same
+size, because a boundary wants to be thin and a handle wants to be easy. The
+band is invisible until the pointer is on it and takes the accent while it is
+held, and it is a **sibling** of the header rather than a child of it — a
+click fires on the nearest common ancestor of press and release, so a handle
+inside the header would end every resize with a sort of the column that was
+just dragged. The handle takes focus on the press, so Left/Right resize by
+16px from the keyboard as well.
 
 ## `Tree`
 

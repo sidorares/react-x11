@@ -11,7 +11,7 @@ import React, {
 } from 'react';
 import { useApp, useSupports } from '../appcontext.js';
 import { interpolate } from '../styles.js';
-import { ThemeProvider, useTheme } from './theme.js';
+import { capTrim, ThemeProvider, useTheme } from './theme.js';
 import {
   DEFAULT_LABEL_SIZE,
   measureLabel,
@@ -474,7 +474,11 @@ export function Tooltip({
           ThemeProvider,
           { value: surfacePalette, style: BUBBLE_CONTENT },
           isText(label)
-            ? h('text', { style: { color: '$text', fontSize } }, label)
+            ? h(
+                'text',
+                { style: [capTrim, { color: '$text', fontSize }] },
+                label,
+              )
             : label,
         ),
       ),

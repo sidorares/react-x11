@@ -2129,7 +2129,7 @@ export class TextNode extends Node {
       this.yoga.setMeasureFunc((width, widthMode) => {
         const maxWidth =
           widthMode === Yoga.MEASURE_MODE_UNDEFINED ? Infinity : width;
-        const layout = this._layoutFor(maxWidth);
+        const layout = this._layoutFor(this._wrapWidth(maxWidth));
         if (!layout) return { width: 0, height: 0 };
         const trim = this._trim(layout);
         return {
@@ -2221,6 +2221,22 @@ export class TextNode extends Node {
     return out;
   }
 
+  /**
+   * `textWrap: 'nowrap'` — CSS's, and the reason a table cell is a table cell
+   * rather than a paragraph.
+   *
+   * A `<text>` measures height-for-width: hand it a narrow box and it wraps
+   * to fit, which is right for prose and wrong for a row of a list. A cell is
+   * a fixed height, so a date that wraps to two lines is not a taller row —
+   * it is a line and a half of date with the rest sliced off, top and bottom,
+   * and the same is true of any name longer than its column. Measuring at
+   * unbounded width makes the overflow horizontal instead, which is what
+   * `overflow: 'hidden'` on the cell already knows how to deal with.
+   */
+  _wrapWidth(maxWidth) {
+    return this.style.textWrap === 'nowrap' ? Infinity : maxWidth;
+  }
+
   _layoutFor(maxWidth) {
     const fonts = this.app?.fonts;
     if (!fonts) return null; // mock container in tests: no text metrics
@@ -2280,7 +2296,7 @@ export class TextNode extends Node {
 
   _paintContent(ctx) {
     const content = this.contentBox();
-    const layout = this._layoutFor(content.width || Infinity);
+    const layout = this._layoutFor(this._wrapWidth(content.width || Infinity));
     if (!layout) return;
     // the box was shortened from the top, so the glyphs come up with it
     const trim = this._trim(layout);
@@ -3110,7 +3126,10 @@ export class TextInputNode extends Node {
         widthMode === Yoga.MEASURE_MODE_UNDEFINED
           ? preferred
           : Math.min(preferred, width);
-      return { width: w, height: Math.ceil(this._lineHeight()) };
+      // Not rounded here: a trimmed `<text>` hands yoga the raw cap band too,
+      // and rounding one of them and not the other is a pixel of difference
+      // between a field and the button beside it.
+      return { width: w, height: this._capBand() };
     });
   }
 
@@ -3233,6 +3252,46 @@ export class TextInputNode extends Node {
     const layout = this._layoutOf('Mg');
     if (layout) return layout.height;
     return (this.style.fontSize ?? DEFAULT_TEXT_STYLE.size) * 1.4;
+  }
+
+  /**
+   * What one line of this field is *worth* vertically: the capitals down to
+   * the baseline, which is what its padding is measured from.
+   *
+   * The same rule every label follows — `textBoxTrim: 'cap-alphabetic'` in
+   * styling.md — reached a different way, because a field cannot trim. Its
+   * caret and its selection are measured against the full line box, and the
+   * glyphs have to be able to hang out of the box for the descenders to be
+   * there at all; so the *box* is the cap band and the drawing is clipped to
+   * the padding box instead, one step out. A field and a `<Button>` with the
+   * same padding are then the same height, which is the whole point: they sit
+   * next to each other on every form there has ever been.
+   */
+  /**
+   * The rectangle the text may draw in: the padding box horizontally
+   * unchanged, vertically grown out to where the border starts. `<textarea>`
+   * keeps the content box, because its box *is* line boxes and nothing hangs
+   * out of it.
+   */
+  _inkClip(content) {
+    const box = this.abs;
+    const top = box.y + this.yoga.getComputedBorder(Yoga.EDGE_TOP);
+    const bottom =
+      box.y + box.height - this.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
+    return {
+      x: content.x,
+      y: Math.min(content.y, top),
+      width: content.width,
+      height: Math.max(content.height, bottom - Math.min(content.y, top)),
+    };
+  }
+
+  _capBand() {
+    const style = this._textStyle();
+    const cap = this.app?.fonts
+      ?.match?.(style.family, { weight: style.weight, style: style.style })
+      ?.metrics?.(style.size)?.capHeight;
+    return cap || this._lineHeight();
   }
 
   /** Shaped layout of the current value, cached per (value, style).
@@ -4039,12 +4098,36 @@ export class TextInputNode extends Node {
       ? (this.props.placeholderColor ?? this.theme.dim)
       : style.color;
     const layout = fonts.layout([{ text: shown, ...style, color }], style);
-    // Center the glyph ink (ascent + descent) rather than layout.height:
-    // the layout box carries the line's leading entirely below the glyphs,
-    // which would push the text visually upward (see halfLeading above).
+    // Centre on the **capitals**, not on the line box and not on the ink.
+    //
+    // The layout box carries the line's leading entirely below the glyphs, so
+    // centring that pushes the text visually up (see `halfLeading`). Centring
+    // ascent + descent — what this did — fixes the leading but not the
+    // asymmetry underneath it: a font's ascent clears its capitals by
+    // `ascent - capHeight`, which is not its descent, so a single line of
+    // text sits off-centre by a number that belongs to the typeface. At 14px
+    // that is 0.7px of extra space above the capitals in SF NS and 2.5px the
+    // other way in Helvetica — visible in a field, where there is one short
+    // line and a border close on both sides to measure it against.
+    //
+    // So: put the baseline where the space above the capitals equals the
+    // space under it. A `<text>` says the same thing as `textBoxTrim`, but a
+    // field cannot trim its box — the caret and the selection are measured
+    // against the full line box — so it moves the line instead, and the marks
+    // below follow because they are derived from the same origin.
     const line = layout.lines?.[0];
     const inkHeight = line ? line.ascent + line.descent : layout.height;
-    const textY = content.y + Math.max(0, (content.height - inkHeight) / 2);
+    const ascent = line?.ascent ?? 0;
+    const capHeight = fonts
+      .match?.(style.family, {
+        weight: style.weight,
+        style: style.style,
+      })
+      ?.metrics?.(style.size)?.capHeight;
+    const textY =
+      capHeight && line
+        ? content.y + (content.height + capHeight) / 2 - ascent
+        : content.y + Math.max(0, (content.height - inkHeight) / 2);
     // selection/caret read better with breathing room around the glyphs
     // (a DOM input highlights the whole line box, not just the ink)
     const markPad = Math.min(3, Math.max(0, textY - content.y));
@@ -4076,7 +4159,12 @@ export class TextInputNode extends Node {
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(content.x, content.y, content.width, content.height);
+    // Clipped to the **padding** box, not the content box: the content box is
+    // the cap band, and an ascender or a descender is outside it by
+    // construction. The padding is where a field's own border stops the text
+    // anyway, so this is the edge that was always meant.
+    const clip = this._inkClip(content);
+    ctx.rect(clip.x, clip.y, clip.width, clip.height);
     ctx.clip();
     const originX = content.x - this._scrollX;
 

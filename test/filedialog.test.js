@@ -398,6 +398,58 @@ describe('the built-in dialog', () => {
     assert.deepEqual(done, [path.join(dir, 'a.txt')]);
   });
 
+  test('a double click opens a directory', async () => {
+    const dir = await fixture();
+    await fs.writeFile(path.join(dir, 'sub', 'inner.txt'), 'x');
+    await renderX11(
+      React.createElement(FileDialog, { startFolder: dir, onDone: () => {} }),
+      { wrap: false, fonts: FONTS },
+    );
+    await settle();
+
+    // Enter has always worked; the double click is the gesture everyone
+    // reaches for first, and it did nothing.
+    fireEvent.doubleClick(screen.getByText('sub/'));
+    await settle();
+
+    assert.equal(screen.queryAllByText('inner.txt').length, 1, 'we went in');
+    assert.equal(screen.queryAllByText('a.txt').length, 0, 'and left');
+  });
+
+  test('a selected directory stays readable', async () => {
+    const dir = await fixture();
+    await renderX11(
+      React.createElement(FileDialog, { startFolder: dir, onDone: () => {} }),
+      { wrap: false, fonts: FONTS },
+    );
+    await settle();
+
+    // A directory is drawn in the accent, and the selected row is *filled*
+    // with it: both palettes derive one from the other, so the two used to be
+    // the same colour and a selected directory could not be read at all.
+    const resting = screen.getByText('sub/').style.color;
+    fireEvent.click(screen.getByText('sub/'));
+    await settle();
+
+    const name = screen.getByText('sub/');
+    assert.notEqual(
+      name.style.color,
+      resting,
+      'the accent does not survive selection',
+    );
+    // the plain cells of the same row are the reference: whatever the theme
+    // says is legible on the selection bar, the name column says too
+    let row = name;
+    while (row && row.props?.role !== 'row') row = row.parent;
+    const colours = new Set();
+    const walk = (n) => {
+      if (n.kind === 'text') colours.add(n.style.color);
+      n.children.forEach(walk);
+    };
+    walk(row);
+    assert.deepEqual([...colours], [name.style.color], 'one legible colour');
+  });
+
   test('cancel answers null exactly once', async () => {
     const dir = await fixture();
     const answers = [];

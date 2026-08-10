@@ -3,7 +3,7 @@
 // build-step-free for consumers.
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { labelContent, useTheme } from './theme.js';
+import { capTrim, labelContent, useTheme } from './theme.js';
 import { centerRect } from './anchor.js';
 import { XK_ESCAPE } from './keys.js';
 
@@ -164,7 +164,10 @@ export function Dialog({
             h(
               'text',
               {
-                style: { fontSize: 15, fontWeight: 'bold', color: theme.text },
+                style: [
+                  capTrim,
+                  { fontSize: 15, fontWeight: 'bold', color: theme.text },
+                ],
               },
               title,
             ),

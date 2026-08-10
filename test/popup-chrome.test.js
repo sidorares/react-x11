@@ -20,6 +20,12 @@ const after = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // the default palette's own numbers, for a 14px body
 const RADIUS_POPUP = 7;
 const RADIUS_ITEM = 5;
+// What a row on a rounded sheet actually gets: its corner has to share a
+// centre with the sheet's, so the inset the list is padded by and the pill's
+// radius add up to the sheet's own — `radiusPopupItem` is the ceiling, not
+// the answer. A hairline border, a 4px inset, a 7px sheet: 7 - 1 - 4.
+const MENU_INSET = 4;
+const RADIUS_ROW = RADIUS_POPUP - 1 - MENU_INSET;
 const RADIUS_TOOLTIP = 4;
 const ARROW_DEPTH = 6;
 
@@ -142,12 +148,24 @@ test('a menu row is a rounded pill, inset, and paints nothing at rest', async ()
   const theme = list.theme;
   const [first] = list.children;
 
-  assert.equal(first.style.borderRadius, RADIUS_ITEM, 'tighter than the sheet');
+  assert.ok(RADIUS_ROW <= RADIUS_ITEM, 'never rounder than the theme allows');
+  assert.equal(
+    first.style.borderRadius,
+    RADIUS_ROW,
+    'concentric with the sheet',
+  );
   assert.equal(first.style.backgroundColor, 'transparent', 'nothing at rest');
   // inset from the popup by the list's padding on both sides, which is what
-  // makes it read as a pill on the sheet rather than a band across it
-  const inset = first.abs.x;
-  assert.ok(inset >= 5, `row inset by ${inset}px`);
+  // makes it read as a pill on the sheet rather than a band across it — and
+  // the same number its corner was derived from, or the two curves would not
+  // share a centre
+  const inset = first.abs.x; // the hairline border plus the list's padding
+  assert.equal(inset, 1 + MENU_INSET, `row inset by ${inset}px`);
+  assert.equal(
+    inset + first.style.borderRadius,
+    RADIUS_POPUP,
+    'the pill’s corner and the sheet’s share a centre',
+  );
   assert.equal(first.abs.width, menu.width - inset * 2);
   assert.ok(first.abs.width > menu.width - 16, 'but still nearly menu-wide');
 
@@ -191,7 +209,7 @@ test('the bar item is the first link in the trail', async () => {
   const item = wnd._reactX11Node.children[0].children[0];
   const theme = list.theme;
 
-  assert.equal(item.style.borderRadius, RADIUS_ITEM, 'the same pill');
+  assert.equal(item.style.borderRadius, RADIUS_ROW, 'the same pill');
   assert.equal(
     item.style.backgroundColor,
     theme.hoverBackground,
@@ -271,15 +289,20 @@ test("a Select's menu is the same surface as a menu, and its options the same pi
 
   const rows = sheet.children[0].children; // through the scroll box
   const theme = sheet.theme;
-  assert.equal(rows[0].style.borderRadius, RADIUS_ITEM);
+  assert.equal(rows[0].style.borderRadius, RADIUS_ROW, 'concentric, as a menu');
   assert.equal(
     rows[0].style.backgroundColor,
     theme.hoverBackground,
     'the selected option opens active',
   );
   assert.equal(rows[1].style.backgroundColor, 'transparent', 'and the rest');
-  // inset from the sheet on both sides, so the pill sits on it
-  assert.ok(rows[0].abs.x >= 5, `option inset by ${rows[0].abs.x}px`);
+  // inset from the sheet on both sides, so the pill sits on it — and by the
+  // same amount a menu's row is, since it is the same surface
+  assert.equal(
+    rows[0].abs.x,
+    1 + MENU_INSET,
+    `option inset by ${rows[0].abs.x}px`,
+  );
   assert.equal(rows[0].abs.width, menu.width - rows[0].abs.x * 2);
 
   await x11Root.unmount();
