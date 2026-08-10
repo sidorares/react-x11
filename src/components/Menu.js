@@ -4,7 +4,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
-import { Icon } from './Icon.js';
+import { Icon, iconSize } from './Icon.js';
 import {
   DEFAULT_LABEL_SIZE,
   anchorRect,
@@ -90,6 +90,18 @@ const BAR_GAP = 1;
 // between one label and the next.
 const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 4;
 
+// The bar entry that stands for the titles that did not fit. A symbol rather
+// than a `label`, because it is the one entry on the bar the application did
+// not write: everything else about it — its popup, its rows, its keys — is
+// the ordinary machinery, and a marker no menu object can collide with is
+// what keeps it that way.
+const OVERFLOW = Symbol('menubar overflow');
+const isOverflow = (menu) => Boolean(menu?.[OVERFLOW]);
+// A title is keyed by its label; the chevron has none, and a NUL is the one
+// key no label can equal — so a menu actually called "More" keeps its
+// identity across a resize instead of trading places with the chevron.
+const OVERFLOW_KEY = '\0menubar-overflow';
+
 // The horizontal gap between a menu and the submenu it opens, measured from
 // the parent popup's outer edge — so `0` is flush against it, a positive
 // value leaves the desktop showing between the two, and a negative one
@@ -140,6 +152,52 @@ function menuListWidth(node, items, fontSize) {
       MENU_ITEM_PAD +
       2,
   );
+}
+
+/**
+ * How much of the bar one title takes, margins included — the same
+ * arithmetic the bar itself is laid out with, written next to
+ * `menuListWidth` so the two cannot drift.
+ */
+function barItemWidth(node, label, fontSize) {
+  const text = measureLabel(node, label ?? '', { size: fontSize }).width;
+  return Math.ceil(text) + (BAR_ITEM_PAD_X + BAR_GAP) * 2;
+}
+
+/** The same, for the chevron: an icon box where a title has its label. */
+const barOverflowWidth = (fontSize) =>
+  iconSize(fontSize) + (BAR_ITEM_PAD_X + BAR_GAP) * 2;
+
+/**
+ * How many titles the bar can paint, and therefore where it is cut. The rest
+ * go to the chevron.
+ *
+ * Two passes rather than Qt's one. Qt reserves the extension button's width
+ * unconditionally, which spends it on every bar including the ones that
+ * never overflow; asking first whether everything fits costs one extra sum
+ * and gives the common case its full width back. It cannot oscillate — the
+ * second pass only ever runs on a bar already known not to fit, and the
+ * chevron is narrower than the title it displaces — which is the trap this
+ * shape is usually avoided for.
+ *
+ * A title that is *partly* visible does not count as visible: half a word is
+ * not a menu you can find, and the pointer cannot reach the half that is
+ * off-window anyway.
+ */
+function barCut(node, menus, fontSize, width) {
+  const widths = menus.map((menu) => barItemWidth(node, menu.label, fontSize));
+  const inner = width - (BAR_INSET - BAR_GAP) * 2;
+  const total = widths.reduce((sum, w) => sum + w, 0);
+  if (total <= inner) return menus.length;
+  const room = inner - barOverflowWidth(fontSize);
+  let used = 0;
+  let count = 0;
+  for (const w of widths) {
+    if (used + w > room) break;
+    used += w;
+    count++;
+  }
+  return count;
 }
 
 /** Next selectable index in `dir`, wrapping, skipping separators/disabled. */
@@ -811,6 +869,36 @@ export function MenuBar({
   const bar = useMemo(() => visibleItems(menus), [menus]);
   const delegated = useGlobalMenu(menus, { onSelect, enabled: globalMenu });
 
+  // What the bar turned out to be, which is the one thing here that cannot
+  // be worked out in a render: layout runs on the frame clock, after the
+  // commit that mounted the box, so `onViewport` is the supported way to
+  // hear about a size (docs/react-features.md) — and it is what makes the
+  // box a scroll container, which is also what clips a bar mid-cut.
+  //
+  // `0` means "not measured yet", and an unmeasured bar shows everything:
+  // that is what every bar did before this, and it is right for every bar
+  // that fits. The window narrower than its titles is one frame late, not
+  // wrong.
+  const barRef = useRef(null);
+  const [barWidth, setBarWidth] = useState(0);
+  const [fits, setFits] = useState(-1);
+  useEffect(() => {
+    if (!barWidth || !barRef.current) return;
+    setFits(barCut(barRef.current, bar, fontSize, barWidth));
+  }, [bar, fontSize, barWidth]);
+
+  // The bar as it is actually drawn: the titles that fit, then the chevron
+  // standing for the rest. Everything downstream — the open index, the
+  // anchor, Left/Right, the popup — reads this rather than `menus`, which
+  // is the whole of what keeps the keyboard on what the eye can see.
+  const entries = useMemo(() => {
+    if (fits < 0 || fits >= bar.length) return bar;
+    return [
+      ...bar.slice(0, fits),
+      { [OVERFLOW]: true, items: bar.slice(fits) },
+    ];
+  }, [bar, fits]);
+
   // The one thing about this an app cannot find out for itself: calling
   // `useGlobalMenu` a second time would export the menu twice, on two paths,
   // with the second registration displacing the first. So the answer is
@@ -823,7 +911,7 @@ export function MenuBar({
     notifyDelegation.current?.(delegated);
   }, [delegated]);
 
-  const items = openIndex >= 0 ? (bar[openIndex]?.items ?? []) : [];
+  const items = openIndex >= 0 ? (entries[openIndex]?.items ?? []) : [];
 
   const close = () => {
     openRef.current = -1;
@@ -839,6 +927,16 @@ export function MenuBar({
     if (delegated) close();
   }, [delegated]);
 
+  // Narrowing the window while a menu is down can take the item it hangs
+  // off the bar. Anchor tracking follows a trigger that *moves*; one that
+  // stopped existing leaves the popup where it was, hanging under nothing
+  // and still holding its grab, so it is shut here instead. Reopening the
+  // same menu from the chevron is one click, and guessing which of the two
+  // the user meant is worse than either.
+  useEffect(() => {
+    if (openIndex >= entries.length) close();
+  }, [entries.length, openIndex]);
+
   /**
    * `reason` is the gesture that opened the menu, and it decides the ring.
    * A menu opened with the pointer already tells you where you are — the
@@ -849,7 +947,7 @@ export function MenuBar({
    */
   const openMenu = (index, reason = 'key') => {
     const node = refs.current[index];
-    const menu = bar[index];
+    const menu = entries[index];
     if (!node || !hasSubmenu(menu)) return;
     const width = menuListWidth(node, menu.items, fontSize);
     const height = menuListHeight(menu.items, fontSize);
@@ -895,7 +993,7 @@ export function MenuBar({
     openIndex >= 0,
     () => {
       const node = refs.current[openRef.current];
-      const menu = bar[openRef.current];
+      const menu = entries[openRef.current];
       if (!node || !hasSubmenu(menu)) return null;
       return {
         placement: 'bottom',
@@ -919,8 +1017,8 @@ export function MenuBar({
   };
 
   const moveMenu = (dir) => {
-    if (!bar.length) return;
-    const n = bar.length;
+    if (!entries.length) return;
+    const n = entries.length;
     openMenu((openIndex + dir + n) % n);
   };
 
@@ -935,7 +1033,22 @@ export function MenuBar({
     {
       theme,
       role: 'menubar',
+      ref: barRef,
+      scrollbar: false,
       ...boxProps,
+      // Layout is the only thing that knows how wide the bar came out, and
+      // it says so here. Width alone: `contentWidth` changes as the cut is
+      // applied, and storing that would be reacting to our own answer.
+      //
+      // After the spread and chained rather than before it and overridable:
+      // an application is welcome to watch its own menu bar resize, and a
+      // handler of its own taking this one's place would quietly leave the
+      // bar unable to measure itself — a prop that turns a feature off by
+      // accident.
+      onViewport: (v) => {
+        setBarWidth(v.width);
+        boxProps.onViewport?.(v);
+      },
       style: [
         {
           flexDirection: 'row',
@@ -943,21 +1056,43 @@ export function MenuBar({
           backgroundColor: theme.surfaceHover,
           paddingLeft: BAR_INSET - BAR_GAP,
           paddingRight: BAR_INSET - BAR_GAP,
+          // `scroll` is what makes a box report its viewport, and the clip
+          // that comes with it is wanted in its own right: it is what holds
+          // the one frame before the first measurement — and any bar whose
+          // own titles cannot be cut down far enough — inside the window
+          // instead of letting it run off the edge. Nothing is ever left to
+          // scroll to once the cut lands, so the bar answers no keys and
+          // takes no wheel (docs/elements.md).
+          overflow: 'scroll',
+          // A scroll container brings `flexShrink: 1`; a menu bar is not a
+          // thing that gives up height when the window is short.
+          flexShrink: 0,
         },
         style,
       ],
     },
-    bar.map((menu, index) => {
+    entries.map((menu, index) => {
       // The bar is the first level of the same trail: while its menu is open
       // with nothing chosen in it the item is the selection, and the moment a
       // row down there takes over it goes quiet — the same handover, drawn
       // the same way, one level up (`rowState`).
       const barState = rowState(index, openIndex, (path[0] ?? -1) >= 0);
+      const overflow = isOverflow(menu);
       return h(
         'box',
         {
-          key: menu.label,
+          key: overflow ? OVERFLOW_KEY : menu.label,
           role: 'menuitem',
+          // The glyph is decoration — `<Icon>` is `aria-hidden` by default —
+          // so the chevron is the one bar item with nothing to read out, and
+          // it says how many titles are behind it because "more" without a
+          // number is the question rather than the answer. The hidden menus
+          // themselves are simply not in the tree: AT-SPI has no notion of
+          // "laid out past the edge", and the fix for reaching them is the
+          // same for a screen reader as for a pointer — this item.
+          'aria-label': overflow
+            ? `More menus (${menu.items.length})`
+            : undefined,
           'aria-haspopup': 'menu',
           'aria-expanded': openIndex === index,
           ref: (node) => {
@@ -1063,19 +1198,31 @@ export function MenuBar({
             },
           ],
         },
-        h(
-          'text',
-          {
-            style: [
-              capTrim,
+        overflow
+          ? h(Icon, {
+              // The set's own overflow mark, rather than the `»` Qt and
+              // Firefox draw or the `⋯` a modern toolbar does: both are text
+              // glyphs, and a text glyph is only as good as the font it
+              // lands in — tofu on a machine without it, which is the exact
+              // warning docs/components.md gives applications about string
+              // `icon`s. One drawing, every font, both colour schemes.
+              name: 'moreVertical',
+              size: iconSize(fontSize),
+              color: barState === 'active' ? theme.hoverText : theme.text,
+            })
+          : h(
+              'text',
               {
-                color: barState === 'active' ? theme.hoverText : theme.text,
-                fontSize: fontSize,
+                style: [
+                  capTrim,
+                  {
+                    color: barState === 'active' ? theme.hoverText : theme.text,
+                    fontSize: fontSize,
+                  },
+                ],
               },
-            ],
-          },
-          menu.label,
-        ),
+              menu.label,
+            ),
       );
     }),
     openIndex >= 0 &&

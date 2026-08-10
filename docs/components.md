@@ -995,9 +995,22 @@ not taken over yet: the pointer is still on the row that opened it, so that
 row stays lit — which is why a menu bar item stays coloured until you touch
 a row in the menu it opened, and goes quiet then.
 
-The bar item wears the same pill as the rows, at `radiusPopupItem`, inset
-into the bar by a few pixels taken out of its own padding so the bar is the
-height it always was.
+The bar item wears the same pill as the rows, at `radiusPopupItem` — the same
+padding around the same capitals, so a title and the first row of the menu it
+opens are one shape in one size, inset into the bar by a few pixels of margin
+that sit outside that padding.
+
+**Titles that do not fit.** A bar narrower than its menus paints as many as
+fit and moves the rest behind a chevron at the end of it — the system set's
+`moreVertical`, drawn rather than a `»`, so it is a mark and not a font's
+opinion of one. The chevron is an ordinary bar entry whose items are the
+menus that were cut, so each row opens the menu it stands for as a submenu,
+and it is a real stop for Left/Right: **the keyboard walks exactly what is
+painted**, never a title laid out past the window's edge. Widen the window
+and the titles come back one at a time. The bar measures itself, so the
+first frame of a new bar always shows everything and the cut lands on the
+next — and none of this happens on a desktop whose panel has taken the menu,
+where there is no bar of ours to overflow.
 
 **Icons.** `icon` fills the 16px column left of the label — the same column
 a `toggleType` mark uses, so an item that is both checked and iconned shows
