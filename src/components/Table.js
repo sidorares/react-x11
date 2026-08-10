@@ -55,6 +55,9 @@ const s = createStyles({
     alignItems: 'center',
     height: ROW_HEIGHT,
     paddingLeft: 8,
+    // Matching the left inset, because the sort mark sits against this edge
+    // now — without it the chevron touches the rule between the columns.
+    paddingRight: 8,
     flexShrink: 0,
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
@@ -90,7 +93,9 @@ const s = createStyles({
   // would be sliced rather than shown — `textWrap` in styling.md
   cellText: { fontSize: 12, textWrap: 'nowrap' },
   spacer: { flexShrink: 0 },
-  // Only the gap: the glyph is square now, and `<Icon size>` sets the box.
+  // The mark is pushed right by a spacer, so this is the floor on the gap
+  // rather than the gap: it only does anything once a long caption has eaten
+  // the space between them.
   sortMark: { marginLeft: 4 },
 });
 
@@ -381,6 +386,12 @@ export function Table({
                 { style: [capTrim, s.headerLabel, { color: theme.text }] },
                 column.label ?? column.id,
               ),
+              // The spacer goes *between* them: the caption belongs to the
+              // left edge of its column, where the eye scans for it, and the
+              // sort mark to the right edge, where it lines up with the
+              // marks of every other sortable column instead of drifting
+              // with the length of each caption.
+              h('box', { style: { flexGrow: 1 } }),
               activeSort?.column === column.id &&
                 h(Icon, {
                   name:
@@ -391,7 +402,6 @@ export function Table({
                   color: theme.dim,
                   style: s.sortMark,
                 }),
-              h('box', { style: { flexGrow: 1 } }),
             ),
             // The band is invisible until the pointer is on it, and answers
             // the press itself — a captured press keeps `:active` for the
