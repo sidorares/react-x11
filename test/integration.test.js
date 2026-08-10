@@ -1333,6 +1333,67 @@ test('a button holds its label evenly on the capitals', async () => {
   }
 });
 
+// A row is a fixed height, so a cell that wraps is not a taller row — it is
+// a line and a half of text with the rest sliced off, top and bottom, and it
+// spills over the rows either side on the way. Needs real metrics: the mock
+// app has no fonts, so nothing there ever wraps.
+test('a table cell keeps its text on one line, inside its row', async () => {
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  const { Table } = await import('../src/index.js');
+
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement(Table, {
+          columns: [
+            { id: 'name', label: 'Name', width: 90 },
+            { id: 'when', label: 'Modified', width: 70 },
+          ],
+          rows: [
+            {
+              id: 1,
+              name: 'a-very-long-file-name.txt',
+              when: '8/10/2026, 10:30:05 AM',
+            },
+            { id: 2, name: 'b.txt', when: '8/10/2026, 10:10:25 AM' },
+          ],
+        }),
+      ),
+      x11Root,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const all = [];
+    const walk = (n) => {
+      all.push(n);
+      for (const c of n.children) if (!c.isWindow) walk(c);
+    };
+    walk(wnd._reactX11Node);
+    const rows = all.filter((n) => n.props.role === 'row');
+    assert.equal(rows.length, 2, 'both rows built');
+
+    for (const row of rows) {
+      for (const cell of row.children) {
+        const text = cell.children.find((n) => n.kind === 'text');
+        assert.ok(text, 'the cell drew its text');
+        assert.ok(
+          text.abs.y >= cell.abs.y &&
+            text.abs.y + text.abs.height <= cell.abs.y + cell.abs.height,
+          `text ${text.abs.y}..${text.abs.y + text.abs.height} escapes its ` +
+            `cell ${cell.abs.y}..${cell.abs.y + cell.abs.height}`,
+        );
+      }
+    }
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+  }
+});
+
 test('a window with no size fits its text, and wraps to fit the screen', async () => {
   // The claim the mock-app tests cannot make: an auto size measured through
   // real glyph metrics, and the height-for-width pass that a wrapping

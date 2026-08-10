@@ -155,6 +155,10 @@ export const TEXT_LAYOUT_PROPS = new Set([
   // read by TextNode rather than passed to ntk: it trims the box the layout
   // produced, it does not change the layout
   'textBoxTrim',
+  // read by TextNode too, and it *is* the layout: `'nowrap'` measures at
+  // unbounded width, so the text is one line and whatever contains it decides
+  // what to do about the overflow
+  'textWrap',
 ]);
 
 /**

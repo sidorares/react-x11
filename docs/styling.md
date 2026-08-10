@@ -207,6 +207,28 @@ A glyph drawn as text — a check mark, a submenu arrow, an icon — is centred
 on its own middle rather than sitting on a baseline, so trimming its box
 moves it off centre. Those keep the full line box, and so should yours.
 
+`<textinput>` cannot trim — its caret and selection are measured against the
+full line box — so it does the same thing by moving the line instead: the
+baseline goes where the space above the capitals equals the space under it,
+and the caret and the selection follow, being drawn from the same origin.
+
+## Keeping text on one line
+
+```jsx
+<text style={{ textWrap: 'nowrap' }}>{row.modified}</text>
+```
+
+`textWrap: 'nowrap'` is CSS's, and it is what separates a cell from a
+paragraph. A `<text>` measures height-for-width: hand it a narrow box and it
+wraps to fit, which is right for prose and wrong for a row of a fixed height —
+a date that wraps to two lines is not a taller row, it is a line and a half of
+date with the rest sliced off, top and bottom, spilling over the rows either
+side on the way. `'nowrap'` measures at unbounded width, so the overflow is
+horizontal, which `overflow: 'hidden'` on the box around it already knows what
+to do with. Default `'wrap'`.
+
+`<Table>` sets it on every cell and header for that reason.
+
 ## `createStyles`
 
 Identity is the point — a hoisted style object lets `applyProps` skip the

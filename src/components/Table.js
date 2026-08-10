@@ -58,7 +58,7 @@ const s = createStyles({
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
   },
-  headerLabel: { fontSize: 12 },
+  headerLabel: { fontSize: 12, textWrap: 'nowrap' },
   grip: {
     flexShrink: 0,
     cursor: 'col-resize',
@@ -85,7 +85,9 @@ const s = createStyles({
     flexShrink: 0,
     overflow: 'hidden',
   },
-  cellText: { fontSize: 12 },
+  // one line, always: a row is a fixed height, so a cell that wrapped
+  // would be sliced rather than shown — `textWrap` in styling.md
+  cellText: { fontSize: 12, textWrap: 'nowrap' },
   spacer: { flexShrink: 0 },
   sortMark: { width: 8, height: 5, marginLeft: 4 },
 });

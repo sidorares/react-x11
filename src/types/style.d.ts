@@ -148,6 +148,7 @@ export interface PaintStyle {
  * and the leading still splits evenly, moving both edges by the same amount.
  */
 export type TextBoxTrim = 'none' | 'cap-alphabetic';
+export type TextWrap = 'wrap' | 'nowrap';
 
 export type TextRendering =
   'auto' | 'optimizeSpeed' | 'optimizeLegibility' | 'geometricPrecision';
@@ -173,6 +174,11 @@ export interface TextStyle {
   textRendering?: TextRendering;
   textAlign?: TextAlign;
   lineHeight?: number;
+  /** CSS's `text-wrap`. `'nowrap'` measures the text at unbounded width, so
+   *  it stays on one line and overflows its box horizontally rather than
+   *  wrapping to fit — what a fixed-height row wants, since a wrapped line in
+   *  one is sliced rather than shown. Default `'wrap'`. */
+  textWrap?: TextWrap;
   /** Default `'none'`. Applies to `<text>`; the editable controls keep their
    *  full line box, which their caret and selection geometry are measured
    *  against. */

@@ -2129,7 +2129,7 @@ export class TextNode extends Node {
       this.yoga.setMeasureFunc((width, widthMode) => {
         const maxWidth =
           widthMode === Yoga.MEASURE_MODE_UNDEFINED ? Infinity : width;
-        const layout = this._layoutFor(maxWidth);
+        const layout = this._layoutFor(this._wrapWidth(maxWidth));
         if (!layout) return { width: 0, height: 0 };
         const trim = this._trim(layout);
         return {
@@ -2221,6 +2221,22 @@ export class TextNode extends Node {
     return out;
   }
 
+  /**
+   * `textWrap: 'nowrap'` — CSS's, and the reason a table cell is a table cell
+   * rather than a paragraph.
+   *
+   * A `<text>` measures height-for-width: hand it a narrow box and it wraps
+   * to fit, which is right for prose and wrong for a row of a list. A cell is
+   * a fixed height, so a date that wraps to two lines is not a taller row —
+   * it is a line and a half of date with the rest sliced off, top and bottom,
+   * and the same is true of any name longer than its column. Measuring at
+   * unbounded width makes the overflow horizontal instead, which is what
+   * `overflow: 'hidden'` on the cell already knows how to deal with.
+   */
+  _wrapWidth(maxWidth) {
+    return this.style.textWrap === 'nowrap' ? Infinity : maxWidth;
+  }
+
   _layoutFor(maxWidth) {
     const fonts = this.app?.fonts;
     if (!fonts) return null; // mock container in tests: no text metrics
@@ -2280,7 +2296,7 @@ export class TextNode extends Node {
 
   _paintContent(ctx) {
     const content = this.contentBox();
-    const layout = this._layoutFor(content.width || Infinity);
+    const layout = this._layoutFor(this._wrapWidth(content.width || Infinity));
     if (!layout) return;
     // the box was shortened from the top, so the glyphs come up with it
     const trim = this._trim(layout);
@@ -4039,12 +4055,36 @@ export class TextInputNode extends Node {
       ? (this.props.placeholderColor ?? this.theme.dim)
       : style.color;
     const layout = fonts.layout([{ text: shown, ...style, color }], style);
-    // Center the glyph ink (ascent + descent) rather than layout.height:
-    // the layout box carries the line's leading entirely below the glyphs,
-    // which would push the text visually upward (see halfLeading above).
+    // Centre on the **capitals**, not on the line box and not on the ink.
+    //
+    // The layout box carries the line's leading entirely below the glyphs, so
+    // centring that pushes the text visually up (see `halfLeading`). Centring
+    // ascent + descent — what this did — fixes the leading but not the
+    // asymmetry underneath it: a font's ascent clears its capitals by
+    // `ascent - capHeight`, which is not its descent, so a single line of
+    // text sits off-centre by a number that belongs to the typeface. At 14px
+    // that is 0.7px of extra space above the capitals in SF NS and 2.5px the
+    // other way in Helvetica — visible in a field, where there is one short
+    // line and a border close on both sides to measure it against.
+    //
+    // So: put the baseline where the space above the capitals equals the
+    // space under it. A `<text>` says the same thing as `textBoxTrim`, but a
+    // field cannot trim its box — the caret and the selection are measured
+    // against the full line box — so it moves the line instead, and the marks
+    // below follow because they are derived from the same origin.
     const line = layout.lines?.[0];
     const inkHeight = line ? line.ascent + line.descent : layout.height;
-    const textY = content.y + Math.max(0, (content.height - inkHeight) / 2);
+    const ascent = line?.ascent ?? 0;
+    const capHeight = fonts
+      .match?.(style.family, {
+        weight: style.weight,
+        style: style.style,
+      })
+      ?.metrics?.(style.size)?.capHeight;
+    const textY =
+      capHeight && line
+        ? content.y + (content.height + capHeight) / 2 - ascent
+        : content.y + Math.max(0, (content.height - inkHeight) / 2);
     // selection/caret read better with breathing room around the glyphs
     // (a DOM input highlights the whole line box, not just the ink)
     const markPad = Math.min(3, Math.max(0, textY - content.y));

@@ -32,6 +32,10 @@ const h = React.createElement;
 
 const ALL_FILES = '__all__';
 
+// A row is one line high, so a name longer than its column is clipped at the
+// column's edge rather than wrapped into a line and a half of name.
+const NOWRAP = Object.freeze({ textWrap: 'nowrap' });
+
 // Stat-ing every entry is one syscall each, which is nothing on a local
 // filesystem and very much something on a network mount with ten thousand
 // files in one directory. Past this, sizes and dates are left blank rather
@@ -334,6 +338,7 @@ export function FileDialog({
           {
             style: [
               capTrim,
+              NOWRAP,
               {
                 color: selected
                   ? theme.hoverText
@@ -358,8 +363,12 @@ export function FileDialog({
     });
     cols.push({
       id: 'modified',
+      // A locale date *and* time: 23 characters at the widest — "12/31/2026,
+      // 12:30:05 PM" — and a column that cannot hold one is the column that
+      // showed a sliced two-line date before cells stopped wrapping. Sized
+      // for the long form rather than for the short one.
       label: 'Modified',
-      width: 150,
+      width: 200,
       value: (row) =>
         row.modified ? new Date(row.modified).toLocaleString() : '',
     });
