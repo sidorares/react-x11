@@ -5,6 +5,7 @@
 import React, { useImperativeHandle, useMemo, useState } from 'react';
 import { createStyles, tint } from '../styles.js';
 import { capTrim, useTheme } from './theme.js';
+import { Icon } from './Icon.js';
 import { changeEvent } from './change.js';
 import {
   XK_DOWN,
@@ -46,6 +47,12 @@ const PILL_H = 28;
 // plain calendar is not 6×8 pixels taller for a feature it is not using.
 const MARKER_H = 8;
 const NAV = 26;
+// The month-nav glyph inside its 26px button. The chevron used to be drawn
+// tall and narrow (7×12) to read as an arrow at all; a square box at 12
+// puts the same ink there — a chevron's long axis is its box, and its short
+// one is half of that — and it is the same shape as every other chevron in
+// the set.
+const NAV_CHEVRON = 12;
 const PAD = 8;
 const GAP = 4;
 const WEEKDAY_H = 20;
@@ -80,7 +87,6 @@ const s = createStyles({
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
   },
-  chevron: { width: 7, height: 12 },
   week: { flexDirection: 'row', flexShrink: 0 },
   weekdayCell: {
     width: CELL_W,
@@ -167,28 +173,17 @@ function sameDayIn(month, day) {
   return `${month}-${String(Math.min(wanted, last)).padStart(2, '0')}`;
 }
 
-function Chevron({ direction, color }) {
-  return h('canvas', {
-    style: s.chevron,
-    onDraw: (ctx, { width, height }) => {
-      const mid = height / 2;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      if (direction === 'left') {
-        ctx.moveTo(width - 1, 1);
-        ctx.lineTo(1, mid);
-        ctx.lineTo(width - 1, height - 1);
-      } else {
-        ctx.moveTo(1, 1);
-        ctx.lineTo(width - 1, mid);
-        ctx.lineTo(1, height - 1);
-      }
-      ctx.stroke();
-    },
-  });
-}
-
+/**
+ * `direction` is the number of months the button steps, `-1` or `+1` — the
+ * argument it already hands `stepMonth`, rather than a second vocabulary
+ * beside it.
+ *
+ * It used to be `'left'`/`'right'` while this function tested `direction < 0`,
+ * and `'left' < 0` is false: every button announced itself as "Next month",
+ * and the glyph followed the label once the icon set took the same test over
+ * from `direction === 'left'`. One name, one type, and the comparison that
+ * reads correctly is the only one available.
+ */
 function NavButton({ direction, disabled, onPress, theme }) {
   return h(
     'box',
@@ -209,7 +204,13 @@ function NavButton({ direction, disabled, onPress, theme }) {
         },
       ],
     },
-    h(Chevron, { direction, color: disabled ? theme.border : theme.dim }),
+    h(Icon, {
+      name: direction < 0 ? 'chevronLeft' : 'chevronRight',
+      size: NAV_CHEVRON,
+      // The button carries the `:hover`, but colour does not reach down to
+      // the glyph — disabled is the state that has to be passed by hand.
+      color: disabled ? theme.border : theme.dim,
+    }),
   );
 }
 
@@ -524,7 +525,7 @@ export function Calendar({
       'box',
       { style: s.header },
       h(NavButton, {
-        direction: 'left',
+        direction: -1,
         disabled: !canGoBack,
         theme,
         onPress: () => stepMonth(-1),
@@ -541,7 +542,7 @@ export function Calendar({
         formatMonth(visibleMonth, locale),
       ),
       h(NavButton, {
-        direction: 'right',
+        direction: 1,
         disabled: !canGoOn,
         theme,
         onPress: () => stepMonth(1),

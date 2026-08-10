@@ -11,6 +11,7 @@ export {
   useAnchorTracking,
 } from './anchor.js';
 export { useDropTarget, useDragSource } from './dnd.js';
+export { Icon, icons, iconNames, iconSize } from './Icon.js';
 export { Button } from './Button.js';
 export { Calendar } from './Calendar.js';
 export { DatePicker } from './DatePicker.js';

@@ -129,6 +129,128 @@ in a style you pass one resolves even with no provider anywhere.
 each in light and dark — and `npm run examples:theming` switches between
 them at runtime.
 
+## System icons
+
+The glyphs the widgets here are drawn with, exported so an application and a
+third-party widget can use the same ones — a toolbar you write and a `Select`
+you did not should not disagree about which way a chevron points.
+
+```jsx
+import { Icon } from 'react-x11';
+
+<Icon name="chevronDown" />
+<Icon name="check" size={10} color={theme.accentText} />
+```
+
+| name                                                   |                                      |
+| ------------------------------------------------------ | ------------------------------------ |
+| `chevronRight` `chevronLeft` `chevronDown` `chevronUp` | more this way: menus, twisties, sort |
+| `check` `dash` `dot`                                   | chosen, partly chosen, one of many   |
+| `close` `plus` `moreVertical`                          | dismiss, add, overflow               |
+| `eye` `eyeOff`                                         | reveal a secret, hide it again       |
+
+| prop    |                                                       |
+| ------- | ----------------------------------------------------- |
+| `name`  | one of the above; anything else throws                |
+| `size`  | the mark, px. Default: a shade under `theme.fontSize` |
+| `color` | the ink. Default: `theme.text`                        |
+
+Everything else goes to the host `<canvas>`, so a clickable one is
+`<Icon name="close" onClick={…} focusable />`.
+
+**`size` is the mark, not a grid it sits in.** This is the one place the set
+departs from how lucide and its descendants are drawn: theirs put about 14px
+of ink in a 24px box, so you reach for `size={20}` next to 14px text. Here
+the ink runs corner to corner, so `size` is what you actually see and the
+number to pick is the number you want — the `Select` chevron is
+`capBand(fontSize)` because it should be as wide as the capitals beside it.
+
+A chevron is the one glyph whose two axes differ: the arms are at 45°, so it
+is as long as `size` along the way it points across and half that the other
+way. `<Icon name="chevronDown" size={10} />` is 10 wide and 5 tall; the same
+size of `chevronRight` is 5 wide and 10 tall.
+
+### Affordances, not nouns
+
+The set holds glyphs that say something about **the control**: there is more
+here, this one is chosen, this closes, this is hidden. It holds no nouns —
+no folder, no document, no save, no printer. Those belong to an icon theme
+(lucide, an XDG icon theme, your own art), they are unbounded in number, and
+a widget set that starts shipping them has taken on a design system.
+
+That is also the answer to "why is X missing": if X names a thing rather
+than an action the control affords, it is not going to be here. Bringing
+your own set is expected and supported — a `<svg>` or a `<canvas>` goes
+anywhere an `<Icon>` does, and `ContextMenu`'s `icon` takes either.
+
+The **drawings are not themable** for the same reason: the geometry is the
+widget set's vocabulary, and an application that wants a different chevron
+wants an icon library. Colour and size are yours; the shape is not.
+
+### Colour and size do not cascade — pass them
+
+This renderer has no cascade: `style` precedence is written at the call site
+([styling.md](styling.md)), and `color` or `fontSize` on an ancestor `<box>`
+reaches nothing below it. An icon is a sibling element rather than a span, so
+it is outside `<text>`'s span inheritance too. Two consequences:
+
+- **Colour.** `color` defaults to the palette's `text`, because `theme` _is_
+  inherited — it is the one channel that walks the tree. But a row painting
+  its label in `theme.hoverText` has to hand its icon the same ink:
+
+  ```jsx
+  <Icon name="chevronRight" color={active ? theme.hoverText : theme.dim} />
+  ```
+
+- **`:hover`.** State selectors resolve per node against the _ancestor_
+  chain, so hovering a row lights the row up and leaves its children alone.
+  An icon that has to follow a hover follows it through React state, the way
+  `Tree`'s twisty and `ContextMenu`'s submenu chevron do.
+
+Both of those describe the model as it stands today rather than a settled
+verdict — a real `color`/`fontSize` cascade is an open question. If it
+lands, `color` and `size` become defaults that inheritance fills in instead
+of things every call site repeats, and nothing about the set changes.
+
+### What it costs to draw one
+
+Each glyph is a drawing over `<canvas mono>`
+([elements.md](elements.md#canvas)), which is a promise that everything it
+paints is one colour it did not choose — so one drawing serves every state a
+control puts it in, and the paint cache can keep one rendered copy of
+`chevronDown` at 12px for every twisty in a `Tree` at once.
+
+The entry is **coverage**, so the colour is applied at composite time and
+stays out of the key: one rendered copy of `chevronDown` at 12px serves the
+resting row, the highlighted row, the disabled one and both colour schemes —
+the trick the glyph cache runs on text, and the one `<svg>` gets for a
+`fill="currentColor"` document. The size cannot leave the key, since a
+coverage surface is pixels at a fixed size, so one icon at two sizes is two
+entries.
+
+The drawings are module-level, so re-rendering a `Tree` invalidates none of
+its twisties: `<canvas>` compares `onDraw` by identity, and a fresh closure
+per render is a repaint per glyph.
+
+`icons` is the map of raw drawings, for a widget that wants the glyph
+without the component:
+
+```jsx
+import { icons } from 'react-x11';
+
+<canvas
+  mono
+  cacheKey="check"
+  onDraw={icons.check}
+  style={{ width: 12, height: 12, color: '$dim' }}
+/>;
+```
+
+They are **decoration by default** — `aria-hidden`, because the meaning is
+already on the control, in its `role` and its `aria-expanded`. Name one
+(`aria-hidden={false} aria-label="Close"`) only when the icon _is_ the
+control and nothing else says so.
+
 ## Basic controls
 
 `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch` and `ProgressBar` share
@@ -901,13 +1023,24 @@ const save = ({ color, size }) => (
 Paint the SVG in `currentColor` and the renderer caches it as coverage
 rather than as pixels, so recolouring per row is a composite and every
 colour of the icon shares one rendered copy
-([elements.md](elements.md#svg)). A **string** icon is drawn as text, which
-is a one-liner — but it is only as good as the font, and `✂` or `⏻` is an
-empty box on a machine without them. An element is rendered as-is.
-`examples/menu.jsx` has a worked set.
+([elements.md](elements.md#svg)). A [system icon](#system-icons) is already
+that, and takes the same two arguments:
+
+```jsx
+{ label: 'Close', icon: (p) => <Icon name="close" {...p} />, onSelect: onClose }
+```
+
+A **string** icon is drawn as text, which is a one-liner — but it is only as
+good as the font, and `✂` or `⏻` is an empty box on a machine without them.
+An element is rendered as-is. `examples/menu.jsx` has a worked set.
+
+The **toggle marks** are system icons for that reason: a checked item is a
+`check`, a radio one a `dot`, and the indeterminate third state a `dash`.
+They used to be `✓`, `●` and `–` set in the row's font, which is the same
+gamble this paragraph tells you not to take.
 
 **Submenus.** Give an item its own `items` and it becomes a submenu parent,
-marked with `▸` and opening to the side:
+marked with a `chevronRight` and opening to the side:
 
 ```jsx
 { label: 'Export', items: [

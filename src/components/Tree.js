@@ -5,6 +5,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
 import { labelContent, useTheme } from './theme.js';
+import { Icon } from './Icon.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
   XK_DOWN,
@@ -20,6 +21,10 @@ const h = React.createElement;
 
 const INDENT = 14;
 const TWISTY = 12;
+// The chevron inside the twisty's hit box, which stays 12px whatever the
+// glyph does — the box is what a file browser lets you click to peek into a
+// folder without selecting it, and it should not shrink with the ink.
+const TWISTY_SIZE = 10;
 const ROW_HEIGHT = 22;
 
 const s = createStyles({
@@ -40,7 +45,6 @@ const s = createStyles({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  glyph: { width: 7, height: 7 },
 });
 
 /** Rows the tree can show right now: the roots, plus the children of every
@@ -265,24 +269,14 @@ export function Tree({
               : undefined,
           },
           branch &&
-            h('canvas', {
-              style: s.glyph,
-              onDraw: (ctx, { width: w, height: hgt }) => {
-                ctx.fillStyle =
-                  item.id === current ? theme.hoverText : theme.dim;
-                ctx.beginPath();
-                if (openSet.has(item.id)) {
-                  ctx.moveTo(0, 0);
-                  ctx.lineTo(w, 0);
-                  ctx.lineTo(w / 2, hgt);
-                } else {
-                  ctx.moveTo(0, 0);
-                  ctx.lineTo(w, hgt / 2);
-                  ctx.lineTo(0, hgt);
-                }
-                ctx.closePath();
-                ctx.fill();
-              },
+            h(Icon, {
+              name: openSet.has(item.id) ? 'chevronDown' : 'chevronRight',
+              size: TWISTY_SIZE,
+              // The row's ink, handed over: `:hover` marks the row and its
+              // ancestors, not its children, and colour does not cascade —
+              // so a twisty that did not take this would stay grey inside a
+              // highlighted row.
+              color: item.id === current ? theme.hoverText : theme.dim,
             }),
         ),
         labelContent(item.label, {

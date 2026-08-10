@@ -2985,6 +2985,22 @@ export class CanvasNode extends Node {
     }
   }
 
+  /**
+   * The ink a `mono` drawing is painted in: the node's own `color`, falling
+   * back to the palette's, exactly as `<text>` and `<svg>` resolve theirs.
+   * There is no cascade from an ancestor `<box>` — see the note on `mono`.
+   */
+  _monoColor() {
+    return this.style.color ?? this.theme.text;
+  }
+
+  /** Preset the ink a `mono` drawing inherits, so `onDraw` never names a
+   *  colour of its own. Called inside the `save()`/`restore()` pair. */
+  _presetMono(ctx, color) {
+    ctx.fillStyle = color;
+    ctx.strokeStyle = color;
+  }
+
   _paintContent(ctx) {
     const onDraw = this.props.onDraw;
     if (typeof onDraw !== 'function') return;
@@ -2993,6 +3009,7 @@ export class CanvasNode extends Node {
     ctx.rect(this.abs.x, this.abs.y, this.abs.width, this.abs.height);
     ctx.clip();
     ctx.translate(this.abs.x, this.abs.y);
+    if (this.props.mono) this._presetMono(ctx, this._monoColor());
     try {
       onDraw(ctx, {
         width: this.abs.width,
@@ -3020,23 +3037,57 @@ export class CanvasNode extends Node {
    * develop with `REACT_X11_PAINT_CACHE=verify`, which turns exactly that
    * mistake into a loud complaint.
    *
-   * `<canvas>` needs no `paintCached`: it already draws origin-relative, so
-   * the cached render and the live one are the same code.
+   * `<canvas>` needs no `paintCached` of its own beyond the mono preset: it
+   * already draws origin-relative, so the cached render and the live one are
+   * the same code.
+   *
+   * ## `mono`: coverage, and the colour out of the key
+   *
+   * `<canvas mono>` is a promise about the drawing — *everything I paint is
+   * one colour, and it is not mine to choose*. `onDraw` then names no colour
+   * at all: `fillStyle` and `strokeStyle` arrive preset from `style.color`.
+   *
+   * That promise is what lets the entry be an **a8 coverage** surface with
+   * the colour applied at blit time, so the colour leaves the key: one
+   * rendered copy of a chevron serves the resting row, the highlighted row,
+   * the disabled one and both schemes. Without it each colour is a separate
+   * argb32 entry, which for an icon in four states is four rasterizations
+   * and four pixmaps of the same shape. `SvgView.paintKind` decides the same
+   * thing by scanning the document; a closure cannot be scanned, so here the
+   * author says it.
+   *
+   * A drawing that sets its own `fillStyle` under `mono` is a bug the digest
+   * catches: colour is out of the key, so two colours of one drawing collide
+   * on one entry and `REACT_X11_PAINT_CACHE=verify` complains.
+   *
+   * Needs **ntk ≥ 7.3.3**, and the floor is not cosmetic. Coverage
+   * composites through ntk's `_drawCoverage`, which routes a clip it cannot
+   * express as a rectangle through a scratch mask — and before 7.3.3 that
+   * path read the surface-sized mask from the origin rather than from the
+   * destination, so anything not drawn at (0, 0) was masked out entirely
+   * (sidorares/ntk#243). Nested rounded clips are the common case, not an
+   * exotic one: `examples/tasks.jsx` puts a checkbox tick under a rounded
+   * card, a scrolled list, a rounded row and a rounded well, and five of its
+   * six ticks came out blank. `package.json` carries the floor.
    */
   paintCachePlan() {
-    const { cacheKey, onDraw } = this.props;
+    const { cacheKey, onDraw, mono } = this.props;
     if (cacheKey == null || typeof onDraw !== 'function') return null;
     const width = Math.ceil(this.abs.width);
     const height = Math.ceil(this.abs.height);
     if (width <= 0 || height <= 0) return null;
+    const tint = mono ? this._monoColor() : null;
+    // Nothing to composite through: an unpainted colour would blit the
+    // coverage as-is, which is not what "invisible" looks like.
+    if (mono && !isPaintedColor(tint)) return null;
     return {
-      key: `canvas|${width}x${height}@1|${cacheKey}`,
+      key: `canvas|${width}x${height}@1|${mono ? 'mono|' : ''}${cacheKey}`,
       x: Math.round(this.abs.x),
       y: Math.round(this.abs.y),
       width,
       height,
-      format: 'argb32',
-      tint: null,
+      format: mono ? 'a8' : 'argb32',
+      tint,
     };
   }
 
@@ -3048,6 +3099,9 @@ export class CanvasNode extends Node {
     ctx.rect(box.x, box.y, box.width, box.height);
     ctx.clip();
     ctx.translate(box.x, box.y);
+    // Into a coverage surface only the alpha of a paint survives and the
+    // tint arrives at blit time, so any opaque colour renders the same mask.
+    if (this.props.mono) this._presetMono(ctx, '#ffffff');
     try {
       onDraw(ctx, { width: box.width, height: box.height, node: this });
     } finally {

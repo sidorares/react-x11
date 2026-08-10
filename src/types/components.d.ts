@@ -6,7 +6,13 @@
 import type { ComponentType, ReactNode, Ref, RefObject } from 'react';
 import type { ColorSchemePreference } from './appearance.js';
 import type { Color, StyleProp } from './style.js';
-import type { BoxProps, GlAreaProps, Vec3 } from './elements.js';
+import type {
+  BoxProps,
+  CanvasProps,
+  DrawInfo,
+  GlAreaProps,
+  Vec3,
+} from './elements.js';
 import type { DrawnNode, Rect } from './nodes.js';
 import type {
   DragEndEvent,
@@ -149,6 +155,52 @@ interface NamedWidget {
    */
   name?: string;
 }
+
+/**
+ * The system icon set: the affordance glyphs core's own widgets are drawn
+ * with. Affordances only — no nouns; a folder or a save icon belongs to an
+ * icon theme. See docs/components.md#system-icons.
+ */
+export type IconName =
+  | 'chevronRight'
+  | 'chevronLeft'
+  | 'chevronDown'
+  | 'chevronUp'
+  | 'check'
+  | 'dash'
+  | 'dot'
+  | 'close'
+  | 'plus'
+  | 'moreVertical'
+  | 'eye'
+  | 'eyeOff';
+
+export interface IconProps extends Omit<CanvasProps, 'onDraw' | 'cacheKey'> {
+  name: IconName;
+  /**
+   * The size of the mark, not of a grid it sits in — the ink runs corner to
+   * corner, unlike lucide and its descendants. A chevron's arms are at 45°,
+   * so it is `size` along the way it points across and half that the other
+   * way. Default: a shade under the palette's `fontSize`.
+   */
+  size?: number;
+  /** Default: the palette's `text`. Colour does not cascade — a widget that
+   *  paints its label in another ink hands the icon the same one. */
+  color?: Color;
+  style?: StyleProp;
+}
+export const Icon: ComponentType<IconProps>;
+
+/**
+ * The drawings themselves, keyed by name — each one an `onDraw` for
+ * `<canvas mono>`, for a widget that wants the glyph without the component.
+ */
+export const icons: Readonly<
+  Record<IconName, (ctx: any, info: DrawInfo) => void>
+>;
+export const iconNames: readonly IconName[];
+/** The default icon box for a given `fontSize`. */
+export function iconSize(fontSize: number): number;
 
 export interface ButtonProps extends WidgetProps {
   children?: ReactNode;

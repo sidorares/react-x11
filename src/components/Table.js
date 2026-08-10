@@ -5,6 +5,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
 import { capTrim, useTheme } from './theme.js';
+import { Icon } from './Icon.js';
 import {
   XK_DOWN,
   XK_END,
@@ -54,6 +55,9 @@ const s = createStyles({
     alignItems: 'center',
     height: ROW_HEIGHT,
     paddingLeft: 8,
+    // Matching the left inset, because the sort mark sits against this edge
+    // now — without it the chevron touches the rule between the columns.
+    paddingRight: 8,
     flexShrink: 0,
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
@@ -89,8 +93,15 @@ const s = createStyles({
   // would be sliced rather than shown — `textWrap` in styling.md
   cellText: { fontSize: 12, textWrap: 'nowrap' },
   spacer: { flexShrink: 0 },
-  sortMark: { width: 8, height: 5, marginLeft: 4 },
+  // The mark is pushed right by a spacer, so this is the floor on the gap
+  // rather than the gap: it only does anything once a long caption has eaten
+  // the space between them.
+  sortMark: { marginLeft: 4 },
 });
+
+/** The sort chevron, matched to the capitals of the 12px header it follows —
+ *  a chevron is as wide as its box, so this is a width rather than a height. */
+const SORT_MARK = 9;
 
 const value = (row, column) =>
   column.value ? column.value(row) : row[column.id];
@@ -375,26 +386,22 @@ export function Table({
                 { style: [capTrim, s.headerLabel, { color: theme.text }] },
                 column.label ?? column.id,
               ),
-              activeSort?.column === column.id &&
-                h('canvas', {
-                  style: s.sortMark,
-                  onDraw: (ctx, { width: w, height: hgt }) => {
-                    ctx.fillStyle = theme.dim;
-                    ctx.beginPath();
-                    if (activeSort.direction === 'asc') {
-                      ctx.moveTo(0, hgt);
-                      ctx.lineTo(w, hgt);
-                      ctx.lineTo(w / 2, 0);
-                    } else {
-                      ctx.moveTo(0, 0);
-                      ctx.lineTo(w, 0);
-                      ctx.lineTo(w / 2, hgt);
-                    }
-                    ctx.closePath();
-                    ctx.fill();
-                  },
-                }),
+              // The spacer goes *between* them: the caption belongs to the
+              // left edge of its column, where the eye scans for it, and the
+              // sort mark to the right edge, where it lines up with the
+              // marks of every other sortable column instead of drifting
+              // with the length of each caption.
               h('box', { style: { flexGrow: 1 } }),
+              activeSort?.column === column.id &&
+                h(Icon, {
+                  name:
+                    activeSort.direction === 'asc'
+                      ? 'chevronUp'
+                      : 'chevronDown',
+                  size: SORT_MARK,
+                  color: theme.dim,
+                  style: s.sortMark,
+                }),
             ),
             // The band is invisible until the pointer is on it, and answers
             // the press itself — a captured press keeps `:active` for the
