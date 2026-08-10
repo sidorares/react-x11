@@ -9,6 +9,11 @@
 // Right opens a submenu and Left leaves it, Enter picks, Escape closes one
 // level at a time.
 //
+// **Extremes → Large menu items** is the stress switch: ticking it puts
+// twenty pull-downs on a 520px bar and thirty rows in the File menu, which is
+// how the bar behaves when it is wider than its window and how a menu behaves
+// when it is taller than the screen it is anchored on.
+//
 // **On a desktop with a global menu the bar is not here at all** — it is in
 // the panel, and the app said nothing to make that happen. `menus` is a plain
 // data array in dbusmenu's own vocabulary, so the same array that draws the
@@ -103,9 +108,19 @@ const ICONS = {
   ),
 };
 
+// The extremes, on a switch (the first bar menu's "Large menu items"): a bar
+// of twenty pull-downs on a 520px window, and a menu of thirty rows on a
+// screen that has no room for it. Neither is a shape an example would
+// otherwise reach, and both are shapes a real application arrives at by
+// accident — a bar that has to survive being wider than its window, a menu
+// that has to survive being taller than the display it is anchored on.
+const LARGE_BAR = 20;
+const LARGE_ITEMS = 30;
+
 function App() {
   const [last, setLast] = useState('(none)');
   const [wrap, setWrap] = useState(true);
+  const [large, setLarge] = useState(false);
   // Only so this example can *say* which way it went. An app needs none of
   // it: `<MenuBar menus={menus} />` is the whole integration, and the bar
   // moves to the panel or stays here without the app being told.
@@ -303,6 +318,59 @@ function App() {
     },
   ];
 
+  // The switch, and the first thing on the bar. `toggleType` is what puts a
+  // row in the check column — `'checkmark'` draws the system check, where
+  // `'radio'` would draw a dot — and `toggleState` is dbusmenu's three-state
+  // one rather than a boolean: 0 keeps the column and draws nothing, which is
+  // what stops a menu of toggles from shuffling sideways as they are ticked.
+  const extremes = {
+    label: 'Extremes',
+    items: [
+      {
+        label: 'Large menu items',
+        toggleType: 'checkmark',
+        toggleState: large ? 1 : 0,
+        onSelect: () => {
+          setLarge((v) => !v);
+          setLast('Large menu items');
+        },
+      },
+    ],
+  };
+
+  // Filler, so that what is extreme about the extremes is the *count*: the
+  // same rows with the same handlers, just a great many of them.
+  const filler = (count, name) =>
+    Array.from({ length: count }, (_, i) => ({
+      label: `${name} ${i + 1}`,
+      onSelect: note(`${name} ${i + 1}`),
+    }));
+
+  // Padded rather than replaced, in both directions: File keeps its own rows
+  // and grows to thirty, the bar keeps File/Edit/View and grows to twenty. A
+  // stress mode that threw the real menus away would be testing the filler.
+  const [file, ...rest] = menus;
+  const bar = !large
+    ? [extremes, ...menus]
+    : [
+        extremes,
+        {
+          ...file,
+          items: [
+            ...file.items,
+            ...filler(Math.max(0, LARGE_ITEMS - file.items.length), 'Item'),
+          ],
+        },
+        ...rest,
+        ...Array.from(
+          { length: Math.max(0, LARGE_BAR - (menus.length + 1)) },
+          (_, i) => ({
+            label: `Menu ${i + 1}`,
+            items: filler(3, `Menu ${i + 1} item`),
+          }),
+        ),
+      ];
+
   const contextItems = [
     {
       label: 'Cut',
@@ -344,7 +412,7 @@ function App() {
       style={{ backgroundColor: '$surfaceHover' }}
     >
       <box style={{ flexGrow: 1 }}>
-        <MenuBar menus={menus} onGlobalMenuChange={setInPanel} />
+        <MenuBar menus={bar} onGlobalMenuChange={setInPanel} />
         <ContextMenu
           items={contextItems}
           style={{
@@ -364,6 +432,14 @@ function App() {
           </text>
           <text style={{ color: '$dim' }}>
             wrap lines: {wrap ? 'on' : 'off'}
+          </text>
+          <text style={{ color: '$dim' }}>
+            Extremes → Large menu items:{' '}
+            <text style={{ color: '$accent' }}>
+              {large
+                ? `on — ${bar.length} menus on the bar, ${LARGE_ITEMS} rows in File`
+                : 'off'}
+            </text>
           </text>
           <text style={{ color: '$dim' }}>
             File → Open/Save runs a real dialog, on this machine's{' '}
