@@ -5,6 +5,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
 import { capTrim, useTheme } from './theme.js';
+import { Icon } from './Icon.js';
 import {
   XK_DOWN,
   XK_END,
@@ -89,8 +90,12 @@ const s = createStyles({
   // would be sliced rather than shown — `textWrap` in styling.md
   cellText: { fontSize: 12, textWrap: 'nowrap' },
   spacer: { flexShrink: 0 },
-  sortMark: { width: 8, height: 5, marginLeft: 4 },
+  // Only the gap: the glyph is square now, and `<Icon size>` sets the box.
+  sortMark: { marginLeft: 4 },
 });
+
+/** The sort chevron, a step under the 12px header text it follows. */
+const SORT_MARK = 10;
 
 const value = (row, column) =>
   column.value ? column.value(row) : row[column.id];
@@ -376,23 +381,14 @@ export function Table({
                 column.label ?? column.id,
               ),
               activeSort?.column === column.id &&
-                h('canvas', {
+                h(Icon, {
+                  name:
+                    activeSort.direction === 'asc'
+                      ? 'chevronUp'
+                      : 'chevronDown',
+                  size: SORT_MARK,
+                  color: theme.dim,
                   style: s.sortMark,
-                  onDraw: (ctx, { width: w, height: hgt }) => {
-                    ctx.fillStyle = theme.dim;
-                    ctx.beginPath();
-                    if (activeSort.direction === 'asc') {
-                      ctx.moveTo(0, hgt);
-                      ctx.lineTo(w, hgt);
-                      ctx.lineTo(w / 2, 0);
-                    } else {
-                      ctx.moveTo(0, 0);
-                      ctx.lineTo(w, 0);
-                      ctx.lineTo(w / 2, hgt);
-                    }
-                    ctx.closePath();
-                    ctx.fill();
-                  },
                 }),
               h('box', { style: { flexGrow: 1 } }),
             ),

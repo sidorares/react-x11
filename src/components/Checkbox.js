@@ -4,9 +4,13 @@
 
 import React from 'react';
 import { changeEvent } from './change.js';
+import { Icon } from './Icon.js';
 import { labelContent, useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
+
+/** The mark inside the 16px well. */
+const MARK = 11;
 
 /**
  * <Checkbox checked onChange disabled>label</Checkbox> — 16px check well +
@@ -86,18 +90,7 @@ export function Checkbox({
         },
       },
       checked &&
-        h('canvas', {
-          onDraw: (ctx) => {
-            ctx.strokeStyle = theme.accentText;
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(1, 4);
-            ctx.lineTo(3.5, 6.5);
-            ctx.lineTo(9, 1);
-            ctx.stroke();
-          },
-          style: { width: 10, height: 8 },
-        }),
+        h(Icon, { name: 'check', size: MARK, color: theme.accentText }),
     ),
     labelContent(children ?? label, {
       color: disabled ? theme.dim : theme.text,

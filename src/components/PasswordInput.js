@@ -7,6 +7,7 @@ import { DEFAULT_TEXT_STYLE, createStyles } from '../styles.js';
 import { useClipboard } from '../appcontext.js';
 import { windowIdOf } from '../windowid.js';
 import { useTheme } from './theme.js';
+import { Icon } from './Icon.js';
 import { changeEvent } from './change.js';
 import { measureLabel } from './anchor.js';
 import { hash32, maskWidth, strokeScribble } from './scribble.js';
@@ -27,6 +28,9 @@ const h = React.createElement;
 // and the *only* text this widget ever lays out while it is masked.
 const REFERENCE_GLYPH = 'n';
 const ICON = 18;
+/** The eye inside the 18px peek button. The old drawing was 16×12 — the
+ *  almond fills a square box the same way, with the lid at 0.27. */
+const EYE = 16;
 
 // Ctrl chords this field answers, as keysym letters.
 const CTRL_U = 0x75;
@@ -57,36 +61,8 @@ const s = createStyles({
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
   },
-  eye: { width: 16, height: 12 },
   caps: { width: 12, height: 12, flexShrink: 0 },
 });
-
-/** An eye, and an eye with a line through it. Drawn rather than set in a
- *  font: a glyph the machine has not got is a tofu box in a login form. */
-function EyeGlyph({ color, open }) {
-  return h('canvas', {
-    style: s.eye,
-    onDraw: (ctx, { width, height }) => {
-      const midY = height / 2;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(1, midY);
-      ctx.quadraticCurveTo(width / 2, -1, width - 1, midY);
-      ctx.quadraticCurveTo(width / 2, height + 1, 1, midY);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(width / 2, midY, 2.2, 0, Math.PI * 2);
-      ctx.stroke();
-      if (!open) {
-        ctx.beginPath();
-        ctx.moveTo(2, height - 1);
-        ctx.lineTo(width - 2, 1);
-        ctx.stroke();
-      }
-    },
-  });
-}
 
 /** Caps Lock: an arrow standing on a bar, which is what the key is engraved
  *  with wherever it is engraved at all. */
@@ -443,9 +419,10 @@ export function PasswordInput({
             },
           ],
         },
-        h(EyeGlyph, {
+        h(Icon, {
+          name: showing ? 'eyeOff' : 'eye',
+          size: EYE,
           color: disabled ? theme.border : theme.dim,
-          open: !showing,
         }),
       ),
   );

@@ -507,6 +507,20 @@ export interface CanvasProps extends DrawnProps<DrawnNode> {
    * unset for anything animated or driven by state outside the props.
    */
   cacheKey?: string | number;
+  /**
+   * A promise about the drawing: everything it paints is one colour, and it
+   * is not the drawing's to choose. `onDraw` then names no colour at all —
+   * `fillStyle` and `strokeStyle` arrive preset from `style.color`.
+   *
+   * The payoff is at the cache: a `mono` drawing is kept as coverage with
+   * the colour applied at blit time, so the colour leaves the key and one
+   * rendered copy serves hover, `:disabled` and both schemes. Without it,
+   * each colour of the same shape is a separate entry.
+   *
+   * Works without `cacheKey` — the ink is preset either way — but the two
+   * together are the point.
+   */
+  mono?: boolean;
 }
 
 // --- rich content ----------------------------------------------------------

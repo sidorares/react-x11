@@ -4,6 +4,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
+import { Icon } from './Icon.js';
 import {
   DEFAULT_LABEL_SIZE,
   anchorRect,
@@ -163,12 +164,17 @@ function ariaChecked(state) {
  * An item whose `toggleState` is 0 draws nothing and keeps its gutter, which
  * is what stops a menu of checkboxes from shuffling sideways as they are
  * ticked.
+ *
+ * These are system icons rather than the `✓`, `●` and `–` they used to be:
+ * a text mark is only as good as the font it lands in, which is the exact
+ * warning this file gives applications about string `icon`s two doc comments
+ * down. Core taking its own advice is the point of the set.
  */
 function toggleMark(item) {
   if (!item.toggleType) return null;
-  if (item.toggleState === -1) return '–';
+  if (item.toggleState === -1) return 'dash';
   if (item.toggleState !== 1) return null;
-  return item.toggleType === 'radio' ? '●' : '✓';
+  return item.toggleType === 'radio' ? 'dot' : 'check';
 }
 
 /**
@@ -192,7 +198,7 @@ function toggleMark(item) {
  */
 function gutterMark(item, { color, fontSize }) {
   const toggle = toggleMark(item);
-  if (toggle) return h('text', { style: { color, fontSize } }, toggle);
+  if (toggle) return h(Icon, { name: toggle, size: MENU_ICON_SIZE, color });
   const { icon } = item;
   if (icon == null) return null;
   if (typeof icon === 'string' || typeof icon === 'number') {
@@ -339,12 +345,10 @@ function MenuRow({
         accelerator,
       ),
     submenu &&
-      h('text', {
-        children: '\u25b8',
-        style: {
-          color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
-          fontSize: fontSize,
-        },
+      h(Icon, {
+        name: 'chevronRight',
+        size: MENU_ICON_SIZE,
+        color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
       }),
   );
 }

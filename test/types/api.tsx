@@ -25,6 +25,10 @@ import {
   activateWindow,
   Checkbox,
   closeBus,
+  Icon,
+  icons,
+  iconNames,
+  iconSize,
   fileDialogBackend,
   onAppOpen,
   registerApplication,
@@ -419,6 +423,23 @@ function Widgets() {
           press
         </Button>
         <Button label="labelled" disabled />
+        {/* the system icon set: a name from the union, and the drawings
+            themselves for anything wanting the glyph without the component */}
+        <Icon name="chevronDown" />
+        <Icon name="check" size={iconSize(14)} color="$accent" />
+        <Icon
+          name="close"
+          aria-hidden={false}
+          aria-label="Close"
+          onClick={() => {}}
+          focusable
+        />
+        <canvas
+          mono
+          cacheKey={iconNames[0]}
+          onDraw={icons.moreVertical}
+          style={{ width: 12, height: 12, color: '$dim' }}
+        />
         <Checkbox checked={checked} onChange={(ev) => setChecked(ev.value)}>
           check
         </Checkbox>

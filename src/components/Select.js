@@ -4,6 +4,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
+import { Icon } from './Icon.js';
 import { changeEvent } from './change.js';
 import {
   measureLabel,
@@ -39,6 +40,12 @@ const ITEM_PAD_RIGHT = ITEM_PAD;
 // right as above and below, measured to the letters rather than to the
 // font's line box (`capTrim`). The menus derive their rows the same way.
 const ITEM_HEIGHT = capBand(DEFAULT_TEXT_STYLE.size) + ITEM_PAD * 2;
+// The chevron is exactly as tall as the capitals it stands beside, and for
+// a reason a form depends on: a field, a dropdown and a button in one row
+// have to be one height, and they only are if the tallest thing in each is
+// measured the same way. A glyph taller than the cap band makes the
+// dropdown alone two pixels taller than everything next to it.
+const CHEVRON = capBand(DEFAULT_TEXT_STYLE.size);
 // The scrolling pane's own padding, and so the inset between the edge
 // and an option — which is what makes the highlight read as a pill on the
 // menu rather than a band across it, and what the pill's own corner radius
@@ -361,18 +368,7 @@ export function Select({
       current ? current.label : placeholder,
     ),
     h('box', { style: { flexGrow: 1 } }),
-    h('canvas', {
-      onDraw: (ctx, { width: w, height: hgt }) => {
-        ctx.fillStyle = theme.dim;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(w, 0);
-        ctx.lineTo(w / 2, hgt);
-        ctx.closePath();
-        ctx.fill();
-      },
-      style: { width: 10, height: 6 },
-    }),
+    h(Icon, { name: 'chevronDown', size: CHEVRON, color: theme.dim }),
     open &&
       anchor &&
       h(
