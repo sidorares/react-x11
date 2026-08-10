@@ -63,8 +63,16 @@ const BIG_COLUMNS = [
     width: 90,
     align: 'right',
     value: (row) => row.size,
-    render: (row) => (
-      <text style={{ fontSize: 11, fontFamily: 'monospace' }}>
+    // A cell that draws itself owns its colour, selected row included — the
+    // selection is a filled bar, and `$text` on it is unreadable.
+    render: (row, { selected }) => (
+      <text
+        style={{
+          fontSize: 11,
+          fontFamily: 'monospace',
+          color: selected ? '$hoverText' : '$text',
+        }}
+      >
         {(row.size / 1024).toFixed(1)}k
       </text>
     ),
@@ -149,8 +157,14 @@ const TICKER_COLUMNS = [
     width: 80,
     align: 'right',
     value: (row) => row.price,
-    render: (row) => (
-      <text style={{ fontSize: 11, fontFamily: 'monospace' }}>
+    render: (row, { selected }) => (
+      <text
+        style={{
+          fontSize: 11,
+          fontFamily: 'monospace',
+          color: selected ? '$hoverText' : '$text',
+        }}
+      >
         {row.price.toFixed(2)}
       </text>
     ),
@@ -161,13 +175,21 @@ const TICKER_COLUMNS = [
     width: 80,
     align: 'right',
     value: (row) => row.change,
-    render: (row) => (
+    // Red and green both sink into the selection bar, so the selected row
+    // drops the colour and lets the arrow carry the direction — which is the
+    // reason to encode it twice in the first place.
+    render: (row, { selected }) => (
       <text
         style={{
           fontSize: 11,
           fontFamily: 'monospace',
-          color:
-            row.change > 0 ? '#00b894' : row.change < 0 ? '#d63031' : '#b2bec3',
+          color: selected
+            ? '$hoverText'
+            : row.change > 0
+              ? '#00b894'
+              : row.change < 0
+                ? '#d63031'
+                : '#b2bec3',
         }}
       >
         {row.change > 0 ? '▲' : row.change < 0 ? '▼' : '·'}{' '}

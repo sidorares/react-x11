@@ -594,11 +594,19 @@ export interface TableColumn<Row = any> {
   align?: 'left' | 'right' | 'center';
   /** Pull the cell value out of a row; defaults to `row[id]`. */
   value?: (row: Row) => unknown;
-  render?: (row: Row, column: TableColumn<Row>) => ReactNode;
+  /**
+   * Draw the cell yourself. `selected` says the cell is on the selected row —
+   * a filled bar — so a colour chosen against the resting background has to
+   * give way to `hoverText` there.
+   */
+  render?: (
+    row: Row,
+    context: { selected: boolean; column: TableColumn<Row> },
+  ) => ReactNode;
 }
 
 export interface TableSort {
-  id: string;
+  column: string;
   direction: 'asc' | 'desc';
 }
 
@@ -611,8 +619,9 @@ export interface TableProps<Row = any> extends WidgetProps {
   onSortChange?: (sort: TableSort | null) => void;
   selected?: string | number | null;
   defaultSelected?: string | number | null;
-  onSelect?: (id: string | number) => void;
-  onActivate?: (id: string | number) => void;
+  onSelect?: (id: string | number, row: Row) => void;
+  /** Double click, or Enter on the selected row. */
+  onActivate?: (id: string | number, row: Row) => void;
   onColumnResize?: (id: string, width: number) => void;
   style?: StyleProp;
 }

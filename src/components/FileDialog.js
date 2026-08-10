@@ -289,10 +289,24 @@ export function FileDialog({
       label: 'Name',
       width: 300,
       value: (row) => row.name,
-      render: (row) =>
+      // The accent that marks a directory is the *same value* as the fill the
+      // selected row gets — `accent` and `hoverBackground` are one colour in
+      // both built-in palettes — so a selected directory was accent on accent
+      // and could not be read at all. On the bar the selection's own text
+      // colour is the readable one in either scheme, and the trailing `/` is
+      // what still says "directory".
+      render: (row, { selected }) =>
         h(
           'text',
-          { style: { color: row.directory ? theme.accent : theme.text } },
+          {
+            style: {
+              color: selected
+                ? theme.hoverText
+                : row.directory
+                  ? theme.accent
+                  : theme.text,
+            },
+          },
           row.directory ? `${row.name}/` : row.name,
         ),
     });

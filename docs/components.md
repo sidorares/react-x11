@@ -1018,11 +1018,24 @@ view actually built.
 | `rowHeight`                    | every row is this tall (24 by default)              |
 | `sort` / `defaultSort`         | `{ column, direction }`; reported by `onSortChange` |
 | `selected` / `defaultSelected` | selected row id; reported by `onSelect(id, row)`    |
-| `onActivate(id, row)`          | Enter on the selection                              |
+| `onActivate(id, row)`          | a double click, or Enter on the selection           |
 | `onColumnResize(id, width)`    | after a header drag                                 |
 
-`value(row)` feeds sorting and the default cell text; `render(row)` replaces
-the cell contents entirely.
+`value(row)` feeds sorting and the default cell text; `render(row, { selected,
+column })` replaces the cell contents entirely.
+
+A `render` is **told when its row is selected**, because the selection is a
+filled bar and a colour picked against the resting background disappears
+into it — a directory in the accent, a failure in red. Fall back to
+`hoverText` there and let the glyph carry the meaning:
+
+```jsx
+render: (row, { selected }) => (
+  <text style={{ color: selected ? '$hoverText' : statusColour(row) }}>
+    {row.state}
+  </text>
+);
+```
 
 **Rows must all be `rowHeight` tall.** That is the price of the table only
 building what is on screen: with ten thousand rows it mounts the twenty or
@@ -1034,10 +1047,20 @@ list. Sorting a hundred thousand rows is still the caller's problem — pass
 The **table** holds the focus, not the row: a row is unmounted as soon as it
 scrolls out of view, and focus would go with it. Up/Down move the selection,
 PageUp/PageDown by a viewport, Home/End to the ends, and the selection is
-kept on screen without building the rows in between.
+kept on screen without building the rows in between. A click selects, a
+double click activates — the same `onActivate` Enter fires, counted from
+`ev.detail` like any other multi-click.
 
-The header scrolls sideways with the body but never vertically. Dragging the
-grip at a header's right edge resizes that column; the body follows.
+The header scrolls sideways with the body but never vertically. Between two
+headers there is a hairline rule and, just left of it, a grab band seven
+pixels wide: the separator you see and the handle you hit are not the same
+size, because a boundary wants to be thin and a handle wants to be easy. The
+band is invisible until the pointer is on it and takes the accent while it is
+held, and it is a **sibling** of the header rather than a child of it — a
+click fires on the nearest common ancestor of press and release, so a handle
+inside the header would end every resize with a sort of the column that was
+just dragged. The handle takes focus on the press, so Left/Right resize by
+16px from the keyboard as well.
 
 ## `Tree`
 

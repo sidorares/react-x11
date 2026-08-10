@@ -148,6 +148,12 @@ not, stated here rather than discovered:
   deliberately not a re-creation of GTK's chooser.
 - **`multiple` in the built-in dialog is a tick column**, not ctrl-click.
 
+In the built-in dialog a double click opens a directory or picks a file, Enter
+does the same to the selected row, `Up` goes to the parent, and Escape cancels
+— and a selected directory is drawn in the selection's own text colour rather
+than the accent it wears at rest, since the selected row is filled with that
+accent in both schemes.
+
 ## Running it where there is no bus
 
 The interesting configurations, and what each one does:

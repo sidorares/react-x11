@@ -76,12 +76,15 @@ const COLUMNS = [
     id: 'state',
     label: 'State',
     width: 64,
-    render: (row) => (
+    render: (row, { selected }) => (
       <text
         style={{
           fontSize: 10,
-          color:
-            row.state === 'fail'
+          // the selected row is a filled bar: a status colour picked against
+          // the resting background disappears into it
+          color: selected
+            ? '$hoverText'
+            : row.state === 'fail'
               ? '#d63031'
               : row.state === 'warn'
                 ? '#e17055'

@@ -547,11 +547,17 @@ function Widgets() {
             label: 'Size',
             align: 'right',
             value: (row) => row.size,
+            render: (row, { selected }) => (
+              <text style={{ color: selected ? '$hoverText' : '$text' }}>
+                {row.size}
+              </text>
+            ),
           },
         ]}
         rows={[{ id: 'a', size: 1 }]}
-        defaultSort={{ id: 'size', direction: 'desc' }}
+        defaultSort={{ column: 'size', direction: 'desc' }}
         onSelect={(id) => void id}
+        onActivate={(id, row) => void `${id}${row.size}`}
       />
       <SplitPane direction="row" defaultSize={200} min={80}>
         <box />

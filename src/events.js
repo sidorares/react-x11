@@ -427,6 +427,10 @@ export class EventManager {
       const target = captured ?? this._hit(native);
       const ev = this.dispatch('MouseUp', target, native, {
         button: native.keycode,
+        // the count the press was given: a release and the click synthesized
+        // from it are the *same* multi-click as the mousedown that opened it,
+        // and `onClick` is where a double click is actually handled
+        detail: this._lastClick.detail,
       });
       // capture ends with the gesture, like implicit DOM pointer capture
       this.capturedNode = null;
@@ -446,6 +450,7 @@ export class EventManager {
         if (clickTarget) {
           this.dispatch('Click', clickTarget, native, {
             button: native.keycode,
+            detail: this._lastClick.detail,
           });
         }
         this.downNode = null;
