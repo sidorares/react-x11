@@ -48,6 +48,16 @@ control are most of what separates one platform's controls from another's:
 | `radiusPopup` `radiusPopupItem` `radiusTooltip` | floating-surface shape         |
 | `fontSize` `paddingX` `paddingY`                | control size                   |
 
+`paddingY` is the space **you can see** — above the capitals and below the
+baseline — not the space plus whatever the font's ascent left over: every
+widget label is trimmed to its letters
+([styling.md](styling.md#measuring-text-to-its-letters)), so a control is its
+label band plus this twice. That makes it a larger number than the same look
+would need in CSS, and it makes it mean the same thing in every typeface.
+Rows on a popup follow the same rule — a menu row and a `Select` option are
+their label with `padding` all round, so the space above a row's text is the
+space beside it.
+
 The `…Active` three are the colour a control takes **while it is held**, and
 a palette almost never sets them: each is derived from the step the palette's
 own hover already makes — `accent` → `accentHover` → one more of the same —
@@ -63,6 +73,14 @@ there, because a rounded thing inside a rounded thing needs the tighter
 curve: `radiusPopupItem` is the highlight on a menu row, `radiusTooltip` the
 tooltip bubble. A palette that moves `fontSize` and names none of them gets
 all three in proportion; naming one pins it.
+
+`radiusPopupItem` is a **ceiling**, not the radius a row gets. A rounded rect
+inside a rounded rect only reads as one shape when the two curves share a
+centre, which happens exactly when the inner radius is the outer one less the
+gap between them — so a row's corner is `radiusPopup` minus the sheet's
+hairline border minus the inset the row is padded in by, and the token caps
+it. A theme that wants rounder highlights rounds the sheet they sit on: that
+is the only change that can round both and keep them concentric.
 
 They are only ever _seen_ where the display composites — a popup gives up
 its corners by not painting them, and with nothing blending them those

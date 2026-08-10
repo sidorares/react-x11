@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
-import { createRoot } from '../src/index.js';
+import { Button, createRoot } from '../src/index.js';
 import { anchorRect } from '../src/components/anchor.js';
 
 // End-to-end test: react-x11 -> real ntk client -> node-x11's pure-JS
@@ -1265,6 +1265,66 @@ test('textBoxTrim: cap-alphabetic centres a label on its capitals', async () => 
     assert.ok(
       Math.abs(above - PAD) <= 1,
       `and should be the padding that was asked for: ${above} vs ${PAD}`,
+    );
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+  }
+});
+
+// And the widgets do it for you. A label centred by `alignItems` is a *box*
+// centred in a box, which says nothing about where the letters are inside it:
+// the trim is what makes the two the same question. Measured on the ink for
+// the same reason the test above is, and on a control rather than a bare
+// `<text>` because "the widgets set it" is the claim.
+test('a button holds its label evenly on the capitals', async () => {
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  const W = 300;
+  const H = 160;
+
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+        React.createElement(
+          Button,
+          { style: { alignSelf: 'flex-start', fontSize: 40 } },
+          'HEX',
+        ),
+      ),
+      x11Root,
+    );
+    const ctx = wnd.getContext('2d');
+    await waitForPixel(ctx, W, H, 2, 2, [255, 255, 255], 'window painted');
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    const button = wnd._reactX11Node.children[0];
+    const image = await readPixels(ctx, W, H);
+    // inside the border and the fill: only the glyphs are dark in here
+    const left = Math.round(button.abs.x) + 2;
+    const right = Math.round(button.abs.x + button.abs.width) - 2;
+    const top = Math.round(button.abs.y) + 2;
+    const bottom = Math.round(button.abs.y + button.abs.height) - 2;
+    const rows = [];
+    for (let y = top; y < bottom; y++) {
+      for (let x = left; x < right; x++) {
+        if (px(image, W, x, y)[0] < 120) {
+          rows.push(y);
+          break;
+        }
+      }
+    }
+    assert.ok(rows.length, 'the label drew something');
+
+    const above = rows[0] - button.abs.y;
+    const below =
+      button.abs.y + button.abs.height - (rows[rows.length - 1] + 1);
+    assert.ok(
+      Math.abs(above - below) <= 1,
+      `a button's label should sit evenly: ${above} above the caps, ${below} below the baseline`,
     );
 
     await x11Root.unmount();

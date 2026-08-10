@@ -4,7 +4,7 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
-import { useTheme } from './theme.js';
+import { capTrim, useTheme } from './theme.js';
 import {
   XK_DOWN,
   XK_END,
@@ -24,8 +24,15 @@ const ROW_HEIGHT = 24;
 // purpose. A separator wants to be a hairline; a resize handle wants to be
 // wide enough to hit without aiming. Drawing the handle is what made every
 // column boundary a 6px bar.
-const GRIP = 7;
+//
+// The band is centred **on** the rule rather than sitting beside it: it is
+// the boundary that is being moved, so a band lying to one side of the line
+// lights up off-centre and reads as belonging to the column it covers.
+// `HALF` either side, which is why the columns on both sides of a rule give
+// up a little width to it.
 const RULE = 1;
+const HALF = 3;
+const GRIP = HALF + RULE + HALF;
 const MIN_COLUMN = 40;
 // what one Left/Right on a focused handle is worth
 const STEP = 16;
@@ -53,10 +60,12 @@ const s = createStyles({
   },
   headerLabel: { fontSize: 12 },
   grip: {
-    width: GRIP,
     flexShrink: 0,
     cursor: 'col-resize',
     alignSelf: 'stretch',
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
     transition: { backgroundColor: 80 },
   },
   rule: { width: RULE, flexShrink: 0, alignSelf: 'stretch' },
@@ -294,6 +303,7 @@ export function Table({
             'text',
             {
               style: [
+                capTrim,
                 s.cellText,
                 { color: isSelected ? theme.hoverText : theme.text },
               ],
@@ -325,15 +335,20 @@ export function Table({
       h(
         'box',
         { style: [s.headerRow, { marginLeft: -scrollX, width: totalWidth }] },
-        columns.map((column) =>
-          // The header cell, the grab band and the rule are **siblings**, not
-          // a cell with a handle inside it. A click fires on the nearest
-          // common ancestor of press and release, so a grip nested in the
-          // header made every resize end in a sort: press the handle, release
+        columns.map((column, index) =>
+          // The header cell and the grab band are **siblings**, not a cell
+          // with a handle inside it. A click fires on the nearest common
+          // ancestor of press and release, so a grip nested in the header
+          // made every resize end in a sort: press the handle, release
           // anywhere over the header, and the click lands on the header. As
           // siblings the release cannot reach it — the pointer is captured by
           // the grip for the whole drag, and even without the capture the
           // common ancestor is the row rather than either header.
+          //
+          // A band centred on the rule takes `HALF` from the column to its
+          // left as well, so every header but the first is inset by that
+          // much; the last band has no column to its right and is the half
+          // that fits.
           h(
             React.Fragment,
             { key: column.id },
@@ -343,14 +358,19 @@ export function Table({
                 role: 'columnheader',
                 style: [
                   s.header,
-                  { width: Math.max(0, columnWidth(column) - GRIP - RULE) },
+                  {
+                    width: Math.max(
+                      0,
+                      columnWidth(column) - HALF - RULE - (index ? HALF : 0),
+                    ),
+                  },
                 ],
                 focusable: true,
                 onClick: () => toggleSort(column),
               },
               h(
                 'text',
-                { style: [s.headerLabel, { color: theme.text }] },
+                { style: [capTrim, s.headerLabel, { color: theme.text }] },
                 column.label ?? column.id,
               ),
               activeSort?.column === column.id &&
@@ -377,22 +397,31 @@ export function Table({
             // The band is invisible until the pointer is on it, and answers
             // the press itself — a captured press keeps `:active` for the
             // whole drag, wherever the pointer wanders, so the handle stays
-            // lit while the column follows it.
-            h('box', {
-              ...resizeProps(column),
-              role: 'separator',
-              'aria-orientation': 'vertical',
-              'aria-label': `Resize ${column.label || column.id}`,
-              'aria-valuenow': columnWidth(column),
-              'aria-valuemin': MIN_COLUMN,
-              style: [
-                s.grip,
-                { backgroundColor: 'transparent' },
-                { ':hover': { backgroundColor: theme.track } },
-                { ':active': { backgroundColor: theme.accent } },
-              ],
-            }),
-            h('box', { style: [s.rule, { backgroundColor: theme.border }] }),
+            // lit while the column follows it. The rule is its child, so the
+            // lit band is symmetric about the line it moves.
+            h(
+              'box',
+              {
+                ...resizeProps(column),
+                role: 'separator',
+                'aria-orientation': 'vertical',
+                'aria-label': `Resize ${column.label || column.id}`,
+                'aria-valuenow': columnWidth(column),
+                'aria-valuemin': MIN_COLUMN,
+                style: [
+                  s.grip,
+                  {
+                    width: index === columns.length - 1 ? HALF + RULE : GRIP,
+                    justifyContent:
+                      index === columns.length - 1 ? 'flex-end' : 'center',
+                  },
+                  { backgroundColor: 'transparent' },
+                  { ':hover': { backgroundColor: theme.track } },
+                  { ':active': { backgroundColor: theme.accent } },
+                ],
+              },
+              h('box', { style: [s.rule, { backgroundColor: theme.border }] }),
+            ),
           ),
         ),
       ),

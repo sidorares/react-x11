@@ -4,7 +4,7 @@
 
 import React, { useImperativeHandle, useMemo, useState } from 'react';
 import { createStyles, tint } from '../styles.js';
-import { useTheme } from './theme.js';
+import { capTrim, useTheme } from './theme.js';
 import { changeEvent } from './change.js';
 import {
   XK_DOWN,
@@ -280,7 +280,11 @@ function DayCell({ day, state, theme, band, onPick, onHover, dayContent }) {
           },
         ],
       },
-      h('text', { style: [s.number, { color }] }, String(Number(day.slice(8)))),
+      h(
+        'text',
+        { style: [capTrim, s.number, { color }] },
+        String(Number(day.slice(8))),
+      ),
       markers ? h('box', { style: s.markers }, markers) : null,
     ),
   );
@@ -527,7 +531,13 @@ export function Calendar({
       }),
       h(
         'text',
-        { style: [s.title, { color: theme.text, fontSize: theme.fontSize }] },
+        {
+          style: [
+            capTrim,
+            s.title,
+            { color: theme.text, fontSize: theme.fontSize },
+          ],
+        },
         formatMonth(visibleMonth, locale),
       ),
       h(NavButton, {
@@ -544,7 +554,11 @@ export function Calendar({
         h(
           'box',
           { key: i, style: s.weekdayCell },
-          h('text', { style: [s.weekdayLabel, { color: theme.dim }] }, label),
+          h(
+            'text',
+            { style: [capTrim, s.weekdayLabel, { color: theme.dim }] },
+            label,
+          ),
         ),
       ),
     ),

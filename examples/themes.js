@@ -30,7 +30,7 @@ const github = {
     borderWidth: 1,
     fontSize: 14,
     paddingX: 16,
-    paddingY: 6,
+    paddingY: 10,
   },
   dark: {
     canvas: '#0d1117',
@@ -52,7 +52,7 @@ const github = {
     borderWidth: 1,
     fontSize: 14,
     paddingX: 16,
-    paddingY: 6,
+    paddingY: 10,
   },
 };
 
@@ -78,7 +78,7 @@ const macos = {
     borderWidth: 1,
     fontSize: 13,
     paddingX: 14,
-    paddingY: 5,
+    paddingY: 9,
   },
   dark: {
     canvas: '#1e1e1e',
@@ -100,7 +100,7 @@ const macos = {
     borderWidth: 1,
     fontSize: 13,
     paddingX: 14,
-    paddingY: 5,
+    paddingY: 9,
   },
 };
 
@@ -126,7 +126,7 @@ const windows = {
     borderWidth: 1,
     fontSize: 14,
     paddingX: 14,
-    paddingY: 6,
+    paddingY: 10,
   },
   dark: {
     canvas: '#202020',
@@ -149,7 +149,7 @@ const windows = {
     borderWidth: 1,
     fontSize: 14,
     paddingX: 14,
-    paddingY: 6,
+    paddingY: 10,
   },
 };
 

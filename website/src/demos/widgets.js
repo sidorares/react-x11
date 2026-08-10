@@ -18,7 +18,7 @@ const macos = {
   surfaceHover: '#f2f2f7', hoverBackground: '#0a84ff', hoverText: '#ffffff',
   track: '#e5e5ea', borderFocus: '#0a84ff',
   radius: 6, radiusSmall: 4, borderWidth: 1,
-  fontSize: 13, paddingX: 12, paddingY: 6,
+  fontSize: 13, paddingX: 12, paddingY: 10,
 };
 
 function Controls() {

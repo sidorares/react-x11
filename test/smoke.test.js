@@ -1442,10 +1442,13 @@ test('Select: an overlong menu scrolls the active option into view', async () =>
   const { Select } = await import('../src/index.js');
   const XK_DOWN = 0xff54;
   const XK_END = 0xff57;
-  const ITEM_HEIGHT = 28;
+  // a row is its capitals plus even padding: 10 + 10 + 10 at the default
+  // 14px body (`Select.js`, ITEM_HEIGHT)
+  const ITEM_HEIGHT = 30;
   // the scroll box's own padding, which the menu's chrome is measured from
-  // (`Select.js`, MENU_PAD — the same inset the menus use)
-  const MENU_PAD = 5;
+  // (`Select.js`, MENU_PAD — the same inset the menus use, and what the
+  // option's own corner radius is derived from)
+  const MENU_PAD = 4;
   const options = Array.from({ length: 12 }, (_, i) => `option-${i}`);
 
   const app = createMockApp();

@@ -193,8 +193,19 @@ Two things worth knowing:
   box, because their caret and selection geometry is measured against it.
 - Trimming removes real space, so a control gets shorter: size the padding
   for the result you want rather than to whatever the metrics happened to
-  add. The built-in widgets do not set it — a theme that wants it sets it on
-  the styles it passes.
+  add.
+
+**The built-in widgets set it on every label**, which is why `paddingY` in a
+palette is bigger than a CSS padding for the same look — it is the space you
+see, not the space plus whatever the ascent left over. Which way a face is
+off changes with the face: at 14px, SF NS leaves 3.7px above the capitals
+against 2.9px below the baseline, so an untrimmed label rides low, while
+Helvetica leaves 0.7 against 3.2 and it rides high. A widget cannot correct
+for that, because it does not know the face it will be drawn in.
+
+A glyph drawn as text — a check mark, a submenu arrow, an icon — is centred
+on its own middle rather than sitting on a baseline, so trimming its box
+moves it off centre. Those keep the full line box, and so should yours.
 
 ## `createStyles`
 

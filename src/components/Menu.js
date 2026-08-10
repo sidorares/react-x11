@@ -3,7 +3,7 @@
 // build-step-free for consumers.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useTheme } from './theme.js';
+import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
 import {
   DEFAULT_LABEL_SIZE,
   anchorRect,
@@ -42,7 +42,12 @@ import {
 
 const h = React.createElement;
 
-const MENU_ITEM_HEIGHT = 26;
+// A row is its label with even space all round: the same number left and
+// right as above and below, measured to the letters rather than to the
+// font's line box (`capTrim`). Which is why the height is derived — hard-code
+// it and the vertical space is whatever the ascent happened to leave.
+const MENU_ITEM_PAD = 8;
+const menuRowHeight = (fontSize) => capBand(fontSize) + MENU_ITEM_PAD * 2;
 
 const MENU_SEPARATOR_HEIGHT = 7;
 
@@ -52,8 +57,9 @@ const MENU_MIN_WIDTH = 140;
 // highlight read as a *pill on* the menu rather than a band across it — and
 // what keeps the first and last one clear of the sheet's rounded corners,
 // where a full-width highlight would show a square shoulder outside the
-// curve.
-const MENU_PAD = 5;
+// curve. It is also half of a pair: the pill's own radius is derived from it
+// so the two corners share a centre (`rowRadius`).
+const MENU_PAD = 4;
 
 // A hairline, not `theme.borderWidth`: this border is there to give the sheet
 // an edge where it meets the desktop behind it, and a theme that draws 2px
@@ -61,8 +67,13 @@ const MENU_PAD = 5;
 const MENU_BORDER = 1;
 
 // How far a bar item's pill sits inside the bar, taken out of its padding so
-// the bar's height does not change.
+// the bar's height does not change. The strip carries the same inset at its
+// two ends: a pill that starts in the window's own corner reads as part of
+// the frame rather than as something on a strip, and the first menu is the
+// one every pointer arrives at.
 const BAR_INSET = 3;
+// the gap between two pills, split between them
+const BAR_GAP = 1;
 
 // The horizontal gap between a menu and the submenu it opens, measured from
 // the parent popup's outer edge — so `0` is flush against it, a positive
@@ -82,10 +93,10 @@ const MENU_SHORTCUT_GAP = 24;
 const MENU_PAGE_ROWS = 10;
 
 /** Total popup height for a menu's items (separators are shorter). */
-function menuListHeight(items) {
+function menuListHeight(items, fontSize) {
+  const row = menuRowHeight(fontSize);
   const body = visibleItems(items).reduce(
-    (sum, item) =>
-      sum + (isSeparator(item) ? MENU_SEPARATOR_HEIGHT : MENU_ITEM_HEIGHT),
+    (sum, item) => sum + (isSeparator(item) ? MENU_SEPARATOR_HEIGHT : row),
     0,
   );
   return body + (MENU_PAD + MENU_BORDER) * 2;
@@ -108,7 +119,11 @@ function menuListWidth(node, items, fontSize) {
   }
   return Math.max(
     MENU_MIN_WIDTH,
-    Math.ceil(widest) + MENU_GUTTER + (MENU_PAD + MENU_BORDER) * 2 + 10,
+    Math.ceil(widest) +
+      MENU_GUTTER +
+      (MENU_PAD + MENU_BORDER) * 2 +
+      MENU_ITEM_PAD +
+      2,
   );
 }
 
@@ -258,16 +273,17 @@ function MenuRow({
       onMouseMove: dim ? undefined : onMove,
       onClick: dim ? undefined : () => onSelect(item),
       style: {
-        height: MENU_ITEM_HEIGHT,
+        height: menuRowHeight(fontSize),
         flexDirection: 'row',
         alignItems: 'center',
-        paddingLeft: 8,
-        paddingRight: 8,
+        paddingLeft: MENU_ITEM_PAD,
+        paddingRight: MENU_ITEM_PAD,
         cursor: dim ? undefined : 'pointer',
         // A pill inside the sheet: the row is inset from the popup edge by
-        // the list's padding and rounded a step tighter than the menu, so
-        // the highlight sits *on* the menu instead of cutting across it.
-        borderRadius: theme.radiusPopupItem,
+        // the list's padding, and rounded so that its corner and the sheet's
+        // share a centre — the two curves are then one shape rather than two
+        // that nearly agree.
+        borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
         // Nothing at rest: the sheet under it is already that colour, and
         // now that the row is rounded, repainting it per row would be a
         // coverage mask drawn to change nothing — with four corners it
@@ -288,7 +304,7 @@ function MenuRow({
     },
     h(
       'box',
-      { style: { width: MENU_GUTTER - 8, alignItems: 'center' } },
+      { style: { width: MENU_GUTTER - MENU_ITEM_PAD, alignItems: 'center' } },
       gutterMark(item, {
         color: dim ? theme.dim : active ? theme.hoverText : theme.text,
         fontSize,
@@ -297,10 +313,13 @@ function MenuRow({
     h(
       'text',
       {
-        style: {
-          color: dim ? theme.dim : active ? theme.hoverText : theme.text,
-          fontSize: fontSize,
-        },
+        style: [
+          capTrim,
+          {
+            color: dim ? theme.dim : active ? theme.hoverText : theme.text,
+            fontSize: fontSize,
+          },
+        ],
       },
       item.label,
     ),
@@ -309,10 +328,13 @@ function MenuRow({
       h(
         'text',
         {
-          style: {
-            color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
-            fontSize: fontSize,
-          },
+          style: [
+            capTrim,
+            {
+              color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
+              fontSize: fontSize,
+            },
+          ],
         },
         accelerator,
       ),
@@ -401,7 +423,7 @@ function MenuLevel({
         alignOffset: -(MENU_BORDER + MENU_PAD),
         offset: SUBMENU_GAP,
         width: menuListWidth(node, childItems, fontSize),
-        height: menuListHeight(childItems),
+        height: menuListHeight(childItems, fontSize),
       }),
     );
   }, [childOpen, active, depth, fontSize, rect.x, rect.y]);
@@ -663,7 +685,7 @@ export function ContextMenu({
     const node = ref.current;
     if (!node || !items.length) return;
     const width = menuListWidth(node, items, fontSize);
-    const height = menuListHeight(items);
+    const height = menuListHeight(items, fontSize);
     const screen = screenOf(node);
     // anchored at the pointer rather than at a widget: clamp by hand, since
     // there is no anchor rect to flip around
@@ -809,7 +831,7 @@ export function MenuBar({
     const menu = bar[index];
     if (!node || !hasSubmenu(menu)) return;
     const width = menuListWidth(node, menu.items, fontSize);
-    const height = menuListHeight(menu.items);
+    const height = menuListHeight(menu.items, fontSize);
     const next = anchorRect(node, { placement: 'bottom', width, height });
     if (!next) return;
     openRef.current = index;
@@ -857,7 +879,7 @@ export function MenuBar({
       return {
         placement: 'bottom',
         width: menuListWidth(node, menu.items, fontSize),
-        height: menuListHeight(menu.items),
+        height: menuListHeight(menu.items, fontSize),
       };
     },
     setRect,
@@ -898,6 +920,8 @@ export function MenuBar({
           flexDirection: 'row',
           alignItems: 'center',
           backgroundColor: theme.surfaceHover,
+          paddingLeft: BAR_INSET - BAR_GAP,
+          paddingRight: BAR_INSET - BAR_GAP,
         },
         style,
       ],
@@ -984,11 +1008,11 @@ export function MenuBar({
               // always was.
               marginTop: BAR_INSET,
               marginBottom: BAR_INSET,
-              marginLeft: 1,
-              marginRight: 1,
+              marginLeft: BAR_GAP,
+              marginRight: BAR_GAP,
               paddingTop: 6 - BAR_INSET,
               paddingBottom: 6 - BAR_INSET,
-              borderRadius: theme.radiusPopupItem,
+              borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
               backgroundColor:
                 barState === 'active'
                   ? theme.hoverBackground
@@ -1020,10 +1044,13 @@ export function MenuBar({
         h(
           'text',
           {
-            style: {
-              color: barState === 'active' ? theme.hoverText : theme.text,
-              fontSize: fontSize,
-            },
+            style: [
+              capTrim,
+              {
+                color: barState === 'active' ? theme.hoverText : theme.text,
+                fontSize: fontSize,
+              },
+            ],
           },
           menu.label,
         ),

@@ -224,12 +224,81 @@ export function useControl(disabled, onActivate, { styled = false } = {}) {
 
 const POINTER = Object.freeze({ cursor: 'pointer' });
 
+/**
+ * What every widget label is measured to: the capitals down to the last
+ * baseline, rather than the font's line box.
+ *
+ * **A line box is not the letters.** It is ascent plus descent plus line
+ * gap, and the space it leaves over a capital differs from the space under a
+ * baseline by `(ascent - capHeight) - descent` — a property of the typeface,
+ * not of the design. So a label centred in a row, or padded inside a button,
+ * is only ever optically even by luck, and which way it is off changes with
+ * the font: at 14px, SF NS leaves 3.7px above the cap against 2.9px below
+ * the baseline and the label rides low, while Helvetica leaves 0.7 against
+ * 3.2 and it rides high. Nothing in the widget can correct for that, because
+ * the widget does not know the face it will be drawn in.
+ *
+ * Trimming makes the box *be* the letters, so the padding around a label is
+ * the padding you asked for and centring centres what can be seen. It is
+ * `textBoxTrim` in styling.md — CSS's `text-box-trim: trim-both` with
+ * `text-box-edge: cap alphabetic` — and the palette's `paddingY` is sized
+ * for the trimmed box.
+ *
+ * **Labels, not glyph marks.** A check, a submenu arrow or an icon drawn as
+ * text is centred on its own middle rather than sitting on a baseline, and
+ * cap-trimming its box moves it off centre. Those keep the full line box.
+ */
+export const capTrim = Object.freeze({ textBoxTrim: 'cap-alphabetic' });
+
+/**
+ * How tall a trimmed single-line label comes out at this size — the band the
+ * space around a row has to be even about.
+ *
+ * From the size rather than from the face on purpose: a popup is **sized
+ * before it is laid out** (a menu is an X window, and its width and height go
+ * to the server with the map request), so the row height cannot wait for a
+ * font to be matched. Cap height is 0.70–0.73em in every UI face measured —
+ * Arial .717, Helvetica .717, SF NS .704, Verdana .727, DejaVu .729 — so this
+ * lands within a pixel of the metrics for all of them, and the trim keeps the
+ * label centred inside whatever it lands on.
+ */
+export const capBand = (fontSize) => Math.round(fontSize * 0.72);
+
+/**
+ * The geometry of rows on a rounded sheet: how far a row sits inside the
+ * sheet's edge, and how round its own corners are.
+ *
+ * **Concentric corners.** A rounded rect inside a rounded rect only looks
+ * like one shape when the two curves share a centre, which happens exactly
+ * when the inner radius is the outer radius less the gap between them. Any
+ * other pairing leaves the pill's corner either tighter or wider than the
+ * sheet's, and the eye reads the mismatch as a wobble along the corner even
+ * where it cannot name it. So the inset and the pill's radius are not two
+ * numbers a widget picks: given the sheet's radius, choosing one fixes the
+ * other, and this returns the pair.
+ *
+ * The inset is the free choice — a pill has to be *seen* to be inset, and it
+ * is also what the popup's own size was measured with — so the widget names
+ * it and the radius follows. `radiusPopupItem` is the ceiling rather than the
+ * value: a theme that wants rounder pills says so by rounding the sheet they
+ * sit on, which is the only way the two can agree.
+ */
+export const rowRadius = (theme, border, inset) =>
+  Math.max(
+    0,
+    Math.min(
+      theme.radiusPopupItem ?? Infinity,
+      (theme.radiusPopup ?? 0) - border - inset,
+    ),
+  );
+
 /** String/number children become a `<text>` with `style`; elements pass
- * through untouched. */
+ * through untouched. Strings are labels, so they are trimmed to their
+ * letters — see {@link capTrim}. */
 export function labelContent(children, style) {
   return React.Children.map(children, (child) =>
     typeof child === 'string' || typeof child === 'number'
-      ? h('text', { style }, child)
+      ? h('text', { style: [capTrim, style] }, child)
       : child,
   );
 }
