@@ -32,6 +32,7 @@ import React, { useRef, useState } from 'react';
 import {
   createRoot,
   createStyles,
+  Icon,
   Select,
   ThemeProvider,
   useAnchor,
@@ -327,6 +328,14 @@ function elbow(ctx, from, at, to, r) {
 
 // --- icons -----------------------------------------------------------------
 
+// Two sources, split on what the glyph is *about*. The affordances — the ×
+// that takes a value off the token field, the ✓ on a chosen row — come from
+// react-x11's own `<Icon>`, so this editor's controls agree with the
+// `Select` and the menus beside them without being told to
+// (docs/components.md#system-icons). The nouns are this app's: a git branch,
+// a folder, a trash can, a drag handle. A widget set does not ship those and
+// should not, so they are lucide, below.
+//
 // [lucide](https://lucide.dev), drawn through `<svg>` — the elements are JSX
 // here, so an icon is its paths and nothing else. What the site hands you
 // around those paths is a browser's business and is dropped: `xmlns` and
@@ -351,7 +360,7 @@ const LUCIDE = {
 // the style channel — which is also where a colour has to be for the
 // renderer to cache the drawing as coverage and recolour it per node
 // (docs/elements.md).
-function Icon({ children, color = '$faint', size = 16, style }) {
+function LucideIcon({ children, color = '$faint', size = 16, style }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -370,75 +379,60 @@ function Icon({ children, color = '$faint', size = 16, style }) {
 
 /** lucide `grip-vertical` — the drag handle. */
 const GripIcon = (props) => (
-  <Icon {...props}>
+  <LucideIcon {...props}>
     <circle cx={9} cy={5} r={1} />
     <circle cx={9} cy={12} r={1} />
     <circle cx={9} cy={19} r={1} />
     <circle cx={15} cy={5} r={1} />
     <circle cx={15} cy={12} r={1} />
     <circle cx={15} cy={19} r={1} />
-  </Icon>
+  </LucideIcon>
 );
 
 /** lucide `trash-2` — remove a row or a group. */
 const TrashIcon = (props) => (
-  <Icon {...props}>
+  <LucideIcon {...props}>
     <path d="M10 11v6" />
     <path d="M14 11v6" />
     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
     <path d="M3 6h18" />
     <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-  </Icon>
+  </LucideIcon>
 );
 
 /** lucide `lock` — the trigger that is not a rule. */
 const LockIcon = (props) => (
-  <Icon {...props}>
+  <LucideIcon {...props}>
     <rect width={18} height={11} x={3} y={11} rx={2} ry={2} />
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-  </Icon>
-);
-
-/** lucide `x` — take a value off the token field. */
-const CloseIcon = (props) => (
-  <Icon {...props}>
-    <path d="M18 6 6 18" />
-    <path d="m6 6 12 12" />
-  </Icon>
-);
-
-/** lucide `check` — the branch pills. */
-const CheckIcon = (props) => (
-  <Icon {...props}>
-    <path d="M20 6 9 17l-5-5" />
-  </Icon>
+  </LucideIcon>
 );
 
 /** lucide `git-branch` — Add rule. */
 const BranchIcon = (props) => (
-  <Icon {...props}>
+  <LucideIcon {...props}>
     <path d="M15 6a9 9 0 0 0-9 9V3" />
     <circle cx={18} cy={6} r={3} />
     <circle cx={6} cy={18} r={3} />
-  </Icon>
+  </LucideIcon>
 );
 
 /** lucide `list-tree` — Add condition. */
 const ListTreeIcon = (props) => (
-  <Icon {...props}>
+  <LucideIcon {...props}>
     <path d="M8 5h13" />
     <path d="M13 12h8" />
     <path d="M13 19h8" />
     <path d="M3 10a2 2 0 0 0 2 2h3" />
     <path d="M3 5v12a2 2 0 0 0 2 2h3" />
-  </Icon>
+  </LucideIcon>
 );
 
 /** lucide `folder` — Add group. */
 const FolderIcon = (props) => (
-  <Icon {...props}>
+  <LucideIcon {...props}>
     <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
-  </Icon>
+  </LucideIcon>
 );
 
 // --- labels ----------------------------------------------------------------
@@ -824,7 +818,7 @@ function TokenField({ options, values, onChange }) {
               set(values.filter((v) => v !== value));
             }}
           >
-            <CloseIcon size={14} />
+            <Icon name="close" size={14} color="$faint" />
           </box>
         </box>
       ))}
@@ -867,7 +861,7 @@ function TokenField({ options, values, onChange }) {
                     {/* the tick's slot is held whether or not it is on, so
                         the labels do not shuffle as values are picked */}
                     <box style={s.tick}>
-                      {on && <CheckIcon color={'$text'} size={16} />}
+                      {on && <Icon name="check" color="$text" size={16} />}
                     </box>
                     <Label style={s.menuText}>{option}</Label>
                   </box>
@@ -1369,7 +1363,7 @@ function Branch({ tone, label }) {
       : { backgroundColor: '$falseBg', color: '$falseText' };
   return (
     <box style={[s.branch, { backgroundColor: colors.backgroundColor }]}>
-      <CheckIcon color={colors.color} size={14} />
+      <Icon name="check" color={colors.color} size={14} />
       <Label style={[s.branchText, { color: colors.color }]}>{label}</Label>
     </box>
   );
