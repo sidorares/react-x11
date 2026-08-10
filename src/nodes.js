@@ -104,6 +104,51 @@ const STACK_BELOW = 1;
 // in progress; drained by flushWindowRestacks from resetAfterCommit.
 const pendingRestack = new Set();
 
+// Windows realized during the commit in progress, waiting to be mapped;
+// drained by flushWindowMaps from resetAfterCommit. See beginWindowMaps.
+const pendingMaps = new Set();
+let inCommit = false;
+
+/**
+ * A window maps at the *end* of the commit that realized it, not when
+ * `realize()` runs.
+ *
+ * React inserts a host instance before it hides it: `hideInstance` runs
+ * after the whole mutation phase, so a `<window>` born inside a hidden
+ * `<Activity>` — or inside a `<Suspense>` that suspends on its first render
+ * — used to be mapped and unmapped back to back. That pair is only safe
+ * when nothing redirects the map. Under a window manager holding
+ * SubstructureRedirect on the root the MapWindow is **not performed**: the
+ * server turns it into a MapRequest and leaves the window unmapped, so the
+ * UnmapWindow that follows lands on an already-unmapped window and is
+ * discarded. The window manager then services its MapRequest and the
+ * "hidden" window is on screen for good (issue #201).
+ *
+ * Deferring costs nothing — `resetAfterCommit` runs inside the same
+ * synchronous `render()` — and it means the map is decided at the one
+ * moment when whether the window is hidden is already known.
+ *
+ * Outside a commit (a `<popup>` realized from `commitMount`, which runs in
+ * the layout phase, or one built imperatively like the text controls' edit
+ * menu) there is no such phase to wait for, and no hiding on the way
+ * either: those map immediately.
+ */
+export function beginWindowMaps() {
+  // A commit that never reached `resetAfterCommit` left its queue behind,
+  // and a window that is owed a map had better get one late rather than
+  // never — that failure mode is an application with no windows in it.
+  flushWindowMaps();
+  inCommit = true;
+}
+
+/** Map every window this commit realized and did not then hide. */
+export function flushWindowMaps() {
+  inCommit = false;
+  const nodes = [...pendingMaps];
+  pendingMaps.clear();
+  for (const node of nodes) node._mapNow();
+}
+
 // --- damage -------------------------------------------------------------
 //
 // A frame either repaints the whole window or a bounded region of it. The
@@ -4561,6 +4606,9 @@ export class WindowNode extends Scrollable(Node) {
     this.root = this;
     this.attributes = attributes;
     this.window = null;
+    // whether this is the tree's own top-level window rather than a nested
+    // one or a popup — decided by realize(), read when it maps
+    this._topLevel = false;
     // set by realize() only once the ARGB visual is actually there, so the
     // paint path never assumes an alpha channel the window does not have
     this._transparent = false;
@@ -4818,17 +4866,30 @@ export class WindowNode extends Scrollable(Node) {
     // everything above it: EWMH's guarantee about `_NET_WM_USER_TIME` is
     // about the window's state at the moment it is mapped. First toplevel
     // only — a later `<window>` is not the launch (src/startup.js).
-    if (!parentWindow && !this.isPopup) {
-      this.app._reactX11Startup?.decorate(wnd);
-    }
-    wnd.map?.();
-    if (!parentWindow && !this.isPopup) {
-      this.app._reactX11Startup?.mapped(wnd);
-    }
+    this._topLevel = !parentWindow && !this.isPopup;
+    if (this._topLevel) this.app._reactX11Startup?.decorate(wnd);
+    // Queued rather than mapped, when there is a commit to queue behind:
+    // React hides a subtree only once it has inserted it (beginWindowMaps).
+    if (inCommit) pendingMaps.add(this);
+    else this._mapNow();
     // ask before anything can be anchored to it, so the first popup is
     // placed as well as the second
     this._refreshScreenOrigin();
     this.invalidate(true, null, 'mount');
+  }
+
+  /**
+   * Put the window on screen, unless this commit went on to hide it.
+   *
+   * The only caller that maps a window for the first time is
+   * `flushWindowMaps` (or `realize` itself outside a commit); `setHidden`
+   * comes back through here so that a window born hidden and revealed later
+   * still ends the startup sequence on its real first map.
+   */
+  _mapNow() {
+    if (this.destroyed || !this.window || this.hidden) return;
+    this.window.map?.();
+    if (this._topLevel) this.app._reactX11Startup?.mapped(this.window);
   }
 
   /**
@@ -5638,9 +5699,22 @@ export class WindowNode extends Scrollable(Node) {
     for (const claim of claims) this.invalidate(false, claim, 'animation');
   }
 
+  /**
+   * A window is hidden by unmapping it, not by yoga's `display: none`: it is
+   * its own layout root, so collapsing it would throw away the arrangement
+   * it comes back to — and there is no parent flex line for it to leave.
+   * The flag is still recorded, because it is what tells a map that has not
+   * gone out yet not to bother.
+   */
   setHidden(hidden) {
+    this.hidden = hidden;
+    // A map still queued for the end of this commit reads `hidden` when it
+    // runs, so there is nothing to send here — and an unmap sent now would
+    // do nothing anyway, the server not having mapped the window yet
+    // (issue #201).
+    if (pendingMaps.has(this)) return;
     if (hidden) this.window?.unmap?.();
-    else this.window?.map?.();
+    else this._mapNow();
   }
 
   /**
