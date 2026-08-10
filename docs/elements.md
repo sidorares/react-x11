@@ -990,18 +990,21 @@ const chevron = (ctx, { width: w, height: h }) => {
 />;
 ```
 
-What the promise buys is at the cache: a `mono` drawing is kept as **coverage**
-rather than as pixels, with the colour applied at composite time, so the colour
-leaves the key. One rendered copy then serves hover, `:disabled`, an accent
-change and both colour schemes — where without it each colour of the same shape
-is a separate rasterization and a separate pixmap. It is the trick the glyph
-cache runs on text, and the same one `<svg>` gets for a document that paints in
-one colour (`fill="currentColor"`); a closure cannot be scanned the way a
-document can, so here you say it.
+The promise is what lets one drawing serve every state a control puts it in:
+`:hover`, `:disabled` and a theme flip all reach the same `onDraw`, and none of
+them is the drawing's business.
 
-A `mono` drawing that sets its own `fillStyle` is a bug rather than an
-override — colour is out of the key, so two colours of it collide on one entry.
-`REACT_X11_PAINT_CACHE=verify` catches it.
+**What it does not buy yet.** A single-colour drawing can in principle be
+cached as **coverage** and painted through at composite time, so the colour
+leaves the key and one rendered copy serves every ink — the trick the glyph
+cache runs on text, and the one `<svg>` gets for a `fill="currentColor"`
+document. `mono` was written for that, and it is switched off: the coverage
+composite comes out empty under nested non-rectangular clips, which is an
+ordinary thing for a widget to sit inside (a rounded card, then a scrolled
+list, then a rounded row, then a checkbox well). So a `mono` entry bakes its
+colour and the colour is part of its key. Sharing across _instances_ — the
+wall of identical icons — is unaffected, and that is where the entries come
+from anyway.
 
 `mono` works without `cacheKey` (the ink is preset either way), but the two
 together are the point. The [system icon set](components.md#system-icons) is

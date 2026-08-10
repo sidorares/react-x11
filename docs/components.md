@@ -216,12 +216,18 @@ of things every call site repeats, and nothing about the set changes.
 
 Each glyph is a drawing over `<canvas mono>`
 ([elements.md](elements.md#canvas)), which is a promise that everything it
-paints is one colour it did not choose. The paint cache then keeps it as a
-**coverage** surface with the colour applied at composite time, so the colour
-leaves the cache key: one rendered copy of `chevronDown` at 12px serves the
-resting row, the highlighted row, the disabled one and both colour schemes.
-The size cannot leave the key — a coverage surface is pixels at a fixed size
-— so a wall of one icon at one size is one entry, and at two sizes is two.
+paints is one colour it did not choose — so one drawing serves every state a
+control puts it in, and the paint cache can keep one rendered copy of
+`chevronDown` at 12px for every twisty in a `Tree` at once.
+
+An entry is per name, per size **and per colour**: a wall of one icon in one
+ink is one entry, and the same icon in a highlight is a second. The colour
+was meant to leave the key — a single-colour drawing can be cached as
+coverage and painted through at composite time, which is what `<svg>` does
+for a `mono` document — but that path composites empty under nested
+non-rectangular clips (a rounded card, a scrolled list, a rounded row, a
+checkbox well), so the colour is baked for now. The sharing that matters,
+across instances, is unaffected.
 
 The drawings are module-level, so re-rendering a `Tree` invalidates none of
 its twisties: `<canvas>` compares `onDraw` by identity, and a fresh closure

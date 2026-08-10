@@ -105,65 +105,74 @@ const row = (name, colours, size = 16) =>
     ),
   );
 
-test('one rendered copy serves every colour', async () => {
-  // The whole reason `mono` exists. Four cells of the same chevron in four
-  // inks: the coverage is rendered once and the colour arrives at blit
-  // time, so a hovered row, a disabled one and a dark scheme all reuse it.
+test('one rendered copy serves every instance', async () => {
+  // Content keying: four cells of one glyph in one ink are one entry and one
+  // rasterization, which is where the wall of identical twisties pays.
   const app = await headlessApp();
-  const ctl = await mount(
-    app,
-    row('chevronDown', ['#cc0000', '#0000cc', '#00aa00', '#aa00aa']),
-  );
+  const ctl = await mount(app, row('chevronDown', Array(4).fill('#cc0000')));
   const cache = ctl.root._paintCache;
 
   assert.ok(cache, 'the cache exists on an app that can make surfaces');
-  assert.equal(cache.entries.size, 1, 'four colours, one entry');
+  assert.equal(cache.entries.size, 1, 'four cells, one entry');
   assert.equal(cache.stats.renders, 1, 'rasterized once');
-
-  const [entry] = cache.entries.values();
-  assert.equal(entry.surface.format, 'a8', 'kept as coverage, not as pixels');
-
   await app.close();
 });
 
-test('and each cell is painted in its own colour', async () => {
-  // Sharing an entry is only right if the tint still lands: a chevron drawn
-  // once and blitted four times has to come out red, blue, green, purple.
+test('a cached glyph is painted, and in its own colour', async () => {
+  // The regression this exists for. It used to assert only that the four
+  // cells *shared* an entry, and to read pixels off `dot` — the one glyph in
+  // the set that fills rather than strokes. Both held while five of the six
+  // ticks in `examples/tasks.jsx` came out blank, because a coverage entry
+  // composites through ntk's `_drawCoverage` and that goes empty under
+  // nested non-rectangular clips. Colour is baked into the entry now, and
+  // what is asserted is the pixel a cached cell actually shows.
   const app = await headlessApp();
-  const ctl = await mount(
-    app,
-    row('dot', ['#cc0000', '#0000cc', '#00aa00', '#aa00aa'], 16),
-  );
-
-  const px = await pixels(app, ctl.root);
-  const want = [
-    [204, 0, 0],
-    [0, 0, 204],
-    [0, 170, 0],
-    [170, 0, 170],
-  ];
-  // the centre of each disc, which is solid coverage rather than an edge
-  for (let i = 0; i < want.length; i++) {
-    const got = px(i * 20 + 8, 8);
-    assert.ok(
-      got.every((c, k) => Math.abs(c - want[i][k]) <= 24),
-      `cell ${i}: got ${got}, wanted ${want[i]}`,
+  for (const name of ['check', 'chevronRight', 'dot', 'close']) {
+    const ctl = await mount(
+      app,
+      row(name, ['#cc0000', '#cc0000', '#0000cc', '#0000cc'], 16),
     );
+    const px = await pixels(app, ctl.root);
+    // Cells 1 and 3 are the cached ones: the first sighting of each key
+    // paints live, the second is served from the entry.
+    for (const [cell, want] of [
+      [1, [204, 0, 0]],
+      [3, [0, 0, 204]],
+    ]) {
+      let hits = 0;
+      for (let y = 0; y < 16; y++) {
+        for (let x = 0; x < 16; x++) {
+          const got = px(cell * 20 + x, y);
+          if (got.every((c, k) => Math.abs(c - want[k]) <= 40)) hits++;
+        }
+      }
+      assert.ok(hits >= 8, `${name} cell ${cell}: only ${hits} inked pixels`);
+    }
   }
   await app.close();
 });
 
-test('the colour is out of the key, the name and the size are in it', async () => {
+test('the ink, the name and the size are all in the key', async () => {
+  // The ink is in the key because it is in the pixels: a `mono` entry bakes
+  // its colour until ntk can composite coverage under a rounded clip.
   const app = await headlessApp();
-  const ctl = await mount(app, row('check', ['#cc0000', '#0000cc']));
-  const [key] = [...ctl.root._paintCache.entries.keys()];
+  // Two cells per ink: one sighting of a key only arms the "seen twice"
+  // gate, so a single cell of each would cache nothing to look at.
+  const ctl = await mount(
+    app,
+    row('check', ['#cc0000', '#cc0000', '#0000cc', '#0000cc']),
+  );
+  const keys = [...ctl.root._paintCache.entries.keys()];
 
-  assert.match(key, /\bmono\b/, 'planned as coverage');
-  assert.match(key, /check/, 'the name is in the key');
-  assert.match(key, /16x16/, 'and the size it was drawn at');
+  assert.equal(keys.length, 2, 'two inks, two entries');
+  for (const key of keys) {
+    assert.match(key, /check/, 'the name is in the key');
+    assert.match(key, /16x16/, 'and the size it was drawn at');
+  }
   assert.ok(
-    !key.includes('cc0000') && !key.includes('0000cc'),
-    `the colour must not be in the key: ${key}`,
+    keys.some((k) => k.includes('cc0000')) &&
+      keys.some((k) => k.includes('0000cc')),
+    `and the ink: ${keys.join(' ')}`,
   );
   await app.close();
 });

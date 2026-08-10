@@ -3041,24 +3041,29 @@ export class CanvasNode extends Node {
    * already draws origin-relative, so the cached render and the live one are
    * the same code.
    *
-   * ## `mono`: coverage, and the colour out of the key
+   * ## `mono`, and why its entry is still pixels
    *
    * `<canvas mono>` is a promise about the drawing — *everything I paint is
    * one colour, and it is not mine to choose*. `onDraw` then names no colour
    * at all: `fillStyle` and `strokeStyle` arrive preset from `style.color`.
    *
-   * That promise is what lets the entry be an **a8 coverage** surface with
-   * the colour applied at blit time, so the colour leaves the key: one
-   * rendered copy of a chevron serves the resting row, the highlighted row,
-   * the disabled one and both schemes. Without it each colour is a separate
-   * argb32 entry, which for an icon in four states is four rasterizations
-   * and four pixmaps of the same shape. `SvgView.paintKind` decides the same
-   * thing by scanning the document; a closure cannot be scanned, so here the
-   * author says it.
+   * The promise is worth making on its own — it is what lets one drawing
+   * serve every state a control puts it in — but it does **not** currently
+   * buy an a8 coverage entry with the colour applied at blit time, which is
+   * what it was written for and what `<svg>` does for a `mono` document.
+   * Coverage composites through ntk's `_drawCoverage`, which folds the
+   * colour in and routes a clip it cannot express as a rectangle through a
+   * scratch mask; nested rounded clips — a card, then a scrolled list, then
+   * a row, then a checkbox well — come out empty. `examples/tasks.jsx` draws
+   * exactly that nesting, and five of its six ticks vanished.
    *
-   * A drawing that sets its own `fillStyle` under `mono` is a bug the digest
-   * catches: colour is out of the key, so two colours of one drawing collide
-   * on one entry and `REACT_X11_PAINT_CACHE=verify` complains.
+   * So the colour is baked and joins the key. The cost is one entry per
+   * colour of a drawing rather than one per drawing, which for an icon in
+   * four states is four small pixmaps instead of one; the sharing across
+   * *instances* — the wall of 400 identical twisties — is untouched, and
+   * that is where the entries were always going to come from. When the ntk
+   * side is fixed this becomes `format: 'a8'`, `tint`, and the colour out of
+   * the key again, with no change above this line.
    */
   paintCachePlan() {
     const { cacheKey, onDraw, mono } = this.props;
@@ -3066,18 +3071,19 @@ export class CanvasNode extends Node {
     const width = Math.ceil(this.abs.width);
     const height = Math.ceil(this.abs.height);
     if (width <= 0 || height <= 0) return null;
-    const tint = mono ? this._monoColor() : null;
-    // Nothing to composite through: an unpainted colour would blit the
-    // coverage as-is, which is not what "invisible" looks like.
-    if (mono && !isPaintedColor(tint)) return null;
+    const ink = mono ? this._monoColor() : null;
+    // Nothing to paint through: a drawing whose ink is `transparent` would
+    // otherwise cache an empty surface under a key that says it is not.
+    if (mono && !isPaintedColor(ink)) return null;
     return {
-      key: `canvas|${width}x${height}@1|${mono ? 'mono|' : ''}${cacheKey}`,
+      // The ink is in the key because it is in the pixels — see above.
+      key: `canvas|${width}x${height}@1|${mono ? `${ink}|` : ''}${cacheKey}`,
       x: Math.round(this.abs.x),
       y: Math.round(this.abs.y),
       width,
       height,
-      format: mono ? 'a8' : 'argb32',
-      tint,
+      format: 'argb32',
+      tint: null,
     };
   }
 
@@ -3089,9 +3095,10 @@ export class CanvasNode extends Node {
     ctx.rect(box.x, box.y, box.width, box.height);
     ctx.clip();
     ctx.translate(box.x, box.y);
-    // Into a coverage surface only the alpha of a paint survives and the
-    // tint arrives at blit time, so any opaque colour renders the same mask.
-    if (this.props.mono) this._presetMono(ctx, '#ffffff');
+    // The same ink the live paint would use: the entry bakes its colour, and
+    // that colour is in the key. (A coverage entry would render this in
+    // opaque white and tint at blit time — see `paintCachePlan`.)
+    if (this.props.mono) this._presetMono(ctx, this._monoColor());
     try {
       onDraw(ctx, { width: box.width, height: box.height, node: this });
     } finally {

@@ -173,6 +173,17 @@ function sameDayIn(month, day) {
   return `${month}-${String(Math.min(wanted, last)).padStart(2, '0')}`;
 }
 
+/**
+ * `direction` is the number of months the button steps, `-1` or `+1` — the
+ * argument it already hands `stepMonth`, rather than a second vocabulary
+ * beside it.
+ *
+ * It used to be `'left'`/`'right'` while this function tested `direction < 0`,
+ * and `'left' < 0` is false: every button announced itself as "Next month",
+ * and the glyph followed the label once the icon set took the same test over
+ * from `direction === 'left'`. One name, one type, and the comparison that
+ * reads correctly is the only one available.
+ */
 function NavButton({ direction, disabled, onPress, theme }) {
   return h(
     'box',
@@ -514,7 +525,7 @@ export function Calendar({
       'box',
       { style: s.header },
       h(NavButton, {
-        direction: 'left',
+        direction: -1,
         disabled: !canGoBack,
         theme,
         onPress: () => stepMonth(-1),
@@ -531,7 +542,7 @@ export function Calendar({
         formatMonth(visibleMonth, locale),
       ),
       h(NavButton, {
-        direction: 'right',
+        direction: 1,
         disabled: !canGoOn,
         theme,
         onPress: () => stepMonth(1),

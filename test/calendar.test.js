@@ -399,3 +399,48 @@ test('the week starts where the caller says, and the labels follow', () => {
   assert.deepStrictEqual(weekdayLabels('en-GB', 1).slice(0, 2), ['Mon', 'Tue']);
   assert.strictEqual(weekdayLabels('en-GB', 0)[0], 'Sun');
 });
+
+test('the month nav points, announces and steps the same way', async () => {
+  // Three things that have to agree and had drifted apart: `direction` was
+  // `'left'`/`'right'` while `NavButton` tested `direction < 0`, so both
+  // buttons announced "Next month" — and once the icon set took the same
+  // test over from `direction === 'left'`, both drew a right-pointing
+  // chevron too. Only the click was ever right.
+  const { app, root } = await mount({});
+
+  const buttons = nodes(
+    treeOf(app),
+    (n) =>
+      n.props?.role === 'button' && n.props['aria-label']?.endsWith(' month'),
+  );
+  assert.deepStrictEqual(
+    buttons.map((b) => b.props['aria-label']),
+    ['Previous month', 'Next month'],
+    'one of each, in reading order',
+  );
+
+  // The glyph, read off the node rather than off the source: the icon set
+  // keys its cache by name, which is the drawing it is about to paint.
+  const glyphOf = (button) =>
+    nodes(button, (n) => n.kind === 'canvas')[0]?.props.cacheKey;
+  assert.strictEqual(glyphOf(buttons[0]), 'chevronLeft', 'back points back');
+  assert.strictEqual(glyphOf(buttons[1]), 'chevronRight', 'on points on');
+
+  // and the press goes the way the arrow does
+  click(app, buttons[0]);
+  await settle();
+  assert.ok(
+    texts(treeOf(app)).some((t) => t.includes('July')),
+    `back should reach July: ${texts(treeOf(app)).slice(0, 3).join(' ')}`,
+  );
+
+  click(app, buttons[1]);
+  click(app, buttons[1]);
+  await settle();
+  assert.ok(
+    texts(treeOf(app)).some((t) => t.includes('September')),
+    'and on should reach September',
+  );
+
+  await root.unmount();
+});

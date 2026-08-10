@@ -23,13 +23,14 @@
 //
 // ## How they are drawn, and why not a font
 //
-// A drawing per icon over `<canvas mono>`, so the paint cache keeps each one
-// as an a8 coverage surface with the colour applied at blit time (see
-// `CanvasNode.paintCachePlan`): one rendered copy of `chevronDown` at 12px
-// serves the resting row, the highlighted row, the disabled one and both
-// colour schemes. The draw functions are module-level, so their identity is
-// stable across renders and a table of 500 twisties invalidates nothing when
-// its rows re-render.
+// A drawing per icon over `<canvas mono>`: the ink comes from `style.color`,
+// so one drawing serves the resting row, the highlighted row, the disabled
+// one and both colour schemes, and the paint cache keeps one rendered copy
+// for every instance of it on screen. (A `mono` entry bakes its colour for
+// now rather than caching coverage and tinting at composite time — see
+// `CanvasNode.paintCachePlan` for why, and what it costs.) The draw
+// functions are module-level, so their identity is stable across renders and
+// a table of 500 twisties invalidates nothing when its rows re-render.
 //
 // A bundled icon *font* would work — ntk's FontManager takes font bytes, and
 // glyphs composite through a solid source picture, so a whole column of
