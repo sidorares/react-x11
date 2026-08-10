@@ -208,9 +208,33 @@ on its own middle rather than sitting on a baseline, so trimming its box
 moves it off centre. Those keep the full line box, and so should yours.
 
 `<textinput>` cannot trim — its caret and selection are measured against the
-full line box — so it does the same thing by moving the line instead: the
-baseline goes where the space above the capitals equals the space under it,
-and the caret and the selection follow, being drawn from the same origin.
+full line box — so it reaches the same place from the other side: its **box**
+is the cap band, its baseline goes where the space above the capitals equals
+the space under it, and the glyphs are allowed to hang out of the box the way
+a trimmed label's descenders do. The drawing is clipped one step out, at the
+padding box, so an ascender and a descender are both there and neither can
+reach the border. The caret and the selection follow, being drawn from the
+same origin.
+
+That is what makes a field the same height as the controls beside it. Padding
+it with the palette's `paddingY` gives exactly the height a `<Button>` and a
+`<Select>` have, because all three are now the same sum — the capitals, plus
+that padding twice, plus the border:
+
+```jsx
+<textinput
+  style={{
+    paddingTop: '$paddingY',
+    paddingBottom: '$paddingY',
+    paddingLeft: 10,
+    paddingRight: 10,
+    borderWidth: '$borderWidth',
+  }}
+/>
+```
+
+`<textarea>` keeps its full line boxes, box and clip both: it is line spacing
+that a paragraph is made of, and nothing hangs out of a stack of them.
 
 ## Keeping text on one line
 

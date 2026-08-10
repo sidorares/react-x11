@@ -325,7 +325,13 @@ export function Select({
           flexDirection: 'row',
           alignItems: 'center',
           gap: 8,
-          padding: 8,
+          // The vertical padding is the palette's, the same one a `<Button>`
+          // takes, because these are controls of one family and a form puts
+          // them in a row together. Horizontally it is its own, tighter
+          // number: a dropdown is a field with a value in it, not a button
+          // with a word centred on it.
+          paddingTop: theme.paddingY,
+          paddingBottom: theme.paddingY,
           paddingLeft: 10,
           paddingRight: 10,
           borderWidth: theme.borderWidth,

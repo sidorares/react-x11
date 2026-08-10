@@ -64,9 +64,15 @@ export function FormPanel() {
         onChange={(ev) => setName(ev.target.value)}
         onSubmit={submit}
         style={{
-          padding: 8,
-          borderRadius: 4,
-          borderWidth: 1,
+          // the palette's own control padding, which is what makes this
+          // field exactly as tall as the Select and the buttons under it —
+          // a field's box is its capitals, the same as a label's
+          paddingTop: '$paddingY',
+          paddingBottom: '$paddingY',
+          paddingLeft: 10,
+          paddingRight: 10,
+          borderRadius: '$radius',
+          borderWidth: '$borderWidth',
           borderColor: '$border',
           backgroundColor: '$background',
         }}

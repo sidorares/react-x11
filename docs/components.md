@@ -56,7 +56,10 @@ label band plus this twice. That makes it a larger number than the same look
 would need in CSS, and it makes it mean the same thing in every typeface.
 Rows on a popup follow the same rule — a menu row and a `Select` option are
 their label with `padding` all round, so the space above a row's text is the
-space beside it.
+space beside it. So does `<textinput>`, which is what keeps a field the same
+height as the `Button` and the `Select` next to it on a form; give it
+`paddingY` and the three agree by construction
+([styling.md](styling.md#measuring-text-to-its-letters)).
 
 The `…Active` three are the colour a control takes **while it is held**, and
 a palette almost never sets them: each is derived from the step the palette's

@@ -1333,6 +1333,75 @@ test('a button holds its label evenly on the capitals', async () => {
   }
 });
 
+// A form puts a field, a dropdown and a button in one row, so the three have
+// to be one height — and they are only one height if they measure the same
+// way. Every label is its capitals plus the padding; a field cannot trim its
+// box, since the caret is measured against the full line box, so it takes the
+// cap band as its box instead and lets the glyphs hang out of it. Get that
+// wrong and the field is the line box taller than everything beside it, which
+// is what happened the moment the labels were trimmed and this did not follow.
+test('a field, a dropdown and a button are the same height', async () => {
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  const { Button, Select } = await import('../src/index.js');
+  const field = {
+    paddingTop: '$paddingY',
+    paddingBottom: '$paddingY',
+    paddingLeft: 10,
+    paddingRight: 10,
+    borderWidth: '$borderWidth',
+  };
+
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        {
+          width: 420,
+          height: 200,
+          // in a row, sharing a top edge, which is both what a form does and
+          // what keeps yoga's pixel-grid rounding out of the comparison
+          style: {
+            padding: 8,
+            gap: 8,
+            flexDirection: 'row',
+            alignItems: 'flex-start',
+          },
+        },
+        React.createElement('textinput', { value: 'Hg', style: field }),
+        React.createElement(Select, {
+          options: ['Blue', 'Red'],
+          value: 'Blue',
+          onChange: () => {},
+        }),
+        React.createElement(Button, null, 'Sign'),
+      ),
+      x11Root,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const all = [];
+    const walk = (n) => {
+      all.push(n);
+      for (const c of n.children) if (!c.isWindow) walk(c);
+    };
+    walk(wnd._reactX11Node);
+    const input = all.find((n) => n.kind === 'textinput');
+    const button = all.find((n) => n.props.role === 'button');
+    const select = all.find(
+      (n) =>
+        n.props.role === 'combobox' || n.props['aria-haspopup'] === 'listbox',
+    );
+    assert.ok(input && button && select, 'all three built');
+    assert.equal(input.abs.height, button.abs.height, 'field vs button');
+    assert.equal(select.abs.height, button.abs.height, 'dropdown vs button');
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+  }
+});
+
 // A row is a fixed height, so a cell that wraps is not a taller row — it is
 // a line and a half of text with the rest sliced off, top and bottom, and it
 // spills over the rows either side on the way. Needs real metrics: the mock

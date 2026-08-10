@@ -3126,7 +3126,10 @@ export class TextInputNode extends Node {
         widthMode === Yoga.MEASURE_MODE_UNDEFINED
           ? preferred
           : Math.min(preferred, width);
-      return { width: w, height: Math.ceil(this._lineHeight()) };
+      // Not rounded here: a trimmed `<text>` hands yoga the raw cap band too,
+      // and rounding one of them and not the other is a pixel of difference
+      // between a field and the button beside it.
+      return { width: w, height: this._capBand() };
     });
   }
 
@@ -3249,6 +3252,46 @@ export class TextInputNode extends Node {
     const layout = this._layoutOf('Mg');
     if (layout) return layout.height;
     return (this.style.fontSize ?? DEFAULT_TEXT_STYLE.size) * 1.4;
+  }
+
+  /**
+   * What one line of this field is *worth* vertically: the capitals down to
+   * the baseline, which is what its padding is measured from.
+   *
+   * The same rule every label follows — `textBoxTrim: 'cap-alphabetic'` in
+   * styling.md — reached a different way, because a field cannot trim. Its
+   * caret and its selection are measured against the full line box, and the
+   * glyphs have to be able to hang out of the box for the descenders to be
+   * there at all; so the *box* is the cap band and the drawing is clipped to
+   * the padding box instead, one step out. A field and a `<Button>` with the
+   * same padding are then the same height, which is the whole point: they sit
+   * next to each other on every form there has ever been.
+   */
+  /**
+   * The rectangle the text may draw in: the padding box horizontally
+   * unchanged, vertically grown out to where the border starts. `<textarea>`
+   * keeps the content box, because its box *is* line boxes and nothing hangs
+   * out of it.
+   */
+  _inkClip(content) {
+    const box = this.abs;
+    const top = box.y + this.yoga.getComputedBorder(Yoga.EDGE_TOP);
+    const bottom =
+      box.y + box.height - this.yoga.getComputedBorder(Yoga.EDGE_BOTTOM);
+    return {
+      x: content.x,
+      y: Math.min(content.y, top),
+      width: content.width,
+      height: Math.max(content.height, bottom - Math.min(content.y, top)),
+    };
+  }
+
+  _capBand() {
+    const style = this._textStyle();
+    const cap = this.app?.fonts
+      ?.match?.(style.family, { weight: style.weight, style: style.style })
+      ?.metrics?.(style.size)?.capHeight;
+    return cap || this._lineHeight();
   }
 
   /** Shaped layout of the current value, cached per (value, style).
@@ -4116,7 +4159,12 @@ export class TextInputNode extends Node {
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(content.x, content.y, content.width, content.height);
+    // Clipped to the **padding** box, not the content box: the content box is
+    // the cap band, and an ascender or a descender is outside it by
+    // construction. The padding is where a field's own border stops the text
+    // anyway, so this is the edge that was always meant.
+    const clip = this._inkClip(content);
+    ctx.rect(clip.x, clip.y, clip.width, clip.height);
     ctx.clip();
     const originX = content.x - this._scrollX;
 
