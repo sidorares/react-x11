@@ -76,6 +76,20 @@ const BAR_INSET = 3;
 // the gap between two pills, split between them
 const BAR_GAP = 1;
 
+// A bar item wears the same pill as a row in the menu it opens, so it takes
+// the row's padding rather than numbers of its own: a title packed tighter
+// than its own first row is the tell that the two were measured separately.
+// Vertically that is `MENU_ITEM_PAD` exactly — same padding, same `capTrim`
+// text — which makes the pill `menuRowHeight` tall, and the bar that much
+// taller for it.
+//
+// Horizontally it takes a little more. A row's label is not `MENU_ITEM_PAD`
+// from the pill's edge but a whole `MENU_GUTTER` in, past the check column,
+// so matching the row's padding here would read as the cramped one: on a
+// strip the pills sit shoulder to shoulder, with nothing but that padding
+// between one label and the next.
+const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 4;
+
 // The horizontal gap between a menu and the submenu it opens, measured from
 // the parent popup's outer edge — so `0` is flush against it, a positive
 // value leaves the desktop showing between the two, and a negative one
@@ -1001,8 +1015,8 @@ export function MenuBar({
           style: [
             {
               cursor: 'pointer',
-              paddingLeft: 10,
-              paddingRight: 10,
+              paddingLeft: BAR_ITEM_PAD_X,
+              paddingRight: BAR_ITEM_PAD_X,
               // The same pill the rows inside the menu wear, at the same
               // radius: the bar item and the first row of the menu it opens
               // are one gesture, and a square title over rounded rows reads
@@ -1010,15 +1024,16 @@ export function MenuBar({
               //
               // The margin is what a radius needs to be seen — a rounded
               // rect flush against the strip's own edges reads as a cut
-              // corner rather than a pill — and it comes out of the padding
-              // rather than being added to it, so the bar is the height it
-              // always was.
+              // corner rather than a pill. It sits *outside* the padding, so
+              // the bar is a menu row plus its two insets tall: the item and
+              // the row below it are then the same pill in the same size,
+              // which is the whole point of giving the bar one.
               marginTop: BAR_INSET,
               marginBottom: BAR_INSET,
               marginLeft: BAR_GAP,
               marginRight: BAR_GAP,
-              paddingTop: 6 - BAR_INSET,
-              paddingBottom: 6 - BAR_INSET,
+              paddingTop: MENU_ITEM_PAD,
+              paddingBottom: MENU_ITEM_PAD,
               borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
               backgroundColor:
                 barState === 'active'
