@@ -331,6 +331,77 @@ test('the set is affordances, and every name draws', () => {
   }
 });
 
+test('the ink fills the box — `size` is the mark', async () => {
+  // The regression this pins: the glyphs were first drawn on lucide's grid,
+  // where the ink is about 58% of the box and a chevron a quarter of it. Every
+  // call site here picks `size` as *how big the mark should be* — a Select's
+  // chevron matches the capitals beside it — so the grid convention made all
+  // of them about 40% too small, and it does not show up in any assertion
+  // about layout or caching. Measured off the pixels for that reason.
+  const app = await headlessApp();
+  const S = 32;
+  const ctl = await mount(
+    app,
+    h(
+      'window',
+      { width: W, height: H, style: { backgroundColor: '#ffffff' } },
+      h(Icon, {
+        name: 'chevronDown',
+        size: S,
+        color: '#000000',
+        style: { position: 'absolute', left: 0, top: 0 },
+      }),
+      h(Icon, {
+        name: 'close',
+        size: S,
+        color: '#000000',
+        style: { position: 'absolute', left: 50, top: 0 },
+      }),
+    ),
+  );
+  const px = await pixels(app, ctl.root);
+
+  /** The painted bounds of a glyph drawn at `left`, in its own box. */
+  const inked = (left) => {
+    let x0 = S,
+      y0 = S,
+      x1 = -1,
+      y1 = -1;
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const [r, g, b] = px(left + x, y);
+        if (r + g + b > 600) continue; // white background
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+    return { w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  };
+
+  const chevron = inked(0);
+  // A chevron's arms are 45°, so it is as wide as its box and half as tall.
+  assert.ok(
+    chevron.w >= S * 0.9,
+    `chevron should span its box: ${chevron.w} of ${S}`,
+  );
+  assert.ok(
+    chevron.h >= S * 0.42 && chevron.h <= S * 0.62,
+    `and stand half as tall: ${chevron.h} of ${S}`,
+  );
+
+  // Everything else fills both axes; `close` is inset a little because an X
+  // reaching the corners measures longer on the diagonal than anything else
+  // in the set measures on its side.
+  const x = inked(50);
+  assert.ok(
+    x.w >= S * 0.72 && x.h >= S * 0.72,
+    `close should fill its box: ${x.w}x${x.h} of ${S}`,
+  );
+  await app.close();
+});
+
 test('iconSize follows the type', () => {
   assert.equal(iconSize(14), 12, 'the 12px gutter the menu was built around');
   assert.ok(iconSize(20) > iconSize(14), 'and it scales with the palette');

@@ -94,8 +94,9 @@ const s = createStyles({
   sortMark: { marginLeft: 4 },
 });
 
-/** The sort chevron, a step under the 12px header text it follows. */
-const SORT_MARK = 10;
+/** The sort chevron, matched to the capitals of the 12px header it follows —
+ *  a chevron is as wide as its box, so this is a width rather than a height. */
+const SORT_MARK = 9;
 
 const value = (row, column) =>
   column.value ? column.value(row) : row[column.id];

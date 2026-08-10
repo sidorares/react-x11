@@ -177,7 +177,12 @@ export type IconName =
 
 export interface IconProps extends Omit<CanvasProps, 'onDraw' | 'cacheKey'> {
   name: IconName;
-  /** Default: a shade under the palette's `fontSize`. */
+  /**
+   * The size of the mark, not of a grid it sits in — the ink runs corner to
+   * corner, unlike lucide and its descendants. A chevron's arms are at 45°,
+   * so it is `size` along the way it points across and half that the other
+   * way. Default: a shade under the palette's `fontSize`.
+   */
   size?: number;
   /** Default: the palette's `text`. Colour does not cascade — a widget that
    *  paints its label in another ink hands the icon the same one. */

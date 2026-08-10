@@ -48,10 +48,11 @@ const PILL_H = 28;
 const MARKER_H = 8;
 const NAV = 26;
 // The month-nav glyph inside its 26px button. The chevron used to be drawn
-// tall and narrow (7×12) to read as an arrow at all; a square one at 14
-// covers the same optical width and is the same shape as every other
-// chevron in the set.
-const NAV_CHEVRON = 14;
+// tall and narrow (7×12) to read as an arrow at all; a square box at 12
+// puts the same ink there — a chevron's long axis is its box, and its short
+// one is half of that — and it is the same shape as every other chevron in
+// the set.
+const NAV_CHEVRON = 12;
 const PAD = 8;
 const GAP = 4;
 const WEEKDAY_H = 20;

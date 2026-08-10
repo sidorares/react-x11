@@ -149,14 +149,26 @@ import { Icon } from 'react-x11';
 | `close` `plus` `moreVertical`                          | dismiss, add, overflow               |
 | `eye` `eyeOff`                                         | reveal a secret, hide it again       |
 
-| prop    |                                                      |
-| ------- | ---------------------------------------------------- |
-| `name`  | one of the above; anything else throws               |
-| `size`  | the box, px. Default: a shade under `theme.fontSize` |
-| `color` | the ink. Default: `theme.text`                       |
+| prop    |                                                       |
+| ------- | ----------------------------------------------------- |
+| `name`  | one of the above; anything else throws                |
+| `size`  | the mark, px. Default: a shade under `theme.fontSize` |
+| `color` | the ink. Default: `theme.text`                        |
 
 Everything else goes to the host `<canvas>`, so a clickable one is
 `<Icon name="close" onClick={…} focusable />`.
+
+**`size` is the mark, not a grid it sits in.** This is the one place the set
+departs from how lucide and its descendants are drawn: theirs put about 14px
+of ink in a 24px box, so you reach for `size={20}` next to 14px text. Here
+the ink runs corner to corner, so `size` is what you actually see and the
+number to pick is the number you want — the `Select` chevron is
+`capBand(fontSize)` because it should be as wide as the capitals beside it.
+
+A chevron is the one glyph whose two axes differ: the arms are at 45°, so it
+is as long as `size` along the way it points across and half that the other
+way. `<Icon name="chevronDown" size={10} />` is 10 wide and 5 tall; the same
+size of `chevronRight` is 5 wide and 10 tall.
 
 ### Affordances, not nouns
 

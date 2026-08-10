@@ -347,7 +347,10 @@ function MenuRow({
     submenu &&
       h(Icon, {
         name: 'chevronRight',
-        size: MENU_ICON_SIZE,
+        // The capitals of the row, not the gutter's 16px column: a chevron
+        // stands as tall as its box, so `MENU_ICON_SIZE` would put an arrow
+        // beside the label taller than the label.
+        size: capBand(fontSize),
         color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
       }),
   );
