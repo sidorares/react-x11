@@ -158,7 +158,12 @@ export function _resetServiceCache() {
  *
  * - **Cancellation.** An `AbortSignal` calls `Request.Close()` on the same
  *   path. Per the XML that means **no `Response` is emitted**, so the promise
- *   has to be settled here rather than left waiting for one.
+ *   has to be settled here rather than left waiting for one. The listener goes
+ *   on **before the first await**, because `addEventListener('abort')` on a
+ *   signal that has already fired never runs: an abort that lands while
+ *   `AddMatch` or the initial call is still in flight would otherwise be
+ *   dropped, leaving a promise nothing can settle and a dialog on screen with
+ *   nobody listening — the exact leak this is here to prevent.
  * - **Deadlines.** There is deliberately **no timeout on the answer** — a
  *   dialog can legitimately be open for an hour, which is the whole reason
  *   portals are request-shaped instead of plain calls. Only the initial method
@@ -189,16 +194,6 @@ export async function portalRequest(
     return { sub, key };
   };
 
-  // Subscribe FIRST. Everything else in this function is bookkeeping around
-  // the fact that this line comes before the invoke.
-  let { sub, key } = await subscribe(path);
-  const answered = new Promise((resolve) => {
-    // `bus.signals` emits the signal's argument array.
-    bus.signals.once(key, ([response, results]) =>
-      resolve({ response, results: results ?? {} }),
-    );
-  });
-
   const closeRequest = (requestPath) =>
     bus
       .invoke({
@@ -213,11 +208,56 @@ export async function portalRequest(
         // The request may already be gone — that is the outcome we wanted.
       });
 
+  // The abort wiring, before anything that can suspend. `sent` is the guard on
+  // Close(): there is no request to close until the call has actually gone out,
+  // and the path the portal will answer on is the predictable one from here
+  // until a pre-0.9 portal says otherwise.
+  let sent = false;
+  let requestPath = path;
+  /** The path the abort actually closed, if it has fired. */
+  let closedPath = null;
   let onAbort;
+  let aborted;
+  if (signal) {
+    aborted = new Promise((_, reject) => {
+      onAbort = () => {
+        if (sent) {
+          closedPath = requestPath;
+          closeRequest(requestPath);
+        }
+        reject(signal.reason ?? new PortalCancelledError());
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    // Nothing awaits `aborted` until the races below, and an abort can land
+    // before then. Mark it handled so a rejection in that window is not an
+    // unhandled one; the races still see it.
+    aborted.catch(() => {});
+  }
+
+  // Subscribe FIRST. Everything else in this function is bookkeeping around
+  // the fact that this line comes before the invoke. It is not raced against
+  // the abort: a match rule half-added is a match rule leaked, so let it
+  // finish and let the `finally` below take it away again.
+  let { sub, key } = await subscribe(path);
+  const answered = new Promise((resolve) => {
+    // `bus.signals` emits the signal's argument array.
+    bus.signals.once(key, ([response, results]) =>
+      resolve({ response, results: results ?? {} }),
+    );
+  });
+
   try {
-    let handle;
-    try {
-      handle = await bus.invoke(
+    // An abort during `AddMatch` above: nothing has been asked for yet, so
+    // there is nothing to Close — just leave, and let the `finally` unsubscribe.
+    if (signal?.aborted) throw signal.reason ?? new PortalCancelledError();
+
+    // `sent` flips *before* the await, not after: from the moment the call is
+    // on the wire the portal may already have a dialog up, and an abort in that
+    // window has to Close it even though no handle has come back yet.
+    sent = true;
+    const call = bus
+      .invoke(
         {
           destination: PORTAL_NAME,
           path: PORTAL_PATH,
@@ -227,15 +267,33 @@ export async function portalRequest(
           body: [parentWindow, title, { ...options, handle_token: token }],
         },
         { timeout: 10_000 },
+      )
+      // Settled either way, so that an abort winning the race below does not
+      // leave this one rejecting into nobody's hands.
+      .then(
+        (handle) => ({ handle }),
+        (cause) => ({ cause }),
       );
-    } catch (cause) {
+
+    // A pre-0.9 portal that picks its own path is the one case where an abort
+    // that beat the reply closed the wrong one — and which path it really was
+    // is not knowable until the handle arrives, quite possibly after this
+    // function has already rejected.
+    call.then(({ handle }) => {
+      if (closedPath && typeof handle === 'string' && handle !== closedPath) {
+        closeRequest(handle);
+      }
+    });
+
+    const { handle, cause } = await Promise.race([call, aborted ?? call]);
+    if (cause)
       throw new NoPortalError(`${iface}.${member} did not answer`, cause);
-    }
 
     // Pre-0.9 portals chose their own path. Re-subscribe on the real one; the
     // first subscription stays until the finally below, which is cheaper than
     // getting the ordering wrong.
     if (typeof handle === 'string' && handle !== path) {
+      requestPath = handle;
       const moved = await subscribe(handle);
       bus.signals.once(moved.key, ([response, results]) => {
         bus.signals.emit(key, [response, results]);
@@ -243,22 +301,9 @@ export async function portalRequest(
       sub = { remove: () => Promise.all([sub.remove(), moved.sub.remove()]) };
     }
 
-    if (signal) {
-      onAbort = () => closeRequest(handle ?? path);
-      signal.addEventListener('abort', onAbort, { once: true });
-      // `Close()` produces no Response, so the abort has to settle the race
-      // itself rather than wait for one that will never arrive.
-      const aborted = new Promise((_, reject) => {
-        signal.addEventListener(
-          'abort',
-          () => reject(signal.reason ?? new PortalCancelledError()),
-          { once: true },
-        );
-      });
-      return await Promise.race([answered, aborted]);
-    }
-
-    return await answered;
+    // `Close()` produces no Response, so the abort has to settle the race
+    // itself rather than wait for one that will never arrive.
+    return await Promise.race([answered, aborted ?? answered]);
   } finally {
     if (onAbort) signal.removeEventListener('abort', onAbort);
     await sub.remove().catch(() => {});

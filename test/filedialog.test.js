@@ -227,6 +227,40 @@ describe('the portal', { ...needsBroker }, () => {
     });
   });
 
+  // The one above aborts as soon as the *portal* has recorded the call — which
+  // it does before its reply travels back, so on a loaded runner the abort can
+  // land while the client is still waiting for the handle. That used to be a
+  // hang rather than a failure: `addEventListener('abort')` on a signal that
+  // has already fired never runs, so the listener registered after the call
+  // returned was registered onto nothing, and a request with no Response
+  // coming waited for one forever. Here the reply is held on purpose, so the
+  // window is the whole test rather than a few microseconds of luck.
+  test('an abort that beats the portal reply is still an abort', async () => {
+    await withBus(async (address) => {
+      const portal = await fakePortal(
+        address,
+        { OpenFile: () => ({ silent: true }) },
+        { holdReply: 200 },
+      );
+      try {
+        const ac = new AbortController();
+        const pending = openFile({ signal: ac.signal });
+        await until(() => portal.calls.length === 1, 'the call to arrive');
+        ac.abort();
+        await assert.rejects(pending, /aborted/i);
+        // And the dialog the portal already has up is closed, which is the
+        // whole point of not simply walking away.
+        await until(
+          () => portal.closed.length === 1,
+          'the portal to see Close()',
+        );
+        assert.equal(portal.closed[0], portal.calls[0].path);
+      } finally {
+        await portal.stop();
+      }
+    });
+  });
+
   test('selectFolder asks for a directory', async () => {
     await withBus(async (address) => {
       const portal = await fakePortal(address, {

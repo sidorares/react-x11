@@ -28,8 +28,19 @@ const REQUEST_IFACE = 'org.freedesktop.portal.Request';
  * The returned object records every call in `calls`, so a test can assert on
  * what was actually marshalled — which is where the option translation is
  * pinned.
+ *
+ * `holdReply` delays the *reply to the method call* — not the Response signal —
+ * by that many milliseconds, while still recording the call and exporting
+ * `Request.Close` up front, exactly as a real portal does. It makes the window
+ * between "the portal has a dialog up" and "the client knows the handle"
+ * wide enough to test deliberately, instead of waiting for a loaded CI runner
+ * to land in it by accident.
  */
-export async function fakePortal(address, handlers = {}) {
+export async function fakePortal(
+  address,
+  handlers = {},
+  { holdReply = 0 } = {},
+) {
   const dbus = (await import('dbus-native')).default;
   const bus = dbus.createClient({ busAddress: address });
   const portal = {
@@ -67,8 +78,12 @@ export async function fakePortal(address, handlers = {}) {
 
     // Answer on a later tick: the call has to return the handle first, and a
     // Response that arrived before it would not prove anything about ordering.
+    // A held reply holds the Response behind it too, for the same reason.
+    const held = holdReply
+      ? new Promise((r) => setTimeout(r, holdReply))
+      : Promise.resolve();
     const handler = handlers[member];
-    Promise.resolve()
+    held
       .then(() => (handler ? handler(call) : { response: 0, results: {} }))
       .then((result) => {
         if (!portal.open.has(path) || result?.silent) return;
@@ -80,6 +95,7 @@ export async function fakePortal(address, handlers = {}) {
       })
       .catch(() => {});
 
+    await held;
     return path;
   };
 
