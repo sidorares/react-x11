@@ -647,6 +647,62 @@ test('a drop handler can refuse at the last moment, and a plain drag asks for no
   }
 });
 
+test('a drop handler that rejects is reported, and the source is told it failed', async () => {
+  // An `async onDrop` that throws did not store what it was given. The
+  // rejection has to be observed (node throws on unhandled ones, #203),
+  // reported like any other handler throw, and — since XdndFinished's
+  // accepted bit is what a `move` source deletes its own copy on — it must
+  // not report success.
+  const { app, srcApp } = await headlessPair();
+  const x11Root = await createRoot({ app });
+  const errors = [];
+  const origError = console.error;
+  const origCode = process.exitCode;
+  const rejections = [];
+  const onRejection = (reason) => rejections.push(reason);
+  console.error = (...a) => errors.push(a.map(String).join(' '));
+  process.on('unhandledRejection', onRejection);
+  try {
+    const instance = await render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement('box', {
+          dropAccept: ['files'],
+          onDrop: async () => {
+            throw new Error('the import failed');
+          },
+          style: { flexGrow: 1 },
+        }),
+      ),
+      x11Root,
+    );
+    const src = new FakeSource(srcApp);
+    await src.init({ 'text/uri-list': 'file:///tmp/x\r\n' });
+    await settle(app);
+
+    await src.enter(instance.id, ['text/uri-list']);
+    src.position(instance.id, 150, 100, { action: 'XdndActionMove' });
+    await until(srcApp, () => src.statuses().length > 0, 'an XdndStatus');
+    src.drop(instance.id);
+    await until(srcApp, () => src.finished().length > 0, 'XdndFinished');
+
+    assert.deepEqual(rejections, [], 'nothing was left for node to throw on');
+    assert.match(errors.join('\n'), /onDrop on <box>/, 'names what failed');
+    assert.match(errors.join('\n'), /the import failed/, 'carries the error');
+    const fin = src.finished()[0].data;
+    assert.equal(fin[1] & 1, 0, 'the source is not told the move succeeded');
+    assert.equal(fin[2], 0, 'and no action is claimed');
+    await x11Root.unmount();
+  } finally {
+    process.off('unhandledRejection', onRejection);
+    console.error = origError;
+    process.exitCode = origCode;
+    await app.close();
+    await srcApp.close();
+  }
+});
+
 test('more than three types: the offer is read from XdndTypeList', async () => {
   const { app, srcApp } = await headlessPair();
   const x11Root = await createRoot({ app });

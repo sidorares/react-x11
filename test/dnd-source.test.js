@@ -265,6 +265,122 @@ test('preventDefault in onDragStart cancels: the gesture stays a click', async (
   await x11Root.unmount();
 });
 
+// --- a drop handler that fails ----------------------------------------------
+//
+// The in-app transport awaits nothing, which is a decision about the
+// *answer* (`onDragEnd` cannot wait for a promise it already ran past) and
+// not a licence to drop the promise on the floor. Unobserved, a rejected
+// async `onDrop` is an unhandled rejection, and node has thrown on those
+// since 15 — the package floor is >= 20.19, so it takes the application
+// down. Issue #203.
+
+/** Capture console.error, process.exitCode and any unhandled rejection
+ * around a body — the last one is the failure under test, so it is watched
+ * rather than left to kill the run. */
+async function watched(body) {
+  const errors = [];
+  const rejections = [];
+  const origError = console.error;
+  const origCode = process.exitCode;
+  const onRejection = (reason) => rejections.push(reason);
+  console.error = (...a) => errors.push(a.map(String).join(' '));
+  process.on('unhandledRejection', onRejection);
+  try {
+    await body();
+    // an unhandled rejection is reported after the microtask queue drains,
+    // so give it a macrotask to arrive in
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    process.off('unhandledRejection', onRejection);
+    console.error = origError;
+    process.exitCode = origCode;
+  }
+  return { errors, rejections };
+}
+
+/** A draggable box and a dropzone that fails the way the test asks for. */
+function failingDrop(onDrop, log) {
+  return h(
+    'window',
+    { width: 400, height: 200 },
+    h('box', {
+      draggable: true,
+      dragData: { 'text/plain': 'payload' },
+      onDragEnd: (e) => log.push(['dragend', e.action, e.dropped]),
+      style: { position: 'absolute', left: 0, top: 0, width: 100, height: 100 },
+    }),
+    h('box', {
+      dropAccept: ['text'],
+      onDrop,
+      style: {
+        position: 'absolute',
+        left: 200,
+        top: 0,
+        width: 150,
+        height: 150,
+      },
+    }),
+  );
+}
+
+test('an async in-app onDrop that rejects is reported, not fatal', async () => {
+  const app = createMockApp();
+  const log = [];
+  const x11Root = await renderMock(
+    app,
+    failingDrop(async () => {
+      throw new Error('the write failed');
+    }, log),
+  );
+  const wnd = app.windows[0];
+
+  const { errors, rejections } = await watched(async () => {
+    down(wnd, 50, 50);
+    move(wnd, 60, 50); // past the threshold
+    move(wnd, 250, 60); // over the dropzone
+    up(wnd, 250, 60);
+    await tick();
+    await tick();
+  });
+
+  assert.deepEqual(rejections, [], 'nothing was left for node to throw on');
+  assert.match(errors.join('\n'), /onDrop on <box>/, 'names what failed');
+  assert.match(errors.join('\n'), /the write failed/, 'and carries the error');
+  assert.ok(
+    log.some((l) => l[0] === 'dragend'),
+    'the gesture still ended cleanly',
+  );
+  await x11Root.unmount();
+});
+
+test('a synchronous in-app onDrop throw refuses the drop', async () => {
+  const app = createMockApp();
+  const log = [];
+  const x11Root = await renderMock(
+    app,
+    failingDrop(() => {
+      throw new Error('boom');
+    }, log),
+  );
+  const wnd = app.windows[0];
+
+  const { errors } = await watched(async () => {
+    down(wnd, 50, 50);
+    move(wnd, 60, 50);
+    move(wnd, 250, 60);
+    up(wnd, 250, 60);
+    await tick();
+  });
+
+  assert.match(errors.join('\n'), /boom/, 'reported');
+  assert.deepEqual(
+    log,
+    [['dragend', null, false]],
+    'a handler that threw did not take the drop, and onDragEnd says so',
+  );
+  await x11Root.unmount();
+});
+
 // --- edge auto-scroll -------------------------------------------------------
 //
 // Driven from the in-app transport because the mechanism is transport

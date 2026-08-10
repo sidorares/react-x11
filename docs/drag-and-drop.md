@@ -207,6 +207,26 @@ application the reply is not sent until the handler settles, so a menu can
 decide it. In-app drags do not wait, so only a synchronous answer reaches
 `onDragEnd`.
 
+### When the handler fails
+
+A handler that throws — or returns a promise that rejects — did not store
+what it was given, so **the drop is refused**, exactly as if it had called
+`e.reject()`, and the failure is reported the way every handler throw is
+([events.md](events.md#when-a-handler-throws)): the handler name, the
+element, and the component that rendered it.
+
+Refusing is the part worth knowing about. A `move` source deletes its own
+copy on the strength of being told the drop was taken, so a failed import
+that reported success is how a file goes missing. A later handler on the
+path can still `accept()`; the refusal is the failed one's answer, not the
+whole dispatch's.
+
+An `async` failure is reported when the promise rejects. For a drop from
+another application that is before the protocol reply goes out, so the
+source hears about it. In-app it is after `onDragEnd` has already fired,
+for the same reason nothing else in that path waits — which is why it is
+reported rather than only returned.
+
 ### Sources that ask
 
 A file manager dragging between two filesystems often does not know
