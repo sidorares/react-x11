@@ -15,6 +15,7 @@ import React from 'react';
 import { createRoot, Icon, icons, iconNames, iconSize } from '../src/index.js';
 
 import xserver from 'x11/lib/xserver/index.js';
+import * as ntk from 'ntk';
 import { createClient, StaticFontSource } from 'ntk';
 
 const require = createRequire(import.meta.url);
@@ -105,36 +106,44 @@ const row = (name, colours, size = 16) =>
     ),
   );
 
-test('one rendered copy serves every instance', async () => {
-  // Content keying: four cells of one glyph in one ink are one entry and one
-  // rasterization, which is where the wall of identical twisties pays.
+test('one rendered copy serves every colour', async () => {
+  // The whole reason `mono` exists. Four cells of the same chevron in four
+  // inks: the coverage is rendered once and the colour arrives at blit
+  // time, so a hovered row, a disabled one and a dark scheme all reuse it.
   const app = await headlessApp();
-  const ctl = await mount(app, row('chevronDown', Array(4).fill('#cc0000')));
+  const ctl = await mount(
+    app,
+    row('chevronDown', ['#cc0000', '#0000cc', '#00aa00', '#aa00aa']),
+  );
   const cache = ctl.root._paintCache;
 
   assert.ok(cache, 'the cache exists on an app that can make surfaces');
-  assert.equal(cache.entries.size, 1, 'four cells, one entry');
+  assert.equal(cache.entries.size, 1, 'four colours, one entry');
   assert.equal(cache.stats.renders, 1, 'rasterized once');
+
+  const [entry] = cache.entries.values();
+  assert.equal(entry.surface.format, 'a8', 'kept as coverage, not as pixels');
   await app.close();
 });
 
 test('a cached glyph is painted, and in its own colour', async () => {
-  // The regression this exists for. It used to assert only that the four
-  // cells *shared* an entry, and to read pixels off `dot` — the one glyph in
-  // the set that fills rather than strokes. Both held while five of the six
-  // ticks in `examples/tasks.jsx` came out blank, because a coverage entry
-  // composites through ntk's `_drawCoverage` and that goes empty under
-  // nested non-rectangular clips. Colour is baked into the entry now, and
-  // what is asserted is the pixel a cached cell actually shows.
+  // What the sharing assertion above cannot see, and did not: it held while
+  // five of the six ticks in `examples/tasks.jsx` came out blank, because a
+  // coverage entry composites through ntk's `_drawCoverage` and that read
+  // its mask from the origin rather than the destination under a
+  // non-rectangular clip (sidorares/ntk#243, fixed in 7.3.3).
+  //
+  // So: every glyph, not just `dot` — which is the one that fills where the
+  // rest stroke — and the pixels a *cached* cell shows, not just the entry
+  // count. Cells 1 and 3 are the cached ones: a key's first sighting paints
+  // live and only the second is served from the entry.
   const app = await headlessApp();
-  for (const name of ['check', 'chevronRight', 'dot', 'close']) {
+  for (const name of iconNames) {
     const ctl = await mount(
       app,
       row(name, ['#cc0000', '#cc0000', '#0000cc', '#0000cc'], 16),
     );
     const px = await pixels(app, ctl.root);
-    // Cells 1 and 3 are the cached ones: the first sighting of each key
-    // paints live, the second is served from the entry.
     for (const [cell, want] of [
       [1, [204, 0, 0]],
       [3, [0, 0, 204]],
@@ -152,27 +161,81 @@ test('a cached glyph is painted, and in its own colour', async () => {
   await app.close();
 });
 
-test('the ink, the name and the size are all in the key', async () => {
-  // The ink is in the key because it is in the pixels: a `mono` entry bakes
-  // its colour until ntk can composite coverage under a rounded clip.
+test('the ntk floor: coverage composites under a non-rectangular clip', async () => {
+  // A dependency-floor test rather than a react-x11 one, and it earns its
+  // place: `mono` gives up correctness for speed unless ntk can composite an
+  // a8 surface under a clip it cannot express as a rectangle. Before 7.3.3
+  // it could not — the scratch-mask path read the surface-sized mask from
+  // the origin instead of from the destination, so every drawing not at
+  // (0, 0) was masked out (sidorares/ntk#243). Five of the six checkbox
+  // ticks in `examples/tasks.jsx` were blank and nothing in this file
+  // noticed, because react-x11's own clips are rectangles: no tree built
+  // through `<box>` reaches that path, so only ntk's API can guard it.
+  //
+  // A downgrade under the `^` range therefore fails here rather than in a
+  // screenshot nobody regenerates.
   const app = await headlessApp();
-  // Two cells per ink: one sighting of a key only arms the "seen twice"
-  // gate, so a single cell of each would cache nothing to look at.
-  const ctl = await mount(
-    app,
-    row('check', ['#cc0000', '#cc0000', '#0000cc', '#0000cc']),
-  );
-  const keys = [...ctl.root._paintCache.entries.keys()];
+  const wnd = app.createWindow({ width: 60, height: 60 });
+  wnd.map();
+  const ctx = wnd.getContext('2d');
+  await settle(app);
 
-  assert.equal(keys.length, 2, 'two inks, two entries');
-  for (const key of keys) {
-    assert.match(key, /check/, 'the name is in the key');
-    assert.match(key, /16x16/, 'and the size it was drawn at');
-  }
+  const ink = new ntk.Surface(app, { width: 20, height: 20, format: 'a8' });
+  ink.render((c) => {
+    c.fillStyle = '#ffffff'; // only alpha survives into coverage
+    c.fillRect(4, 4, 12, 12);
+  });
+
+  const painted = async (clip) => {
+    ctx.save();
+    ctx.fillStyle = '#cc0000';
+    ctx.fillRect(0, 0, 60, 60);
+    if (clip) {
+      ctx.beginPath();
+      clip(ctx);
+      ctx.clip();
+    }
+    ctx.fillStyle = '#ffffff';
+    ctx.drawImage(ink, 20, 20); // ink lands at (24,24)-(36,36)
+    ctx.restore();
+    const image = await new Promise((resolve, reject) =>
+      ctx.getImageData(0, 0, 60, 60, (err, d) =>
+        err ? reject(err) : resolve(d),
+      ),
+    );
+    let white = 0;
+    for (let i = 0; i < image.data.length; i += 4) {
+      if (image.data[i] > 200 && image.data[i + 2] > 200) white++;
+    }
+    return white;
+  };
+
+  const flat = await painted(null);
+  assert.equal(flat, 144, 'the unclipped baseline is the 12x12 block');
+  assert.equal(
+    await painted((c) => c.rect(10, 10, 40, 40)),
+    flat,
+    'a rectangular clip keeps it — this path always worked',
+  );
+  assert.equal(
+    await painted((c) => c.arc(30, 30, 25, 0, Math.PI * 2)),
+    flat,
+    'and so must a circular one, which is the case that went blank',
+  );
+  await app.close();
+});
+
+test('the colour is out of the key, the name and the size are in it', async () => {
+  const app = await headlessApp();
+  const ctl = await mount(app, row('check', ['#cc0000', '#0000cc']));
+  const [key] = [...ctl.root._paintCache.entries.keys()];
+
+  assert.match(key, /\bmono\b/, 'planned as coverage');
+  assert.match(key, /check/, 'the name is in the key');
+  assert.match(key, /16x16/, 'and the size it was drawn at');
   assert.ok(
-    keys.some((k) => k.includes('cc0000')) &&
-      keys.some((k) => k.includes('0000cc')),
-    `and the ink: ${keys.join(' ')}`,
+    !key.includes('cc0000') && !key.includes('0000cc'),
+    `the colour must not be in the key: ${key}`,
   );
   await app.close();
 });

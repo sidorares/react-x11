@@ -495,22 +495,27 @@ whose whole promise is that the ink comes from `style.color`, so one drawing
 serves every state a control puts it in. A drawing that sets its own
 `fillStyle` breaks that; `test/icons.test.js` asserts it for every name.
 
-`mono` was written to buy an **a8 coverage** entry — the colour applied at
-composite time and therefore out of the cache key, one rendered copy per name
-and size serving every ink. That half is off, and the reason is worth keeping
-because it will look like an oversight otherwise: ntk's `_drawCoverage`
-composites empty under nested non-rectangular clips, and a widget sits inside
-those routinely — `examples/tasks.jsx` nests a rounded card, a scrolled list,
-a rounded row and a checkbox well, and five of its six ticks came out blank
-while every unit test passed. So the ink is baked into the entry and joins
-the key. Turning it back on is `format: 'a8'`, `tint: ink`, and the ink out
-of the key in `CanvasNode.paintCachePlan`, once ntk can composite coverage
-under a clip it cannot express as a rectangle.
+`mono` buys an **a8 coverage** entry: the colour is applied at composite time
+and therefore out of the cache key, so one rendered copy per name and size
+serves every ink. That needs **ntk ≥ 7.3.3** and the floor is load-bearing
+rather than cosmetic — earlier versions composite coverage as empty under any
+clip they cannot express as a rectangle
+([ntk#243](https://github.com/sidorares/ntk/issues/243)), and a widget sits
+inside clips like that routinely. `examples/tasks.jsx` nests a rounded card,
+a scrolled list, a rounded row and a checkbox well; five of its six ticks
+came out blank while every unit test passed.
 
-The lesson that generalises: a paint bug of this shape survives every
-assertion about layout, keys and cache statistics. `npm run screenshots` and
-a look at `docs/img/` is the check that catches it — regenerate on the base
-first and diff, since the rasterizer shifts edges on its own.
+Two things came out of that and are worth keeping:
+
+- **A dependency floor deserves a test that fails on a downgrade.** The one in
+  `test/icons.test.js` drives ntk's API directly — an a8 `Surface` composited
+  under a circular clip — because no tree built from `<box>` reaches that
+  path: react-x11's own clips are rectangles. A react-x11-level test for it
+  passed happily against the broken version, which is the trap.
+- **This shape of paint bug survives every assertion about layout, keys and
+  cache statistics.** `npm run screenshots` and a look at `docs/img/` is what
+  catches it — regenerate on the base first and diff, since the rasterizer
+  shifts edges on its own.
 
 Two things follow that every call site has to know, because there is **no
 cascade**: an icon does not inherit `color` or `fontSize` from an ancestor

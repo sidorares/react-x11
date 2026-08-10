@@ -220,14 +220,13 @@ paints is one colour it did not choose — so one drawing serves every state a
 control puts it in, and the paint cache can keep one rendered copy of
 `chevronDown` at 12px for every twisty in a `Tree` at once.
 
-An entry is per name, per size **and per colour**: a wall of one icon in one
-ink is one entry, and the same icon in a highlight is a second. The colour
-was meant to leave the key — a single-colour drawing can be cached as
-coverage and painted through at composite time, which is what `<svg>` does
-for a `mono` document — but that path composites empty under nested
-non-rectangular clips (a rounded card, a scrolled list, a rounded row, a
-checkbox well), so the colour is baked for now. The sharing that matters,
-across instances, is unaffected.
+The entry is **coverage**, so the colour is applied at composite time and
+stays out of the key: one rendered copy of `chevronDown` at 12px serves the
+resting row, the highlighted row, the disabled one and both colour schemes —
+the trick the glyph cache runs on text, and the one `<svg>` gets for a
+`fill="currentColor"` document. The size cannot leave the key, since a
+coverage surface is pixels at a fixed size, so one icon at two sizes is two
+entries.
 
 The drawings are module-level, so re-rendering a `Tree` invalidates none of
 its twisties: `<canvas>` compares `onDraw` by identity, and a fresh closure
