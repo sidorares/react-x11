@@ -1364,15 +1364,24 @@ test('a table cell keeps its text on one line, inside its row', async () => {
       ),
       x11Root,
     );
-    await new Promise((resolve) => setTimeout(resolve, 200));
-
-    const all = [];
-    const walk = (n) => {
-      all.push(n);
-      for (const c of n.children) if (!c.isWindow) walk(c);
+    // Wait for the rows rather than sleeping at them: the table builds what
+    // is in view only once layout has run and `onViewport` has come back,
+    // which is two frames, and a fixed sleep is a guess about how long a
+    // loaded CI runner takes to produce them.
+    const rowsNow = () => {
+      const found = [];
+      const walk = (n) => {
+        if (n.props.role === 'row') found.push(n);
+        for (const c of n.children) if (!c.isWindow) walk(c);
+      };
+      walk(wnd._reactX11Node);
+      return found;
     };
-    walk(wnd._reactX11Node);
-    const rows = all.filter((n) => n.props.role === 'row');
+    let rows = [];
+    for (let i = 0; i < 100 && rows.length < 2; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      rows = rowsNow();
+    }
     assert.equal(rows.length, 2, 'both rows built');
 
     for (const row of rows) {
@@ -1387,9 +1396,12 @@ test('a table cell keeps its text on one line, inside its row', async () => {
         );
       }
     }
-
-    await x11Root.unmount();
   } finally {
+    // Unmount **in the finally**, not after the assertions: a root left
+    // mounted keeps its frame clock and its X connection, and `app.close()`
+    // on a live one does not return — so a failed assertion here hung the
+    // whole file rather than reporting, and a hung file hangs `node --test`.
+    await x11Root.unmount().catch(() => {});
     await app.close();
   }
 });
