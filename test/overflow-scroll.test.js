@@ -245,6 +245,6 @@ test('a plain box does not swallow the keys a scroll pane answers', async () => 
   );
   // XK_Down. A scroll pane consumes it; a box with nothing to scroll must
   // leave it for whatever else would answer.
-  assert.equal(ref.current._defaultKeyDown({ keysym: 0xff54 }), undefined);
+  assert.equal(ref.current.defaultKeyDown({ keysym: 0xff54 }), undefined);
   assert.equal(ref.current.scrollY, 0);
 });

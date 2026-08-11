@@ -177,12 +177,12 @@ test('a <textarea> bar drag scrolls it, and never moves the caret', async () => 
   assert.ok(bar, 'text taller than the box gets a thumb');
   const caretBefore = area._caret;
 
-  area._defaultMouseDown({
+  area.defaultMouseDown({
     x: bar.x + 2,
     y: bar.thumbStart + 2,
     capturePointer() {},
   });
-  area._defaultMouseDrag({
+  area.defaultMouseDrag({
     x: bar.x + 2,
     y: bar.thumbStart + 2 + bar.travel / 2,
   });
@@ -192,9 +192,9 @@ test('a <textarea> bar drag scrolls it, and never moves the caret', async () => 
     `half the travel is half the range, got ${area._scrollY}`,
   );
 
-  area._defaultMouseDrag({ x: bar.x + 2, y: 10_000 });
+  area.defaultMouseDrag({ x: bar.x + 2, y: 10_000 });
   assert.strictEqual(area._scrollY, bar.range, 'and clamps at the end');
-  area._defaultMouseUp({});
+  area.defaultMouseUp({});
 
   // a press in the text still reaches the caret logic
   area._scrollY = 0;
@@ -204,7 +204,7 @@ test('a <textarea> bar drag scrolls it, and never moves the caret', async () => 
     placed = true;
     return 3;
   };
-  area._defaultMouseDown({ x: content.x + 5, y: content.y + 5, detail: 1 });
+  area.defaultMouseDown({ x: content.x + 5, y: content.y + 5, detail: 1 });
   assert.ok(placed, 'a press away from the bar still places the caret');
 
   await x11Root.unmount();

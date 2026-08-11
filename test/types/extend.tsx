@@ -13,8 +13,16 @@ import {
   knownElements,
   drawnKinds,
 } from '../../src/host.js';
-import { Node, BoxNode, intrinsicSize } from '../../src/node.js';
+import {
+  Node,
+  BoxNode,
+  intrinsicSize,
+  CARET_BLINK_MS,
+} from '../../src/node.js';
 import type { MeasureConstraints } from '../../src/node.js';
+import { XK_ESCAPE, XK_TAB } from '../../src/keysyms.js';
+// the synthetic events, not the DOM's same-named globals
+import type { KeyboardEvent, MouseEvent } from '../../src/types/events.js';
 import {
   isStyleProp,
   flattenStyle,
@@ -38,6 +46,13 @@ declare module '../../src/jsx-runtime.js' {
       };
       thumb: {
         style?: Style;
+      };
+      codeeditor: {
+        value?: string;
+        style?: Style;
+        // a third party declares the handlers it composes with, and gets the
+        // synthetic event rather than the DOM's same-named one
+        onKeyDown?: (ev: KeyboardEvent) => void;
       };
     }
   }
@@ -106,6 +121,59 @@ class ThumbNode extends Node {
   }
 }
 
+// An element with behaviour of its own (#251): the default actions run after
+// the app's handlers, and Tab is an ordinary key it may keep.
+class EditorNode extends Node {
+  private caretOn = false;
+  private tabEscapes = false;
+
+  constructor(props: Record<string, unknown>, app: never) {
+    super('codeeditor', props, app);
+    this.focusableByDefault = true;
+    this.defaultCursor = 'text';
+  }
+
+  defaultKeyDown(ev: KeyboardEvent): void {
+    if (ev.keysym === XK_ESCAPE) {
+      this.tabEscapes = true;
+      return;
+    }
+    if (ev.keysym === XK_TAB && !this.tabEscapes) {
+      ev.preventDefault(); // mine: the focus cycle does not get this one
+      return;
+    }
+    this.tabEscapes = false;
+    const _typed: string = ev.key;
+    void _typed;
+  }
+
+  defaultMouseDown(ev: MouseEvent): void {
+    ev.capturePointer();
+    const _button: number = ev.button;
+    void _button;
+  }
+
+  defaultMouseDrag(_ev: MouseEvent): void {}
+
+  defaultMouseUp(_ev: MouseEvent): void {}
+
+  defaultFocus(): void {
+    // the timer is node's; what this pins is the cadence it runs at
+    const _every: number = CARET_BLINK_MS;
+    this.caretOn = true;
+    this.invalidate(false, this.abs, 'caret');
+  }
+
+  defaultBlur(): void {
+    this.caretOn = false;
+    this.invalidate(false, this.abs, 'caret');
+  }
+}
+
+registerElement('codeeditor', {
+  create: (props, app) => new EditorNode(props, app as never),
+});
+
 registerElement('gauge', {
   create: (props, app) => new GaugeNode(props, app as never),
   semanticNames: ['ticks'],
@@ -138,6 +206,8 @@ function Chart() {
       <sparkline data={[1, 4, 2, 8]} color="#c0392b" style={{ flexGrow: 1 }} />
       <gauge ticks={6} />
       <thumb />
+      {/* an app handler and the element's own behaviour, composed */}
+      <codeeditor value="const x = 1" onKeyDown={(ev) => void ev.keysym} />
     </box>
   );
 }

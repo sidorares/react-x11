@@ -120,7 +120,7 @@ merged theme (`ThemeProvider`, `useTheme`) and a
   (#90, issue #88): `src/editmenu.js` builds it from the node's own
   capabilities, and the selection-collapse half of that issue went with it —
   a right-click inside a selection keeps it, only one outside moves the
-  caret (`_defaultMouseDown`), which is what GTK and Qt do. Still missing:
+  caret (`defaultMouseDown`), which is what GTK and Qt do. Still missing:
   a generic Popover, and a file open/save dialog
 - **Horizontal scrolling — DONE.** A scroll container scrolls on both axes:
   `scrollX`/`contentWidth`, a second draggable bar, `scrollTo({x, y})`,

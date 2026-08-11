@@ -135,6 +135,9 @@ export class EventManager {
     // — the second shrinks and grows again as the pointer leaves and returns
     this.downPath = [];
     this.pressPath = [];
+    // whether the press's default action ran, which is what the drag and the
+    // release that continue the same gesture follow
+    this._downDefaulted = false;
     this.capturedNode = null;
     this.focused = null;
     // what had focus before `focused`, so a focus scope opened by something
@@ -230,8 +233,8 @@ export class EventManager {
     this.windowFocused = focused;
     const node = this.focused;
     if (node && !node.destroyed) {
-      if (focused) node._defaultFocus?.();
-      else node._defaultBlur?.();
+      if (focused) node.defaultFocus?.();
+      else node.defaultBlur?.();
     }
     // …and the things that keep a window of their own open on the strength
     // of this one having focus — a menu, a dropdown — which the focused node
@@ -385,8 +388,15 @@ export class EventManager {
         },
         this.downPath,
       );
-      if (!ev.defaultPrevented) {
-        target._defaultMouseDown?.(ev);
+      // A gesture is vetoed at its press, once: the drag and the release
+      // that continue it are the same gesture, so an element whose
+      // `defaultMouseDown` never ran does not then get told about motion it
+      // has no press behind. `<textinput>` guarded that itself with a
+      // `_dragging` flag; a registered element should not have to rediscover
+      // the need for one (issue #251).
+      this._downDefaulted = !ev.defaultPrevented;
+      if (this._downDefaulted) {
+        target.defaultMouseDown?.(ev);
       }
       // a left press on (or inside) a `draggable` arms a drag; below the
       // threshold the gesture is still a click (src/dnd.js)
@@ -402,7 +412,7 @@ export class EventManager {
           button: native.keycode,
         });
         if (!menuEv.defaultPrevented) {
-          target?._defaultContextMenu?.(menuEv);
+          target?.defaultContextMenu?.(menuEv);
         }
       }
     });
@@ -435,8 +445,8 @@ export class EventManager {
       // capture ends with the gesture, like implicit DOM pointer capture
       this.capturedNode = null;
       this._clearPress();
-      if (this.downNode && !this.downNode.destroyed) {
-        this.downNode._defaultMouseUp?.(ev);
+      if (this._downDefaulted && this.downNode && !this.downNode.destroyed) {
+        this.downNode.defaultMouseUp?.(ev);
       }
       if (this.downNode) {
         // click fires on the nearest common ancestor of press and release
@@ -475,9 +485,10 @@ export class EventManager {
       if (this.downNode && !captured)
         this._setPressed(this._pressedAlong(path));
       const ev = this.dispatch('MouseMove', target, native, undefined, path);
-      // drags deliver to the pressed node even when the pointer leaves it
-      if (this.downNode && !this.downNode.destroyed) {
-        this.downNode._defaultMouseDrag?.(ev);
+      // drags deliver to the pressed node even when the pointer leaves it —
+      // unless the press that started them was vetoed, see `_downDefaulted`
+      if (this._downDefaulted && this.downNode && !this.downNode.destroyed) {
+        this.downNode.defaultMouseDrag?.(ev);
       }
     });
   }
@@ -639,12 +650,21 @@ export class EventManager {
             ? String.fromCodePoint(native.codepoint)
             : undefined,
       });
-      if (name === 'KeyDown' && keysym === XK_TAB && !ev.defaultPrevented) {
+      if (name !== 'KeyDown' || ev.defaultPrevented) return;
+      // The element's own behaviour first, focus traversal after it — Tab is
+      // an ordinary defaultable key rather than one the focus manager eats on
+      // the way past. Cycling first meant an editor could only keep Tab as an
+      // indent key through a *user-level* handler, which is a wiring an
+      // element cannot ship with itself (issue #251).
+      //
+      // A default action that consumed the key says so by calling
+      // `preventDefault()` — the same word, one layer down: what it prevents
+      // now is the default action left after it, which for Tab is the focus
+      // cycle. Nothing in core consumes Tab, so `<textinput>` and friends
+      // still hand it straight to traversal.
+      target.defaultKeyDown?.(ev);
+      if (keysym === XK_TAB && !ev.defaultPrevented) {
         this._cycleFocus(Boolean(native.buttons & 1));
-        return;
-      }
-      if (name === 'KeyDown' && !ev.defaultPrevented) {
-        target._defaultKeyDown?.(ev);
       }
     });
   }
@@ -674,7 +694,7 @@ export class EventManager {
       old.root?.invalidate(false, old, 'focus');
       old.setStyleState(':focus', false);
       old.setStyleState(':focus-visible', false);
-      old._defaultBlur?.();
+      old.defaultBlur?.();
       old.props.onBlur?.(this._makeEvent('blur', null, old));
       // it may be in another window than the new focus — owner window ↔ its
       // popup — and the caret it was drawing has to go too
@@ -686,7 +706,7 @@ export class EventManager {
       node.setStyleState(':focus', true);
       node.setStyleState(':focus-visible', reason !== 'pointer');
       this._scrollIntoView(node);
-      if (this.windowFocused) node._defaultFocus?.();
+      if (this.windowFocused) node.defaultFocus?.();
       node.props.onFocus?.(this._makeEvent('focus', null, node));
       node.root?.invalidate(false, node, 'focus');
     }

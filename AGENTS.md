@@ -994,8 +994,9 @@ source of truth for what's next). Done: phase 0 (ntk 3.1.0), phase 1 (drawn laye
 phase 2 (events, scrolling), phase 3's `<popup>` and `<textinput>`
 (on ntk 3.2.0: clipboard, cursors, setLineDash), and the layout debug
 overlay (`REACT_X11_DEBUG_LAYOUT=1`). Element default actions (textinput
-editing, wheel scrolling) run via `_default*` hooks on nodes AFTER user
-prop handlers, skipped on `preventDefault()`. The window-manager example
+editing, wheel scrolling, Tab traversal) run via the `default*` methods on
+nodes AFTER user prop handlers, skipped on `preventDefault()` — a documented
+seam a registered element implements too (#251, docs/extending.md). The window-manager example
 (issue #3) is done — on ntk 3.9.0 and node-x11 3.2.0, which grew the
 substructure-redirect support it needed. Also done since: the widget set
 including `Select`, `Menu`/`MenuBar`/`ContextMenu`, `Tabs`, `Tree`,

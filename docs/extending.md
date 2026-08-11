@@ -86,6 +86,7 @@ that only draws needs a constructor and a `paint`. What you may override:
 | `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.   |
 | `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.       |
 | `measureContent(constraints)`  | your content has a size of its own (below). Leaves only — an element that measures has no children. |
+| `default*(ev)`                 | the element's own behaviour for a key, a press or focus (below) — what makes it _interactive_.      |
 | `hitTest(x, y)`                | non-rectangular hit areas. The default walks children in reverse paint order.                       |
 | `insertBefore` / `removeChild` | only if children mean something structural to you                                                   |
 | `destroySubtree()`             | release anything you allocated (pixmaps, fonts, timers). Call `super.destroySubtree()`.             |
@@ -215,6 +216,115 @@ class ThumbNode extends Node {
 It shrinks to the width on offer with the height following, and scales the
 width from a style height when only that axis is fixed — which is what an
 `<img>` does, and is the whole of `<image>`'s own measurement.
+
+### Behaviour of your own
+
+An element that _does_ something — an editor, a terminal, a table with cell
+editing, a tree with type-ahead — implements the **default actions**. They are
+the same seam `<textinput>`'s editing runs on, and the ordering is the whole
+point:
+
+1. the application's `onKeyDown` / `onMouseDown` / … handlers, capture then
+   bubble;
+2. **if none of them called `ev.preventDefault()`**, the element's `default*`
+   method.
+
+So an app can veto the behaviour, or run something before it, without knowing
+how the element is built — which is what `<textinput onKeyDown>` has always
+been able to do, and is the reason to implement behaviour here rather than in
+a React component wrapping the element.
+
+| method                   | when                                                                                                                         |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `defaultKeyDown(ev)`     | a key, delivered to the focused node. `ev.keysym` is the `XK_*` constant; `codepoint >= 0x20` is the test for "this is text" |
+| `defaultMouseDown(ev)`   | a press. Place a caret, grab a handle; `ev.capturePointer()` to keep the rest of the gesture                                 |
+| `defaultMouseDrag(ev)`   | motion while _this_ element holds the press — including outside its box, which `onMouseMove` does not give you               |
+| `defaultMouseUp(ev)`     | that press was released                                                                                                      |
+| `defaultContextMenu(ev)` | right-click, after the press: open your own menu. Separate so suppressing it keeps the caret placement                       |
+| `defaultFocus()`         | this element became the focused node (or its window got the X focus back): start the caret blinking                          |
+| `defaultBlur()`          | focus left, or the window lost it: stop it                                                                                   |
+
+```js
+import { Node, CARET_BLINK_MS } from 'react-x11/node';
+import { XK_TAB, XK_ESCAPE } from 'react-x11/keysyms';
+
+class EditorNode extends Node {
+  constructor(props, app) {
+    super('codeeditor', props, app);
+    // without this nothing focuses it, and no key ever arrives
+    this.focusableByDefault = true;
+    this.defaultCursor = 'text';
+  }
+
+  defaultKeyDown(ev) {
+    if (ev.keysym === XK_ESCAPE) {
+      // the way out: the next Tab leaves, so the element is never a trap
+      this._tabEscapes = true;
+      return;
+    }
+    if (ev.keysym === XK_TAB) {
+      if (this._tabEscapes) {
+        this._tabEscapes = false; // one Tab, then it indents again
+        return; // …and this one belongs to focus traversal
+      }
+      this.indent(ev.shiftKey ? -1 : 1);
+      ev.preventDefault(); // this one is mine
+      return;
+    }
+    this._tabEscapes = false;
+    if (ev.codepoint >= 0x20) this.insert(ev.key);
+  }
+
+  defaultFocus() {
+    this._caretOn = true;
+    this._blink = setInterval(() => {
+      this._caretOn = !this._caretOn;
+      this.root?.invalidate(false, this, 'caret');
+    }, CARET_BLINK_MS);
+    this._blink.unref?.();
+  }
+
+  defaultBlur() {
+    clearInterval(this._blink);
+    this._blink = null;
+    this._caretOn = false;
+  }
+}
+```
+
+Four details worth having in writing:
+
+**A gesture is vetoed once, at its press.** `defaultMouseDrag` and
+`defaultMouseUp` are the continuation of the press `defaultMouseDown` got, so
+a handler that prevented the press means none of the three run — an element
+never hears about motion it has no press behind, and does not need a
+`dragging` flag of its own to discover that.
+
+**Focus is a prerequisite, not a consequence.** Keys are delivered to the
+focused node, and nothing focuses an element that has not said it can be:
+`focusableByDefault = true` makes it a tab stop and a press target the way
+`<textinput>` is one, and an application's `focusable={false}` or `tabIndex`
+still overrides it ([events.md](events.md#focus)).
+
+**Tab is an ordinary key here.** It reaches `defaultKeyDown` before focus
+traversal sees it, so an element can keep it — an editor indenting with Tab
+does not need a wrapping component to get it, which is what the ordering used
+to force. Consuming it means calling `ev.preventDefault()` from the default
+action: what that prevents is the default action _after_ this one, which for
+Tab is the focus cycle.
+
+An element that eats Tab has taken the keyboard user's only way out of it, so
+it owes them another. The convention, above and worth converging on: **Escape
+arms one pass-through Tab.** Escape on its own does nothing visible, the next
+Tab leaves, and the one after that indents again — the same bargain a code
+editor on the web makes, and the reason a screen-reader user is not stuck in
+your element.
+
+**A caret blinks at `CARET_BLINK_MS`.** It is the cadence `<textinput>` uses,
+exported so that two carets on one screen are in step rather than a few tens
+of milliseconds apart. Stop the timer in `defaultBlur` _and_ in
+`destroySubtree`: a node that unmounts while focused is forgotten rather than
+blurred, so `defaultBlur` is not guaranteed to run.
 
 ### Drawing once instead of every frame
 
