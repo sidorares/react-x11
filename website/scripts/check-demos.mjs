@@ -170,6 +170,8 @@ const exercises = {
     server.injectButton(3, true);
     server.injectButton(3, false);
   },
+  // a cell in the grid: opens a <popup anchor> at that cell's own rect
+  anchored: (server) => click(server, 0xeef4fb),
 };
 
 // The GLX emulator only has a WebGL backend, so <glarea> cannot draw

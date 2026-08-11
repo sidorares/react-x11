@@ -372,6 +372,34 @@ function Popup() {
   );
 }
 
+// issue #255: a popup that hangs off a node — or off a rect inside one —
+// and sizes itself from its content, so it never states a position at all
+function AnchoredPopup() {
+  const editor = useRef<DrawnNode>(null);
+  const [caret, setCaret] = useState({ x: 0, y: 0, width: 1, height: 16 });
+  return (
+    <window title="editor">
+      <box ref={editor} onClick={() => setCaret({ ...caret, x: caret.x + 7 })} />
+      <popup
+        anchor={{ to: editor, at: caret, placement: 'bottom', align: 'start' }}
+        maxHeight={220}
+      >
+        <box />
+      </popup>
+      {/* the node itself is a target too, and so is the alignment's */}
+      <popup anchor={{ to: editor.current, alignTo: editor, offset: 6 }}>
+        <box />
+      </popup>
+    </window>
+  );
+}
+
+// @ts-expect-error — `at` is a rect, not a pair of screen coordinates
+const _badAt = <popup anchor={{ to: null, at: { left: 1, top: 2 } }} />;
+
+// @ts-expect-error — the anchor has to name what it hangs off
+const _noTarget = <popup anchor={{ placement: 'bottom' }} />;
+
 // issue #130: transientFor takes a ref to a window, a ref to a drawn node, a
 // raw XID or 'root'; a <popup> can opt out of override-redirect to become a
 // WM-managed dialog
@@ -536,7 +564,20 @@ function Widgets() {
     <ThemeProvider value={{ accent: '#2980b9', radius: 6 }} style={s.row}>
       <Themed />
       <box ref={anchorRef} style={s.row}>
-        <Button primary onPress={() => void anchor()}>
+        <Button
+          primary
+          onPress={() => {
+            // the placement options, including a rect inside the node
+            const rect = anchor({
+              placement: 'start',
+              align: 'center',
+              offset: 4,
+              at: { x: 12, y: 4, height: 16 },
+              width: 180,
+            });
+            if (rect) void (rect.placement === 'left');
+          }}
+        >
           press
         </Button>
         <Button label="labelled" disabled />
@@ -821,6 +862,7 @@ async function main() {
   root.render(<Scene />);
   root.render(<RawGl />);
   root.render(<Popup />, () => {});
+  root.render(<AnchoredPopup />);
   root.render(<Events />);
   await root.unmount();
 

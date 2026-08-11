@@ -4,6 +4,7 @@
 // typeahead.js and keys.js.
 export { ThemeProvider, useDirection, useTheme } from './theme.js';
 export {
+  anchorArea,
   anchorRect,
   centerRect,
   screenRect,

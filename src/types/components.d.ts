@@ -767,10 +767,20 @@ export const Canvas3D: ComponentType<Canvas3DProps>;
 
 // --- anchoring helpers -----------------------------------------------------
 
+/**
+ * The side a popup is asked for. `'start'`/`'end'` are the **logical** ones
+ * and mirror with the anchor's direction, which is what a submenu wants;
+ * `'left'`/`'right'` stay physical.
+ */
+export type AnchorPlacement = Placement | 'start' | 'end';
+
 export interface AnchorOptions {
-  placement?: Placement;
-  /** Gap between the anchor and the popup, in px. */
-  gap?: number;
+  /** Preferred side, flipped at a screen edge (default `'bottom'`). */
+  placement?: AnchorPlacement;
+  /** Which edges line up on the cross axis (default `'start'`). */
+  align?: 'start' | 'center' | 'end';
+  /** Gap from the anchor along the placement axis, in px (default 2). */
+  offset?: number;
   /**
    * Shift along the *alignment* axis, applied before the popup is clamped
    * into the screen. For lining up what is drawn in a surface rather than
@@ -778,23 +788,52 @@ export interface AnchorOptions {
    * first item a border and a padding lower, and the eye lines up the items.
    */
   alignOffset?: number;
+  /**
+   * Anchor to a rect **inside** the node, in the node's own coordinates:
+   * a caret, a table cell, a chart datapoint. Everything reads it — the
+   * side that flips, the edge that aligns, the gap `offset` leaves — so a
+   * popup at a caret behaves like one at a small widget that happens to be
+   * there. `width`/`height` default to 0, so `{x, y}` alone is a point.
+   */
+  at?: { x: number; y: number; width?: number; height?: number };
+  /** The size of the popup being placed. `width` defaults to the anchor's. */
   width?: number;
   height?: number;
-  /** Flip to the opposite side when there is no room (default true). */
-  flip?: boolean;
+  /** Take the alignment from this node instead — a submenu lines up with
+   *  the row that opened it while hanging off the menu's outer edge. */
+  alignTo?: DrawnNode | null;
+  /** Overrides the direction read off the anchoring node. */
+  direction?: 'ltr' | 'rtl';
+}
+
+/** An anchored rect, and the side it actually ended up on. */
+export interface AnchorRect extends Rect {
+  placement: Placement;
 }
 
 /**
  * Where to put a `<popup>` relative to a node, in screen coordinates,
- * flipped at screen edges.
+ * flipped at screen edges. `null` for a node that has not been laid out.
  */
-export function anchorRect(node: DrawnNode, options?: AnchorOptions): Rect;
+export function anchorRect(
+  node: DrawnNode | null,
+  options?: AnchorOptions,
+): AnchorRect | null;
 
 /** Centre a popup of this size on the node's screen. */
 export function centerRect(
   node: DrawnNode,
   size: { width: number; height: number },
 ): Rect;
+
+/**
+ * The area a popup anchored to this node may be placed in: the usable part
+ * of the monitor it is on — per-monitor, minus the panels, the same answer
+ * `<window width="auto">` is capped by. What a widget sizing its own surface
+ * needs (a menu is never wider than the screen it opens on). `null` where
+ * there is no display to ask, which includes the headless mock.
+ */
+export function anchorArea(node: DrawnNode | null): Rect | null;
 
 /**
  * A node's laid-out rect in screen coordinates — where a popup's *trigger*
@@ -808,7 +847,7 @@ export function screenRect(node: DrawnNode): Rect | null;
 /** `anchorRect` bound to a ref, recomputed on demand. */
 export function useAnchor(
   ref: RefObject<DrawnNode | null>,
-): (options?: AnchorOptions) => Rect | null;
+): (options?: AnchorOptions) => AnchorRect | null;
 
 /**
  * Keeps an `anchorRect` live for as long as `active`, instead of measuring
@@ -823,12 +862,16 @@ export function useAnchor(
  * the popup there — a popup is a real window, not a web element clipped by
  * its ancestors, so following a trigger that is no longer visible would
  * leave it pointing at nothing. Typically `onOutOfView` closes the popup.
+ * With an `at` in the options that test is about the sub-rect: a caret
+ * leaves the viewport long before the editor around it does.
  */
 export function useAnchorTracking(
   ref: RefObject<DrawnNode | null>,
   active: boolean,
-  getOptions: () => AnchorOptions,
-  setRect: (next: Rect | null | ((prev: Rect | null) => Rect | null)) => void,
+  getOptions: () => AnchorOptions | null | undefined,
+  setRect: (
+    next: AnchorRect | null | ((prev: AnchorRect | null) => AnchorRect | null),
+  ) => void,
   onOutOfView?: () => void,
 ): void;
 

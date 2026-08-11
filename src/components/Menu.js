@@ -13,11 +13,11 @@ import {
 import { Icon, iconSize } from './Icon.js';
 import {
   DEFAULT_LABEL_SIZE,
+  anchorArea,
   anchorRect,
   measureLabel,
   movingToward,
   SAFE_HOVER_DELAY,
-  screenOf,
   screenPoint,
   useAnchorTracking,
   useDismissOnWindowBlur,
@@ -767,14 +767,16 @@ export function ContextMenu({
     if (!node || !items.length) return;
     const width = menuListWidth(node, items, fontSize);
     const height = menuListHeight(items, fontSize);
-    const screen = screenOf(node);
+    const area = anchorArea(node);
     // anchored at the pointer rather than at a widget: clamp by hand, since
     // there is no anchor rect to flip around
     const x = ev.nativeEvent?.rootx ?? ev.x;
     const y = ev.nativeEvent?.rooty ?? ev.y;
     setRect({
-      x: screen ? Math.max(0, Math.min(x, screen.pixel_width - width)) : x,
-      y: screen ? Math.max(0, Math.min(y, screen.pixel_height - height)) : y,
+      x: area ? Math.max(area.x, Math.min(x, area.x + area.width - width)) : x,
+      y: area
+        ? Math.max(area.y, Math.min(y, area.y + area.height - height))
+        : y,
       width,
       height,
     });

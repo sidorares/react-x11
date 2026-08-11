@@ -14,10 +14,10 @@ import { interpolate } from '../styles.js';
 import { capTrim, ThemeProvider, useTheme } from './theme.js';
 import {
   DEFAULT_LABEL_SIZE,
+  anchorArea,
   measureLabel,
   movingToward,
   SAFE_HOVER_DELAY,
-  screenOf,
   screenPoint,
   screenRect,
   useAnchor,
@@ -131,23 +131,24 @@ function dismissOthers(app, self) {
  * The side to hang a hint off when the caller has not named one.
  *
  * Measured against the **screen**, not the owner window: a popup is a real
- * X window, so the room a tooltip has is the room the display has. The
- * first side it fits on wins, in the order above, and if it fits nowhere
- * the roomiest side does — there the placement is going to be clamped
- * whatever we pick, and the most room is the least clamping.
+ * X window, so the room a tooltip has is the room the display has — the
+ * usable part of the monitor the trigger is on (`anchorArea`). The first
+ * side it fits on wins, in the order above, and if it fits nowhere the
+ * roomiest side does — there the placement is going to be clamped whatever
+ * we pick, and the most room is the least clamping.
  *
- * With no screen geometry to read (the headless mock) this is `'top'`,
- * which is where a tooltip went before there was anything to ask.
+ * With no display to ask at all this is `'top'`, which is where a tooltip
+ * went before there was anything to ask.
  */
 function autoDirection(node, size) {
   const trigger = screenRect(node);
-  const screen = screenOf(node);
-  if (!trigger || !screen) return 'top';
+  const area = anchorArea(node);
+  if (!trigger || !area) return 'top';
   const room = {
-    top: trigger.y,
-    bottom: screen.pixel_height - (trigger.y + trigger.height),
-    left: trigger.x,
-    right: screen.pixel_width - (trigger.x + trigger.width),
+    top: trigger.y - area.y,
+    bottom: area.y + area.height - (trigger.y + trigger.height),
+    left: trigger.x - area.x,
+    right: area.x + area.width - (trigger.x + trigger.width),
   };
   const needed = (side) =>
     (side === 'top' || side === 'bottom' ? size.height : size.width) +
