@@ -234,6 +234,15 @@ export function Tree({
             {
               backgroundColor:
                 item.id === current ? theme.hoverBackground : 'transparent',
+              // The row's ink, said once. `color` inherits, so the label and
+              // the twisty both take it — a twisty that had to be handed the
+              // colour separately used to be the thing that stayed grey
+              // inside a highlighted row.
+              color: item.disabled
+                ? theme.dim
+                : item.id === current
+                  ? theme.hoverText
+                  : theme.text,
             },
             !item.disabled && {
               ':hover': {
@@ -272,20 +281,13 @@ export function Tree({
             h(Icon, {
               name: openSet.has(item.id) ? 'chevronDown' : 'chevronRight',
               size: TWISTY_SIZE,
-              // The row's ink, handed over: `:hover` marks the row and its
-              // ancestors, not its children, and colour does not cascade —
-              // so a twisty that did not take this would stay grey inside a
-              // highlighted row.
-              color: item.id === current ? theme.hoverText : theme.dim,
+              // dimmer than the label on an unselected row, and the row's own
+              // ink once it is selected — where "the row's own ink" is what
+              // inheritance gives it, with nothing said here
+              style: item.id === current ? null : { color: theme.dim },
             }),
         ),
-        labelContent(item.label, {
-          color: item.disabled
-            ? theme.dim
-            : item.id === current
-              ? theme.hoverText
-              : theme.text,
-        }),
+        labelContent(item.label),
       ),
     ),
   );

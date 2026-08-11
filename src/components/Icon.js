@@ -265,30 +265,21 @@ export const iconSize = (fontSize) => Math.round(fontSize * 0.85);
  * <Icon name="check" size={10} color={theme.accentText} />
  * ```
  *
- * ## Colour and size do not cascade — pass them
+ * ## Colour inherits; size does not
  *
- * There is no cascade in this renderer: `style` precedence is written at the
- * call site (docs/styling.md), and a `color` or `fontSize` on an ancestor
- * `<box>` reaches nothing below it. So an icon inside a highlighted row does
- * **not** pick the row's ink up by itself, and neither does one inside a
- * `<text>` — it is a sibling element, not a span.
+ * `color` travels down the tree, so an icon inside a row that dims itself
+ * dims with it, and a `:hover` block that sets `color` on the row reaches
+ * the icon exactly as it reaches the row's label — the ink is an inherited
+ * property, and the state block changes it on the row (docs/styling.md).
+ * The `color` prop here is for saying something the surrounding text does
+ * not: a destructive action's mark, a check drawn on an accent fill.
  *
- * Two consequences worth knowing before reaching for one:
- *
- *  - `color` defaults to the palette's `text`, which *does* reach here,
- *    because `theme` is the one channel that walks the tree. A row that
- *    paints its label in `theme.hoverText` has to hand the icon the same
- *    colour explicitly — which is what every call site in core does, and
- *    what Menu's `icon({ color, size })` contract has always done.
- *  - `:hover` is resolved per node against the *ancestor* chain, so a
- *    hovered row lights up but its child icon does not. An icon that has to
- *    follow a hover follows it through React state, not through a style
- *    block.
- *
- * (Both of those are the current model rather than a settled verdict: a real
- * `color`/`fontSize` cascade is a live question, and if it lands, `color`
- * and `size` here become defaults that inheritance fills in rather than
- * things every call site repeats. Nothing in the set's shape would change.)
+ * **`size` does not inherit** and is deliberately not `fontSize`. A glyph is
+ * a drawing rather than a letter — it has no baseline to sit on and no
+ * ascent to be measured against — so it takes its default from the palette's
+ * `fontSize` (`iconSize`) rather than from whatever text happens to be
+ * around it, which keeps a chevron the same size in a row that shrank its
+ * label. Pass `size` for the one icon that has to be bigger.
  *
  * Everything else is a `<canvas>`: `style` merges last, and the rest of the
  * props go straight through, so a clickable icon is `<Icon onClick focusable/>`.
@@ -326,8 +317,12 @@ export function Icon({
     onDraw: draw,
     'aria-hidden': ariaHidden,
     ...canvasProps,
+    // No `color` unless the call site named one: leaving it off the style is
+    // what lets it inherit, where `color: theme.text` would pin every icon to
+    // the palette and undo the row it sits in.
     style: [
-      { width: px, height: px, flexShrink: 0, color: color ?? theme.text },
+      { width: px, height: px, flexShrink: 0 },
+      color ? { color } : null,
       style,
     ],
   });

@@ -8,8 +8,10 @@ import {
   paintPropsChanged,
   textStyleFrom,
   DEFAULT_TEXT_STYLE,
-  TEXT_LAYOUT_PROPS,
-  TEXT_PAINT_PROPS,
+  inheritedTextChanged,
+  localTextStyleChanged,
+  resolvedTextDelta,
+  TEXT_REMEASURE,
   flattenStyle,
   validateStyle,
   resolveStyleStates,
@@ -527,6 +529,16 @@ const warnedNoArgb = new WeakSet();
 // `borderRadius` on a non-uniform border warned about once (`_paintBorderSides`).
 let warnedSideRadius = false;
 
+/**
+ * Depth of the `_themeChanged` walk in progress, if any.
+ *
+ * That walk already visits every node in the subtree and re-resolves each
+ * one, so a style swap it performs on the way down must not kick off a
+ * second walk of the nodes it is about to reach anyway. Without the guard a
+ * theme change over a tree of token-using nodes is quadratic in its depth.
+ */
+let inThemeWalk = 0;
+
 // Frame timestamps for transitions. Indirected so tests can drive the clock
 // instead of sleeping through real animations.
 let now = () => Date.now();
@@ -541,46 +553,6 @@ export function setAnimationClock(fn) {
 let debugPaint = process.env.REACT_X11_DEBUG_PAINT || '';
 export function setDebugPaint(mode) {
   debugPaint = mode || '';
-}
-
-/**
- * Every text layout prop is a scalar and compares by value, except the one
- * that is a bag of axis coordinates. `fontVariationSettings` is written as
- * an object literal in a render, so a fresh one arrives on every commit and
- * `!==` would call it a change every time — re-shaping the paragraph and
- * re-rasterizing its glyphs to arrive at the same pixels. Small and flat, so
- * comparing it is cheaper than believing it.
- */
-function axesEqual(a, b) {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  const keys = Object.keys(a);
-  if (keys.length !== Object.keys(b).length) return false;
-  for (const key of keys) {
-    if (a[key] !== b[key]) return false;
-  }
-  return true;
-}
-
-/** Did anything that only changes how the text is *drawn* change? */
-function textPaintStyleChanged(style, before) {
-  if (style === before) return false;
-  for (const key of TEXT_PAINT_PROPS) {
-    if (style[key] !== before[key]) return true;
-  }
-  return false;
-}
-
-/** Did anything the text stack measures or paints with change? */
-function textStyleChanged(style, before) {
-  if (style === before) return false;
-  if (style.color !== before.color) return true;
-  for (const key of TEXT_LAYOUT_PROPS) {
-    if (key === 'fontVariationSettings') {
-      if (!axesEqual(style[key], before[key])) return true;
-    } else if (style[key] !== before[key]) return true;
-  }
-  return false;
 }
 
 /**
@@ -1085,6 +1057,7 @@ export class Node {
     // node states that style blocks can react to, owned by EventManager
     this.states = {
       ':hover': false,
+      ':focus-within': false,
       ':focus': false,
       ':focus-visible': false,
       ':active': false,
@@ -1093,6 +1066,10 @@ export class Node {
     };
     // in-flight transitions: prop -> {from, to, start, duration}
     this._anim = null;
+    // `resolvedTextStyle()`'s cache: this node's own text style over what it
+    // inherits. Undefined means "never asked", which is load-bearing — see
+    // `_retext`
+    this._resolvedText = undefined;
     // hot pointer-path caches (issue #188): the children in paint order,
     // re-verified against the live children on every read, and the
     // subtree's hit reach, invalidated through _clearHitBounds()
@@ -1231,6 +1208,13 @@ export class Node {
     if (displayed.overflow !== this.style.overflow) {
       this._overflowChanged?.(displayed.overflow);
     }
+    // The same funnel is what keeps the text cascade honest: every route a
+    // new style arrives by — a commit, a `:hover`, a size query, a token —
+    // comes through here, so this is the one place that has to notice the
+    // ink or the face moving and push it into the subtree.
+    if (!inThemeWalk && inheritedTextChanged(this.style, displayed)) {
+      this._retextSubtree();
+    }
     return this.style;
   }
 
@@ -1263,6 +1247,11 @@ export class Node {
       // the author asked for that by transitioning one (docs/styling.md)
       if (this.root) this.root.needsLayout = true;
     }
+    // A tick writes `this.style` without going through `_retarget`, so it
+    // owes the cascade the same notice — and it is the only thing that owes
+    // it *per frame*: a transitioned `color` is a new ink every frame, for
+    // this node and for everything inheriting from it.
+    if (inheritedTextChanged(this.style, before)) this._retextSubtree();
     return this._anim.size > 0;
   }
 
@@ -1340,26 +1329,30 @@ export class Node {
   }
 
   /**
-   * The text style a node inherits when nothing named one — **the palette's**,
-   * not a set of constants.
+   * The text style this node inherits — **the enclosing element's**, and at
+   * the top of the tree the palette's.
    *
-   * The ink first: a `<text>` or a `<textinput>` that never mentions a colour
+   * The ink, the face and the size travel down the tree the way they do in
+   * CSS: `<box style={{ color: theme.dim, fontSize: 12 }}>` is how a caption
+   * block, a disabled row or a code panel is written, and it is what makes
+   * `color` on a row reach the row's label without the row handing it over.
+   * Only the properties in `INHERITED_TEXT_PROPS` travel; a style property on
+   * the node itself still wins, the way it always has.
+   *
+   * Under the last element is the palette, and that floor is not a set of
+   * constants either. The ink first: a `<text>` that never mentions a colour
    * has to be readable on the surface it is drawn on, and that surface
    * follows the desktop now. Black on `#1e2228` is invisible, which is the
-   * whole bug.
+   * whole bug. The face and the size for the same reason one step out — a
+   * theme names `fontFamily` and `fontSize` because it is describing the type
+   * this app sets, and the only way that can be true is if the text nobody
+   * styled follows them.
    *
-   * The face and the size for the same reason one step out. A theme names
-   * `fontFamily` and `fontSize` because it is describing the type this app
-   * sets, and the only way that can be true is if the text nobody styled
-   * follows them — otherwise `fontSize` is a token that moves the menu
-   * corners derived from it and not one letter, and `fontFamily` is a token
-   * with no reader at all.
-   *
-   * Cached per node so the object identity is stable while the palette is —
-   * the layouts below are keyed on style and a fresh base each call would
-   * miss the cache every time.
+   * A detached node has no parent yet and so resolves against the floor;
+   * `insertBefore` re-resolves the subtree against the real one.
    */
   get inheritedTextStyle() {
+    if (this.parent) return this.parent.resolvedTextStyle();
     const theme = this.theme;
     const color = theme.text;
     // A palette can reach a node as a bare `theme` **prop** rather than a
@@ -1372,6 +1365,57 @@ export class Node {
       this._textBase = { ...DEFAULT_TEXT_STYLE, color, family, size };
     }
     return this._textBase;
+  }
+
+  /**
+   * Re-resolve this node's text style and pay for what moved.
+   *
+   * The cache is dropped rather than patched, and the *values* decide what
+   * happens next: a node that names its own `color` and face absorbs an
+   * ancestor's change entirely, which is what lets `_retextSubtree` stop
+   * walking there. Returns the cost so it can.
+   *
+   * A node with no cached resolution has never been asked, and neither has
+   * anything below it — `inheritedTextStyle` fills every ancestor on the way
+   * up, so an empty cache here proves an empty cache in the whole subtree.
+   * That is the early-out that keeps a hover on one row from touching a
+   * window's worth of nodes.
+   */
+  _retext() {
+    const before = this._resolvedText;
+    if (before === undefined) return 0;
+    this._resolvedText = undefined;
+    const cost = resolvedTextDelta(before, this.resolvedTextStyle());
+    if (cost !== 0) this._textStyleMoved(cost);
+    return cost;
+  }
+
+  /** …and everything under it, stopping wherever the answer did not change. */
+  _retextSubtree() {
+    if (this._retext() === 0) return;
+    for (const child of this.children) child._retextSubtree();
+  }
+
+  /**
+   * This node's resolved text style moved — because its own style did, or
+   * because an ancestor's did and it inherited the change.
+   *
+   * `TEXT_REMEASURE` means a glyph can have moved and the box has to be
+   * measured again; `TEXT_REPAINT` means only the ink or the glyph rounding
+   * did, so the cached layout still has to go — the value rides on the spans
+   * inside it — but nothing reflows. Keeping those apart is the whole reason
+   * a `:hover { color }` costs a repaint rather than a layout pass.
+   *
+   * The default serves any element that draws text: re-measure if it has a
+   * size of its own, repaint otherwise. Elements that draw no text override
+   * it away.
+   */
+  _textStyleMoved(cost) {
+    if (cost === TEXT_REMEASURE && this._measureFn) {
+      this.invalidateMeasure('text');
+    } else {
+      this.root?.invalidate(false, this, 'text');
+    }
   }
 
   /**
@@ -1402,8 +1446,11 @@ export class Node {
   _sizeQueriesChanged() {
     if (!(this._queried || this._supportsQueried) || this.destroyed) return;
     const before = this.style;
+    // a query block may name `fontSize`, and `_syncStyle` → `_retarget` is
+    // what pushes that into the subtree; only the node-local text props are
+    // left to notice here
     this._syncStyle(this.props);
-    if (textStyleChanged(this.style, before)) this._textContentChanged();
+    if (localTextStyleChanged(this.style, before)) this._textContentChanged();
     if (this.yoga && this.style !== before) {
       applyLayoutStyle(this.yoga, this.style, before);
     }
@@ -1412,35 +1459,37 @@ export class Node {
   /** The theme above or on this node changed: drop the caches and restyle
    * the subtree, since a token can appear at any depth. */
   _themeChanged() {
-    // The base this node's unstyled text was last shaped against, by
-    // identity: `inheritedTextStyle` only builds a new one when a value it
-    // reads actually moved, so `!==` afterwards is exact.
-    const wasType = this._textBase;
-    this._theme = undefined;
-    // A `<window>` with no `backgroundColor` of its own follows the palette,
-    // and the server's copy of that colour has to follow with it — otherwise
-    // the next resize fills the new area in the old scheme.
-    if (this.isWindow) this._syncWindowBackground();
-    // The inherited ink, face and size are in no style object, so
-    // `_usesTokens` does not see them move — but a cached layout carries the
-    // colour *and the font* it was shaped with, and would keep painting them.
-    // A theme swap that only changes `fontFamily` is the case that made this
-    // worth widening: nothing else about the node changes, so nothing else
-    // would have dropped the layout.
-    if (wasType !== undefined && this.inheritedTextStyle !== wasType) {
-      this._textContentChanged();
-      this.root?.invalidate(true, null, 'theme');
+    // This walk visits every node itself, so the per-node re-resolution below
+    // is enough — a style swap it causes must not start a second walk of the
+    // same subtree from halfway down.
+    inThemeWalk++;
+    try {
+      this._theme = undefined;
+      // A `<window>` with no `backgroundColor` of its own follows the palette,
+      // and the server's copy of that colour has to follow with it — otherwise
+      // the next resize fills the new area in the old scheme.
+      if (this.isWindow) this._syncWindowBackground();
+      if (this._usesTokens) {
+        const before = this.style;
+        this._syncStyle(this.props);
+        // a token change reaches the node without React re-rendering it, so
+        // the invalidation a commit would have done has to happen here too
+        if (localTextStyleChanged(this.style, before)) {
+          this._textContentChanged();
+        }
+        this.root?.invalidate(true, null, 'theme');
+      }
+      // The palette is the floor under the cascade, so a theme swap moves the
+      // resolved style of every node that named none of its own — and none of
+      // that is in a style object, so nothing above would have noticed. A
+      // swap that only changes `fontFamily` is the case that made this worth
+      // having: nothing else about the node changes, and a cached layout
+      // carries the face it was shaped with.
+      if (this._retext() !== 0) this.root?.invalidate(true, null, 'theme');
+      for (const child of this.children) child._themeChanged();
+    } finally {
+      inThemeWalk--;
     }
-    if (this._usesTokens) {
-      const before = this.style;
-      this._syncStyle(this.props);
-      // a token change reaches the node without React re-rendering it, so
-      // the invalidation TextNode.applyProps would have done has to happen
-      // here too — otherwise the cached layout keeps painting the old colour
-      if (textStyleChanged(this.style, before)) this._textContentChanged();
-      this.root?.invalidate(true, null, 'theme');
-    }
-    for (const child of this.children) child._themeChanged();
   }
 
   /**
@@ -2303,9 +2352,18 @@ export class Node {
    * way rather than the style vocabulary's (`family`, not `fontFamily`;
    * `variations`, not `fontVariationSettings`), which is a mapping worth
    * having in one place instead of vendored per element.
+   *
+   * **Cached**, and the cache is the cascade's spine: asking here fills every
+   * ancestor's on the way up, which is what lets an invalidation walk stop at
+   * a node that never resolved (`_retext`). Everything that can move the
+   * answer drops it — a style swap (`_retarget`), an animation tick, a theme
+   * change, an attach — so an element may keep reading it at paint time.
    */
   resolvedTextStyle() {
-    return textStyleFrom(this.style, this.inheritedTextStyle);
+    return (this._resolvedText ??= textStyleFrom(
+      this.style,
+      this.inheritedTextStyle,
+    ));
   }
 
   paint(ctx) {
@@ -2733,38 +2791,73 @@ export class TextNode extends Node {
     this._layouts.clear();
   }
 
+  /** The node that owns the box this text flows in. A span has none of its
+   * own, so its geometry — and its damage — belong to the nearest ancestor
+   * with a yoga node. */
+  _textBoxOwner() {
+    let owner = this;
+    while (owner && !owner.yoga) owner = owner.parent;
+    return owner;
+  }
+
+  /**
+   * The type this text is set in moved, from its own style or from an
+   * ancestor's. The two costs differ by a layout pass.
+   *
+   * A re-measure has to *ask* for one. None of `fontSize`, `fontWeight`,
+   * `fontFamily` or `fontStyle` is a yoga property, so `applyLayoutStyle`
+   * sees nothing move, and none is a paint prop either, so the node
+   * contributes no damage — the frame is already decided by the time the
+   * layout is dropped. They are all inputs to the *measure function*, and the
+   * dirty flag `_textContentChanged` sets is only read by a layout pass:
+   * without asking for one the cleared layout is never rebuilt and the old
+   * glyphs stay on screen with nothing reporting an error.
+   */
+  _textStyleMoved(cost) {
+    const owner = this._textBoxOwner();
+    if (cost === TEXT_REMEASURE) {
+      this._textContentChanged();
+      if (owner) owner._invalidateLayout('text');
+      else this.root?.invalidate(true, null, 'text');
+      return;
+    }
+    // Only the ink or the glyph rounding. Both ride on the spans inside the
+    // cached layout, so it still has to go — but the box cannot have moved,
+    // and `false` here is the whole point: this is the path a `:hover`
+    // arrives by, once per pointer move, and a transitioned colour by, once
+    // per frame.
+    this._textPaintChanged();
+    this.root?.invalidate(false, owner ?? NO_DAMAGE, 'text');
+  }
+
   applyProps(newProps, oldProps) {
     const before = this.style;
     super.applyProps(newProps, oldProps);
-    if (!textStyleChanged(this.style, before)) {
-      if (!textPaintStyleChanged(this.style, before)) return;
-      this._textPaintChanged();
-      // damage belongs to the node that owns the box; a span has none of its
-      // own. `false` is the whole point of this branch — no layout pass.
-      let owner = this;
-      while (owner && !owner.yoga) owner = owner.parent;
-      this.root?.invalidate(false, owner ?? NO_DAMAGE, 'text');
-      return;
-    }
+    // The inherited half of the text style — the face, the size, the ink —
+    // travels through `_retarget` and lands in `_textStyleMoved`, whichever
+    // route it arrived by. What is left here is what only this node's own box
+    // cares about: how its lines are aligned, how tall they are, whether they
+    // wrap at all.
+    if (!localTextStyleChanged(this.style, before)) return;
     this._textContentChanged();
-    // `super.applyProps` has already committed this frame, and it decided
-    // there was nothing to re-lay-out: none of `fontSize`, `fontWeight`,
-    // `fontFamily`, `fontStyle`, `lineHeight` or `textAlign` is a yoga
-    // property, so `applyLayoutStyle` saw nothing move, and none of them is
-    // a paint prop either, so the node contributed no damage. They are all
-    // inputs to the *measure function*, though — the dirty flag
-    // `_textContentChanged` just set is only read by a layout pass, and
-    // without asking for one the cleared layout is never rebuilt and the
-    // old glyphs stay on screen. A new string reaches the same conclusion
-    // through `TextChunkNode.setText`; this is that path for a new style.
-    let owner = this;
-    while (owner && !owner.yoga) owner = owner.parent;
+    const owner = this._textBoxOwner();
     if (owner) owner._invalidateLayout('text');
     else this.root?.invalidate(true, null, 'text');
   }
 
-  collectSpans(inherited, out) {
-    const style = textStyleFrom(this.style, inherited);
+  /**
+   * The paragraph as a flat run list: one entry per chunk of text, carrying
+   * the style resolved where that chunk is written.
+   *
+   * A nested `<text>` is a span, and it inherits from the `<text>` around it
+   * by the same mechanism a `<text>` inherits from the `<box>` around it —
+   * `resolvedTextStyle()` walks the parents either way, so a span needs no
+   * inheritance rule of its own. It also has to *ask*, rather than be handed
+   * the answer: filling the cache here is what makes `:hover` on a span work,
+   * since an unresolved node is one `_retext` skips.
+   */
+  collectSpans(out) {
+    const style = this.resolvedTextStyle();
     for (const child of this.children) {
       if (child.kind === 'textchunk') {
         out.push({
@@ -2778,7 +2871,7 @@ export class TextNode extends Node {
           color: style.color,
         });
       } else if (child.kind === 'text') {
-        child.collectSpans(style, out);
+        child.collectSpans(out);
       }
     }
     return out;
@@ -2806,7 +2899,7 @@ export class TextNode extends Node {
     const key = String(maxWidth);
     let layout = this._layouts.get(key);
     if (!layout) {
-      const spans = this.collectSpans(this.inheritedTextStyle, []);
+      const spans = this.collectSpans([]);
       const base = this.resolvedTextStyle();
       layout = fonts.layout(spans, base, {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
@@ -3482,6 +3575,13 @@ export class BoxNode extends Scrollable(Node) {
   constructor(props, app) {
     super('box', props, app);
   }
+
+  /** A box draws a fill and a border and no text at all, so a new ink or a
+   * new face costs it nothing — it is only ever the *source* of one. The
+   * nodes inside it claim their own damage as the walk reaches them, which
+   * keeps hovering a long list bounded to the labels rather than to the
+   * list. */
+  _textStyleMoved() {}
 }
 
 /** Escape hatch: a retained node whose content is painted by props.onDraw. */
@@ -3506,12 +3606,14 @@ export class CanvasNode extends Node {
   }
 
   /**
-   * The ink a `mono` drawing is painted in: the node's own `color`, falling
-   * back to the palette's, exactly as `<text>` and `<svg>` resolve theirs.
-   * There is no cascade from an ancestor `<box>` — see the note on `mono`.
+   * The ink a `mono` drawing is painted in: the node's own `color`, then what
+   * it inherits, then the palette's — exactly as `<text>` and `<svg>` resolve
+   * theirs, because it is literally the same resolution. An `<Icon>` in a
+   * row that dims itself dims with it, with nothing handed over at the call
+   * site.
    */
   _monoColor() {
-    return this.style.color ?? this.theme.text;
+    return this.resolvedTextStyle().color;
   }
 
   /** Preset the ink a `mono` drawing inherits, so `onDraw` never names a
@@ -4652,11 +4754,10 @@ export class TextInputNode extends Node {
     this._caret = Math.min(this._caret, len);
     this._anchor = Math.min(this._anchor, len);
     this._noteExternalValue();
-    let metricsChanged = false;
-    for (const key of TEXT_LAYOUT_PROPS) {
-      if (this.style[key] !== beforeStyle[key]) metricsChanged = true;
-    }
-    if (metricsChanged) {
+    // The face and the size arrive through `_textStyleMoved`, whether they
+    // came from this commit or from an ancestor; what is left here is the
+    // node-local half of the text vocabulary.
+    if (localTextStyleChanged(this.style, beforeStyle)) {
       this.invalidateMeasure('props');
     } else if (newProps.value !== before.value) {
       // painting clips to the content box and the measure function reads
@@ -5625,6 +5726,10 @@ export class WindowNode extends Scrollable(Node) {
   _windowBackground() {
     return this.style.backgroundColor || this.theme.background;
   }
+
+  /** Like a `<box>`: a window fills and never letters, so it is the top of
+   * the cascade rather than a reader of it. */
+  _textStyleMoved() {}
 
   /**
    * Keep the server's idea of the background in step with ours. Called when

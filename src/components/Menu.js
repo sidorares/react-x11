@@ -270,11 +270,13 @@ function toggleMark(item) {
  */
 function gutterMark(item, { color, fontSize }) {
   const toggle = toggleMark(item);
-  if (toggle) return h(Icon, { name: toggle, size: MENU_ICON_SIZE, color });
+  // no `color` on the built-ins: the row names its ink and both of these
+  // inherit it, which is also what keeps them in step with `:active`
+  if (toggle) return h(Icon, { name: toggle, size: MENU_ICON_SIZE });
   const { icon } = item;
   if (icon == null) return null;
   if (typeof icon === 'string' || typeof icon === 'number') {
-    return h('text', { style: { color, fontSize } }, String(icon));
+    return h('text', { style: { fontSize } }, String(icon));
   }
   return typeof icon === 'function'
     ? icon({ color, size: MENU_ICON_SIZE })
@@ -323,6 +325,7 @@ function MenuRow({
   const dim = !isEnabled(item);
   const submenu = hasSubmenu(item);
   const accelerator = formatShortcut(item.shortcut);
+  const rowInk = dim ? theme.dim : active ? theme.hoverText : theme.text;
   if (process.env.NODE_ENV !== 'production') checkShortcut(item);
   return h(
     'box',
@@ -371,6 +374,10 @@ function MenuRow({
           : state === 'path'
             ? theme.surfaceActive
             : 'transparent',
+        // The row's ink, said once for the mark, the label, the accelerator
+        // and the submenu chevron — four elements that used to repeat this
+        // ternary and could each be forgotten separately.
+        color: rowInk,
         // the item is already highlighted by the time it can be pressed, so
         // the press is a further step down rather than a first one — without
         // it the command runs on the release out of a picture that never
@@ -383,37 +390,17 @@ function MenuRow({
     h(
       'box',
       { style: { width: MENU_GUTTER - MENU_ITEM_PAD, alignItems: 'center' } },
-      gutterMark(item, {
-        color: dim ? theme.dim : active ? theme.hoverText : theme.text,
-        fontSize,
-      }),
+      gutterMark(item, { color: rowInk, fontSize }),
     ),
-    h(
-      'text',
-      {
-        style: [
-          capTrim,
-          {
-            color: dim ? theme.dim : active ? theme.hoverText : theme.text,
-            fontSize: fontSize,
-          },
-        ],
-      },
-      item.label,
-    ),
+    h('text', { style: [capTrim, { fontSize }] }, item.label),
     h('box', { style: { flexGrow: 1 } }),
+    // The accelerator and the chevron are quieter than the label at rest and
+    // rise with the row when it is chosen — so on an active row they say
+    // nothing and take what the row set.
     accelerator &&
       h(
         'text',
-        {
-          style: [
-            capTrim,
-            {
-              color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
-              fontSize: fontSize,
-            },
-          ],
-        },
+        { style: [capTrim, { fontSize }, !active && { color: theme.dim }] },
         accelerator,
       ),
     submenu &&
@@ -423,7 +410,7 @@ function MenuRow({
         // stands as tall as its box, so `MENU_ICON_SIZE` would put an arrow
         // beside the label taller than the label.
         size: capBand(fontSize),
-        color: dim ? theme.dim : active ? theme.hoverText : theme.dim,
+        style: !active && { color: theme.dim },
       }),
   );
 }
@@ -1187,6 +1174,8 @@ export function MenuBar({
               // keyboard user who cannot see where they are is exactly the
               // reader the ring exists for.
               outlineWidth: openIndex === index ? 0 : undefined,
+              // said once for whichever of the two the title turns out to be
+              color: barState === 'active' ? theme.hoverText : theme.text,
             },
             // Only while this menu is shut, as in `Select`: an open one is
             // already showing the answer, and a state block would outrank
@@ -1208,21 +1197,8 @@ export function MenuBar({
               // `icon`s. One drawing, every font, both colour schemes.
               name: 'moreVertical',
               size: iconSize(fontSize),
-              color: barState === 'active' ? theme.hoverText : theme.text,
             })
-          : h(
-              'text',
-              {
-                style: [
-                  capTrim,
-                  {
-                    color: barState === 'active' ? theme.hoverText : theme.text,
-                    fontSize: fontSize,
-                  },
-                ],
-              },
-              menu.label,
-            ),
+          : h('text', { style: [capTrim, { fontSize }] }, menu.label),
       );
     }),
     openIndex >= 0 &&

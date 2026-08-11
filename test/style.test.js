@@ -215,6 +215,80 @@ test(':active follows the press, :disabled wins over :hover', async () => {
   await x11Root.unmount();
 });
 
+test(':focus-within lights the ancestors of whatever has focus', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const field = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 200, height: 100 },
+      h(
+        'box',
+        {
+          style: {
+            backgroundColor: 'white',
+            ':focus-within': { backgroundColor: 'yellow' },
+            // narrower than the row's, and only true of the field itself
+            ':focus': { backgroundColor: 'green' },
+          },
+        },
+        h('textinput', { ref: field, style: { height: 20 } }),
+      ),
+    ),
+  );
+  await tick();
+  const row = nodeOf(app).children[0];
+  assert.strictEqual(row.style.backgroundColor, 'white');
+
+  field.current.focus();
+  assert.strictEqual(
+    row.style.backgroundColor,
+    'yellow',
+    'the row follows focus landing inside it',
+  );
+  assert.strictEqual(
+    field.current.style.backgroundColor,
+    undefined,
+    'and the field is not styled by the row',
+  );
+
+  field.current.blur();
+  assert.strictEqual(row.style.backgroundColor, 'white', 'and gives it back');
+
+  await x11Root.unmount();
+});
+
+test(':focus is narrower than :focus-within, so it wins', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const box = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 200, height: 100 },
+      h('box', {
+        ref: box,
+        focusable: true,
+        style: {
+          backgroundColor: 'white',
+          ':focus-within': { backgroundColor: 'yellow' },
+          ':focus': { backgroundColor: 'green' },
+        },
+      }),
+    ),
+  );
+  await tick();
+  box.current.focus();
+  assert.strictEqual(
+    box.current.style.backgroundColor,
+    'green',
+    'a node with focus is also within itself, and the narrower block wins',
+  );
+
+  await x11Root.unmount();
+});
+
 test('<window>: width/height are the X window, style is the root box', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
@@ -899,6 +973,12 @@ test('a token change invalidates cached text, not just the style object', async 
   render(THEME);
   await tick();
   const text = nodeOf(app).children[0].children[0];
+  // What a paint would do, and the reason the invalidation walk is allowed to
+  // stop at a node that has never resolved: the only thing that fills
+  // `_layouts` is `_layoutFor`, which asks for the resolved text style first.
+  // The mock app has no font manager, so `_layoutFor` bails before it gets
+  // there and the two halves have to be staged by hand.
+  text.resolvedTextStyle();
   text._layouts.set('stale', { width: 1, height: 1 });
 
   // the <text> element's own props do not change — only the theme above it —

@@ -4,8 +4,10 @@ export default {
   description:
     'Inline styles with :hover / :focus / :active blocks that resolve in the ' +
     'renderer — a pointer move repaints one node and never renders React. ' +
-    'Plus theme tokens ($name, resolved against the nearest theme above the ' +
-    'node) and transitions, which lerp on the window frame clock.',
+    'Plus inherited type (color and the font properties travel down the ' +
+    'tree, so a :hover on a row reaches its labels), theme tokens ($name, ' +
+    'resolved against the nearest theme above the node) and transitions, ' +
+    'which lerp on the window frame clock.',
   code: `import React, { useState } from 'react';
 import { createRoot, createStyles } from 'react-x11';
 
@@ -48,6 +50,18 @@ const s = createStyles({
   },
   buttonText: { color: '$accentText', fontSize: 13 },
   swatch: { width: 34, height: 34, borderRadius: 17, transition: 200 },
+  // color and the font properties inherit, so this row sets the type of
+  // everything written inside it — including on hover, which is why there
+  // is no "group hover" to learn
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+    padding: 6,
+    borderRadius: 6,
+    color: '$muted',
+    transition: 140,
+    ':hover': { color: '$accent', backgroundColor: '$panel' },
+  },
 });
 
 function App() {
@@ -73,6 +87,19 @@ function App() {
           The border colour comes from a ':hover' block. No React render
           happens: the event manager already knows the hover path, so the
           renderer recomputes this node's style and repaints it.
+        </text>
+      </box>
+
+      <box style={s.card}>
+        <text style={s.title}>Type travels down</text>
+        <box style={s.row}>
+          <text style={{ fontSize: 13 }}>Open recent</text>
+          <box style={{ flexGrow: 1 }} />
+          <text style={{ fontSize: 13 }}>Ctrl+R</text>
+        </box>
+        <text style={s.body}>
+          Neither label names a colour. The row does, in its own style and in
+          its ':hover' block, and 'color' is inherited — so both follow it.
         </text>
       </box>
 

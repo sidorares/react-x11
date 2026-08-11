@@ -1680,16 +1680,9 @@ test('text spans collect nested styles', async () => {
   );
 
   const textNode = app.windows[0]._reactX11Node.children[0];
-  const spans = textNode.collectSpans(
-    {
-      family: 'sans-serif',
-      size: 14,
-      weight: 'normal',
-      style: 'normal',
-      color: 'black',
-    },
-    [],
-  );
+  // no base to hand over: a span inherits from the <text> around it through
+  // the same cascade a <text> inherits from the <box> around it
+  const spans = textNode.collectSpans([]);
   assert.strictEqual(spans.length, 2);
   assert.deepStrictEqual(
     [spans[0].text, spans[0].size, spans[0].color],

@@ -129,7 +129,18 @@ const s = createStyles({
     ':hover': { borderLeftColor: '$accent' },
   },
   rule: { borderWidth: 1, borderBottomWidth: 0, borderTopColor: '#ddd' },
+  // the text cascade: `color` on a container is how the labels inside it are
+  // dimmed, and `:focus-within` is how the row follows the field in it
+  field: {
+    color: '$text',
+    fontSize: 13,
+    ':focus-within': { borderColor: '$borderFocus' },
+    ':hover': { color: '$accent' },
+  },
 });
+
+// @ts-expect-error — the size a container sets is layout, state blocks are not
+createStyles({ bad: { ':focus-within': { fontSize: 12 } } });
 
 // arrays, falsy entries, nesting
 const composed: StyleProp = [s.root, false, null, [s.row, { padding: 4 }]];
