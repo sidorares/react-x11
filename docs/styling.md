@@ -128,7 +128,8 @@ that. `:dragging` is set on the source node for the duration of a drag.
 See [drag-and-drop.md](drag-and-drop.md).
 
 **State blocks may only set paint properties** (`backgroundColor`,
-`borderColor`, `borderRadius`, `zIndex`, `outlineWidth`, `outlineColor`,
+`borderColor` and the per-side `borderTopColor`/…, `borderRadius`, `zIndex`,
+`outlineWidth`, `outlineColor`,
 `outlineOffset`, `color`) — enforced at declaration
 time by `createStyles`. A `:hover` that could set `padding` would reflow the
 tree on pointer move: jitter, and the end of the "hover is a repaint" property
@@ -160,6 +161,40 @@ A theme sets `focusRing`, `focusRingWidth` and `focusRingOffset` to restyle
 every ring under it at once — the renderer reads them from the nearest
 `theme` prop, so `<ThemeProvider>` covers the widgets and anything an
 application writes itself.
+
+## Per-side borders
+
+```jsx
+<box
+  style={{ borderLeftWidth: 3, borderLeftColor: '$border', paddingLeft: 10 }}
+>
+  {children} {/* a blockquote bar, no extra node */}
+</box>
+```
+
+A side width overrides the `borderWidth` shorthand exactly the way
+`paddingLeft` overrides `padding`, and a side colour
+(`borderTopColor`/`Right`/`Bottom`/`Left`) falls back to `borderColor`. The
+widths are layout — yoga sees each edge, so the bar above insets content on
+the left only — and the colours are paint, legal in a state block like
+`borderColor` itself.
+
+This is what a rule or an accent edge should be built from: a blockquote's
+bar, a table's row separators (`borderBottomWidth: 1` on each row), a tab's
+underline. Composing the same line out of 1px `<box>`es works but pays a
+node per row into layout and paint, and scatters what is really one style
+value ("the table's border colour") across the tree.
+
+Two edges of the v1 shape:
+
+- **`borderRadius` requires uniform borders** — same width and colour on
+  all four sides. A non-uniform border paints square, ignores the radius,
+  and says so once in development; bars and rules are square, so this costs
+  nothing real.
+- Corners between two painted sides of different colours are square and
+  deterministic: top and bottom span the box's full width, left and right
+  run between them. CSS mitres that corner diagonally; nothing built from
+  bars and rules can tell the difference.
 
 ## Measuring text to its letters
 

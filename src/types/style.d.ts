@@ -110,6 +110,13 @@ export interface LayoutStyle {
   display?: Display;
   overflow?: Overflow;
   borderWidth?: number;
+  /** Per-side widths override `borderWidth` the way `paddingTop` overrides
+   *  `padding`. Layout properties: yoga sees each edge, so a 3px left bar
+   *  insets content on the left only. */
+  borderTopWidth?: number;
+  borderRightWidth?: number;
+  borderBottomWidth?: number;
+  borderLeftWidth?: number;
 }
 
 /**
@@ -121,6 +128,15 @@ export interface LayoutStyle {
 export interface PaintStyle {
   backgroundColor?: Color;
   borderColor?: Color;
+  /** Per-side colours fall back to `borderColor`. Paint properties, legal in
+   *  state blocks like it. */
+  borderTopColor?: Color;
+  borderRightColor?: Color;
+  borderBottomColor?: Color;
+  borderLeftColor?: Color;
+  /** Rounds the background, the border and the child clip. Requires uniform
+   *  borders — same width and colour on all four sides; a non-uniform border
+   *  paints square and ignores the radius. */
   borderRadius?: number;
   zIndex?: number;
   /**

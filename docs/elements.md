@@ -52,6 +52,13 @@ A box with `overflow: 'scroll'` applies exactly that to itself by default.
   `'rgba(0,0,0,.5)'`, `'red'`)
 - `borderWidth`, `borderColor`, `borderRadius`, `borderStyle`
   (`'solid'` default, `'dashed'`)
+- per-side borders: `borderTopWidth`/`Right`/`Bottom`/`Left` override
+  `borderWidth` the way `paddingLeft` overrides `padding`, and
+  `borderTopColor`/… fall back to `borderColor`. A blockquote's bar is
+  `borderLeftWidth: 3` on the quote box, not a 3px sibling; a table rule is
+  `borderBottomWidth: 1` on the row. `borderRadius` requires uniform
+  borders — a non-uniform border paints square
+  ([styling.md](styling.md#per-side-borders))
 - `zIndex` — paint/hit order among siblings (stable sort)
 - `outlineWidth`, `outlineColor`, `outlineOffset` — the focus ring, painted
   outside the border box and invisible to yoga, so it never moves what it

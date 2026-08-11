@@ -121,6 +121,13 @@ const LAYOUT_APPLIERS = {
   overflow: (n, v) =>
     n.setOverflow(pick(OVERFLOW, v, 'overflow') ?? Yoga.OVERFLOW_VISIBLE),
   borderWidth: (n, v) => n.setBorder(Yoga.EDGE_ALL, v ?? 0),
+  // per-side widths resolve the way padding does: the side overrides the
+  // shorthand, and yoga's own edge precedence (EDGE_TOP over EDGE_ALL) is
+  // what implements the override
+  borderTopWidth: (n, v) => n.setBorder(Yoga.EDGE_TOP, v),
+  borderRightWidth: (n, v) => n.setBorder(Yoga.EDGE_RIGHT, v),
+  borderBottomWidth: (n, v) => n.setBorder(Yoga.EDGE_BOTTOM, v),
+  borderLeftWidth: (n, v) => n.setBorder(Yoga.EDGE_LEFT, v),
 };
 
 // Props that only affect painting, not geometry.
@@ -133,6 +140,10 @@ const LAYOUT_APPLIERS = {
 const PAINT_PROPS = new Set([
   'backgroundColor',
   'borderColor',
+  'borderTopColor',
+  'borderRightColor',
+  'borderBottomColor',
+  'borderLeftColor',
   'borderRadius',
   'zIndex',
   'outlineWidth',
@@ -779,6 +790,22 @@ export const DEFAULT_FOCUS_RING = {
  * or null when there is none. Sides left out are 0, so the object form only
  * has to name what it grows.
  */
+/**
+ * Per-side border widths, resolved the way padding resolves: the side
+ * property overrides the `borderWidth` shorthand. This is the paint-side
+ * reading of the same rule yoga applies on the layout side (EDGE_TOP wins
+ * over EDGE_ALL), kept in one place so the two cannot disagree.
+ */
+export function resolveBorderWidths(style) {
+  const all = style.borderWidth ?? 0;
+  return {
+    top: style.borderTopWidth ?? all,
+    right: style.borderRightWidth ?? all,
+    bottom: style.borderBottomWidth ?? all,
+    left: style.borderLeftWidth ?? all,
+  };
+}
+
 export function resolveHitSlop(value) {
   if (value == null) return null;
   if (typeof value === 'number') {

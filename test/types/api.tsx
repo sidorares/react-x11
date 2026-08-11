@@ -120,6 +120,15 @@ const s = createStyles({
   },
   target: { hitSlop: 4 },
   perSide: { hitSlop: { top: 4, bottom: 4 } },
+  // issue #262: per-side borders — a side width overrides the shorthand the
+  // way paddingLeft overrides padding; a side colour is paint, so it may
+  // change in a state block
+  quote: {
+    borderLeftWidth: 3,
+    borderLeftColor: '$border',
+    ':hover': { borderLeftColor: '$accent' },
+  },
+  rule: { borderWidth: 1, borderBottomWidth: 0, borderTopColor: '#ddd' },
 });
 
 // arrays, falsy entries, nesting
@@ -138,6 +147,9 @@ createStyles({ bad: { colour: 'red' } });
 
 // @ts-expect-error — hit slop is not paint, so it cannot go in a state block
 createStyles({ bad: { ':focus-visible': { hitSlop: 4 } } });
+
+// @ts-expect-error — a side width is layout, so it may not go in a state block
+createStyles({ bad: { ':hover': { borderLeftWidth: 3 } } });
 
 // --- elements --------------------------------------------------------------
 

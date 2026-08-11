@@ -48,6 +48,13 @@ test('createStyles rejects unknown properties and layout in state blocks', async
   );
   // paint properties are fine
   createStyles({ a: { ':hover': { backgroundColor: 'red', color: 'blue' } } });
+  // per-side border colours are paint too; the widths are layout (#262)
+  createStyles({ a: { ':hover': { borderLeftColor: 'red' } } });
+  assert.throws(
+    () => createStyles({ a: { ':hover': { borderLeftWidth: 3 } } }),
+    /"borderLeftWidth" is not allowed inside ":hover"/,
+    'a side width reflows, so it is refused like padding',
+  );
 });
 
 test('style drives layout and paint; props stay semantic', async () => {
