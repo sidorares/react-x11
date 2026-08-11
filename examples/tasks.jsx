@@ -3,7 +3,9 @@
 // a scrolling <box>, Buttons for the filters — with keyboard interaction
 // throughout (Tab moves focus, Space/Enter toggles). Type a task and press
 // Enter or click Add; Ctrl+C/V and middle-click PRIMARY paste work in the
-// input. Run with: npm run examples:tasks  (needs an X server / DISPLAY)
+// input. The window also refuses to be resized smaller than its own content
+// (`minWidth="auto"`, at the bottom of this file) — drag an edge and see.
+// Run with: npm run examples:tasks  (needs an X server / DISPLAY)
 // — or hot-reloadable with: npm run examples:tasks:hot  (edit this file
 // while it runs; see tasks-hot.jsx)
 import React, { useContext, useMemo, useReducer, useState } from 'react';
@@ -157,7 +159,7 @@ export function TasksPanel() {
 
         <text style={{ color: '$dim' }}>
           {String(remaining)} remaining — click or Tab + Space to toggle, wheel
-          to scroll
+          to scroll, drag an edge to meet the floor
         </text>
       </box>
     </DispatchContext.Provider>
@@ -166,9 +168,17 @@ export function TasksPanel() {
 
 function App() {
   return (
+    // `minWidth`/`minHeight` of `'auto'` is the smallest size this content
+    // can be drawn at, handed to the window manager — try dragging an edge
+    // and it stops where the filter buttons stop fitting. The task list is
+    // the part that gives: `overflow: 'scroll'` means it can be any size, so
+    // it contributes nothing to the floor and everything around it does.
+    // The window still *opens* at 420x400; a floor is not a size.
     <window
       width={420}
       height={400}
+      minWidth="auto"
+      minHeight="auto"
       title="tasks"
       style={{ backgroundColor: '$surfaceHover' }}
     >
