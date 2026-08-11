@@ -76,6 +76,9 @@ async function suite() {
   void within(windowNode).queryAllByRole('option');
   const _text: string = textOf(input);
   const _role: string = roleOf(input);
+  // the escape hatch, matching on the element name (#252)
+  const _gauges = screen.all((n) => n.kind === 'gauge');
+  const _kind: string = input.kind;
   void windowNodesOf(windowNode).length;
 
   // events

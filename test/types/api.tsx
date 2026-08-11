@@ -160,6 +160,18 @@ function Elements() {
   const inputRef = useRef<TextInputNode>(null);
   const [text, setText] = useState('');
 
+  // issue #252: what a ref hands back, without a cast. The element name is
+  // `kind` — the name the element was registered under, which is what paint
+  // order and the harness queries match on.
+  const _kind: string | undefined = boxRef.current?.kind;
+  const _focused: boolean | undefined = boxRef.current?.focused;
+  const _within: boolean | undefined = boxRef.current?.focusWithin;
+  const _holds = () => boxRef.current?.contains(inputRef.current);
+  // focus() hands the node back, so an imperative handle can forward it
+  const _refocus = () => inputRef.current?.blur().focus();
+  // @ts-expect-error — the element name is `kind`; no node has a `type`
+  const _noType = () => boxRef.current?.type;
+
   return (
     <window
       ref={winRef}
@@ -404,6 +416,12 @@ function Themed() {
   const _face: string = theme.fontFamily;
   const _mono: string = theme.monoFamily;
   const _size: number = theme.fontSize;
+  // issue #252: a component that reads a token by a name it was handed —
+  // a code palette, a `$token` it is resolving itself — indexes the palette
+  // instead of casting it. Unknown names are `unknown`, so they narrow.
+  const pick = (token: string): string =>
+    typeof theme[token] === 'string' ? (theme[token] as string) : theme.text;
+  void pick('dim');
   return (
     <box
       style={{

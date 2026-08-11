@@ -30,6 +30,7 @@ import {
   resolveTokens,
 } from '../../src/style.js';
 import type { Style } from '../../src/style.js';
+import { ctrlChordLetter, keysymOf } from '../../src/keysyms.js';
 
 // The element, declared to JSX exactly as docs/extending.md shows.
 declare module '../../src/jsx-runtime.js' {
@@ -73,7 +74,26 @@ class SparklineNode extends Node {
     void this.theme;
     void this.props.data;
     void this.app;
+    // damage as a rect, and as the node itself — both are what the window
+    // node collects, and `invalidate` is on every node, not just that one
     this.invalidate(false, this.abs, 'content');
+    this.invalidate(false, this, 'content');
+  }
+
+  // The focus half of the same surface (#252): an element takes focus as a
+  // click would, and reads where focus is.
+  activate(): SparklineNode {
+    if (!this.focused && !this.focusWithin)
+      this.focus().invalidate(false, this);
+    void this.contains(this.parent);
+    return this.blur();
+  }
+
+  // A widget that answers a chord of its own reads the letter from keysyms
+  // rather than copying the Shift rule.
+  handleKey(ev: { keysym?: number; codepoint: number }): boolean {
+    const letter: number | null = ctrlChordLetter(ev);
+    return letter === keysymOf('d');
   }
 }
 

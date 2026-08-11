@@ -14,15 +14,24 @@ export interface Rect {
 
 /** The retained node behind a drawn element. */
 export interface DrawnNode {
-  /** Element name — `'box'`, `'text'`, … */
-  readonly type: string;
+  /** Element name — `'box'`, `'text'`, and the name a registered element
+   * was registered under. What queries and paint order match on:
+   * `screen.all((n) => n.kind === 'gauge')`. */
+  readonly kind: string;
   /** Position and size within the owning window, valid after layout. */
   readonly abs: Rect;
   readonly parent: DrawnNode | null;
   readonly children: readonly DrawnNode[];
-  /** Take the keyboard focus, if this node is focusable. */
-  focus(): void;
-  blur(): void;
+  /** Take the keyboard focus, if this node is focusable. Returns the node,
+   * so a component can hand it straight out of an imperative handle. */
+  focus(): this;
+  blur(): this;
+  /** Whether this node has the owning window's focus. */
+  readonly focused: boolean;
+  /** Whether focus is on this node or inside it — CSS `:focus-within`. */
+  readonly focusWithin: boolean;
+  /** Whether `node` is this node or a descendant of it (DOM `contains`). */
+  contains(node: DrawnNode | null): boolean;
   getClientRects(): Rect[];
 }
 

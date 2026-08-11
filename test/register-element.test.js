@@ -245,6 +245,53 @@ test('the introspection helpers are copies, not the live sets', () => {
   assert.ok(!drawnKinds().includes('sparkline'), 'and it leaves DRAWN_KINDS');
 });
 
+test('an element asks for its own repaint, bounded (#252)', async () => {
+  register('sparkline', {
+    create: (props, app) => new SparklineNode(props, app),
+    semanticNames: ['data', 'color'],
+  });
+  await renderX11(
+    h(
+      'box',
+      { style: { padding: 10, flexGrow: 1 } },
+      h('sparkline', { data: [1, 2], style: { width: 60, height: 20 } }),
+    ),
+    { backend: 'mock' },
+  );
+
+  const node = screen.all((n) => n.kind === 'sparkline')[0];
+  const root = node.root;
+  assert.notStrictEqual(root, node, 'the window node is where damage lands');
+
+  // what docs/extending.md tells an element to write: name yourself as the
+  // damage, and the frame is bounded by what you draw rather than the window
+  root.needsPaint = false;
+  root._damage = null;
+  node.invalidate(false, node, 'props');
+  assert.strictEqual(root.needsPaint, true, 'a frame is owed');
+  assert.deepStrictEqual(
+    root._damage,
+    [node.paintBounds()],
+    'bounded by the node that changed',
+  );
+
+  // and naming nothing is still the whole window, as it always was
+  root.needsPaint = false;
+  root._damage = null;
+  node.invalidate(true, null, 'props');
+  assert.strictEqual(root.needsLayout, true);
+  assert.strictEqual(
+    typeof root._damage,
+    'symbol',
+    'no bound is the whole window',
+  );
+
+  // before it is attached there is no window and nothing on screen
+  const orphan = new SparklineNode({ data: [] }, node.app);
+  assert.strictEqual(orphan.root, null);
+  assert.doesNotThrow(() => orphan.invalidate(false, orphan, 'props'));
+});
+
 test('react-x11/style is enough to speak the vocabulary from outside', () => {
   assert.strictEqual(isStyleProp('backgroundColor'), true);
   assert.strictEqual(isStyleProp('title'), false);
