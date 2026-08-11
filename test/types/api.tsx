@@ -399,10 +399,16 @@ function Themed() {
   const theme = useTheme();
   const _radius: number = theme.radius;
   const _focus: string = theme.borderFocus;
+  // the type the palette sets: what unstyled text takes, and the face code
+  // surfaces ask for by name
+  const _face: string = theme.fontFamily;
+  const _mono: string = theme.monoFamily;
+  const _size: number = theme.fontSize;
   return (
     <box
       style={{
         backgroundColor: theme.accent,
+        fontFamily: theme.monoFamily,
         ':hover': { backgroundColor: theme.accentHover },
         // the pressed step: derived from the hover unless a palette names it
         ':active': { backgroundColor: theme.accentActive },

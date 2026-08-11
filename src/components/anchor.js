@@ -306,7 +306,12 @@ export function measureLabel(node, text, style) {
     return { width: String(text).length * size * 0.55, height: size * 1.4 };
   }
   const layout = fonts.layout(String(text), {
-    family: style?.family ?? 'sans-serif',
+    // The face **this node inherits**, not the literal `sans-serif`: the
+    // labels these popups are sized around name no family of their own, so
+    // the one they are drawn in is the palette's. Measuring in a different
+    // face is measuring the wrong label — a menu sized in sans-serif for a
+    // row that paints in a wider mono is a menu whose own options wrap.
+    family: style?.family ?? node?.inheritedTextStyle?.family ?? 'sans-serif',
     size,
     weight: style?.weight ?? 'normal',
     // dropping this would measure a different face from the one drawn, and

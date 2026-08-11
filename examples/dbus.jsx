@@ -98,7 +98,11 @@ const C = {
 // rounder corners than the default 4. Colours are deliberately absent.
 const THEME = { radius: 5 };
 
-const MONO = 'monospace';
+// The palette's mono face rather than the literal: every code surface in
+// this app — the chips, the pane titles, the value dumps — is one token, so
+// a desktop or an app that has a better monospace than the default sets it
+// in one place.
+const MONO = '$monoFamily';
 
 // react-x11 has `borderWidth` for the whole box and no per-edge borders, so a
 // rule is a one-pixel box rather than a border — which is also cheaper: a

@@ -1267,21 +1267,36 @@ export class Node {
   }
 
   /**
-   * The text style a node inherits when nothing named one.
+   * The text style a node inherits when nothing named one — **the palette's**,
+   * not a set of constants.
    *
-   * The ink is the **palette's**, not a fixed black: a `<text>` or a
-   * `<textinput>` that never mentions a colour has to be readable on the
-   * surface it is drawn on, and that surface follows the desktop now. Black
-   * on `#1e2228` is invisible, which is the whole bug.
+   * The ink first: a `<text>` or a `<textinput>` that never mentions a colour
+   * has to be readable on the surface it is drawn on, and that surface
+   * follows the desktop now. Black on `#1e2228` is invisible, which is the
+   * whole bug.
+   *
+   * The face and the size for the same reason one step out. A theme names
+   * `fontFamily` and `fontSize` because it is describing the type this app
+   * sets, and the only way that can be true is if the text nobody styled
+   * follows them — otherwise `fontSize` is a token that moves the menu
+   * corners derived from it and not one letter, and `fontFamily` is a token
+   * with no reader at all.
    *
    * Cached per node so the object identity is stable while the palette is —
    * the layouts below are keyed on style and a fresh base each call would
    * miss the cache every time.
    */
   get inheritedTextStyle() {
-    const color = this.theme.text;
-    if (this._textBase?.color !== color) {
-      this._textBase = { ...DEFAULT_TEXT_STYLE, color };
+    const theme = this.theme;
+    const color = theme.text;
+    // A palette can reach a node as a bare `theme` **prop** rather than a
+    // resolved one — `<box theme={{ text: 'red' }}>` merges and derives
+    // nothing (styling.md) — so neither of these is guaranteed to be there.
+    const family = theme.fontFamily ?? DEFAULT_TEXT_STYLE.family;
+    const size = theme.fontSize ?? DEFAULT_TEXT_STYLE.size;
+    const base = this._textBase;
+    if (base?.color !== color || base.family !== family || base.size !== size) {
+      this._textBase = { ...DEFAULT_TEXT_STYLE, color, family, size };
     }
     return this._textBase;
   }
@@ -1324,16 +1339,22 @@ export class Node {
   /** The theme above or on this node changed: drop the caches and restyle
    * the subtree, since a token can appear at any depth. */
   _themeChanged() {
-    const wasInk = this._theme?.text;
+    // The base this node's unstyled text was last shaped against, by
+    // identity: `inheritedTextStyle` only builds a new one when a value it
+    // reads actually moved, so `!==` afterwards is exact.
+    const wasType = this._textBase;
     this._theme = undefined;
     // A `<window>` with no `backgroundColor` of its own follows the palette,
     // and the server's copy of that colour has to follow with it — otherwise
     // the next resize fills the new area in the old scheme.
     if (this.isWindow) this._syncWindowBackground();
-    // The inherited ink is not in any style object, so `_usesTokens` does not
-    // see it move — but a cached layout carries the colour it was shaped
-    // with, and would keep painting the old one.
-    if (wasInk !== undefined && wasInk !== this.theme.text) {
+    // The inherited ink, face and size are in no style object, so
+    // `_usesTokens` does not see them move — but a cached layout carries the
+    // colour *and the font* it was shaped with, and would keep painting them.
+    // A theme swap that only changes `fontFamily` is the case that made this
+    // worth widening: nothing else about the node changes, so nothing else
+    // would have dropped the layout.
+    if (wasType !== undefined && this.inheritedTextStyle !== wasType) {
       this._textContentChanged();
       this.root?.invalidate(true, null, 'theme');
     }
@@ -3642,7 +3663,10 @@ export class TextInputNode extends Node {
   _lineHeight() {
     const layout = this._layoutOf('Mg');
     if (layout) return layout.height;
-    return (this.style.fontSize ?? DEFAULT_TEXT_STYLE.size) * 1.4;
+    // No fonts to measure with. `_textStyle()` rather than the style prop
+    // alone, so the guess is made at the size this field inherits — the
+    // palette's — and not at 14 whatever the theme said.
+    return this._textStyle().size * 1.4;
   }
 
   /**

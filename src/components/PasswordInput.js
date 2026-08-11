@@ -3,7 +3,7 @@
 // build-step-free for consumers.
 
 import React, { useEffect, useRef, useState } from 'react';
-import { DEFAULT_TEXT_STYLE, createStyles } from '../styles.js';
+import { createStyles } from '../styles.js';
 import { useClipboard } from '../appcontext.js';
 import { windowIdOf } from '../windowid.js';
 import { useTheme } from './theme.js';
@@ -178,7 +178,10 @@ export function PasswordInput({
   const length = chars(text).length;
   const showing = revealed === undefined ? ownRevealed : revealed;
 
-  const size = DEFAULT_TEXT_STYLE.size;
+  // The palette's size, not a constant: the dots are drawn to stand in for
+  // the characters the field would have shown, and the field shows them at
+  // the size it inherits.
+  const size = theme.fontSize;
   const unit = measureLabel(fieldRef.current, REFERENCE_GLYPH, { size });
   const lineHeight = Math.ceil(unit.height || size * 1.4);
 

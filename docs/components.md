@@ -47,6 +47,28 @@ control are most of what separates one platform's controls from another's:
 | `radius` `radiusSmall` `borderWidth`            | control shape                  |
 | `radiusPopup` `radiusPopupItem` `radiusTooltip` | floating-surface shape         |
 | `fontSize` `paddingX` `paddingY`                | control size                   |
+| `fontFamily` `monoFamily`                       | the app's two faces            |
+
+`fontFamily` and `fontSize` are the type this app sets, and text that names
+neither **takes them** — a `<text>`, a `<textinput>`, a widget's own label. So
+`<ThemeProvider value={{ fontFamily: 'Inter', fontSize: 16 }}>` is where an app
+says what it is set in, once, rather than on every label, and a `Select`'s rows
+grow with it because a row is its label with even space all round. A `fontSize`
+or `fontFamily` in a style still wins, the way a style property always wins
+over what a node inherits.
+
+The widgets that take a size of their own keep taking it: `MenuBar` and
+`ContextMenu` have a `fontSize` prop because they measure their labels before
+they have anywhere to measure them in, and `Table` has `rowHeight` because
+every row has to be the same height for it to skip the ones off screen.
+
+Both are CSS-style family lists — `'"JetBrains Mono", monospace'` names a
+preference and a fallback.
+
+`monoFamily` is the second face, and nothing unstyled reads it: it is there so
+that every code surface in an app — a listing, a log pane, a hex dump, all
+written by different components — can say `fontFamily: '$monoFamily'` and be
+set from one place.
 
 `paddingY` is the space **you can see** — above the capitals and below the
 baseline — not the space plus whatever the font's ascent left over: every
