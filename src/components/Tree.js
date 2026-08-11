@@ -4,7 +4,7 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
-import { labelContent, useTheme } from './theme.js';
+import { labelContent, useDirection, useTheme } from './theme.js';
 import { Icon } from './Icon.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
@@ -35,7 +35,7 @@ const s = createStyles({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    paddingRight: 8,
+    paddingEnd: 8,
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
   },
@@ -96,6 +96,7 @@ export function Tree({
   ...boxProps
 }) {
   const theme = useTheme();
+  const rtl = useDirection() === 'rtl';
   const [ownExpanded, setOwnExpanded] = useState(
     () => new Set(defaultExpanded),
   );
@@ -156,6 +157,12 @@ export function Tree({
       return null;
     };
     const row = rows[index];
+    // Deeper is the direction the indent grows in, which is the direction the
+    // text runs — so it is Left that opens a branch in a mirrored tree, and
+    // the two arrows swap wholesale rather than the tree growing a second
+    // pair of cases
+    const deeper = rtl ? XK_LEFT : XK_RIGHT;
+    const shallower = rtl ? XK_RIGHT : XK_LEFT;
     switch (ev.keysym) {
       case XK_UP:
         goTo(step(-1));
@@ -163,13 +170,13 @@ export function Tree({
       case XK_DOWN:
         goTo(step(1));
         return;
-      case XK_RIGHT:
+      case deeper:
         // open it, then walk into it — one key does both, in order
         if (row?.branch && !openRef.current.has(row.item.id)) {
           toggle(row.item.id, true);
         } else if (row?.branch) goTo(step(1));
         return;
-      case XK_LEFT:
+      case shallower:
         if (row?.branch && openRef.current.has(row.item.id)) {
           toggle(row.item.id, false);
         } else if (row?.parent) {
@@ -230,7 +237,9 @@ export function Tree({
           onClick: () => !item.disabled && goTo({ item, depth, branch }),
           style: [
             s.row,
-            { paddingLeft: 4 + depth * INDENT },
+            // the indent is what says "inside", so it is measured from the
+            // edge the row's label begins at
+            { paddingStart: 4 + depth * INDENT },
             {
               backgroundColor:
                 item.id === current ? theme.hoverBackground : 'transparent',
@@ -279,7 +288,11 @@ export function Tree({
           },
           branch &&
             h(Icon, {
-              name: openSet.has(item.id) ? 'chevronDown' : 'chevronRight',
+              name: openSet.has(item.id)
+                ? 'chevronDown'
+                : rtl
+                  ? 'chevronLeft'
+                  : 'chevronRight',
               size: TWISTY_SIZE,
               // dimmer than the label on an unselected row, and the row's own
               // ink once it is selected — where "the row's own ink" is what

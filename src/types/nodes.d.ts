@@ -30,6 +30,16 @@ export interface DrawnNode {
   readonly focused: boolean;
   /** Whether focus is on this node or inside it — CSS `:focus-within`. */
   readonly focusWithin: boolean;
+  /**
+   * Which way this node reads, resolved — `'ltr'` or `'rtl'`, never
+   * `'inherit'`. The `direction` style property here or on the nearest
+   * element above, and the palette's under all of them.
+   *
+   * What a widget measuring a pointer against a laid-out box has to ask: a
+   * coordinate means the opposite thing in the two directions, so a drag
+   * reads this rather than the theme.
+   */
+  readonly direction: 'ltr' | 'rtl';
   /** Whether `node` is this node or a descendant of it (DOM `contains`). */
   contains(node: DrawnNode | null): boolean;
   getClientRects(): Rect[];

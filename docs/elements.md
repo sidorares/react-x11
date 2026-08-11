@@ -762,6 +762,13 @@ around the labels in it
 `textAlign` and `lineHeight` do not: they shape the box the lines flow in,
 which belongs to the `<text>` that owns it.
 
+`start` and `end` are resolved against the box's own **direction**, not
+against the first strong character in the string — the box says which way it
+reads and the paragraph is laid out at that base level, so `"(12) files"` in
+an RTL panel punctuates as an RTL sentence and a `<text>` with no strong
+characters at all still lands on the right side.
+See [styling.md](styling.md#direction-and-the-logical-edges).
+
 ### Variable fonts
 
 _ntk ≥ 7.1.0._

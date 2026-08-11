@@ -65,6 +65,20 @@ function windowOrigin(node) {
  * what is drawn **in** it: a submenu whose top edge is level with the row
  * that opened it has its first item a border and a padding lower down, and
  * the eye lines up the items, not the boxes.
+ *
+ * ## Which side is which
+ *
+ * `placement: 'start'` and `'end'` are the **logical** sides, and they are
+ * what a submenu wants: a menu opens away from the edge its rows begin at, so
+ * it goes out to the right in an LTR menu and out to the left in an RTL one.
+ * `'left'`/`'right'` stay available and stay physical, for the rare placement
+ * that really is about the screen. `align: 'start'`/`'end'` mirror the same
+ * way — but only when the popup is above or below its trigger, since with a
+ * popup beside it the alignment axis is vertical and nothing about a vertical
+ * axis mirrors.
+ *
+ * The direction comes from the anchoring node, so a menu inside a mirrored
+ * panel opens the mirrored way without its widget being told.
  */
 export function anchorRect(node, options = {}) {
   if (!node?.abs) return null;
@@ -76,7 +90,9 @@ export function anchorRect(node, options = {}) {
     width = node.abs.width,
     height = 0,
     alignTo,
+    direction = node.direction,
   } = options;
+  const rtl = direction === 'rtl';
 
   const origin = windowOrigin(node);
   const ax = origin.x + node.abs.x;
@@ -94,15 +110,36 @@ export function anchorRect(node, options = {}) {
   const sw = screen?.pixel_width;
   const sh = screen?.pixel_height;
 
-  const alignAlong = (start, size, extent) =>
-    alignOffset +
-    (align === 'center'
-      ? start + (size - extent) / 2
-      : align === 'end'
-        ? start + size - extent
-        : start);
+  // `mirrored` is only ever true on the horizontal axis: `alignAlong` serves
+  // both, and a vertically-aligned popup's `start` is the top in every
+  // direction there is.
+  const alignAlong = (start, size, extent, mirrored) => {
+    const at =
+      align === 'center'
+        ? 'center'
+        : (align === 'end') !== mirrored
+          ? 'end'
+          : 'start';
+    return (
+      alignOffset +
+      (at === 'center'
+        ? start + (size - extent) / 2
+        : at === 'end'
+          ? start + size - extent
+          : start)
+    );
+  };
 
-  let side = placement;
+  let side =
+    placement === 'start'
+      ? rtl
+        ? 'right'
+        : 'left'
+      : placement === 'end'
+        ? rtl
+          ? 'left'
+          : 'right'
+        : placement;
   let x;
   let y;
 
@@ -119,7 +156,7 @@ export function anchorRect(node, options = {}) {
       side = 'bottom';
     }
     y = side === 'bottom' ? below : above;
-    x = alignAlong(cx, cross.width, width);
+    x = alignAlong(cx, cross.width, width, rtl);
   } else {
     const after = ax + aw + offset;
     const before = ax - width - offset;
@@ -133,7 +170,7 @@ export function anchorRect(node, options = {}) {
       side = 'right';
     }
     x = side === 'right' ? after : before;
-    y = alignAlong(cy, cross.height, height);
+    y = alignAlong(cy, cross.height, height, false);
   }
 
   if (sw != null) x = Math.max(0, Math.min(x, sw - width));

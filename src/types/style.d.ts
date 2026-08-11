@@ -71,6 +71,16 @@ export type Cursor =
   | 'none'
   | (string & {});
 
+/**
+ * Which way the boxes under this one run — CSS's `direction`.
+ *
+ * `'inherit'` is the default and means "whatever is around me"; the floor
+ * under the whole tree is the palette's `direction`, which is seeded from the
+ * locale. Setting it mirrors this subtree: rows run the other way, and every
+ * `*Start`/`*End` edge below swaps sides with it.
+ */
+export type Direction = 'ltr' | 'rtl' | 'inherit';
+
 /** Everything yoga lays out. */
 export interface LayoutStyle {
   width?: Dimension;
@@ -103,6 +113,18 @@ export interface LayoutStyle {
   paddingRight?: Length;
   paddingBottom?: Length;
   paddingLeft?: Length;
+  /**
+   * The **logical** horizontal edges: the side the text starts at and the
+   * side it ends at, whichever those are under the direction in force. They
+   * override their physical counterparts even in LTR, the way CSS's
+   * `padding-inline-start` overrides `padding-left`.
+   */
+  start?: Length;
+  end?: Length;
+  marginStart?: Dimension;
+  marginEnd?: Dimension;
+  paddingStart?: Length;
+  paddingEnd?: Length;
   gap?: number;
   rowGap?: number;
   columnGap?: number;
@@ -117,6 +139,10 @@ export interface LayoutStyle {
   borderRightWidth?: number;
   borderBottomWidth?: number;
   borderLeftWidth?: number;
+  /** The logical sides, which win over the physical ones. */
+  borderStartWidth?: number;
+  borderEndWidth?: number;
+  direction?: Direction;
 }
 
 /**
@@ -134,6 +160,9 @@ export interface PaintStyle {
   borderRightColor?: Color;
   borderBottomColor?: Color;
   borderLeftColor?: Color;
+  /** …and the logical sides, matching `borderStartWidth`/`borderEndWidth`. */
+  borderStartColor?: Color;
+  borderEndColor?: Color;
   /** Rounds the background, the border and the child clip. Requires uniform
    *  borders — same width and colour on all four sides; a non-uniform border
    *  paints square and ignores the radius. */

@@ -104,7 +104,18 @@ export function ThemeProvider({
       ),
     [outer, value, dark, wantsDark],
   );
-  const boxStyle = useMemo(() => (style ? [FILL, style] : FILL), [style]);
+  // A provider that **names** a direction plants it as a style too, so the
+  // node tree mirrors along with the widgets: `useTheme().direction` is what
+  // a `<Slider>` reads, and the `direction` style property is what yoga
+  // reads, and they have to be the same answer. Only when this provider named
+  // it — every provider publishes a *complete* palette, so planting
+  // `theme.direction` unconditionally would pin an inner provider's subtree
+  // back to LTR inside a `<box style={{ direction: 'rtl' }}>`.
+  const named = value?.direction ?? (wantsDark ? dark?.direction : undefined);
+  const boxStyle = useMemo(() => {
+    const base = named ? [FILL, { direction: named }] : [FILL];
+    return style ? [...base, style] : base.length === 1 ? FILL : base;
+  }, [style, named]);
   return h(
     ThemeContext.Provider,
     { value: theme },
@@ -151,6 +162,33 @@ export function useTheme() {
   const system = useAppearanceWhen(provided == null);
   if (provided) return provided;
   return system.colorScheme === 'dark' ? DarkTheme : DefaultTheme;
+}
+
+/**
+ * Which way the widgets here read — `'ltr'` or `'rtl'`.
+ *
+ * **What a widget mirrors is not what a box mirrors.** Yoga mirrors the boxes
+ * on its own from the `direction` style property, so most of the widget set
+ * needs nothing from this: a `<Checkbox>` is a `row` with a gap and a
+ * `<ProgressBar>` is two flex ratios, and both come out mirrored without a
+ * line of code. This is for the decisions yoga cannot make — which way an
+ * arrow key steps, which way a glyph points, which side a menu opens on.
+ *
+ * It comes from the palette because that is the channel a widget can read
+ * during its own render, and because an app with a language menu is already
+ * swapping a `<ThemeProvider>`. The provider plants the matching style
+ * property as it goes, so the boxes and the widgets under it mirror together.
+ *
+ * The one case the two can part company is a bare `<box style={{ direction:
+ * 'rtl' }}>` wrapped around widgets with no provider: the layout mirrors and
+ * a widget's own arithmetic does not. Use a `<ThemeProvider>` to mirror a
+ * region that contains widgets. Where a widget is measuring a **pointer**
+ * against a laid-out box it reads `node.direction` instead — the coordinate
+ * has to be interpreted in the direction the box was really laid out in, or a
+ * drag runs backwards.
+ */
+export function useDirection() {
+  return useTheme().direction === 'rtl' ? 'rtl' : 'ltr';
 }
 
 /**

@@ -188,6 +188,80 @@ every ring under it at once — the renderer reads them from the nearest
 `theme` prop, so `<ThemeProvider>` covers the widgets and anything an
 application writes itself.
 
+## Direction, and the logical edges
+
+```jsx
+<box style={{ direction: 'rtl' }}>
+  <box style={{ flexDirection: 'row', paddingStart: 12, gap: 8 }}>…</box>
+</box>
+```
+
+`direction` is CSS's, `'ltr' | 'rtl' | 'inherit'`, and it inherits: setting
+it mirrors that subtree and nothing above it. Rows run the other way, `flex-start`
+is the right-hand end, and every logical edge below swaps sides with it.
+
+**The default comes from the locale.** An app started under
+`LANG=ar_EG.UTF-8` is mirrored with no configuration, because that is what
+GTK and Qt both do and because the alternative is an Arabic desktop where
+one application's panels are on the wrong side. Every locale that is not
+written right to left answers `'ltr'`, so an app that never thinks about
+this pays nothing. The palette carries it — `theme.direction` — so an app
+with a language menu switches the whole UI with the `<ThemeProvider>` swap
+it was already doing for colours:
+
+```jsx
+<ThemeProvider value={{ direction: settings.rtl ? 'rtl' : 'ltr' }}>
+```
+
+Prefer the provider over a bare `direction` style when the region contains
+**widgets**. Yoga mirrors boxes on its own, so most of the widget set needs
+nothing — a `<Checkbox>` is a row with a gap — but the decisions yoga cannot
+make (which way an arrow key steps, which way a chevron points, which side a
+submenu opens on) are read from the palette through `useDirection()`. A
+provider plants the matching style property in the tree as it goes, so both
+routes always agree under one.
+
+### The logical edges
+
+| logical                          | physical in LTR                | in RTL  |
+| -------------------------------- | ------------------------------ | ------- |
+| `start` / `end`                  | `left` / `right`               | swapped |
+| `marginStart` / `marginEnd`      | `marginLeft` / `marginRight`   | swapped |
+| `paddingStart` / `paddingEnd`    | `paddingLeft` / `paddingRight` | swapped |
+| `borderStartWidth` / `…EndWidth` | `borderLeftWidth` / `…Right…`  | swapped |
+| `borderStartColor` / `…EndColor` | `borderLeftColor` / `…Right…`  | swapped |
+
+**A logical edge wins over the physical one even in LTR**, the way CSS's
+`padding-inline-start` wins over `padding-left`. Yoga's full order is
+start/end, then the physical side, then `EDGE_HORIZONTAL`, then
+`EDGE_ALL` — the opposite way round from what the vertical shorthands
+suggest, which is why it is pinned in a test.
+
+Write layout in the logical pair and it is the same layout in both
+directions. Use the physical one when you mean the screen: a drop shadow, a
+resize handle in a fixed corner.
+
+### What does not mirror
+
+- **`<canvas>`** — the drawing is the application's, and `ctx` keeps its
+  top-left origin. An app that wants mirrored art reads `node.direction`
+  from the ref it already has.
+- **A `<window>`'s or `<popup>`'s explicit `x`/`y`** — screen coordinates.
+- **Vertical anything.** `top`/`bottom`, a column's order, a vertical
+  scrollbar's travel, Up/Down on every control.
+- **`<textinput>` and `<textarea>`.** They shape and draw bidi text
+  correctly — that is ntk's doing — but the field's own origin, caret
+  scrolling and selection geometry are still written left-to-right. Wrapping
+  one in an RTL box mirrors the box around it and not the field inside it.
+  Tracked separately.
+
+What **does**, besides the box tree: a vertical scrollbar moves to the left;
+horizontal scrolling counts from the right-hand edge, so `scrollX: 0` still
+means "at the beginning"; `textAlign: 'start'`/`'end'` resolve against the
+box's direction rather than against the first strong character; and a popup
+prefers the start side, so a submenu opens leftwards and still flips at the
+screen edge.
+
 ## Per-side borders
 
 ```jsx
@@ -200,7 +274,9 @@ application writes itself.
 
 A side width overrides the `borderWidth` shorthand exactly the way
 `paddingLeft` overrides `padding`, and a side colour
-(`borderTopColor`/`Right`/`Bottom`/`Left`) falls back to `borderColor`. The
+(`borderTopColor`/`Right`/`Bottom`/`Left`) falls back to `borderColor`.
+`borderStartWidth`/`borderStartColor` and their `End` counterparts are the
+[logical](#the-logical-edges) pair, and they win over the physical side. The
 widths are layout — yoga sees each edge, so the bar above insets content on
 the left only — and the colours are paint, legal in a state block like
 `borderColor` itself.

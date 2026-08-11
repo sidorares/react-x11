@@ -2,7 +2,7 @@
 // modules here are grouped by widget, with the shared plumbing in
 // theme.js (palette + control props), anchor.js (popup geometry),
 // typeahead.js and keys.js.
-export { ThemeProvider, useTheme } from './theme.js';
+export { ThemeProvider, useDirection, useTheme } from './theme.js';
 export {
   anchorRect,
   centerRect,

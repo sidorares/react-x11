@@ -84,7 +84,7 @@ merged theme (`ThemeProvider`, `useTheme`) and a
   arrows/Home/End/PageUp/Down)
 - **Switch animation** — DONE via style transitions, not a per-widget
   requestAnimationFrame loop: the thumb is absolutely positioned and slides
-  on `left`, and the same `transition` declaration eases the track colour.
+  on `start`, and the same `transition` declaration eases the track colour.
   The frame loop runs only while something is unfinished
   ([docs/styling.md](docs/styling.md))
 - **Tooltip** — DONE: `useAnchor(ref)`/`anchorRect()` extracted from

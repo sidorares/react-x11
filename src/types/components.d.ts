@@ -79,6 +79,14 @@ export interface Theme {
    * read by anything unstyled; it is there so `fontFamily: '$monoFamily'`
    * says "this app's mono face" in one place. */
   monoFamily: string;
+  /**
+   * Which way this app reads. Seeded from the environment's locale, so an app
+   * started under an RTL locale is mirrored without being asked; set it to
+   * mirror a whole UI from one place — the provider plants the matching
+   * `direction` style property in the tree, so the boxes and the widgets
+   * follow it together.
+   */
+  direction: 'ltr' | 'rtl';
   paddingX: number;
   paddingY: number;
 }
@@ -139,6 +147,13 @@ export interface ThemeTokens extends Theme {
 /** The palette in force: merged over the defaults and over any outer
  * provider, and the same object `$token` resolution sees. */
 export function useTheme(): ThemeTokens;
+
+/**
+ * Which way the widgets here read. Yoga mirrors the boxes on its own from the
+ * `direction` style property, so this is for what it cannot decide: which way
+ * an arrow key steps, which way a glyph points, which side a menu opens on.
+ */
+export function useDirection(): 'ltr' | 'rtl';
 
 /** Props a widget passes through to the `<box>` it renders. */
 type WidgetProps = Omit<BoxProps, 'children' | 'style' | 'ref'>;

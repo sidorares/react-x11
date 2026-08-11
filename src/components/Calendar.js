@@ -4,7 +4,7 @@
 
 import React, { useImperativeHandle, useMemo, useState } from 'react';
 import { createStyles, tint } from '../styles.js';
-import { capTrim, useTheme } from './theme.js';
+import { capTrim, useDirection, useTheme } from './theme.js';
 import { Icon } from './Icon.js';
 import { changeEvent } from './change.js';
 import {
@@ -241,8 +241,11 @@ function DayCell({ day, state, theme, band, onPick, onHover, dayContent }) {
         style: [
           s.band,
           {
-            left: band.opensRight ? CELL_W / 2 : 0,
-            right: band.opensLeft ? CELL_W / 2 : 0,
+            // logical insets: the band runs along the row of days, and the
+            // row runs the way the text does — a mirrored month puts later
+            // days to the left
+            start: band.opensEnd ? CELL_W / 2 : 0,
+            end: band.opensStart ? CELL_W / 2 : 0,
             backgroundColor: tint(theme.accent, 0.18),
           },
         ],
@@ -357,6 +360,7 @@ export function Calendar({
   ...boxProps
 }) {
   const theme = useTheme();
+  const rtl = useDirection() === 'rtl';
   const minDay = toDay(min);
   const maxDay = toDay(max);
   const todayKey = today();
@@ -464,12 +468,16 @@ export function Calendar({
   /** Returns whether the key was the calendar's — a picker wrapping this one
    *  still owns Escape and Tab, and has no other way to tell. */
   const handleKey = (ev) => {
+    // A week is a `row`, so a mirrored month runs its days right to left and
+    // the key that steps to *tomorrow* is Left. Up and Down are a week either
+    // way — the grid only mirrors along one axis.
+    const nextDay = rtl ? -1 : 1;
     switch (ev.keysym) {
       case XK_LEFT:
-        moveFocus(-1);
+        moveFocus(-nextDay);
         return true;
       case XK_RIGHT:
-        moveFocus(1);
+        moveFocus(nextDay);
         return true;
       case XK_UP:
         moveFocus(-7);
@@ -582,7 +590,7 @@ export function Calendar({
             onPick: pick,
             onHover: pending ? setHovered : undefined,
             band: inBand
-              ? { opensRight: day === bandStart, opensLeft: day === bandEnd }
+              ? { opensEnd: day === bandStart, opensStart: day === bandEnd }
               : null,
             state: {
               blocked: isBlocked(day),

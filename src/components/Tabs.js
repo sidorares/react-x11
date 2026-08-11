@@ -4,7 +4,7 @@
 
 import React, { useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
-import { labelContent, useTheme } from './theme.js';
+import { labelContent, useDirection, useTheme } from './theme.js';
 import {
   XK_DOWN,
   XK_END,
@@ -67,6 +67,7 @@ export function Tabs({
   ...boxProps
 }) {
   const theme = useTheme();
+  const rtl = useDirection() === 'rtl';
   const firstEnabled = items.find((item) => !item.disabled)?.id;
   const [uncontrolled, setUncontrolled] = useState(
     defaultValue ?? firstEnabled,
@@ -100,8 +101,12 @@ export function Tabs({
   };
 
   const onKeyDown = (ev) => {
-    const back = vertical ? XK_UP : XK_LEFT;
-    const forward = vertical ? XK_DOWN : XK_RIGHT;
+    // The arrows are visual, the list is logical: in a mirrored horizontal
+    // strip the *next* tab is the one to the left. A vertical strip never
+    // mirrors — Up is Up.
+    const swap = !vertical && rtl;
+    const back = vertical ? XK_UP : swap ? XK_RIGHT : XK_LEFT;
+    const forward = vertical ? XK_DOWN : swap ? XK_LEFT : XK_RIGHT;
     const current = items.findIndex(
       (item) => item.id === (focusedId ?? selected),
     );
@@ -131,8 +136,11 @@ export function Tabs({
   const content =
     typeof active?.content === 'function' ? active.content() : active?.content;
 
+  // A vertical strip's indicator rides the edge the rows *begin* at, so it
+  // is a logical inset; a horizontal one spans the tab and sits underneath
+  // it, where both edges are named and neither is a side.
   const indicatorStyle = vertical
-    ? { top: 0, bottom: 0, left: 0, width: INDICATOR }
+    ? { top: 0, bottom: 0, start: 0, width: INDICATOR }
     : { left: 0, right: 0, bottom: 0, height: INDICATOR };
 
   return h(
