@@ -100,6 +100,10 @@ And what you read:
   lays out reads this, never `props`.**
 - `this.abs` — position and size within the owning window, valid after
   layout.
+- `this.contentBox()` — `abs` inset by the border and the padding: where the
+  content goes, and where every built-in draws.
+- `this.resolvedTextStyle()` — the text style this node resolves to, ready to
+  hand to `app.fonts.layout` (below).
 - `this.root` — the owning `<window>` node; `this.app` — the ntk connection.
 - `this.theme` — the nearest theme at or above this node.
 
@@ -115,6 +119,53 @@ And to take the keyboard focus: `this.focus()` moves it here as a click
 would and hands the node back, `this.blur()` gives it up, `this.focused` and
 `this.focusWithin` answer where it is. They claim their own damage — a
 focused control repaints itself, and its ring, without being asked.
+
+### Text of your own
+
+An element that draws text — a badge, a code editor, a terminal — shapes it
+through ntk's font manager, and the two things it needs to do that are the
+two accessors above:
+
+```js
+class BadgeNode extends Node {
+  paint(ctx) {
+    super.paint(ctx); // background, border, clip
+    const fonts = this.app?.fonts;
+    if (!fonts) return; // headless: no font manager, nothing to shape with
+    const box = this.contentBox();
+    const layout = fonts.layout(
+      String(this.props.label ?? ''),
+      this.resolvedTextStyle(),
+      { maxWidth: box.width || undefined },
+    );
+    layout.draw(ctx, box.x, box.y);
+  }
+}
+```
+
+**`contentBox()` is not `abs` minus `style.padding`.** The insets come off
+the layout, which is where `padding: '10%'`, the per-side overrides and the
+border widths have already been resolved against this frame's size — so the
+box an element computes from the style bag agrees with the one `<text>` uses
+only by luck, and stops agreeing the next time the vocabulary grows another
+edge — the per-side border widths were the last one to arrive.
+
+**`resolvedTextStyle()` is what makes the type of an app reach your
+element.** It is the node's own font properties over what the palette says
+text with none of its own is set in, in the shape `fonts.layout` wants
+(`family`, not `fontFamily`; `variations`, not `fontVariationSettings`). An
+element that reads `this.style.fontFamily` instead is one that a
+`<ThemeProvider value={{ fontFamily: 'Inter' }}>` does not reach — every
+built-in label changes face and yours does not, which is a bug an app author
+can only work around by growing a `fontFamily` prop on your element and
+threading it in. Ask, and the element inherits exactly what a `<text>`
+sibling inherits.
+
+Both are read at paint time, not cached: the palette can change under a
+mounted tree ([styling.md](styling.md)), and the box changes with every
+layout. If the text is also what _sizes_ the element, shape it in
+`measureContent` as well — `<text>` memoizes its layout per max-width for
+exactly that reason.
 
 ### A size of your own
 

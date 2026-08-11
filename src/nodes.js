@@ -2249,7 +2249,24 @@ export class Node {
     return Boolean(a11yFocusable(this));
   }
 
+  /**
+   * The rectangle this node's **content** goes in — `abs` inset by the
+   * border and the padding, in the owning window's coordinates. Every text
+   * element in core paints inside it, and so should anything a registered
+   * element draws that the padding is meant to hold off.
+   *
+   * Public (docs/extending.md) because the arithmetic is not reproducible
+   * from `this.style`: the insets come off the yoga node, which is where
+   * percentages, the per-side overrides and the border widths have already
+   * been resolved against this frame's size. An element deriving them from
+   * the style bag instead re-implements a resolution order it cannot see,
+   * and silently disagrees with `<text>` the day the vocabulary grows
+   * another edge — the per-side border widths (#262) were the last one.
+   */
   contentBox() {
+    // A node with no yoga node (`{ yoga: false }`) has no resolved insets,
+    // so its box is its content box.
+    if (!this.yoga) return { ...this.abs };
     const padL =
       this.yoga.getComputedPadding(Yoga.EDGE_LEFT) +
       this.yoga.getComputedBorder(Yoga.EDGE_LEFT);
@@ -2268,6 +2285,27 @@ export class Node {
       width: Math.max(0, this.abs.width - padL - padR),
       height: Math.max(0, this.abs.height - padT - padB),
     };
+  }
+
+  /**
+   * The text style this node resolves to, in the shape `app.fonts.layout`
+   * takes as its base: `{ family, size, weight, style, variations,
+   * textRendering, color }`. `<text>`, `<textinput>` and the document views
+   * draw with exactly this, and an element that draws text of its own is
+   * asking the same question they are.
+   *
+   * Two things are folded in that `this.style` does not carry. The palette
+   * is under it — `text`, `fontFamily` and `fontSize` are the ink, the face
+   * and the size of everything that named none of its own (styling.md) — so
+   * an element reading its own style alone is one whose app can say
+   * `<ThemeProvider value={{ fontFamily: 'Inter' }}>` and watch it reach
+   * every built-in label and stop at this one. And the bag is spelled ntk's
+   * way rather than the style vocabulary's (`family`, not `fontFamily`;
+   * `variations`, not `fontVariationSettings`), which is a mapping worth
+   * having in one place instead of vendored per element.
+   */
+  resolvedTextStyle() {
+    return textStyleFrom(this.style, this.inheritedTextStyle);
   }
 
   paint(ctx) {
@@ -2768,9 +2806,8 @@ export class TextNode extends Node {
     const key = String(maxWidth);
     let layout = this._layouts.get(key);
     if (!layout) {
-      const inherited = this.inheritedTextStyle;
-      const spans = this.collectSpans(inherited, []);
-      const base = textStyleFrom(this.style, inherited);
+      const spans = this.collectSpans(this.inheritedTextStyle, []);
+      const base = this.resolvedTextStyle();
       layout = fonts.layout(spans, base, {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
         align: this.style.textAlign,
@@ -2803,7 +2840,7 @@ export class TextNode extends Node {
     if (this.style.textBoxTrim !== 'cap-alphabetic') return null;
     const lines = layout?.lines;
     if (!lines?.length) return null;
-    const base = textStyleFrom(this.style, this.inheritedTextStyle);
+    const base = this.resolvedTextStyle();
     const font = this.app?.fonts?.match?.(base.family, {
       weight: base.weight,
       style: base.style,
@@ -3784,24 +3821,20 @@ export class TextInputNode extends Node {
     return Array.from(this.value);
   }
 
-  _textStyle() {
-    return textStyleFrom(this.style, this.inheritedTextStyle);
-  }
-
   _layoutOf(text) {
     const fonts = this.app?.fonts;
     if (!fonts) return null;
-    const style = this._textStyle();
+    const style = this.resolvedTextStyle();
     return fonts.layout(text, style);
   }
 
   _lineHeight() {
     const layout = this._layoutOf('Mg');
     if (layout) return layout.height;
-    // No fonts to measure with. `_textStyle()` rather than the style prop
-    // alone, so the guess is made at the size this field inherits — the
+    // No fonts to measure with. `resolvedTextStyle()` rather than the style
+    // prop alone, so the guess is made at the size this field inherits — the
     // palette's — and not at 14 whatever the theme said.
-    return this._textStyle().size * 1.4;
+    return this.resolvedTextStyle().size * 1.4;
   }
 
   /**
@@ -3837,7 +3870,7 @@ export class TextInputNode extends Node {
   }
 
   _capBand() {
-    const style = this._textStyle();
+    const style = this.resolvedTextStyle();
     const cap = this.app?.fonts
       ?.match?.(style.family, { weight: style.weight, style: style.style })
       ?.metrics?.(style.size)?.capHeight;
@@ -3852,7 +3885,7 @@ export class TextInputNode extends Node {
     const fonts = this.app?.fonts;
     if (!fonts) return null;
     const text = this.value;
-    const s = this._textStyle();
+    const s = this.resolvedTextStyle();
     const key = `${text}|${s.family}|${s.size}|${s.weight}|${s.style}`;
     if (this._valueLayoutKey !== key) {
       this._valueLayoutKey = key;
@@ -4489,7 +4522,7 @@ export class TextInputNode extends Node {
     );
     const { x, y } = this._editMenuOrigin(ev, geometry);
     const colors = editMenuColors(this.theme);
-    const style = this._textStyle();
+    const style = this.resolvedTextStyle();
     const state = { active: -1 };
 
     const canvas = new CanvasNode(
@@ -4639,7 +4672,7 @@ export class TextInputNode extends Node {
     const content = this.contentBox();
     if (content.width <= 0 || content.height <= 0) return;
 
-    const style = this._textStyle();
+    const style = this.resolvedTextStyle();
     const text = this.value;
     const isEmpty = text.length === 0;
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
@@ -4832,7 +4865,7 @@ export class TextAreaNode extends TextInputNode {
     const text = this.value;
     const isEmpty = text.length === 0;
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
-    const s = this._textStyle();
+    const s = this.resolvedTextStyle();
     const color = isEmpty
       ? (this.props.placeholderColor ?? this.theme.dim)
       : s.color;
@@ -5031,7 +5064,7 @@ export class TextAreaNode extends TextInputNode {
     layout.draw(ctx, originX, originY);
 
     if (this._focused && this._caretOn && a === b) {
-      ctx.fillStyle = this.props.caretColor ?? this._textStyle().color;
+      ctx.fillStyle = this.props.caretColor ?? this.resolvedTextStyle().color;
       ctx.fillRect(originX + pos.x, originY + pos.y, 1.5, pos.height);
     }
     // inside the clip, so the thumb is bounded by the content box
