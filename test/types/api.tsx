@@ -379,7 +379,10 @@ function AnchoredPopup() {
   const [caret, setCaret] = useState({ x: 0, y: 0, width: 1, height: 16 });
   return (
     <window title="editor">
-      <box ref={editor} onClick={() => setCaret({ ...caret, x: caret.x + 7 })} />
+      <box
+        ref={editor}
+        onClick={() => setCaret({ ...caret, x: caret.x + 7 })}
+      />
       <popup
         anchor={{ to: editor, at: caret, placement: 'bottom', align: 'start' }}
         maxHeight={220}
