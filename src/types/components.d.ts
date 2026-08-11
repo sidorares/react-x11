@@ -120,9 +120,25 @@ export interface ThemeProviderProps {
  */
 export const ThemeProvider: ComponentType<ThemeProviderProps>;
 
+/**
+ * The palette as a bag of tokens, which is what it is at runtime: a theme
+ * merges over whatever is above it and a `$name` in a style resolves against
+ * the result, so a component that reads tokens by name — a code block asking
+ * for `background`/`text`/`dim`, a renderer resolving a palette it was handed
+ * — can index it. The named tokens keep their types; anything else is
+ * `unknown` and has to be narrowed, which is the honest answer for a name
+ * only the caller knows.
+ *
+ * `<ThemeProvider value>` stays closed (`Partial<Theme>`) on purpose: a typo
+ * in a palette is a bug, and there is nowhere else to catch it.
+ */
+export interface ThemeTokens extends Theme {
+  readonly [token: string]: unknown;
+}
+
 /** The palette in force: merged over the defaults and over any outer
  * provider, and the same object `$token` resolution sees. */
-export function useTheme(): Theme;
+export function useTheme(): ThemeTokens;
 
 /** Props a widget passes through to the `<box>` it renders. */
 type WidgetProps = Omit<BoxProps, 'children' | 'style' | 'ref'>;

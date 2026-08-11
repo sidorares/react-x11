@@ -12,6 +12,26 @@ export function keysymOf(char: string): number;
 /** The character a keysym produces, or `''` for a non-printing key. */
 export function charOf(keysym: number): string;
 
+/**
+ * The letter of a Ctrl chord, independent of Shift — the keysym for its
+ * lowercase form, so `keysymOf('z')` matches both Ctrl+Z and Ctrl+Shift+Z.
+ * Null when the event carries neither a keysym nor a codepoint.
+ *
+ * ntk derives `codepoint` from the *shifted* keysym, so a handler that
+ * compared code points would see `Z` for Ctrl+Shift+Z and miss the chord.
+ * Here rather than inside `<textinput>` because both layers need it: the
+ * built-in editors read Ctrl+C/V/Z, and so does any widget that answers a
+ * chord of its own.
+ *
+ * ```js
+ * if (ev.ctrlKey && ctrlChordLetter(ev) === keysymOf('d')) duplicateLine();
+ * ```
+ */
+export function ctrlChordLetter(ev: {
+  keysym?: number | null;
+  codepoint?: number | null;
+}): number | null;
+
 export const XK_BACKSPACE: 0xff08;
 export const XK_TAB: 0xff09;
 export const XK_RETURN: 0xff0d;

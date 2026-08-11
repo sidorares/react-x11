@@ -88,6 +88,10 @@ getByPlaceholder('Your name');
   included** — a `<popup>` is a child node of the window that opened it, so a
   menu or a dialog is queryable without any special casing.
 - `within(node)` scopes them to a subtree.
+- `all(predicate?)` is the escape hatch: every node under the root, in paint
+  order, matched on anything — `screen.all((n) => n.kind === 'gauge')`.
+  `node.kind` is the element name, which is how an element with no text and
+  no role of its own is still reachable.
 - A miss prints the tree it searched, rather than leaving you with
   `undefined is not an object`.
 

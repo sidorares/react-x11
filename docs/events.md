@@ -100,6 +100,19 @@ const root = await createRoot({
 `nativeEvent.rootx/rooty` are screen coordinates — useful for anchoring a
 `<popup>` at the pointer.
 
+**A Ctrl chord is read from the keysym, not the code point.** `codepoint`
+comes from the _shifted_ keysym, so Ctrl+Shift+Z arrives as `Z` and Ctrl+Z as
+`z`; a handler that compares code points misses half of its own shortcut.
+`ctrlChordLetter(ev)` from `react-x11/keysyms` answers with the lowercase
+keysym either way — it is what `<textinput>` reads Ctrl+C/V/Z with, and it is
+exported because any widget with a chord of its own needs the same rule:
+
+```js
+onKeyDown={(ev) => {
+  if (ev.ctrlKey && ctrlChordLetter(ev) === keysymOf('d')) duplicateLine();
+}}
+```
+
 ## Handlers
 
 | handler                                     | notes                                                                                   |
@@ -141,7 +154,10 @@ light up every widget the pointer crosses.
 `focusable` opts a node into focus (`<textinput>` is focusable by
 default, and so is a scroll container with somewhere to scroll), `autoFocus`
 takes it at mount, and every drawn node has
-`focus()` / `blur()` / `focused` on its ref. Focusing a node inside a
+`focus()` / `blur()` / `focused` on its ref — plus `focusWithin`, which is
+true while focus is on the node **or inside it**, the question a modal asks
+before taking focus itself. `focus()` hands the node back, so a component
+can forward it straight out of an imperative handle. Focusing a node inside a
 scroll container scrolls it into view. Mousedown focuses the nearest
 focusable ancestor of the hit node; Tab / Shift+Tab cycle through focusable
 nodes in tree order. Keyboard

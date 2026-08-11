@@ -138,6 +138,13 @@ function Panel() {
 }
 ```
 
+It is a bag of tokens, and indexes like one: a component that resolves a name
+it was handed rather than one it wrote — a code block reading its own colour
+map, a renderer resolving `$token` itself — writes `theme[name]` with no cast.
+The named tokens keep their types, anything else is `unknown` and narrows.
+What a provider _accepts_ stays closed (`Partial<Theme>`), because a typo in a
+palette has nowhere else to be caught.
+
 The palette reaches the tree on a `<box>` the provider renders, styled
 `{ flexGrow: 1 }` so an app-level provider fills its parent; pass `style` to
 change that (`style={{ flexGrow: 0 }}` around a single control). A `<window>`

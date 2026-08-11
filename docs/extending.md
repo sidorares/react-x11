@@ -102,11 +102,18 @@ And what you read:
 - `this.root` — the owning `<window>` node; `this.app` — the ntk connection.
 - `this.theme` — the nearest theme at or above this node.
 
-To ask for a repaint: `this.root?.invalidate(layout, rect, reason)`. Pass a
-`rect` when you know what changed — an invalidation with no bound repaints
-the whole window, which is this renderer's main performance bug class (see
-[debugging.md](debugging.md)). `reason` joins the closed set the diagnostics
-print.
+To ask for a repaint: `this.invalidate(layout, damage, reason)`. Pass the
+damage — `this` is usually it, or a rect when you know a tighter one. An
+invalidation with no bound repaints the whole window, which is this
+renderer's main performance bug class (see [debugging.md](debugging.md)).
+`reason` joins the closed set the diagnostics print. Damage is collected on
+the window node and `invalidate` on any node forwards there, so an element
+that is not attached yet invalidates nothing rather than throwing.
+
+And to take the keyboard focus: `this.focus()` moves it here as a click
+would and hands the node back, `this.blur()` gives it up, `this.focused` and
+`this.focusWithin` answer where it is. They claim their own damage — a
+focused control repaints itself, and its ring, without being asked.
 
 ### A size of your own
 
@@ -291,7 +298,7 @@ discardable — is the part that is easy to get wrong.
 | `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                         |
 | `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary               |
 | `react-x11/ntk`     | ntk itself, re-exported                                                                                  |
-| `react-x11/keysyms` | the `XK_*` constants                                                                                     |
+| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                     |
 
 **Reach ntk through `react-x11/ntk`, not a second dependency.** Two copies
 of ntk in one process means two Yoga instances and two font caches, and a

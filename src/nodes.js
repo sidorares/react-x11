@@ -2105,6 +2105,22 @@ export class Node {
   }
 
   /**
+   * Ask the owning window to repaint. The damage lives on the window node,
+   * which is the only node with a frame clock — this forwards there, so an
+   * element says `this.invalidate(false, this, 'props')` and never has to
+   * know that. Overridden by WindowNode, which *is* the collector.
+   *
+   * `damage` is the node or rect that changed. Passing one is the difference
+   * between repainting a control and repainting the window, and `this` is
+   * almost always the right answer (docs/extending.md). Before the node is
+   * attached there is no window and nothing on screen, so this is a no-op —
+   * the mount invalidates in full anyway.
+   */
+  invalidate(layoutChanged = false, damage = null, reason = null) {
+    this.root?.invalidate(layoutChanged, damage, reason);
+  }
+
+  /**
    * A layout-affecting change confined to this node: claim the subtree as
    * it stands now, and queue it for a second claim once layout has run —
    * the same before/after protocol `_childListChanged` uses. Anything

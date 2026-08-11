@@ -105,6 +105,20 @@ export declare class Node {
     nextProps: Record<string, unknown>,
     prevProps: Record<string, unknown>,
   ): void;
+  /** Take the keyboard focus, as clicking this node would: focus moves
+   * here, `onBlur` fires on whatever had it, `onFocus` here. Also pulls the
+   * X input focus back to the window if the window manager gave it away.
+   * Returns this node, so an element can hand it out of a method. */
+  focus(): this;
+  /** Give up focus, leaving the window with nothing focused. */
+  blur(): this;
+  /** Whether this node has the owning window's focus. */
+  readonly focused: boolean;
+  /** Whether focus is on this node or inside it — CSS `:focus-within`. A
+   * `<popup>` counts as inside the node it hangs off in the JSX tree. */
+  readonly focusWithin: boolean;
+  /** Whether `node` is this node or a descendant of it (DOM `contains`). */
+  contains(node: Node | null): boolean;
   /** The deepest node containing the point, or null. */
   hitTest(x: number, y: number): Node | null;
   containsPoint(x: number, y: number): boolean;
@@ -113,9 +127,16 @@ export declare class Node {
   insertBefore(child: Node, beforeChild: Node | null): void;
   removeChild(child: Node): void;
   destroySubtree(): void;
-  /** Ask the owning window to repaint. `reason` joins the closed set the
+  /** Ask the owning window to repaint — every node has this; the window
+   * node is where it lands. `damage` is what changed: pass `this`, or a
+   * rect when you know a tighter one, because an invalidation with no bound
+   * repaints the whole window. `reason` joins the closed set the
    * diagnostics print (docs/debugging.md). */
-  invalidate(layout?: boolean, rect?: Rect | null, reason?: string): void;
+  invalidate(
+    layout?: boolean,
+    damage?: Node | Rect | null,
+    reason?: string,
+  ): void;
   getClientRects(): Rect[];
 }
 
