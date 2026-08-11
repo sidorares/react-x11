@@ -12,6 +12,43 @@ import type { Style } from './types/style.js';
 /** ntk's 2d context. Typed loosely — it is ntk's API, not ours. */
 export type Context2D = unknown;
 
+/** How an axis is bounded when layout asks an element for its size.
+ * `'exactly'` — the style decided this axis; `'at-most'` — that many pixels
+ * are on offer; `'unconstrained'` — nothing bounds it. */
+export type MeasureMode = 'exactly' | 'at-most' | 'unconstrained';
+
+/** The question `measureContent` answers. */
+export interface MeasureConstraints {
+  /** Pixels on offer across, per `widthMode`. `Infinity` when unbounded, so
+   * `Math.min(preferred, width)` is right in every mode. */
+  width: number;
+  /** Pixels on offer down, per `heightMode`. `Infinity` when unbounded. */
+  height: number;
+  widthMode: MeasureMode;
+  heightMode: MeasureMode;
+}
+
+/** What `measureContent` answers with. */
+export interface MeasuredSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * The `measureContent` body for content with a natural size and an aspect
+ * ratio to keep — `<image>` and `<svg>` are written on it:
+ *
+ * ```js
+ * measureContent(constraints) {
+ *   return intrinsicSize({ width: 320, height: 200 }, constraints);
+ * }
+ * ```
+ */
+export declare function intrinsicSize(
+  natural: MeasuredSize,
+  constraints: MeasureConstraints,
+): MeasuredSize;
+
 export declare class Node {
   constructor(
     kind: string,
@@ -45,6 +82,24 @@ export declare class Node {
   /** Draw. A subclass calls `super.paint(ctx)` first, for the background,
    * border and clip, then draws inside `this.abs`. */
   paint(ctx: Context2D): void;
+  /**
+   * Implemented by an element whose size comes from its content — a gauge, a
+   * chart, a terminal, an editor. Called during layout whenever the box's
+   * size is the element's to give, and by the content-floor pass behind
+   * `minWidth: 'auto'` with `{ width: 0, widthMode: 'at-most' }`, whose
+   * answer is the smallest size the content can be drawn at.
+   *
+   * Must be a **method on the class**: the base constructor is what wires it
+   * to layout. An element that implements it may not have children, and it
+   * has to answer from what it can read at any time (props, loaded data) —
+   * never from `this.abs`, which is the result of the layout doing the
+   * asking. Call `invalidateMeasure()` when the answer would change.
+   */
+  measureContent?(constraints: MeasureConstraints): MeasuredSize;
+  /** The inputs to `measureContent` changed — a prop it reads, data that
+   * arrived — so the next layout has to ask again. `reason` joins the closed
+   * set the diagnostics print. */
+  invalidateMeasure(reason?: string): void;
   /** Props changed. A subclass calls `super.applyProps(next, prev)`. */
   applyProps(
     nextProps: Record<string, unknown>,
