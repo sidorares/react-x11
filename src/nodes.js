@@ -473,7 +473,7 @@ export function flushWindowRestacks() {
  * uses. Alpha is dropped: this is the *window background attribute*, a single
  * opaque pixel the server repeats, not something composited.
  */
-function pixelFor(color) {
+export function pixelFor(color) {
   const rgba = cssColorStraight(color);
   if (!rgba) return null;
   const [r, g, b] = rgba;
@@ -5598,8 +5598,9 @@ export class WindowNode extends Scrollable(Node) {
       }
     }
     this._restackWindowChildren();
-    // <glarea>s mounted before the window existed own a child X window too
-    this._realizeGlAreas(this);
+    // <glarea>s and <foreign>s mounted before the window existed own a
+    // child X window too
+    this._realizeChildWindows(this);
     // Before the map, deliberately. EWMH 7.7 gives an unmapped window a
     // different mechanism — it *declares* its initial state by writing the
     // property, where a mapped one has to *ask* the window manager — and
@@ -5916,12 +5917,20 @@ export class WindowNode extends Scrollable(Node) {
     for (const cb of [...this._windowFocusListeners]) cb(focused);
   }
 
-  /** Walk the drawn subtree and give every <glarea> its child X window. */
-  _realizeGlAreas(node) {
+  /**
+   * Walk the drawn subtree and give every element that owns a real child X
+   * window one — `<glarea>` and `<foreign>`.
+   *
+   * Here rather than in `createInstance` because the render phase is
+   * discardable: a CreateWindow from a render React throws away leaks a
+   * server resource, and a ReparentWindow from one has moved another
+   * client's window for real (docs/extending.md).
+   */
+  _realizeChildWindows(node) {
     for (const child of node.children) {
       if (child.isWindow) continue;
-      if (child.isGlArea) child.realize();
-      else this._realizeGlAreas(child);
+      if (child.isGlArea || child.isForeign) child.realize();
+      else this._realizeChildWindows(child);
     }
   }
 

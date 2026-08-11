@@ -652,7 +652,16 @@ export class EventManager {
             ? String.fromCodePoint(native.codepoint)
             : undefined,
       });
-      if (name !== 'KeyDown' || ev.defaultPrevented) return;
+      if (ev.defaultPrevented) return;
+      // A release has no traversal after it, but it does have a default
+      // action: an element that answers the whole keystroke rather than the
+      // press — one forwarding into an embedded client (`<foreign>`) — needs
+      // the other half of the pair, or the client sees a key that never
+      // comes up.
+      if (name !== 'KeyDown') {
+        target.defaultKeyUp?.(ev);
+        return;
+      }
       // The element's own behaviour first, focus traversal after it — Tab is
       // an ordinary defaultable key rather than one the focus manager eats on
       // the way past. Cycling first meant an editor could only keep Tab as an
@@ -680,10 +689,16 @@ export class EventManager {
    * Everything else — Tab, an arrow inside a widget, `autoFocus`, a modal
    * handing focus back as it closes, `node.focus()` from an application —
    * lights one, because none of those tell the user where focus went.
+   *
+   * `backwards` is only meaningful for `reason: 'key'`, and only one element
+   * has ever needed it: XEmbed distinguishes a Tab arriving forwards from a
+   * back-Tab, because that is what tells an embedded client whether to focus
+   * its first widget or its last (`<foreign>`, src/foreignnodes.js). It
+   * reaches the node through `defaultFocus({ reason, backwards })`.
    */
-  focus(node, reason = 'script') {
+  focus(node, reason = 'script', backwards = false) {
     const manager = this.focusManager;
-    if (manager !== this) return manager.focus(node, reason);
+    if (manager !== this) return manager.focus(node, reason, backwards);
     if (node === this.focused) return;
     const old = this.focused;
     this._previousFocus = old;
@@ -708,7 +723,7 @@ export class EventManager {
       node.setStyleState(':focus', true);
       node.setStyleState(':focus-visible', reason !== 'pointer');
       this._scrollIntoView(node);
-      if (this.windowFocused) node.defaultFocus?.();
+      if (this.windowFocused) node.defaultFocus?.({ reason, backwards });
       node.props.onFocus?.(this._makeEvent('focus', null, node));
       node.root?.invalidate(false, node, 'focus');
     }
@@ -856,7 +871,7 @@ export class EventManager {
     const index = list.indexOf(this.focused);
     if (index === -1) {
       // nothing focused, or focus sits outside the current scope: Tab enters
-      this.focus(backwards ? list[list.length - 1] : list[0], 'key');
+      this.focus(backwards ? list[list.length - 1] : list[0], 'key', backwards);
       return;
     }
     this.focus(
@@ -864,6 +879,7 @@ export class EventManager {
         ? list[(index || list.length) - 1]
         : list[(index + 1) % list.length],
       'key',
+      backwards,
     );
   }
 

@@ -415,6 +415,36 @@ function RawGl() {
   );
 }
 
+function Embedded({ id }: { id: number }) {
+  return (
+    <foreign
+      windowId={id}
+      style={{ flexGrow: 1, backgroundColor: '#101014' }}
+      focusable
+      onEmbedded={({ id: wid, xembed, version }) => {
+        const _id: number = wid;
+        const _mode: boolean = xembed;
+        const _v: number = version;
+      }}
+      onClientGone={() => {}}
+      onRequestFocus={() => {}}
+      onError={(err) => void err.message}
+    />
+  );
+}
+
+function Adopting() {
+  // no windowId: the container's id is what a program is spawned into
+  return (
+    <foreign
+      style={{ flexGrow: 1 }}
+      onReady={({ windowId }) => {
+        const _id: number = windowId;
+      }}
+    />
+  );
+}
+
 // --- components ------------------------------------------------------------
 
 function Themed() {

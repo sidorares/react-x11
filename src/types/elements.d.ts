@@ -1,7 +1,7 @@
 /**
- * The host elements. Only `<window>`, `<popup>` and `<glarea>` are real X11
- * windows; everything else is a retained node laid out by yoga and painted
- * into the owning window. See docs/elements.md.
+ * The host elements. Only `<window>`, `<popup>`, `<glarea>` and `<foreign>`
+ * are real X11 windows; everything else is a retained node laid out by yoga
+ * and painted into the owning window. See docs/elements.md.
  */
 
 import type { Ref, ReactNode, Key } from 'react';
@@ -584,6 +584,43 @@ export interface GlAreaProps extends DrawnProps<DrawnNode> {
   onPointerMissed?: (ev: MouseEvent<DrawnNode>) => void;
 }
 
+// --- embedding -------------------------------------------------------------
+
+/** What arrived, and how. `xembed: false` is a client that set no
+ * `_XEMBED_INFO` and got plain reparenting — the common case. */
+export interface EmbeddedInfo {
+  /** the client's X window id */
+  id: number;
+  /** whether the client speaks the XEmbed protocol */
+  xembed: boolean;
+  /** the protocol version in use, or 0 */
+  version: number;
+  node: DrawnNode;
+}
+
+export interface ForeignProps extends DrawnProps<DrawnNode> {
+  /**
+   * The X window to embed. Changing it hands the old client back before the
+   * new one is taken. Omit it to instead **adopt** whatever is put inside
+   * this node, which is what `xterm -into WID` and `mpv --wid=WID` need —
+   * `onReady` is where that id comes from.
+   */
+  windowId?: number;
+  /** The container window's id, offered as soon as it exists, so a program
+   * can be spawned into it. Fires before there is anything embedded. */
+  onReady?: (info: { windowId: number; node: DrawnNode }) => void;
+  /** A client is in. */
+  onEmbedded?: (info: EmbeddedInfo) => void;
+  /** Destroyed, or reparented away by someone else. */
+  onClientGone?: (info: { node: DrawnNode }) => void;
+  /** `XEMBED_REQUEST_FOCUS`: the client wants the focus. It is given through
+   * the focus manager unless a handler prevents it by focusing elsewhere. */
+  onRequestFocus?: (info: { node: DrawnNode }) => void;
+  /** The embed failed — no such window, or it went away mid-handshake.
+   * Without a handler the failure is a console warning. */
+  onError?: (err: Error) => void;
+}
+
 // --- 3D scene --------------------------------------------------------------
 
 export type Vec3 = [number, number, number];
@@ -857,6 +894,7 @@ export interface ReactX11Elements {
   svg: SvgProps;
   tex: TexProps;
   glarea: GlAreaProps;
+  foreign: ForeignProps;
 
   group: GroupProps;
   mesh: MeshProps;
