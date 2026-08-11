@@ -319,6 +319,9 @@ function Events() {
         void ev.key;
         void ev.codepoint;
         void ev.shiftKey;
+        // the Latin keysym, and which layout typed the character
+        const layout: number = ev.group;
+        void layout;
         // a key an open composition took types nothing of its own
         if (ev.composing) return;
       }}
@@ -861,6 +864,14 @@ async function main() {
 
   // @ts-expect-error — compose takes a table, not a boolean either way
   await createRoot({ compose: true });
+
+  // accelerators: the Latin keysym by default, and two ways to say otherwise
+  const byLayout = await createRoot({ accelerators: 'layout' });
+  await byLayout.unmount();
+  const ownKeycodes = await createRoot({ accelerators: { 52: 'z', 54: 0x63 } });
+  await ownKeycodes.unmount();
+  // (a third name is caught at runtime rather than here: a string satisfies
+  // `Record<number, string>`, since indexing one gives a string back)
 
   root.render(<Scene />);
   root.render(<RawGl />);

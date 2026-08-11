@@ -76,8 +76,17 @@ export interface WheelEvent<T = DrawnNode> extends SyntheticEvent<T> {
 export interface KeyboardEvent<T = DrawnNode> extends SyntheticEvent<T> {
   /** X keycode. */
   keycode: number;
-  /** X keysym (`XK_*`), or undefined if the map has no entry. */
+  /**
+   * X keysym (`XK_*`), or undefined if the map has no entry — **the Latin
+   * one**, so a shortcut keeps matching while another layout is typing.
+   * `ev.key`/`ev.codepoint` are what the key produced; this is what it is
+   * called. See "Layouts" in docs/events.md, and
+   * `createRoot({ accelerators })` to turn the resolution off.
+   */
   keysym?: number;
+  /** Which XKB layout group typed this, 0-3. A layout switch moves the
+   * group and sends no other notice. */
+  group: number;
   /** Unicode code point, undefined when the key produces no character —
    * which includes every key a composition took (see `composing`). */
   codepoint?: number;

@@ -43,6 +43,7 @@ import {
 import { hooks as a11yHooks, startA11y } from './a11y.js';
 import { beginStartup } from './startup.js';
 import { beginCompose } from './compose.js';
+import { beginKeyboard } from './keyboard.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
 import { watchAppearance } from './appearance.js';
@@ -731,6 +732,11 @@ export async function createRoot(options = {}) {
   // process, and only `compose: 'system'` or a file of your own reads
   // anything from disk.
   beginCompose(app, rest.compose);
+
+  // Which keysym a shortcut matches when the layout is not Latin
+  // (src/keyboard.js). Pure bookkeeping — the work happens per key event,
+  // and only for a key that types another script.
+  beginKeyboard(app, rest.accelerators);
 
   // Awaited, and this is the only place it can be: whether a compositor is
   // running decides what a `transparent` window paints, and a window that
