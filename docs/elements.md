@@ -707,6 +707,10 @@ box you do not scroll.
 `scrollTo(y)` takes a number for the vertical axis; `scrollTo({x, y})` moves
 either, leaving alone whichever you omit. `scrollBy` matches.
 `scrollIntoView(node)` scrolls the minimum amount on both axes.
+`canScroll(dx, dy)` answers whether there is room to move on the axis a delta
+names — what the wheel asks each node on its way out, and the one method an
+element of your own implements to be asked it too
+([extending.md](extending.md#scrolling-content-you-painted)).
 
 Horizontal content comes from children that will not shrink — a row of
 fixed-width cells, say. The extent is measured **through the subtree**, the
@@ -987,6 +991,10 @@ word-wraps at the content width, Enter inserts a newline (Ctrl+Enter fires
 Home/End go to the start/end of the visual (wrapped) line, selection spans
 lines, and the view scrolls vertically to follow the caret (mouse wheel
 scrolls too).
+
+The wheel reaches it through the same chain a `<box overflow="scroll">` is
+in, so a field whose text fits passes the gesture out to the pane or the
+window behind it rather than swallowing it.
 
 | prop            |                                                   |
 | --------------- | ------------------------------------------------- |

@@ -202,6 +202,8 @@ function Elements() {
   // pointer against this box has to read
   const _dir: 'ltr' | 'rtl' | undefined = boxRef.current?.direction;
   const _holds = () => boxRef.current?.contains(inputRef.current);
+  // issue #253: the question the wheel asks a scroller on its way out
+  const _room: boolean | undefined = scrollRef.current?.canScroll(0, 48);
   // focus() hands the node back, so an imperative handle can forward it
   const _refocus = () => inputRef.current?.blur().focus();
   // @ts-expect-error — the element name is `kind`; no node has a `type`

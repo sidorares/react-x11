@@ -415,7 +415,7 @@ test('an unfocused field shows the start of its value, not the caret', async () 
       x11Root,
     );
 
-    // paint at least once: the offsets are settled during _paintContent
+    // paint at least once: the offsets are settled during paintContent
     const root = wnd._reactX11Node;
     for (let i = 0; i < 4; i++) {
       await new Promise((r) => setImmediate(r));

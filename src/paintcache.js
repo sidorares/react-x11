@@ -189,11 +189,11 @@ export class PaintCache {
    */
   paint(node, ctx) {
     const plan = node.paintCachePlan(ctx);
-    if (!plan || !isDeviceSpace(ctx)) return node._paintContent(ctx);
+    if (!plan || !isDeviceSpace(ctx)) return node.paintContent(ctx);
 
     if (plan.width * plan.height > MAX_ITEM_PIXELS) {
       this.stats.tooBig++;
-      return node._paintContent(ctx);
+      return node.paintContent(ctx);
     }
 
     const hit = this.entries.get(plan.key);
@@ -212,12 +212,12 @@ export class PaintCache {
     if (seen < 2) {
       if (this.pending.size >= MAX_PENDING) this.pending.clear();
       this.pending.set(plan.key, seen);
-      return node._paintContent(ctx);
+      return node.paintContent(ctx);
     }
     this.pending.delete(plan.key);
 
     const entry = this._render(node, plan);
-    if (!entry) return node._paintContent(ctx);
+    if (!entry) return node.paintContent(ctx);
     this.entries.set(plan.key, entry);
     this.bytes += entry.bytes;
     this.inUse.add(entry);

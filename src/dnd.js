@@ -194,16 +194,15 @@ function actionAtom(atoms, name) {
  * skipping the same ones, so the two gestures agree about which viewport a
  * point belongs to.
  *
- * `<textarea>` scrolls under the wheel but not under a drag: nothing can
- * be dropped into one, so scrolling it would move text the drag cannot
- * reach.
+ * A scroll *container* — `isScroller()` — rather than anything the wheel
+ * would scroll: `<textarea>` and its kind answer `canScroll` because they
+ * pan their own pixels, but nothing can be dropped into one, so scrolling
+ * it here would move text the drag cannot reach.
  */
 function scrollerIn(path) {
   for (let i = path.length - 1; i >= 0; i--) {
     const n = path[i];
-    if (n.isScroller?.() && (n._maxScroll('x') > 0 || n._maxScroll('y') > 0)) {
-      return n;
-    }
+    if (n.isScroller?.() && n.canScroll(1, 1)) return n;
   }
   return null;
 }

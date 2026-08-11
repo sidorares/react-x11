@@ -283,10 +283,13 @@ it, so a drop target below the fold can be reached without letting go.
 Nothing opts in: it applies to any scroll container a drag passes over,
 from this application or another one.
 
-The viewport it scrolls is the nearest one enclosing the pointer — the
-same one the wheel would scroll, found the same way. `<textarea>` is
+The viewport it scrolls is the nearest scroll _container_ enclosing the
+pointer, walked out the same way the wheel walks. Something that scrolls
+pixels of its own without being a container — `<textarea>` and anything else
+that answers `canScroll` alone
+([extending.md](extending.md#scrolling-content-you-painted)) — is
 deliberately excluded: nothing can be dropped into one, so scrolling it
-during a drag would only move text out of reach.
+during a drag would only move content out of reach.
 
 Two consequences worth knowing:
 
