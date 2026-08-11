@@ -29,6 +29,7 @@ import {
   resolveQueries,
   DEFAULT_FOCUS_RING,
   resolveHitSlop,
+  resolveBorderWidths,
   tint,
 } from './styles.js';
 import { cssColorStraight } from 'ntk';
@@ -521,6 +522,9 @@ const DEV = process.env.NODE_ENV !== 'production';
 
 // Connections already told they have no 32-bit visual (`_argbAttributes`).
 const warnedNoArgb = new WeakSet();
+
+// `borderRadius` on a non-uniform border warned about once (`_paintBorderSides`).
+let warnedSideRadius = false;
 
 // Frame timestamps for transitions. Indirected so tests can drive the clock
 // instead of sleeping through real animations.
@@ -2158,8 +2162,27 @@ export class Node {
   }
 
   _paintBorder(ctx) {
-    const { borderWidth = 0, borderColor, borderRadius = 0 } = this.style;
-    if (!(borderWidth > 0) || !isPaintedColor(borderColor)) return;
+    const { borderColor, borderRadius = 0 } = this.style;
+    const w = resolveBorderWidths(this.style);
+    const colors = {
+      top: this.style.borderTopColor ?? borderColor,
+      right: this.style.borderRightColor ?? borderColor,
+      bottom: this.style.borderBottomColor ?? borderColor,
+      left: this.style.borderLeftColor ?? borderColor,
+    };
+    const uniform =
+      w.top === w.right &&
+      w.top === w.bottom &&
+      w.top === w.left &&
+      colors.top === colors.right &&
+      colors.top === colors.bottom &&
+      colors.top === colors.left;
+    if (!uniform) {
+      this._paintBorderSides(ctx, w, colors);
+      return;
+    }
+    const borderWidth = w.top;
+    if (!(borderWidth > 0) || !isPaintedColor(colors.top)) return;
     // dashed borders need ntk >= 3.2.0 (setLineDash); solid fallback below
     const dashed =
       this.style.borderStyle === 'dashed' &&
@@ -2167,7 +2190,7 @@ export class Node {
     if (dashed) {
       ctx.setLineDash([borderWidth * 2 + 2, borderWidth + 2]);
     }
-    ctx.strokeStyle = borderColor;
+    ctx.strokeStyle = colors.top;
     ctx.lineWidth = borderWidth;
     // stroke centered on the box edge inset by half the border width
     const inset = borderWidth / 2;
@@ -2192,6 +2215,68 @@ export class Node {
     if (dashed) {
       ctx.setLineDash([]);
     }
+  }
+
+  /**
+   * Non-uniform borders: four independent strokes, square corners. The join
+   * rule is CSS-adjacent and deterministic — top and bottom span the full
+   * width of the box, left and right run between them — which every square
+   * case (bars, rules, accent edges) never notices, because it only has one
+   * painted side to begin with.
+   *
+   * `borderRadius` requires uniform borders in v1: a rounded corner between
+   * two sides of different width or colour has no honest square answer, so
+   * the radius is ignored here and DEV says so once rather than bending the
+   * strokes halfway.
+   */
+  _paintBorderSides(ctx, w, colors) {
+    if (DEV && (this.style.borderRadius ?? 0) > 0 && !warnedSideRadius) {
+      warnedSideRadius = true;
+      console.warn(
+        'react-x11: borderRadius needs uniform borders — same width and ' +
+          'colour on all four sides. This border is painted square. Round ' +
+          'the corners with a uniform border, or drop the radius.',
+      );
+    }
+    const dashable = typeof ctx.setLineDash === 'function';
+    const dashed = this.style.borderStyle === 'dashed' && dashable;
+    const { x, y, width, height } = this.abs;
+    const side = (sw, color, x1, y1, x2, y2) => {
+      if (!(sw > 0) || !isPaintedColor(color)) return;
+      if (dashed) ctx.setLineDash([sw * 2 + 2, sw + 2]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = sw;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    };
+    side(w.top, colors.top, x, y + w.top / 2, x + width, y + w.top / 2);
+    side(
+      w.bottom,
+      colors.bottom,
+      x,
+      y + height - w.bottom / 2,
+      x + width,
+      y + height - w.bottom / 2,
+    );
+    side(
+      w.left,
+      colors.left,
+      x + w.left / 2,
+      y + w.top,
+      x + w.left / 2,
+      y + height - w.bottom,
+    );
+    side(
+      w.right,
+      colors.right,
+      x + width - w.right / 2,
+      y + w.top,
+      x + width - w.right / 2,
+      y + height - w.bottom,
+    );
+    if (dashed) ctx.setLineDash([]);
   }
 
   _paintContent(ctx) {}
@@ -6439,8 +6524,17 @@ export class WindowNode extends Scrollable(Node) {
     // pixels into place the repaint no longer covers
     if (layoutMoved) return;
     // children clip to the border box, so a border ring or rounded corner
-    // would be shifted like content
-    if (node.style.borderWidth > 0 || node.style.borderRadius > 0) return;
+    // would be shifted like content — any painted side counts
+    const blitBorder = resolveBorderWidths(node.style);
+    if (
+      blitBorder.top > 0 ||
+      blitBorder.right > 0 ||
+      blitBorder.bottom > 0 ||
+      blitBorder.left > 0 ||
+      node.style.borderRadius > 0
+    ) {
+      return;
+    }
     const vp = node.abs;
     // fractional geometry or offsets change every pixel; only a whole-pixel
     // shift is a copy
@@ -6578,9 +6672,14 @@ export class WindowNode extends Scrollable(Node) {
         if (child.style?.display === 'none') continue;
         if (ancestors.has(child)) {
           // on the path down: its solid background under the viewport is
-          // translation-invariant, its border ring and corners are not
+          // translation-invariant, its border ring and corners are not.
+          // The widest side is conservative for a non-uniform border
+          const bw = resolveBorderWidths(child.style ?? EMPTY_STYLE);
           const inset = Math.max(
-            child.style?.borderWidth ?? 0,
+            bw.top,
+            bw.right,
+            bw.bottom,
+            bw.left,
             child.style?.borderRadius ?? 0,
           );
           if (inset > 0 && !rectContains(insetRect(child.abs, inset), vp)) {

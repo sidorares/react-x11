@@ -80,6 +80,8 @@ const STYLE_NAMES = [
   'borderColor',
   'borderRadius',
   'borderWidth',
+  'borderLeftWidth',
+  'borderTopColor',
   'borderStyle',
   'zIndex',
   'color',
