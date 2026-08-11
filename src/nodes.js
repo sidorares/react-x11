@@ -36,7 +36,7 @@ import {
   tint,
 } from './styles.js';
 import { cssColorStraight } from 'ntk';
-import { EventManager, discrete } from './events.js';
+import { EventManager, discrete, WHEEL_NOTCH_PX } from './events.js';
 import {
   DropSession,
   dndAtoms,
@@ -3956,9 +3956,10 @@ const XK_DELETE = 0xffff;
 const XK_ESCAPE = 0xff1b;
 const XK_SPACE = 0x0020;
 
-// An arrow key scrolls by a wheel notch — the same 48px `WHEEL_BUTTONS`
-// moves in events.js, so the two input routes agree about what one step is.
-const SCROLL_KEY_STEP = 48;
+// An arrow key scrolls by a wheel notch — literally the one events.js
+// converts a notch into, so the two input routes agree about what one step
+// is however far a notch turns out to be.
+const SCROLL_KEY_STEP = WHEEL_NOTCH_PX;
 // A page keeps a sliver of the previous one on screen, so the eye has
 // somewhere to land. Toolkits all keep a line or two; this is about that.
 const SCROLL_KEY_PAGE_OVERLAP = 24;
@@ -5968,6 +5969,20 @@ export class WindowNode extends Scrollable(Node) {
     // with 0 — transparent black — when the ARGB visual is really there.
     if (this.props.transparent)
       Object.assign(attributes, this._argbAttributes());
+    // **Smooth scrolling, where the server can.** XI2 carries a scroll as
+    // the device's own valuators, so a touchpad's two-finger scroll arrives
+    // as the fractions of a notch it was rather than as the whole clicks of
+    // button 4/5 the server emulates for clients that cannot read them. ntk
+    // translates the device events back into the core-shaped ones the rest
+    // of this file reads, and falls back to those buttons where there is no
+    // XI2, so this is the whole cost of it here (issue #273).
+    //
+    // Not on a `<popup>`, which is the window that holds a pointer grab: a
+    // core grab delivers core events, and ntk drops the emulated wheel
+    // buttons on a window whose valuators are flowing — a menu that had
+    // selected XI2 would be a menu the wheel could not reach while it was
+    // grabbing. Notch-at-a-time inside an open menu, smooth everywhere else.
+    attributes.xi2 ??= !this.isPopup;
     const wnd = this.app.createWindow(attributes);
     this.window = wnd;
     // Now that the visual is known: settle the capabilities, re-resolve any

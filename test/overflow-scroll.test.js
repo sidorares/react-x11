@@ -11,7 +11,7 @@ import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
 import { a11yRole, ATSPI_ROLE } from '../src/a11y.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -36,9 +36,9 @@ const rows = (n = 10, height = 40) =>
     h('box', { key: i, style: { height, flexShrink: 0 } }),
   );
 
-// X delivers wheel notches as button presses: 4 up, 5 down, 6/7 horizontal.
-const wheel = (wnd, x, y, button = 5) =>
-  wnd.emit('mousedown', { x, y, keycode: button });
+// ntk delivers a scroll as `wheel`, in notches — positive down and right,
+// whether the connection measured it with XI2 or counted button 4-7 presses.
+const wheel = (wnd, x, y, delta) => spinWheel(wnd, x, y, delta);
 
 // --- the gate ---------------------------------------------------------------
 

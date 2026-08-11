@@ -27,14 +27,14 @@ import { registerElement, unregisterElement } from '../src/host.js';
 import { Node, Scrollable } from '../src/node.js';
 import { a11yRole, ATSPI_ROLE } from '../src/a11y.js';
 import { XK_PAGE_DOWN } from '../src/keysyms.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-// X delivers wheel notches as button presses: 4 up, 5 down, 6/7 horizontal.
-const wheel = (wnd, x, y, button = 5) =>
-  wnd.emit('mousedown', { x, y, keycode: button });
+// ntk delivers a scroll as `wheel`, in notches — positive down and right,
+// whether the connection measured it with XI2 or counted button 4-7 presses.
+const wheel = (wnd, x, y, delta) => spinWheel(wnd, x, y, delta);
 
 function pressKey(app, wnd, keysym) {
   const keycode = (keysym % 248) + 8;
@@ -262,7 +262,7 @@ test('a horizontal extent it reports is one the wheel can reach', async () => {
     }),
   );
   assert.equal(ref.current.canScroll(0, 1), false, 'nothing vertical');
-  wheel(wnd, 50, 50, 7); // X button 7 is a wheel-right
+  wheel(wnd, 50, 50, { deltaX: 1, deltaY: 0 }); // a notch to the right
   await tick();
   assert.ok(ref.current.scrollX > 0);
 });

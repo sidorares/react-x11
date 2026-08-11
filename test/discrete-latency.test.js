@@ -18,7 +18,7 @@ import xserver from 'x11/lib/xserver/index.js';
 import { createClient } from 'ntk';
 
 import { createRoot } from '../src/index.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, spinWheel } from './helpers/mock-app.js';
 import { hooks } from '../src/trace-registry.js';
 
 const h = React.createElement;
@@ -162,7 +162,7 @@ test('motion still coalesces to one paint per frame', async () => {
   await x11Root.unmount();
 });
 
-test('a wheel burst inside one round trip paints twice, not ten times', async () => {
+test('a wheel burst is one paint, and no notch is lost in it', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
   x11Root.render(
@@ -183,23 +183,22 @@ test('a wheel burst inside one round trip paints twice, not ten times', async ()
   );
   await tick();
   const wnd = app.windows[0];
+  const box = wnd._reactX11Node.children[0];
   const passes = countPaints();
 
-  // Model the fence: the first paint of a frame sends one, and it stays
-  // unanswered for the rest of this turn. That is the gate that turns a
-  // burst into "paint the first notch, coalesce the rest".
-  wnd.frameInFlight = () => passes.length > 0;
+  // The wheel is the one input that is *not* on the discrete path, because
+  // it is the one ntk coalesces: a touchpad reports a scroll dozens of times
+  // a frame and nobody can see the difference between those frames. What
+  // makes that free is that the coalescing adds up — ntk hands over the sum
+  // of the frame's deltas — so the pacing costs a paint, never a distance.
+  // (A real connection delivers one summed event; ten arriving separately,
+  // as here, is the harder case and lands in the same place.)
+  for (let i = 0; i < 10; i++) spinWheel(wnd, 100, 100, { deltaY: 1 });
+  assert.strictEqual(passes.length, 0, 'no paint per notch');
 
-  // X delivers wheel notches as presses of buttons 4-7, and a spun wheel
-  // sends many per round trip
-  for (let i = 0; i < 10; i++) {
-    wnd.emit('mousedown', { x: 100, y: 100, keycode: 5 });
-  }
-  assert.strictEqual(passes.length, 1, 'the first notch painted immediately');
-
-  wnd.frameInFlight = () => false; // the server caught up
   await tick();
-  assert.strictEqual(passes.length, 2, 'the other nine caught up in one frame');
+  assert.strictEqual(passes.length, 1, 'the whole burst is one paint');
+  assert.strictEqual(box.scrollY, 480, 'and all ten notches are in it');
 
   await x11Root.unmount();
 });
@@ -305,9 +304,33 @@ async function xserverApp() {
 const roundTrip = (app) =>
   new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
 
-// X ButtonPress, as it arrives on ntk's raw event stream — button 5 is a
-// wheel notch down
+// A core input event as it arrives on ntk's raw stream: ButtonPress is 4,
+// and buttons 4-7 are what a wheel is in the core protocol.
 const buttonPress = (keycode) => ({ type: 4, x: 100, y: 100, keycode });
+const buttonRelease = (keycode) => ({ type: 5, x: 100, y: 100, keycode });
+
+/** The scene both real-ntk tests use: a scroll pane taller than its window,
+ *  with a pressable at the top so a press has something to darken. */
+function scrollScene(x11Root, onWindow) {
+  x11Root.render(
+    h(
+      'window',
+      { width: 200, height: 200 },
+      h('box', PRESSABLE),
+      h(
+        'box',
+        { style: { overflow: 'scroll', flexGrow: 1 } },
+        ...Array.from({ length: 20 }, (_, i) =>
+          h('box', {
+            key: i,
+            style: { height: 40, flexShrink: 0, backgroundColor: '#eef1f5' },
+          }),
+        ),
+      ),
+    ),
+    onWindow,
+  );
+}
 
 test('real ntk: the press paints, and the present shuts the gate behind it', async (t) => {
   const { server, app } = await xserverApp();
@@ -320,25 +343,9 @@ test('real ntk: the press paints, and the present shuts the gate behind it', asy
   // the render callback hands back the root child's public instance, which
   // for a <window> is the live ntk window
   let wnd = null;
-  x11Root.render(
-    h(
-      'window',
-      { width: 200, height: 200 },
-      h(
-        'box',
-        { style: { overflow: 'scroll', flexGrow: 1 } },
-        ...Array.from({ length: 20 }, (_, i) =>
-          h('box', {
-            key: i,
-            style: { height: 40, flexShrink: 0, backgroundColor: '#eef1f5' },
-          }),
-        ),
-      ),
-    ),
-    (instance) => {
-      wnd = instance;
-    },
-  );
+  scrollScene(x11Root, (instance) => {
+    wnd = instance;
+  });
   await tick();
   await roundTrip(app);
   await tick();
@@ -353,9 +360,63 @@ test('real ntk: the press paints, and the present shuts the gate behind it', asy
   assert.strictEqual(wnd.frameInFlight(), false, 'the server is caught up');
 
   const passes = countPaints();
-  // ten notches of a spun wheel, all inside one round trip
-  for (let i = 0; i < 10; i++) wnd.emit('event', buttonPress(5));
+  // a press on the pressable, and the release that ends it — two discrete
+  // events, each with one visual answer of its own
+  wnd.emit('event', { type: 4, x: 10, y: 10, keycode: 1 });
 
+  assert.strictEqual(passes.length, 1, 'the press painted, from its handler');
+  assert.strictEqual(
+    wnd.frameInFlight(),
+    true,
+    'presenting it armed the fence, which is what paces what follows',
+  );
+
+  // The release's answer rides the paced frame, because the fence the press
+  // armed is still outstanding: update instantly, then catch up.
+  wnd.emit('event', { type: 5, x: 10, y: 10, keycode: 1 });
+  assert.strictEqual(passes.length, 1, 'the fence held the release');
+
+  const deadline = Date.now() + 2000;
+  while (passes.length < 2 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.strictEqual(passes.length, 2, 'one catch-up frame for the rest');
+
+  await x11Root.unmount();
+});
+
+test('real ntk: a spun wheel paints twice, not ten times, and loses no notch', async (t) => {
+  const { server, app } = await xserverApp();
+  const x11Root = await createRoot({ app });
+  t.after(async () => {
+    await app.close?.();
+    server.close?.();
+  });
+
+  let wnd = null;
+  scrollScene(x11Root, (instance) => {
+    wnd = instance;
+  });
+  await tick();
+  await roundTrip(app);
+  await tick();
+  await roundTrip(app);
+  const pane = wnd._reactX11Node.children[1];
+
+  const passes = countPaints();
+  // Ten notches of a spun wheel, all inside one round trip. This server has
+  // no XI2, so they arrive the way they always did — as presses of button 5,
+  // each with its release — and ntk turns them into its own `wheel`.
+  for (let i = 0; i < 10; i++) {
+    wnd.emit('event', buttonPress(5));
+    wnd.emit('event', buttonRelease(5));
+  }
+  // Still one paint for the first notch and not ten for the burst, though
+  // neither number is the wheel's doing any more: the press behind it is a
+  // discrete event, and the flush that ends *its* dispatch pays off the
+  // scroll the wheel just did. On a connection with XI2 there is no press —
+  // the wheel arrives inside ntk's frame, which paints before it ends, so
+  // the first notch is on screen just as fast by the other route.
   assert.strictEqual(passes.length, 1, 'the first notch painted, alone');
   assert.strictEqual(
     wnd.frameInFlight(),
@@ -363,14 +424,12 @@ test('real ntk: the press paints, and the present shuts the gate behind it', asy
     'presenting it armed the fence, which is what held the other nine',
   );
 
-  // The catch-up rides the paced frame, so it waits on the fence *and* the
-  // frame interval — which is exactly the point: the nine notches nobody
-  // needed to see individually cost one frame between them.
   const deadline = Date.now() + 2000;
   while (passes.length < 2 && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.strictEqual(passes.length, 2, 'one catch-up frame for the rest');
+  assert.strictEqual(pane.scrollY, 480, 'and every notch is in the distance');
 
   await x11Root.unmount();
 });

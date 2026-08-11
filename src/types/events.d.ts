@@ -61,8 +61,16 @@ export interface MouseEvent<T = DrawnNode> extends SyntheticEvent<T> {
 }
 
 export interface WheelEvent<T = DrawnNode> extends SyntheticEvent<T> {
+  /** Pixels, positive right — one notch of the wheel is 48 of them. */
   deltaX: number;
+  /** Pixels, positive down. Fractions of a notch where `smooth`. */
   deltaY: number;
+  /**
+   * Whether the device measured this scroll rather than clicked it: XI2's
+   * scroll valuators (a touchpad, a high-resolution wheel) can report a
+   * fraction of a notch, the emulated buttons 4-7 can only ever say one.
+   */
+  smooth: boolean;
 }
 
 export interface KeyboardEvent<T = DrawnNode> extends SyntheticEvent<T> {

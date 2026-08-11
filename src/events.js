@@ -1,6 +1,6 @@
 // Synthetic event system: ntk window events → capture/target/bubble dispatch
 // over the drawn node tree, with hit testing, click synthesis, hover
-// enter/leave, wheel mapping (X buttons 4-7) and focus/Tab traversal.
+// enter/leave, the wheel and focus/Tab traversal.
 // Handlers always read from current props, so updates never go stale.
 import {
   runWithPriority,
@@ -16,7 +16,27 @@ import { hooks as a11yHooks, isFocusable } from './a11y.js';
 import { Composer, composeTableFor } from './compose.js';
 
 const XK_TAB = 0xff09;
-const WHEEL_BUTTONS = { 4: [0, -48], 5: [0, 48], 6: [-48, 0], 7: [48, 0] };
+// The core protocol has no wheel: it is a click of button 4/5 (vertical) or
+// 6/7 (horizontal). ntk derives its `wheel` event from those presses — or,
+// where the connection has XI2, from the scroll valuators that carry the real
+// distance — so the presses themselves are noise on the button path, the way
+// a wheel release always was.
+const WHEEL_BUTTONS = new Set([4, 5, 6, 7]);
+/**
+ * How far one notch of the wheel scrolls, in pixels.
+ *
+ * ntk reports a scroll in **notches**: a mouse wheel's click, or the fraction
+ * of one a touchpad measured, `increment` being what the device says makes a
+ * whole one. That is the only unit a device agrees on — how far a notch
+ * *travels* is a toolkit's decision, and this is ours. Everything downstream
+ * of the dispatch is in pixels (`canScroll`/`scrollBy` take them, so does
+ * every registered element that answers the wheel), so the conversion happens
+ * here, once, and `deltaX`/`deltaY` mean pixels wherever they are read.
+ *
+ * The same step an arrow key takes (`SCROLL_KEY_STEP`, nodes.js), so a notch
+ * and an arrow press move a list by the same amount.
+ */
+export const WHEEL_NOTCH_PX = 48;
 const RIGHT_BUTTON = 3;
 // X11 KeyButMask bit for Mod1 (Alt on virtually every layout), same bitmask
 // `shiftKey`/`ctrlKey` above already read `buttons` from.
@@ -103,9 +123,9 @@ export function setClickToComponentHandler(fn) {
  * Wrap an ntk event callback for a *discrete* event — one whose response is
  * a single visual state, so there is nothing a frame's wait could coalesce
  * it with. That is everything ntk does not coalesce: mousedown/mouseup,
- * keydown/keyup, the wheel (X delivers notches as button 4-7 presses),
- * focus/blur and WM messages. Motion, and the hover diffing it drives, are
- * the opposite case and stay on the paced frame.
+ * keydown/keyup, focus/blur and WM messages. Motion and the wheel are the
+ * opposite case and stay on the paced frame — the hover diffing motion
+ * drives, and a scroll whose distance ntk sums over the frame.
  *
  * The response is painted once the *whole* dispatch has unwound — default
  * actions, React's discrete-priority commit, and every invalidation the two
@@ -158,6 +178,10 @@ export class EventManager {
     // toolkit that believed it was unfocused would blink no caret at all.
     this.windowFocused = true;
     this._lastClick = { time: 0, x: 0, y: 0, detail: 0 };
+    // the sub-pixel part of a smooth scroll the default action has not spent
+    // yet — see `_onWheel`, which moves whole pixels so the scroll blit stays
+    // available
+    this._wheelOwed = { x: 0, y: 0 };
     // the window's DragSession while a press has armed it (src/dnd.js)
     this._dragArmed = null;
   }
@@ -218,6 +242,13 @@ export class EventManager {
       );
     onDiscrete('mousedown', (ev) => this._onMouseDown(ev));
     onDiscrete('mouseup', (ev) => this._onMouseUp(ev));
+    // ntk's own event, derived from the wheel buttons or from XI2's scroll
+    // valuators (ntk >= 7.5.0) — one shape whichever the connection turned
+    // out to have. Paced rather than discrete because ntk coalesces it, and
+    // it coalesces by *adding up*: a touchpad reports a scroll dozens of
+    // times a frame, and the frame's event carries the sum of them rather
+    // than the last one, so pacing costs distance nothing.
+    wnd.on('wheel', (ev) => this._onWheel(ev));
     wnd.on('mousemove', (ev) => this._onMouseMove(ev));
     wnd.on('mouseout', (ev) => this._onMouseOut(ev));
     onDiscrete('keydown', (ev) => this._onKey('KeyDown', ev));
@@ -330,60 +361,114 @@ export class EventManager {
     );
   }
 
+  /**
+   * Answer an input the grab brought in from outside the window with the
+   * dismissal it is, and say so. Both the press and the wheel end here: a
+   * menu is anchored to something, and scrolling that something away is as
+   * much "I am doing something else now" as clicking beside it.
+   */
+  _dismissOutside(native) {
+    if (!this._pressOutside(native)) return false;
+    runWithPriority(DiscreteEventPriority, () => {
+      const onDismiss = this.node.props.onDismiss;
+      if (onDismiss) {
+        callHandler(
+          this.node,
+          'onDismiss',
+          onDismiss,
+          this._makeEvent('dismiss', native, this.node),
+        );
+      }
+    });
+    return true;
+  }
+
+  /**
+   * A scroll: ntk's `wheel`, in notches, whatever measured it.
+   *
+   * On a connection with XI2 that is the scroll valuators of the device the
+   * user actually touched, so a touchpad's two-finger scroll arrives as the
+   * fractions of a notch it really was — and arrives at all, where the
+   * emulated button 4/5 it also sends could only ever say "one notch, again".
+   * Everywhere else it is that button, worth exactly one notch, which is the
+   * most a press can carry. Neither is named below: the difference is the
+   * value of `deltaY`, and `ev.smooth` for a handler that wants to know
+   * whether the device it is reading can do better than whole notches.
+   *
+   * Continuous priority, as in the DOM: a scroll is a stream of states on the
+   * way somewhere rather than one, and React must be free to interrupt the
+   * render it started for the notch before.
+   */
+  _onWheel(native) {
+    // A scroll somewhere else is an interaction somewhere else: the pointer
+    // grab an open menu holds brings it here, and the menu is anchored to
+    // content that is about to move out from under it. Same answer the press
+    // outside gets, and for the same reason (`_pressOutside`).
+    if (this._dismissOutside(native)) return;
+    runWithPriority(ContinuousEventPriority, () => {
+      const target = this._hit(native);
+      // Shift turns a vertical wheel sideways — the convention for the mouse
+      // and the touchpad that have no horizontal axis. Read off the delta
+      // rather than off the source: a plain wheel mouse on an XI2 connection
+      // reports through the valuators too, and it still has only one axis.
+      const sideways = Boolean(native.buttons & 1) && !native.deltaX;
+      const notchX = sideways ? native.deltaY : native.deltaX;
+      const notchY = sideways ? 0 : native.deltaY;
+      const ev = this.dispatch('Wheel', target, native, {
+        deltaX: notchX * WHEEL_NOTCH_PX,
+        deltaY: notchY * WHEEL_NOTCH_PX,
+        // whether the delta can be a fraction of a notch, not whether this
+        // one is: a touchpad that happens to have travelled exactly one
+        // notch this frame is still the device that can travel a third
+        smooth: Boolean(native.smooth),
+      });
+      if (ev.defaultPrevented) return;
+      // **The default action moves whole pixels and keeps the change.** A
+      // scroll offset that is not an integer costs the scroll blit — the
+      // server-side copy that makes a scroll cheap can only shift by whole
+      // pixels, so `_applyScrollBlits` (nodes.js) declines a fractional one
+      // and repaints the viewport instead. A touchpad reporting a third of a
+      // notch would therefore turn every frame of the smoothest gesture the
+      // renderer has into a full repaint, which is the opposite of the
+      // trade. The fraction is not dropped, it is carried to the next event,
+      // so a slow scroll still moves — it moves a pixel at a time.
+      const owedX = this._wheelOwed.x + ev.deltaX;
+      const owedY = this._wheelOwed.y + ev.deltaY;
+      const dx = Math.trunc(owedX);
+      const dy = Math.trunc(owedY);
+      this._wheelOwed = { x: owedX - dx, y: owedY - dy };
+      if (dx === 0 && dy === 0) return;
+      // The nearest node out from the target that says it has somewhere to
+      // go on this axis scrolls. Chaining past one that fits its own content
+      // is what a browser does, and it matters now that any `<box>` can be a
+      // scroll container — a pane that happens to fit must not swallow the
+      // wheel the window would have answered. The `<window>` is the last
+      // candidate, then the walk stops.
+      //
+      // Two methods and no kinds: `<textarea>` scrolls pixels it painted
+      // rather than children it laid out, and so does a registered
+      // element that draws its own content, and neither of them should
+      // have to be named here to be reachable (issue #253).
+      for (let n = target; n; n = n.parent) {
+        if (n.canScroll?.(dx, dy)) {
+          n.scrollBy({ x: dx, y: dy });
+          break;
+        }
+        if (n === this.node) break;
+      }
+    });
+  }
+
   _onMouseDown(native) {
+    // the wheel arrived as `wheel`, with a distance the press cannot carry
+    if (WHEEL_BUTTONS.has(native.keycode)) return;
     if (clickToComponentHandler && Boolean(native.buttons & MOD1_MASK)) {
       clickToComponentHandler(this._hit(native), native);
       return;
     }
-    if (this._pressOutside(native)) {
-      runWithPriority(DiscreteEventPriority, () => {
-        const onDismiss = this.node.props.onDismiss;
-        if (onDismiss) {
-          callHandler(
-            this.node,
-            'onDismiss',
-            onDismiss,
-            this._makeEvent('dismiss', native, this.node),
-          );
-        }
-      });
-      return;
-    }
+    if (this._dismissOutside(native)) return;
     runWithPriority(DiscreteEventPriority, () => {
-      const wheel = WHEEL_BUTTONS[native.keycode];
       const target = this._hit(native);
-      if (wheel) {
-        const shift = Boolean(native.buttons & 1);
-        // X sends buttons 6/7 for a horizontal wheel; Shift+vertical is the
-        // convention for mice and touchpads that have none
-        const [dx, dy] =
-          shift && wheel[0] === 0 ? [wheel[1], 0] : [wheel[0], wheel[1]];
-        const ev = this.dispatch('Wheel', target, native, {
-          deltaX: dx,
-          deltaY: dy,
-        });
-        if (!ev.defaultPrevented) {
-          // Default action: the nearest node out from the target that says it
-          // has somewhere to go on this axis scrolls. Chaining past one that
-          // fits its own content is what a browser does, and it matters now
-          // that any `<box>` can be a scroll container — a pane that happens
-          // to fit must not swallow the wheel the window would have answered.
-          // The `<window>` is the last candidate, then the walk stops.
-          //
-          // Two methods and no kinds: `<textarea>` scrolls pixels it painted
-          // rather than children it laid out, and so does a registered
-          // element that draws its own content, and neither of them should
-          // have to be named here to be reachable (issue #253).
-          for (let n = target; n; n = n.parent) {
-            if (n.canScroll?.(ev.deltaX, ev.deltaY)) {
-              n.scrollBy({ x: ev.deltaX, y: ev.deltaY });
-              break;
-            }
-            if (n === this.node) break;
-          }
-        }
-        return;
-      }
       this.downNode = target;
       this.downPath = target ? this._path(target) : [];
       // the caret is about to move, and the accent was aimed at where it was
@@ -431,7 +516,7 @@ export class EventManager {
   }
 
   _onMouseUp(native) {
-    if (WHEEL_BUTTONS[native.keycode]) return; // wheel release
+    if (WHEEL_BUTTONS.has(native.keycode)) return; // wheel release
     runWithPriority(DiscreteEventPriority, () => {
       // a completed drag ends the gesture: no mouseup, no click — as in
       // the DOM, where dragend replaces them

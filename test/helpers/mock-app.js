@@ -5,4 +5,5 @@ export {
   createMockApp,
   moveMouse,
   pressButton,
+  spinWheel,
 } from '../../src/testing/mock-app.js';

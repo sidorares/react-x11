@@ -54,7 +54,12 @@ export {
   toRgb,
   toPNG,
 } from './pixels.js';
-export { createMockApp, moveMouse, pressButton } from './mock-app.js';
+export {
+  createMockApp,
+  moveMouse,
+  pressButton,
+  spinWheel,
+} from './mock-app.js';
 export * from '../keysyms.js';
 
 /**

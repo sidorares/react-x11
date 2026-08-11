@@ -463,6 +463,15 @@ Answer `canScroll` from the **extent, not the position**: a viewport already
 scrolled to its bottom should keep the rest of a flick rather than pass it
 to whatever is behind it.
 
+Both deltas are **whole pixels**, and stay whole however the scroll was
+measured. A touchpad on a server with XI2 reports fractions of a notch and
+`ev.deltaY` carries them ([events.md](events.md#wheel)), but the default
+action spends only the whole part and carries the rest to the next event —
+because a fractional scroll offset is one the server-side blit cannot shift,
+and a smooth gesture that repainted every frame would cost more than it
+looks. So an element joining the chain never has to think about sub-pixels,
+and a slow scroll still moves: a pixel at a time.
+
 #### The mixin, for everything else
 
 `canScroll` + `scrollBy` buys the wheel. `Scrollable(Node)` buys the rest —

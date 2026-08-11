@@ -388,3 +388,35 @@ export function pressButton(wnd, x, y, { press = true, release = true } = {}) {
   if (press) wnd.emit('mousedown', { x, y, keycode: 1 });
   if (release) wnd.emit('mouseup', { x, y, keycode: 1 });
 }
+
+/**
+ * A scroll at a point, in **notches** — ntk's `wheel` event, which is what
+ * the renderer reads whether the connection had XI2 or only the wheel
+ * buttons behind it.
+ *
+ * A notch is one click of a wheel, and a fraction of one is what a touchpad
+ * measures, so `{ deltaY: 0.25, smooth: true }` is a quarter of a notch from
+ * a device that can do that — the case the emulated buttons cannot express
+ * and a test of smooth scrolling is about. `buttons` takes the X modifier
+ * mask, for the Shift that turns a vertical wheel sideways.
+ */
+export function spinWheel(
+  wnd,
+  x,
+  y,
+  { deltaX = 0, deltaY = 1, smooth = false, buttons = 0 } = {},
+) {
+  wnd.emit('wheel', {
+    name: 'wheel',
+    x,
+    y,
+    rootx: x,
+    rooty: y,
+    buttons,
+    deltaX,
+    deltaY,
+    deltaMode: 'line',
+    smooth,
+    source: smooth ? 'valuator' : 'button',
+  });
+}

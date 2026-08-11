@@ -721,9 +721,14 @@ while its own cells overflow it still reports something to scroll. Anything
 that clips its own children ends that measurement, since their overflow
 belongs to them.
 
-X sends buttons 6 and 7 for a horizontal wheel; **Shift + vertical wheel**
-scrolls sideways too, for mice and touchpads that have none. When both bars
+A device with a horizontal axis scrolls sideways with it; **Shift + vertical
+wheel** does too, for the mice and touchpads that have none. When both bars
 show, each stops short of the other's corner.
+
+The distance is the device's, not a constant: where the server has XI2 a
+touchpad's scroll arrives as the fraction of a notch it measured, so a pane
+moves by a few pixels rather than by 48 at a time. A wheel notch is still 48
+pixels, and so is an arrow key ([events.md](events.md#wheel)).
 
 `onViewport` fires from **layout**, not from scrolling, so it arrives for a
 list nobody has scrolled yet. That is what a virtualized list needs before

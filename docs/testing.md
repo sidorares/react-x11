@@ -190,7 +190,8 @@ await userEvent.type(input, 'héllo\n'); // \n is Return
 await userEvent.tab({ shift: true });
 await userEvent.key(XK_ESCAPE); // react-x11/keysyms
 await userEvent.key(XK_DEAD_ACUTE); // then type 'e' for é — events.md#composition
-await userEvent.wheel(list, { deltaY: 3 });
+await userEvent.wheel(list, { deltaY: 3 }); // three notches, as buttons 4-7
+await userEvent.wheel(list, { deltaY: 0.25, smooth: true }); // a touchpad
 await userEvent.clickOutside(); // dismisses a menu — see below
 ```
 
@@ -209,6 +210,13 @@ exercised rather than simulated. Deciding which window gets the keyboard is a
 window manager's job and there is no window manager, so `renderX11` plays the
 part with one `SetInputFocus` at mount — otherwise keys would go to whatever
 the pointer happened to be over, which is a rule nobody should have to learn.
+
+**A smooth scroll is the one exception**, and says so. Whole notches go
+through the server as the button presses X really uses, but a touchpad's
+fraction of a notch is XI2, and the in-process server has no XInput — there
+are no valuators to inject. `{ smooth: true }` therefore delivers the `wheel`
+event ntk would have derived from them, straight to the window. Everything
+above it is still the real path: the dispatch, the chain, the default action.
 
 **Typing works for text the layout does not have.** `userEvent.type(input,
 'héllo')` binds a spare keycode for `é` on both the server's keymap and the

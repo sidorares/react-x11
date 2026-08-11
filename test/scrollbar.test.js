@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -315,14 +315,14 @@ test('the horizontal wheel scrolls sideways, and Shift+wheel does too', async ()
   await tick();
   const sv = scroller(app);
 
-  // X button 7 is a wheel-right
-  wnd.emit('mousedown', { x: 50, y: 50, keycode: 7 });
+  // a notch to the right — X button 7, or a horizontal scroll axis
+  spinWheel(wnd, 50, 50, { deltaX: 1, deltaY: 0 });
   await tick();
   assert.ok(sv.scrollX > 0, `wheel-right scrolled to ${sv.scrollX}`);
 
   const after = sv.scrollX;
   // Shift + wheel-down, for mice with no horizontal wheel (buttons bit 1)
-  wnd.emit('mousedown', { x: 50, y: 50, keycode: 5, buttons: 1 });
+  spinWheel(wnd, 50, 50, { deltaY: 1, buttons: 1 });
   await tick();
   assert.ok(sv.scrollX > after, 'Shift turned a vertical wheel sideways');
   assert.strictEqual(sv.scrollY, 0, 'and did not scroll down as well');
