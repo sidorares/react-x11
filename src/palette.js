@@ -78,6 +78,19 @@ export const DefaultTheme = {
   radiusTooltip: 4,
   borderWidth: 1,
   fontSize: 14,
+  // The two faces an app has. `fontFamily` is what a `<text>` inherits where
+  // nothing named one, so "this app is Inter" is a sentence said once here
+  // rather than on every label; `monoFamily` is the one every code surface
+  // reaches for — a `<Code>`, a log pane, a hex dump — and the reason it is a
+  // token at all is that those are written by *different* components, which
+  // would otherwise each grow their own prop for it and have to be set one by
+  // one.
+  //
+  // CSS-style family lists, the same as the `fontFamily` style property:
+  // `'"JetBrains Mono", monospace'` names a preference and a fallback, and
+  // ntk's `fonts.match` splits the list itself.
+  fontFamily: 'sans-serif',
+  monoFamily: 'monospace',
   paddingX: 16,
   // Measured from the **letters**, not from the font's line box: widget
   // labels are trimmed to the capitals down to the baseline, so this is the

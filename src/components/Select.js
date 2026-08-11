@@ -13,7 +13,6 @@ import {
   useAnchorTracking,
   useDismissOnWindowBlur,
 } from './anchor.js';
-import { DEFAULT_TEXT_STYLE } from '../styles.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import {
   XK_DOWN,
@@ -39,13 +38,12 @@ const ITEM_PAD_RIGHT = ITEM_PAD;
 // A row is its label with even space all round — the same number left and
 // right as above and below, measured to the letters rather than to the
 // font's line box (`capTrim`). The menus derive their rows the same way.
-const ITEM_HEIGHT = capBand(DEFAULT_TEXT_STYLE.size) + ITEM_PAD * 2;
-// The chevron is exactly as tall as the capitals it stands beside, and for
-// a reason a form depends on: a field, a dropdown and a button in one row
-// have to be one height, and they only are if the tallest thing in each is
-// measured the same way. A glyph taller than the cap band makes the
-// dropdown alone two pixels taller than everything next to it.
-const CHEVRON = capBand(DEFAULT_TEXT_STYLE.size);
+//
+// A function of the palette's text size and not of a constant: the labels in
+// these rows are unstyled `<text>`, which *inherits* that size, so a row
+// sized against 14 under a theme that set 18 is a row its own label does not
+// fit in.
+const itemHeight = (fontSize) => capBand(fontSize) + ITEM_PAD * 2;
 // The scrolling pane's own padding, and so the inset between the edge
 // and an option — which is what makes the highlight read as a pill on the
 // menu rather than a band across it, and what the pill's own corner radius
@@ -73,20 +71,20 @@ function normalizeOption(option) {
  * current value — left every longer label to wrap inside a fixed 28px row and
  * overlap the option under it.
  *
- * Labels are measured at the size they are painted: a `<text>` resolves its
- * style against `DEFAULT_TEXT_STYLE` rather than inheriting from the boxes
- * around it, so the option rows are 14px whatever the trigger is set to. The
- * selected one is measured bold, which is how `Option` draws it.
+ * Labels are measured at the size they are painted: a `<text>` that names no
+ * size of its own takes the palette's, so this is `theme.fontSize` and not
+ * the size of whatever is in the trigger. The selected one is measured bold,
+ * which is how `Option` draws it.
  *
  * The result is never narrower than the trigger it hangs off, and never wider
  * than the screen it has to open on — `anchorRect` can slide a popup left to
  * fit, but nothing can rescue one that is wider than the display.
  */
-function menuWidth(node, options, value, scrolls) {
+function menuWidth(node, options, value, scrolls, fontSize) {
   let widest = 0;
   for (const option of options) {
     const { width } = measureLabel(node, option.label, {
-      size: DEFAULT_TEXT_STYLE.size,
+      size: fontSize,
       weight: option.value === value ? 'bold' : 'normal',
     });
     if (width > widest) widest = width;
@@ -126,7 +124,7 @@ function Option({
       onMouseEnter: () => onHover?.(),
       onClick: () => onPick(option),
       style: {
-        height: ITEM_HEIGHT,
+        height: itemHeight(theme.fontSize),
         justifyContent: 'center',
         paddingLeft: ITEM_PAD_LEFT,
         paddingRight: ITEM_PAD_RIGHT,
@@ -201,7 +199,10 @@ export function Select({
 
   const normalized = options.map(normalizeOption);
   const current = normalized.find((o) => o.value === value);
-  const contentHeight = normalized.length * ITEM_HEIGHT + MENU_PAD * 2;
+  // Rows are sized from the palette's text size, because that is the size
+  // the labels inside them come out at.
+  const rowHeight = itemHeight(theme.fontSize);
+  const contentHeight = normalized.length * rowHeight + MENU_PAD * 2;
   const menuHeight = Math.min(contentHeight, MAX_MENU_HEIGHT);
   const scrolls = contentHeight > MAX_MENU_HEIGHT;
 
@@ -211,7 +212,13 @@ export function Select({
   const menuAnchorOptions = () => ({
     placement: 'bottom',
     height: menuHeight + 2,
-    width: menuWidth(triggerRef.current, normalized, value, scrolls),
+    width: menuWidth(
+      triggerRef.current,
+      normalized,
+      value,
+      scrolls,
+      theme.fontSize,
+    ),
   });
 
   const close = () => setOpen(false);
@@ -274,7 +281,7 @@ export function Select({
         // a page is what the menu shows at once, so paging lines up with
         // what the user can see rather than an arbitrary count
         if (!open || !count) return;
-        const page = Math.max(1, Math.floor(MAX_MENU_HEIGHT / ITEM_HEIGHT));
+        const page = Math.max(1, Math.floor(MAX_MENU_HEIGHT / rowHeight));
         const dir = ev.keysym === XK_PAGE_DOWN ? 1 : -1;
         const from = activeIndex < 0 ? 0 : activeIndex;
         setActiveIndex(Math.min(count - 1, Math.max(0, from + dir * page)));
@@ -368,7 +375,16 @@ export function Select({
       current ? current.label : placeholder,
     ),
     h('box', { style: { flexGrow: 1 } }),
-    h(Icon, { name: 'chevronDown', size: CHEVRON, color: theme.dim }),
+    // The chevron is exactly as tall as the capitals it stands beside, and
+    // for a reason a form depends on: a field, a dropdown and a button in one
+    // row have to be one height, and they only are if the tallest thing in
+    // each is measured the same way. A glyph taller than the cap band makes
+    // the dropdown alone two pixels taller than everything next to it.
+    h(Icon, {
+      name: 'chevronDown',
+      size: capBand(theme.fontSize),
+      color: theme.dim,
+    }),
     open &&
       anchor &&
       h(

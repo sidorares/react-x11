@@ -755,6 +755,16 @@ export function textStyleFrom(props, inherited) {
   };
 }
 
+/**
+ * The floor under `Node.inheritedTextStyle`, which is what text actually
+ * reads: the ink, the face and the size all come from the palette in force,
+ * and these are only what is left when there is no palette at all — a node
+ * that has not been attached yet, or a bare `theme` prop naming neither.
+ *
+ * `family`, `size` and `color` therefore mirror `DefaultTheme.fontFamily`,
+ * `.fontSize` and `.text`; the rest have no token because no theme has ever
+ * wanted to set the weight of every label in an app at once.
+ */
 export const DEFAULT_TEXT_STYLE = {
   family: 'sans-serif',
   size: 14,

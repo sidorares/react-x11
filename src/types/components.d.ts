@@ -69,7 +69,16 @@ export interface Theme {
   /** A tooltip bubble — the smallest floating surface there is. */
   radiusTooltip: number;
   borderWidth: number;
+  /** The size unstyled text comes out at, and what the popup radii are
+   * derived from. */
   fontSize: number;
+  /** The UI face, as a CSS-style family list. What a `<text>` that names no
+   * `fontFamily` inherits. */
+  fontFamily: string;
+  /** The face code surfaces use — a `<Code>`, a log pane, a hex dump. Not
+   * read by anything unstyled; it is there so `fontFamily: '$monoFamily'`
+   * says "this app's mono face" in one place. */
+  monoFamily: string;
   paddingX: number;
   paddingY: number;
 }

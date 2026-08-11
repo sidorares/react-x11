@@ -352,6 +352,27 @@ paints (`style={[s.card, { backgroundColor: theme.panel }]}`).
 Tokens are not colour-only; `padding: '$gutter'` resolves a number just as
 well.
 
+Three of them are read with no `$` anywhere, because they are what text falls
+back to rather than something a style asked for: **`text`, `fontFamily` and
+`fontSize` are the ink, the face and the size of every `<text>` that names
+none of its own** ([components.md](components.md#theming)). That is what makes
+`<ThemeProvider value={{ fontFamily: 'Inter' }}>` a sentence an app says once.
+A style property still wins over it, the way a style property always wins over
+what a node inherits:
+
+```jsx
+<window theme={{ fontFamily: 'Inter', fontSize: 16 }}>
+  <text>Inter at 16</text>
+  <text style={{ fontFamily: '$monoFamily' }}>the palette's mono face, 16</text>
+  <text style={{ fontSize: 24 }}>Inter at 24</text>
+</window>
+```
+
+`monoFamily` has no such fallback — nothing is monospace unless it says so, and
+that is what the `$` above is for. It is a token so that the code surfaces of
+an app, which are written by components that never meet, can be set from one
+place.
+
 A `theme` prop anywhere scopes its subtree, and an inner one merges over the
 outer, so a panel can restate a colour or two without repeating a palette.
 Popups resolve through their place in the **tree**, not their window, so a
