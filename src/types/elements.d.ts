@@ -327,6 +327,19 @@ export interface WindowProps
    */
   transparent?: boolean;
   /**
+   * Read the pointer through XI2, which is what makes scrolling smooth: the
+   * device's own scroll valuators instead of the whole notches the server
+   * emulates as button 4/5 presses, so a touchpad reports the fractions of a
+   * notch it measured. On by default, and ignored where the server has no
+   * XI2 — the wheel buttons answer as they always did. `false` opts out.
+   *
+   * A `<popup>` is the exception and defaults to `false`: it holds a pointer
+   * grab, a core grab delivers core events, and a window whose valuators are
+   * flowing has its emulated wheel buttons dropped. Set at creation. Needs
+   * ntk >= 7.5.0.
+   */
+  xi2?: boolean;
+  /**
    * Mark this window as a drag preview: the drag router never treats it as
    * the window under the pointer, so a `<popup dragPreview>` can follow the
    * pointer without swallowing its own drag. See `useDragSource`.

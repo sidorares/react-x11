@@ -111,9 +111,11 @@ no override-redirect staging (issue #4).
   side a text property is on decides who has to react when it moves, so a
   new one goes in exactly one of them.
 - `src/events.js` — `EventManager`: ntk window events → synthetic events
-  (click synthesis, hover enter/leave diffing, wheel from X buttons 4-7,
-  focus/Tab). Three ancestor-chain diffs live here and share one shape —
-  `:hover`, `:active` over the press chain, and `:focus-within`.
+  (click synthesis, hover enter/leave diffing, the wheel — ntk's `wheel`
+  event, XI2 valuators where the server has them and buttons 4-7 where it
+  does not, converted from notches to pixels here (#273) — focus/Tab).
+  Three ancestor-chain diffs live here and share one shape — `:hover`,
+  `:active` over the press chain, and `:focus-within`.
 - `src/compose.js` — dead keys and the Compose key (#272): the sequence
   table and the state machine `EventManager` runs between an application's
   `onKeyDown` and the element's `defaultKeyDown`. The dead-key half is

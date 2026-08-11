@@ -185,11 +185,39 @@ export const fireEvent = {
   },
 
   /**
-   * A wheel notch. X has no wheel: it is buttons 4/5 (vertical) and 6/7
-   * (horizontal), which is what the renderer maps back into deltas.
+   * A scroll, in **notches** — one click of a wheel, which the renderer
+   * turns into the 48 pixels a notch is worth. The core protocol has no
+   * wheel, so a whole notch is injected as the press of button 4/5
+   * (vertical) or 6/7 (horizontal) it really is.
+   *
+   * `{ smooth: true }` is a touchpad instead, and takes fractions:
+   * `fireEvent.wheel(list, { deltaY: 0.25, smooth: true })` is a quarter of
+   * a notch. That one does **not** go through the server — the in-process X
+   * server has no XInput extension, so there are no valuators to inject —
+   * and is delivered as the `wheel` event ntk would have derived from them.
+   * The only thing in this module that skips the server, and it skips it
+   * because nothing below the toolkit can express the gesture.
    */
-  wheel(node, { deltaY = 1, deltaX = 0, ...options } = {}) {
+  wheel(node, { deltaY = 1, deltaX = 0, smooth = false, ...options } = {}) {
     const { x, y, server } = screenPointOf(node, options);
+    if (smooth) {
+      const wnd = rootWindow(node).window;
+      const origin = wnd._screenOrigin ?? { x: wnd.x ?? 0, y: wnd.y ?? 0 };
+      wnd.emit('wheel', {
+        name: 'wheel',
+        x: x - origin.x,
+        y: y - origin.y,
+        rootx: x,
+        rooty: y,
+        buttons: maskOf(options.modifiers),
+        deltaX,
+        deltaY,
+        deltaMode: 'line',
+        smooth: true,
+        source: 'valuator',
+      });
+      return;
+    }
     server.injectPointerMove(x, y);
     const button = deltaX ? (deltaX > 0 ? 7 : 6) : deltaY > 0 ? 5 : 4;
     const notches = Math.max(1, Math.abs(deltaX || deltaY));

@@ -5,7 +5,7 @@ import { createRoot } from '../src/index.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-import { createMockApp } from './helpers/mock-app.js';
+import { createMockApp, spinWheel } from './helpers/mock-app.js';
 
 // Simulate an ntk keydown: registers the keysym for a synthetic keycode and
 // emits the raw event shape the EventManager consumes.
@@ -529,8 +529,8 @@ test('a scroll box scrolls, clamps and offsets hit testing', async () => {
   assert.strictEqual(sv.contentHeight, 180);
   assert.strictEqual(sv.children[1].abs.y, 60);
 
-  // wheel down (X button 5) scrolls by default
-  wnd.emit('mousedown', { x: 50, y: 50, keycode: 5 });
+  // a notch down scrolls by default
+  spinWheel(wnd, 50, 50, { deltaY: 1 });
   await tick();
   assert.strictEqual(sv.scrollY, 48);
   assert.strictEqual(sv.children[1].abs.y, 12);

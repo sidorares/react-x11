@@ -40,18 +40,21 @@ unwound — the default action, your handlers and React's update all in one
 pass, never a half-updated frame followed by a second one.
 
 Discrete means everything ntk does not coalesce: `mouseDown`/`mouseUp`,
-`keyDown`/`keyUp`, the wheel, focus and blur, and the window manager's close
-request.
+`keyDown`/`keyUp`, focus and blur, and the window manager's close request.
 
-**Motion stays on the frame clock.** `mouseMove`, and the hover
+**Motion and the wheel stay on the frame clock.** `mouseMove`, and the hover
 enter/leave work it drives, are the opposite case — the pointer reports at
 device rate and only the newest position matters — so they coalesce to at
-most one repaint per frame, as before.
+most one repaint per frame. A scroll is the same case for a different reason:
+a touchpad reports one dozens of times a frame, and nobody can see those
+frames apart. What makes the wait free is that ntk coalesces a scroll by
+_adding it up_ rather than keeping the newest, so a frame's event carries the
+whole distance and the pacing costs a paint, never a pixel.
 
 Bursts of discrete input stay bounded by the same mechanism. While the
 server has not acknowledged the last frame, the response goes back to the
-paced path: spin a wheel and the first notch paints immediately while the
-rest fold into one catch-up frame. Update instantly, then catch up.
+paced path: click twice quickly and the first press paints immediately while
+the second folds into one catch-up frame. Update instantly, then catch up.
 
 This needs ntk 5.2.0 or newer, which publishes the `frameInFlight()` gate
 the decision is made with. On an older ntk everything still works; the
@@ -101,7 +104,7 @@ const root = await createRoot({
   preventDefault(), stopPropagation(),
   capturePointer(), releasePointer(),   // see Pointer capture below
   // mouse: button, detail (DOM-style click count: 2 = double, 3 = triple)
-  // wheel: deltaX, deltaY
+  // wheel: deltaX, deltaY (pixels), smooth
   // keyboard: keycode, keysym, codepoint, key, composing
   // composition: data
 }
@@ -125,19 +128,63 @@ onKeyDown={(ev) => {
 
 ## Handlers
 
-| handler                                                           | notes                                                                                      |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks      |
-| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                 |
-| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing                                        |
-| `onWheel`                                                         | X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go    |
-| `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu       |
-| `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Tab cycles focus unless the element took it |
-| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — a dead key, a Compose sequence; see below                         |
-| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                   |
-| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, the same shape as the hover pair above                |
-| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)             |
-| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                             |
+| handler                                                           | notes                                                                                                                   |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks                                   |
+| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                                              |
+| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing                                                                     |
+| `onWheel`                                                         | pixels, from the device or from X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go |
+| `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu                                    |
+| `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Tab cycles focus unless the element took it                              |
+| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — a dead key, a Compose sequence; see below                                                      |
+| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                                                |
+| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, the same shape as the hover pair above                                             |
+| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)                                          |
+| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                                                          |
+
+## The wheel {#wheel}
+
+`ev.deltaX` / `ev.deltaY` are **pixels**, positive down and right, and one
+notch of a wheel is 48 of them — the step an arrow key takes, so the two
+input routes move a list by the same amount.
+
+Where the server has XI2, those pixels are the distance the device actually
+measured. The core protocol has no wheel at all: a scroll arrives as a click
+of button 4/5/6/7, and a click carries no magnitude, which is why every
+scroll used to be exactly one notch. XI2 carries the same gesture as the
+device's own _scroll valuators_, so a touchpad's two-finger scroll reports
+the fractions of a notch it really was, and `deltaY` is `14.5` rather than
+`48` twice a second.
+
+```jsx
+<box
+  style={{ overflow: 'scroll' }}
+  onWheel={(ev) => {
+    ev.deltaY; // pixels — fractional from a touchpad
+    ev.smooth; // whether the device can report a fraction at all
+  }}
+/>
+```
+
+`ev.smooth` says which kind of device this was, not whether this particular
+delta happened to be fractional: `true` means the valuators are flowing and
+the next event may be a third of a notch, `false` means the emulated button,
+which can only ever say one. It is the flag to branch on for anything that
+wants to animate a scroll — a whole notch is worth easing towards, a stream
+of measured pixels is not.
+
+**Nothing is opted into.** A `<window>` selects XI2 when it is created and
+falls back to the wheel buttons where the server has none, so a handler
+written against `deltaY` works on both and the difference is the value.
+`<window xi2={false}>` opts out. A `<popup>` is on the buttons deliberately —
+it holds a pointer grab, and a core grab delivers core events — so a scroll
+inside an open menu moves a notch at a time. Needs ntk >= 7.5.0.
+
+Shift turns a vertical scroll sideways for a device with only one axis (the
+convention every toolkit follows); a device that reports its own horizontal
+axis keeps what it reported. The default action is the scroll chain — see
+[extending.md](extending.md#scrolling-content-you-painted) for how anything
+joins it.
 
 ## Composition: dead keys and Compose {#composition}
 

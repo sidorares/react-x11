@@ -467,3 +467,34 @@ test('a drag and drop gesture is drivable through the published surface', async 
   );
   assert.deepStrictEqual(log.at(-1), ['end', 'copy', true]);
 });
+
+test('the wheel is drivable both ways: notches, and a touchpad', async () => {
+  const deltas = [];
+  const { windowNode } = await renderX11(
+    h(
+      'box',
+      {
+        style: { overflow: 'scroll', flexGrow: 1 },
+        onWheel: (ev) => deltas.push([ev.deltaY, ev.smooth]),
+      },
+      ...Array.from({ length: 20 }, (_, i) =>
+        h('box', { key: i, style: { height: 40, flexShrink: 0 } }),
+      ),
+    ),
+    { fonts, width: 200, height: 200 },
+  );
+  const pane = windowNode.children[0];
+
+  // whole notches go through the server as the button presses X has
+  await userEvent.wheel(pane, { deltaY: 2 });
+  assert.deepStrictEqual(deltas, [
+    [48, false],
+    [48, false],
+  ]);
+  assert.strictEqual(pane.scrollY, 96);
+
+  // and a touchpad reports a fraction of one, which no button could
+  await userEvent.wheel(pane, { deltaY: 0.5, smooth: true });
+  assert.deepStrictEqual(deltas.at(-1), [24, true]);
+  assert.strictEqual(pane.scrollY, 120);
+});

@@ -395,9 +395,15 @@ export const fireEvent: {
   click(node: DrawnNode, options?: PointerOptions): void;
   doubleClick(node: DrawnNode, options?: PointerOptions): void;
   contextMenu(node: DrawnNode, options?: PointerOptions): void;
+  /** A scroll in notches; `smooth` takes fractions of one, as a touchpad
+   *  measures them. */
   wheel(
     node: DrawnNode,
-    options?: PointerOptions & { deltaX?: number; deltaY?: number },
+    options?: PointerOptions & {
+      deltaX?: number;
+      deltaY?: number;
+      smooth?: boolean;
+    },
   ): void;
   key(keysym: number, options?: KeyOptions): void;
   char(char: string, options?: KeyOptions): void;
@@ -414,9 +420,15 @@ export const userEvent: {
   doubleClick(node: DrawnNode, options?: PointerOptions): Promise<void>;
   hover(node: DrawnNode, options?: PointerOptions): Promise<void>;
   unhover(node: DrawnNode, options?: PointerOptions): Promise<void>;
+  /** A scroll in notches; `smooth` takes fractions of one, as a touchpad
+   *  measures them. */
   wheel(
     node: DrawnNode,
-    options?: PointerOptions & { deltaX?: number; deltaY?: number },
+    options?: PointerOptions & {
+      deltaX?: number;
+      deltaY?: number;
+      smooth?: boolean;
+    },
   ): Promise<void>;
   /** Click to focus, then send each character as a real key. */
   type(
@@ -528,4 +540,16 @@ export function pressButton(
   x: number,
   y: number,
   options?: { press?: boolean; release?: boolean },
+): void;
+/** A scroll at a point, in notches — ntk's `wheel` event. */
+export function spinWheel(
+  window: unknown,
+  x: number,
+  y: number,
+  options?: {
+    deltaX?: number;
+    deltaY?: number;
+    smooth?: boolean;
+    buttons?: number;
+  },
 ): void;
