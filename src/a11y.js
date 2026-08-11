@@ -98,6 +98,9 @@ export const ATSPI_ROLE = Object.freeze({
   PARAGRAPH: 73,
   APPLICATION: 75,
   AUTOCOMPLETE: 76,
+  // another toolkit's widget hierarchy inside ours — AT-SPI's own word for
+  // what `<foreign>` holds. The AT walks into the client's tree, not ours.
+  EMBEDDED: 78,
   ENTRY: 79,
   CAPTION: 81,
   DOCUMENT_FRAME: 82,
@@ -308,6 +311,7 @@ const KIND_ROLES = {
   tex: ATSPI_ROLE.MATH,
   svg: ATSPI_ROLE.IMAGE,
   glarea: ATSPI_ROLE.CANVAS,
+  foreign: ATSPI_ROLE.EMBEDDED,
 };
 
 /** The kind → web-role-name table `roleOf()` in the test queries also

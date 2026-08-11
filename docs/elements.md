@@ -1,8 +1,10 @@
 # Elements
 
-Only `<window>`, `<popup>` and `<glarea>` are backed by real X11 windows,
-created top-down in React's commit phase so every `CreateWindow` names its
-actual parent. Everything else is a retained lightweight node — one
+Only `<window>`, `<popup>`, `<glarea>` and `<foreign>` are backed by real
+X11 windows, created top-down in React's commit phase so every
+`CreateWindow` names its actual parent — and, for `<foreign>`, so that no
+`ReparentWindow` is ever issued from a render React might discard.
+Everything else is a retained lightweight node — one
 [yoga-layout](https://www.yogalayout.dev/) node each — painted into the
 owning window's double-buffered 2d context on ntk's frame clock.
 
@@ -1168,6 +1170,60 @@ sibling `<popup>`. Pointer events over the surface go to its own window;
 `onDraw` is the raw escape hatch; for a scene, put 3D elements inside
 (below) and let the renderer drive the GL. See `examples/gl.jsx` for the
 raw form, `examples/three.jsx` for the declarative one.
+
+---
+
+## `<foreign>`
+
+Another process's top-level X window, laid out as an element — a terminal
+pane, a video surface, a docked tray icon. The second element that owns a
+real X window without painting into its parent, and the only one that makes
+a react-x11 app a _host_ rather than a drawer of its own pixels. Needs ntk
+≥ 7.4.0.
+
+```jsx
+<foreign
+  windowId={terminal.windowId}
+  style={{ flexGrow: 1, backgroundColor: '#101014' }}
+  onEmbedded={({ xembed }) => setMode(xembed ? 'xembed' : 'reparented')}
+  onClientGone={() => respawn()}
+/>
+```
+
+- `windowId` — the window to embed. Changing it hands the old client back
+  before the new one is taken. **Omit it** to adopt whatever is put inside
+  this node instead, which is what `xterm -into WID` and `mpv --wid=WID`
+  need.
+- `onReady({ windowId })` — this node's own container id, offered before
+  anything is embedded, so a program can be spawned into it.
+- `onEmbedded({ id, xembed, version })` — a client is in. `xembed: false`
+  is a client that set no `_XEMBED_INFO` and got plain reparenting, which
+  is the common case rather than the fallback.
+- `onClientGone()` — destroyed, or reparented away by someone else.
+- `onRequestFocus()` — the client asked for the focus. It is then given
+  through the focus manager, so the rest of the tree observes it normally.
+- `onError(err)` — the embed failed. Without a handler, a console warning.
+- `focusable` — default `true`, like `<textinput>`.
+- `backgroundColor` in the `style` is what shows in the rect with no client
+  in it: the container window's background, painted by the server.
+
+**Unmount reparents the client back to the root and drops it from the save
+set. It never destroys it** — a React tree changing shape is not a reason
+for another application to lose its window.
+
+Layout treats it as a leaf, and its X window follows that rect; every change
+also sends the client the synthetic ICCCM 4.1.5 `ConfigureNotify` with
+root-relative coordinates. Stacking is `<glarea>`'s: the child window sits
+above everything drawn in the parent, so 2D content cannot overlap it — an
+overlay belongs in a sibling `<popup>` — and pointer events over it are the
+client's. `<foreign>` takes no children.
+
+Keyboard focus is where this element has a rule of its own: **while a
+`<foreign>` holds focus, the application's handlers see every key first and
+anything they do not consume with `preventDefault()` is forwarded to the
+client.** That, the XEmbed focus messages, the tab chain crossing the
+boundary and the one case the rule cannot cover are all in
+[embedding.md](embedding.md).
 
 ---
 

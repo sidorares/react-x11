@@ -24,6 +24,7 @@ const BUILT_IN = Object.freeze([
   'svg',
   'tex',
   'glarea',
+  'foreign',
 ]);
 
 /** The built-in element names. A copy: the vocabulary grows through

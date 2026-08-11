@@ -265,5 +265,7 @@ export declare class TextInputNode extends Node {}
 export declare class TextAreaNode extends TextInputNode {}
 export declare class WindowNode extends Node {}
 export declare class PopupNode extends WindowNode {}
-/** The precedent for an element owning a real child X window. */
+/** The precedents for an element owning a real child X window — a surface of
+ * its own, and one holding somebody else's window. */
 export declare class GlAreaNode extends Node {}
+export declare class ForeignNode extends Node {}

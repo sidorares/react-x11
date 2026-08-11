@@ -434,13 +434,13 @@ tear-free. So:
 **Real X window (own `Window` object) — only when the server gives us
 something we cannot do client-side:**
 
-| Element                                        | Why it needs a real window                                                                                                     |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `<window>` (top-level)                         | WM interaction: title, decorations, close protocol, resize events                                                              |
-| `<popup>` / menus / tooltips / combo dropdowns | Must escape the parent window's bounds; needs `overrideRedirect` (or EWMH window types) — **blocked on the ntk attribute bug** |
-| `<glarea>`                                     | GLX needs its own visual/drawable; can't share the XRender pipeline                                                            |
-| `<foreign windowId={…}>`                       | Embedding external clients (XEMBED-ish); ntk's `createWindow({id})` foreign-window adoption already supports the wrapper side  |
-| (later) video / shm surfaces                   | Different presentation path                                                                                                    |
+| Element                                        | Why it needs a real window                                                                                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `<window>` (top-level)                         | WM interaction: title, decorations, close protocol, resize events                                                                                                        |
+| `<popup>` / menus / tooltips / combo dropdowns | Must escape the parent window's bounds; needs `overrideRedirect` (or EWMH window types) — **blocked on the ntk attribute bug**                                           |
+| `<glarea>`                                     | GLX needs its own visual/drawable; can't share the XRender pipeline                                                                                                      |
+| `<foreign windowId={…}>`                       | Embedding external clients — **done** (issue #269, docs/embedding.md): XEmbed over ntk's `XEmbedSocket`, plus the plain-reparent path `xterm -into` and `mpv --wid` need |
+| (later) video / shm surfaces                   | Different presentation path                                                                                                                                              |
 
 Server-side wins we keep at this granularity: per-window expose coalescing,
 frame pacing/fencing, input masks — all already in ntk.
