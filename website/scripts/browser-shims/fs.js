@@ -1,6 +1,9 @@
-// Browser stub for node's `fs`. Two callers: x11's lib/auth.js (reading
-// ~/.Xauthority, and custom transports skip auth entirely) and react-x11's
-// remembered system appearance. Keep the shape callable so any stray call
+// Browser stub for node's `fs`. Three callers: x11's lib/auth.js (reading
+// ~/.Xauthority, and custom transports skip auth entirely), react-x11's
+// remembered system appearance, and the Compose file `compose: 'system'`
+// looks for — which finds none here, so composition falls back to its
+// built-in table, which is the whole table a browser was ever going to get.
+// Keep the shape callable so any stray call
 // fails softly through the normal error path — both of those already treat a
 // throw as "no cached value", which in a browser is the truth.
 const noFilesystem = (what) => {

@@ -901,7 +901,8 @@ without firing `onChange`, the way assigning to a DOM input's `value` does —
 that is how react-hook-form's `register()` resets a field through its ref.
 
 Interactions: click/drag selection, double-click word select, triple-click
-select all, Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,
+select all, **dead keys and Compose**
+([events.md](events.md#composition)), Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,
 Ctrl+C/X/V on CLIPBOARD, middle-click paste from PRIMARY, selections own
 PRIMARY (X11 conventions, select-all included), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
 and redo, and a **right-click menu**. Focusable by default; shows the text
@@ -964,6 +965,10 @@ Home/End, a click, focus leaving the field), and around edits that are
 their own step whatever surrounds them: a paste, a cut, a replaced
 selection, Ctrl+Backspace, and a `<textarea>` newline. Undo restores the
 selection and puts the caret back where the undone edit started.
+
+A composed character is one entry, not one per keystroke: the accent a dead
+key is holding is not in the value until it commits, so Ctrl+Z after
+`dead_acute` `e` steps over `é` rather than into it.
 
 Undo is a stack of snapshots of the states the control has shown, capped
 at 200. A **controlled** `value` reports the restored text through

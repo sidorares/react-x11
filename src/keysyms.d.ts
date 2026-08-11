@@ -52,6 +52,52 @@ export const XK_KP_ENTER: 0xff8d;
 export const XK_MENU: 0xff67;
 export const XK_SPACE: 0x0020;
 
+/**
+ * The Compose key. It types nothing on its own: it opens a sequence that
+ * the next keys finish — `Compose o c` is `©`. See
+ * [docs/events.md](events.md#composition).
+ */
+export const XK_MULTI_KEY: 0xff20;
+
+// The dead keys. Each waits for the character it decorates, so `dead_acute`
+// then `e` is `é`; on its own — followed by a space, or pressed twice — it
+// types the accent.
+export const XK_DEAD_GRAVE: 0xfe50;
+export const XK_DEAD_ACUTE: 0xfe51;
+export const XK_DEAD_CIRCUMFLEX: 0xfe52;
+export const XK_DEAD_TILDE: 0xfe53;
+export const XK_DEAD_MACRON: 0xfe54;
+export const XK_DEAD_BREVE: 0xfe55;
+export const XK_DEAD_ABOVEDOT: 0xfe56;
+export const XK_DEAD_DIAERESIS: 0xfe57;
+export const XK_DEAD_ABOVERING: 0xfe58;
+export const XK_DEAD_DOUBLEACUTE: 0xfe59;
+export const XK_DEAD_CARON: 0xfe5a;
+export const XK_DEAD_CEDILLA: 0xfe5b;
+export const XK_DEAD_OGONEK: 0xfe5c;
+export const XK_DEAD_IOTA: 0xfe5d;
+export const XK_DEAD_VOICED_SOUND: 0xfe5e;
+export const XK_DEAD_SEMIVOICED_SOUND: 0xfe5f;
+export const XK_DEAD_BELOWDOT: 0xfe60;
+export const XK_DEAD_HOOK: 0xfe61;
+export const XK_DEAD_HORN: 0xfe62;
+export const XK_DEAD_STROKE: 0xfe63;
+export const XK_DEAD_ABOVECOMMA: 0xfe64;
+export const XK_DEAD_ABOVEREVERSEDCOMMA: 0xfe65;
+export const XK_DEAD_DOUBLEGRAVE: 0xfe66;
+export const XK_DEAD_BELOWRING: 0xfe67;
+export const XK_DEAD_BELOWMACRON: 0xfe68;
+export const XK_DEAD_BELOWCIRCUMFLEX: 0xfe69;
+export const XK_DEAD_BELOWTILDE: 0xfe6a;
+export const XK_DEAD_BELOWBREVE: 0xfe6b;
+export const XK_DEAD_BELOWDIAERESIS: 0xfe6c;
+export const XK_DEAD_INVERTEDBREVE: 0xfe6d;
+export const XK_DEAD_BELOWCOMMA: 0xfe6e;
+export const XK_DEAD_CURRENCY: 0xfe6f;
+
+/** Whether a keysym is one of the `XK_dead_*` block. */
+export function isDeadKeysym(keysym: number): boolean;
+
 export const XK_SHIFT_L: 0xffe1;
 export const XK_SHIFT_R: 0xffe2;
 export const XK_CONTROL_L: 0xffe3;

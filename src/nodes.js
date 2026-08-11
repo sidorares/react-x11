@@ -3806,6 +3806,11 @@ export class TextInputNode extends Node {
     this._historyIndex = 0;
     this._historyValue = this.value;
     this._undoRun = null;
+    // the uncommitted composition: what a pending dead key or an open
+    // Compose sequence is showing, and where it sits in the value. Never
+    // part of `value`, and never in the history — see `defaultComposition`
+    this._preedit = '';
+    this._preeditAt = 0;
     // the open built-in edit menu, if any (see _openEditMenu)
     this._editMenu = null;
   }
@@ -3923,6 +3928,97 @@ export class TextInputNode extends Node {
     return Array.from(this.value);
   }
 
+  // --- composition ---------------------------------------------------------
+  //
+  // A composition is text the user is still typing: a dead key that has not
+  // met its letter yet, or a Compose sequence half entered (src/compose.js).
+  // It is shown at the caret and underlined, and it is deliberately *not*
+  // the value:
+  //
+  // - `value`, `onChange` and the undo history never see it, so a commit is
+  //   one entry rather than one per keystroke, and Ctrl+Z after `dead_acute`
+  //   + `e` steps over `é` rather than into it;
+  // - a **controlled** field whose parent rewrites `value` mid-composition
+  //   cannot corrupt the buffer, because the buffer is not in the value.
+  //   That is the classic web bug, and it is structurally absent here;
+  // - abandoning it — Escape, focus leaving, a press elsewhere — is
+  //   dropping a string, not undoing an edit.
+  //
+  // The one thing it does change is the *displayed* string, which is what
+  // `_displayValue` is: everything measuring or hit-testing goes through
+  // that, and `_displayIndex` is the door between the two index spaces.
+
+  /** Where the composition sits in the value — clamped, because a
+   * controlled parent may have replaced the value under it. */
+  _preeditStart() {
+    return Math.min(this._preeditAt, this._chars().length);
+  }
+
+  /** The string the field draws — the value with any composition spliced in
+   * where it will land. */
+  _displayValue() {
+    if (!this._preedit) return this.value;
+    const chars = this._chars();
+    const at = this._preeditStart();
+    return (
+      chars.slice(0, at).join('') + this._preedit + chars.slice(at).join('')
+    );
+  }
+
+  /** A value index in the displayed string. The caret is at the composition
+   * while it is open, so it maps to the *end* of the preedit — which is
+   * where the next keystroke of the sequence appears. */
+  _displayIndex(index) {
+    if (!this._preedit) return index;
+    return index >= this._preeditStart()
+      ? index + Array.from(this._preedit).length
+      : index;
+  }
+
+  /** The inverse, for indices that come back out of a layout. A hit inside
+   * the preedit answers where the preedit starts: the composition is one
+   * thing, not a run of characters to put a caret between. */
+  _valueIndex(index) {
+    if (!this._preedit) return index;
+    const start = this._preeditStart();
+    if (index <= start) return index;
+    return Math.max(start, index - Array.from(this._preedit).length);
+  }
+
+  _setPreedit(text) {
+    if (text === this._preedit) return;
+    if (!this._preedit) this._preeditAt = this._selection()[0];
+    this._preedit = text;
+    this._repaint();
+  }
+
+  /**
+   * The composition default action, after `onCompositionStart` /
+   * `onCompositionUpdate` / `onCompositionEnd` have had their say.
+   *
+   * `compositionEnd` carries the text the sequence produced — empty when it
+   * was abandoned — and inserting it is an ordinary edit, so it replaces the
+   * selection, respects `maxLength`, fires `onChange` and joins the undo run
+   * the surrounding typing is in. `é` undoes like the letter it is.
+   */
+  defaultComposition(ev) {
+    if (ev.type !== 'compositionEnd') {
+      this._setPreedit(ev.data);
+      return;
+    }
+    this._setPreedit('');
+    if (!ev.data) return;
+    // the same bookkeeping `defaultKeyDown` does, so the `onChange` this
+    // produces carries the keystroke that committed the sequence
+    const previous = this._keyNative;
+    this._keyNative = ev.nativeEvent ?? null;
+    try {
+      this._insert(ev.data, 'type');
+    } finally {
+      this._keyNative = previous;
+    }
+  }
+
   _layoutOf(text) {
     const fonts = this.app?.fonts;
     if (!fonts) return null;
@@ -3986,7 +4082,7 @@ export class TextInputNode extends Node {
   _valueLayout() {
     const fonts = this.app?.fonts;
     if (!fonts) return null;
-    const text = this.value;
+    const text = this._displayValue();
     const s = this.resolvedTextStyle();
     const key = `${text}|${s.family}|${s.size}|${s.weight}|${s.style}`;
     if (this._valueLayoutKey !== key) {
@@ -3996,11 +4092,17 @@ export class TextInputNode extends Node {
     return this._valueLayoutCache;
   }
 
-  /** Visual caret x for a logical code-point index. */
+  /** Visual caret x for a logical code-point index **in the value**. */
   _prefixWidth(count) {
+    return this._prefixWidthAt(this._displayIndex(count));
+  }
+
+  /** The same, for an index in the displayed string — which is the value
+   * unless a composition is showing. */
+  _prefixWidthAt(index) {
     const layout = this._valueLayout();
     if (!layout) return 0;
-    return layout.caretPosition(count).x;
+    return layout.caretPosition(index).x;
   }
 
   _selection() {
@@ -4369,7 +4471,7 @@ export class TextInputNode extends Node {
     const layout = this._valueLayout();
     if (!layout) return this._chars().length;
     const content = this.contentBox();
-    return layout.indexAt(x - content.x + this._scrollX, 0);
+    return this._valueIndex(layout.indexAt(x - content.x + this._scrollX, 0));
   }
 
   /** Click-to-caret for a mouse event (textarea also uses ev.y). */
@@ -4728,6 +4830,10 @@ export class TextInputNode extends Node {
   defaultBlur() {
     this._focused = false;
     this._caretOn = false;
+    // the EventManager ends an open composition before focus moves, so this
+    // is the belt to that braces: a field that lost focus by some other
+    // route must not keep drawing an accent nobody can finish
+    this._preedit = '';
     // coming back to a field later is a new edit, not more of the old one
     this._breakUndoRun();
     clearInterval(this._blinkTimer);
@@ -4774,7 +4880,7 @@ export class TextInputNode extends Node {
     if (content.width <= 0 || content.height <= 0) return;
 
     const style = this.resolvedTextStyle();
-    const text = this.value;
+    const text = this._displayValue();
     const isEmpty = text.length === 0;
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
     const color = isEmpty
@@ -4867,12 +4973,45 @@ export class TextInputNode extends Node {
     }
 
     layout.draw(ctx, originX, textY);
+    this._paintPreedit(ctx, originX, textY, style);
 
     if (this._focused && this._caretOn && a === b) {
       ctx.fillStyle = this.props.caretColor ?? style.color;
       ctx.fillRect(originX + caretX, markY, 1.5, markHeight);
     }
     ctx.restore();
+  }
+
+  /**
+   * Underline the composition. The convention every toolkit shares, and the
+   * reason it is worth having: the accent showing at the caret is text the
+   * user has not typed yet, and nothing else about it says so — it is in the
+   * field's own ink, in the field's own font, where the next character will
+   * be. The line is what makes it provisional.
+   */
+  _paintPreedit(ctx, originX, originY, style) {
+    if (!this._preedit) return;
+    const layout = this._valueLayout();
+    if (!layout?.lines?.length) return;
+    const start = this._preeditStart();
+    const from = layout.caretPosition(start);
+    const to = layout.caretPosition(start + Array.from(this._preedit).length);
+    ctx.fillStyle = style.color;
+    // a line loop rather than one rectangle, because `<textarea>` shares
+    // this and a composition at a wrap point is two spans
+    for (let li = from.line; li <= to.line; li++) {
+      const line = layout.lines[li];
+      if (!line) break;
+      const x0 = li === from.line ? from.x : line.x;
+      const x1 = li === to.line ? to.x : line.x + line.width;
+      if (x1 <= x0) continue;
+      ctx.fillRect(
+        originX + x0,
+        originY + line.y + line.ascent + 1,
+        x1 - x0,
+        1,
+      );
+    }
   }
 }
 
@@ -4963,7 +5102,7 @@ export class TextAreaNode extends TextInputNode {
   _valueLayout() {
     const fonts = this.app?.fonts;
     if (!fonts) return null;
-    const text = this.value;
+    const text = this._displayValue();
     const isEmpty = text.length === 0;
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
     const s = this.resolvedTextStyle();
@@ -4991,7 +5130,9 @@ export class TextAreaNode extends TextInputNode {
     const layout = this._valueLayout();
     if (!layout) return this._chars().length;
     const content = this.contentBox();
-    return layout.indexAt(ev.x - content.x, ev.y - content.y + this._scrollY);
+    return this._valueIndex(
+      layout.indexAt(ev.x - content.x, ev.y - content.y + this._scrollY),
+    );
   }
 
   scrollBy(dy) {
@@ -5105,7 +5246,7 @@ export class TextAreaNode extends TextInputNode {
     if (!layout) return;
     const content = this.contentBox();
     if (content.width <= 0 || content.height <= 0) return;
-    const isEmpty = this.value.length === 0;
+    const isEmpty = this._displayValue().length === 0;
 
     // Keep the caret line inside the viewport, and only while focused — the
     // caret starts at the end of the value, so chasing it unconditionally
@@ -5113,7 +5254,7 @@ export class TextAreaNode extends TextInputNode {
     // <textinput> this does not reset the offset when focus leaves: a
     // textarea scrolls on the wheel and has a scrollbar, so where an
     // unfocused one is scrolled to is the reader's business.
-    const pos = layout.caretPosition(this._caret);
+    const pos = layout.caretPosition(this._displayIndex(this._caret));
     if (this._focused) {
       if (pos.y + pos.height - this._scrollY > content.height) {
         this._scrollY = pos.y + pos.height - content.height;
@@ -5137,8 +5278,8 @@ export class TextAreaNode extends TextInputNode {
 
     const [a, b] = this._selection();
     if (this._showsSelection() && a !== b && !isEmpty) {
-      const posA = layout.caretPosition(a);
-      const posB = layout.caretPosition(b);
+      const posA = layout.caretPosition(this._displayIndex(a));
+      const posB = layout.caretPosition(this._displayIndex(b));
       // A **translucent** accent rather than an opaque light blue. The ink
       // on top is `style.color`, which this fill does not control, so an
       // opaque highlight has to be picked to contrast with it — and no one
@@ -5163,6 +5304,7 @@ export class TextAreaNode extends TextInputNode {
     }
 
     layout.draw(ctx, originX, originY);
+    this._paintPreedit(ctx, originX, originY, this.resolvedTextStyle());
 
     if (this._focused && this._caretOn && a === b) {
       ctx.fillStyle = this.props.caretColor ?? this.resolvedTextStyle().color;

@@ -189,6 +189,7 @@ await userEvent.hover(node);
 await userEvent.type(input, 'héllo\n'); // \n is Return
 await userEvent.tab({ shift: true });
 await userEvent.key(XK_ESCAPE); // react-x11/keysyms
+await userEvent.key(XK_DEAD_ACUTE); // then type 'e' for é — events.md#composition
 await userEvent.wheel(list, { deltaY: 3 });
 await userEvent.clickOutside(); // dismisses a menu — see below
 ```

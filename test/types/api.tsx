@@ -8,6 +8,7 @@
  */
 import React, { useRef, useState } from 'react';
 import { startTrace } from 'react-x11/debug';
+import { XK_MULTI_KEY, isDeadKeysym } from 'react-x11/keysyms';
 import type {
   BusHandle,
   CalendarHandle,
@@ -76,6 +77,7 @@ import {
 import type {
   ChangeEvent,
   DrawnNode,
+  CompositionEvent,
   KeyboardEvent,
   MouseEvent,
   NtkWindow,
@@ -291,6 +293,14 @@ function Events() {
         void ev.key;
         void ev.codepoint;
         void ev.shiftKey;
+        // a key an open composition took types nothing of its own
+        if (ev.composing) return;
+      }}
+      onCompositionStart={(ev: CompositionEvent) => void ev.data}
+      onCompositionUpdate={(ev: CompositionEvent) => void ev.data}
+      onCompositionEnd={(ev: CompositionEvent) => {
+        void ev.data;
+        ev.preventDefault();
       }}
       onMouseEnter={() => {}}
       onFocus={() => {}}
@@ -728,6 +738,25 @@ async function main() {
 
   // @ts-expect-error — completeOn is a closed set
   await createRoot({ startupNotification: { completeOn: 'someday' } });
+
+  // composition: the built-in table by default, and four ways to say
+  // otherwise
+  const composes: boolean = isDeadKeysym(0xfe51);
+  void composes;
+  const noCompose = await createRoot({ compose: false });
+  await noCompose.unmount();
+  const systemCompose = await createRoot({ compose: 'system' });
+  await systemCompose.unmount();
+  const ownCompose = await createRoot({
+    compose: {
+      file: '/usr/share/X11/locale/en_US.UTF-8/Compose',
+      sequences: [[[XK_MULTI_KEY, 'l', 'd'], '\u{1F986}']],
+    },
+  });
+  await ownCompose.unmount();
+
+  // @ts-expect-error — compose takes a table, not a boolean either way
+  await createRoot({ compose: true });
 
   root.render(<Scene />);
   root.render(<RawGl />);

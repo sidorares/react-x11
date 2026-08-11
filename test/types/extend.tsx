@@ -23,7 +23,11 @@ import type { MeasureConstraints, TextStyle } from '../../src/node.js';
 import type { Rect } from '../../src/types/nodes.js';
 import { XK_ESCAPE, XK_TAB } from '../../src/keysyms.js';
 // the synthetic events, not the DOM's same-named globals
-import type { KeyboardEvent, MouseEvent } from '../../src/types/events.js';
+import type {
+  CompositionEvent,
+  KeyboardEvent,
+  MouseEvent,
+} from '../../src/types/events.js';
 import {
   isStyleProp,
   flattenStyle,
@@ -179,8 +183,15 @@ class EditorNode extends Node {
       return;
     }
     this.tabEscapes = false;
-    const _typed: string = ev.key;
+    // `key` is absent for a key that types nothing — a function key, and
+    // every key an open composition took
+    const _typed: string | undefined = ev.key;
     void _typed;
+  }
+
+  defaultComposition(ev: CompositionEvent): void {
+    const _data: string = ev.data;
+    void _data;
   }
 
   defaultMouseDown(ev: MouseEvent): void {

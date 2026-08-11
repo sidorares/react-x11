@@ -42,6 +42,7 @@ import {
 } from './trace-registry.js';
 import { hooks as a11yHooks, startA11y } from './a11y.js';
 import { beginStartup } from './startup.js';
+import { beginCompose } from './compose.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
 import { watchAppearance } from './appearance.js';
@@ -714,6 +715,12 @@ export async function createRoot(options = {}) {
   // before it maps, and the environment variable has to be consumed whether
   // or not this app ends up using it (src/startup.js).
   beginStartup(app, rest.startupNotification);
+
+  // Which dead-key and Compose sequences this root types (src/compose.js).
+  // Synchronous and normally free: the built-in table is built once per
+  // process, and only `compose: 'system'` or a file of your own reads
+  // anything from disk.
+  beginCompose(app, rest.compose);
 
   // Awaited, and this is the only place it can be: whether a compositor is
   // running decides what a `transparent` window paints, and a window that

@@ -13,6 +13,7 @@ import { callHandler } from './errors.js';
 import { armDrag } from './dnd.js';
 import { noteInputTime } from './inputtime.js';
 import { hooks as a11yHooks, isFocusable } from './a11y.js';
+import { Composer, composeTableFor } from './compose.js';
 
 const XK_TAB = 0xff09;
 const WHEEL_BUTTONS = { 4: [0, -48], 5: [0, 48], 6: [-48, 0], 7: [48, 0] };
@@ -149,6 +150,9 @@ export class EventManager {
     this.scopes = [];
     // resolved lazily for popups: the manager that owns focus (focusManager)
     this._focusOwner = null;
+    // the dead-key/Compose state machine, built on the first key (undefined
+    // until then, null when the app turned composition off)
+    this._composerInstance = undefined;
     // whether the X server sends keys to this window at all. Assume yes
     // until told otherwise: ntk < 3.7 never reports focus changes, and a
     // toolkit that believed it was unfocused would blink no caret at all.
@@ -233,6 +237,9 @@ export class EventManager {
   _onWindowFocus(focused, native) {
     if (this.windowFocused === focused) return;
     this.windowFocused = focused;
+    // a half-typed accent does not wait for the user to come back: the keys
+    // that would finish it are going somewhere else now
+    if (!focused) this._endComposition(native);
     const node = this.focused;
     if (node && !node.destroyed) {
       if (focused) node.defaultFocus?.();
@@ -378,6 +385,8 @@ export class EventManager {
       }
       this.downNode = target;
       this.downPath = target ? this._path(target) : [];
+      // the caret is about to move, and the accent was aimed at where it was
+      this._endComposition(native);
       this._setPressed(this.downPath);
       this._focusFromPress(target);
       const ev = this.dispatch(
@@ -628,6 +637,72 @@ export class EventManager {
     }
   }
 
+  /**
+   * The composition state machine for this keyboard focus, or null when the
+   * app turned composition off. On the focus manager, because a composition
+   * belongs to *the* keyboard: a `<popup>` shares the owner window's focus,
+   * and a half-typed accent has to survive a dropdown opening under it.
+   *
+   * Built lazily from the root's table (`createRoot({ compose })`), which is
+   * also why an app object that never went through `createRoot` — a mock, a
+   * unit test — still composes: `composeTableFor` falls back to the
+   * built-ins rather than to nothing.
+   */
+  _composer() {
+    const manager = this.focusManager;
+    if (manager !== this) return manager._composer();
+    if (this._composerInstance === undefined) {
+      const table = composeTableFor(this.node.app);
+      this._composerInstance = table ? new Composer(table) : null;
+    }
+    return this._composerInstance;
+  }
+
+  /**
+   * One composition event, defaultable like any other: the application's
+   * `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` first,
+   * then the element's own `defaultComposition` unless one of them called
+   * `preventDefault()`. Same seam, same order as `defaultKeyDown`.
+   */
+  _composition(phase, target, data, native) {
+    const ev = this.dispatch('Composition' + phase, target, native, { data });
+    if (!ev.defaultPrevented) target.defaultComposition?.(ev);
+    return ev;
+  }
+
+  /** Run a composer step that has already been probed, as the events an
+   * element and an application see. */
+  _compose(composer, step, target, native) {
+    const was = composer.composing;
+    composer.apply(step);
+    if (!was) this._composition('Start', target, '', native);
+    if (composer.composing) {
+      this._composition('Update', target, step.preedit, native);
+    } else {
+      this._composition('End', target, step.text ?? '', native);
+    }
+  }
+
+  /**
+   * Abandon an open composition, discarding what it had so far.
+   *
+   * Focus moving, the window losing the keyboard, a press putting the caret
+   * somewhere else: in all three the accent was aimed at a place the user
+   * has left, and committing it there would put a character where nobody
+   * was looking. The element hears an `End` with no data, which is what
+   * clears its preedit.
+   */
+  _endComposition(native = null) {
+    const manager = this.focusManager;
+    if (manager !== this) return manager._endComposition(native);
+    const composer = this._composerInstance;
+    if (!composer?.composing) return;
+    composer.reset();
+    const focused = this.focused;
+    const target = focused && !focused.destroyed ? focused : this.node;
+    this._composition('End', target, '', native);
+  }
+
   _onKey(name, native) {
     runWithPriority(DiscreteEventPriority, () => {
       const wnd = this.node.window;
@@ -643,16 +718,43 @@ export class EventManager {
       // shared with the popup (see focusManager), key delivery follows it
       const focused = this.focusManager.focused;
       const target = focused && !focused.destroyed ? focused : this.node;
+      // Composition reads the keysym the key *typed*, not the base one:
+      // a dead key is routinely a shifted or AltGr level of a key whose
+      // level 1 is an ordinary character, and `baseKeysym` is that
+      // character. Shortcuts want the base — the reason it is on the event
+      // at all — and composition wants what was actually produced.
+      const composer = name === 'KeyDown' ? this._composer() : null;
+      const step = composer?.probe(native.keysym ?? keysym) ?? null;
+      const composing = Boolean(step?.consumed);
       const ev = this.dispatch(name, target, native, {
         keycode: native.keycode,
         keysym,
-        codepoint: native.codepoint,
+        // A key the composition is going to take types nothing on its own:
+        // its text arrives on the composition event instead. Reporting the
+        // code point as well is what would make `Compose o c` insert `oc©`
+        // in any application that types from `onKeyDown` — the renderer's
+        // own elements included.
+        codepoint: composing ? undefined : native.codepoint,
         key:
-          native.codepoint && native.codepoint >= 0x20
+          !composing && native.codepoint && native.codepoint >= 0x20
             ? String.fromCodePoint(native.codepoint)
             : undefined,
+        composing,
       });
       if (name !== 'KeyDown' || ev.defaultPrevented) return;
+      // App chords, then composition, then the element, then focus
+      // traversal. Composition sits above the element so that a dead key
+      // cannot also trigger an editing action, and below the application so
+      // that an `onKeyDown` chord still wins — `preventDefault()` above
+      // returned already, with the composer's state untouched, which is why
+      // `probe` and `apply` are separate.
+      if (step && (step.consumed || step.text != null)) {
+        this._compose(composer, step, target, native);
+        // A key that ended a sequence without belonging to it — an arrow
+        // after a pending accent — has committed the accent and now takes
+        // its ordinary turn.
+        if (step.consumed) return;
+      }
       // The element's own behaviour first, focus traversal after it — Tab is
       // an ordinary defaultable key rather than one the focus manager eats on
       // the way past. Cycling first meant an editor could only keep Tab as an
@@ -685,6 +787,9 @@ export class EventManager {
     const manager = this.focusManager;
     if (manager !== this) return manager.focus(node, reason);
     if (node === this.focused) return;
+    // before `focused` moves, so the element that was collecting the
+    // sequence is the one told to drop it
+    this._endComposition();
     const old = this.focused;
     this._previousFocus = old;
     this.focused = node;

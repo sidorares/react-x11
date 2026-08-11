@@ -98,7 +98,8 @@ const root = await createRoot({
   capturePointer(), releasePointer(),   // see Pointer capture below
   // mouse: button, detail (DOM-style click count: 2 = double, 3 = triple)
   // wheel: deltaX, deltaY
-  // keyboard: keycode, keysym, codepoint, key
+  // keyboard: keycode, keysym, codepoint, key, composing
+  // composition: data
 }
 ```
 
@@ -120,18 +121,111 @@ onKeyDown={(ev) => {
 
 ## Handlers
 
-| handler                                     | notes                                                                                      |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `onClick`                                   | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks      |
-| `onMouseDown` / `onMouseUp` / `onMouseMove` | move is coalesced to once per frame by ntk                                                 |
-| `onMouseEnter` / `onMouseLeave`             | do not propagate; synthesized by hover-path diffing                                        |
-| `onWheel`                                   | X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go    |
-| `onContextMenu`                             | right-click (button 3), after `onMouseDown`; default action opens the element's menu       |
-| `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus unless the element took it |
-| `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                   |
-| `onDragEnter` / `onDragLeave`               | do not propagate; drag-path diffing, the same shape as the hover pair above                |
-| `onDragOver` / `onDrop`                     | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)             |
-| `onDragStart` / `onDrag` / `onDragEnd`      | on a `draggable` node; the press is a click until it moves 4px                             |
+| handler                                                           | notes                                                                                      |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks      |
+| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                 |
+| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing                                        |
+| `onWheel`                                                         | X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go    |
+| `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu       |
+| `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Tab cycles focus unless the element took it |
+| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — a dead key, a Compose sequence; see below                         |
+| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                   |
+| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, the same shape as the hover pair above                |
+| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)             |
+| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                             |
+
+## Composition: dead keys and Compose {#composition}
+
+`é` is not a key. On a French, German or us-intl layout it is `dead_acute`
+then `e`, and a dead key is a keysym with **no code point at all** — so a
+renderer that types from `ev.codepoint` types the letter and drops the
+accent. That is most accented input in Europe, and it is invisible to anyone
+testing on a US layout (issue #272).
+
+A composition is text the user is still typing. It shows at the caret,
+underlined, and it is not the value until it commits:
+
+```
+dead_acute        →  the field shows ´ (underlined). value unchanged.
+e                 →  the field shows é. value is now …é, one undo step.
+```
+
+Everything about it is on by default and needs no configuration:
+
+| you press                          | you get                                           |
+| ---------------------------------- | ------------------------------------------------- |
+| `dead_acute` `e`                   | `é` — and any base letter, in any script          |
+| `dead_circumflex` `dead_acute` `e` | `ế` — dead keys stack                             |
+| `dead_acute` space                 | `´` — the accent on its own                       |
+| `dead_acute` `q`                   | `´q` — no such character, so nothing is swallowed |
+| Compose `o` `c`                    | `©`                                               |
+| Compose `'` `e` (or `e` `'`)       | `é`                                               |
+| Compose `-` `-` `-`                | `—`                                               |
+| Escape mid-sequence                | nothing typed, and the accent goes away           |
+
+The dead keys are Unicode's own composition rather than a table somebody
+maintains, so `dead_breve` + `и` is `й` and `dead_acute` + `α` is `ά`
+without anyone having written those down. What is written down is the part
+Unicode has no rule for: `dead_stroke` + `o` is `ø`, and the `Multi_key`
+symbol sequences, which are conventions rather than compositions.
+
+### Handling it yourself
+
+The three events mirror the DOM's. `data` is empty on the start, the text
+showing at the caret on each update, and the **committed text** at the end —
+empty when the sequence was abandoned.
+
+```jsx
+<textinput
+  onCompositionUpdate={(ev) => setStatus(`composing ${ev.data}`)}
+  onCompositionEnd={(ev) => setStatus('')}
+/>
+```
+
+**A key an open composition took carries no text of its own.** `ev.key` and
+`ev.codepoint` are `undefined` on it and `ev.composing` is true, because its
+text arrives on the composition event instead — an application that types
+from `onKeyDown` would otherwise insert `o`, `c` and then `©`. The keysym is
+still there, so a chord still matches.
+
+The order is **application chords → composition → the element → focus
+traversal**: an `onKeyDown` that calls `preventDefault()` keeps its key and
+the composer never sees it, and a key the composer does take never reaches
+the element's `defaultKeyDown` — so a dead key cannot also fire an
+accelerator, and a Compose sequence containing `z` cannot undo halfway
+through.
+
+A composition is abandoned, never half-committed, when focus leaves, when the
+window loses the keyboard, or when a press puts the caret somewhere else.
+
+### Changing the table
+
+```js
+import { XK_MULTI_KEY } from 'react-x11/keysyms';
+
+const root = await createRoot({
+  compose: {
+    // this machine's Compose file, which is how a personal ~/.XCompose is
+    // picked up — usually absent on macOS, where nothing is lost
+    file: 'system',
+    sequences: [[[XK_MULTI_KEY, 'l', 'd'], '🦆']],
+  },
+});
+```
+
+`compose: 'system'` is the whole file shorthand, `compose: false` turns
+composition off for an app that does its own, and later definitions win over
+earlier ones — which is what makes a Compose file an override of the
+built-ins rather than an addition beside them. Parsing is X's own format;
+`include` directives are ignored, and a line naming keysyms outside ASCII
+and the dead-key block (`<Greek_alpha>`, `<Cyrillic_a>`) is skipped rather
+than guessed at.
+
+**What this is not is an input method.** There is no preedit arriving from
+another process and no candidate list, so CJK still needs XIM or an
+IBus/Fcitx client — issue #272 tracks it. The events above are the surface it
+will arrive on.
 
 ## Pointer capture
 

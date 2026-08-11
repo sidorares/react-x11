@@ -93,6 +93,16 @@ no override-redirect staging (issue #4).
   (click synthesis, hover enter/leave diffing, wheel from X buttons 4-7,
   focus/Tab). Three ancestor-chain diffs live here and share one shape —
   `:hover`, `:active` over the press chain, and `:focus-within`.
+- `src/compose.js` — dead keys and the Compose key (#272): the sequence
+  table and the state machine `EventManager` runs between an application's
+  `onKeyDown` and the element's `defaultKeyDown`. The dead-key half is
+  **Unicode's composition rather than a table of ours** — `dead_acute` is
+  U+0301 and the rest is `normalize('NFC')` — which is what makes it 30
+  entries instead of X's 6000 and correct for scripts nobody listed. Only
+  what Unicode has no rule for is written down: `ø`, the currency signs, and
+  the `Multi_key` symbols. `probe`/`apply` are separate on purpose, since
+  the key event is dispatched to the application before the composer may
+  eat it.
 - `src/priority.js` — shared React update-priority state (discrete vs
   continuous events).
 - `src/DevToolsIntegration.js` — opt-in React DevTools bridge

@@ -247,6 +247,32 @@ export interface RootOptions {
    * counts as up, and docs/desktop.md.
    */
   startupNotification?: boolean | string | StartupNotificationOptions;
+  /**
+   * Dead keys and the Compose key — what `dead_acute` then `e` types, and
+   * what `Compose o c` does (docs/events.md).
+   *
+   * The default is a built-in table: every dead key composed through
+   * Unicode, so it covers every base letter in every script, plus the
+   * `Multi_key` symbol sequences. It needs no configuration and reads
+   * nothing from disk.
+   *
+   * - `'system'` adds this machine's Compose file — `$XCOMPOSEFILE`, a
+   *   personal `~/.XCompose`, or the locale's file under
+   *   `/usr/share/X11/locale`. There is usually none on macOS.
+   * - `{ file }` adds one you name, `{ sequences }` adds or overrides
+   *   individual ones; later definitions win.
+   * - `false` turns composition off, for an app doing its own.
+   */
+  compose?: false | 'system' | ComposeOptions;
+}
+
+export interface ComposeOptions {
+  /** A Compose file to load on top of the built-ins, or `'system'` to look
+   * for this machine's. */
+  file?: string | 'system';
+  /** Sequences to add or override: `[[keysyms], text]`, where a keysym may
+   * be given as a character. */
+  sequences?: Array<[Array<number | string>, string]>;
 }
 
 export interface StartupNotificationOptions {
