@@ -434,32 +434,22 @@ the browser, so `npm run docs:test` fails when a demo stops matching the API.
 
 ## Known issues
 
-Three that are worth knowing before you hit them, all predating the current
-release and all tracked:
+Two that are worth knowing before you hit them, both predating the current
+release and both tracked:
 
-- **Non-Latin keyboard layouts type Latin**
-  ([#85](https://github.com/sidorares/react-x11/issues/85)). Keysyms are
-  resolved from index 0/1 of the keymap, which is XKB group 1 — so
-  switching to a Cyrillic or Greek layout has no effect on Linux. macOS
-  and XQuartz need a second, different mechanism, since XQuartz has no
-  groups and rewrites the keymap instead.
 - **`sans-serif` can resolve to a CJK font on macOS**
   ([#86](https://github.com/sidorares/react-x11/issues/86)). Font families
   are resolved by shelling out to `fc-match`, which follows `PATH`;
   Homebrew's fontconfig ships no macOS system-font aliases and answers
   Hiragino Sans. Latin looks fine, Cyrillic comes out on full-width
   advances. Put `/opt/X11/bin` first on `PATH` until this is fixed.
-- **Text entry is one codepoint per key event.** A key press is resolved to
-  a single keysym and committed straight into the field, with no composition
-  stage anywhere in the stack. So AltGr levels do not work (`@` on a German
-  layout, `€`, `ł`, `ã` on US-International), dead keys and Compose
-  sequences do not work (`dead_acute` then `e` produces nothing, not `é`),
-  and there is no input method integration, so CJK is not partially working
-  — it is structurally absent. The text controls have a caret, a selection,
-  an undo stack and a clipboard, and nowhere for uncommitted composition
-  text to live. Fixing the level rule is an ntk change that also closes half
-  of [#85](https://github.com/sidorares/react-x11/issues/85); a preedit
-  model and an ibus/fcitx/XIM backend are the rest.
+- **AltGr levels do not work, and there is no input method.** `@` on a
+  German layout, `€`, `ł`, `ã` on US-International: the core keyboard map
+  cannot say whether the third and fourth keysyms on a key are a second
+  layout or a third and fourth level, so they are read as a layout and left
+  alone. Dead keys, Compose and layout switching all work
+  ([docs/events.md](docs/events.md)); what is absent is an ibus/fcitx/XIM
+  backend, so CJK is not partially working — it is structurally absent.
 
 ## Security
 

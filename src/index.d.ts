@@ -264,6 +264,23 @@ export interface RootOptions {
    * - `false` turns composition off, for an app doing its own.
    */
   compose?: false | 'system' | ComposeOptions;
+  /**
+   * Which keysym `ev.keysym` reports, and so which one a shortcut matches
+   * (docs/events.md, issue #85).
+   *
+   * `'latin'`, the default: the Latin keysym for the key, taken from the
+   * Latin group when the keymap has one and from the physical position when
+   * it does not — so Ctrl+Z keeps undoing while the user types Russian, on
+   * Linux and under XQuartz alike. Typing is unaffected: `ev.key` and
+   * `ev.codepoint` always follow the active layout.
+   *
+   * - `'layout'` reports the keysym the layout actually put on the key, for
+   *   an application matching shortcuts its own way.
+   * - An object is a keycode→Latin keysym table of your own, for a server
+   *   whose keycodes are neither evdev's nor macOS's. Values may be given as
+   *   a character: `{ 52: 'z' }`.
+   */
+  accelerators?: 'latin' | 'layout' | Record<number, number | string>;
 }
 
 export interface ComposeOptions {

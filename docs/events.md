@@ -105,7 +105,7 @@ const root = await createRoot({
   capturePointer(), releasePointer(),   // see Pointer capture below
   // mouse: button, detail (DOM-style click count: 2 = double, 3 = triple)
   // wheel: deltaX, deltaY (pixels), smooth
-  // keyboard: keycode, keysym, codepoint, key, composing
+  // keyboard: keycode, keysym, group, codepoint, key, composing
   // composition: data
 }
 ```
@@ -125,6 +125,10 @@ onKeyDown={(ev) => {
   if (ev.ctrlKey && ctrlChordLetter(ev) === keysymOf('d')) duplicateLine();
 }}
 ```
+
+That keeps working under a Cyrillic or Greek layout too: `ev.keysym` is the
+Latin keysym for the key however the layout is switched — see
+[Layouts](#layouts).
 
 ## Handlers
 
@@ -277,6 +281,55 @@ than guessed at.
 another process and no candidate list, so CJK still needs XIM or an
 IBus/Fcitx client — issue #272 tracks it. The events above are the surface it
 will arrive on.
+
+## Layouts {#layouts}
+
+A key event answers two questions and, the moment a non-Latin layout is
+active, it has to answer them differently:
+
+- **what the key typed** — `ev.key` and `ev.codepoint`, the active layout,
+  the active level. A Cyrillic layout types Cyrillic.
+- **what the key is called** — `ev.keysym`, the **Latin** keysym for that
+  key, whichever group holds it. Shortcuts do not move with the layout, in
+  GTK, in Qt and in the browsers, and Ctrl+Z has to keep undoing while the
+  user is typing Russian.
+
+So `ctrlChordLetter(ev) === keysymOf('z')` matches the physical Z key under
+every layout, and nothing in a widget has to know that a layout exists.
+`ev.group` is the active XKB group, 0-3, for an application that wants to
+show which layout is live — a switch sends no other notice.
+
+Where the Latin keysym comes from depends on how the layout got there, and
+the two mechanisms have nothing in common:
+
+- **Linux/XKB** loads every layout at once as a group and switches which one
+  is live; the keymap never changes and **no MappingNotify is sent**. The
+  Latin keysym is on the same keycode, in whichever group is the Latin one —
+  which under `ru,us` is the second.
+- **XQuartz** has no groups. It synthesizes the keymap from the active macOS
+  layout and _overwrites_ it when the input menu changes (Preferences →
+  Input → "Follow system keyboard layout"; without that, nothing downstream
+  can help), then sends MappingNotify. After a switch to Russian **no group
+  anywhere holds Latin**, and the only thing left that still means "the Z
+  key" is the keycode — so that is what is used, against the US position of
+  whichever keycode scheme the server speaks.
+
+```js
+const root = await createRoot({
+  // 'latin' is the default; 'layout' reports the keysym the layout put on
+  // the key, for an app matching shortcuts its own way
+  accelerators: 'layout',
+});
+```
+
+`accelerators` also takes a keycode→keysym table (`{ 52: 'z' }`) for a
+server whose keycodes are neither evdev's nor macOS's, which is the only
+case the two built-in ones do not cover.
+
+One thing the core protocol cannot express is the difference between two
+groups of two levels and one group of four, so **the AltGr row is not
+reachable**: `ev.keysym` and `ev.codepoint` read groups only. Resolving it
+needs XkbGetMap, which node-x11 does not implement.
 
 ## Pointer capture
 

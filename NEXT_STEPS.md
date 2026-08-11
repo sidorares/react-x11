@@ -29,10 +29,13 @@
 >    `src/a11y.js` (the model) + `src/atspi.js` (the bridge) on the D-Bus
 >    layer that was already here, off silently wherever there is no bus.
 >    See [docs/accessibility.md](docs/accessibility.md) and §11.3.
-> 3. The two oldest open issues, both real and both mine to fix: **#86**
->    (`sans-serif` resolves to a CJK font on macOS) and **#85** (keyboard
->    layout switching ignored — needs the Linux group bits _and_ XQuartz's
->    keymap rewrite; §15 has the wider version of that problem). The rest of
+> 3. **#85 (keyboard layout switching) is done**: ntk reads the active group
+>    out of the event state, so a Cyrillic layout types Cyrillic, and
+>    `src/keyboard.js` resolves the Latin keysym for shortcuts — from the
+>    Latin group where there is one, from the physical position where
+>    XQuartz's keymap rewrite has left none. That leaves **#86**
+>    (`sans-serif` resolves to a CJK font on macOS) as the oldest open one,
+>    and AltGr as the piece §15 still owns. The rest of
 >    the backlog is now filed too — #113–#130 here, and the upstream half as
 >    sidorares/ntk#115–#126, sidorares/node-x11#243–#247 and
 >    sidorares/dbus-native#389–#392.
@@ -192,35 +195,34 @@ merged theme (`ThemeProvider`, `useTheme`) and a
 - ~~WM close button~~ DONE: `<window onCloseRequest>` opts into
   WM_DELETE_WINDOW and dispatches at discrete priority (unmount/hide/quit
   is the handler's choice); see examples/windows.jsx
-- **Keyboard**: AltGr/compose/IME not handled (ntk TODO), key repeat is
-  server-side (works), keymap beyond index 0/1 unhandled — that last one is
-  **issue #85**, and it costs more than it looks: index 0/1 is group 1, so
-  a non-Latin layout can never be typed. Linux carries the active group in
-  bits 13–14 of the event state; XQuartz has no groups at all and rewrites
-  the keymap instead, so both mechanisms are needed. `onContextMenu` is
-  done (#90) — dispatched from button 3, `preventDefault()` suppresses the
-  built-in edit menu
+- **Keyboard**: AltGr and IME not handled, key repeat is server-side
+  (works). ~~Compose and dead keys~~ done (#276), and ~~keymap beyond
+  index 0/1~~ done (**issue #85**): ntk reads the active group from bits
+  13–14 of the event state, so a non-Latin layout types, and
+  `src/keyboard.js` keeps shortcuts on the Latin keysym — including under
+  XQuartz, which has no groups at all and rewrites the keymap instead, so
+  after a switch no group holds Latin and the keycode is what is left.
+  `onContextMenu` is done (#90) — dispatched from button 3,
+  `preventDefault()` suppresses the built-in edit menu
 
-  The "(ntk TODO)" parenthetical is doing too much work. Text entry today is
-  **one keysym per key event, committed straight into the field**:
-  `src/events.js:435` takes `keycode2keysyms[keycode][0]` and ntk's
-  `lib/window.js:340` picks `syms[capital ? 1 : 0]`, so levels 2–4 are
-  unreachable. Three consequences, in increasing order of severity:
+  Two of the three consequences this list used to carry are gone; the
+  first and the last remain, in increasing order of severity:
 
   - **AltGr is dead.** `@` on a German layout, `€` on most European ones,
     `ł` on Polish, `ã` on US-International — none of them can be typed.
-    Same line as #85, and fixing it properly means resolving the group
-    _and_ the shift / lock / level3 / level5 modifiers, applying caps only
-    to alphabetic keysyms — the current rule applies it to everything, so
-    **Caps Lock turns `1` into `!`**.
-  - **No Compose and no dead keys.** `dead_acute` then `e` produces two
-    nothings rather than `é`. That is a trie over the system Compose table
-    plus `$XCOMPOSEFILE`/`~/.XCompose` when present — pure data, no
-    protocol.
-  - **No input method at all.** No preedit string, no candidate window, no
-    commit event. `<textinput>` has a caret, a selection, an undo stack and
-    a clipboard, and **nowhere for uncommitted composition text to live**.
-    CJK is not partially working; it is structurally absent.
+    The blocker is not the level rule any more, it is that the **core
+    keyboard map is ambiguous**: four keysyms on a keycode are two groups
+    of two levels under `us,ru` and one group of four levels under
+    `us(intl)`, and nothing in the core protocol tells them apart. The
+    request that would is XkbGetMap, which node-x11 does not implement, so
+    ntk reads groups only and refuses to guess at levels 3–4.
+  - ~~**No Compose and no dead keys.**~~ Done in #276: a trie over the
+    built-in sequences, plus `$XCOMPOSEFILE`/`~/.XCompose` on request, and
+    a preedit in the text controls (`src/compose.js`, docs/events.md).
+  - **No input method at all.** No preedit string arriving from another
+    process, no candidate window, no commit event. The preedit _model_ is
+    there now — `<textinput>` has somewhere for uncommitted text to live —
+    but nothing fills it from ibus, fcitx or XIM, so CJK is still absent.
 
   Staged in §15; the level rule and the Compose engine are
   sidorares/ntk#116. Stage 1 is entirely inside ntk and is worth more than
@@ -1408,18 +1410,21 @@ and one under `<textinput>` in [docs/elements.md](docs/elements.md). A user
 who discovers this by typing into a demo concludes the project is broken; a
 user who reads it concludes it is honest. Costs nothing, blocks nothing.
 
-**Stage 1 — fix key→text in ntk** (§8 item 13, sidorares/ntk#116). The XKB
-level rule plus a Compose engine, emitting a string rather than a codepoint.
-**This alone makes every European layout work and needs no D-Bus.** It also
-closes half of #85.
+**Stage 1 — fix key→text in ntk** (§8 item 13, sidorares/ntk#116) — **done**,
+and it closed #85 with it. ntk decodes group and level against the keymap
+and the event state, Caps applies only where the two levels are a case pair,
+and the Compose engine lives on this side (`src/compose.js`, #276). What it
+does not reach is levels 3–4, the AltGr row: the core map cannot say whether
+those two entries are a second group or a third and fourth level, and
+XkbGetMap is what would settle it.
 
-**Stage 2 — a preedit model in the renderer, backend-agnostic.**
-`onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` on the
-text controls, using react-dom's names because they are the names people
-know. `TextInputNode` keeps `_preedit` next to `_caret`, draws it at the
-caret with an underline run, and reports the caret's **screen rect** back so
-a candidate window lands in the right place — which is what
-`node.screenRect()` (§12.6) is for, and is the one change the core needs.
+**Stage 2 — a preedit model in the renderer, backend-agnostic** — **done**
+(#276). `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` on
+the text controls, using react-dom's names because they are the names people
+know. `TextInputNode` keeps `_preedit` next to `_caret` and draws it at the
+caret. What is still owed is the caret's **screen rect** back to a backend,
+so a candidate window lands in the right place — `node.screenRect()`
+(§12.6).
 
 **Stage 3 — the backends**, in `@react-x11/desktop/im` for ibus and fcitx
 over D-Bus, and `react-x11/xim` for XIM. Keep XIM: it works with any XIM

@@ -1056,9 +1056,11 @@ The AT-SPI accessibility work is done and in core (NEXT_STEPS §11.3,
 [docs/accessibility.md](docs/accessibility.md)): standard `role`/`aria-*`
 props on every element, `src/a11y.js` (the model) + `src/atspi.js` (the
 bridge), Orca-verified. Next: a generic Popover and a file open/save
-dialog. Open GitHub issues, both real: **#85** keyboard layout switching
-is ignored (non-Latin layouts always type Latin), **#86** `sans-serif`
-resolves to a CJK font on macOS.
+dialog. **#85** (keyboard layout switching ignored) is done — ntk decodes
+the active XKB group, and `src/keyboard.js` keeps shortcuts on the Latin
+keysym even where XQuartz's keymap rewrite has left no Latin group
+(docs/events.md "Layouts"). One open issue left from that pair: **#86**
+`sans-serif` resolves to a CJK font on macOS.
 
 ## Pull requests
 

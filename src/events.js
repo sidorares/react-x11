@@ -14,6 +14,7 @@ import { armDrag } from './dnd.js';
 import { noteInputTime } from './inputtime.js';
 import { hooks as a11yHooks, isFocusable } from './a11y.js';
 import { Composer, composeTableFor } from './compose.js';
+import { acceleratorKeysym } from './keyboard.js';
 
 const XK_TAB = 0xff09;
 // The core protocol has no wheel: it is a click of button 4/5 (vertical) or
@@ -798,8 +799,17 @@ export class EventManager {
       // what shortcut comparisons want (XK_TAB even under Shift), which is
       // exactly what the old level-0 read gave. The keymap lookup stays as
       // the fallback for synthetic events that skip ntk's decoration.
-      const keysym =
-        native.baseKeysym ?? wnd.X?.keycode2keysyms?.[native.keycode]?.[0];
+      //
+      // …and group 1 is Latin only until somebody puts a Cyrillic layout
+      // first, or runs under XQuartz, where a layout switch rewrites the
+      // keymap and leaves no Latin group at all. `acceleratorKeysym` is the
+      // rest of the rule: `ev.keysym` is the Latin keysym for the key, so a
+      // chord keeps matching while `ev.codepoint` types Russian (#85).
+      const keysym = acceleratorKeysym(
+        this.node.app,
+        native.keycode,
+        native.baseKeysym ?? wnd.X?.keycode2keysyms?.[native.keycode]?.[0],
+      );
       // the focused node may live inside a <popup> of this window: focus is
       // shared with the popup (see focusManager), key delivery follows it
       const focused = this.focusManager.focused;
@@ -822,6 +832,11 @@ export class EventManager {
       const ev = this.dispatch(name, target, native, {
         keycode: native.keycode,
         keysym,
+        // Which layout typed this, 0-3 — the XKB group, from bits 13-14 of
+        // the event's state field. The one thing that says a layout switch
+        // happened at all: switching sends no MappingNotify, because on
+        // Linux the keymap did not change, only which part of it is live.
+        group: native.group ?? 0,
         // A key the composition is going to take types nothing on its own:
         // its text arrives on the composition event instead. Reporting the
         // code point as well is what would make `Compose o c` insert `oc©`
