@@ -241,6 +241,11 @@ export type SizeQuery = `@${'width' | 'height'} ${string}`;
 export interface StyleBlocks {
   transition?: Transition;
   ':hover'?: StateStyle;
+  /** Set while focus is on this node **or inside it** — CSS's
+   * `:focus-within`, and the way a row highlights while the field in it is
+   * being typed into. Lower precedence than `:focus`, which is the narrower
+   * statement. */
+  ':focus-within'?: StateStyle;
   ':focus'?: StateStyle;
   /** Focus that arrived from the keyboard rather than from a press — CSS's
    * `:focus-visible`. This is where a focus ring belongs: a ring on every
@@ -265,8 +270,10 @@ export type Style = StyleProperties &
 
 /**
  * What a `style` prop accepts: an object, or a nested array of them with
- * falsy entries skipped and later entries winning. This is what replaces
- * the cascade — precedence is written at the call site.
+ * falsy entries skipped and later entries winning. This is what replaces the
+ * *selector* cascade — precedence is written at the call site rather than
+ * resolved by specificity. Inheritance is a separate thing and does happen:
+ * the ink, the face and the size travel down the tree (`INHERITED_TEXT_PROPS`).
  */
 export type StyleProp = Style | false | null | undefined | readonly StyleProp[];
 

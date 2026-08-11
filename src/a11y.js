@@ -709,7 +709,7 @@ export function textStateOf(node) {
       selection: node._selection?.() ?? [0, 0],
     };
   }
-  const spans = node.collectSpans?.(node.inheritedTextStyle, []) ?? [];
+  const spans = node.collectSpans?.([]) ?? [];
   const chars = Array.from(spans.map((s) => s.text).join(''));
   return { chars, caret: 0, selection: [0, 0] };
 }

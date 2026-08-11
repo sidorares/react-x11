@@ -209,8 +209,9 @@ export interface IconProps extends Omit<CanvasProps, 'onDraw' | 'cacheKey'> {
    * way. Default: a shade under the palette's `fontSize`.
    */
   size?: number;
-  /** Default: the palette's `text`. Colour does not cascade — a widget that
-   *  paints its label in another ink hands the icon the same one. */
+  /** Default: the ink of the element around it, and under that the palette's
+   *  `text` — `color` inherits, so an icon in a row that dims itself dims
+   *  with it. Pass this only to say something the surrounding text does not. */
   color?: Color;
   style?: StyleProp;
 }

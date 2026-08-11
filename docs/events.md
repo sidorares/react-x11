@@ -161,7 +161,10 @@ default, and so is a scroll container with somewhere to scroll), `autoFocus`
 takes it at mount, and every drawn node has
 `focus()` / `blur()` / `focused` on its ref — plus `focusWithin`, which is
 true while focus is on the node **or inside it**, the question a modal asks
-before taking focus itself. `focus()` hands the node back, so a component
+before taking focus itself. To _draw_ that rather than read it, there is a
+`':focus-within'` style block
+([styling.md](styling.md#inline-pseudo-states)), which is what a row
+containing a field wants. `focus()` hands the node back, so a component
 can forward it straight out of an imperative handle. Focusing a node inside a
 scroll container scrolls it into view. Mousedown focuses the nearest
 focusable ancestor of the hit node; Tab / Shift+Tab cycle through focusable

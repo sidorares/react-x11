@@ -216,30 +216,31 @@ The **drawings are not themable** for the same reason: the geometry is the
 widget set's vocabulary, and an application that wants a different chevron
 wants an icon library. Colour and size are yours; the shape is not.
 
-### Colour and size do not cascade — pass them
+### Colour inherits; size does not
 
-This renderer has no cascade: `style` precedence is written at the call site
-([styling.md](styling.md)), and `color` or `fontSize` on an ancestor `<box>`
-reaches nothing below it. An icon is a sibling element rather than a span, so
-it is outside `<text>`'s span inheritance too. Two consequences:
+`color` travels down the tree
+([styling.md](styling.md#inheritance-the-ink-the-face-and-the-size)), so an
+icon takes the ink of whatever it is written inside and needs nothing said
+at the call site:
 
-- **Colour.** `color` defaults to the palette's `text`, because `theme` _is_
-  inherited — it is the one channel that walks the tree. But a row painting
-  its label in `theme.hoverText` has to hand its icon the same ink:
+```jsx
+<box style={{ color: theme.dim, ':hover': { color: theme.accent } }}>
+  <text>Open recent</text>
+  <Icon name="chevronRight" />
+</box>
+```
 
-  ```jsx
-  <Icon name="chevronRight" color={active ? theme.hoverText : theme.dim} />
-  ```
+That covers the hover case too. `:hover` marks the row, `color` is
+inherited, and the label and the icon both follow — which is why `Tree`'s
+twisty and `ContextMenu`'s submenu chevron carry no colour of their own any
+more. The `color` prop is for saying something the surrounding text does
+not: a destructive action's mark, or a check drawn on an accent fill.
 
-- **`:hover`.** State selectors resolve per node against the _ancestor_
-  chain, so hovering a row lights the row up and leaves its children alone.
-  An icon that has to follow a hover follows it through React state, the way
-  `Tree`'s twisty and `ContextMenu`'s submenu chevron do.
-
-Both of those describe the model as it stands today rather than a settled
-verdict — a real `color`/`fontSize` cascade is an open question. If it
-lands, `color` and `size` become defaults that inheritance fills in instead
-of things every call site repeats, and nothing about the set changes.
+**`size` does not inherit, and is deliberately not `fontSize`.** A glyph is
+a drawing rather than a letter — no baseline to sit on, no ascent to be
+measured against — so it takes its default from the palette's `fontSize` and
+stays put when a label beside it shrinks. Pass `size` for the one icon that
+has to be bigger.
 
 ### What it costs to draw one
 

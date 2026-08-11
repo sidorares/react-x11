@@ -747,12 +747,20 @@ run list so wrapping spans the whole content.
 
 | prop                                                |                                                        |
 | --------------------------------------------------- | ------------------------------------------------------ |
-| `color`                                             | text color (inherited by spans)                        |
+| `color`                                             | text color — inherited (see below)                     |
 | `fontSize`, `fontFamily`, `fontWeight`, `fontStyle` | ntk font style (fontconfig lookup + fallback)          |
 | `fontVariationSettings`                             | a variable font's axes — see below                     |
 | `textRendering`                                     | which glyph path to draw with — see below              |
 | `textAlign`                                         | `left`, `right`, `center`, `start`, `end` (bidi-aware) |
 | `lineHeight`                                        | multiplier over the natural font line height           |
+
+The first four rows and `fontVariationSettings` and `textRendering`
+**inherit** — from a nested span's point of view that has always been true,
+and it is equally true across a `<box>`, so a caption block is written once
+around the labels in it
+([styling.md](styling.md#inheritance-the-ink-the-face-and-the-size)).
+`textAlign` and `lineHeight` do not: they shape the box the lines flow in,
+which belongs to the `<text>` that owns it.
 
 ### Variable fonts
 
@@ -1043,7 +1051,10 @@ their props, so the renderer can build the key itself.
 
 `mono` is a promise about the drawing: **everything it paints is one colour,
 and it is not the drawing's to choose.** `onDraw` then names no colour at all
-— `fillStyle` and `strokeStyle` arrive preset from `style.color`:
+— `fillStyle` and `strokeStyle` arrive preset from the node's resolved
+`color`, which is its own if it named one and otherwise the ink it inherits
+([styling.md](styling.md#inheritance-the-ink-the-face-and-the-size)), so a
+mark inside a dimmed or hovered row follows it with nothing said:
 
 ```jsx
 const chevron = (ctx, { width: w, height: h }) => {
@@ -1415,8 +1426,12 @@ on the `<svg>` element itself.
 | `viewBox` | coordinate system (children form) |
 
 **`currentColor` and recolouring.** `fill="currentColor"` and
-`stroke="currentColor"` resolve to the node's `color` style, so one icon
-serves every state the UI puts it in:
+`stroke="currentColor"` resolve the way the word does in CSS: the node's own
+`color` if it named one, otherwise the ink it inherits, and under that the
+palette's `text`
+([styling.md](styling.md#inheritance-the-ink-the-face-and-the-size)). So one
+drawing serves every state the UI puts it in, and an unstyled one is
+readable on a dark desktop rather than black on it:
 
 ```jsx
 <svg

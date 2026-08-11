@@ -6,7 +6,7 @@
 import { MarkdownView, HtmlView, SvgView, layoutTex } from 'ntk';
 
 import { Node, intrinsicSize } from './nodes.js';
-import { isLayoutProp, isPaintProp, DEFAULT_TEXT_STYLE } from './styles.js';
+import { isLayoutProp, isPaintProp } from './styles.js';
 
 /** Joined text of string children (react-markdown style), or null when the
  * element has none — then the `source` prop is the content. */
@@ -78,6 +78,11 @@ class DocumentViewNode extends Node {
     if (this.view) this._setSource(this.view);
     this._contentInvalidated();
   }
+
+  /** A document sets its own type — headings, code, body, all decided by the
+   * widget's `theme` prop — so the enclosing element's ink and face are not
+   * something it reads, and a change in them costs it nothing. */
+  _textStyleMoved() {}
 
   _layoutAt(width) {
     if (this._laidOutWidth !== width) {
@@ -372,9 +377,17 @@ export class SvgNode extends Node {
     });
   }
 
-  /** What `fill="currentColor"` resolves to here. */
+  /**
+   * What `fill="currentColor"` resolves to here.
+   *
+   * The node's own `color`, then what it inherits, then the palette's — the
+   * same resolution `<text>` and `<canvas mono>` use, and it has to be, or
+   * `currentColor` means something different depending on which element is
+   * drawing. It used to stop at a hardcoded black, which is invisible on a
+   * dark desktop and does not follow a `<box style={{ color }}>` either.
+   */
   _currentColor() {
-    return this.style.color ?? DEFAULT_TEXT_STYLE.color;
+    return this.resolvedTextStyle().color;
   }
 
   /**
@@ -465,13 +478,13 @@ export class SvgNode extends Node {
 }
 
 /**
- * A formula's ink, which is the palette's text colour unless the style names
- * one. It used to be a fixed `#222222` — a shade darker than the prose around
- * it, so a formula read as a figure. That cannot survive a palette that
- * follows the desktop: `#222222` on a dark background is invisible, and
+ * A formula's ink, which is the ink of the text around it unless the style
+ * names one. It used to be a fixed `#222222` — a shade darker than the prose
+ * beside it, so a formula read as a figure. That cannot survive a palette
+ * that follows the desktop: `#222222` on a dark background is invisible, and
  * stepping past `text` to keep the contrast lands on black on a light one.
  */
-const texColor = (node) => node.style.color ?? node.theme.text;
+const texColor = (node) => node.resolvedTextStyle().color;
 
 /**
  * <tex source displayMode size>: a KaTeX formula via ntk layoutTex.

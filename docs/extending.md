@@ -151,21 +151,30 @@ only by luck, and stops agreeing the next time the vocabulary grows another
 edge — the per-side border widths were the last one to arrive.
 
 **`resolvedTextStyle()` is what makes the type of an app reach your
-element.** It is the node's own font properties over what the palette says
-text with none of its own is set in, in the shape `fonts.layout` wants
-(`family`, not `fontFamily`; `variations`, not `fontVariationSettings`). An
-element that reads `this.style.fontFamily` instead is one that a
-`<ThemeProvider value={{ fontFamily: 'Inter' }}>` does not reach — every
-built-in label changes face and yours does not, which is a bug an app author
-can only work around by growing a `fontFamily` prop on your element and
-threading it in. Ask, and the element inherits exactly what a `<text>`
-sibling inherits.
+element.** It is the node's own font properties over what it **inherits**
+from the elements around it, and under that what the palette says text with
+none of its own is set in — in the shape `fonts.layout` wants (`family`, not
+`fontFamily`; `variations`, not `fontVariationSettings`). An element that
+reads `this.style.fontFamily` instead is one that a
+`<ThemeProvider value={{ fontFamily: 'Inter' }}>` does not reach, and one
+that a `<box style={{ color: theme.dim }}>` around it does not dim — bugs an
+app author can only work around by growing props on your element and
+threading them in. Ask, and the element inherits exactly what a `<text>`
+sibling inherits, including a `:hover` block on the row it sits in
+([styling.md](styling.md#inheritance-the-ink-the-face-and-the-size)).
 
-Both are read at paint time, not cached: the palette can change under a
-mounted tree ([styling.md](styling.md)), and the box changes with every
-layout. If the text is also what _sizes_ the element, shape it in
-`measureContent` as well — `<text>` memoizes its layout per max-width for
-exactly that reason.
+Both are read at paint time. `contentBox()` is computed each call, since the
+box changes with every layout; `resolvedTextStyle()` is memoised and dropped
+by everything that can move it — a style change, a state block, an
+animation tick, a theme swap, an element above it changing its own type — so
+reading it per frame costs a property lookup and never goes stale. If the
+text is also what _sizes_ the element, shape it in `measureContent` as well;
+`<text>` memoizes its layout per max-width for exactly that reason. An
+element that keeps a cache of its own keyed on the type — a shaped run, a
+rasterized label — should drop it in **`_textStyleMoved(cost)`**, which is
+called with `2` when a glyph can have moved and `1` when only the ink or the
+glyph rounding did. The default re-measures on the first and repaints on the
+second, which is right for most elements.
 
 ### A size of your own
 

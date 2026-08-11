@@ -16,12 +16,19 @@ One namespace per kind of thing, and no name in both:
   (`position`, `material`) — those are object properties, not CSS.
 
 `style` takes an object or a nested array, flattened left-to-right with
-falsy entries skipped. That is what replaces the cascade: precedence is
-written at the call site instead of resolved by specificity.
+falsy entries skipped. That is what replaces the **selector** cascade:
+precedence is written at the call site instead of resolved by specificity.
 
 ```jsx
 <box style={[s.card, isWide && s.wide, { backgroundColor: theme.panel }]} />
 ```
+
+Inheritance is a different thing and it does happen — see
+[Inheritance](#inheritance-the-ink-the-face-and-the-size) below. The two are
+easy to conflate because CSS ships them together: what is gone here is
+_matching a rule against a tree_; what remains is a handful of properties
+that travel down it, which is the part that makes a theme, a caption block
+or a dimmed row expressible at all.
 
 ## What it fixes on `<window>`
 
@@ -65,18 +72,19 @@ The thing inline CSS cannot do, and the reason people keep a stylesheet:
 />
 ```
 
-`:hover`, `:focus`, `:focus-visible`, `:active`, `:disabled`, `:drag-over`,
-`:dragging`.
+`:hover`, `:focus-within`, `:focus`, `:focus-visible`, `:active`,
+`:disabled`, `:drag-over`, `:dragging`.
 These are **node states, not selectors** — each is something the node itself
-already knows, so resolving them needs no cascade, no specificity and no
-tree walk. The event manager already tracks the hover path and the focused
-node; a state change now recomputes one node's style and repaints. **No
-React render.**
+already knows, so resolving them needs no specificity and no matching. The
+event manager already tracks the hover path, the press chain and the focused
+node; a state change recomputes one node's style and repaints. **No React
+render.**
 
-Precedence is fixed and low-to-high: `:hover` → `:focus` → `:focus-visible`
-→ `:active` → `:disabled` → `:drag-over` → `:dragging`, merged per property,
-so a disabled control never looks hovered, and a drag in progress outranks
-all of the pointer and focus states.
+Precedence is fixed and low-to-high: `:hover` → `:focus-within` → `:focus` →
+`:focus-visible` → `:active` → `:disabled` → `:drag-over` → `:dragging`,
+merged per property, so a disabled control never looks hovered, a node that
+is itself focused can say something narrower than one that merely contains
+focus, and a drag in progress outranks all of the pointer and focus states.
 Because the hover _path_ is the ancestor chain, hovering a child lights up an
 ancestor's `:hover` block, exactly like CSS.
 
@@ -119,6 +127,24 @@ CSS grew the distinction: the user knows where they clicked, and a ring on
 every click is noise, where a ring on Tab is the only cue a keyboard user
 has. Put focus rings in `:focus-visible` and colour changes that are welcome
 either way in `:focus`.
+
+`:focus-within` is focus on this node **or inside it** — CSS's, and the
+answer to "the row should light up while the field in it is being typed
+into", which is the one thing a node's own states cannot say. It is diffed
+over the focused node's ancestor chain, the same walk `:hover` uses, and a
+`<popup>` counts as inside the node it hangs off in the JSX tree, so a
+`Select` with its menu open still reads as focused.
+
+```jsx
+<box
+  style={{
+    borderColor: theme.border,
+    ':focus-within': { borderColor: theme.borderFocus },
+  }}
+>
+  <textinput value={value} onChange={setValue} />
+</box>
+```
 
 The last two belong to drag and drop. `:drag-over` follows the pointer
 during a drag on exactly the same ancestor-path rule as `:hover` — and,
@@ -288,6 +314,70 @@ to do with. Default `'wrap'`.
 
 `<Table>` sets it on every cell and header for that reason.
 
+## Inheritance: the ink, the face and the size
+
+Seven properties travel down the tree, and they are the ones CSS calls
+inherited:
+
+| property                |                                            |
+| ----------------------- | ------------------------------------------ |
+| `color`                 | the ink                                    |
+| `fontFamily`            | the face                                   |
+| `fontSize`              | the size                                   |
+| `fontWeight`            |                                            |
+| `fontStyle`             |                                            |
+| `fontVariationSettings` | a variable font's remaining axes           |
+| `textRendering`         | how glyph origins are rounded at draw time |
+
+So a block of quiet type is a `<box>` and not a decision repeated at every
+label inside it:
+
+```jsx
+<box style={{ color: theme.dim, fontSize: 12 }}>
+  <text>Last modified</text>
+  <text>{row.modified}</text>
+  <Icon name="clock" />
+</box>
+```
+
+A style property on the node itself still wins, the way a property always
+wins over what a node inherits — and under the outermost element is the
+palette, so text that names none of this is set in the theme's `text`,
+`fontFamily` and `fontSize` ([theme tokens](#theme-tokens) below).
+
+It reaches everything that draws with type, not just `<text>`: a
+`<textinput>`, a `<canvas mono>` (which is what an `<Icon>` is), an `<svg>`
+resolving `fill="currentColor"`, a `<tex>` formula, and any custom element
+that asks `node.resolvedTextStyle()`
+([extending.md](extending.md#text-of-your-own)). A nested `<text>` span is
+the same mechanism seen from closer up.
+
+**A `:hover` block that sets `color` therefore reaches the labels inside.**
+That is how CSS behaves and it is why there is no "group hover" here to
+learn: `:hover` marks the row, `color` is inherited, and the row's label and
+its icon follow.
+
+```jsx
+<box style={{ color: theme.text, ':hover': { color: theme.accent } }}>
+  <text>Open recent</text>
+  <Icon name="chevronRight" />
+</box>
+```
+
+Nothing about that costs a layout pass. A state block may only set paint
+properties and `color` (see above), so the only inherited property a pointer
+can ever move is the ink — which drops the memoised text layouts under it
+and repaints, with no re-measuring and no reflow. A `fontSize` change
+_does_ re-measure, and it can only come from a React commit, a size query or
+a theme.
+
+What does **not** inherit: `textAlign`, `lineHeight`, `textWrap` and
+`textBoxTrim`. CSS inherits the first two; here they are read by the node
+that owns the **box** the text flows in, and a box is not something a
+descendant has. `<Icon>`'s `size` does not inherit either — a glyph is a
+drawing rather than a letter, so it takes its default from the palette's
+`fontSize` and stays put when a label around it shrinks.
+
 ## `createStyles`
 
 Identity is the point — a hoisted style object lets `applyProps` skip the
@@ -355,7 +445,9 @@ well.
 Three of them are read with no `$` anywhere, because they are what text falls
 back to rather than something a style asked for: **`text`, `fontFamily` and
 `fontSize` are the ink, the face and the size of every `<text>` that names
-none of its own** ([components.md](components.md#theming)). That is what makes
+none of its own** ([components.md](components.md#theming)). They are the floor
+under [inheritance](#inheritance-the-ink-the-face-and-the-size) — what a node
+resolves to when no element above it named one either — which is what makes
 `<ThemeProvider value={{ fontFamily: 'Inter' }}>` a sentence an app says once.
 A style property still wins over it, the way a style property always wins over
 what a node inherits:
@@ -537,6 +629,17 @@ can be looked at without stopping the compositor for the whole session. See
 
 - **`':hover'`, not `_hover`.** The CSS spelling costs a pair of quotes and
   buys transfer from every other styling system.
+- **Inherited properties, no relational selectors.** `color` and the font
+  properties travel down the tree; nothing matches a rule against it. So
+  there is no `:hover > child`, no sibling combinator and no Tailwind-style
+  `group`. Each of those exists to move a value across the tree, and
+  inheritance already does it in the one direction that is cheap: a parent's
+  `:hover` reaches its children because `color` is inherited, and a child's
+  hover reaches its parents because the hover path is the ancestor chain.
+  What is left over — a **sibling** reacting to a sibling — stays in React,
+  where `useControl` already returns `hover`/`focused`/`pressed` as state
+  ([components.md](components.md#basic-controls)). `<Checkbox>` does exactly
+  that, because its well is a sibling of the label the press lands on.
 
 ## Elements that are not styled
 

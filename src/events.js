@@ -140,6 +140,8 @@ export class EventManager {
     this._downDefaulted = false;
     this.capturedNode = null;
     this.focused = null;
+    // the focused node and its ancestors, which is what draws `:focus-within`
+    this.focusWithinPath = [];
     // what had focus before `focused`, so a focus scope opened by something
     // that focuses itself still knows where to hand focus back
     this._previousFocus = null;
@@ -710,7 +712,35 @@ export class EventManager {
       node.props.onFocus?.(this._makeEvent('focus', null, node));
       node.root?.invalidate(false, node, 'focus');
     }
+    this._updateFocusWithin(node);
     a11yHooks.focus?.(old, node);
+  }
+
+  /**
+   * Flip `:focus-within` over the focused node's ancestor chain, diffed the
+   * way hover and the press chain are.
+   *
+   * It is the answer to "this row should light up while the field inside it
+   * has focus", which is otherwise the one thing a state block cannot say —
+   * the field is a descendant, and the row has no state of its own to react
+   * to. Nothing relational is added by it: the chain is a walk up `parent`,
+   * the same one `Node.focusWithin` already reports, and a `<popup>` counts
+   * as inside the node it hangs off in the JSX tree, so a `Select` with its
+   * menu open still reads as focused.
+   */
+  _updateFocusWithin(node) {
+    const path = [];
+    for (let n = node; n; n = n.parent) path.push(n);
+    path.reverse();
+    const old = this.focusWithinPath;
+    const common = sharedPrefix(old, path);
+    for (let i = old.length - 1; i >= common; i--) {
+      if (!old[i].destroyed) old[i].setStyleState(':focus-within', false);
+    }
+    for (let i = common; i < path.length; i++) {
+      path[i].setStyleState(':focus-within', true);
+    }
+    this.focusWithinPath = path;
   }
 
   /**
@@ -848,5 +878,8 @@ export class EventManager {
     manager.popScope(node);
     if (manager.focused === node) manager.focused = null;
     if (manager._previousFocus === node) manager._previousFocus = null;
+    // the ancestors above a departing node keep `:focus-within` until focus
+    // actually moves, which is right — what must not survive is the node
+    manager.focusWithinPath = manager.focusWithinPath.filter((n) => n !== node);
   }
 }

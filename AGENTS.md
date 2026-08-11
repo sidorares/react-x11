@@ -83,10 +83,16 @@ no override-redirect staging (issue #4).
   `npm run examples:urischeme` is the manual harness for the two dispatch paths
   a broker cannot fake.
 - `src/styles.js` — flat style props → yoga setters; paint prop
-  classification; text style resolution.
+  classification; text style resolution. Also the two prop sets the
+  **inheritance** rule is written as: `INHERITED_TEXT_PROPS` (the ink, the
+  face, the size — what travels down the tree) and `LOCAL_TEXT_PROPS` (what
+  shapes a node's own box and therefore cannot arrive from above). Which
+  side a text property is on decides who has to react when it moves, so a
+  new one goes in exactly one of them.
 - `src/events.js` — `EventManager`: ntk window events → synthetic events
   (click synthesis, hover enter/leave diffing, wheel from X buttons 4-7,
-  focus/Tab).
+  focus/Tab). Three ancestor-chain diffs live here and share one shape —
+  `:hover`, `:active` over the press chain, and `:focus-within`.
 - `src/priority.js` — shared React update-priority state (discrete vs
   continuous events).
 - `src/DevToolsIntegration.js` — opt-in React DevTools bridge
@@ -517,13 +523,16 @@ Two things came out of that and are worth keeping:
   catches it — regenerate on the base first and diff, since the rasterizer
   shifts edges on its own.
 
-Two things follow that every call site has to know, because there is **no
-cascade**: an icon does not inherit `color` or `fontSize` from an ancestor
-box, and `:hover` marks the ancestor chain rather than the children, so a
-glyph inside a highlighted row is handed its ink in React. (If a real
-`color`/`fontSize` cascade lands, those become defaults inheritance fills in
-and nothing about the set changes — but until then, passing the colour is
-not boilerplate to be cleaned up. It is the only thing that works.)
+**The ink comes from the cascade; the size does not.** `color` is an
+inherited property (docs/styling.md), and a `mono` drawing reads exactly what
+a `<text>` beside it would — so an icon in a row that dims itself dims with
+it, and a `:hover` block that sets `color` on the row reaches the glyph the
+same way it reaches the label. Nothing is handed over at the call site, and
+an `<Icon color=…>` now means "this mark is not the colour of the text
+around it" rather than "someone remembered". `size` stays out of it on
+purpose: a glyph has no baseline and no ascent, so it derives from the
+palette's `fontSize` rather than from whatever text is nearby, which keeps a
+chevron the same size in a row that shrank its label.
 
 Not a font, and the reasoning is on record so it is not re-derived: ntk's
 FontManager does take font bytes, and glyphs composite through a solid source

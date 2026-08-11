@@ -187,6 +187,112 @@ export const TEXT_LAYOUT_PROPS = new Set([
  */
 export const TEXT_PAINT_PROPS = new Set(['textRendering']);
 
+/**
+ * The text properties that **inherit** — the ones a node hands down to
+ * everything drawing text inside it, so `<box style={{ color: theme.dim }}>`
+ * dims the labels under it the way it would in CSS.
+ *
+ * This is CSS's inherited set narrowed to what a *descendant* can act on: the
+ * face, the size, the ink and the glyph rounding. `textAlign`, `lineHeight`,
+ * `textWrap` and `textBoxTrim` stay out even though CSS inherits the first
+ * two — here they are read by the node that owns the **box** the text flows
+ * in, and a box is not something a descendant has. A `<box>` that wants its
+ * children aligned says so in the styles it gives them.
+ */
+export const INHERITED_TEXT_PROPS = new Set([
+  'fontFamily',
+  'fontSize',
+  'fontWeight',
+  'fontStyle',
+  'fontVariationSettings',
+  'textRendering',
+  'color',
+]);
+
+/**
+ * The text props that do **not** inherit — `TEXT_LAYOUT_PROPS` minus
+ * `INHERITED_TEXT_PROPS`. They shape the box a node's own text flows in, so
+ * no cascade can bring one in from above and the node that owns them is the
+ * only one that has to react.
+ */
+export const LOCAL_TEXT_PROPS = new Set(
+  [...TEXT_LAYOUT_PROPS].filter((key) => !INHERITED_TEXT_PROPS.has(key)),
+);
+
+/** Did anything that shapes this node's own text box change? */
+export function localTextStyleChanged(style, before) {
+  if (style === before) return false;
+  for (const key of LOCAL_TEXT_PROPS) {
+    if (style[key] !== before[key]) return true;
+  }
+  return false;
+}
+
+/** Did anything a descendant inherits change between two style bags? The
+ * gate on re-resolving a subtree, so a commit that moved `padding` walks
+ * nothing. */
+export function inheritedTextChanged(style, before) {
+  if (style === before) return false;
+  for (const key of INHERITED_TEXT_PROPS) {
+    if (key === 'fontVariationSettings') {
+      if (!axesEqual(style[key], before[key])) return true;
+    } else if (style[key] !== before[key]) return true;
+  }
+  return false;
+}
+
+/** What a change in resolved text style costs the node that draws with it:
+ * a glyph may have moved. */
+export const TEXT_REMEASURE = 2;
+/** …or only the ink or the rounding did, so the box cannot have changed. */
+export const TEXT_REPAINT = 1;
+
+/**
+ * Compare two **resolved** text styles (`textStyleFrom`'s shape, which is
+ * ntk's) and price the difference.
+ *
+ * The split is what keeps a colour cascade off the layout path: `color` and
+ * `textRendering` ride on the spans inside a cached layout, so the layout
+ * still has to go — but neither moves a glyph, so nothing needs measuring
+ * again. Conflating the two is why `:hover { color }` used to be able to
+ * cost a full layout pass per pointer move.
+ */
+export function resolvedTextDelta(a, b) {
+  if (a === b) return 0;
+  if (
+    a.family !== b.family ||
+    a.size !== b.size ||
+    a.weight !== b.weight ||
+    a.style !== b.style ||
+    !axesEqual(a.variations, b.variations)
+  ) {
+    return TEXT_REMEASURE;
+  }
+  if (a.color !== b.color || a.textRendering !== b.textRendering) {
+    return TEXT_REPAINT;
+  }
+  return 0;
+}
+
+/**
+ * Every text layout prop is a scalar and compares by value, except the one
+ * that is a bag of axis coordinates. `fontVariationSettings` is written as
+ * an object literal in a render, so a fresh one arrives on every commit and
+ * `!==` would call it a change every time — re-shaping the paragraph and
+ * re-rasterizing its glyphs to arrive at the same pixels. Small and flat, so
+ * comparing it is cheaper than believing it.
+ */
+export function axesEqual(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
 export const isLayoutProp = (name) =>
   Object.prototype.hasOwnProperty.call(LAYOUT_APPLIERS, name);
 export const isPaintProp = (name) => PAINT_PROPS.has(name);
@@ -195,12 +301,25 @@ export const isEventProp = (name) => /^on[A-Z]/.test(name);
 /**
  * State blocks, lowest precedence first. These are *node* states, not
  * selectors: each one is something the node itself knows about, so
- * resolving them needs no cascade, no specificity and no tree walk.
- * Anything relational (`:hover > child`, `:focus-within`, `:nth-child`)
- * stays in React, where composition already answers it.
+ * resolving them needs no specificity and no matching. Anything relational
+ * — `:hover > child`, a sibling selector, `:nth-child` — stays in React,
+ * where composition already answers it.
+ *
+ * The two that read as relational are not. `:hover` and `:active` mark the
+ * whole ancestor chain because the node the pointer actually landed on is
+ * whatever the control happens to be built out of, and `:focus-within` is
+ * the same fact about the focus path — each of them is still "something
+ * true of this node", diffed over a path the event manager has already
+ * computed. What a child does about an ancestor's state is inheritance
+ * rather than a selector: a `:hover` block that sets `color` reaches the
+ * labels inside, the way it does in CSS.
  */
 export const STATE_KEYS = [
   ':hover',
+  // Focus is on this node or inside it — CSS's `:focus-within`. Below
+  // `:focus` on purpose: it is the broader fact, so a node that is itself
+  // focused should be able to say something narrower and win.
+  ':focus-within',
   ':focus',
   // Focus that came from the keyboard rather than from a press — CSS's
   // `:focus-visible`, and for the same reason: a ring on every click is
