@@ -2,8 +2,8 @@
 
 - [elements.md](elements.md) — the host elements: `<window>`, `<popup>`,
   `<box>`, `<text>`, `<textinput>`, `<textarea>`, `<image>`, `<canvas>`,
-  and the rich-content wrappers `<markdown>`, `<html>`, `<svg>`, `<tex>`,
-  their props and refs.
+  `<foreign>`, and the rich-content wrappers `<markdown>`, `<html>`,
+  `<svg>`, `<tex>`, their props and refs.
 - [styling.md](styling.md) — the `style` prop: layout and paint properties,
   `:hover`/`:focus`/`:active`/`:disabled` blocks, transitions, theme tokens,
   window size queries, `createStyles`.
@@ -48,6 +48,10 @@
 - [extending.md](extending.md) — `registerElement()` and the subpath
   exports: adding a host element from outside the package, the node
   contract, and the two definition fields that fail far from their cause.
+- [embedding.md](embedding.md) — `<foreign>`: another application's window
+  inside yours. XEmbed and the plain-reparent path most clients actually
+  want, why unmount hands the window back rather than destroying it, and
+  the rule that keeps an app's chords from being swallowed by the client.
 - [testing.md](testing.md) — `react-x11/test`: render, query, drive and
   assert on real pixels, against a real X server in your test process. No
   display, no xvfb.

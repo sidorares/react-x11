@@ -301,15 +301,16 @@ how the element is built — which is what `<textinput onKeyDown>` has always
 been able to do, and is the reason to implement behaviour here rather than in
 a React component wrapping the element.
 
-| method                   | when                                                                                                                         |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `defaultKeyDown(ev)`     | a key, delivered to the focused node. `ev.keysym` is the `XK_*` constant; `codepoint >= 0x20` is the test for "this is text" |
-| `defaultMouseDown(ev)`   | a press. Place a caret, grab a handle; `ev.capturePointer()` to keep the rest of the gesture                                 |
-| `defaultMouseDrag(ev)`   | motion while _this_ element holds the press — including outside its box, which `onMouseMove` does not give you               |
-| `defaultMouseUp(ev)`     | that press was released                                                                                                      |
-| `defaultContextMenu(ev)` | right-click, after the press: open your own menu. Separate so suppressing it keeps the caret placement                       |
-| `defaultFocus()`         | this element became the focused node (or its window got the X focus back): start the caret blinking                          |
-| `defaultBlur()`          | focus left, or the window lost it: stop it                                                                                   |
+| method                   | when                                                                                                                                                                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaultKeyDown(ev)`     | a key, delivered to the focused node. `ev.keysym` is the `XK_*` constant; `codepoint >= 0x20` is the test for "this is text"                                                                                                |
+| `defaultKeyUp(ev)`       | that key was released. Rare — nothing in core needs it — and there for an element that answers the whole keystroke rather than the press, such as `<foreign>` forwarding into an embedded client                            |
+| `defaultMouseDown(ev)`   | a press. Place a caret, grab a handle; `ev.capturePointer()` to keep the rest of the gesture                                                                                                                                |
+| `defaultMouseDrag(ev)`   | motion while _this_ element holds the press — including outside its box, which `onMouseMove` does not give you                                                                                                              |
+| `defaultMouseUp(ev)`     | that press was released                                                                                                                                                                                                     |
+| `defaultContextMenu(ev)` | right-click, after the press: open your own menu. Separate so suppressing it keeps the caret placement                                                                                                                      |
+| `defaultFocus(info)`     | this element became the focused node (or its window got the X focus back): start the caret blinking. `info` is `{ reason, backwards }` — `'key'` with a direction is a Tab, which is the only thing that has ever needed it |
+| `defaultBlur()`          | focus left, or the window lost it: stop it                                                                                                                                                                                  |
 
 ```js
 import { Node, CARET_BLINK_MS } from 'react-x11/node';
@@ -453,12 +454,29 @@ rather than a reason to opt out.
 
 `drawn: false` is for a node backed by its own child X window rather than
 painted into its parent — a GL surface, an XEMBED socket, a video overlay.
-`GlAreaNode` (`src/glnodes.js`) is the worked example: it holds no paint
-code, and the owning `WindowNode` realizes it in the commit phase
-(`_realizeGlAreas`) so the child window names its real parent from the
-start. Read those two together before writing a third one; the ordering
-constraint — no X calls in the render phase, because the render phase is
-discardable — is the part that is easy to get wrong.
+There are two worked examples, and they are worth reading in this order.
+
+`GlAreaNode` (`src/glnodes.js`) is the simple one: it holds no paint code,
+and the owning `WindowNode` realizes it in the commit phase
+(`_realizeChildWindows`) so the child window names its real parent from the
+start. The ordering constraint — no X calls in the render phase, because the
+render phase is discardable — is the part that is easy to get wrong.
+
+`ForeignNode` (`src/foreignnodes.js`) is the same shape with the stakes
+raised, and it is the one to read if your element touches a resource you did
+not create. Three things it has to do that a GL surface does not:
+
+- **Nothing in the render phase, for a sharper reason.** A `CreateWindow`
+  from a discarded render leaks a server resource; a `ReparentWindow` from
+  one has moved another application's window for real.
+- **Teardown is synchronous.** `WindowNode.destroySubtree` destroys its own
+  X window in the same turn your node's does, and `DestroyWindow` takes every
+  inferior with it — so a release that waits for a round trip releases a
+  window that no longer exists. Compute what you would have asked for; the
+  requests are ordered on the connection, which is what makes "hand it back,
+  _then_ destroy the container" a guarantee.
+- **Give it back, do not destroy it.** The element's own test file asserts
+  that first, because it is the failure this shape is most able to cause.
 
 ## The subpath exports
 

@@ -40,6 +40,7 @@
     "examples:icons": "tsx examples/icons.jsx",
     "examples:raster-gate": "tsx examples/raster-gate.jsx",
     "examples:stress": "tsx examples/stress/index.jsx",
+    "examples:foreign": "tsx examples/foreign.jsx",
     "examples:gl": "tsx examples/gl.jsx",
     "examples:three": "tsx examples/three.jsx",
     "examples:shader": "tsx examples/shader.jsx",
