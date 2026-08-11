@@ -80,6 +80,30 @@ destroyed.
 `onClientGone` fires when the client is destroyed by its own process, or
 reparented away by someone else. Nothing further is sent to a dead id.
 
+### Letting go really means letting go
+
+A released client is a top-level window again, and **a running window manager
+will manage it** — frame it, put it in the taskbar, place it wherever its
+policy says. That is the right outcome for an unmount (`examples/foreign.jsx`
+is built on it: detach the pane and the terminal is simply a terminal window
+on the desktop), and it is a trap for one thing:
+
+> **Do not hand a client from one `<foreign>` to another by unmounting the
+> first and mounting the second with the same `windowId`.**
+
+The window is parked at the root for the moment in between, which is long
+enough to be offered to the window manager. The WM's `ReparentWindow` into a
+frame of its own then arrives _after_ the second pane has taken the client,
+undoes it, and the second pane reports `onClientGone` — for a client that is
+alive and now framed on the desktop. It is a race with another process, so it
+does not always happen, which is worse than if it always did.
+
+Change `windowId` on **one** node instead. That path releases and re-embeds
+in order and is tested; the client is only ever at the root while nothing
+else wants it. (Re-embedding a window the WM has already framed also works —
+the reparent pulls it out and the WM unmanages it — the hazard is only the
+moment right after a release.)
+
 ## Layout and stacking
 
 The rect comes from yoga like any other child, and every change moves the
@@ -192,8 +216,9 @@ server rather than trusting reported geometry — the same problem
 
 ## Example
 
-`examples/foreign.jsx` spawns a program into a pane and shows the release
-path — run it with a program of your choice:
+`examples/foreign.jsx` spawns a program into a pane and then lets go of it,
+which is the whole element in one click: the pane disappears and the terminal
+is still there, framed by the window manager, as if it had started on its own.
 
 ```sh
 npm run examples:foreign            # xterm, if you have it

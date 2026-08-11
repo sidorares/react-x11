@@ -175,7 +175,20 @@ export class ForeignNode extends Node {
     // The container id is what a program is *given* — `xterm -into ID` — so
     // it has to be reachable before there is anything in it, and it is the
     // only way the adopt path can ever start.
-    this.props.onReady?.({ windowId: socket.window.id, node: this });
+    //
+    // On a microtask, because this runs in the **commit phase**: a handler
+    // that sets state — which is what "start the program and show its
+    // status" is — would be setting it on a component React has not finished
+    // mounting, and React says so. The microtask lands after the whole
+    // synchronous commit and still before any reply from the server, which
+    // is the only ordering the caller can observe.
+    const onReady = this.props.onReady;
+    if (onReady) {
+      queueMicrotask(() => {
+        if (this._token !== token || this.destroyed) return;
+        onReady({ windowId: socket.window.id, node: this });
+      });
+    }
   }
 
   _onEmbedded(info) {

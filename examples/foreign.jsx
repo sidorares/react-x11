@@ -1,16 +1,19 @@
 // <foreign>: another application's window, inside this one.
 //
-// A pane that spawns a program into itself and shows what happened to it.
-// Two paths in one demo, because they are the two ways an embed ever starts:
+// A pane that spawns a program into itself, lets go of it, and takes it back.
+// Both ways an embed ever starts are in here:
 //
 //   - **adopt** (no `windowId`): the pane's own X window id is handed to the
 //     program on its command line, and whatever it puts inside is taken.
 //     `xterm -into WID` and `mpv --wid=WID` work this way, and so does
 //     anything else that has to be *given* a window before it makes one.
-//   - **embed** (`windowId={id}`): a window that already exists — one found
-//     by a window manager, a picker, or a previous pane letting go of it.
-//     Closing the pane here re-embeds the same client in the other slot,
-//     which is the whole point: the window is not ours, and it survives.
+//   - **embed** (`windowId={id}`): a window that already exists — found by a
+//     window manager, a picker, or a previous run.
+//
+// **Detach** is the part worth watching. It unmounts the pane, and the
+// terminal does not disappear: it becomes an ordinary application window on
+// the desktop, frame and all, because it was never this app's to destroy.
+// That is the whole promise of the element, visible in one click.
 //
 // Run with: npm run examples:foreign     (needs an X server and a program
 //                                         that accepts a window id)
@@ -44,7 +47,7 @@ function commandFor(windowId) {
  * id, and it fires before anything is embedded — which has to be true,
  * because the program cannot be started without it.
  */
-function SpawningPane({ onStatus, onWindow }) {
+function SpawningPane({ onStatus }) {
   const started = useRef(false);
 
   const start = useCallback(
@@ -67,18 +70,14 @@ function SpawningPane({ onStatus, onWindow }) {
     <foreign
       style={{ flexGrow: 1, backgroundColor: '#101014' }}
       onReady={start}
-      onEmbedded={({ id, xembed, version }) => {
-        onWindow(id);
+      onEmbedded={({ id, xembed, version }) =>
         onStatus(
           xembed
             ? `embedded ${id} — speaks XEmbed v${version}`
             : `embedded ${id} — plain reparenting, no _XEMBED_INFO`,
-        );
-      }}
-      onClientGone={() => {
-        onWindow(null);
-        onStatus('the client went away');
-      }}
+        )
+      }
+      onClientGone={() => onStatus('the client went away')}
       onRequestFocus={() => onStatus('the client asked for the focus')}
       onError={(err) => onStatus(`embed failed: ${err.message}`)}
     />
@@ -87,9 +86,7 @@ function SpawningPane({ onStatus, onWindow }) {
 
 function App() {
   const [status, setStatus] = useState(`waiting — ${COMMAND}`);
-  // the id the pane is holding, so the second pane can take it over
-  const [windowId, setWindowId] = useState(null);
-  const [moved, setMoved] = useState(false);
+  const [attached, setAttached] = useState(true);
 
   return (
     <window
@@ -116,44 +113,35 @@ function App() {
       >
         <box style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <text style={{ fontSize: 13, flexGrow: 1 }}>{status}</text>
-          <Button disabled={!windowId} onPress={() => setMoved((m) => !m)}>
-            {moved ? 'Move back' : 'Move to the other pane'}
+          <Button
+            disabled={!attached}
+            onPress={() => {
+              setAttached(false);
+              setStatus('detached — it is a window of its own now');
+            }}
+          >
+            Detach
           </Button>
         </box>
 
-        {/*
-          The same client, in one pane or the other. Unmounting the pane it
-          is in hands the window back to the root rather than destroying it,
-          which is what lets the other pane pick it up by id — and what would
-          happen to a real application if this app simply quit.
-        */}
-        {moved && windowId ? (
-          <box style={{ flexDirection: 'row', flexGrow: 1, gap: 10 }}>
-            <box
-              style={{
-                flexGrow: 1,
-                borderWidth: 1,
-                borderColor: '$border',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <text style={{ fontSize: 12, color: '$dim' }}>empty</text>
-            </box>
-            <foreign
-              windowId={windowId}
-              style={{ flexGrow: 1, backgroundColor: '#101014' }}
-              onEmbedded={({ id }) =>
-                setStatus(`re-embedded ${id} on the right`)
-              }
-              onClientGone={() => {
-                setWindowId(null);
-                setStatus('the client went away');
-              }}
-            />
-          </box>
+        {attached ? (
+          <SpawningPane onStatus={setStatus} />
         ) : (
-          <SpawningPane onStatus={setStatus} onWindow={setWindowId} />
+          <box
+            style={{
+              flexGrow: 1,
+              borderWidth: 1,
+              borderColor: '$border',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 20,
+            }}
+          >
+            <text style={{ fontSize: 12, color: '$dim', textAlign: 'center' }}>
+              The pane is gone and the terminal is still running — look for it
+              on the desktop, with a window manager frame of its own.
+            </text>
+          </box>
         )}
 
         <text style={{ fontSize: 11, color: '$dim' }}>

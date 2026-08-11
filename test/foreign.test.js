@@ -695,7 +695,9 @@ test('<foreign> adopts a window put inside it, and hands out the id to put it in
       ),
       x11Root,
     );
-    assert.equal(ready.length, 1, 'the container id is offered immediately');
+    // on a microtask, not inside the commit — a handler that sets state must
+    // not be setting it on a component React has not finished mounting
+    await until(app, () => ready.length === 1, 'the container id');
     await settle(app);
 
     // what `xterm -into ID` does: create a window as a child of the id it
