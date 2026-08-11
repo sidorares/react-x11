@@ -7,7 +7,12 @@
  * contract in prose.
  */
 import type { Rect, NtkApp } from './types/nodes.js';
-import type { Style } from './types/style.js';
+import type {
+  FontStyle,
+  FontWeight,
+  Style,
+  TextRendering,
+} from './types/style.js';
 import type { KeyboardEvent, MouseEvent } from './types/events.js';
 
 /** ntk's 2d context. Typed loosely — it is ntk's API, not ours. */
@@ -33,6 +38,24 @@ export interface MeasureConstraints {
 export interface MeasuredSize {
   width: number;
   height: number;
+}
+
+/**
+ * A resolved text style — the base style `app.fonts.layout` takes, which is
+ * ntk's vocabulary rather than the style vocabulary: `family` for
+ * `fontFamily`, `variations` for `fontVariationSettings`.
+ */
+export interface TextStyle {
+  /** A CSS-style family list, as `fontFamily` is written. */
+  family: string;
+  size: number;
+  weight: FontWeight;
+  style: FontStyle;
+  /** A variable font's axes, `{ wght: 460 }` — undefined unless a style or
+   * the cascade above it named one. */
+  variations: Record<string, number> | undefined;
+  textRendering: TextRendering | undefined;
+  color: string;
 }
 
 /**
@@ -78,6 +101,16 @@ export declare class Node {
   readonly destroyed: boolean;
   /** Position and size within the owning window, valid after layout. */
   readonly abs: Rect;
+  /** `abs` inset by the border and the padding — where the content goes,
+   * and where every built-in draws. The insets come off the layout, which
+   * is where percentages and the per-side overrides have already been
+   * resolved, so this is not arithmetic to redo from `style`. */
+  contentBox(): Rect;
+  /** The text style this node resolves to, in the shape `app.fonts.layout`
+   * takes: the style's font properties over what the palette says text
+   * with none of its own is set in. An element that draws text inherits
+   * exactly what `<text>` inherits by asking. */
+  resolvedTextStyle(): TextStyle;
   /** The flattened `style` prop with the active state blocks overlaid.
    * Everything that paints or lays out reads this, never `props`. */
   readonly style: Style;

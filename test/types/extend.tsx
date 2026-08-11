@@ -19,7 +19,8 @@ import {
   intrinsicSize,
   CARET_BLINK_MS,
 } from '../../src/node.js';
-import type { MeasureConstraints } from '../../src/node.js';
+import type { MeasureConstraints, TextStyle } from '../../src/node.js';
+import type { Rect } from '../../src/types/nodes.js';
 import { XK_ESCAPE, XK_TAB } from '../../src/keysyms.js';
 // the synthetic events, not the DOM's same-named globals
 import type { KeyboardEvent, MouseEvent } from '../../src/types/events.js';
@@ -78,6 +79,21 @@ class SparklineNode extends Node {
     // node collects, and `invalidate` is on every node, not just that one
     this.invalidate(false, this.abs, 'content');
     this.invalidate(false, this, 'content');
+  }
+
+  // The two accessors a drawing element reads (#254): where its content
+  // goes, and the text style the cascade resolved for it — the second in
+  // ntk's spelling, ready for `app.fonts.layout`.
+  label(): string {
+    const box: Rect = this.contentBox();
+    const type: TextStyle = this.resolvedTextStyle();
+    const _family: string = type.family;
+    const _size: number = type.size;
+    const _ink: string = type.color;
+    void box.width;
+    void _family;
+    void _size;
+    return _ink;
   }
 
   // The focus half of the same surface (#252): an element takes focus as a
