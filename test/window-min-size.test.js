@@ -457,3 +457,33 @@ test('a window that pins itself re-pins at the size it grew to', async () => {
   assert.ok(pinnedAt.length > 0, 'the pin was re-sent after the window grew');
   await root.unmount();
 });
+
+test('a row of containers is floored by the sum of what they hold', async () => {
+  // The pass that measures the floor offers nothing, so a container with no
+  // size of its own comes out at nothing and the ones after it are packed
+  // in behind it. Recovering what each holds without moving the rest along
+  // would measure the two boxes below as if they overlapped.
+  const { wnd, root } = await mount(
+    h(
+      'window',
+      { minWidth: 'auto' },
+      h(
+        'box',
+        { style: { flexDirection: 'row', gap: 10 } },
+        h(
+          'box',
+          { key: 'a', style: { padding: 4 } },
+          box({ width: 90, height: 20 }, 'inner'),
+        ),
+        h(
+          'box',
+          { key: 'b', style: { padding: 4 } },
+          box({ width: 70, height: 20 }, 'inner'),
+        ),
+      ),
+    ),
+  );
+  // (90 + 8) + 10 + (70 + 8)
+  assert.strictEqual(hintsOf(wnd).minWidth, 186);
+  await root.unmount();
+});

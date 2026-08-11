@@ -743,6 +743,27 @@ function assertWindowSize(props, kind) {
 }
 
 /**
+ * Record how tall every leaf in this subtree currently is, keyed by node.
+ *
+ * A leaf's height at a given width is not something it can give: a
+ * paragraph wrapped to 300px is as tall as it is. But `align-items` defaults
+ * to `stretch`, so a leaf inside a `row` takes the row's height — and in a
+ * pass run with no height on offer the row came out at nothing, taking its
+ * leaves down with it. A container in that position is recovered by looking
+ * inside it; a leaf has nothing inside, which is what this is for.
+ */
+function captureLeafHeights(node, out) {
+  let leaf = true;
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow) continue;
+    if (child.style.display === 'none') continue;
+    if (child.style.position !== 'absolute') leaf = false;
+    captureLeafHeights(child, out);
+  }
+  if (leaf) out.set(node, node.yoga.getComputedHeight());
+}
+
+/**
  * Whether this node's laid-out size is already the answer for `axis`, so
  * that what is inside it stops counting towards a floor.
  *
@@ -795,8 +816,13 @@ function boundsItsOwnContent(node, axis, axisIsMain) {
  * Out-of-flow children are skipped, as they are in CSS: an absolutely
  * positioned node contributes nothing to what contains it, and a
  * `display: 'none'` one is not there at all.
+ *
+ * `intrinsic` carries what the leaves measured to before the pass being read
+ * squashed them — see `_measureMinimum`, which is the only caller that needs
+ * it. A container that came out at nothing is recovered by looking inside
+ * it; a leaf has nothing inside, so it has to be remembered.
  */
-function contentSpan(node, axis) {
+function contentSpan(node, axis, intrinsic) {
   const yoga = node.yoga;
   const horizontal = axis === 'width';
   const own = horizontal ? yoga.getComputedWidth() : yoga.getComputedHeight();
@@ -808,25 +834,50 @@ function contentSpan(node, axis) {
   const axisIsMain = rowFirst === horizontal;
   let start = Infinity;
   let end = -Infinity;
+  // What the children after this one were laid out too early by. A node the
+  // pass squashed is one its siblings were packed in behind, so recovering
+  // its extent without moving them along would lose exactly what was
+  // recovered — the span would come out the same as before.
+  let shift = 0;
   for (const child of node.children) {
     // the same set that joins the flex tree: a nested <window> is laid out
     // by itself, and a <text> span has no box of its own
     if (!child.yoga || child.isWindow) continue;
     if (child.style.position === 'absolute') continue;
     if (child.style.display === 'none') continue;
-    const at = horizontal
-      ? child.yoga.getComputedLeft()
-      : child.yoga.getComputedTop();
-    let extent = horizontal
+    const at =
+      (horizontal
+        ? child.yoga.getComputedLeft()
+        : child.yoga.getComputedTop()) + shift;
+    const laidOut = horizontal
       ? child.yoga.getComputedWidth()
       : child.yoga.getComputedHeight();
+    let extent = laidOut;
     if (!boundsItsOwnContent(child, axis, axisIsMain)) {
-      extent = Math.max(extent, contentSpan(child, axis));
+      extent = Math.max(extent, contentSpan(child, axis, intrinsic));
     }
+    // Only along the axis the children are packed on: on the other one they
+    // all start from the same edge, so nothing follows anything.
+    if (axisIsMain) shift += extent - laidOut;
     start = Math.min(start, at);
     end = Math.max(end, at + extent);
   }
-  if (start === Infinity) return own;
+  if (start === Infinity) {
+    // A leaf: nothing inside to look at, and what the pass did to it may
+    // have been a stretch rather than a measurement. So it is asked again —
+    // across, for the size its content cannot go below, which for a
+    // paragraph is its longest word; down, for what it measured before the
+    // collapse, since a height at a settled width is not a leaf's to give.
+    const measured = horizontal
+      ? node._measureFn?.(
+          0,
+          Yoga.MEASURE_MODE_AT_MOST,
+          undefined,
+          Yoga.MEASURE_MODE_UNDEFINED,
+        )?.width
+      : intrinsic?.get(node);
+    return Math.max(own, measured ?? 0);
+  }
   const edges =
     yoga.getComputedPadding(startEdge) +
     yoga.getComputedPadding(endEdge) +
@@ -1317,6 +1368,23 @@ export class Node {
 
   _joinsYoga(child) {
     return Boolean(this.yoga && child.yoga && !child.isWindow);
+  }
+
+  /**
+   * Give this node's box a measure function, keeping a reference that can be
+   * asked again later.
+   *
+   * A leaf's content is recorded nowhere but in its measure function, and
+   * the size yoga keeps for it is not always what that function said:
+   * `align-items` defaults to `stretch`, so in a pass run with no room on
+   * offer — which is how a content floor is measured, see `contentSpan` —
+   * the cross size a leaf ends up at is the container's, not its own. A
+   * container in that position is recovered by looking inside it. A leaf
+   * has nothing inside, so it is asked again instead.
+   */
+  _setMeasureFunc(measure) {
+    this._measureFn = measure;
+    this.yoga.setMeasureFunc(measure);
   }
 
   appendChild(child) {
@@ -2310,7 +2378,7 @@ export class TextNode extends Node {
     this.isSpan = span;
     this._layouts = new Map();
     if (this.yoga) {
-      this.yoga.setMeasureFunc((width, widthMode) => {
+      this._setMeasureFunc((width, widthMode) => {
         const maxWidth =
           widthMode === Yoga.MEASURE_MODE_UNDEFINED ? Infinity : width;
         const layout = this._layoutFor(this._wrapWidth(maxWidth));
@@ -2536,7 +2604,7 @@ export class ImageNode extends Node {
     super('image', props, app);
     this.image = null;
     this._loadToken = 0;
-    this.yoga.setMeasureFunc(
+    this._setMeasureFunc(
       intrinsicMeasure(() => ({
         width: this.image?.width ?? 0,
         height: this.image?.height ?? 0,
@@ -3358,7 +3426,7 @@ export class TextInputNode extends Node {
     this._undoRun = null;
     // the open built-in edit menu, if any (see _openEditMenu)
     this._editMenu = null;
-    this.yoga.setMeasureFunc((width, widthMode) => {
+    this._setMeasureFunc((width, widthMode) => {
       const preferred = 150;
       const w =
         widthMode === Yoga.MEASURE_MODE_UNDEFINED
@@ -4488,7 +4556,7 @@ export class TextAreaNode extends TextInputNode {
     super(props, app, 'textarea');
     this._scrollY = 0;
     this._goalX = null;
-    this.yoga.setMeasureFunc((width, widthMode) => {
+    this._setMeasureFunc((width, widthMode) => {
       const preferred = 220;
       const w =
         widthMode === Yoga.MEASURE_MODE_UNDEFINED
@@ -4825,10 +4893,19 @@ export class WindowNode extends Scrollable(Node) {
     yoga.setHeight(undefined);
     if (axis === 'width') {
       yoga.calculateLayout(0, undefined, Yoga.DIRECTION_LTR);
-    } else {
-      yoga.calculateLayout(forWidth, 0, Yoga.DIRECTION_LTR);
+      return Math.ceil(contentSpan(this, axis));
     }
-    return Math.ceil(contentSpan(this, axis));
+    // Height takes two passes. The first is the tree at its real width with
+    // no bound on the height, which is where every leaf reports the height
+    // it actually needs there — a wrapped paragraph's is settled by the
+    // width, and no leaf can give any of it back. The second is the one
+    // that collapses, and it squashes a leaf that a `row` stretches: those
+    // are the ones the map above puts back.
+    yoga.calculateLayout(forWidth, undefined, Yoga.DIRECTION_LTR);
+    const intrinsic = new Map();
+    captureLeafHeights(this, intrinsic);
+    yoga.calculateLayout(forWidth, 0, Yoga.DIRECTION_LTR);
+    return Math.ceil(contentSpan(this, axis, intrinsic));
   }
 
   /**
