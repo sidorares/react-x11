@@ -4,7 +4,7 @@
  * and painted into the owning window. See docs/elements.md.
  */
 
-import type { Ref, ReactNode, Key } from 'react';
+import type { Ref, RefObject, ReactNode, Key } from 'react';
 import type { Color, Cursor, StyleProp } from './style.js';
 import type {
   DrawnNode,
@@ -12,6 +12,7 @@ import type {
   ScrollableNode,
   TextInputNode,
 } from './nodes.js';
+import type { AnchorOptions } from './components.js';
 import type {
   ChangeEvent,
   EventHandlers,
@@ -405,6 +406,40 @@ export interface PopupProps extends WindowProps {
   overrideRedirect?: boolean;
   /** A press landed outside the popup: close it. */
   onDismiss?: (ev: MouseEvent<DrawnNode>) => void;
+  /**
+   * Hang this popup off a node — `anchorRect`'s options plus the node to
+   * measure, and the popup works out its own position from them, ignoring
+   * `x`/`y`.
+   *
+   * What this does that computing a rect in the application cannot: a popup
+   * with an `'auto'` size only knows how big it is *inside* `realize()`,
+   * after the content is measured and before `CreateWindow` — and which side
+   * it flips to and how far it is pulled back from a screen edge are both
+   * functions of that size. So an anchored popup is born the right size in
+   * the right place, and keeps up afterwards with everything that can move
+   * either: the anchor's own layout, an ancestor scrolling, the owner window
+   * being dragged, its own content growing.
+   *
+   * `at` names a rect **inside** the node — a caret, a table cell — so a
+   * completion list follows the line being typed on rather than the editor.
+   * When the anchor scrolls out of view the popup unmaps until it comes
+   * back, since there is no position that points at something invisible;
+   * an app that would rather *close* it does the placement itself with
+   * {@link useAnchorTracking} and its `onOutOfView`.
+   */
+  anchor?: PopupAnchor;
+}
+
+/** A node to anchor to: a ref (the usual — refs attach after the commit
+ *  that renders them) or the node itself. */
+export type AnchorTarget = DrawnNode | RefObject<DrawnNode | null> | null;
+
+export interface PopupAnchor extends Omit<AnchorOptions, 'alignTo'> {
+  /** The node this popup hangs off. */
+  to: AnchorTarget;
+  /** Takes the alignment axis from another node — see
+   *  {@link AnchorOptions.alignTo}. */
+  alignTo?: AnchorTarget;
 }
 
 // --- drawn elements --------------------------------------------------------

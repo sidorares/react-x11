@@ -7,8 +7,8 @@ import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
 import { Icon } from './Icon.js';
 import { changeEvent } from './change.js';
 import {
+  anchorArea,
   measureLabel,
-  screenOf,
   useAnchor,
   useAnchorTracking,
   useDismissOnWindowBlur,
@@ -95,8 +95,8 @@ function menuWidth(node, options, value, scrolls, fontSize) {
     ITEM_PAD_RIGHT +
     (scrolls ? SCROLLBAR_WIDTH : 0);
   const width = Math.max(node.abs.width, Math.ceil(widest) + chrome);
-  const screen = screenOf(node);
-  return screen ? Math.min(width, screen.pixel_width) : width;
+  const area = anchorArea(node);
+  return area ? Math.min(width, area.width) : width;
 }
 
 function Option({

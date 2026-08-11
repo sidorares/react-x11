@@ -53,6 +53,7 @@ import {
   watchCompositing,
 } from './compositing.js';
 import { availableArea } from './screens.js';
+import { anchorOffscreen, anchorRect } from './anchor.js';
 import { baseTheme } from './palette.js';
 import { callHandler } from './errors.js';
 import {
@@ -880,9 +881,10 @@ function contentSpan(node, axis, intrinsic) {
  * closure forever. Handlers are read from current props at dispatch time
  * instead, so they can never go stale. `children` is the tree's,
  * `transientFor` holds a React ref that only the commit phase can resolve
- * (WindowNode._applyTransientFor), and `transparent` names a visual that has
- * to be looked up on the connection (WindowNode._argbAttributes) rather than
- * a value ntk takes.
+ * (WindowNode._applyTransientFor), `anchor` is a position `realize()` works
+ * out from the size it just measured (WindowNode._anchorPlacement), and
+ * `transparent` names a visual that has to be looked up on the connection
+ * (WindowNode._argbAttributes) rather than a value ntk takes.
  */
 export function windowAttributes(props) {
   const attributes = {};
@@ -890,6 +892,7 @@ export function windowAttributes(props) {
   for (const key of Object.keys(props)) {
     if (key === 'children' || key === 'style' || isEventProp(key)) continue;
     if (key === 'transientFor' || key === 'transparent') continue;
+    if (key === 'anchor') continue;
     if ((key === 'width' || key === 'height') && isAutoSize(props[key])) {
       continue;
     }
@@ -2772,11 +2775,17 @@ export class Node {
    * them) for the server to then discard. Checking the window alone missed
    * that: a node can sit well inside the window and still be entirely past
    * a scrolling ancestor whose own bounds are the real limit.
+   *
+   * `rect` asks the same question about part of the node instead — window
+   * coordinates, the node's own rect by default. What wants it is anchoring
+   * (`src/anchor.js`): a popup pointed at a caret has to know when *the
+   * caret* has scrolled out of the editor, which happens many screens before
+   * the editor itself goes anywhere.
    */
-  _offscreen() {
+  _offscreen(rect = this.abs) {
     const window = this.root?.abs;
     if (!window) return false;
-    const { x, y, width, height } = this.abs;
+    const { x, y, width, height } = rect;
     if (
       x + width <= 0 ||
       y + height <= 0 ||
@@ -2786,7 +2795,7 @@ export class Node {
       return true;
     }
     for (let n = this.parent; n && n !== this.root; n = n.parent) {
-      if (n.clipsChildren() && !rectsOverlap(this.abs, n.abs)) return true;
+      if (n.clipsChildren() && !rectsOverlap(rect, n.abs)) return true;
     }
     return false;
   }
@@ -5926,6 +5935,130 @@ export class WindowNode extends Scrollable(Node) {
     } else {
       wnd.resize?.(next.width, next.height);
     }
+    // A window that grew is a window whose *placement* moved with it, and
+    // the anchored ones have to be told: a completion list that gains a row
+    // near the bottom of the screen is one that now flips above the caret.
+    // From `next` rather than from the window, which is still the size the
+    // server last confirmed.
+    this._followAnchor({ width: next.width, height: next.height });
+  }
+
+  // --- anchoring ----------------------------------------------------------
+  //
+  // A `<popup anchor={{to: ref, …}}>` works out its own position, because it
+  // is the only thing that can: with `width="auto"` the size is settled
+  // inside `realize()`, between `_measure()` and `CreateWindow`, which is
+  // after the last moment React could have computed a rect for it — and the
+  // placement *needs* the size, since which side it flips to and how far it
+  // is pulled back from an edge are both functions of how big it is.
+  //
+  // So the same order the natural size already established: measure, place,
+  // create. The popup is born the right size **and** in the right place,
+  // rather than mapped somewhere provisional and corrected a frame later.
+  // A widget that knows its own size has no such problem and stays on
+  // `useAnchor` / `useAnchorTracking`; both call the same functions
+  // (src/anchor.js), so the two agree by construction.
+
+  /** A `to`/`alignTo` in an `anchor` prop: a ref, or the node itself. */
+  _anchorTarget(target) {
+    if (target == null || typeof target !== 'object') return null;
+    const node = target.abs ? target : target.current;
+    return node?.abs ? node : null;
+  }
+
+  /** Where this window goes at `size`, or null when there is nothing to
+   *  anchor to yet — a ref whose node has not been laid out. */
+  _anchorPlacement(size) {
+    const anchor = this.props.anchor;
+    const node = this._anchorTarget(anchor?.to);
+    if (!node) return null;
+    return anchorRect(node, {
+      ...anchor,
+      alignTo: this._anchorTarget(anchor.alignTo) ?? undefined,
+      width: size.width,
+      height: size.height,
+    });
+  }
+
+  /**
+   * Keep an anchored window over the thing it points at: the trigger's own
+   * layout moving, an ancestor of it scrolling, the owner window being
+   * dragged, or this window's content changing size under it.
+   *
+   * The first three arrive through the *owner* window's `onAnchorChange`
+   * (`_watchAnchor`) — the same signal `useAnchorTracking` reads, since it
+   * is the same set of things that can move a trigger. The fourth is
+   * `_refit`, which knows the new size before the server does.
+   *
+   * **Out of view is not a position.** A popup is a real X window, not a
+   * web element its ancestors clip, so a caret that has scrolled out of the
+   * editor leaves a completion list floating over a document it no longer
+   * points into. There is no placement that fixes that, so the window is
+   * unmapped for as long as the anchor is gone and mapped again where it
+   * belongs when it comes back — the one answer the renderer can give on
+   * its own, since whether the popup should *close* is React state and
+   * therefore the application's. (An app that would rather close it keeps
+   * `useAnchorTracking`'s `onOutOfView`, which is exactly that seam.)
+   */
+  _followAnchor(size = this._requestedSize) {
+    if (this.destroyed || !this.window || !this.props.anchor) return;
+    const node = this._anchorTarget(this.props.anchor.to);
+    // A ref that has not attached yet counts as gone, and for the same
+    // reason: there is nowhere for the popup to be. Refs attach in the
+    // commit phase a popup realizes in, so one written *above* its own
+    // trigger in the JSX gets a frame of this — and waiting it out is
+    // better than a frame in the corner of the screen.
+    const lost = !node || anchorOffscreen(node, this.props.anchor.at);
+    if (lost !== Boolean(this._anchorLost)) {
+      this._anchorLost = lost;
+      // The grab goes with it and comes back with it. X releases a pointer
+      // grab whose window stops being viewable, so a menu that hid and
+      // reappeared would be one no press outside could dismiss — the
+      // `onDismiss` that reads as "click anywhere to close" would simply
+      // stop happening.
+      if (lost) {
+        if (this.props.grab) this.window.ungrabPointer?.();
+        this.window.unmap?.();
+      } else {
+        this._mapNow();
+        if (this.props.grab) this.window.grabPointer?.({}, () => {});
+      }
+    }
+    if (lost || !size) return;
+    const rect = this._anchorPlacement(size);
+    if (!rect) return;
+    if (this._placedAt?.x === rect.x && this._placedAt?.y === rect.y) return;
+    this._placedAt = { x: rect.x, y: rect.y };
+    if (typeof this.window.setState === 'function') {
+      this.window.setState({ x: rect.x, y: rect.y });
+    } else {
+      this.window.move?.(rect.x, rect.y);
+    }
+  }
+
+  /**
+   * Subscribe to whatever can move the anchor. On the **owner's** window,
+   * not on this one: what moves is the trigger, and this window's own
+   * layout passes say nothing about where it sits on screen.
+   */
+  _watchAnchor() {
+    this._unwatchAnchor();
+    if (!this.props.anchor) return;
+    // The anchor's own window where the ref has attached, and the window
+    // this popup was *written into* otherwise — which is the same one in
+    // every case that matters, and is what makes an unattached ref a
+    // one-frame wait rather than a popup nothing ever notifies again. The
+    // notification is only ever a prompt to re-measure, so subscribing to a
+    // window the anchor turns out not to be in costs a no-op.
+    const root =
+      this._anchorTarget(this.props.anchor.to)?.root ?? this.parent?.root;
+    if (!root?.onAnchorChange || root === this) return;
+    this._anchorWatch = root.onAnchorChange(() => this._followAnchor());
+  }
+
+  _unwatchAnchor() {
+    this._anchorWatch?.();
+    this._anchorWatch = null;
   }
 
   /** Create the real X11 window (commit phase only). Children windows are
@@ -5944,6 +6077,15 @@ export class WindowNode extends Scrollable(Node) {
     attributes.width = natural.width;
     attributes.height = natural.height;
     this._requestedSize = { width: natural.width, height: natural.height };
+    // And straight after it, for the same reason: the placement is a
+    // function of the size, so this is the first moment it can be worked
+    // out — and the last one before the window exists at a position.
+    const placed = this._anchorPlacement(natural);
+    if (placed) {
+      attributes.x = placed.x;
+      attributes.y = placed.y;
+      this._placedAt = { x: placed.x, y: placed.y };
+    }
     // A bound the content decides is a number by now, and the window manager
     // reads `WM_NORMAL_HINTS` when it frames the window — so it goes in with
     // the creation attributes rather than chasing the map with a second
@@ -6030,6 +6172,16 @@ export class WindowNode extends Scrollable(Node) {
     // only — a later `<window>` is not the launch (src/startup.js).
     this._topLevel = !parentWindow && !this.isPopup;
     if (this._topLevel) this.app._reactX11Startup?.decorate(wnd);
+    // Before the map for the same reason the properties above are: a popup
+    // whose anchor is already out of view — an editor scrolled between the
+    // keystroke that opened the completion list and the commit that
+    // realized it — should never be on screen at all, rather than appear
+    // and vanish.
+    if (this.props.anchor) {
+      this._watchAnchor();
+      const node = this._anchorTarget(this.props.anchor.to);
+      this._anchorLost = !node || anchorOffscreen(node, this.props.anchor.at);
+    }
     // Queued rather than mapped, when there is a commit to queue behind:
     // React hides a subtree only once it has inserted it (beginWindowMaps).
     if (inCommit) pendingMaps.add(this);
@@ -6050,6 +6202,9 @@ export class WindowNode extends Scrollable(Node) {
    */
   _mapNow() {
     if (this.destroyed || !this.window || this.hidden) return;
+    // An anchor that is not on screen is a popup that has nowhere to be
+    // (`_followAnchor`); it maps from there, when the anchor comes back.
+    if (this._anchorLost) return;
     this.window.map?.();
     if (this._topLevel) this.app._reactX11Startup?.mapped(this.window);
   }
@@ -6728,6 +6883,11 @@ export class WindowNode extends Scrollable(Node) {
     clearPendingFrame(this);
     this._unwatchCompositing?.();
     this._unwatchCompositing = null;
+    // Before the owner's next layout pass, which is this same commit: a
+    // popup that has gone still holds a subscription to the window it was
+    // anchored to, and answering that notification would configure a dead
+    // window.
+    this._unwatchAnchor();
     // out of the drag registries before the window goes: a drag routed to
     // a dead window would translate against a null _screenOrigin
     forgetTopLevel(this);
@@ -6798,8 +6958,14 @@ export class WindowNode extends Scrollable(Node) {
     const sizeChanged =
       canonicalSize(newProps.width) !== canonicalSize(before.width) ||
       canonicalSize(newProps.height) !== canonicalSize(before.height);
-    const geometryChanged =
-      sizeChanged || newProps.x !== before.x || newProps.y !== before.y;
+    // An anchored window's position is the anchor's business, not the
+    // app's: `x`/`y` are ignored while `anchor` is set (`_followAnchor`
+    // sends the moves), so a commit that changed nothing else is not a
+    // configure back to a stale prop.
+    const anchored = Boolean(newProps.anchor);
+    const movedByProps =
+      !anchored && (newProps.x !== before.x || newProps.y !== before.y);
+    const geometryChanged = sizeChanged || movedByProps;
     // A size that became a number is the app taking the size over, which is
     // exactly the state `_userSized` names — and one that became `'auto'` is
     // the app handing it back, so the window fits its content again on the
@@ -6820,8 +6986,8 @@ export class WindowNode extends Scrollable(Node) {
     if (geometryChanged) {
       if (typeof wnd.setState === 'function') {
         wnd.setState({
-          x: newProps.x,
-          y: newProps.y,
+          x: anchored ? undefined : newProps.x,
+          y: anchored ? undefined : newProps.y,
           // `'auto'` is not a geometry ntk can be given: an axis the app has
           // handed back is left alone here and resolved by `_refit()` on the
           // layout this same commit is about to schedule.
@@ -6836,10 +7002,27 @@ export class WindowNode extends Scrollable(Node) {
         ) {
           wnd.resize?.(newProps.width, newProps.height);
         }
-        if (newProps.x !== before.x || newProps.y !== before.y) {
+        if (movedByProps) {
           wnd.move?.(newProps.x, newProps.y);
         }
       }
+    }
+
+    // Re-read every commit: the options object is rebuilt by every render,
+    // and a moving `at` — a caret — is the whole point of one. Only the
+    // *subscription* is conditional, because only the node it hangs off can
+    // make it stale.
+    if (newProps.anchor?.to !== before.anchor?.to) this._watchAnchor();
+    if (anchored) {
+      this._followAnchor();
+    } else if (before.anchor) {
+      this._placedAt = null;
+      // A popup that gives up its anchor gives up being hidden by one: it
+      // is an ordinary `x`/`y` popup from here, and the configure above
+      // has already put it where the app asked.
+      const wasLost = this._anchorLost;
+      this._anchorLost = false;
+      if (wasLost) this._mapNow();
     }
 
     const layoutChanged =

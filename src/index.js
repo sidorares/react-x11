@@ -64,6 +64,7 @@ export {
   ContextMenu,
   useAnchor,
   useAnchorTracking,
+  anchorArea,
   anchorRect,
   centerRect,
   screenRect,

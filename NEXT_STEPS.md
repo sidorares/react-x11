@@ -1185,13 +1185,10 @@ Shipping both without distinguishing them double-scales everything.
   `src/components/anchor.js` already does, with a comment explaining why.
   Anchoring, drag-and-drop, accessibility and IME candidate placement all
   want this.
-- **`AnchorOptions` is wrong in four places** (#120). It declares
-  `{ placement, gap, width, height, flip }`; `anchor.js` destructures
-  `{ placement, align, offset, width, height }`. `gap` and `flip` are
-  inert, `align` is undeclared, and `anchorRect()` returns `null` for a
-  node with no `.abs` while the type says `Rect`. Fix the implementation
-  where the declaration is right and the declaration where the
-  implementation is right.
+- **`AnchorOptions` is wrong in four places** (#120) — DONE (#255): the
+  declaration was the wrong one. `gap` and `flip` never existed; the options
+  are the ones `anchorRect` actually destructures, `at` among them, and the
+  return type says `null` for a node with no `.abs`, which is what it does.
 - **`<window onResize|onExpose|onCloseRequest>` forward the raw ntk event**
   while the types declare `SyntheticEvent<NtkWindow>`. Wrap them, since
   every other handler in the system receives a synthetic event.

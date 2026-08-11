@@ -11,6 +11,7 @@ import React from 'react';
 import { createRoot, MenuBar, Select, Tooltip } from '../src/index.js';
 import { resolveTheme } from '../src/components/theme.js';
 import { setCompositingForTests } from '../src/compositing.js';
+import { setScreensForTests } from '../src/screens.js';
 import { createMockApp, moveMouse, pressButton } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -316,9 +317,10 @@ async function showTip(
 ) {
   const app = createMockApp();
   setCompositingForTests(app, composited);
-  // the mock models no screen geometry, and `anchorRect` reads that as "no
-  // edge to flip at" — a test about which side a hint takes has to say
-  if (screen) Object.assign(app.X.display.screen[0], screen);
+  // the mock's monitor is a roomy 1280x800, and which side a hint takes is a
+  // question about how much room there is — a test about that has to say
+  if (screen)
+    setScreensForTests(app, { monitors: [{ x: 0, y: 0, ...screen }] });
   const x11Root = await createRoot({ app });
   x11Root.render(
     h(
@@ -344,7 +346,7 @@ async function showTip(
   return { app, x11Root, wnd, wrapper, tip: app.windows[1] };
 }
 
-const ROOMY = { pixel_width: 900, pixel_height: 700 };
+const ROOMY = { width: 900, height: 700 };
 
 test('a tooltip is a rounded bubble with an arrow, and no border', async () => {
   const { x11Root, tip } = await showTip({}, { screen: ROOMY });
@@ -439,7 +441,7 @@ test('direction="auto" changes axis when neither top nor bottom fits', async () 
   // moves a popup to an axis it was not asked for.
   const { x11Root, tip } = await showTip(
     {},
-    { screen: { pixel_width: 900, pixel_height: 96 }, pad: 36 },
+    { screen: { width: 900, height: 96 }, pad: 36 },
   );
   const [bubble, arrow] = tip._reactX11Node.children;
 

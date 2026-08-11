@@ -1483,6 +1483,7 @@ const rect = measure({ placement: 'bottom', align: 'center', width, height });
 | `placement`       | `'bottom'` (default), `'top'`, `'start'`, `'end'`, `'left'`, `'right'` |
 | `align`           | `'start'` (default), `'center'`, `'end'` on the cross axis             |
 | `offset`          | gap from the anchor in px (default 2)                                  |
+| `at`              | a rect **inside** the node to anchor to instead — a caret, a cell      |
 | `width`, `height` | size of the popup you are positioning                                  |
 | `alignTo`         | node the alignment reads, when it is not the anchor                    |
 
@@ -1506,6 +1507,52 @@ from the anchor, the alignment from `alignTo`. A submenu is the case that
 needs it — it belongs against the outer edge of the menu it comes out of,
 but level with the row that opened it, and that row is inset by the menu's
 border and padding. Both nodes have to be in the same window.
+
+### `at` — anchoring to part of a node
+
+`at` is a rect in the **anchor node's own coordinates**, and it becomes the
+anchor: the side that flips, the edge that aligns, the gap `offset` leaves,
+the rect tracking keeps in view. A caret is the case it exists for — a
+moving point inside one element — and a table cell, a chart datapoint or a
+highlighted span are the same shape.
+
+```jsx
+const measure = useAnchor(editorRef);
+const rect = measure({
+  at: { x: caretX, y: lineTop, width: 1, height: lineHeight },
+  placement: 'bottom',
+  width: 240,
+  height: rows * 22,
+});
+```
+
+`width` and `height` are optional (`{x, y}` alone is a point), and `width`
+on the popup then defaults to the sub-rect's rather than the node's.
+
+Node-relative rather than screen-relative on purpose: the offset stays true
+through everything that moves the node, so `useAnchorTracking` follows a
+caret with no extra work — and its out-of-view test becomes the caret's,
+which is what you want, since an editor's own lines scroll away long before
+the editor does.
+
+**A popup that has to measure itself first anchors from the other side.**
+Rows sized to their labels, a menu as wide as its widest item: the size is
+not known until the popup's content is laid out, and by then React has
+already rendered. `<popup anchor={{ to: ref, at }}>` hands the placement to
+the popup, which does it in the one place the size is known —
+[elements.md](elements.md#anchor--a-popup-that-places-itself).
+
+### `anchorArea(node)`
+
+The rect a popup anchored to `node` may be placed in: the usable part of the
+monitor that node is on — per-monitor, `_NET_WORKAREA` taken off it, the
+same answer [`<window width="auto">`](elements.md#natural-size) is capped
+by. `null` where there is no display to ask.
+
+What needs it is a surface sizing itself: a menu measured to its longest
+label is never usefully wider than the screen it opens on, and `anchorRect`
+can slide a popup back from an edge but nothing rescues one that does not
+fit. `Select` and `ContextMenu` both cap themselves this way.
 
 ## `useDropTarget(options)` / `useDragSource(options)`
 

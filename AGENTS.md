@@ -62,10 +62,20 @@ no override-redirect staging (issue #4).
   function, `draw(ctx, x, y)` paints, `onInvalidate` (ntk ≥ 3.4.0)
   reflows on async content (HtmlView images and SVGs; MarkdownView is
   synchronous).
+- `src/anchor.js` — where a `<popup>` goes: `anchorRect` and the screen
+  area it flips and clamps against. Core rather than widget code because
+  **both** callers need it and only one is a widget — a `<popup anchor>`
+  with an `'auto'` size learns how big it is inside `realize()`, after the
+  content is measured and before `CreateWindow`, which is past the last
+  moment React could have handed it a position (issue #255). So the window
+  places itself from the same functions the widgets call, and the two agree
+  by construction. `at` anchors to a rect _inside_ a node — a caret — and
+  is node-relative so that everything which moves the node keeps it true.
 - `src/components/` — the widget set, plain React over the host
   primitives (no reconciler support needed). One module per widget, with
   the shared plumbing in `theme.js` (palette, `useTheme`, `useControl`),
-  `anchor.js` (popup placement + label measurement), `typeahead.js` and
+  `anchor.js` (the React half of the above: `useAnchor`,
+  `useAnchorTracking`, label measurement), `typeahead.js` and
   `keys.js`. `index.js` re-exports the public names.
 - `src/menuitem.js`, `src/dbusmenu.js`, `src/globalmenu.js` — the global
   menu (#112). `menuitem.js` is the item vocabulary, which is

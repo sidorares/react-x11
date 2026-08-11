@@ -2591,16 +2591,17 @@ test('Slider: thumb stays within the track at both extremes', async () => {
 
 test('anchorRect places, flips at a screen edge and clamps', async () => {
   const { anchorRect } = await import('../src/index.js');
-  // a stand-in node: laid-out rect, owner window position, screen size
-  const node = (
-    abs,
-    win = { x: 100, y: 50 },
-    screen = { pixel_width: 1000, pixel_height: 800 },
-  ) => ({
-    abs,
-    root: { window: win },
-    app: { display: { screen: [screen] } },
-  });
+  const { setScreensForTests } = await import('../src/screens.js');
+  // a stand-in node: laid-out rect, owner window position, and the monitor
+  // it is on — which is what placement flips and clamps against
+  // (`anchorArea`), the same answer an auto-sized window is capped by
+  const node = (abs, win = { x: 100, y: 50 }, screen = [1000, 800]) => {
+    const app = {};
+    setScreensForTests(app, {
+      monitors: [{ x: 0, y: 0, width: screen[0], height: screen[1] }],
+    });
+    return { abs, root: { window: win }, app };
+  };
 
   // default: below the anchor, left edges aligned, in screen coordinates
   const below = anchorRect(node({ x: 10, y: 20, width: 160, height: 30 }), {
@@ -2621,11 +2622,7 @@ test('anchorRect places, flips at a screen edge and clamps', async () => {
 
   // ... but only if there is room above; otherwise it stays below
   const noRoomEither = anchorRect(
-    node(
-      { x: 10, y: 10, width: 160, height: 30 },
-      { x: 0, y: 0 },
-      { pixel_width: 1000, pixel_height: 60 },
-    ),
+    node({ x: 10, y: 10, width: 160, height: 30 }, { x: 0, y: 0 }, [1000, 60]),
     { height: 100 },
   );
   assert.strictEqual(noRoomEither.placement, 'bottom');

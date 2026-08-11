@@ -563,18 +563,97 @@ An override-redirect top-level window at **screen coordinates** — the
 window manager ignores it (no decorations, no focus stealing): menus,
 tooltips, dropdowns. May appear anywhere in the JSX tree (its position in
 the tree does not affect its position on screen); it is its own paint and
-event root. Anchor with `ev.nativeEvent.rootx/rooty` (pointer in screen
-coordinates) or a ref's `abs` rect plus the owner window's `x`/`y`.
-Same props as `<window>`; conditional rendering controls its lifetime.
+event root. Give it an `anchor` and it places itself against a node
+([below](#anchor--a-popup-that-places-itself)); `x`/`y` are there for the
+placements that are nobody's node — `ev.nativeEvent.rootx/rooty`, the
+pointer in screen coordinates. Same props as `<window>` — **including
+[natural size](#natural-size)**, which is what a menu sized by its own rows
+is — and conditional rendering controls its lifetime.
 
 | prop               |                                                                                                                |
 | ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `anchor`           | place against a node, or a rect inside one, at whatever size the content turns out to be (below)               |
 | `grab`             | hold a pointer grab while the popup is up — how menus behave on X (below)                                      |
 | `transparent`      | 32-bit ARGB visual: rounded corners and translucency ([above](#transparent--rounded-corners-and-translucency)) |
 | `onDismiss`        | a press landed outside the popup: close it                                                                     |
 | `trapFocus`        | own a focus scope: a modal (see [events.md](events.md#focus-scopes-modals))                                    |
 | `overrideRedirect` | `false` makes it a WM-managed window instead — a real dialog (below)                                           |
 | `dragPreview`      | this popup is a drag preview following the pointer, never a drop target — [drag-and-drop.md](drag-and-drop.md) |
+
+### `anchor` — a popup that places itself
+
+```jsx
+function Completions({ editorRef, caret, matches, onPick }) {
+  if (!matches.length) return null;
+  return (
+    <popup
+      anchor={{ to: editorRef, at: caret, placement: 'bottom' }}
+      maxHeight={220}
+    >
+      <box
+        style={{ overflow: 'scroll', padding: 4, backgroundColor: '$surface' }}
+      >
+        {matches.map((m) => (
+          <box key={m.label} onClick={() => onPick(m)} style={{ padding: 6 }}>
+            <text>{m.label}</text>
+          </box>
+        ))}
+      </box>
+    </popup>
+  );
+}
+```
+
+That is the whole completion list: **at the caret**, as wide as its widest
+label, no taller than 220 and scrolling past that, flipped above the line
+when it is near the bottom of the screen. Nothing in it measures a font,
+states a size, or names a position — `caret` is a rect the editor already
+knows, in its own coordinates.
+
+`anchor` takes [`anchorRect`'s options](components.md#useanchorref--anchorrectnode-options)
+— `placement`, `align`, `offset`, `alignOffset`, `alignTo`, `at` — plus `to`,
+the node (or a ref to one) it hangs off. `x`/`y` are ignored while it is set.
+
+**Why the popup and not the application.** A `<popup>` with no `width` is
+sized from its content like any other window, and that size is settled
+_inside_ `realize()` — after the content is measured, before `CreateWindow`.
+Which side the popup flips to and how far it is pulled back from a screen
+edge are both functions of that size, so the earliest anyone can work out the
+position is the moment after the measurement — which is already too late for
+React to have passed one in. Doing it here keeps the rule the natural size
+established: the window is **born** the right size in the right place, rather
+than mapped somewhere provisional and corrected a frame later.
+
+Afterwards it keeps up with everything that can move either half — the
+anchor's own layout, an ancestor of it scrolling, the owner window being
+dragged by the window manager, its own content growing a row.
+
+`at` is a rect **inside** the node, in the node's own coordinates:
+
+```js
+const caret = { x: caretX, y: lineTop, width: 1, height: lineHeight };
+```
+
+Everything reads it — the side that flips, the edge that aligns, the gap
+`offset` leaves — so a popup at a caret behaves like one hung off a small
+widget that happens to be there. `width`/`height` may be left out, and
+`{x, y}` alone is a point.
+
+A popup whose anchor is a ref that has not attached yet — one written
+_above_ its own trigger in the JSX — waits for it rather than opening in the
+corner of the screen. That is one frame, and it is the same rule as the one
+below: an anchored popup is on screen only while there is something for it
+to point at.
+
+**When the anchor scrolls out of view the popup unmaps** and comes back,
+where it belongs — and holding its `grab` again, since X drops a pointer
+grab whose window stops being viewable — when the anchor does. A popup is a real X window rather
+than an element its ancestors clip, so a caret that has scrolled out of the
+editor leaves a list floating over a document it no longer points into —
+and there is no position that fixes that. Whether it should _close_ instead
+is React state and therefore the application's: do the placement yourself
+with [`useAnchorTracking`](components.md#useanchorref--anchorrectnode-options)
+and its `onOutOfView`.
 
 A popup never receives the X input focus, but nodes inside it can hold the
 **owner window's** focus and receive keys — with `trapFocus` and `autoFocus`

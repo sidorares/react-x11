@@ -10,6 +10,7 @@ import password from './password.js';
 import tasks from './tasks.js';
 import canvas from './canvas.js';
 import menu from './menu.js';
+import anchored from './anchored.js';
 import three from './three.js';
 
 // Ordered list shown in the playground picker. Each entry:
@@ -32,6 +33,7 @@ const demos = [
   tasks,
   canvas,
   menu,
+  anchored,
   three,
 ];
 
