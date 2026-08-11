@@ -183,6 +183,69 @@ a window manager answers with a size of its own, the window is theirs and
 stops re-fitting. Setting `width` to a number is the app doing the same
 thing, and setting it back to `'auto'` hands it back.
 
+### A floor the content decides
+
+`minWidth`/`minHeight` also take `'auto'`: **the smallest size the content
+can be drawn at**, measured from the tree and handed to the window manager,
+which is what stops the user dragging the window below it.
+
+```jsx
+<window minWidth="auto" minHeight="auto">   {/* never smaller than my content */}
+<window width={900} minWidth="auto" />      {/* my opening size, the content's floor */}
+```
+
+This is what Qt and GTK both do, and in both it is the default rather than
+something you ask for: a Qt layout's `minimumSize()` becomes the window's
+via `QLayout::SetDefaultConstraint`, and GTK writes the widget tree's
+minimum into the WM geometry hints. Here it is opt-in, because a renderer
+whose layout is CSS has no floor unless one is asked for — CSS lets content
+overflow.
+
+**How the floor is measured**: the tree is laid out with _no room at all_,
+and the floor is how far it still reached. What each node contributes is
+whatever its own style lets it shrink to, which makes the interesting part
+what _doesn't_ count:
+
+| the node                                               | contributes       |
+| ------------------------------------------------------ | ----------------- |
+| a rigid box (`flexShrink` is 0 by default — see above) | its whole size    |
+| a wrapping row                                         | its widest item   |
+| text                                                   | its longest word  |
+| `overflow: 'scroll'` / `'hidden'`                      | nothing           |
+| `flexShrink: 1`, or a `minWidth: 0` of its own         | what it shrank to |
+
+The last two rows are the escape hatch, and they are the same one CSS,
+Qt and GTK all spell — `min-width: 0`, `QScrollArea`, `min-content-width`.
+A node that was told it may shrink is taken at its word and its contents
+stop counting, so a window around a scrolling pane is floored by everything
+_except_ that pane. Naming a number (`minWidth: 240` on the box) is an
+answer too, and stops the measurement there.
+
+`maxWidth`/`maxHeight` take `'auto'` as well, and it means the other half of
+the pair: **the size the content wanted** — the natural size above, not the
+floor. `'auto'` reads as "ask the content", and the content's answer to _how
+big_ is not its answer to _how small_. On a tree where nothing can shrink
+the two are the same number, which is what makes `minWidth="auto"
+maxWidth="auto"` the fixed-size dialog — the same thing `resizable={false}`
+says more briefly.
+
+Three things worth knowing:
+
+- **A floor is a request.** mutter, kwin and xfwm enforce it at the drag; a
+  tiling window manager may size the window however it likes. It stops the
+  user, it does not relieve the app of clipping gracefully — and the
+  renderer will not fight a window manager that ignores it.
+- **`minHeight="auto"` is measured for the width the window has**, and
+  re-sent as that changes. A minimum height is a height _for a width_ — a
+  paragraph is tallest at its narrowest — and `WM_NORMAL_HINTS` holds two
+  independent numbers with no way to say so. (GTK answers the same question
+  at its minimum _width_, which is a taller floor than a wide window needs.)
+- **The floor outlives the size.** An `'auto'` size stops tracking once the
+  user takes the window over; an `'auto'` bound does not, because stopping
+  them going too far is the whole job. It is measured on every frame that
+  lays out — one extra layout pass per axis asked for — and written only on
+  the frames it actually moves.
+
 Three things worth knowing before reaching for it:
 
 - A scroll container reports its **content** height, not a viewport height,
@@ -257,7 +320,11 @@ are free, so no `sizeHints` object is needed.
 ```jsx
 <window width={400} height={300} resizable={false} windowType="dialog" />
 <window width={400} height={300} minWidth={320} minHeight={200} />
+<window width={400} height={300} minWidth="auto" /> {/* measured — see above */}
 ```
+
+The four bounds also take `'auto'`, which asks the content instead of naming
+a number: [a floor the content decides](#a-floor-the-content-decides).
 
 On a `<window>` these names are the window's, not yoga's: `width`/`height`
 are the real geometry the user can drag, and `minWidth`/`maxHeight` are what

@@ -1533,3 +1533,66 @@ test('a window with no size fits its text, and wraps to fit the screen', async (
     await app.close();
   }
 });
+
+test('a content floor is measured through real glyphs and read back', async () => {
+  // The two claims about `minWidth="auto"` that need a font to make, read
+  // back off the server as the window manager would see them.
+  const { app } = await createHeadlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const wnd = await render(
+      React.createElement(
+        'window',
+        { title: 'floor', minWidth: 'auto', minHeight: 'auto' },
+        React.createElement(
+          'text',
+          { style: { fontSize: 20 } },
+          'wrap me somewhere sensible',
+        ),
+      ),
+      x11Root,
+    );
+    await settle(app);
+    const hints = await wnd.getSizeHints();
+
+    // A paragraph's floor is the width of its longest word: it may be made
+    // much narrower than the line it opened as without a word being cut.
+    assert.ok(
+      hints.minWidth > 0 && hints.minWidth < wnd.width / 2,
+      `a floor well under the unwrapped line (got ${hints.minWidth} of ${wnd.width})`,
+    );
+    assert.ok(
+      hints.minHeight >= wnd.height,
+      'and at that width the same text is at least as tall',
+    );
+
+    // A leaf inside a `row` is stretched to the row's height, and the pass
+    // that measures the floor gives the row no height to stretch to — so a
+    // squashed measure function is what this asserts is *not* believed.
+    const stacked = await render(
+      React.createElement(
+        'window',
+        { key: 'stacked', title: 'stacked', minHeight: 'auto', width: 400 },
+        React.createElement(
+          'box',
+          { style: { flexDirection: 'row', gap: 8 } },
+          React.createElement('text', { style: { fontSize: 20 } }, 'All'),
+          React.createElement('text', { style: { fontSize: 20 } }, 'Done'),
+        ),
+        React.createElement('box', { style: { width: 40, height: 30 } }),
+      ),
+      x11Root,
+    );
+    await settle(app);
+    const stackedHints = await stacked.getSizeHints();
+    // Nothing here can give, so the floor is the whole natural height —
+    // the row of text included, and the 30-tall box after it not shifted
+    // up into the space the row would have vacated.
+    assert.strictEqual(stackedHints.minHeight, stacked.height);
+    assert.ok(stackedHints.minHeight > 30, 'the row of text was counted');
+
+    await x11Root.unmount();
+  } finally {
+    await app.close();
+  }
+});

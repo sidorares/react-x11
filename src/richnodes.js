@@ -42,7 +42,7 @@ class DocumentViewNode extends Node {
     super(kind, props, app);
     this.view = null;
     this._laidOutWidth = -1;
-    this.yoga.setMeasureFunc((width, widthMode) => {
+    this._setMeasureFunc((width, widthMode) => {
       const view = this._ensureView();
       if (!view) return { width: 0, height: 0 };
       const unconstrained =
@@ -296,7 +296,7 @@ export class SvgNode extends Node {
      * See the note there. */
     this._docRevision = 0;
     this._paintedRevision = -1;
-    this.yoga.setMeasureFunc(
+    this._setMeasureFunc(
       intrinsicMeasure(() => {
         const view = this._ensureView();
         return {
@@ -492,7 +492,7 @@ export class TexNode extends Node {
     super('tex', props, app);
     this.box = null;
     this._boxKey = null;
-    this.yoga.setMeasureFunc(() => {
+    this._setMeasureFunc(() => {
       const box = this._ensureBox();
       if (!box) return { width: 0, height: 0 };
       return { width: Math.ceil(box.width), height: Math.ceil(box.height) };
