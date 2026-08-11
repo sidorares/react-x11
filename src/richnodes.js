@@ -119,12 +119,12 @@ class DocumentViewNode extends Node {
     ctx.rect(this.abs.x, this.abs.y, this.abs.width, this.abs.height);
     ctx.clip();
     // links recorded by draw() are in window coordinates, so linkAt can
-    // take synthetic-event coordinates directly (_defaultMouseDown)
+    // take synthetic-event coordinates directly (defaultMouseDown)
     view.draw(ctx, content.x, content.y);
     ctx.restore();
   }
 
-  _defaultMouseDown(ev) {
+  defaultMouseDown(ev) {
     if (ev.button !== 1 || !this.view || !this.props.onLink) return;
     const hit = this.view.linkAt(ev.x, ev.y);
     if (!hit) return;

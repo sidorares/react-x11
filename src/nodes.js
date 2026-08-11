@@ -3261,7 +3261,7 @@ export const Scrollable = (Base) =>
      * Runs after the application's own `onKeyDown`, and not at all if that
      * called `preventDefault` — the same contract `<textinput>` editing has.
      */
-    _defaultKeyDown(ev) {
+    defaultKeyDown(ev) {
       // nothing to scroll, nothing to swallow: a plain box must leave the
       // arrows and Page keys to whatever else would answer them
       if (!this.focusableByDefault) return undefined;
@@ -3388,7 +3388,7 @@ export const Scrollable = (Base) =>
       return super.hitTest(x, y);
     }
 
-    _defaultMouseDown(ev) {
+    defaultMouseDown(ev) {
       for (const bar of this._scrollbars()) {
         const hit = scrollbarHit(bar, ev.x, ev.y);
         if (!hit) continue;
@@ -3407,7 +3407,7 @@ export const Scrollable = (Base) =>
       }
     }
 
-    _defaultMouseDrag(ev) {
+    defaultMouseDrag(ev) {
       if (this._barGrab == null) return;
       const bar = this._scrollbar(this._barGrab.axis);
       if (!bar || bar.travel <= 0) return;
@@ -3416,7 +3416,7 @@ export const Scrollable = (Base) =>
       this.scrollTo(bar.axis === 'x' ? { x: to } : { y: to });
     }
 
-    _defaultMouseUp() {
+    defaultMouseUp() {
       this._barGrab = null;
     }
   };
@@ -3602,6 +3602,18 @@ const SCROLL_KEY_PAGE_OVERLAP = 24;
 /** Undo entries kept per input. Snapshots of a single field are small; the
  * cap is what stops a long-lived form from growing without bound. */
 const UNDO_LIMIT = 200;
+
+/**
+ * How long a caret stays in each of its two states, in milliseconds. GTK,
+ * Qt and Windows all land within a few tens of milliseconds of this, and a
+ * blink that is out of step with the rest of the desktop is noticed even
+ * when the number cannot be named.
+ *
+ * Exported from `react-x11/node` because an element that edits text draws
+ * its own caret and would otherwise hardcode a second cadence — two carets
+ * on one screen blinking against each other (issue #251).
+ */
+export const CARET_BLINK_MS = 530;
 
 /**
  * <textinput>: single-line editable text. Caret/selection via ntk TextLayout
@@ -4105,7 +4117,7 @@ export class TextInputNode extends Node {
    * an input event at all, and a value pushed from a parent has no X event
    * behind it — those report `nativeEvent: null`, which is the truth.
    */
-  _defaultKeyDown(ev) {
+  defaultKeyDown(ev) {
     const previous = this._keyNative;
     this._keyNative = ev.nativeEvent ?? null;
     try {
@@ -4248,7 +4260,7 @@ export class TextInputNode extends Node {
     return i;
   }
 
-  _defaultMouseDown(ev) {
+  defaultMouseDown(ev) {
     // wherever the caret lands, editing resumes as a new undo entry
     this._breakUndoRun();
     if (ev.button === 3) {
@@ -4327,13 +4339,13 @@ export class TextInputNode extends Node {
     return this._focused || Boolean(this._editMenu);
   }
 
-  _defaultMouseDrag(ev) {
+  defaultMouseDrag(ev) {
     if (!this._dragging) return;
     this._caret = this._indexAtPoint(ev);
     this._repaint();
   }
 
-  _defaultMouseUp() {
+  defaultMouseUp() {
     if (!this._dragging) return;
     this._dragging = false;
     if (this._caret !== this._anchor) this._copySelection('PRIMARY');
@@ -4420,7 +4432,7 @@ export class TextInputNode extends Node {
     else if (id === 'selectAll') this._selectAll();
   }
 
-  _defaultContextMenu(ev) {
+  defaultContextMenu(ev) {
     if (this.props.contextMenu === false) return;
     this._openEditMenu(ev);
   }
@@ -4549,7 +4561,7 @@ export class TextInputNode extends Node {
     if (!this.destroyed) this._focusManager()?.focus(this, 'pointer');
   }
 
-  _defaultFocus() {
+  defaultFocus() {
     this._focused = true;
     this._caretOn = true;
     this._blinkTimer = setInterval(() => {
@@ -4557,12 +4569,12 @@ export class TextInputNode extends Node {
       // twice a second, forever, for as long as a field has focus: the one
       // repaint that most wants to cost only the field it happens in
       this.root?.invalidate(false, this, 'caret');
-    }, 530);
+    }, CARET_BLINK_MS);
     this._blinkTimer.unref?.();
     this.root?.invalidate(false, this, 'focus');
   }
 
-  _defaultBlur() {
+  defaultBlur() {
     this._focused = false;
     this._caretOn = false;
     // coming back to a field later is a new edit, not more of the old one
@@ -4728,10 +4740,10 @@ export class TextAreaNode extends TextInputNode {
    * thumb would drop the caret into whatever text sits behind it and start
    * a selection drag.
    */
-  _defaultMouseDown(ev) {
+  defaultMouseDown(ev) {
     const bar = this._scrollbar();
     const hit = scrollbarHit(bar, ev.x, ev.y);
-    if (!hit) return super._defaultMouseDown(ev);
+    if (!hit) return super.defaultMouseDown(ev);
     if (hit === 'thumb') {
       this._barGrab = ev.y - bar.thumbStart;
       ev.capturePointer();
@@ -4741,8 +4753,8 @@ export class TextAreaNode extends TextInputNode {
     this._scrollTo(this._scrollY + (ev.y < bar.thumbStart ? -page : page), bar);
   }
 
-  _defaultMouseDrag(ev) {
-    if (this._barGrab == null) return super._defaultMouseDrag(ev);
+  defaultMouseDrag(ev) {
+    if (this._barGrab == null) return super.defaultMouseDrag(ev);
     const bar = this._scrollbar();
     if (!bar || bar.travel <= 0) return;
     this._scrollTo(
@@ -4751,12 +4763,12 @@ export class TextAreaNode extends TextInputNode {
     );
   }
 
-  _defaultMouseUp(ev) {
+  defaultMouseUp(ev) {
     if (this._barGrab != null) {
       this._barGrab = null;
       return;
     }
-    super._defaultMouseUp(ev);
+    super.defaultMouseUp(ev);
   }
 
   _scrollTo(y, bar) {

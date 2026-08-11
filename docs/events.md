@@ -12,8 +12,13 @@ events dispatched over the drawn node tree with DOM-like semantics.
    the target.
 3. **Target + bubble phase**: `on<Event>` handlers from the target up.
 4. **Default action**: the element's built-in behavior (textinput editing,
-   wheel scrolling) — skipped if any handler called
+   wheel scrolling, then Tab traversal) — skipped if any handler called
    `ev.preventDefault()`.
+
+Step 4 is a documented seam, not a privilege of the built-in elements: an
+element added with `registerElement` implements the same `defaultKeyDown` /
+`defaultMouseDown` / … methods and gets the same ordering
+([extending.md](extending.md#behaviour-of-your-own)).
 
 `ev.stopPropagation()` stops the walk. Handlers always read from current
 props — they can never go stale.
@@ -102,18 +107,18 @@ const root = await createRoot({
 
 ## Handlers
 
-| handler                                     | notes                                                                                   |
-| ------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `onClick`                                   | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks   |
-| `onMouseDown` / `onMouseUp` / `onMouseMove` | move is coalesced to once per frame by ntk                                              |
-| `onMouseEnter` / `onMouseLeave`             | do not propagate; synthesized by hover-path diffing                                     |
-| `onWheel`                                   | X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go |
-| `onContextMenu`                             | right-click (button 3), after `onMouseDown`; default action opens the element's menu    |
-| `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus in `tabIndex` order     |
-| `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                |
-| `onDragEnter` / `onDragLeave`               | do not propagate; drag-path diffing, the same shape as the hover pair above             |
-| `onDragOver` / `onDrop`                     | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)          |
-| `onDragStart` / `onDrag` / `onDragEnd`      | on a `draggable` node; the press is a click until it moves 4px                          |
+| handler                                     | notes                                                                                      |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `onClick`                                   | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks      |
+| `onMouseDown` / `onMouseUp` / `onMouseMove` | move is coalesced to once per frame by ntk                                                 |
+| `onMouseEnter` / `onMouseLeave`             | do not propagate; synthesized by hover-path diffing                                        |
+| `onWheel`                                   | X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go    |
+| `onContextMenu`                             | right-click (button 3), after `onMouseDown`; default action opens the element's menu       |
+| `onKeyDown` / `onKeyUp`                     | delivered to the focused node (or the window); Tab cycles focus unless the element took it |
+| `onFocus` / `onBlur`                        | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                   |
+| `onDragEnter` / `onDragLeave`               | do not propagate; drag-path diffing, the same shape as the hover pair above                |
+| `onDragOver` / `onDrop`                     | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)             |
+| `onDragStart` / `onDrag` / `onDragEnd`      | on a `draggable` node; the press is a click until it moves 4px                             |
 
 ## Pointer capture
 
@@ -177,6 +182,13 @@ the order.
 <box focusable />      {/* then tree order */}
 <box tabIndex={-1} />  {/* clickable, never tabbed to */}
 ```
+
+Traversal is a **default action** like any other, and it runs last: an
+`onKeyDown` that calls `preventDefault()` on Tab keeps it, and so does an
+element whose own `defaultKeyDown` consumes it — an editor indenting with
+Tab. An element that does owes the keyboard user a way out of it, which is
+the Escape-arms-one-Tab convention in
+[extending.md](extending.md#behaviour-of-your-own).
 
 ### Focus scopes (modals)
 
