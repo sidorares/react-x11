@@ -64,6 +64,12 @@ export interface ScrollableNode extends DrawnNode {
   scrollTo(to: number | ScrollTarget): void;
   scrollBy(by: number | ScrollTarget): void;
   /**
+   * Is there room to move on the axis a delta names? What the wheel's
+   * default action asks before it scrolls this node instead of the next one
+   * out — see [extending.md](../../docs/extending.md).
+   */
+  canScroll(dx: number, dy: number): boolean;
+  /**
    * Scroll the minimum amount on both axes that makes a descendant fully
    * visible. Safe to call right after that node mounts — the request is
    * resolved on the next layout pass, when it has geometry.

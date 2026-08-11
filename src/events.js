@@ -356,19 +356,20 @@ export class EventManager {
           deltaY: dy,
         });
         if (!ev.defaultPrevented) {
-          // Default action: scroll the nearest enclosing scroll container
-          // that has somewhere to go on this axis. Chaining past one that
+          // Default action: the nearest node out from the target that says it
+          // has somewhere to go on this axis scrolls. Chaining past one that
           // fits its own content is what a browser does, and it matters now
           // that any `<box>` can be a scroll container — a pane that happens
           // to fit must not swallow the wheel the window would have answered.
           // The `<window>` is the last candidate, then the walk stops.
+          //
+          // Two methods and no kinds: `<textarea>` scrolls pixels it painted
+          // rather than children it laid out, and so does a registered
+          // element that draws its own content, and neither of them should
+          // have to be named here to be reachable (issue #253).
           for (let n = target; n; n = n.parent) {
-            if (n.isScroller?.() && n._canScroll(ev.deltaX, ev.deltaY)) {
+            if (n.canScroll?.(ev.deltaX, ev.deltaY)) {
               n.scrollBy({ x: ev.deltaX, y: ev.deltaY });
-              break;
-            }
-            if (n.kind === 'textarea') {
-              n.scrollBy(ev.deltaY); // one axis only: it wraps
               break;
             }
             if (n === this.node) break;

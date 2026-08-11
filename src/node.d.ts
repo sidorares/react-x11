@@ -227,6 +227,10 @@ export declare class Node {
  * Scrolling as a mixin: `class Pane extends Scrollable(Node)` gives a
  * registered element the same `overflow: 'scroll'` behaviour `<box>` and
  * `<window>` have — wheel, keys, bars, and the AT-SPI scroll-pane role.
+ *
+ * An element whose content is **painted rather than laid out** overrides
+ * `measureScrollContent`; everything else follows from the numbers it
+ * returns. See docs/extending.md.
  */
 export declare function Scrollable<T extends typeof Node>(
   Base: T,
@@ -239,6 +243,13 @@ export declare function Scrollable<T extends typeof Node>(
     isScroller(): boolean;
     scrollTo(to: number | { x?: number; y?: number }): void;
     scrollBy(by: number | { x?: number; y?: number }): void;
+    /** Chain membership: has this node room to move on the axis the delta
+     * names? The wheel asks it before scrolling this node rather than the
+     * next one out. */
+    canScroll(dx: number, dy: number): boolean;
+    /** How far the content reaches. The default walks the children;
+     * override it when the content is pixels this element paints. */
+    measureScrollContent(): { width: number; height: number };
     scrollIntoView(node: Node): void;
   };
 };

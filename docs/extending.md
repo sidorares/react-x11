@@ -81,15 +81,16 @@ are about to use needs declaring.
 `Node` already implements the whole reconciler-facing surface, so an element
 that only draws needs a constructor and a `paint`. What you may override:
 
-| method                         | when                                                                                                |
-| ------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.   |
-| `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.       |
-| `measureContent(constraints)`  | your content has a size of its own (below). Leaves only — an element that measures has no children. |
-| `default*(ev)`                 | the element's own behaviour for a key, a press or focus (below) — what makes it _interactive_.      |
-| `hitTest(x, y)`                | non-rectangular hit areas. The default walks children in reverse paint order.                       |
-| `insertBefore` / `removeChild` | only if children mean something structural to you                                                   |
-| `destroySubtree()`             | release anything you allocated (pixmaps, fonts, timers). Call `super.destroySubtree()`.             |
+| method                         | when                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.            |
+| `paintContent(ctx)`            | draw _between_ the background and the children — where the built-ins draw, and what a scroller needs (below) |
+| `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.                |
+| `measureContent(constraints)`  | your content has a size of its own (below). Leaves only — an element that measures has no children.          |
+| `default*(ev)`                 | the element's own behaviour for a key, a press or focus (below) — what makes it _interactive_.               |
+| `hitTest(x, y)`                | non-rectangular hit areas. The default walks children in reverse paint order.                                |
+| `insertBefore` / `removeChild` | only if children mean something structural to you                                                            |
+| `destroySubtree()`             | release anything you allocated (pixmaps, fonts, timers). Call `super.destroySubtree()`.                      |
 
 And what you read:
 
@@ -397,6 +398,114 @@ exported so that two carets on one screen are in step rather than a few tens
 of milliseconds apart. Stop the timer in `defaultBlur` _and_ in
 `destroySubtree`: a node that unmounts while focused is forgotten rather than
 blurred, so `defaultBlur` is not guaranteed to run.
+
+### Scrolling content you painted
+
+A `<box overflow="scroll">` scrolls **children**: layout knows where they
+are, so the extent, the bars, the clamping and the wheel all follow from the
+tree. An editor, a terminal or a canvas-backed table has no children — its
+content is pixels it draws — and it still has a scroll position, an extent
+and a wheel gesture to answer. Two methods make it a member of the same
+machinery instead of an exception to it (issue #253):
+
+| method                   |                                                                                                     |
+| ------------------------ | --------------------------------------------------------------------------------------------------- |
+| `canScroll(dx, dy)`      | is there room to move on the axis this delta names? The wheel asks before it scrolls you            |
+| `scrollBy(by)`           | `scrollBy(dy)` or `scrollBy({x, y})` — move by that much                                            |
+| `measureScrollContent()` | `Scrollable` only: `{ width, height }`, how far the content reaches. The default walks the children |
+
+**The wheel's default action is those first two and nothing else.** It walks
+out from the node the pointer hit, asks each one `canScroll(deltaX, deltaY)`,
+and the first that says yes gets `scrollBy` — up to the `<window>`, where the
+walk stops. So an element joins the chain by answering two questions, and it
+**chains** by answering the first of them honestly: say no when there is
+nothing left to move and the wheel goes to the pane or the window behind you,
+which is what a browser does and what a user flicking through a long page
+expects. `<textarea>` is the worked example in core — it scrolls wrapped text
+it painted, and since it answers `canScroll` off that text, a short one hands
+the gesture outward rather than swallowing it.
+
+Answer `canScroll` from the **extent, not the position**: a viewport already
+scrolled to its bottom should keep the rest of a flick rather than pass it
+to whatever is behind it.
+
+#### The mixin, for everything else
+
+`canScroll` + `scrollBy` buys the wheel. `Scrollable(Node)` buys the rest —
+the offsets, `scrollTo`/`scrollBy`/`scrollIntoView`, the drawn scrollbars and
+their drags, the scroll keys (arrows, Page, Home/End, Space), the tab stop
+and the AT-SPI scroll-pane role — and all of it reads one number pair:
+
+```js
+import { Node, Scrollable } from 'react-x11/node';
+
+const LINE = 16;
+
+class EditorNode extends Scrollable(Node) {
+  constructor(props, app) {
+    super('codeeditor', props, app);
+  }
+
+  // scrolling is what this element *is*, rather than something an app opts
+  // into with a style; the default answers `overflow: 'scroll'`
+  isScroller() {
+    return true;
+  }
+
+  // …and the one thing only this element knows: how far the drawing goes
+  measureScrollContent() {
+    return {
+      width: this.longestLineWidth(),
+      height: LINE * this.lines.length,
+    };
+  }
+
+  paintContent(ctx) {
+    const box = this.contentBox();
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(box.x, box.y, box.width, box.height);
+    ctx.clip();
+    this.drawLines(ctx, box.x - this.scrollX, box.y - this.scrollY);
+    ctx.restore();
+  }
+}
+```
+
+Three things about that, each of which is a bug if you get it the other way
+round:
+
+**Draw in `paintContent`, not in `paint`.** `paint` draws the background,
+then `paintContent`, then the children, the border, and — for a
+`Scrollable` — the scrollbars last. An element that draws after
+`super.paint(ctx)` returns therefore paints _over its own thumb_.
+`paintContent` is the seam every built-in that draws uses, and it is where a
+drawing belongs whether it scrolls or not.
+
+**Offset the drawing yourself, and clip it.** A `<box>`'s children are moved
+by the scroll during layout; nobody moves pixels. `contentBox()` is the
+viewport to clip to and `scrollX`/`scrollY` are what to subtract — they are
+already clamped to the extent you reported, so there is nothing to bound
+again. `scrollX` is a distance from the edge the content _starts_ at, which
+is the right-hand one under `direction: 'rtl'`
+([styling.md](styling.md#direction-and-the-logical-edges)) — and the `width` you report is that
+same reach, so an element that draws in its own reading direction never has
+to ask which one it is in.
+
+**Do not assign `focusableByDefault`.** `Scrollable` answers it — a pane with
+somewhere to go is a tab stop, one that fits is not — and assigning over the
+getter throws. Override the getter if your element is focusable for a reason
+of its own.
+
+`measureScrollContent` is called once per layout pass, from `absolutize`, so
+it may read layout geometry, but it must not paint or invalidate. It has to
+return finite numbers: a `NaN` extent would otherwise become a `NaN` offset
+and a subtree laid out at `NaN`, so returning anything else throws naming the
+element, exactly as `measureContent` does.
+
+When the drawing changes its own extent — a line was typed, rows arrived —
+say so the way any other layout change is said, with
+`this.invalidate(true, this, 'scroll')`; the next pass asks again.
 
 ### Drawing once instead of every frame
 

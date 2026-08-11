@@ -360,7 +360,7 @@ function lyingNode(colours) {
       ctx.fillStyle = colours[Math.min(call++, colours.length - 1)];
       ctx.fillRect(box.x, box.y, box.width, box.height);
     },
-    _paintContent() {
+    paintContent() {
       this.live++;
     },
   };

@@ -2469,7 +2469,7 @@ export class Node {
     // lookup for the privilege.
     const cache = this.paintCachePlan && this.root?._paintCache;
     if (cache) cache.paint(this, ctx);
-    else this._paintContent(ctx);
+    else this.paintContent(ctx);
     this._paintChildren(ctx);
     this._paintBorder(ctx);
     // last, and outside the border box: a ring drawn under the border would
@@ -2653,7 +2653,14 @@ export class Node {
     if (dashed) ctx.setLineDash([]);
   }
 
-  _paintContent(ctx) {}
+  /**
+   * What this element draws of its own, between its background and its
+   * children — where every built-in that draws anything draws it, and the
+   * seam an element that draws over its own scroll offset needs, since the
+   * scrollbars go on after the children and `paint` returning is too late
+   * to be underneath them.
+   */
+  paintContent(ctx) {}
 
   /**
    * The paint-cache protocol (issue #149). A node implements both methods or
@@ -3063,7 +3070,7 @@ export class TextNode extends Node {
     };
   }
 
-  _paintContent(ctx) {
+  paintContent(ctx) {
     const content = this.contentBox();
     const layout = this._layoutFor(this._wrapWidth(content.width || Infinity));
     if (!layout) return;
@@ -3114,7 +3121,7 @@ export class ImageNode extends Node {
     }
   }
 
-  _paintContent(ctx) {
+  paintContent(ctx) {
     if (!this.image) return;
     const content = this.contentBox();
     ctx.drawImage(
@@ -3326,12 +3333,20 @@ export const Scrollable = (Base) =>
         return;
       }
       const rtl = this.direction === 'rtl';
-      const { start, bottom } = this._measureContent();
-      this.contentHeight =
-        bottom + this.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
-      this.contentWidth =
-        start +
-        this.yoga.getComputedPadding(rtl ? Yoga.EDGE_LEFT : Yoga.EDGE_RIGHT);
+      const size = this.measureScrollContent();
+      if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height)) {
+        // A NaN here does not throw on its own: it becomes a NaN max scroll,
+        // a NaN offset, and every child laid out at NaN — a whole tree gone
+        // with nothing naming the element that did it.
+        throw new Error(
+          `react-x11: <${this.kind}>.measureScrollContent() must return ` +
+            '{ width, height } as finite numbers; it returned ' +
+            `${describeSize(size)}. Return { width: 0, height: 0 } for ` +
+            'content that has not arrived yet.',
+        );
+      }
+      this.contentWidth = size.width;
+      this.contentHeight = size.height;
       this._resolveScrollIntoView();
       this.scrollY = clampScroll(this.scrollY, this._maxScroll('y'));
       this.scrollX = clampScroll(this.scrollX, this._maxScroll('x'));
@@ -3413,22 +3428,35 @@ export const Scrollable = (Base) =>
     }
 
     /**
-     * How far the content actually reaches, measured through the subtree
-     * rather than off the direct children. A row that stretches to the
-     * viewport while its own cells overflow it — a table, in other words —
-     * reports the viewport width at the top level and says nothing about the
-     * cells, so a shallow measurement would find nothing to scroll. This is
-     * what `scrollWidth`/`scrollHeight` mean in a browser.
+     * How far the content reaches — `scrollWidth`/`scrollHeight`, and what
+     * everything below scrolls against: the maxima, the bars, the keys.
      *
-     * Anything that clips its own children ends the walk: their overflow is
-     * that node's business, not ours.
+     * The default measures the **children**, through the subtree rather than
+     * off the direct ones. A row that stretches to the viewport while its own
+     * cells overflow it — a table, in other words — reports the viewport
+     * width at the top level and says nothing about the cells, so a shallow
+     * measurement would find nothing to scroll. Anything that clips its own
+     * children ends the walk: their overflow is that node's business.
      *
-     * `start` is how far the content reaches from the edge it *starts* at,
+     * `width` is how far the content reaches from the edge it *starts* at,
      * which is the right-hand one under `direction: 'rtl'` — yoga lays an
      * overflowing RTL row out at negative offsets, so the reach that matters
-     * there is how far left of zero it got, not how far right.
+     * there is how far left of zero it got, not how far right. An element
+     * measuring its own drawing answers the same question and never has to
+     * ask which direction it is in.
+     *
+     * **Override it when the content is pixels rather than nodes.** An
+     * element that paints its own content — an editor drawing lines of text,
+     * a terminal, a canvas-backed table — has no children to walk, so the
+     * default measures 0 and the viewport clamps to nothing however far the
+     * drawing actually goes. Answering here is the whole of joining in: the
+     * wheel, the scrollbars, the scroll keys and the AT-SPI scroll pane all
+     * read the numbers this returns (docs/extending.md).
+     *
+     * Called once per layout pass, from `absolutize`, so it may read yoga
+     * geometry but must not invalidate or paint.
      */
-    _measureContent() {
+    measureScrollContent() {
       const rtl = this.direction === 'rtl';
       const width = this.yoga.getComputedWidth();
       let start = 0;
@@ -3445,7 +3473,15 @@ export const Scrollable = (Base) =>
         }
       };
       walk(this, 0, 0);
-      return { start, bottom };
+      // the end padding is part of the content box a browser scrolls to, and
+      // it is the one part of it yoga has already resolved for us — on the
+      // left in RTL, since that is the end there
+      return {
+        width:
+          start +
+          this.yoga.getComputedPadding(rtl ? Yoga.EDGE_LEFT : Yoga.EDGE_RIGHT),
+        height: bottom + this.yoga.getComputedPadding(Yoga.EDGE_BOTTOM),
+      };
     }
 
     /**
@@ -3513,11 +3549,16 @@ export const Scrollable = (Base) =>
     }
 
     /**
-     * Is there room to move on the axis this delta names? What the wheel's
-     * default action chains on: a scroll container that fits its content
-     * hands the gesture to the next one out, the way a browser does.
+     * Is there room to move on the axis this delta names? The first half of
+     * the wheel's chain protocol (`canScroll` then `scrollBy`, see
+     * docs/extending.md): a scroll container that fits its content answers
+     * no and hands the gesture to the next one out, the way a browser does.
+     *
+     * Position is deliberately not part of the answer — a viewport scrolled
+     * to its bottom still owns the wheel, rather than passing the rest of a
+     * flick to whatever is behind it.
      */
-    _canScroll(dx, dy) {
+    canScroll(dx, dy) {
       if (dx && this._maxScroll('x') > 0) return true;
       if (dy && this._maxScroll('y') > 0) return true;
       return false;
@@ -3791,7 +3832,7 @@ export class CanvasNode extends Node {
     ctx.strokeStyle = color;
   }
 
-  _paintContent(ctx) {
+  paintContent(ctx) {
     const onDraw = this.props.onDraw;
     if (typeof onDraw !== 'function') return;
     ctx.save();
@@ -4935,7 +4976,7 @@ export class TextInputNode extends Node {
     }
   }
 
-  _paintContent(ctx) {
+  paintContent(ctx) {
     const fonts = this.app?.fonts;
     if (!fonts) return;
     const content = this.contentBox();
@@ -5162,11 +5203,33 @@ export class TextAreaNode extends TextInputNode {
     return layout.indexAt(ev.x - content.x, ev.y - content.y + this._scrollY);
   }
 
-  scrollBy(dy) {
+  /** How far the wrapped text reaches past the viewport. The measurement a
+   * `Scrollable` takes off its children, taken off the layout that is
+   * actually painted — which is what makes a self-painting element a member
+   * of the scroll protocol rather than a special case in it. */
+  _maxScrollY() {
     const layout = this._valueLayout();
-    const content = this.contentBox();
-    const max = layout ? Math.max(0, layout.height - content.height) : 0;
-    const next = Math.min(Math.max(0, this._scrollY + dy), max);
+    if (!layout) return 0;
+    return Math.max(0, layout.height - this.contentBox().height);
+  }
+
+  /**
+   * The chain protocol's first half (issue #253). Vertical only — the text
+   * wraps, so there is never anything to the right — and false when the
+   * value fits, which is what lets the wheel chain outward to the pane or
+   * the window behind a short field instead of dying on it.
+   */
+  canScroll(dx, dy) {
+    return Boolean(dy) && this._maxScrollY() > 0;
+  }
+
+  /** `scrollBy(dy)`, or `scrollBy({x, y})` — the shape `Scrollable` takes,
+   * so the wheel's default action calls every scroller the same way. `x` is
+   * accepted and ignored: wrapped text has no horizontal extent. */
+  scrollBy(by) {
+    const dy = typeof by === 'number' ? by : (by?.y ?? 0);
+    if (!dy) return;
+    const next = Math.min(Math.max(0, this._scrollY + dy), this._maxScrollY());
     if (next === this._scrollY) return;
     this._scrollY = next;
     // an inner scroll moves pixels only inside the field's own clip
@@ -5268,7 +5331,7 @@ export class TextAreaNode extends TextInputNode {
     });
   }
 
-  _paintContent(ctx) {
+  paintContent(ctx) {
     const layout = this._valueLayout();
     if (!layout) return;
     const content = this.contentBox();
