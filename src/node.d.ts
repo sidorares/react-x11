@@ -13,7 +13,11 @@ import type {
   Style,
   TextRendering,
 } from './types/style.js';
-import type { KeyboardEvent, MouseEvent } from './types/events.js';
+import type {
+  CompositionEvent,
+  KeyboardEvent,
+  MouseEvent,
+} from './types/events.js';
 
 /** ntk's 2d context. Typed loosely — it is ntk's API, not ours. */
 export type Context2D = unknown;
@@ -153,6 +157,17 @@ export declare class Node {
    * takes Tab owes the user a way back out; see docs/extending.md.
    */
   defaultKeyDown?(ev: KeyboardEvent): void;
+  /**
+   * Text the user is still typing: a dead key waiting for its letter, or a
+   * Compose sequence half entered. `ev.type` is `compositionStart`,
+   * `compositionUpdate` or `compositionEnd`, and `ev.data` is what to show
+   * — or, at the end, the text that was committed.
+   *
+   * An element that implements this shows the preedit at its caret and
+   * inserts only what the end carries; the keys that made it never reach
+   * `defaultKeyDown`. See docs/extending.md.
+   */
+  defaultComposition?(ev: CompositionEvent): void;
   /** The element's own behaviour for a press, after `onMouseDown` handlers:
    * placing a caret, grabbing a scrollbar thumb, arming a drag. */
   defaultMouseDown?(ev: MouseEvent): void;
@@ -180,6 +195,12 @@ export declare class Node {
    * element with default actions for keys has to set this, or nothing will
    * ever focus it. */
   focusableByDefault?: boolean;
+  /** Whether dead keys and Compose run while this element has focus.
+   * Defaults to on. Set it false for an element that forwards raw key
+   * events to something with an input method of its own — `<foreign>` does,
+   * and composing on this side would swallow the dead key on its way to the
+   * embedded client. */
+  composes?: boolean;
   /** The cursor to show over this element when nothing in the style says
    * otherwise — `'text'` for something editable. A `cursor` style wins. */
   defaultCursor?: string;

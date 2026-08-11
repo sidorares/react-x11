@@ -311,6 +311,7 @@ a React component wrapping the element.
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `defaultKeyDown(ev)`     | a key, delivered to the focused node. `ev.keysym` is the `XK_*` constant; `codepoint >= 0x20` is the test for "this is text"                                                                                                |
 | `defaultKeyUp(ev)`       | that key was released. Rare — nothing in core needs it — and there for an element that answers the whole keystroke rather than the press, such as `<foreign>` forwarding into an embedded client                            |
+| `defaultComposition(ev)` | text still being typed — a dead key, a Compose sequence. `ev.type` is the phase, `ev.data` what to show, or at the end what to insert                                                                                       |
 | `defaultMouseDown(ev)`   | a press. Place a caret, grab a handle; `ev.capturePointer()` to keep the rest of the gesture                                                                                                                                |
 | `defaultMouseDrag(ev)`   | motion while _this_ element holds the press — including outside its box, which `onMouseMove` does not give you                                                                                                              |
 | `defaultMouseUp(ev)`     | that press was released                                                                                                                                                                                                     |
@@ -393,6 +394,38 @@ arms one pass-through Tab.** Escape on its own does nothing visible, the next
 Tab leaves, and the one after that indents again — the same bargain a code
 editor on the web makes, and the reason a screen-reader user is not stuck in
 your element.
+
+**An element that types text implements `defaultComposition` too.** `é` is
+a dead key and then a letter, and the keys that make it never reach
+`defaultKeyDown` — so an element that only implements the key path types the
+letter and drops the accent, which is the bug
+[events.md](events.md#composition) describes. Three phases, and the third
+is the only one that inserts anything:
+
+```js
+defaultComposition(ev) {
+  if (ev.type === 'compositionEnd') {
+    this.preedit = '';
+    if (ev.data) this.insert(ev.data);   // one edit, one undo entry
+  } else {
+    this.preedit = ev.data;              // draw it at the caret, underlined
+  }
+  this.root?.invalidate(false, this, 'text');
+}
+```
+
+**An element that forwards keys somewhere else sets `composes = false`**
+instead. Composition is ours to run only when the text lands in our tree;
+an element handing the raw key event to another program — `<foreign>` and
+its embedded client — wants the dead key itself, and the client's own input
+method takes it from there.
+
+The preedit is deliberately not part of your value: it never reaches
+`onChange` or the undo history, a controlled value rewritten mid-composition
+cannot corrupt it, and abandoning it — Escape, focus leaving — is dropping a
+string rather than undoing an edit. Not implementing it at all is a
+supported position for an element that holds no text; the composition then
+simply goes nowhere.
 
 **A caret blinks at `CARET_BLINK_MS`.** It is the cadence `<textinput>` uses,
 exported so that two carets on one screen are in step rather than a few tens

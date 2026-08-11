@@ -184,6 +184,14 @@ own and says so with `FOCUS_NEXT` when it runs off the end of it. A client that
 speaks no XEmbed — a terminal — keeps Tab for good, which is what a terminal is
 for; click elsewhere to leave.
 
+**Dead keys and Compose stay out of it.** react-x11's own composition
+([events.md](events.md#composition)) does not run while a `<foreign>` holds
+focus: the client is another program with an input method of its own, and an
+accent composed on this side would swallow the `KeyPress` on its way there
+and hand back a character with nowhere to put it. The raw key is forwarded
+and the client composes it, which is also what makes `é` work in an embedded
+terminal whatever the toolkit inside it is.
+
 ### The one gap
 
 X delivers a key to the deepest descendant of the focus window that contains the

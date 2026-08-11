@@ -70,10 +70,26 @@ export interface KeyboardEvent<T = DrawnNode> extends SyntheticEvent<T> {
   keycode: number;
   /** X keysym (`XK_*`), or undefined if the map has no entry. */
   keysym?: number;
-  /** Unicode code point, 0 when the key produces no character. */
-  codepoint: number;
-  /** The character the key produced, `''` for non-printing keys. */
-  key: string;
+  /** Unicode code point, undefined when the key produces no character —
+   * which includes every key a composition took (see `composing`). */
+  codepoint?: number;
+  /** The character the key produced, undefined for non-printing keys and
+   * for keys a composition took. */
+  key?: string;
+  /** Whether this key belongs to an open composition — a dead key, or a key
+   * of a Compose sequence. Its text arrives on the composition events
+   * instead, so a handler that types from `onKeyDown` should skip it. */
+  composing: boolean;
+}
+
+/**
+ * A composition — text the user is still typing. `onCompositionStart` has
+ * no data, `onCompositionUpdate` carries what is showing at the caret, and
+ * `onCompositionEnd` carries the text that was committed (empty when the
+ * sequence was abandoned).
+ */
+export interface CompositionEvent<T = DrawnNode> extends SyntheticEvent<T> {
+  data: string;
 }
 
 export interface FocusEvent<T = DrawnNode> extends SyntheticEvent<T> {}
@@ -290,6 +306,20 @@ export interface KeyboardHandlers<T = DrawnNode> {
   onKeyDownCapture?: (ev: KeyboardEvent<T>) => void;
   onKeyUp?: (ev: KeyboardEvent<T>) => void;
   onKeyUpCapture?: (ev: KeyboardEvent<T>) => void;
+  /**
+   * A composition opened — a dead key was pressed, or the Compose key was.
+   * `preventDefault()` on any of the three stops the element acting on it,
+   * which for `<textinput>` means showing or committing the text.
+   */
+  onCompositionStart?: (ev: CompositionEvent<T>) => void;
+  onCompositionStartCapture?: (ev: CompositionEvent<T>) => void;
+  /** The composition changed: `data` is what is showing at the caret. */
+  onCompositionUpdate?: (ev: CompositionEvent<T>) => void;
+  onCompositionUpdateCapture?: (ev: CompositionEvent<T>) => void;
+  /** The composition finished: `data` is the text it produced, empty if it
+   * was abandoned. */
+  onCompositionEnd?: (ev: CompositionEvent<T>) => void;
+  onCompositionEndCapture?: (ev: CompositionEvent<T>) => void;
 }
 
 export interface FocusHandlers<T = DrawnNode> {

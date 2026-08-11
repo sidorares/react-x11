@@ -103,6 +103,12 @@ export class ForeignNode extends Node {
     // an embedded client is a control the user can Tab to, like a
     // <textinput> — `focusable={false}` opts out (a video surface, say)
     this.focusableByDefault = true;
+    // …but it is not a control we type *into*. Dead keys and Compose are
+    // ours to run only when the text lands in our tree; here the raw key
+    // event is forwarded, and the client runs whatever input method it has
+    // — an accent composed on this side would eat the KeyPress and hand
+    // back a character with nowhere to go (docs/events.md#composition).
+    this.composes = false;
     // whether an XEMBED_FOCUS_IN is outstanding, so the matching FOCUS_OUT
     // is sent once and only after one
     this._focusSent = false;
