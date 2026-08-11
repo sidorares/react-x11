@@ -2,6 +2,7 @@ import counter from './counter.js';
 import layout from './layout.js';
 import styling from './styling.js';
 import sizeQueries from './size-queries.js';
+import rtl from './rtl.js';
 import widgets from './widgets.js';
 import events from './events.js';
 import dates from './dates.js';
@@ -23,6 +24,7 @@ const demos = [
   layout,
   styling,
   sizeQueries,
+  rtl,
   widgets,
   events,
   dates,

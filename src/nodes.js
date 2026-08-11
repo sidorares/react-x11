@@ -32,6 +32,7 @@ import {
   DEFAULT_FOCUS_RING,
   resolveHitSlop,
   resolveBorderWidths,
+  resolveBorderColors,
   tint,
 } from './styles.js';
 import { cssColorStraight } from 'ntk';
@@ -188,6 +189,7 @@ const INVALIDATE_REASONS = new Set([
   'props', // a React commit changed what a node draws
   'style-state', // :hover/:focus/:active/:disabled restyle
   'theme', // a theme/token change restyled a subtree
+  'direction', // the reading direction moved: sides, glyph order, bar edge
   'animation', // a transition frame
   'scroll', // scrollTo/scrollBy/scrollIntoView, textarea/textinput panning
   'text', // text content, input value or caret editing
@@ -1070,6 +1072,10 @@ export class Node {
     // inherits. Undefined means "never asked", which is load-bearing — see
     // `_retext`
     this._resolvedText = undefined;
+    // `direction`'s cache, same contract as `_resolvedText`'s: undefined means
+    // "never asked", which is what lets `_redirectSubtree` stop at a node
+    // nothing below has resolved through
+    this._direction = undefined;
     // hot pointer-path caches (issue #188): the children in paint order,
     // re-verified against the live children on every read, and the
     // subtree's hit reach, invalidated through _clearHitBounds()
@@ -1215,6 +1221,12 @@ export class Node {
     if (!inThemeWalk && inheritedTextChanged(this.style, displayed)) {
       this._retextSubtree();
     }
+    // …and the same funnel is the only place a `direction` can arrive by. The
+    // *layout* half of it went to yoga through `applyLayoutStyle`; this is
+    // everything else that reads a side.
+    if (!inThemeWalk && displayed.direction !== this.style.direction) {
+      this._redirectSubtree();
+    }
     return this.style;
   }
 
@@ -1326,6 +1338,79 @@ export class Node {
     const own = this.props.theme;
     this._theme = own ? { ...inherited, ...own } : inherited;
     return this._theme;
+  }
+
+  /**
+   * Which way this node reads: `'ltr'` or `'rtl'`, never `'inherit'` — this
+   * is the *resolved* answer, which is what everything outside yoga needs.
+   *
+   * Yoga resolves the same question for the layout on its own, and does it
+   * inside WASM where nothing can read it back (the binding has no
+   * `getComputedDirection`). So it is resolved a second time here, over the
+   * same rule, for everything the box tree does not answer: which side a
+   * scrollbar sits on, which physical edge a `borderStartWidth` paints, which
+   * way a popup flips, and the base direction a paragraph of neutral
+   * characters resolves against.
+   *
+   * The rule, nearest first:
+   *
+   * 1. `direction` in this node's own style — CSS's property, and the one
+   *    thing that means "this subtree, whatever is around it".
+   * 2. otherwise the enclosing element's, which is what makes it inherit.
+   * 3. otherwise the palette's, which is seeded from the locale — so an app
+   *    started in an RTL locale is mirrored without being asked, and
+   *    `<ThemeProvider value={{ direction }}>` is how one with a language
+   *    menu says otherwise. The provider plants the matching style property
+   *    as it goes, so rule 1 is what actually carries a mid-tree swap and
+   *    this clause is only ever read at the top of the tree.
+   *
+   * Cached like `theme` and dropped by the same walk, since the two now move
+   * together.
+   */
+  get direction() {
+    if (this._direction !== undefined) return this._direction;
+    const own = this.style.direction;
+    return (this._direction =
+      own === 'ltr' || own === 'rtl'
+        ? own
+        : this.parent
+          ? this.parent.direction
+          : this.theme.direction === 'rtl'
+            ? 'rtl'
+            : 'ltr');
+  }
+
+  /**
+   * The resolved direction moved — because this node's style named a new one,
+   * or because the palette under the whole tree did. Everything below
+   * inherits it, so the caches go with it, and the walk stops where a
+   * subtree states a direction of its own: nothing under that node can have
+   * changed.
+   *
+   * A node that never resolved one has nothing cached below it either —
+   * `direction` fills every ancestor on the way up — which is the same
+   * early-out the text cascade takes.
+   */
+  _redirectSubtree() {
+    if (this._direction === undefined) return;
+    const before = this._direction;
+    this._direction = undefined;
+    if (this.direction === before) return;
+    this._directionMoved();
+    for (const child of this.children) child._redirectSubtree();
+  }
+
+  /**
+   * What a direction change costs this node. The default is a repaint: the
+   * *layout* has already been dealt with by yoga, which was told about the
+   * style property directly, so what is left here is everything painted from
+   * the resolved side — the scrollbar, a logical border, an icon.
+   *
+   * `TextNode` overrides it: a paragraph's base direction is part of how it
+   * is shaped, so its cached layouts have to go.
+   */
+  _directionMoved() {
+    this.root?.invalidate(false, this, 'direction');
   }
 
   /**
@@ -1465,6 +1550,11 @@ export class Node {
     inThemeWalk++;
     try {
       this._theme = undefined;
+      // The palette is the floor under the direction too, and this walk
+      // already visits every node — so the cache is dropped here rather than
+      // through `_redirectSubtree`, which would walk the same subtree again.
+      const wasDirection = this._direction;
+      this._direction = undefined;
       // A `<window>` with no `backgroundColor` of its own follows the palette,
       // and the server's copy of that colour has to follow with it — otherwise
       // the next resize fills the new area in the old scheme.
@@ -1486,6 +1576,9 @@ export class Node {
       // having: nothing else about the node changes, and a cached layout
       // carries the face it was shaped with.
       if (this._retext() !== 0) this.root?.invalidate(true, null, 'theme');
+      if (wasDirection !== undefined && this.direction !== wasDirection) {
+        this._directionMoved();
+      }
       for (const child of this.children) child._themeChanged();
     } finally {
       inThemeWalk--;
@@ -2446,14 +2539,11 @@ export class Node {
   }
 
   _paintBorder(ctx) {
-    const { borderColor, borderRadius = 0 } = this.style;
-    const w = resolveBorderWidths(this.style);
-    const colors = {
-      top: this.style.borderTopColor ?? borderColor,
-      right: this.style.borderRightColor ?? borderColor,
-      bottom: this.style.borderBottomColor ?? borderColor,
-      left: this.style.borderLeftColor ?? borderColor,
-    };
+    const { borderRadius = 0 } = this.style;
+    // Both through the node's resolved direction: a `borderStartWidth` lays
+    // out on one side and has to paint on the same one.
+    const w = resolveBorderWidths(this.style, this.direction);
+    const colors = resolveBorderColors(this.style, this.direction);
     const uniform =
       w.top === w.right &&
       w.top === w.bottom &&
@@ -2791,6 +2881,20 @@ export class TextNode extends Node {
     this._layouts.clear();
   }
 
+  /**
+   * The base direction is an input to shaping, not just to painting: it sets
+   * the level every neutral character resolves against and the edge
+   * `textAlign: 'start'` means. So a paragraph whose direction moved is a
+   * paragraph that has to be laid out again, at the same cost as a font
+   * change.
+   */
+  _directionMoved() {
+    this._textContentChanged();
+    const owner = this._textBoxOwner();
+    if (owner) owner._invalidateLayout('direction');
+    else this.root?.invalidate(true, null, 'direction');
+  }
+
   /** The node that owns the box this text flows in. A span has none of its
    * own, so its geometry — and its damage — belong to the nearest ancestor
    * with a yoga node. */
@@ -2905,6 +3009,16 @@ export class TextNode extends Node {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
         align: this.style.textAlign,
         lineHeight: this.style.lineHeight,
+        // The paragraph's **base** direction, which is not the same question
+        // as which script the characters are in. UAX#9 resolves a run of
+        // neutrals — `"(1) 12:30"`, a filename, a lone bracket — against the
+        // paragraph level, and the first-strong-character rule is only what
+        // to do when nobody said. So handing the box's direction down is what
+        // makes an Arabic paragraph parenthesise and punctuate correctly, and
+        // it is also what `textAlign: 'start'` resolves against: ntk aligns
+        // `start`/`end` to the base level, so a `<text>` with no strong
+        // characters at all lands on the right side of an RTL box.
+        direction: this.direction,
       });
       if (this._layouts.size > 32) this._layouts.clear();
       this._layouts.set(key, layout);
@@ -3034,6 +3148,12 @@ const EMPTY_SCROLLBARS = Object.freeze([]);
  * `viewport`/`content`/`scroll` are along the axis; `across`/`crossSize`
  * place the bar on the other one. `shorten` keeps the two bars out of each
  * other's corner when both are showing.
+ *
+ * `direction` mirrors both of those. A vertical bar sits on the **left** in
+ * an RTL viewport — every desktop does this, and it is not decoration: the
+ * bar belongs on the edge the eye finishes a line at. And a horizontal bar's
+ * thumb starts at the right, because `scroll` is measured from the start of
+ * the content and the start of RTL content is its right-hand edge.
  */
 function scrollbarGeometry({
   axis = 'y',
@@ -3045,17 +3165,26 @@ function scrollbarGeometry({
   scroll,
   inset = 0,
   shorten = 0,
+  direction = 'ltr',
 }) {
   const length = viewport - shorten;
   if (length <= 0 || !(content > viewport)) return null;
+  const rtl = direction === 'rtl';
   const thumbLength = Math.max(
     SCROLLBAR_MIN_THUMB,
     (length * length) / content,
   );
   const range = content - viewport;
   const travel = Math.max(0, length - thumbLength);
-  const thumbStart = start + (range > 0 ? (scroll / range) * travel : 0);
-  const crossStart = crossStart0 + crossSize - SCROLLBAR_WIDTH - inset;
+  const offset = range > 0 ? (scroll / range) * travel : 0;
+  // a vertical bar always fills from the top; only the horizontal one runs
+  // the way the text does
+  const thumbStart =
+    rtl && axis === 'x' ? start + travel - offset : start + offset;
+  const crossStart =
+    rtl && axis === 'y'
+      ? crossStart0 + inset
+      : crossStart0 + crossSize - SCROLLBAR_WIDTH - inset;
   return {
     axis,
     trackStart: start,
@@ -3065,6 +3194,10 @@ function scrollbarGeometry({
     crossStart,
     range,
     travel,
+    // does a larger `scroll` move the thumb *towards* trackStart? The one
+    // place the mirroring is written down, so the drag and the track-page
+    // below read it rather than asking about the direction again
+    reversed: rtl && axis === 'x',
     // the thumb as a rect, for painting
     x: axis === 'x' ? thumbStart : crossStart,
     y: axis === 'x' ? crossStart : thumbStart,
@@ -3192,15 +3325,24 @@ export const Scrollable = (Base) =>
         }
         return;
       }
-      const { right, bottom } = this._measureContent();
+      const rtl = this.direction === 'rtl';
+      const { start, bottom } = this._measureContent();
       this.contentHeight =
         bottom + this.yoga.getComputedPadding(Yoga.EDGE_BOTTOM);
-      this.contentWidth = right + this.yoga.getComputedPadding(Yoga.EDGE_RIGHT);
+      this.contentWidth =
+        start +
+        this.yoga.getComputedPadding(rtl ? Yoga.EDGE_LEFT : Yoga.EDGE_RIGHT);
       this._resolveScrollIntoView();
       this.scrollY = clampScroll(this.scrollY, this._maxScroll('y'));
       this.scrollX = clampScroll(this.scrollX, this._maxScroll('x'));
       this._reportViewport();
-      const ox = originX - this.scrollX;
+      // `scrollX` is how far the content has moved **from its start**, which
+      // is the right-hand edge in RTL — so scrolling shifts the children the
+      // other way. Keeping it a distance rather than a coordinate is what
+      // makes `scrollTo({x: 0})` mean "back to the beginning" in both
+      // directions, and keeps every clamp, every max and the blit's arithmetic
+      // in one sign.
+      const ox = rtl ? originX + this.scrollX : originX - this.scrollX;
       const oy = originY - this.scrollY;
       // The layout diff and a scroll would double-report each other: a scroll
       // is a uniform shift of everything below this viewport, already claimed
@@ -3280,22 +3422,30 @@ export const Scrollable = (Base) =>
      *
      * Anything that clips its own children ends the walk: their overflow is
      * that node's business, not ours.
+     *
+     * `start` is how far the content reaches from the edge it *starts* at,
+     * which is the right-hand one under `direction: 'rtl'` — yoga lays an
+     * overflowing RTL row out at negative offsets, so the reach that matters
+     * there is how far left of zero it got, not how far right.
      */
     _measureContent() {
-      let right = 0;
+      const rtl = this.direction === 'rtl';
+      const width = this.yoga.getComputedWidth();
+      let start = 0;
       let bottom = 0;
       const walk = (node, dx, dy) => {
         for (const child of node.children) {
           if (child.isWindow || !child.yoga || child.hidden) continue;
           const x = dx + child.yoga.getComputedLeft();
           const y = dy + child.yoga.getComputedTop();
-          right = Math.max(right, x + child.yoga.getComputedWidth());
+          const w = child.yoga.getComputedWidth();
+          start = Math.max(start, rtl ? width - x : x + w);
           bottom = Math.max(bottom, y + child.yoga.getComputedHeight());
           if (!child.clipsChildren()) walk(child, x, y);
         }
       };
       walk(this, 0, 0);
-      return { right, bottom };
+      return { start, bottom };
     }
 
     /**
@@ -3412,15 +3562,21 @@ export const Scrollable = (Base) =>
       // arrows and Page keys to whatever else would answer them
       if (!this.focusableByDefault) return undefined;
       const page = Math.max(1, this.abs.height - SCROLL_KEY_PAGE_OVERLAP);
+      // Left and Right are the directions on the *screen*, and `scrollX` runs
+      // from the start of the content — so which of them moves it forward
+      // depends on which way the content runs. Home/End and the Page keys
+      // need no such rule: they already name the logical ends.
+      const forward =
+        this.direction === 'rtl' ? -SCROLL_KEY_STEP : SCROLL_KEY_STEP;
       switch (ev.keysym) {
         case XK_DOWN:
           return this.scrollBy({ y: SCROLL_KEY_STEP });
         case XK_UP:
           return this.scrollBy({ y: -SCROLL_KEY_STEP });
         case XK_RIGHT:
-          return this.scrollBy({ x: SCROLL_KEY_STEP });
+          return this.scrollBy({ x: forward });
         case XK_LEFT:
-          return this.scrollBy({ x: -SCROLL_KEY_STEP });
+          return this.scrollBy({ x: -forward });
         case XK_PAGE_DOWN:
           return this.scrollBy({ y: page });
         case XK_PAGE_UP:
@@ -3468,15 +3624,23 @@ export const Scrollable = (Base) =>
         if (!n.parent) return;
       }
       const bottom = top + target.yoga.getComputedHeight();
-      const rightEdge = left + target.yoga.getComputedWidth();
+      // Horizontally the two edges are measured from the content's **start**,
+      // the same units `scrollX` is in — so under RTL the target's near edge
+      // is its right one and both are counted back from the viewport's width.
+      const w = target.yoga.getComputedWidth();
+      const near =
+        this.direction === 'rtl'
+          ? this.yoga.getComputedWidth() - left - w
+          : left;
+      const far = near + w;
       if (bottom > this.scrollY + this.abs.height) {
         this.scrollY = bottom - this.abs.height;
       }
       if (top < this.scrollY) this.scrollY = top;
-      if (rightEdge > this.scrollX + this.abs.width) {
-        this.scrollX = rightEdge - this.abs.width;
+      if (far > this.scrollX + this.abs.width) {
+        this.scrollX = far - this.abs.width;
       }
-      if (left < this.scrollX) this.scrollX = left;
+      if (near < this.scrollX) this.scrollX = near;
     }
 
     paint(ctx) {
@@ -3512,6 +3676,7 @@ export const Scrollable = (Base) =>
         scroll: horizontal ? this.scrollX : this.scrollY,
         inset: 2,
         shorten: other ? SCROLLBAR_WIDTH + 2 : 0,
+        direction: this.direction,
       });
     }
 
@@ -3545,9 +3710,11 @@ export const Scrollable = (Base) =>
           ev.capturePointer();
           return;
         }
-        // a press on the track pages towards it, like PageUp/PageDown
+        // a press on the track pages towards it, like PageUp/PageDown — and
+        // "towards it" is a visual direction, so it flips with the bar
         const page = bar.axis === 'x' ? this.abs.width : this.abs.height;
-        const delta = at < bar.thumbStart ? -page : page;
+        const back = at < bar.thumbStart ? !bar.reversed : bar.reversed;
+        const delta = back ? -page : page;
         this.scrollBy(bar.axis === 'x' ? { x: delta } : { y: delta });
         return;
       }
@@ -3558,7 +3725,8 @@ export const Scrollable = (Base) =>
       const bar = this._scrollbar(this._barGrab.axis);
       if (!bar || bar.travel <= 0) return;
       const at = along(bar, ev.x, ev.y) - this._barGrab.offset - bar.trackStart;
-      const to = (at / bar.travel) * bar.range;
+      const from = bar.reversed ? bar.travel - at : at;
+      const to = (from / bar.travel) * bar.range;
       this.scrollTo(bar.axis === 'x' ? { x: to } : { y: to });
     }
 
@@ -5261,14 +5429,39 @@ export class WindowNode extends Scrollable(Node) {
    * way, so the floor is measured at the width the window will actually
    * have and re-sent as that changes.
    */
+  /**
+   * The direction to lay this window's tree out in, as yoga spells it.
+   *
+   * `calculateLayout`'s third argument is the direction the *owner* imposes,
+   * and a window has no owner — so the root reads its own resolved value and
+   * hands it down. A `direction` on a `<box>` inside is then yoga's business
+   * rather than ours: it carries the property on its own node and everything
+   * under it inherits from there.
+   */
+  get _rootDirection() {
+    return this.direction === 'rtl' ? Yoga.DIRECTION_RTL : Yoga.DIRECTION_LTR;
+  }
+
+  /**
+   * The root's direction is an argument to `calculateLayout` rather than a
+   * property on a yoga node, so nothing in the box tree is dirty when it
+   * moves and the layout pass has to be asked for. That is only reachable
+   * from the palette — a `direction` written in the window's own style goes
+   * through `applyLayoutStyle`, which dirties the node the ordinary way.
+   */
+  _directionMoved() {
+    this.invalidate(true, null, 'direction');
+  }
+
   _measureMinimum(axis, forWidth) {
     const yoga = this.yoga;
+    const dir = this._rootDirection;
     // The root carries whatever size the last pass pinned on it, and an
     // available size means nothing to a root that has one of its own.
     yoga.setWidth(undefined);
     yoga.setHeight(undefined);
     if (axis === 'width') {
-      yoga.calculateLayout(0, undefined, Yoga.DIRECTION_LTR);
+      yoga.calculateLayout(0, undefined, dir);
       return Math.ceil(contentSpan(this, axis));
     }
     // Height takes two passes. The first is the tree at its real width with
@@ -5277,10 +5470,10 @@ export class WindowNode extends Scrollable(Node) {
     // width, and no leaf can give any of it back. The second is the one
     // that collapses, and it squashes a leaf that a `row` stretches: those
     // are the ones the map above puts back.
-    yoga.calculateLayout(forWidth, undefined, Yoga.DIRECTION_LTR);
+    yoga.calculateLayout(forWidth, undefined, dir);
     const intrinsic = new Map();
     captureLeafHeights(this, intrinsic);
-    yoga.calculateLayout(forWidth, 0, Yoga.DIRECTION_LTR);
+    yoga.calculateLayout(forWidth, 0, dir);
     return Math.ceil(contentSpan(this, axis, intrinsic));
   }
 
@@ -5388,6 +5581,7 @@ export class WindowNode extends Scrollable(Node) {
       return { width: props.width, height: props.height, hints };
     }
 
+    const dir = this._rootDirection;
     const measure = () => {
       // The root carries whatever size the last flush() pinned on it — and
       // whatever the floor pass below cleared — so this is re-stated per
@@ -5397,11 +5591,7 @@ export class WindowNode extends Scrollable(Node) {
       yoga.setHeight(needH ? undefined : props.height);
       let naturalW;
       if (needW) {
-        yoga.calculateLayout(
-          undefined,
-          needH ? undefined : props.height,
-          Yoga.DIRECTION_LTR,
-        );
+        yoga.calculateLayout(undefined, needH ? undefined : props.height, dir);
         naturalW = clampExtent(yoga.getComputedWidth(), undefined, availW);
       }
       const width = autoW ? clampExtent(naturalW, minW, availW) : props.width;
@@ -5409,11 +5599,7 @@ export class WindowNode extends Scrollable(Node) {
       // is the layout the window is about to be created at, so leaving the
       // tree holding the max-content one would hand `flush()` a stale
       // arrangement.
-      yoga.calculateLayout(
-        width,
-        needH ? undefined : props.height,
-        Yoga.DIRECTION_LTR,
-      );
+      yoga.calculateLayout(width, needH ? undefined : props.height, dir);
       const naturalH = needH
         ? clampExtent(yoga.getComputedHeight(), undefined, availH)
         : undefined;
@@ -6676,7 +6862,7 @@ export class WindowNode extends Scrollable(Node) {
       this._resolveSizeQueries(width, height);
       this.yoga.setWidth(width);
       this.yoga.setHeight(height);
-      this.yoga.calculateLayout(width, height, Yoga.DIRECTION_LTR);
+      this.yoga.calculateLayout(width, height, this._rootDirection);
       this.abs = { x: 0, y: 0, width, height };
       // the root's rect is written here, not through _assignAbs, so its
       // cached hit reach is dropped here too (children bubble their own)
@@ -6820,7 +7006,7 @@ export class WindowNode extends Scrollable(Node) {
     if (layoutMoved) return;
     // children clip to the border box, so a border ring or rounded corner
     // would be shifted like content — any painted side counts
-    const blitBorder = resolveBorderWidths(node.style);
+    const blitBorder = resolveBorderWidths(node.style, node.direction);
     if (
       blitBorder.top > 0 ||
       blitBorder.right > 0 ||
@@ -6969,7 +7155,10 @@ export class WindowNode extends Scrollable(Node) {
           // on the path down: its solid background under the viewport is
           // translation-invariant, its border ring and corners are not.
           // The widest side is conservative for a non-uniform border
-          const bw = resolveBorderWidths(child.style ?? EMPTY_STYLE);
+          const bw = resolveBorderWidths(
+            child.style ?? EMPTY_STYLE,
+            child.direction,
+          );
           const inset = Math.max(
             bw.top,
             bw.right,

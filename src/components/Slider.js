@@ -66,14 +66,24 @@ export function Slider({
     if (next !== value) onChange?.(changeEvent('range', name, next));
   };
 
-  /** Pointer x -> value, using the track's laid-out rect. */
+  /**
+   * Pointer x -> value, using the track's laid-out rect.
+   *
+   * The direction is read off the **node** rather than the theme: it is the
+   * one the track was actually laid out in, which is what the pointer
+   * coordinate has to be measured against — a slider inside a `<box
+   * style={{ direction: 'rtl' }}>` mirrors without a provider anywhere.
+   */
   const valueAt = (ev) => {
     const node = trackRef.current;
     if (!node?.abs?.width) return value;
     // the thumb is centred on the value, so the usable travel is the track
     // minus one thumb width — otherwise min/max are unreachable at the ends
     const travel = Math.max(1, node.abs.width - SLIDER_THUMB);
-    const x = ev.x - node.abs.x - SLIDER_THUMB / 2;
+    const x =
+      node.direction === 'rtl'
+        ? node.abs.x + node.abs.width - ev.x - SLIDER_THUMB / 2
+        : ev.x - node.abs.x - SLIDER_THUMB / 2;
     return quantize(min + (Math.min(travel, Math.max(0, x)) / travel) * span);
   };
 
@@ -101,12 +111,22 @@ export function Slider({
         onMouseUp: () => setDragging(false),
         onKeyDown: (ev) => {
           const big = (step || 1) * 10;
+          // Left and Right name what the *thumb* should do on the screen, so
+          // in a mirrored slider Left is the one that raises the value —
+          // WAI-ARIA's rule for a horizontal slider, and the only one that
+          // matches what the hand sees. Up and Down never mirror, which is
+          // why they are not folded in with them.
+          const along = trackRef.current?.direction === 'rtl' ? -1 : 1;
           switch (ev.keysym) {
             case XK_LEFT:
+              emit(quantize(clamp(value - along * (step || 1))));
+              return;
+            case XK_RIGHT:
+              emit(quantize(clamp(value + along * (step || 1))));
+              return;
             case XK_DOWN:
               emit(quantize(clamp(value - (step || 1))));
               return;
-            case XK_RIGHT:
             case XK_UP:
               emit(quantize(clamp(value + (step || 1))));
               return;
@@ -188,12 +208,15 @@ export function Slider({
         style: { flexGrow: 1 - fraction, flexShrink: 0, flexBasis: 0 },
       }),
     ),
-    // thumb, centred on the value within the same travel the math uses
+    // thumb, centred on the value within the same travel the math uses.
+    // Logical inset and logical margin: the track's two flex ratios already
+    // mirror on their own — a `row` runs the other way under `direction:
+    // 'rtl'` — and these are what keep the thumb on top of the join.
     h('box', {
       style: {
         position: 'absolute',
-        left: `${fraction * 100}%`,
-        marginLeft: -SLIDER_THUMB * fraction,
+        start: `${fraction * 100}%`,
+        marginStart: -SLIDER_THUMB * fraction,
         width: SLIDER_THUMB,
         height: SLIDER_THUMB,
         borderRadius: SLIDER_THUMB / 2,

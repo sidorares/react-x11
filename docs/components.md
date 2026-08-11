@@ -48,6 +48,7 @@ control are most of what separates one platform's controls from another's:
 | `radiusPopup` `radiusPopupItem` `radiusTooltip` | floating-surface shape         |
 | `fontSize` `paddingX` `paddingY`                | control size                   |
 | `fontFamily` `monoFamily`                       | the app's two faces            |
+| `direction`                                     | which way the app reads        |
 
 `fontFamily` and `fontSize` are the type this app sets, and text that names
 neither **takes them** — a `<text>`, a `<textinput>`, a widget's own label. So
@@ -69,6 +70,46 @@ preference and a fallback.
 that every code surface in an app — a listing, a log pane, a hex dump, all
 written by different components — can say `fontFamily: '$monoFamily'` and be
 set from one place.
+
+### Which way it reads
+
+`direction` is `'ltr'` or `'rtl'`, and it is **seeded from the locale**: an
+app started under an RTL locale is mirrored without being configured, the
+way a GTK or Qt one is. Set it here to mirror a whole UI from one place:
+
+```jsx
+<ThemeProvider value={{ direction: settings.rtl ? 'rtl' : 'ltr' }}>
+```
+
+The provider plants the matching `direction` style property in the node tree
+as it goes, so the **boxes** and the **widgets** mirror together. That is
+why this is the way to do it rather than a bare `<box style={{ direction:
+'rtl' }}>`: yoga mirrors boxes on its own, but which way an arrow key steps,
+which way a chevron points and which side a submenu opens on are widget
+decisions, read through `useDirection()`. Under a bare style property the
+layout mirrors and those do not.
+
+Most of the set needs no help — `Button`, `Checkbox`, `Radio`, `Switch` and
+`ProgressBar` are rows and flex ratios, and come out mirrored on their own.
+The rest each have one thing yoga could not answer:
+
+| widget                    | what mirrors                                        |
+| ------------------------- | --------------------------------------------------- |
+| `Slider`                  | the drag, and Left/Right (Up/Down do not)           |
+| `Tabs`                    | Left/Right walk the strip the way it is drawn       |
+| `Tree`                    | the indent, the twisty, and which arrow opens       |
+| `Table`                   | column resizing, the sort mark, the header's scroll |
+| `SplitPane`               | which pane is first, the drag and its arrows        |
+| `MenuBar` / `ContextMenu` | submenus open to the start side, and their arrows   |
+| `Calendar` / `DatePicker` | a week runs the other way, and so do Left/Right     |
+| `Select`, `PasswordInput` | the field's own insets follow the text              |
+
+`<textinput>` and `<textarea>` are the gap: they shape and draw bidi text
+correctly, but the field's own origin and caret scrolling are still
+left-to-right.
+
+See [styling.md](styling.md#direction-and-the-logical-edges) for the style
+property and the logical edges.
 
 `paddingY` is the space **you can see** — above the capitals and below the
 baseline — not the space plus whatever the font's ascent left over: every
@@ -1437,19 +1478,28 @@ const rect = measure({ placement: 'bottom', align: 'center', width, height });
 // -> { x, y, width, height, placement }
 ```
 
-| option            |                                                            |
-| ----------------- | ---------------------------------------------------------- |
-| `placement`       | `'bottom'` (default), `'top'`, `'left'`, `'right'`         |
-| `align`           | `'start'` (default), `'center'`, `'end'` on the cross axis |
-| `offset`          | gap from the anchor in px (default 2)                      |
-| `width`, `height` | size of the popup you are positioning                      |
-| `alignTo`         | node the alignment reads, when it is not the anchor        |
+| option            |                                                                        |
+| ----------------- | ---------------------------------------------------------------------- |
+| `placement`       | `'bottom'` (default), `'top'`, `'start'`, `'end'`, `'left'`, `'right'` |
+| `align`           | `'start'` (default), `'center'`, `'end'` on the cross axis             |
+| `offset`          | gap from the anchor in px (default 2)                                  |
+| `width`, `height` | size of the popup you are positioning                                  |
+| `alignTo`         | node the alignment reads, when it is not the anchor                    |
 
 `placement` is a **preference, not a promise**: a menu near the bottom of
 the screen flips above its trigger rather than opening off-screen, and the
 result is clamped into the screen either way. The side actually used comes
 back as `placement`. Where screen geometry is unavailable it places without
 clamping.
+
+`'start'` and `'end'` are the **logical** sides and are what a submenu
+wants: it opens away from the edge its parent's rows begin at, which is
+leftwards in a mirrored menu, and still flips at the screen edge from there.
+`'left'`/`'right'` stay physical. `align` mirrors the same way, but only
+when the popup is above or below its trigger — with one beside it the
+alignment axis is vertical, and nothing vertical mirrors. The direction is
+read off the anchoring node, so a menu inside a mirrored panel needs no
+argument.
 
 `alignTo` takes the two axes from **different nodes**: the placement edge
 from the anchor, the alignment from `alignTo`. A submenu is the case that

@@ -29,14 +29,16 @@ const s = createStyles({
     hitSlop: TRACK_SLOP,
     transition: { backgroundColor: 120 },
   },
-  // absolutely positioned so the thumb slides on `left`: `justifyContent`
-  // would flip it between the ends with nothing in between to animate
+  // absolutely positioned so the thumb slides on `start`: `justifyContent`
+  // would flip it between the ends with nothing in between to animate. The
+  // *logical* inset, so an off switch has its thumb on the side its label
+  // starts at and the slide runs the way the text does.
   thumb: {
     position: 'absolute',
     width: THUMB,
     height: THUMB,
     borderRadius: THUMB / 2,
-    transition: { left: 120 },
+    transition: { start: 120 },
   },
 });
 
@@ -61,7 +63,7 @@ const THUMB_ON = TRACK_WIDTH - THUMB - INSET;
  * node under the pointer, which is what lets the track answer a press that
  * landed on the thumb.
  *
- * The slide is a `transition` on `left`, so the animation is the renderer's
+ * The slide is a `transition` on `start`, so the animation is the renderer's
  * frame clock rather than a requestAnimationFrame loop written here — and
  * the same declaration animates the track colour with it. It runs on the
  * press tint too: 120ms of fade that *starts* on the press frame, which is
@@ -114,7 +116,7 @@ export function Switch({
       style: [
         s.thumb,
         {
-          left: checked ? THUMB_ON : THUMB_OFF,
+          start: checked ? THUMB_ON : THUMB_OFF,
           backgroundColor: theme.background,
         },
       ],

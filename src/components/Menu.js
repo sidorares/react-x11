@@ -3,7 +3,13 @@
 // build-step-free for consumers.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
+import {
+  capBand,
+  capTrim,
+  rowRadius,
+  useDirection,
+  useTheme,
+} from './theme.js';
 import { Icon, iconSize } from './Icon.js';
 import {
   DEFAULT_LABEL_SIZE,
@@ -308,6 +314,7 @@ function MenuRow({
   nodeRef,
 }) {
   const theme = useTheme();
+  const rtl = useDirection() === 'rtl';
   // only the live end of the trail takes the selection colour, and with it
   // the inverted label
   const active = state === 'active';
@@ -405,7 +412,9 @@ function MenuRow({
       ),
     submenu &&
       h(Icon, {
-        name: 'chevronRight',
+        // points the way the submenu opens, which is away from the edge the
+        // rows begin at
+        name: rtl ? 'chevronLeft' : 'chevronRight',
         // The capitals of the row, not the gutter's 16px column: a chevron
         // stands as tall as its box, so `MENU_ICON_SIZE` would put an arrow
         // beside the label taller than the label.
@@ -473,7 +482,9 @@ function MenuLevel({
     if (!node?.abs?.width) return;
     setChildRect(
       anchorRect(listRef.current ?? node, {
-        placement: 'right',
+        // the logical side: a submenu opens away from the edge its parent's
+        // rows begin at, and still flips at the screen edge from there
+        placement: 'end',
         // The edge comes from the list box, which fills the popup, and the
         // alignment from the row. Anchoring both to the row put the submenu
         // a border and a padding *inside* its parent's right edge, so the
@@ -634,10 +645,13 @@ function MenuLevel({
  *
  * Returns true when the key was consumed. Left and Right fall through when
  * there is no submenu to enter or leave, so `MenuBar` can walk the bar.
+ *
+ * `rtl` swaps the two horizontal keys, because they name what happens on the
+ * screen: a submenu that opens to the left is a submenu Left enters.
  */
 function handleMenuKey(
   ev,
-  { rootItems, path, setPath, select, close, typeAhead },
+  { rootItems, path, setPath, select, close, typeAhead, rtl = false },
 ) {
   const depth = path.length - 1;
   if (depth < 0) return false;
@@ -684,9 +698,9 @@ function handleMenuKey(
       );
       return true;
     }
-    case XK_RIGHT:
+    case rtl ? XK_LEFT : XK_RIGHT:
       return enterSubmenu();
-    case XK_LEFT:
+    case rtl ? XK_RIGHT : XK_LEFT:
       if (depth > 0) {
         setPath(path.slice(0, -1));
         return true;
@@ -731,6 +745,7 @@ export function ContextMenu({
   const [rect, setRect] = useState(null);
   const [path, setPath] = useState([]);
   const typeAhead = useTypeAhead();
+  const rtl = useDirection() === 'rtl';
 
   const close = () => {
     setRect(null);
@@ -794,6 +809,7 @@ export function ContextMenu({
           select,
           close,
           typeAhead,
+          rtl,
         });
       },
       onBlur: close,
@@ -837,6 +853,7 @@ export function MenuBar({
   ...boxProps
 }) {
   const theme = useTheme();
+  const rtl = useDirection() === 'rtl';
   const [openIndex, setOpenIndex] = useState(-1);
   const [rect, setRect] = useState(null);
   const [path, setPath] = useState([]);
@@ -1115,8 +1132,8 @@ export function MenuBar({
               }
               if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
                 openMenu(index);
-              } else if (ev.keysym === XK_LEFT) moveMenu(-1);
-              else if (ev.keysym === XK_RIGHT) moveMenu(1);
+              } else if (ev.keysym === XK_LEFT) moveMenu(rtl ? 1 : -1);
+              else if (ev.keysym === XK_RIGHT) moveMenu(rtl ? -1 : 1);
               return;
             }
             // the menu gets first refusal: Left leaves a submenu and Right
@@ -1129,10 +1146,13 @@ export function MenuBar({
               select,
               close,
               typeAhead,
+              rtl,
             });
             if (consumed) return;
-            if (ev.keysym === XK_LEFT) moveMenu(-1);
-            else if (ev.keysym === XK_RIGHT) moveMenu(1);
+            // the bar runs the way the titles do, so Left is the next title
+            // along in a mirrored bar
+            if (ev.keysym === XK_LEFT) moveMenu(rtl ? 1 : -1);
+            else if (ev.keysym === XK_RIGHT) moveMenu(rtl ? -1 : 1);
           },
           style: [
             {

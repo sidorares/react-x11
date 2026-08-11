@@ -57,6 +57,18 @@ const OVERFLOW = {
   scroll: Yoga.OVERFLOW_SCROLL,
 };
 
+/**
+ * CSS's `direction`. `'inherit'` is yoga's own default and the value every
+ * node keeps having, so writing it is the same as leaving it out — it is
+ * spelled anyway because "take it from the box around me" is a thing a style
+ * has to be able to say back after saying `'rtl'`.
+ */
+const DIRECTION = {
+  ltr: Yoga.DIRECTION_LTR,
+  rtl: Yoga.DIRECTION_RTL,
+  inherit: Yoga.DIRECTION_INHERIT,
+};
+
 const pick = (map, value, name) => {
   if (value === undefined) return undefined;
   if (!(value in map)) {
@@ -98,6 +110,12 @@ const LAYOUT_APPLIERS = {
     n.setPositionType(
       pick(POSITION, v, 'position') ?? Yoga.POSITION_TYPE_RELATIVE,
     ),
+  // Which way the boxes under this one run. Everything else in this file is
+  // physical; this is the one property that decides what "start" means, and
+  // yoga inherits it down its own tree — so a `<box>` that sets it mirrors
+  // that subtree and nothing above it.
+  direction: (n, v) =>
+    n.setDirection(pick(DIRECTION, v, 'direction') ?? Yoga.DIRECTION_INHERIT),
   top: (n, v) => n.setPosition(Yoga.EDGE_TOP, v),
   right: (n, v) => n.setPosition(Yoga.EDGE_RIGHT, v),
   bottom: (n, v) => n.setPosition(Yoga.EDGE_BOTTOM, v),
@@ -112,6 +130,23 @@ const LAYOUT_APPLIERS = {
   paddingRight: (n, v) => n.setPadding(Yoga.EDGE_RIGHT, v),
   paddingBottom: (n, v) => n.setPadding(Yoga.EDGE_BOTTOM, v),
   paddingLeft: (n, v) => n.setPadding(Yoga.EDGE_LEFT, v),
+  // The **logical** edges — the side the text starts on and the side it ends
+  // on, whichever those turn out to be. A stylesheet written in these is the
+  // same stylesheet in both directions, which is the whole reason `direction`
+  // is worth having: a physical `paddingLeft` under `direction: 'rtl'` is a
+  // gutter on the wrong side of the text it was meant to indent.
+  //
+  // Yoga's edge precedence is start/end over the physical side over
+  // `EDGE_HORIZONTAL` over `EDGE_ALL` — so `paddingStart` beats `paddingLeft`
+  // even in LTR where the two name the same edge, the way CSS's
+  // `padding-inline-start` beats `padding-left`. Pinned in a test rather than
+  // trusted, since it is the opposite of what the vertical shorthands do.
+  start: (n, v) => n.setPosition(Yoga.EDGE_START, v),
+  end: (n, v) => n.setPosition(Yoga.EDGE_END, v),
+  marginStart: (n, v) => n.setMargin(Yoga.EDGE_START, v),
+  marginEnd: (n, v) => n.setMargin(Yoga.EDGE_END, v),
+  paddingStart: (n, v) => n.setPadding(Yoga.EDGE_START, v),
+  paddingEnd: (n, v) => n.setPadding(Yoga.EDGE_END, v),
   gap: (n, v) => n.setGap(Yoga.GUTTER_ALL, v ?? 0),
   rowGap: (n, v) => n.setGap(Yoga.GUTTER_ROW, v ?? 0),
   columnGap: (n, v) => n.setGap(Yoga.GUTTER_COLUMN, v ?? 0),
@@ -128,6 +163,8 @@ const LAYOUT_APPLIERS = {
   borderRightWidth: (n, v) => n.setBorder(Yoga.EDGE_RIGHT, v),
   borderBottomWidth: (n, v) => n.setBorder(Yoga.EDGE_BOTTOM, v),
   borderLeftWidth: (n, v) => n.setBorder(Yoga.EDGE_LEFT, v),
+  borderStartWidth: (n, v) => n.setBorder(Yoga.EDGE_START, v),
+  borderEndWidth: (n, v) => n.setBorder(Yoga.EDGE_END, v),
 };
 
 // Props that only affect painting, not geometry.
@@ -144,6 +181,8 @@ const PAINT_PROPS = new Set([
   'borderRightColor',
   'borderBottomColor',
   'borderLeftColor',
+  'borderStartColor',
+  'borderEndColor',
   'borderRadius',
   'zIndex',
   'outlineWidth',
@@ -581,6 +620,7 @@ export function hasStateStyles(style) {
 const NOT_ANIMATABLE = new Set([
   'transition',
   'zIndex',
+  'direction',
   'flexDirection',
   'justifyContent',
   'alignItems',
@@ -920,19 +960,57 @@ export const DEFAULT_FOCUS_RING = {
  * has to name what it grows.
  */
 /**
- * Per-side border widths, resolved the way padding resolves: the side
- * property overrides the `borderWidth` shorthand. This is the paint-side
- * reading of the same rule yoga applies on the layout side (EDGE_TOP wins
- * over EDGE_ALL), kept in one place so the two cannot disagree.
+ * Which physical side each logical edge lands on. The one function that knows
+ * what `start` means, so a widget or a paint path never has to spell the
+ * conditional out again.
  */
-export function resolveBorderWidths(style) {
+export const physicalSides = (direction) =>
+  direction === 'rtl'
+    ? { start: 'right', end: 'left' }
+    : { start: 'left', end: 'right' };
+
+/**
+ * Per-side border widths, resolved the way padding resolves: the side
+ * property overrides the `borderWidth` shorthand, and a **logical** side
+ * overrides the physical one — `borderStartWidth` beats `borderLeftWidth` in
+ * LTR, the way `border-inline-start-width` beats `border-left-width` in CSS.
+ * This is the paint-side reading of the rule yoga applies on the layout side
+ * (EDGE_START over EDGE_LEFT over EDGE_ALL), kept in one place so the two
+ * cannot disagree — a border that lays out one width and paints another is a
+ * gap along the edge of the box.
+ *
+ * `direction` is the resolved direction of the node being painted, so this is
+ * also where a `borderStartWidth` crosses to the other side of the box.
+ */
+export function resolveBorderWidths(style, direction) {
   const all = style.borderWidth ?? 0;
-  return {
+  const { start, end } = physicalSides(direction);
+  const sides = {
     top: style.borderTopWidth ?? all,
     right: style.borderRightWidth ?? all,
     bottom: style.borderBottomWidth ?? all,
     left: style.borderLeftWidth ?? all,
   };
+  if (style.borderStartWidth !== undefined)
+    sides[start] = style.borderStartWidth;
+  if (style.borderEndWidth !== undefined) sides[end] = style.borderEndWidth;
+  return sides;
+}
+
+/** …and the same rule for the colours those widths are stroked in. */
+export function resolveBorderColors(style, direction) {
+  const all = style.borderColor;
+  const { start, end } = physicalSides(direction);
+  const sides = {
+    top: style.borderTopColor ?? all,
+    right: style.borderRightColor ?? all,
+    bottom: style.borderBottomColor ?? all,
+    left: style.borderLeftColor ?? all,
+  };
+  if (style.borderStartColor !== undefined)
+    sides[start] = style.borderStartColor;
+  if (style.borderEndColor !== undefined) sides[end] = style.borderEndColor;
+  return sides;
 }
 
 export function resolveHitSlop(value) {

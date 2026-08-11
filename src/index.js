@@ -42,6 +42,7 @@ export {
   Table,
   SplitPane,
   ThemeProvider,
+  useDirection,
   useTheme,
   Icon,
   icons,

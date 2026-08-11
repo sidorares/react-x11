@@ -104,6 +104,11 @@ And what you read:
   content goes, and where every built-in draws.
 - `this.resolvedTextStyle()` — the text style this node resolves to, ready to
   hand to `app.fonts.layout` (below).
+- `this.direction` — which way this node reads, resolved: `'ltr'` or
+  `'rtl'`, never `'inherit'`. Yoga has already mirrored the boxes, so this
+  is for what you draw _inside_ one — which side a mark sits on, which way
+  a chevron points, what a pointer coordinate means
+  ([styling.md](styling.md#direction-and-the-logical-edges)).
 - `this.root` — the owning `<window>` node; `this.app` — the ntk connection.
 - `this.theme` — the nearest theme at or above this node.
 

@@ -68,6 +68,7 @@ import {
   Tooltip,
   Tree,
   useAnchor,
+  useDirection,
   useTheme,
   useTopLevelWindow,
   useWindowId,
@@ -129,6 +130,20 @@ const s = createStyles({
     ':hover': { borderLeftColor: '$accent' },
   },
   rule: { borderWidth: 1, borderBottomWidth: 0, borderTopColor: '#ddd' },
+  // issue #271: the logical edges and the direction that decides what they
+  // mean. `direction` is layout, so it is not legal in a state block; the
+  // logical border *colours* are paint, like the physical ones.
+  mirrored: {
+    direction: 'rtl',
+    paddingStart: 12,
+    paddingEnd: 4,
+    marginStart: 8,
+    marginEnd: 0,
+    start: 0,
+    borderStartWidth: 3,
+    borderStartColor: '$accent',
+    ':hover': { borderEndColor: '$border' },
+  },
   // the text cascade: `color` on a container is how the labels inside it are
   // dimmed, and `:focus-within` is how the row follows the field in it
   field: {
@@ -162,6 +177,12 @@ createStyles({ bad: { ':focus-visible': { hitSlop: 4 } } });
 // @ts-expect-error — a side width is layout, so it may not go in a state block
 createStyles({ bad: { ':hover': { borderLeftWidth: 3 } } });
 
+// @ts-expect-error — 'rtol' is not a direction
+createStyles({ bad: { direction: 'rtol' } });
+
+// @ts-expect-error — direction is layout, so it may not go in a state block
+createStyles({ bad: { ':hover': { direction: 'rtl' } } });
+
 // --- elements --------------------------------------------------------------
 
 function Elements() {
@@ -177,6 +198,9 @@ function Elements() {
   const _kind: string | undefined = boxRef.current?.kind;
   const _focused: boolean | undefined = boxRef.current?.focused;
   const _within: boolean | undefined = boxRef.current?.focusWithin;
+  // issue #271: the resolved direction, which is what a widget measuring a
+  // pointer against this box has to read
+  const _dir: 'ltr' | 'rtl' | undefined = boxRef.current?.direction;
   const _holds = () => boxRef.current?.contains(inputRef.current);
   // focus() hands the node back, so an imperative handle can forward it
   const _refocus = () => inputRef.current?.blur().focus();
@@ -427,6 +451,10 @@ function Themed() {
   const _face: string = theme.fontFamily;
   const _mono: string = theme.monoFamily;
   const _size: number = theme.fontSize;
+  // issue #271: the direction the palette carries, and the hook the widget
+  // set reads it through
+  const _themeDir: 'ltr' | 'rtl' = theme.direction;
+  const _dir: 'ltr' | 'rtl' = useDirection();
   // issue #252: a component that reads a token by a name it was handed —
   // a code palette, a `$token` it is resolving itself — indexes the palette
   // instead of casting it. Unknown names are `unknown`, so they narrow.

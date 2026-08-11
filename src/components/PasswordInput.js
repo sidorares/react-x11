@@ -48,8 +48,10 @@ const s = createStyles({
     alignItems: 'center',
     gap: 6,
     padding: 8,
-    paddingLeft: 10,
-    paddingRight: 6,
+    // logical: the text's own inset, and the tighter one on the side the
+    // reveal button sits on, which is wherever the row ends
+    paddingStart: 10,
+    paddingEnd: 6,
   },
   slot: { flexGrow: 1, flexShrink: 1, minWidth: 0, justifyContent: 'center' },
   icon: {

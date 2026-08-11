@@ -83,7 +83,14 @@ no override-redirect staging (issue #4).
   `npm run examples:urischeme` is the manual harness for the two dispatch paths
   a broker cannot fake.
 - `src/styles.js` — flat style props → yoga setters; paint prop
-  classification; text style resolution. Also the two prop sets the
+  classification; text style resolution. Also the **logical** edges
+  (`paddingStart`, `marginEnd`, `borderStartWidth`, `start`/`end`) and the
+  `direction` that decides what they mean: yoga resolves those for the
+  layout, and `Node.direction` (nodes.js) resolves the same rule a second
+  time for everything outside it — which side a scrollbar sits on, which
+  edge a logical border paints, the base level a paragraph of neutral
+  characters shapes at. The floor under it is the palette's `direction`,
+  seeded from the locale. Also the two prop sets the
   **inheritance** rule is written as: `INHERITED_TEXT_PROPS` (the ink, the
   face, the size — what travels down the tree) and `LOCAL_TEXT_PROPS` (what
   shapes a node's own box and therefore cannot arrive from above). Which
