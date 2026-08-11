@@ -4,7 +4,7 @@
 
 import React, { useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
-import { useTheme } from './theme.js';
+import { useDirection, useTheme } from './theme.js';
 import { XK_DOWN, XK_END, XK_HOME, XK_LEFT, XK_RIGHT, XK_UP } from './keys.js';
 
 const h = React.createElement;
@@ -65,6 +65,7 @@ export function SplitPane({
   ...boxProps
 }) {
   const theme = useTheme();
+  const rtl = useDirection() === 'rtl';
   const [first, second] = React.Children.toArray(children);
   const [uncontrolled, setUncontrolled] = useState(defaultSize);
   const [dragging, setDragging] = useState(false);
@@ -92,12 +93,24 @@ export function SplitPane({
     onResize?.(clamped);
   };
 
+  /**
+   * How far along the split the pointer is, measured from the first pane's
+   * own edge — the top in a column, and in a row the side the panes start
+   * at, which is the right-hand one when the layout is mirrored. Everything
+   * else here is already a distance rather than a coordinate, so this is the
+   * only place the direction gets read.
+   */
+  const alongSplit = (ev, box) => {
+    if (vertical) return ev.y - box.y;
+    return rtl ? box.x + box.width - ev.x : ev.x - box.x;
+  };
+
   const dividerProps = {
     focusable: true,
     onMouseDown: (ev) => {
       const box = rootRef.current?.abs;
       // where in the divider it was taken, so it does not jump on press
-      grab.current = (vertical ? ev.y - box.y : ev.x - box.x) - sizeRef.current;
+      grab.current = alongSplit(ev, box) - sizeRef.current;
       ev.capturePointer();
       draggingRef.current = true;
       setDragging(true);
@@ -106,15 +119,18 @@ export function SplitPane({
       if (!draggingRef.current) return;
       const box = rootRef.current?.abs;
       if (!box) return;
-      commit((vertical ? ev.y - box.y : ev.x - box.x) - grab.current);
+      commit(alongSplit(ev, box) - grab.current);
     },
     onMouseUp: () => {
       draggingRef.current = false;
       setDragging(false);
     },
     onKeyDown: (ev) => {
-      const back = vertical ? XK_UP : XK_LEFT;
-      const forward = vertical ? XK_DOWN : XK_RIGHT;
+      // the key that *shrinks* the first pane is the one pointing back at
+      // its own edge, which swaps with the layout
+      const swap = !vertical && rtl;
+      const back = vertical ? XK_UP : swap ? XK_RIGHT : XK_LEFT;
+      const forward = vertical ? XK_DOWN : swap ? XK_LEFT : XK_RIGHT;
       switch (ev.keysym) {
         case back:
           commit(sizeRef.current - KEY_STEP);

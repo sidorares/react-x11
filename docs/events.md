@@ -18,7 +18,11 @@ events dispatched over the drawn node tree with DOM-like semantics.
 Step 4 is a documented seam, not a privilege of the built-in elements: an
 element added with `registerElement` implements the same `defaultKeyDown` /
 `defaultMouseDown` / … methods and gets the same ordering
-([extending.md](extending.md#behaviour-of-your-own)).
+([extending.md](extending.md#behaviour-of-your-own)). The wheel's default
+action is the same story in a different shape — it walks out from the target
+asking each node `canScroll(deltaX, deltaY)`, so an element that scrolls
+content it painted joins the chain by answering
+([extending.md](extending.md#scrolling-content-you-painted)).
 
 `ev.stopPropagation()` stops the walk. Handlers always read from current
 props — they can never go stale.

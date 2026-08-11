@@ -498,6 +498,38 @@ test('a composing key never reaches the element default action', async () => {
   assert.deepEqual(editor.log.slice(-1), [`key:${keysymOf('z')}`]);
 });
 
+test('an element that forwards keys elsewhere is not composed for', async () => {
+  // `<foreign>` hands the raw key to an embedded client that has an input
+  // method of its own, so composing here would eat the dead key on its way
+  // out and hand back a character with nowhere to go
+  registerElement('forwardedit', {
+    create: (p, app) => {
+      const node = new EditorNode(p, app);
+      node.kind = 'forwardedit';
+      node.composes = false;
+      return node;
+    },
+    childrenAllowed: false,
+    override: true,
+  });
+  registered.add('forwardedit');
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  root.render(h('window', { width: 300, height: 200 }, h('forwardedit', {})));
+  await tick();
+  const editor = find(treeOf(app), (n) => n.kind === 'forwardedit');
+  editor.focus();
+  editor.log.length = 0;
+
+  press(app, XK_DEAD_ACUTE);
+  typeKey(app, 'e');
+  // both keys arrive whole, and no composition happened on this side
+  assert.deepEqual(editor.log, [
+    `key:${XK_DEAD_ACUTE}`,
+    `key:${keysymOf('e')}`,
+  ]);
+});
+
 // --- pixels ----------------------------------------------------------------
 
 test('the composition is underlined, and the underline goes on commit', async () => {

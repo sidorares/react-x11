@@ -195,6 +195,12 @@ export declare class Node {
    * element with default actions for keys has to set this, or nothing will
    * ever focus it. */
   focusableByDefault?: boolean;
+  /** Whether dead keys and Compose run while this element has focus.
+   * Defaults to on. Set it false for an element that forwards raw key
+   * events to something with an input method of its own — `<foreign>` does,
+   * and composing on this side would swallow the dead key on its way to the
+   * embedded client. */
+  composes?: boolean;
   /** The cursor to show over this element when nothing in the style says
    * otherwise — `'text'` for something editable. A `cursor` style wins. */
   defaultCursor?: string;
@@ -242,6 +248,10 @@ export declare class Node {
  * Scrolling as a mixin: `class Pane extends Scrollable(Node)` gives a
  * registered element the same `overflow: 'scroll'` behaviour `<box>` and
  * `<window>` have — wheel, keys, bars, and the AT-SPI scroll-pane role.
+ *
+ * An element whose content is **painted rather than laid out** overrides
+ * `measureScrollContent`; everything else follows from the numbers it
+ * returns. See docs/extending.md.
  */
 export declare function Scrollable<T extends typeof Node>(
   Base: T,
@@ -254,6 +264,13 @@ export declare function Scrollable<T extends typeof Node>(
     isScroller(): boolean;
     scrollTo(to: number | { x?: number; y?: number }): void;
     scrollBy(by: number | { x?: number; y?: number }): void;
+    /** Chain membership: has this node room to move on the axis the delta
+     * names? The wheel asks it before scrolling this node rather than the
+     * next one out. */
+    canScroll(dx: number, dy: number): boolean;
+    /** How far the content reaches. The default walks the children;
+     * override it when the content is pixels this element paints. */
+    measureScrollContent(): { width: number; height: number };
     scrollIntoView(node: Node): void;
   };
 };
@@ -269,5 +286,7 @@ export declare class TextInputNode extends Node {}
 export declare class TextAreaNode extends TextInputNode {}
 export declare class WindowNode extends Node {}
 export declare class PopupNode extends WindowNode {}
-/** The precedent for an element owning a real child X window. */
+/** The precedents for an element owning a real child X window — a surface of
+ * its own, and one holding somebody else's window. */
 export declare class GlAreaNode extends Node {}
+export declare class ForeignNode extends Node {}

@@ -31,6 +31,7 @@ import {
 import { MarkdownNode, HtmlNode, SvgNode, TexNode } from '../src/richnodes.js';
 import { DefaultTheme } from '../src/palette.js';
 import { GlAreaNode } from '../src/glnodes.js';
+import { ForeignNode } from '../src/foreignnodes.js';
 import { isStyleProp } from '../src/styles.js';
 import { createMockApp } from './helpers/mock-app.js';
 
@@ -53,6 +54,7 @@ const BUILD = {
   svg: (app, props) => new SvgNode(props, app),
   tex: (app, props) => new TexNode(props, app),
   glarea: (app, props) => new GlAreaNode(props, app),
+  foreign: (app, props) => new ForeignNode(props, app),
 };
 
 // A spread of the style vocabulary: one from each family, plus every name an

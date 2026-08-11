@@ -363,19 +363,20 @@ export class EventManager {
           deltaY: dy,
         });
         if (!ev.defaultPrevented) {
-          // Default action: scroll the nearest enclosing scroll container
-          // that has somewhere to go on this axis. Chaining past one that
+          // Default action: the nearest node out from the target that says it
+          // has somewhere to go on this axis scrolls. Chaining past one that
           // fits its own content is what a browser does, and it matters now
           // that any `<box>` can be a scroll container — a pane that happens
           // to fit must not swallow the wheel the window would have answered.
           // The `<window>` is the last candidate, then the walk stops.
+          //
+          // Two methods and no kinds: `<textarea>` scrolls pixels it painted
+          // rather than children it laid out, and so does a registered
+          // element that draws its own content, and neither of them should
+          // have to be named here to be reachable (issue #253).
           for (let n = target; n; n = n.parent) {
-            if (n.isScroller?.() && n._canScroll(ev.deltaX, ev.deltaY)) {
+            if (n.canScroll?.(ev.deltaX, ev.deltaY)) {
               n.scrollBy({ x: ev.deltaX, y: ev.deltaY });
-              break;
-            }
-            if (n.kind === 'textarea') {
-              n.scrollBy(ev.deltaY); // one axis only: it wraps
               break;
             }
             if (n === this.node) break;
@@ -723,7 +724,14 @@ export class EventManager {
       // level 1 is an ordinary character, and `baseKeysym` is that
       // character. Shortcuts want the base — the reason it is on the event
       // at all — and composition wants what was actually produced.
-      const composer = name === 'KeyDown' ? this._composer() : null;
+      // …and it does not run at all for an element that forwards raw key
+      // events to something with an input method of its own: composing here
+      // would eat the dead key on its way to an embedded client, which then
+      // receives neither the key nor the character (`<foreign>`).
+      const composer =
+        name === 'KeyDown' && target.composes !== false
+          ? this._composer()
+          : null;
       const step = composer?.probe(native.keysym ?? keysym) ?? null;
       const composing = Boolean(step?.consumed);
       const ev = this.dispatch(name, target, native, {
@@ -741,7 +749,16 @@ export class EventManager {
             : undefined,
         composing,
       });
-      if (name !== 'KeyDown' || ev.defaultPrevented) return;
+      if (ev.defaultPrevented) return;
+      // A release has no traversal after it, but it does have a default
+      // action: an element that answers the whole keystroke rather than the
+      // press — one forwarding into an embedded client (`<foreign>`) — needs
+      // the other half of the pair, or the client sees a key that never
+      // comes up.
+      if (name !== 'KeyDown') {
+        target.defaultKeyUp?.(ev);
+        return;
+      }
       // App chords, then composition, then the element, then focus
       // traversal. Composition sits above the element so that a dead key
       // cannot also trigger an editing action, and below the application so
@@ -782,10 +799,16 @@ export class EventManager {
    * Everything else — Tab, an arrow inside a widget, `autoFocus`, a modal
    * handing focus back as it closes, `node.focus()` from an application —
    * lights one, because none of those tell the user where focus went.
+   *
+   * `backwards` is only meaningful for `reason: 'key'`, and only one element
+   * has ever needed it: XEmbed distinguishes a Tab arriving forwards from a
+   * back-Tab, because that is what tells an embedded client whether to focus
+   * its first widget or its last (`<foreign>`, src/foreignnodes.js). It
+   * reaches the node through `defaultFocus({ reason, backwards })`.
    */
-  focus(node, reason = 'script') {
+  focus(node, reason = 'script', backwards = false) {
     const manager = this.focusManager;
-    if (manager !== this) return manager.focus(node, reason);
+    if (manager !== this) return manager.focus(node, reason, backwards);
     if (node === this.focused) return;
     // before `focused` moves, so the element that was collecting the
     // sequence is the one told to drop it
@@ -813,7 +836,7 @@ export class EventManager {
       node.setStyleState(':focus', true);
       node.setStyleState(':focus-visible', reason !== 'pointer');
       this._scrollIntoView(node);
-      if (this.windowFocused) node.defaultFocus?.();
+      if (this.windowFocused) node.defaultFocus?.({ reason, backwards });
       node.props.onFocus?.(this._makeEvent('focus', null, node));
       node.root?.invalidate(false, node, 'focus');
     }
@@ -961,7 +984,7 @@ export class EventManager {
     const index = list.indexOf(this.focused);
     if (index === -1) {
       // nothing focused, or focus sits outside the current scope: Tab enters
-      this.focus(backwards ? list[list.length - 1] : list[0], 'key');
+      this.focus(backwards ? list[list.length - 1] : list[0], 'key', backwards);
       return;
     }
     this.focus(
@@ -969,6 +992,7 @@ export class EventManager {
         ? list[(index || list.length) - 1]
         : list[(index + 1) % list.length],
       'key',
+      backwards,
     );
   }
 

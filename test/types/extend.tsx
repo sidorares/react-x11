@@ -16,6 +16,7 @@ import {
 import {
   Node,
   BoxNode,
+  Scrollable,
   intrinsicSize,
   CARET_BLINK_MS,
 } from '../../src/node.js';
@@ -219,6 +220,60 @@ class EditorNode extends Node {
 
 registerElement('codeeditor', {
   create: (props, app) => new EditorNode(props, app as never),
+});
+
+// An element that scrolls pixels it painted (#253). The mixin brings the
+// offsets, the bars and the keys; the override is the one number pair only
+// this element knows.
+class TerminalNode extends Scrollable(Node) {
+  private rows: string[] = [];
+
+  constructor(props: Record<string, unknown>, app: never) {
+    super('miniterm', props, app);
+  }
+
+  isScroller(): boolean {
+    return true;
+  }
+
+  measureScrollContent(): { width: number; height: number } {
+    return { width: 400, height: this.rows.length * 16 };
+  }
+
+  paintContent(_ctx: unknown): void {
+    // the offsets the mixin clamped, subtracted by the drawing itself
+    const _x: number = this.scrollX;
+    const _y: number = this.scrollY;
+    void _x;
+    void _y;
+  }
+}
+
+// …and the chain on its own: two methods, no mixin, the shape the wheel's
+// default action calls.
+class TickerNode extends Node {
+  private at = 0;
+
+  constructor(props: Record<string, unknown>, app: never) {
+    super('miniticker', props, app);
+  }
+
+  canScroll(_dx: number, dy: number): boolean {
+    return Boolean(dy) && this.at < 400;
+  }
+
+  scrollBy(by: number | { x?: number; y?: number }): void {
+    this.at += typeof by === 'number' ? by : (by.y ?? 0);
+  }
+}
+
+registerElement('miniterm', {
+  create: (props, app) => new TerminalNode(props, app as never),
+  childrenAllowed: false,
+});
+registerElement('miniticker', {
+  create: (props, app) => new TickerNode(props, app as never),
+  childrenAllowed: false,
 });
 
 registerElement('gauge', {

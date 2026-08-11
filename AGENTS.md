@@ -10,8 +10,9 @@ react-like ergonomics on top of [ntk](https://github.com/sidorares/ntk) /
 implementations of the X11 protocol, no native bridge.
 
 Architecture (see NEXT_STEPS.md for the full rationale): only `<window>`,
-`<popup>` and `<glarea>` map to real X11 windows (`<glarea>` because GLX
-needs its own visual); everything else is a retained
+`<popup>`, `<glarea>` and `<foreign>` map to real X11 windows (`<glarea>`
+because GLX needs its own visual, `<foreign>` because the window is another
+process's); everything else is a retained
 lightweight node — one yoga-layout node each — painted into the owning
 window's double-buffered 2d context on ntk's frame clock, with synthetic
 capture/bubble events dispatched via front-to-back hit testing. X11
@@ -36,6 +37,19 @@ no override-redirect staging (issue #4).
   GLX visual (ntk's `chooseGLXConfig`), positioned by the parent's yoga
   rect, drawing `onDraw` frames on its own frame clock. First step of
   docs/glx.md.
+- `src/foreignnodes.js` — `<foreign>`: another process's window, embedded.
+  A second `drawn: false` node, over ntk's `XEmbedSocket` (docs/embedding.md).
+  Two things here are not obvious and are commented at length. **Teardown is
+  synchronous** — `WindowNode` destroys its own X window in the same turn, and
+  `DestroyWindow` takes every inferior with it, so a release that waits for a
+  round trip releases a window that is already gone; the client is reparented
+  to the root and dropped from the save set before the container goes, and
+  **never destroyed**. And **no focus proxy**: the classic XEmbed embedder
+  gives the X focus to an InputOnly window that forwards keys, which here
+  would read as the toplevel losing focus and would put every key past the
+  React tree before any handler saw it. The X focus stays on our window and
+  forwarding happens in `defaultKeyDown`/`defaultKeyUp`, which is what makes
+  the rule "app chords first, everything else forwards" mechanical.
 - `src/scene3d.js` — the 3D scene tree inside a `<glarea>`: `<mesh>`,
   `<group>`, geometry/material nodes and the renderer that compiles each
   geometry into a server-side **display list** (a frame is matrices +
@@ -83,7 +97,14 @@ no override-redirect staging (issue #4).
   `npm run examples:urischeme` is the manual harness for the two dispatch paths
   a broker cannot fake.
 - `src/styles.js` — flat style props → yoga setters; paint prop
-  classification; text style resolution. Also the two prop sets the
+  classification; text style resolution. Also the **logical** edges
+  (`paddingStart`, `marginEnd`, `borderStartWidth`, `start`/`end`) and the
+  `direction` that decides what they mean: yoga resolves those for the
+  layout, and `Node.direction` (nodes.js) resolves the same rule a second
+  time for everything outside it — which side a scrollbar sits on, which
+  edge a logical border paints, the base level a paragraph of neutral
+  characters shapes at. The floor under it is the palette's `direction`,
+  seeded from the locale. Also the two prop sets the
   **inheritance** rule is written as: `INHERITED_TEXT_PROPS` (the ink, the
   face, the size — what travels down the tree) and `LOCAL_TEXT_PROPS` (what
   shapes a node's own box and therefore cannot arrive from above). Which

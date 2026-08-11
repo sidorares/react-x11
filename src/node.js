@@ -35,7 +35,10 @@ export {
   PopupNode,
 } from './nodes.js';
 
-// The precedent for an element that owns a real child X window rather than
-// painting into its parent's: registered with `drawn: false`, realized by
-// the owning WindowNode. docs/extending.md walks through it.
+// The two precedents for an element that owns a real child X window rather
+// than painting into its parent's: registered with `drawn: false`, realized
+// by the owning WindowNode. docs/extending.md walks through them —
+// `GlAreaNode` for a surface of one's own, `ForeignNode` for one that holds
+// somebody else's window and therefore must never destroy it.
 export { GlAreaNode } from './glnodes.js';
+export { ForeignNode } from './foreignnodes.js';

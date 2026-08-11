@@ -4,7 +4,7 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
-import { capTrim, useTheme } from './theme.js';
+import { capTrim, useDirection, useTheme } from './theme.js';
 import { Icon } from './Icon.js';
 import {
   XK_DOWN,
@@ -54,10 +54,10 @@ const s = createStyles({
     flexDirection: 'row',
     alignItems: 'center',
     height: ROW_HEIGHT,
-    paddingLeft: 8,
-    // Matching the left inset, because the sort mark sits against this edge
-    // now — without it the chevron touches the rule between the columns.
-    paddingRight: 8,
+    paddingStart: 8,
+    // Matching the leading inset, because the sort mark sits against this
+    // edge now — without it the chevron touches the rule between the columns.
+    paddingEnd: 8,
     flexShrink: 0,
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
@@ -85,7 +85,7 @@ const s = createStyles({
   cell: {
     height: ROW_HEIGHT,
     justifyContent: 'center',
-    paddingLeft: 8,
+    paddingStart: 8,
     flexShrink: 0,
     overflow: 'hidden',
   },
@@ -93,10 +93,10 @@ const s = createStyles({
   // would be sliced rather than shown — `textWrap` in styling.md
   cellText: { fontSize: 12, textWrap: 'nowrap' },
   spacer: { flexShrink: 0 },
-  // The mark is pushed right by a spacer, so this is the floor on the gap
-  // rather than the gap: it only does anything once a long caption has eaten
-  // the space between them.
-  sortMark: { marginLeft: 4 },
+  // The mark is pushed to the far end of the header by a spacer, so this is
+  // the floor on the gap rather than the gap: it only does anything once a
+  // long caption has eaten the space between them.
+  sortMark: { marginStart: 4 },
 });
 
 /** The sort chevron, matched to the capitals of the 12px header it follows —
@@ -154,6 +154,7 @@ export function Table({
   ...boxProps
 }) {
   const theme = useTheme();
+  const rtl = useDirection() === 'rtl';
   const [ownSort, setOwnSort] = useState(defaultSort ?? null);
   const [ownSelected, setOwnSelected] = useState(defaultSelected);
   const [widths, setWidths] = useState(() =>
@@ -276,7 +277,9 @@ export function Table({
     onMouseMove: (ev) => {
       const d = drag.current;
       if (!d) return;
-      resize(d.id, d.width + (ev.x - d.from));
+      // dragging the grip away from the column's own start edge widens it,
+      // and which way that is follows the layout
+      resize(d.id, d.width + (rtl ? d.from - ev.x : ev.x - d.from));
     },
     onMouseUp: () => {
       drag.current = null;
@@ -286,8 +289,10 @@ export function Table({
     // than no stop at all. Left/Right, the same pair `SplitPane`'s divider
     // takes; the table's own keys are Up/Down and never collide.
     onKeyDown: (ev) => {
-      if (ev.keysym === XK_LEFT) resize(column.id, columnWidth(column) - STEP);
-      else if (ev.keysym === XK_RIGHT)
+      const narrower = rtl ? XK_RIGHT : XK_LEFT;
+      const wider = rtl ? XK_LEFT : XK_RIGHT;
+      if (ev.keysym === narrower) resize(column.id, columnWidth(column) - STEP);
+      else if (ev.keysym === wider)
         resize(column.id, columnWidth(column) + STEP);
     },
   });
@@ -300,9 +305,12 @@ export function Table({
         style: [
           s.cell,
           { width: columnWidth(column) },
+          // `'right'` is what a numeric column asks for and what it means is
+          // "the end of the row" — a column of figures lines up on the edge
+          // the row finishes at, which is the left one in a mirrored table
           column.align === 'right' && {
             alignItems: 'flex-end',
-            paddingRight: 8,
+            paddingEnd: 8,
           },
         ],
       },
@@ -347,7 +355,9 @@ export function Table({
       { style: [s.headerClip, { backgroundColor: theme.surfaceHover }] },
       h(
         'box',
-        { style: [s.headerRow, { marginLeft: -scrollX, width: totalWidth }] },
+        // `marginStart`, so the header tracks the body's scroll in the
+        // direction the columns actually run
+        { style: [s.headerRow, { marginStart: -scrollX, width: totalWidth }] },
         columns.map((column, index) =>
           // The header cell and the grab band are **siblings**, not a cell
           // with a handle inside it. A click fires on the nearest common

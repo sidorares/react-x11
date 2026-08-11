@@ -46,6 +46,7 @@ import { beginCompose } from './compose.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
 import { watchAppearance } from './appearance.js';
+import { ForeignNode } from './foreignnodes.js';
 import { GlAreaNode } from './glnodes.js';
 import { directGLFailure, hasDirectGL } from './glbackend.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
@@ -96,6 +97,7 @@ export const HOST_TYPES = [
   'svg',
   'tex',
   'glarea',
+  'foreign',
 ];
 
 const HostConfig = {
@@ -293,6 +295,14 @@ const HostConfig = {
         break;
       case 'glarea':
         node = new GlAreaNode(props, rootContainer);
+        break;
+      case 'foreign':
+        // No X11 calls here either, and for a sharper reason than
+        // `<window>`'s: the window this element embeds belongs to another
+        // process, and a reparent issued from a render React then discards
+        // has moved it for real. WindowNode.realize does it in the commit
+        // phase (`_realizeChildWindows`).
+        node = new ForeignNode(props, rootContainer);
         break;
       default: {
         // Third-party elements (issue #125). Built-ins stay a switch —

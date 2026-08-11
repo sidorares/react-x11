@@ -16,6 +16,76 @@ import { appearanceSnapshot } from './appearance.js';
 import { stepBeyond } from './styles.js';
 
 /**
+ * The language subtags written right-to-left — CLDR's set, by the language
+ * rather than by the script, because a locale name is what an environment
+ * actually carries. Arabic and its neighbours, Hebrew, Persian and Dari,
+ * Pashto, Urdu, Sindhi, Kashmiri, Uyghur, Yiddish, Sorani Kurdish, Dhivehi,
+ * Syriac, N'Ko, and Adlam-written Fulah.
+ */
+const RTL_LANGUAGES = new Set([
+  'ae',
+  'ar',
+  'arc',
+  'bcc',
+  'bqi',
+  'ckb',
+  'dv',
+  'fa',
+  'ff',
+  'glk',
+  'he',
+  'iw',
+  'khw',
+  'ks',
+  'ku',
+  'mzn',
+  'nqo',
+  'pnb',
+  'prs',
+  'ps',
+  'sd',
+  'syr',
+  'ug',
+  'ur',
+  'yi',
+]);
+
+/**
+ * Which way this desktop reads, from the environment's locale.
+ *
+ * **This is the default, and it is a default rather than a setting on
+ * purpose.** An app started under `LANG=ar_EG.UTF-8` is an Arabic app, and
+ * the person who started it should not have to have been given a language
+ * menu before the panels are on the right side. It is what GTK and Qt both
+ * do — GTK asks the translation of `"default:LTR"`, Qt asks the system
+ * locale — and it costs an app that never thinks about this exactly nothing,
+ * because every locale not in the set above answers `'ltr'`.
+ *
+ * The overrides, nearest first: a `direction` style property on any node
+ * mirrors that subtree, and `<ThemeProvider value={{ direction }}>` mirrors
+ * everything under it *including the widgets*, which is the one an app with a
+ * language menu wants — see docs/styling.md.
+ *
+ * There is no environment in the playground bundle, which runs this in a
+ * browser — hence the guard rather than a bare `process.env`. A page has no
+ * locale to read either way; what it has is whatever the app writes.
+ *
+ * Read once, at load: a locale does not change under a running process, and
+ * this is on the path that resolves the palette for every node.
+ */
+export function localeDirection(env = ENV) {
+  const locale = env.LC_ALL || env.LC_MESSAGES || env.LANG || '';
+  // `ar_EG.UTF-8`, `he-IL`, `fa`, or `C`/`POSIX` — the language is whatever
+  // comes before the territory, and the separator is either spelling
+  const language = locale.split(/[._@-]/)[0].toLowerCase();
+  return RTL_LANGUAGES.has(language) ? 'rtl' : 'ltr';
+}
+
+const ENV = typeof process === 'undefined' ? {} : (process.env ?? {});
+
+const LOCALE_DIRECTION = localeDirection();
+
+/**
  * The palette every widget reads, and the shape of the controls with it.
  * A theme overrides what it cares about and inherits the rest, so the
  * defaults here are the look the widgets have always had.
@@ -91,6 +161,17 @@ export const DefaultTheme = {
   // ntk's `fonts.match` splits the list itself.
   fontFamily: 'sans-serif',
   monoFamily: 'monospace',
+  // Which way this app reads — `'ltr'` or `'rtl'`, seeded from the locale.
+  //
+  // In the palette rather than in a context of its own because both consumers
+  // are already here: the widgets read it through `useTheme()` to decide which
+  // way a slider travels or which side a submenu opens on, and the node tree
+  // reads it as the floor under the `direction` style property. An app with a
+  // language menu therefore switches the whole UI, layout and widgets
+  // together, with the `<ThemeProvider>` swap it was already doing for
+  // colours — and a `<ThemeProvider>` that names it plants the matching style
+  // in the tree, so the two routes cannot disagree.
+  direction: LOCALE_DIRECTION,
   paddingX: 16,
   // Measured from the **letters**, not from the font's line box: widget
   // labels are trimmed to the capitals down to the baseline, so this is the

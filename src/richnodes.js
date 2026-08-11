@@ -113,7 +113,7 @@ class DocumentViewNode extends Node {
     }
   }
 
-  _paintContent(ctx) {
+  paintContent(ctx) {
     const view = this._ensureView();
     if (!view) return;
     const content = this.contentBox();
@@ -367,7 +367,7 @@ export class SvgNode extends Node {
     this._textContentChanged();
   }
 
-  _paintContent(ctx) {
+  paintContent(ctx) {
     const view = this._ensureView();
     if (!view) return;
     const content = this.contentBox();
@@ -391,7 +391,7 @@ export class SvgNode extends Node {
   }
 
   /**
-   * Cache plan (see `Node._paintContent` for the protocol).
+   * Cache plan (see `Node.paintContent` for the protocol).
    *
    * The key is the document, the size it is drawn at, and the device scale.
    * Everything else that could change the pixels is either handled at blit
@@ -493,7 +493,7 @@ const texColor = (node) => node.resolvedTextStyle().color;
  *
  * The ink colour is `style={{ color }}`, not a prop — `color` is a style
  * name, so a `color` prop threw in development and only worked in
- * production (issue #118). `_paintContent` and `paintCachePlan` already
+ * production (issue #118). `paintContent` and `paintCachePlan` already
  * read it off the style; the prop reached nothing but layoutTex.
  */
 export class TexNode extends Node {
@@ -552,7 +552,7 @@ export class TexNode extends Node {
     }
   }
 
-  _paintContent(ctx) {
+  paintContent(ctx) {
     const box = this._ensureBox();
     // TexBox.draw issues raw XRender requests through ctx.window.app —
     // it needs a real ntk 2d context (headless mock contexts skip)
