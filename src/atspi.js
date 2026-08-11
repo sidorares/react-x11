@@ -54,6 +54,7 @@ import {
   isTextControl,
   hasTextInterface,
   textStateOf,
+  inPreedit,
   diffChars,
 } from './a11y.js';
 import { onApp } from './trace-registry.js';
@@ -249,6 +250,49 @@ const CACHE_DESC = {
 
 function clampOffset(offset, length) {
   return Math.max(0, Math.min(offset | 0, length));
+}
+
+/**
+ * The attribute run around an offset, `[attributes, start, end)`.
+ *
+ * A composition is drawn underlined and `underline` is the only registered
+ * AT-SPI attribute that says so, so that is what the preedit run carries.
+ * `composition` beside it is this renderer's own: AT-SPI registers nothing
+ * for a preedit, and an attribute a reader does not know is one it ignores,
+ * which is a better failure than a run claiming to be nothing special.
+ * Everything outside the composition is one unattributed run, bounded by
+ * the composition's edges so an AT walking runs finds them.
+ */
+function attributeRun(state, offset) {
+  const total = state.chars.length;
+  const at = clampOffset(offset, total);
+  const pre = state.preedit;
+  if (!pre) return [[], 0, total];
+  const start = pre.offset;
+  const end = pre.offset + pre.length;
+  if (at >= start && at < end) {
+    return [
+      [
+        ['underline', 'single'],
+        ['composition', 'true'],
+      ],
+      start,
+      end,
+    ];
+  }
+  return at < start ? [[], 0, start] : [[], end, total];
+}
+
+/**
+ * An offset an AT handed back, in the node's **value** space — what it was
+ * told is the displayed string, composition included. An offset inside the
+ * composition answers where the composition starts: a preedit is one thing,
+ * not a run of characters to put a caret between or edit around.
+ */
+function valueOffset(node, offset) {
+  const { chars } = textStateOf(node);
+  const at = clampOffset(offset, chars.length);
+  return node._valueIndex ? node._valueIndex(at) : at;
 }
 
 const isWordChar = (ch) => /\S/.test(ch);
@@ -580,18 +624,20 @@ const TextImpl = {
   SetCaretOffset(offset) {
     const node = this.n;
     if (typeof node._moveCaret !== 'function') return false;
-    const { chars } = textStateOf(node);
-    node._moveCaret(clampOffset(offset, chars.length), false);
+    node._moveCaret(valueOffset(node, offset), false);
     return true;
   },
-  GetAttributes() {
-    const { chars } = textStateOf(this.n);
-    return [[], 0, chars.length];
+  GetAttributes(offset) {
+    return attributeRun(textStateOf(this.n), offset);
   },
   GetDefaultAttributes() {
     return [];
   },
-  GetAttributeValue() {
+  GetAttributeValue(offset, name) {
+    const [attrs] = attributeRun(textStateOf(this.n), offset);
+    for (const [key, value] of attrs) {
+      if (key === name) return value;
+    }
     return '';
   },
   GetCharacterExtents(offset, coordType) {
@@ -650,12 +696,12 @@ const EditableTextImpl = {
   InsertText(position, text, length) {
     return this.b.editText(this.n, () => {
       const node = this.n;
+      const at = valueOffset(node, position);
       const chars = node._chars();
       const insert = Array.from(String(text)).slice(
         0,
         length < 0 ? undefined : length,
       );
-      const at = clampOffset(position, chars.length);
       chars.splice(at, 0, ...insert);
       node._commit(chars, at + insert.length);
     });
@@ -663,9 +709,11 @@ const EditableTextImpl = {
   DeleteText(start, end) {
     return this.b.editText(this.n, () => {
       const node = this.n;
+      const a = valueOffset(node, start);
+      const b = valueOffset(node, end);
       const chars = node._chars();
-      const s = clampOffset(Math.min(start, end), chars.length);
-      const e = clampOffset(Math.max(start, end), chars.length);
+      const s = Math.min(a, b);
+      const e = Math.max(a, b);
       chars.splice(s, e - s);
       node._commit(chars, s);
     });
@@ -682,8 +730,7 @@ const EditableTextImpl = {
     const node = this.n;
     if (!this.b.editable(node)) return false;
     if (typeof node._pasteFrom !== 'function') return false;
-    const { chars } = textStateOf(node);
-    node._moveCaret?.(clampOffset(position, chars.length), false);
+    node._moveCaret?.(valueOffset(node, position), false);
     node._pasteFrom('CLIPBOARD');
     return true;
   },
@@ -818,8 +865,8 @@ class AtspiBridge {
       text: null,
     };
     if (hasTextInterface(node)) {
-      const { chars, caret, selection } = textStateOf(node);
-      snapshot.text = { chars, caret, selection };
+      const { chars, caret, selection, preedit } = textStateOf(node);
+      snapshot.text = { chars, caret, selection, preedit };
     }
     return snapshot;
   }
@@ -959,9 +1006,8 @@ class AtspiBridge {
 
   setTextSelection(node, start, end) {
     if (!isTextControl(node) || node.destroyed) return false;
-    const { chars } = textStateOf(node);
-    node._anchor = clampOffset(start, chars.length);
-    node._caret = clampOffset(end, chars.length);
+    node._anchor = valueOffset(node, start);
+    node._caret = valueOffset(node, end);
     node._repaint?.();
     return true;
   }
@@ -971,9 +1017,10 @@ class AtspiBridge {
     if (typeof node._copySelection !== 'function') return;
     const caret = node._caret;
     const anchor = node._anchor;
-    const { chars } = textStateOf(node);
-    node._anchor = clampOffset(Math.min(start, end), chars.length);
-    node._caret = clampOffset(Math.max(start, end), chars.length);
+    const a = valueOffset(node, start);
+    const b = valueOffset(node, end);
+    node._anchor = Math.min(a, b);
+    node._caret = Math.max(a, b);
     try {
       node._copySelection('CLIPBOARD');
     } finally {
@@ -1306,24 +1353,40 @@ class AtspiBridge {
     this._diffText(node, before, now);
   }
 
+  /**
+   * The difference as AT-SPI events, with the composition's own churn
+   * marked `:system` — the detail suffix Gecko established for a change the
+   * user did not type, and which at-spi2-core's event dispatch already
+   * parses. A preedit appearing, growing or being abandoned is exactly
+   * that: nothing was typed, a decoration is on the screen.
+   *
+   * The **commit** stays a plain `insert`. `dead_acute` then `e` deletes
+   * the `´` — inside the old preedit, so `delete:system` — and inserts `é`,
+   * which is in no preedit and is what the user actually typed. A reader
+   * that suppresses system text says "é" and nothing else, which is the
+   * distinction this path exists to draw.
+   */
   _diffText(node, before, now) {
     const diff = diffChars(before.chars, now.chars);
     if (diff) {
       if (diff.removed.length > 0) {
+        // what it replaced belonged to the *previous* state's composition
+        const system = inPreedit(before, diff.offset, diff.removed.length);
         this.emitObject(
           node,
           'TextChanged',
-          'delete',
+          system ? 'delete:system' : 'delete',
           diff.offset,
           diff.removed.length,
           ['s', diff.removed.join('')],
         );
       }
       if (diff.inserted.length > 0) {
+        const system = inPreedit(now, diff.offset, diff.inserted.length);
         this.emitObject(
           node,
           'TextChanged',
-          'insert',
+          system ? 'insert:system' : 'insert',
           diff.offset,
           diff.inserted.length,
           ['s', diff.inserted.join('')],

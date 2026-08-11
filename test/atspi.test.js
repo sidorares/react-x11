@@ -432,6 +432,109 @@ describe('the AT-SPI bridge', { concurrency: 1, ...needsBroker }, () => {
     );
   });
 
+  test('a composition is system text; the character it commits is not', async () => {
+    const wnd = app.windows[0];
+    const input = wnd._reactX11Node.children[1];
+    // compose in the middle of the value, so a wrong index space shows up
+    // as a wrong offset rather than as the end of the string either way
+    await call(appBus, paths.input, TEXT, 'SetCaretOffset', 'i', [2]);
+    const before = await call(
+      appBus,
+      paths.input,
+      TEXT,
+      'GetText',
+      'ii',
+      [0, -1],
+    );
+    const chars = Array.from(before);
+    signals.length = 0;
+
+    // A dead key. The accent is on the screen and in nobody's value.
+    input.defaultComposition({ type: 'compositionUpdate', data: '´' });
+    await until(
+      () => eventsNamed('TextChanged').length >= 1,
+      'the preedit insert',
+    );
+    assert.deepEqual(
+      eventsNamed('TextChanged').map((s) => [
+        s.body[0],
+        s.body[1],
+        dbus.variantValue(s.body[3]),
+      ]),
+      [['insert:system', 2, '´']],
+      'a preedit is text the user did not type — Gecko\'s ":system" suffix',
+    );
+    assert.equal(input.value, chars.join(''), 'the value did not move');
+
+    // The Text interface answers with what is drawn: an AT tracking the
+    // caret or magnifying character 3 has to land on the glyphs, and the
+    // layout every extent is read from is the layout of *this* string.
+    const composed = [...chars.slice(0, 2), '´', ...chars.slice(2)].join('');
+    assert.equal(
+      await call(appBus, paths.input, TEXT, 'GetText', 'ii', [0, -1]),
+      composed,
+    );
+    assert.equal(
+      await getProp(appBus, paths.input, TEXT, 'CharacterCount'),
+      chars.length + 1,
+    );
+    // the caret is at the far end of the composition, where the next
+    // keystroke of the sequence will appear
+    assert.equal(await getProp(appBus, paths.input, TEXT, 'CaretOffset'), 3);
+
+    // …and which part of it is uncommitted is a text run, not a guess
+    assert.deepEqual(
+      await call(appBus, paths.input, TEXT, 'GetAttributes', 'i', [2]),
+      // `underline` is the registered AT-SPI attribute for what is drawn;
+      // `composition` is this renderer's own, because AT-SPI registers
+      // nothing for a preedit
+      [{ underline: 'single', composition: 'true' }, 2, 3],
+    );
+    assert.deepEqual(
+      await call(appBus, paths.input, TEXT, 'GetAttributes', 'i', [0]),
+      [{}, 0, 2],
+      'the committed text before it is one plain run, bounded by the preedit',
+    );
+    assert.equal(
+      await call(appBus, paths.input, TEXT, 'GetAttributeValue', 'is', [
+        2,
+        'underline',
+      ]),
+      'single',
+    );
+
+    // The commit. The accent leaving is still system text — nothing was
+    // deleted — but `é` is what the user typed, so it is a plain insert and
+    // a reader that suppresses system text still speaks it.
+    signals.length = 0;
+    input.defaultComposition({ type: 'compositionEnd', data: 'é' });
+    await until(
+      () =>
+        eventsNamed('TextChanged').some((s) => s.body[0].startsWith('insert')),
+      'the commit',
+    );
+    assert.deepEqual(
+      eventsNamed('TextChanged').map((s) => [
+        s.body[0],
+        s.body[1],
+        dbus.variantValue(s.body[3]),
+      ]),
+      [
+        ['delete:system', 2, '´'],
+        ['insert', 2, 'é'],
+      ],
+    );
+    assert.equal(
+      await call(appBus, paths.input, TEXT, 'GetText', 'ii', [0, -1]),
+      [...chars.slice(0, 2), 'é', ...chars.slice(2)].join(''),
+    );
+    assert.deepEqual(
+      await call(appBus, paths.input, TEXT, 'GetAttributes', 'i', [2]),
+      [{}, 0, chars.length + 1],
+      'nothing is composing any more',
+    );
+  });
+
   test('a state prop change becomes one precise state-changed event', async () => {
     // reach the checkbox in a fresh render: props flow through commitUpdate
     x11Root.render(

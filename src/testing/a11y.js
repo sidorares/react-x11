@@ -54,6 +54,7 @@ import {
   a11yParent,
   hasTextInterface,
   textStateOf,
+  inPreedit,
   diffChars,
 } from '../a11y.js';
 
@@ -393,7 +394,19 @@ export class A11ySpy {
     }
     if (before.text && now.text) {
       const diff = diffChars(before.text.chars, now.text.chars);
-      if (diff && diff.removed.length > 0) {
+      // A composition's own churn is not an edit. A preedit appearing,
+      // growing or being abandoned is one `preedit` entry rather than the
+      // insert and delete it technically is on screen — and what the
+      // sequence finally *commits* stays an ordinary insert, because that
+      // is the character the user typed. The bridge draws the same line
+      // with the `:system` detail suffix; this is the same rule, spoken.
+      const wasComposing = before.text.preedit?.text ?? '';
+      const isComposing = now.text.preedit?.text ?? '';
+      if (
+        diff &&
+        diff.removed.length > 0 &&
+        !inPreedit(before.text, diff.offset, diff.removed.length)
+      ) {
         this._push({
           type: 'text-delete',
           node,
@@ -402,7 +415,22 @@ export class A11ySpy {
           summary: `delete: ${JSON.stringify(diff.removed.join(''))}`,
         });
       }
-      if (diff && diff.inserted.length > 0) {
+      if (isComposing !== wasComposing) {
+        this._push({
+          type: 'preedit',
+          node,
+          text: isComposing,
+          offset: now.text.preedit?.offset ?? before.text.preedit?.offset ?? 0,
+          summary: isComposing
+            ? `preedit: ${JSON.stringify(isComposing)}`
+            : 'preedit: cleared',
+        });
+      }
+      if (
+        diff &&
+        diff.inserted.length > 0 &&
+        !inPreedit(now.text, diff.offset, diff.inserted.length)
+      ) {
         this._push({
           type: 'text-insert',
           node,

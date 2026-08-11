@@ -256,6 +256,12 @@ await userEvent.key(XK_SPACE);
 assert.ok(at.since().some((e) => e.type === 'state' && e.state === 'checked'));
 ```
 
+A composition is in there as itself: a dead key logs one `preedit` entry
+(`preedit: "´"`) and no insertion, and the letter that finishes it logs
+`preedit: cleared` and one `insert: "é"` — the same line the bridge draws
+with `:system`, which is how a test catches a screen reader that would echo
+a half-typed accent.
+
 `at.events()` / `at.since()` are precise facts, `at.transcript()` the
 one-line summaries, `at.focusables()` every keyboard stop in Tab order with
 its utterance — a nameless control reads `"(no accessible name)"`, which
