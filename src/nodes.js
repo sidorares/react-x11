@@ -619,6 +619,19 @@ function clampExtent(value, min, max) {
 }
 
 /**
+ * A bound measured from the content, held inside the space there is. Unlike
+ * a size it may legitimately be 0 — a window whose every part can give has
+ * no floor to speak of — and a bound the window cannot satisfy is worse than
+ * none: a `minWidth` past the screen is a window that cannot be put on it.
+ */
+function clampBound(value, max) {
+  return Math.max(
+    0,
+    Math.min(Math.ceil(value), max ?? Infinity, MAX_WINDOW_EXTENT),
+  );
+}
+
+/**
  * Where a `transientFor` owner sits on screen, for picking the monitor a
  * dialog should be sized against. Accepts everything `windowIdOf` does — a
  * window ref, a node, a drawn node's ref — and answers null for a raw XID,
@@ -652,6 +665,24 @@ export const WINDOW_HINT_PROPS = [
   'maxAspect',
   'gravity',
 ];
+
+/**
+ * The bounds that can be spelled `'auto'` — asked of the content rather than
+ * named as a number. The increments and the aspect ratios cannot: there is
+ * no content answer to what a resize step is.
+ */
+export const CONTENT_BOUND_PROPS = [
+  'minWidth',
+  'minHeight',
+  'maxWidth',
+  'maxHeight',
+];
+
+/** A bound that asks the content instead of naming a number. */
+const isContentBound = (value) => value === 'auto';
+
+/** A bound as a number, or nothing where it is the content's to answer. */
+const numericBound = (value) => (isContentBound(value) ? undefined : value);
 
 /**
  * A `<window width>`/`<height>` that is not a number: sized from its own
@@ -696,6 +727,112 @@ function assertWindowSize(props, kind) {
         'means. See docs/elements.md, "Natural size".',
     );
   }
+  for (const bound of CONTENT_BOUND_PROPS) {
+    const value = props[bound];
+    if (value === undefined || value === 'auto') continue;
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      continue;
+    }
+    throw new Error(
+      `react-x11: <${kind} ${bound}={${JSON.stringify(value)}}> — a window ` +
+        `bound is a number of pixels or 'auto' (measured from the content), ` +
+        'and leaving it out means no bound at all. ' +
+        'See docs/elements.md, "A floor the content decides".',
+    );
+  }
+}
+
+/**
+ * Whether this node's laid-out size is already the answer for `axis`, so
+ * that what is inside it stops counting towards a floor.
+ *
+ * The question only arises because the layout being read was run with no
+ * room in it: a node whose size came from its container rather than from
+ * itself came out at nothing, and nothing is not a measurement. So the test
+ * is *who decided this size* —
+ *
+ * - it clips, so what overflows it is not something to make room for. CSS
+ *   says the same in `min-width: auto` computing to `0` on anything whose
+ *   overflow is not `visible`, and it is the escape hatch Qt spells
+ *   `QScrollArea` and GTK spells `min-content-width`;
+ * - the author named a size, a floor or a ceiling on this axis. All three
+ *   are answers, `minWidth: 0` — "I can be any size" — included;
+ * - it was told it may shrink, on the axis its container lays out along.
+ *   `flexShrink` is the opt-in, and it means nothing on the other axis.
+ *
+ * Anything else was sized by its parent — a stretched cross-axis child is
+ * the usual one — and has to be looked inside.
+ */
+function boundsItsOwnContent(node, axis, axisIsMain) {
+  const style = node.style;
+  if (style.overflow === 'scroll' || style.overflow === 'hidden') return true;
+  const [size, min, max] =
+    axis === 'width'
+      ? [style.width, style.minWidth, style.maxWidth]
+      : [style.height, style.minHeight, style.maxHeight];
+  if (
+    typeof size === 'number' ||
+    typeof min === 'number' ||
+    typeof max === 'number'
+  ) {
+    return true;
+  }
+  return axisIsMain && (style.flexShrink ?? 0) > 0;
+}
+
+/**
+ * How far this node's content actually reaches along one axis, in its own
+ * coordinate space — the reading of a layout the root was given no room for,
+ * where `getComputedWidth()` says nothing (a root offered 0 is clamped to 0)
+ * but the children still sit where their own styles put them.
+ *
+ * A **span** rather than a rightmost edge, because a `center` or
+ * `space-around` row given less room than it needs overflows *both* sides —
+ * exactly as CSS says it should — and its first child's edge lands at a
+ * negative offset. The padding and border are added back on both sides
+ * because the span is measured between the children, inside them.
+ *
+ * Out-of-flow children are skipped, as they are in CSS: an absolutely
+ * positioned node contributes nothing to what contains it, and a
+ * `display: 'none'` one is not there at all.
+ */
+function contentSpan(node, axis) {
+  const yoga = node.yoga;
+  const horizontal = axis === 'width';
+  const own = horizontal ? yoga.getComputedWidth() : yoga.getComputedHeight();
+  const [startEdge, endEdge] = horizontal
+    ? [Yoga.EDGE_LEFT, Yoga.EDGE_RIGHT]
+    : [Yoga.EDGE_TOP, Yoga.EDGE_BOTTOM];
+  const direction = node.style.flexDirection ?? 'column';
+  const rowFirst = direction === 'row' || direction === 'row-reverse';
+  const axisIsMain = rowFirst === horizontal;
+  let start = Infinity;
+  let end = -Infinity;
+  for (const child of node.children) {
+    // the same set that joins the flex tree: a nested <window> is laid out
+    // by itself, and a <text> span has no box of its own
+    if (!child.yoga || child.isWindow) continue;
+    if (child.style.position === 'absolute') continue;
+    if (child.style.display === 'none') continue;
+    const at = horizontal
+      ? child.yoga.getComputedLeft()
+      : child.yoga.getComputedTop();
+    let extent = horizontal
+      ? child.yoga.getComputedWidth()
+      : child.yoga.getComputedHeight();
+    if (!boundsItsOwnContent(child, axis, axisIsMain)) {
+      extent = Math.max(extent, contentSpan(child, axis));
+    }
+    start = Math.min(start, at);
+    end = Math.max(end, at + extent);
+  }
+  if (start === Infinity) return own;
+  const edges =
+    yoga.getComputedPadding(startEdge) +
+    yoga.getComputedPadding(endEdge) +
+    yoga.getComputedBorder(startEdge) +
+    yoga.getComputedBorder(endEdge);
+  return Math.max(own, end - start + edges);
 }
 
 /**
@@ -727,7 +864,9 @@ export function windowAttributes(props) {
       continue;
     }
     if (WINDOW_HINT_PROPS.includes(key)) {
-      hints[key] = props[key];
+      // An `'auto'` bound is not a number ntk can be given; `realize()`
+      // measures it and merges the answer in before CreateWindow.
+      if (!isContentBound(props[key])) hints[key] = props[key];
       continue;
     }
     attributes[key] = props[key];
@@ -4644,11 +4783,60 @@ export class WindowNode extends Scrollable(Node) {
     // the only thing that ever does is the user dragging an edge.
     this._requestedSize = null;
     this._userSized = false;
+    // the last `WM_NORMAL_HINTS` struct written and the size it was written
+    // at, so that a bound measured every frame is only *sent* on the frames
+    // it moves (see _sendSizeHints for why the size is part of it)
+    this._sentHints = null;
+    this._sentHintsAt = null;
   }
 
   /**
-   * The size this window's content wants, for whichever of `width`/`height`
-   * is `'auto'` — CSS shrink-to-fit, then height-for-width.
+   * The smallest size this window's content can be drawn at: GTK's
+   * `minimum` to the `natural` below, and what an `'auto'` `minWidth` or
+   * `minHeight` resolves to.
+   *
+   * One layout pass **with no space on offer at all**, which is the whole
+   * trick — yoga answers it with every node at the smallest size its own
+   * style allows. Nothing shrinks unless the author said it may (yoga
+   * defaults `flexShrink` to 0, and `overflow: 'scroll'` sets it to 1 along
+   * with `minWidth: 0`), text measures at its longest word, and a wrapping
+   * row wraps at every item. `contentSpan` then reads how far that reached.
+   *
+   * What it deliberately does *not* do is second-guess that layout. A node
+   * that shrank was told it may shrink, so it contributes what it shrank to
+   * and its content stops counting — CSS's `min-width: 0`, Qt's
+   * `QScrollArea`, GTK's `min-content-width`. All three spell the same
+   * escape hatch, and a scroll container gets it here for free.
+   *
+   * `forWidth` is the width the height is measured for, and there has to be
+   * one: a paragraph's minimum height is a height *for a width*. GTK asks
+   * for its minimum height at its minimum width, which for a paragraph is
+   * the width it is tallest at — an honest answer to a question nobody
+   * asked, since the window is not at its minimum width. `WM_NORMAL_HINTS`
+   * holds two independent numbers and cannot express the dependency either
+   * way, so the floor is measured at the width the window will actually
+   * have and re-sent as that changes.
+   */
+  _measureMinimum(axis, forWidth) {
+    const yoga = this.yoga;
+    // The root carries whatever size the last pass pinned on it, and an
+    // available size means nothing to a root that has one of its own.
+    yoga.setWidth(undefined);
+    yoga.setHeight(undefined);
+    if (axis === 'width') {
+      yoga.calculateLayout(0, undefined, Yoga.DIRECTION_LTR);
+    } else {
+      yoga.calculateLayout(forWidth, 0, Yoga.DIRECTION_LTR);
+    }
+    return Math.ceil(contentSpan(this, axis));
+  }
+
+  /**
+   * What the content has to say about this window's size: the size it wants
+   * for whichever of `width`/`height` is `'auto'`, and the numbers an
+   * `'auto'` bound resolves to.
+   *
+   * The **natural** size is CSS shrink-to-fit, then height-for-width:
    *
    * 1. Lay the tree out with **no available width**, which is what yoga's
    *    `undefined` means: every measure function is asked in
@@ -4666,13 +4854,24 @@ export class WindowNode extends Scrollable(Node) {
    * overflows. A window cannot be wider than the screen, so the clamp wins
    * and the content is cut instead.
    *
+   * The two answers are the pair Qt and GTK both hand their toplevels —
+   * `sizeHint()`/`minimumSizeHint()`, `gtk_widget_measure`'s
+   * `(minimum, natural)` — which is why `'auto'` reads as the natural size
+   * on a cap and as the minimum on a floor: it means "ask the content",
+   * and the content's answer to *how big* is not its answer to *how small*.
+   *
    * Runs before `CreateWindow`, so it must not need one: text measures
    * through `app.fonts`, which is the connection's, and the clamp was
    * resolved during `createRoot`. That is the whole point — the window is
    * *created* at its natural size rather than resized into it after mapping,
    * so nothing is ever on screen at the wrong size.
+   *
+   * Leaves the tree laid out at a size that is nobody's arrangement, so it
+   * may only be called on a frame that goes on to lay out — `realize()`,
+   * which invalidates, and `_refit()`, which `flush()` only calls when it
+   * owes a layout pass anyway.
    */
-  _measureNatural() {
+  _measure() {
     const props = this.props;
     const autoW = isAutoSize(props.width);
     const autoH = isAutoSize(props.height);
@@ -4680,53 +4879,93 @@ export class WindowNode extends Scrollable(Node) {
     // Where the window will open, for picking a monitor: next to its owner
     // where it has one, and wherever the WM puts it otherwise.
     const area = availableArea(this.app, screenOriginOf(props.transientFor));
+    // An `'auto'` cap never bounds the pass that resolves it: `maxWidth`
+    // there *is* the natural width, so letting it in would be the answer
+    // bounding the question.
     const limit = (max, screen) =>
-      Math.min(max ?? Infinity, screen ?? Infinity, MAX_WINDOW_EXTENT);
+      Math.min(
+        numericBound(max) ?? Infinity,
+        screen ?? Infinity,
+        MAX_WINDOW_EXTENT,
+      );
     const availW = limit(props.maxWidth, area?.width);
     const availH = limit(props.maxHeight, area?.height);
+    const hints = {};
     if (!yoga) {
       // Only reachable on a torn-down window, and a size still has to be a
       // size: fall back to the space on offer rather than handing `'auto'`
-      // through to CreateWindow.
+      // through to CreateWindow. Nothing left to measure a bound against.
       return {
         width: autoW
-          ? clampExtent(availW, props.minWidth, availW)
+          ? clampExtent(availW, numericBound(props.minWidth), availW)
           : props.width,
         height: autoH
-          ? clampExtent(availH, props.minHeight, availH)
+          ? clampExtent(availH, numericBound(props.minHeight), availH)
           : props.height,
+        hints,
       };
     }
-    if (!autoW && !autoH) return { width: props.width, height: props.height };
 
-    // The root carries whatever size the last flush() pinned on it; clearing
-    // an axis is what makes yoga measure it rather than fill it.
-    yoga.setWidth(autoW ? undefined : props.width);
-    yoga.setHeight(autoH ? undefined : props.height);
+    // A numeric floor applies to the natural size as it always has; an
+    // `'auto'` one is measured below. The height's needs a width to be
+    // measured for, and it can never exceed the natural height anyway —
+    // same width, every node at or below the size it settled at — so
+    // nothing is lost by clamping the height without it.
+    const minH = numericBound(props.minHeight);
+
+    // Also run for an axis that is not `'auto'` but whose cap is: a
+    // `maxWidth="auto"` on a window with a `width` still has to find out
+    // what the content wanted.
+    const needW = autoW || isContentBound(props.maxWidth);
+    const needH = autoH || isContentBound(props.maxHeight);
+    if (!needW && !needH) {
+      // Both sizes are the app's, so there is nothing to measure but the
+      // bounds — and nothing re-resolves `@width` blocks here: the styles
+      // are the ones the window's real size resolved on the last frame,
+      // which is the size the floors are wanted for.
+      if (isContentBound(props.minWidth)) {
+        hints.minWidth = clampBound(this._measureMinimum('width'), availW);
+      }
+      this._finishHeightFloor(
+        hints,
+        props,
+        this.window?.width ?? props.width,
+        availH,
+      );
+      return { width: props.width, height: props.height, hints };
+    }
 
     const measure = () => {
-      let width = props.width;
-      if (autoW) {
+      // The root carries whatever size the last flush() pinned on it — and
+      // whatever the floor pass below cleared — so this is re-stated per
+      // call rather than hoisted: clearing an axis is what makes yoga
+      // measure it rather than fill it.
+      yoga.setWidth(needW ? undefined : props.width);
+      yoga.setHeight(needH ? undefined : props.height);
+      let naturalW;
+      if (needW) {
         yoga.calculateLayout(
           undefined,
-          autoH ? undefined : props.height,
+          needH ? undefined : props.height,
           Yoga.DIRECTION_LTR,
         );
-        width = clampExtent(yoga.getComputedWidth(), props.minWidth, availW);
+        naturalW = clampExtent(yoga.getComputedWidth(), undefined, availW);
       }
+      const width = autoW ? clampExtent(naturalW, minW, availW) : props.width;
       // The height-for-width pass. Run even when only the width is auto: it
       // is the layout the window is about to be created at, so leaving the
       // tree holding the max-content one would hand `flush()` a stale
       // arrangement.
       yoga.calculateLayout(
         width,
-        autoH ? undefined : props.height,
+        needH ? undefined : props.height,
         Yoga.DIRECTION_LTR,
       );
-      const height = autoH
-        ? clampExtent(yoga.getComputedHeight(), props.minHeight, availH)
-        : props.height;
-      return { width, height };
+      const naturalH = needH
+        ? clampExtent(yoga.getComputedHeight(), undefined, availH)
+        : undefined;
+      const height = autoH ? clampExtent(naturalH, minH, availH) : props.height;
+      return { width, height, naturalW, naturalH };
     };
 
     // `@width`/`@height` blocks and an auto size are mutually circular: the
@@ -4741,9 +4980,49 @@ export class WindowNode extends Scrollable(Node) {
       autoW ? availW : props.width,
       autoH ? availH : props.height,
     );
+
+    // The width floor, measured against the styles the pass below starts
+    // from and before it, because it is what the natural width is clamped
+    // into. Bounded by the same space the size is: a floor wider than the
+    // screen is a window that cannot be put on it, and a floor past
+    // `maxWidth` is a `WM_NORMAL_HINTS` that contradicts itself.
+    const minW = isContentBound(props.minWidth)
+      ? (hints.minWidth = clampBound(this._measureMinimum('width'), availW))
+      : props.minWidth;
+
     let size = measure();
     if (this._resolveSizeQueries(size.width, size.height)) size = measure();
-    return size;
+
+    // A cap the content decides is its natural size, never below a floor
+    // that was named as a number: `WM_NORMAL_HINTS` with a min above its own
+    // max is a struct no window manager can honour.
+    if (isContentBound(props.maxWidth)) {
+      hints.maxWidth = Math.max(size.naturalW, minW ?? 0);
+    }
+    if (isContentBound(props.maxHeight)) {
+      hints.maxHeight = Math.max(size.naturalH, minH ?? 0);
+    }
+    // Last, because it is a height *for a width*: the width the window is
+    // about to have where the width is still ours to choose, and the one it
+    // has where it is not.
+    const forWidth =
+      autoW && !this._userSized
+        ? size.width
+        : (this.window?.width ?? size.width);
+    this._finishHeightFloor(hints, props, forWidth, availH);
+    return { width: size.width, height: size.height, hints };
+  }
+
+  /** The `minHeight="auto"` floor, measured for the width just settled. */
+  _finishHeightFloor(hints, props, forWidth, availH) {
+    if (!isContentBound(props.minHeight)) return;
+    hints.minHeight = clampBound(
+      this._measureMinimum('height', forWidth),
+      availH,
+    );
+    if (isContentBound(props.maxHeight)) {
+      hints.maxHeight = Math.max(hints.maxHeight ?? 0, hints.minHeight);
+    }
   }
 
   /**
@@ -4762,14 +5041,29 @@ export class WindowNode extends Scrollable(Node) {
    * The result is applied through the window rather than through props: an
    * auto size is not something React said, so nothing about it should read
    * as a prop change or wait for one.
+   *
+   * A **bound** the content decides is not covered by that rule and outlives
+   * it: `minWidth="auto"` still means the same thing after the user has
+   * taken the size over — it is what stops them taking it *too far* — and it
+   * means it on a window with a `width` of its own, which never tracked
+   * anything. So the floor is re-measured on every frame that lays out, and
+   * the size only while it is still the window's to choose.
    */
   _refit() {
-    if (this._userSized || this.destroyed) return;
-    if (!isAutoSize(this.props.width) && !isAutoSize(this.props.height)) return;
+    if (this.destroyed) return;
     const wnd = this.window;
     if (!wnd) return;
+    const props = this.props;
+    const tracking =
+      !this._userSized && (isAutoSize(props.width) || isAutoSize(props.height));
+    const bounded = CONTENT_BOUND_PROPS.some((key) =>
+      isContentBound(props[key]),
+    );
+    if (!tracking && !bounded) return;
     const asked = this._requestedSize;
-    const next = this._measureNatural();
+    const next = this._measure();
+    this._sendSizeHints(props, next.hints);
+    if (!tracking) return;
     if (asked && next.width === asked.width && next.height === asked.height) {
       return;
     }
@@ -4801,10 +5095,18 @@ export class WindowNode extends Scrollable(Node) {
     // Before CreateWindow, so an auto-sized window is *born* the right size.
     // Doing it after would mean a window mapped at 800x800 and corrected a
     // frame later, which is the jump this exists to avoid.
-    const natural = this._measureNatural();
+    const natural = this._measure();
     attributes.width = natural.width;
     attributes.height = natural.height;
     this._requestedSize = { width: natural.width, height: natural.height };
+    // A bound the content decides is a number by now, and the window manager
+    // reads `WM_NORMAL_HINTS` when it frames the window — so it goes in with
+    // the creation attributes rather than chasing the map with a second
+    // property write.
+    if (Object.keys(natural.hints).length > 0) {
+      this._sentHints = this._hintsToSend(this.props, natural.hints);
+      attributes.sizeHints = this._sentHints;
+    }
     // **What the server paints into newly exposed area.** A resize enlarges
     // the window before the app can possibly have drawn the new part, and X
     // fills it with this attribute in the meantime — so without one, growing
@@ -5186,10 +5488,16 @@ export class WindowNode extends Scrollable(Node) {
       next.resizable !== prev.resizable ||
       !shallowEqual(hints, this._sizeHints(prev))
     ) {
-      wnd.setSizeHints?.({
-        ...hints,
-        ...(next.resizable === false && { resizable: false }),
-      });
+      if (CONTENT_BOUND_PROPS.some((key) => isContentBound(next[key]))) {
+        // A bound this commit cannot resolve: `'auto'` is a measurement, and
+        // measuring leaves the tree laid out at a size that is nobody's
+        // arrangement. Asking for the layout this frame owes anyway is what
+        // makes it safe — `flush()` measures, sends the hints and lays the
+        // tree back out, in that order.
+        this.invalidate(true, null, 'props');
+      } else {
+        this._sendSizeHints(next);
+      }
     }
     if (!shallowEqual(next.wmClass, prev.wmClass) && next.wmClass) {
       const c = next.wmClass;
@@ -5283,13 +5591,64 @@ export class WindowNode extends Scrollable(Node) {
     wnd.setTransientFor(id);
   }
 
-  /** The WM size hints among these props. */
+  /** The WM size hints among these props, as the author wrote them. */
   _sizeHints(props) {
     const hints = {};
     for (const key of WINDOW_HINT_PROPS) {
       if (props[key] !== undefined) hints[key] = props[key];
     }
     return hints;
+  }
+
+  /**
+   * The whole `WM_NORMAL_HINTS` struct to write: what the author named, with
+   * every `'auto'` replaced by the number `_measure()` resolved for it.
+   *
+   * Whole, because `setSizeHints` writes the property outright and carries
+   * nothing over from the last call — a floor sent on its own would drop the
+   * `widthInc` beside it. A bound left unresolved (a torn-down window with
+   * nothing to measure) is dropped rather than sent: `'auto'` reaches the
+   * wire as a CARD32 of 0, which is a floor of nothing dressed up as a
+   * declaration.
+   */
+  _hintsToSend(props, resolved) {
+    const hints = { ...this._sizeHints(props), ...resolved };
+    for (const key of CONTENT_BOUND_PROPS) {
+      if (isContentBound(hints[key])) delete hints[key];
+    }
+    if (props.resizable === false) hints.resizable = false;
+    return hints;
+  }
+
+  /**
+   * Write the hints, if they are not the ones already written.
+   *
+   * Diffed against what actually went out rather than against props: a
+   * content-measured bound is recomputed on every frame that lays out, and
+   * most frames move nothing. Without the check, a window with
+   * `minWidth="auto"` would spend a `ChangeProperty` per frame restating a
+   * number the window manager already has.
+   *
+   * `resizable: false` is the one hint whose meaning is not in its keys — it
+   * pins min and max to the size the window has *at the call* — so the size
+   * is part of what is compared, and a window that pins itself and then
+   * grows re-pins at the size it grew to.
+   */
+  _sendSizeHints(props = this.props, resolved = null) {
+    const wnd = this.window;
+    if (!wnd || typeof wnd.setSizeHints !== 'function') return;
+    const hints = this._hintsToSend(props, resolved);
+    if (Object.keys(hints).length === 0) return;
+    const at = `${wnd.width}x${wnd.height}`;
+    if (
+      shallowEqual(hints, this._sentHints) &&
+      (hints.resizable !== false || at === this._sentHintsAt)
+    ) {
+      return;
+    }
+    this._sentHints = hints;
+    this._sentHintsAt = at;
+    wnd.setSizeHints(hints);
   }
 
   get semanticNames() {

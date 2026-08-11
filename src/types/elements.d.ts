@@ -183,12 +183,18 @@ export interface DrawnProps<T = DrawnNode>
 
 // --- windows ---------------------------------------------------------------
 
-/** ICCCM `WM_NORMAL_HINTS` — what the window manager will let the user do. */
+/**
+ * ICCCM `WM_NORMAL_HINTS` — what the window manager will let the user do.
+ *
+ * The four bounds also take `'auto'`, which asks the content: on a floor
+ * that is the smallest size it can be drawn at, and on a cap the size it
+ * wanted. Both are re-measured as the content changes.
+ */
 export interface SizeHintProps {
-  minWidth?: number;
-  minHeight?: number;
-  maxWidth?: number;
-  maxHeight?: number;
+  minWidth?: number | 'auto';
+  minHeight?: number | 'auto';
+  maxWidth?: number | 'auto';
+  maxHeight?: number | 'auto';
   widthInc?: number;
   heightInc?: number;
   baseWidth?: number;
