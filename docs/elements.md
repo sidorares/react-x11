@@ -221,6 +221,10 @@ what _doesn't_ count:
 | `overflow: 'scroll'` / `'hidden'`                      | nothing           |
 | `flexShrink: 1`, or a `minWidth: 0` of its own         | what it shrank to |
 
+A registered element contributes whatever its `measureContent` answers when
+asked for the smallest size it can be drawn at — see
+[extending.md](extending.md#a-size-of-your-own).
+
 The last two rows are the escape hatch, and they are the same one CSS,
 Qt and GTK all spell — `min-width: 0`, `QScrollArea`, `min-content-width`.
 A node that was told it may shrink is taken at its word and its contents

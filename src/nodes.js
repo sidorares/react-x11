@@ -190,6 +190,7 @@ const INVALIDATE_REASONS = new Set([
   'scroll', // scrollTo/scrollBy/scrollIntoView, textarea/textinput panning
   'text', // text content, input value or caret editing
   'content', // async content arrived (image decode, rich-content reflow)
+  'measure', // an element said its own size changed (invalidateMeasure)
   'child-list', // children were added, removed or reordered
   'focus', // focus moved: ring/caret handover between nodes
   'caret', // the caret blink timer
@@ -987,6 +988,72 @@ const WINDOW_SEMANTIC_NAMES = new Set([
   ...WINDOW_HINT_PROPS,
 ]);
 
+/**
+ * Yoga's measure modes, in words. Indexed by the integer yoga hands a
+ * measure function, so `MEASURE_MODES[widthMode]` is the name.
+ *
+ * The names are the public vocabulary (`measureContent`) and the integers
+ * are not: an element that wrote `widthMode === 0` would be pinned to
+ * yoga's ABI through us, which is exactly what the seam exists to stop.
+ */
+const MEASURE_MODES = [];
+MEASURE_MODES[Yoga.MEASURE_MODE_UNDEFINED] = 'unconstrained';
+MEASURE_MODES[Yoga.MEASURE_MODE_EXACTLY] = 'exactly';
+MEASURE_MODES[Yoga.MEASURE_MODE_AT_MOST] = 'at-most';
+
+/**
+ * The pixels on offer on one axis, as a number an element can do arithmetic
+ * with. Yoga says "no bound" with a null, so `Math.min(preferred, width)`
+ * would answer 0 to the one question where the honest answer is `preferred`;
+ * `Infinity` is what "no bound" means in that expression, and it makes the
+ * mode something an element consults only when it has a reason to.
+ */
+function measureOffer(value, mode) {
+  return mode === Yoga.MEASURE_MODE_UNDEFINED || !Number.isFinite(value)
+    ? Infinity
+    : value;
+}
+
+/** What a measure function answered, for the error that rejects it. */
+function describeSize(size) {
+  if (size === null || typeof size !== 'object') return String(size);
+  return `{ width: ${size.width}, height: ${size.height} }`;
+}
+
+/**
+ * Fit a natural size into what layout offered — the shape `<image>`, `<svg>`
+ * and any other element whose content has a size of its own and an aspect
+ * ratio to keep.
+ *
+ * **Which axes the style fixed is something layout already knows**, and says
+ * in the measure modes: `'exactly'` on an axis means the style made it
+ * definite. Working it out a second time by reading style back would be
+ * duplication; working it out by reading *props* was issue #118 — `width` is
+ * a style name, so `<image width={40}>` throws in development and only ever
+ * reached that branch in production.
+ *
+ * - Both fixed: layout skips the measure entirely, so there is no
+ *   fixed-size case to write here.
+ * - Height fixed alone: scale the width with it, the way an `<img>` with
+ *   only a height set does, rather than stretching to the container.
+ * - Otherwise: natural size, shrunk to the width on offer, height following
+ *   the aspect ratio.
+ *
+ * @param {{width: number, height: number}} natural the content's own size
+ * @param {MeasureConstraints} constraints the argument of `measureContent`
+ */
+export function intrinsicSize(
+  natural,
+  { width, height, widthMode, heightMode },
+) {
+  const { width: natW, height: natH } = natural;
+  if (heightMode === 'exactly' && widthMode !== 'exactly' && natH > 0) {
+    return { width: (height * natW) / natH, height };
+  }
+  const w = width < natW ? width : natW;
+  return { width: w, height: natW > 0 ? (w * natH) / natW : natH };
+}
+
 /** Equality for props that may be a scalar, an array or a plain object
  *  (window hints are all three shapes), so an unchanged inline object
  *  literal does not re-send the property every render. */
@@ -1035,6 +1102,12 @@ export class Node {
     this.yoga = yoga ? Yoga.Node.create() : null;
     if (this.yoga) {
       applyLayoutStyle(this.yoga, this.style);
+      // An element with a size of its own says so by implementing
+      // `measureContent`, and the base class is what wires it to layout —
+      // so a third-party element reaches everything that asks a leaf for its
+      // size, including the content floor `minWidth: 'auto'` is measured
+      // with (#248), without knowing either of them exists.
+      if (typeof this.measureContent === 'function') this._useMeasureContent();
     }
     if (DEV) devCheckA11yProps(this);
   }
@@ -1412,6 +1485,67 @@ export class Node {
     this.yoga.setMeasureFunc(measure);
   }
 
+  /**
+   * Hand `measureContent` to layout, translated: the modes arrive as words,
+   * an axis with no bound arrives as `Infinity` rather than as yoga's null,
+   * and what comes back is checked before it can turn a whole tree into
+   * NaNs. Called by the constructor, so an element only writes the method.
+   */
+  _useMeasureContent() {
+    this._setMeasureFunc((width, widthMode, height, heightMode) => {
+      const size = this.measureContent({
+        width: measureOffer(width, widthMode),
+        height: measureOffer(height, heightMode),
+        widthMode: MEASURE_MODES[widthMode],
+        heightMode: MEASURE_MODES[heightMode],
+      });
+      if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height)) {
+        // Left to itself this is a destructuring TypeError from inside
+        // yoga's wrapper, or — worse, because it does not throw at all — a
+        // NaN that spreads through every ancestor's rect.
+        throw new Error(
+          `react-x11: <${this.kind}>.measureContent() must return ` +
+            '{ width, height } as finite numbers; it returned ' +
+            `${describeSize(size)}. Return { width: 0, height: 0 } for ` +
+            'content that has not arrived yet.',
+        );
+      }
+      return size;
+    });
+  }
+
+  /**
+   * The inputs to `measureContent` changed — a prop it reads, data that
+   * loaded — so the next layout has to ask again instead of reusing the
+   * answer it cached.
+   *
+   * `reason` joins the closed set the diagnostics print (docs/debugging.md);
+   * the default says the measurement itself moved.
+   */
+  invalidateMeasure(reason = 'measure') {
+    // Nothing to re-ask, and both halves matter: layout aborts the process
+    // on a node that never had a measure function, and a destroyed node's
+    // box has already been freed under it.
+    if (this.destroyed || !this._measureFn) {
+      // Said once, in development: an element that asks for a re-measure and
+      // silently gets none looks broken rather than degraded, and there is
+      // nothing in the frame to pull on.
+      if (DEV && !this.destroyed && !this._measureNagged) {
+        this._measureNagged = true;
+        console.warn(
+          `react-x11: <${this.kind}>.invalidateMeasure() has nothing to ` +
+            're-measure — this element implements no measureContent(). ' +
+            'Note it has to be a method on the class: assigning it in the ' +
+            'constructor is too late, since the base Node constructor is ' +
+            'what wires it to layout.',
+        );
+      }
+      return;
+    }
+    this.yoga.markDirty();
+    this._invalidateLayout(reason);
+  }
+
   appendChild(child) {
     this.insertBefore(child, null);
   }
@@ -1455,6 +1589,23 @@ export class Node {
       throw new Error(
         `react-x11: <${this.kind}> takes no children (registered with ` +
           `childrenAllowed: false), but <${child.kind}> is inside it.`,
+      );
+    }
+    // A node's size comes from its measure function or from its children,
+    // never both — and yoga does not merely refuse the second one, it aborts
+    // the WebAssembly module, which takes the process down naming nothing
+    // the developer wrote. The built-ins reach it too: `<text>`, `<markdown>`
+    // and friends are turned away earlier by `createInstance`, which knows
+    // what their content is, but `<image>`, `<textinput>` and `<textarea>`
+    // arrive here.
+    if (this._measureFn && this._joinsYoga(child)) {
+      throw new Error(
+        `react-x11: <${this.kind}> measures its own content, so it cannot ` +
+          `contain <${child.kind}> — layout sizes such an element from its ` +
+          `measure function and gives its children no say. Render <${child.kind}> ` +
+          `beside it rather than inside it; or, if <${this.kind}> is meant to ` +
+          'arrange children, remove its measureContent() and let flexbox size ' +
+          'it from what is inside it.',
       );
     }
     // captured before the child joins, so it covers the arrangement that is
@@ -2483,22 +2634,22 @@ export class TextNode extends Node {
     super('text', props, app, { yoga: !span });
     this.isSpan = span;
     this._layouts = new Map();
-    if (this.yoga) {
-      this._setMeasureFunc((width, widthMode) => {
-        const maxWidth =
-          widthMode === Yoga.MEASURE_MODE_UNDEFINED ? Infinity : width;
-        const layout = this._layoutFor(this._wrapWidth(maxWidth));
-        if (!layout) return { width: 0, height: 0 };
-        const trim = this._trim(layout);
-        return {
-          width: Math.ceil(layout.width),
-          height: Math.max(
-            0,
-            Math.ceil(layout.height) - (trim ? trim.top + trim.bottom : 0),
-          ),
-        };
-      });
-    }
+  }
+
+  /** Height for a width: the paragraph shaped into whatever is on offer.
+   * The offer is `Infinity` when nothing bounds it, which is also what
+   * `textWrap: 'nowrap'` asks for, so neither needs a mode. */
+  measureContent({ width }) {
+    const layout = this._layoutFor(this._wrapWidth(width));
+    if (!layout) return { width: 0, height: 0 };
+    const trim = this._trim(layout);
+    return {
+      width: Math.ceil(layout.width),
+      height: Math.max(
+        0,
+        Math.ceil(layout.height) - (trim ? trim.top + trim.bottom : 0),
+      ),
+    };
   }
 
   _textContentChanged() {
@@ -2663,60 +2814,21 @@ export class TextNode extends Node {
   }
 }
 
-/**
- * The measure function the intrinsically-sized elements share — the ones
- * with a natural width and height that scale together (`<image>`, `<svg>`).
- * `natural()` returns that size; it is called per measure because it
- * arrives late (a decoded file, a parsed document).
- *
- * **Which dimensions the style fixed is something yoga already knows**, and
- * says in the measure modes: `EXACTLY` on an axis means the style made it
- * definite. Working it out a second time by reading style back would be
- * duplication; working it out by reading *props* was issue #118 — `width`
- * is a style name, so `<image width={40}>` throws in development and only
- * ever reached this branch in production.
- *
- * - Both fixed: yoga skips the measure function outright, so there is no
- *   fixed-size case to write here.
- * - Height fixed alone: scale the width with it, the way an `<img>` with
- *   only a height set does, rather than stretching to the container.
- * - Otherwise: natural size, shrunk to the width on offer, height
- *   following the aspect ratio.
- */
-export function intrinsicMeasure(natural) {
-  return (width, widthMode, height, heightMode) => {
-    const { width: natW, height: natH } = natural();
-    if (
-      heightMode === Yoga.MEASURE_MODE_EXACTLY &&
-      widthMode !== Yoga.MEASURE_MODE_EXACTLY &&
-      natH > 0
-    ) {
-      return { width: (height * natW) / natH, height };
-    }
-    let w = natW;
-    if (
-      widthMode !== Yoga.MEASURE_MODE_UNDEFINED &&
-      Number.isFinite(width) &&
-      width < w
-    ) {
-      w = width;
-    }
-    return { width: w, height: natW > 0 ? (w * natH) / natW : natH };
-  };
-}
-
 export class ImageNode extends Node {
   constructor(props, app) {
     super('image', props, app);
     this.image = null;
     this._loadToken = 0;
-    this._setMeasureFunc(
-      intrinsicMeasure(() => ({
-        width: this.image?.width ?? 0,
-        height: this.image?.height ?? 0,
-      })),
-    );
     this._load(props.src);
+  }
+
+  /** The decoded size, kept to its aspect ratio. Read per measure rather
+   * than once, because it arrives late. */
+  measureContent(constraints) {
+    return intrinsicSize(
+      { width: this.image?.width ?? 0, height: this.image?.height ?? 0 },
+      constraints,
+    );
   }
 
   async _load(src) {
@@ -2727,10 +2839,7 @@ export class ImageNode extends Node {
       const image = await loadImage(src);
       if (token !== this._loadToken || this.destroyed) return;
       this.image = image;
-      if (this.yoga) {
-        this.yoga.markDirty?.();
-        this._invalidateLayout('content');
-      }
+      this.invalidateMeasure('content');
     } catch (err) {
       console.error(`react-x11: failed to load image ${src}:`, err.message);
     }
@@ -3532,17 +3641,15 @@ export class TextInputNode extends Node {
     this._undoRun = null;
     // the open built-in edit menu, if any (see _openEditMenu)
     this._editMenu = null;
-    this._setMeasureFunc((width, widthMode) => {
-      const preferred = 150;
-      const w =
-        widthMode === Yoga.MEASURE_MODE_UNDEFINED
-          ? preferred
-          : Math.min(preferred, width);
-      // Not rounded here: a trimmed `<text>` hands yoga the raw cap band too,
-      // and rounding one of them and not the other is a pixel of difference
-      // between a field and the button beside it.
-      return { width: w, height: this._capBand() };
-    });
+  }
+
+  /** A preferred width, capped to whatever is on offer — `Infinity` when
+   * nothing is, which is what makes the `Math.min` the whole rule. */
+  measureContent({ width }) {
+    // Not rounded here: a trimmed `<text>` hands layout the raw cap band
+    // too, and rounding one of them and not the other is a pixel of
+    // difference between a field and the button beside it.
+    return { width: Math.min(150, width), height: this._capBand() };
   }
 
   get value() {
@@ -4489,8 +4596,7 @@ export class TextInputNode extends Node {
       if (this.style[key] !== beforeStyle[key]) metricsChanged = true;
     }
     if (metricsChanged) {
-      this.yoga.markDirty();
-      this._invalidateLayout('props');
+      this.invalidateMeasure('props');
     } else if (newProps.value !== before.value) {
       // painting clips to the content box and the measure function reads
       // only font metrics, so a value change is confined to the field —
@@ -4665,15 +4771,17 @@ export class TextAreaNode extends TextInputNode {
     super(props, app, 'textarea');
     this._scrollY = 0;
     this._goalX = null;
-    this._setMeasureFunc((width, widthMode) => {
-      const preferred = 220;
-      const w =
-        widthMode === Yoga.MEASURE_MODE_UNDEFINED
-          ? preferred
-          : Math.min(preferred, width);
-      const rows = Math.max(1, this.props.rows ?? 3);
-      return { width: w, height: Math.ceil(this._lineHeight() * rows) };
-    });
+  }
+
+  /** Wider than a single-line field, and `rows` lines tall — a height that
+   * comes from a prop rather than from the style, which is what makes
+   * `invalidateMeasure` necessary below. */
+  measureContent({ width }) {
+    const rows = Math.max(1, this.props.rows ?? 3);
+    return {
+      width: Math.min(220, width),
+      height: Math.ceil(this._lineHeight() * rows),
+    };
   }
 
   /** Multi-line: preserve newlines (normalize CRLF). */
@@ -4714,10 +4822,7 @@ export class TextAreaNode extends TextInputNode {
   applyProps(newProps, oldProps) {
     const before = oldProps ?? this.props;
     super.applyProps(newProps, oldProps);
-    if (newProps.rows !== before.rows) {
-      this.yoga.markDirty();
-      this._invalidateLayout('props');
-    }
+    if (newProps.rows !== before.rows) this.invalidateMeasure('props');
   }
 
   _indexAtPoint(ev) {

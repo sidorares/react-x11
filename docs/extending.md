@@ -81,13 +81,14 @@ are about to use needs declaring.
 `Node` already implements the whole reconciler-facing surface, so an element
 that only draws needs a constructor and a `paint`. What you may override:
 
-| method                         | when                                                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`. |
-| `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.     |
-| `hitTest(x, y)`                | non-rectangular hit areas. The default walks children in reverse paint order.                     |
-| `insertBefore` / `removeChild` | only if children mean something structural to you                                                 |
-| `destroySubtree()`             | release anything you allocated (pixmaps, fonts, timers). Call `super.destroySubtree()`.           |
+| method                         | when                                                                                                |
+| ------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.   |
+| `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.       |
+| `measureContent(constraints)`  | your content has a size of its own (below). Leaves only — an element that measures has no children. |
+| `hitTest(x, y)`                | non-rectangular hit areas. The default walks children in reverse paint order.                       |
+| `insertBefore` / `removeChild` | only if children mean something structural to you                                                   |
+| `destroySubtree()`             | release anything you allocated (pixmaps, fonts, timers). Call `super.destroySubtree()`.             |
 
 And what you read:
 
@@ -106,6 +107,114 @@ To ask for a repaint: `this.root?.invalidate(layout, rect, reason)`. Pass a
 the whole window, which is this renderer's main performance bug class (see
 [debugging.md](debugging.md)). `reason` joins the closed set the diagnostics
 print.
+
+### A size of your own
+
+`<box>` is as big as its style and its children say; a gauge, a chart, a
+terminal or an editor is as big as its _content_ says. An element with a size
+of its own implements **`measureContent`**, and layout asks it whenever the
+size on an axis is the element's to give:
+
+```js
+const TICK = 30;
+
+class GaugeNode extends Node {
+  measureContent({ width }) {
+    const ticks = Math.max(1, Number(this.props.ticks ?? 4));
+    // never wider than the offer, never narrower than one tick
+    return { width: Math.max(TICK, Math.min(ticks * TICK, width)), height: 24 };
+  }
+
+  applyProps(next, prev) {
+    const before = prev ?? this.props;
+    super.applyProps(next, prev);
+    // the measurement reads `ticks`, so a new one has to be taken
+    if (next.ticks !== before.ticks) this.invalidateMeasure();
+  }
+}
+```
+
+`<gauge ticks={6} />` is then 180×24 with nothing in the style saying so, the
+way `<textarea rows={6}>` is six lines tall.
+
+It has to be a **method on the class**: the base `Node` constructor is what
+wires it to layout, so an element that assigns it in its own constructor is
+too late and never gets asked. `invalidateMeasure()` says so in development.
+
+#### What it is asked
+
+The argument is `{ width, height, widthMode, heightMode }`. Each mode says
+what the number beside it means, and an unbounded axis arrives as `Infinity`
+rather than as a sentinel — so `Math.min(preferred, width)` is the right
+answer in all three, and the mode is there for the cases where it is not:
+
+| asked with       | the element answers                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `unconstrained`  | its natural size — nothing bounds this axis (`<textarea>`: its preferred width, `rows` tall)                                   |
+| `at-most`        | its natural size, clamped into the offer                                                                                       |
+| `at-most` with 0 | **the smallest it can be drawn at** — an editor: a character or two of one line; something that scrolls inside: honestly small |
+| `exactly`        | the style decided this axis; hand the number back and answer for the other one                                                 |
+
+The `at-most 0` row is the one worth reading twice, because something else
+asks it: `<window minWidth="auto">` measures the smallest size its content
+can be drawn at by laying the tree out with **no room at all** and asking
+every leaf directly ([elements.md](elements.md#a-floor-the-content-decides)).
+An element that answers 0 there is saying it can be squeezed to nothing, and
+the window's floor comes out without it.
+
+`at-most` is what is _available_, not a cap that will be enforced: an element
+may answer larger and it will be laid out at what it asked for, overflowing
+whatever contains it. That is how `<text textWrap="nowrap">` works, and it is
+the honest answer for content that genuinely does not reflow — a code block
+that scrolls sideways rather than wrapping.
+
+#### What it must not do
+
+`measureContent` is a **question about a hypothetical**, asked several times
+per layout and at sizes nothing will ever be drawn at. So:
+
+- **do not read `this.abs`** — it is the result of the layout doing the
+  asking, and last frame's answer at that;
+- **do not paint, invalidate, or set state.** Cache derived work if it is
+  expensive (`<text>` memoizes its shaped layout per width), but keep the
+  answer a pure function of the content and the constraints;
+- **answer with finite numbers.** Content that has not arrived yet is
+  `{ width: 0, height: 0 }`, not `undefined` — anything else throws naming
+  the element, because a `NaN` would otherwise spread silently through every
+  ancestor's rect.
+
+An element that measures itself **cannot have children**: layout sizes it
+from the measure function and gives its children no say, so rendering one
+inside it is an error naming both elements.
+
+#### Saying the answer moved
+
+Layout caches what an element measured to. `invalidateMeasure(reason?)` is
+how the element says that cache is stale — a prop the measurement read
+changed, data arrived, a font loaded — and the next frame asks again. Nothing
+does this for you: only the element knows which of its inputs the measurement
+reads. `reason` joins the closed set the diagnostics print
+([debugging.md](debugging.md#invalidation-reasons)); the default is
+`'measure'`.
+
+#### Content with an aspect ratio
+
+The `<image>`/`<svg>` shape — a natural size to keep the proportions of — is
+one call:
+
+```js
+import { Node, intrinsicSize } from 'react-x11/node';
+
+class ThumbNode extends Node {
+  measureContent(constraints) {
+    return intrinsicSize(this.decoded ?? { width: 0, height: 0 }, constraints);
+  }
+}
+```
+
+It shrinks to the width on offer with the height following, and scales the
+width from a style height when only that axis is fixed — which is what an
+`<img>` does, and is the whole of `<image>`'s own measurement.
 
 ### Drawing once instead of every frame
 
@@ -179,7 +288,7 @@ discardable — is the part that is easy to get wrong.
 | subpath             |                                                                                                          |
 | ------------------- | -------------------------------------------------------------------------------------------------------- |
 | `react-x11/host`    | `registerElement`, `unregisterElement`, `registeredElements`, `hostTypes`, `knownElements`, `drawnKinds` |
-| `react-x11/node`    | `Node` and the built-in node classes                                                                     |
+| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                         |
 | `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary               |
 | `react-x11/ntk`     | ntk itself, re-exported                                                                                  |
 | `react-x11/keysyms` | the `XK_*` constants                                                                                     |

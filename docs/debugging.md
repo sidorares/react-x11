@@ -314,8 +314,8 @@ same screenshots far more than this route did.
 
 Every internal `invalidate()` call now names why it ran, from a small
 closed set: `props`, `style-state`, `theme`, `animation`, `scroll`,
-`text`, `content`, `child-list`, `focus`, `caret`, `resize`, `mount`,
-`expose`, `highlight`. The frame's collected reasons are what
+`text`, `content`, `measure`, `child-list`, `focus`, `caret`, `resize`,
+`mount`, `expose`, `highlight`. The frame's collected reasons are what
 `REACT_X11_TRACE=requests` frame lines, the chrome trace's frame slices,
 the full-repaint warning and `examples/stress/perf.js` print. After a
 frame they are readable on the window node as `root._lastReasons`

@@ -5,13 +5,8 @@
 // through the widget's `onInvalidate` hook (ntk >= 3.4.0).
 import { MarkdownView, HtmlView, SvgView, layoutTex } from 'ntk';
 
-import { Node, intrinsicMeasure } from './nodes.js';
-import {
-  Yoga,
-  isLayoutProp,
-  isPaintProp,
-  DEFAULT_TEXT_STYLE,
-} from './styles.js';
+import { Node, intrinsicSize } from './nodes.js';
+import { isLayoutProp, isPaintProp, DEFAULT_TEXT_STYLE } from './styles.js';
 
 /** Joined text of string children (react-markdown style), or null when the
  * element has none — then the `source` prop is the content. */
@@ -42,17 +37,17 @@ class DocumentViewNode extends Node {
     super(kind, props, app);
     this.view = null;
     this._laidOutWidth = -1;
-    this._setMeasureFunc((width, widthMode) => {
-      const view = this._ensureView();
-      if (!view) return { width: 0, height: 0 };
-      const unconstrained =
-        widthMode === Yoga.MEASURE_MODE_UNDEFINED ||
-        !Number.isFinite(width) ||
-        width <= 0;
-      const w = Math.max(1, Math.ceil(unconstrained ? PREFERRED_WIDTH : width));
-      const height = this._layoutAt(w);
-      return { width: w, height: Math.ceil(height) };
-    });
+  }
+
+  /** Height for a width, through the document widget's own layout. A flowed
+   * document has no natural width, so an unbounded offer gets a readable
+   * one rather than one long line. */
+  measureContent({ width }) {
+    const view = this._ensureView();
+    if (!view) return { width: 0, height: 0 };
+    const bounded = Number.isFinite(width) && width > 0;
+    const w = Math.max(1, Math.ceil(bounded ? width : PREFERRED_WIDTH));
+    return { width: w, height: Math.ceil(this._layoutAt(w)) };
   }
 
   _ensureView() {
@@ -71,8 +66,7 @@ class DocumentViewNode extends Node {
   _contentInvalidated() {
     if (this.destroyed) return;
     this._laidOutWidth = -1;
-    this.yoga?.markDirty();
-    this._invalidateLayout('content');
+    this.invalidateMeasure('content');
   }
 
   _source() {
@@ -296,22 +290,24 @@ export class SvgNode extends Node {
      * See the note there. */
     this._docRevision = 0;
     this._paintedRevision = -1;
-    this._setMeasureFunc(
-      intrinsicMeasure(() => {
-        const view = this._ensureView();
-        return {
-          width: view?.naturalWidth ?? 0,
-          height: view?.naturalHeight ?? 0,
-        };
-      }),
+  }
+
+  /** The viewBox is the natural size; `<image>`'s rules do the rest. */
+  measureContent(constraints) {
+    const view = this._ensureView();
+    return intrinsicSize(
+      {
+        width: view?.naturalWidth ?? 0,
+        height: view?.naturalHeight ?? 0,
+      },
+      constraints,
     );
   }
 
   /** Any change to the svg subtree (props, children, text) lands here. */
   _textContentChanged() {
     this._stale = true;
-    this.yoga?.markDirty();
-    this._invalidateLayout('props');
+    this.invalidateMeasure('props');
   }
 
   _ensureView() {
@@ -492,18 +488,19 @@ export class TexNode extends Node {
     super('tex', props, app);
     this.box = null;
     this._boxKey = null;
-    this._setMeasureFunc(() => {
-      const box = this._ensureBox();
-      if (!box) return { width: 0, height: 0 };
-      return { width: Math.ceil(box.width), height: Math.ceil(box.height) };
-    });
+  }
+
+  /** A formula does not wrap: one size, whatever is on offer. */
+  measureContent() {
+    const box = this._ensureBox();
+    if (!box) return { width: 0, height: 0 };
+    return { width: Math.ceil(box.width), height: Math.ceil(box.height) };
   }
 
   /** Formula text changed via string children. */
   _textContentChanged() {
     this._boxKey = null;
-    this.yoga?.markDirty();
-    this._invalidateLayout('text');
+    this.invalidateMeasure('text');
   }
 
   _ensureBox() {
@@ -538,8 +535,7 @@ export class TexNode extends Node {
       newProps.size !== before.size ||
       newProps.displayMode !== before.displayMode
     ) {
-      this.yoga.markDirty();
-      this._invalidateLayout('props');
+      this.invalidateMeasure('props');
     }
   }
 

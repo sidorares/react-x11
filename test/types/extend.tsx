@@ -13,7 +13,8 @@ import {
   knownElements,
   drawnKinds,
 } from '../../src/host.js';
-import { Node, BoxNode } from '../../src/node.js';
+import { Node, BoxNode, intrinsicSize } from '../../src/node.js';
+import type { MeasureConstraints } from '../../src/node.js';
 import {
   isStyleProp,
   flattenStyle,
@@ -29,6 +30,13 @@ declare module '../../src/jsx-runtime.js' {
       sparkline: {
         data: number[];
         color?: string;
+        style?: Style;
+      };
+      gauge: {
+        ticks?: number;
+        style?: Style;
+      };
+      thumb: {
         style?: Style;
       };
     }
@@ -61,6 +69,51 @@ registerElement('sparkline', {
   childrenAllowed: false,
 });
 
+// An element with a size of its own (#250): the modes are words, the offer is
+// a number, and nothing here names yoga.
+class GaugeNode extends Node {
+  constructor(props: Record<string, unknown>, app: never) {
+    super('gauge', props, app);
+  }
+
+  measureContent({ width, widthMode }: MeasureConstraints): {
+    width: number;
+    height: number;
+  } {
+    const ticks = Number(this.props.ticks ?? 4);
+    const _mode: 'exactly' | 'at-most' | 'unconstrained' = widthMode;
+    return { width: Math.min(ticks * 30, width), height: 24 };
+  }
+
+  applyProps(
+    next: Record<string, unknown>,
+    prev: Record<string, unknown>,
+  ): void {
+    const before = prev ?? this.props;
+    super.applyProps(next, prev);
+    if (next.ticks !== before.ticks) this.invalidateMeasure();
+  }
+}
+
+// …and the aspect-ratio recipe, which is `<image>`'s own measurement.
+class ThumbNode extends Node {
+  constructor(props: Record<string, unknown>, app: never) {
+    super('thumb', props, app);
+  }
+
+  measureContent(constraints: MeasureConstraints) {
+    return intrinsicSize({ width: 400, height: 100 }, constraints);
+  }
+}
+
+registerElement('gauge', {
+  create: (props, app) => new GaugeNode(props, app as never),
+  semanticNames: ['ticks'],
+});
+registerElement('thumb', {
+  create: (props, app) => new ThumbNode(props, app as never),
+});
+
 // the minimum: a create() and nothing else
 registerElement('minimal', {
   create: (props, app) => new BoxNode(props, app),
@@ -83,6 +136,8 @@ function Chart() {
   return (
     <box style={styles.chart}>
       <sparkline data={[1, 4, 2, 8]} color="#c0392b" style={{ flexGrow: 1 }} />
+      <gauge ticks={6} />
+      <thumb />
     </box>
   );
 }
