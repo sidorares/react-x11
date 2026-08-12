@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { a11yRole, ATSPI_ROLE } from '../src/a11y.js';
+import { atspiRoleOf, ATSPI_ROLE } from '../src/a11y.js';
 import { createMockApp, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -57,7 +57,7 @@ test('a box only scrolls when overflow says scroll', async () => {
   assert.equal(box._maxScroll('y'), 0);
   assert.deepEqual(box._scrollbars(), []);
   assert.equal(box.focusableByDefault, false, 'not a tab stop');
-  assert.equal(a11yRole(box), ATSPI_ROLE.FILLER, 'not a scroll pane');
+  assert.equal(atspiRoleOf(box), ATSPI_ROLE.FILLER, 'not a scroll pane');
 
   // ...and the content is still where it was laid out
   assert.equal(node.children[0].children[0].abs.y, 0);
@@ -77,7 +77,7 @@ test('overflow: scroll turns the same box into a scroll pane', async () => {
     true,
     'a tab stop, having somewhere to go',
   );
-  assert.equal(a11yRole(box), ATSPI_ROLE.SCROLL_PANE);
+  assert.equal(atspiRoleOf(box), ATSPI_ROLE.SCROLL_PANE);
   assert.equal(box._scrollbars().length, 1, 'a vertical thumb, no horizontal');
 });
 
@@ -181,7 +181,7 @@ test('a window scrolls its own content', async () => {
   assert.equal(node.children[0].abs.y, -80, 'the children moved under it');
 
   // a window is a frame to a screen reader whatever its overflow says
-  assert.equal(a11yRole(node), ATSPI_ROLE.FRAME);
+  assert.equal(atspiRoleOf(node), ATSPI_ROLE.FRAME);
 });
 
 test('the wheel scrolls the window when nothing inner takes it', async () => {

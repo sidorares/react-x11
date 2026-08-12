@@ -228,6 +228,68 @@ on top of the text-changed feed would have a screen reader say the accent
 twice; an application that wants to narrate composition state can call
 `announce()` itself from `onCompositionUpdate`.
 
+### Text of your own
+
+A [registered element](extending.md) that draws its own text — a code
+editor, a markdown viewer, a terminal, a canvas-backed table with cell
+editing — reports it through one method and is then read by everything
+above: character count, reading by character/word/line, caret, selection,
+the text-changed deltas, and an AT that can navigate and type.
+
+```js
+class EditorNode extends Node {
+  a11yTextState() {
+    return {
+      value: this.text, // what is drawn, composition included
+      caret: this.caret, // code-point offsets into `value`
+      selectionStart: this.anchor,
+      selectionEnd: this.caret,
+      editable: true, // an editor rather than a viewer
+      multiline: true,
+    };
+  }
+
+  insert(text) {
+    /* …the edit… */ this.notifyA11yTextChanged();
+  }
+}
+```
+
+| member                              |                                                                                                     |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `a11yTextState()`                   | `{ value, caret, selectionStart, selectionEnd, editable, multiline, preedit }` — `null` for no text |
+| `notifyA11yTextChanged()`           | the text moved. Free when nothing is listening, so no guard around it                               |
+| `a11ySetSelection(start, end)`      | an AT moved the caret or made a selection                                                           |
+| `a11yReplaceText(start, end, text)` | an AT edited — insert, delete and replace all arrive as this                                        |
+| `a11yRole`                          | the role the element is when the app writes none; `role` still wins                                 |
+
+Two tiers, because the read-only one is a real element and not a
+degenerate editor. `{ value, selectionStart, selectionEnd }` alone is a
+document: the `Text` interface, a `document` role, a selection an AT reads
+and sets — which is what a markdown view with Ctrl+C needs and all it
+needs. `editable: true` adds the EDITABLE state, an `entry` role and, once
+`a11yReplaceText` exists, the `EditableText` interface. Nothing is exposed
+that would not work: an element that reports editable text but implements
+no write is announced as editable and reports its own edits, but is not
+offered to an AT as one to type into.
+
+Offsets are code points and index the string the element **draws** — an
+open composition included, for the same reason `<textinput>`'s do. Report
+which part is uncommitted as `preedit: { offset, text }` and its churn is
+marked `:system`, so a reader stays quiet through a dead key and speaks the
+character it commits. Offsets are clamped on the way out, so a stale caret
+cannot become an out-of-range answer on the wire.
+
+The known limits of the tier, none of which stop a screen reader working:
+per-character screen rectangles fall back to the element's own rect (a
+magnifier tracks the element, not the glyph), and AT-driven paste and copy
+are the built-ins' — an element's own Ctrl+C/Ctrl+V is unaffected. Both
+want a layout the element alone has; say so on the issue if you have one.
+
+The seam is observed by the test spy exactly as core's is, so an editor in
+another package can assert what it says with no bus and no desktop —
+[below](#asserting-what-a-screen-reader-would-hear).
+
 ## The compatibility ladder
 
 `createRoot()` starts one climb per process, off the critical path:
@@ -272,7 +334,11 @@ whatever the tree says. The seams, in increasing order of involvement:
 - `onAccessibilityAction` — when an AT can _set_ something on your control.
 - A [registered element](extending.md) is a host element like any other:
   its instances take all of the above, and a class that should default to a
-  role can set `props.role` in its constructor.
+  role assigns `this.a11yRole` in its constructor (a `role` prop still
+  wins).
+- `a11yTextState()` + `notifyA11yTextChanged()` — when your element draws
+  text of its own, which is the one thing props cannot express
+  ([above](#text-of-your-own)).
 
 ## Testing and verifying
 

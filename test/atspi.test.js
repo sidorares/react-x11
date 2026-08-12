@@ -41,7 +41,13 @@ const VALUE = 'org.a11y.atspi.Value';
 const PROPERTIES = 'org.freedesktop.DBus.Properties';
 
 const ROLE = { APPLICATION: 75, FRAME: 23, BUTTON: 43, ENTRY: 79, LABEL: 29 };
-const STATE = { CHECKED: 4, ENABLED: 8, FOCUSABLE: 11, FOCUSED: 12 };
+const STATE = {
+  CHECKED: 4,
+  EDITABLE: 7,
+  ENABLED: 8,
+  FOCUSABLE: 11,
+  FOCUSED: 12,
+};
 const hasState = ([lo, hi], bit) =>
   bit < 32 ? Boolean(lo & (1 << bit)) : Boolean(hi & (1 << (bit - 32)));
 
@@ -639,6 +645,178 @@ describe('the AT-SPI bridge', { concurrency: 1, ...needsBroker }, () => {
     assert.equal(detail, '');
     assert.equal(politeness, 2);
     assert.equal(dbus.variantValue(text), 'saved');
+  });
+
+  test('a registered element that reports text is read and edited like an input', async () => {
+    // #257: the seam a package outside react-x11 implements — a text state
+    // it reports and a replacement it accepts — has to reach the wire as
+    // the Text/EditableText pair, or a third-party editor is silent to Orca
+    // with no way to fix it from outside.
+    const { registerElement, unregisterElement } =
+      await import('../src/host.js');
+    const { Node } = await import('../src/node.js');
+
+    class MiniEditorNode extends Node {
+      constructor(props, app) {
+        super('minieditor', props, app);
+        this.text = String(props.defaultValue ?? '');
+        this.caret = this.text.length;
+      }
+      a11yTextState() {
+        return {
+          value: this.text,
+          caret: this.caret,
+          selectionStart: this.caret,
+          selectionEnd: this.caret,
+          editable: true,
+          multiline: true,
+        };
+      }
+      a11yReplaceText(start, end, text) {
+        const chars = Array.from(this.text);
+        chars.splice(start, end - start, ...Array.from(text));
+        this.text = chars.join('');
+        this.caret = start + Array.from(text).length;
+        this.notifyA11yTextChanged();
+        return true;
+      }
+      a11ySetSelection(start, end) {
+        this.caret = end;
+        void start;
+        this.notifyA11yTextChanged();
+        return true;
+      }
+    }
+
+    /** The read-only tier: text and a selection, nothing to type into. */
+    class MiniDocNode extends Node {
+      constructor(props, app) {
+        super('minidoc', props, app);
+      }
+      a11yTextState() {
+        return { value: String(this.props.text ?? '') };
+      }
+    }
+
+    /** Editable text the user types but an AT may not: the element
+     * implements no write half. */
+    class MiniOwnNode extends Node {
+      constructor(props, app) {
+        super('miniown', props, app);
+      }
+      a11yTextState() {
+        return { value: 'mine', editable: true, multiline: false };
+      }
+    }
+
+    registerElement('minieditor', {
+      create: (props, app) => new MiniEditorNode(props, app),
+      semanticNames: ['defaultValue'],
+      childrenAllowed: false,
+    });
+    registerElement('minidoc', {
+      create: (props, app) => new MiniDocNode(props, app),
+      semanticNames: ['text'],
+      childrenAllowed: false,
+    });
+    registerElement('miniown', {
+      create: (props, app) => new MiniOwnNode(props, app),
+      childrenAllowed: false,
+    });
+    x11Root.render(
+      h(
+        'window',
+        { title: 'Bridge Test', width: 320, height: 200 },
+        h('minieditor', { defaultValue: 'let x = 1' }),
+        h('minidoc', { text: 'read me' }),
+        h('miniown', null),
+      ),
+    );
+    await settle();
+    const frameChildren = await call(
+      appBus,
+      framePath,
+      ACCESSIBLE,
+      'GetChildren',
+    );
+    const editorPath = frameChildren[0][1];
+    const docPath = frameChildren[1][1];
+    const ownPath = frameChildren[2][1];
+
+    // the role it never declared, from the text it reports
+    assert.equal(
+      await call(appBus, editorPath, ACCESSIBLE, 'GetRole'),
+      ROLE.ENTRY,
+    );
+    const ifaces = await call(appBus, editorPath, ACCESSIBLE, 'GetInterfaces');
+    assert.ok(ifaces.includes(TEXT), 'the Text interface');
+    assert.ok(ifaces.includes(EDITABLE), 'and EditableText, since it writes');
+    // the viewer reads, and only reads: an EditableText whose every method
+    // answered false would be a lie an AT cannot see through
+    const docIfaces = await call(appBus, docPath, ACCESSIBLE, 'GetInterfaces');
+    assert.ok(docIfaces.includes(TEXT));
+    assert.ok(!docIfaces.includes(EDITABLE), 'nothing may type into a viewer');
+    assert.equal(
+      await call(appBus, docPath, TEXT, 'GetText', 'ii', [0, -1]),
+      'read me',
+    );
+    // …and an element whose text only *it* edits is announced as editable
+    // without being offered as one an AT may write to
+    const ownIfaces = await call(appBus, ownPath, ACCESSIBLE, 'GetInterfaces');
+    assert.ok(ownIfaces.includes(TEXT));
+    assert.ok(!ownIfaces.includes(EDITABLE), 'no write half, no EditableText');
+    assert.ok(
+      hasState(
+        await call(appBus, ownPath, ACCESSIBLE, 'GetState'),
+        STATE.EDITABLE,
+      ),
+      'the EDITABLE state is still true of it',
+    );
+
+    assert.equal(await getProp(appBus, editorPath, TEXT, 'CharacterCount'), 9);
+    assert.deepEqual(
+      await call(appBus, editorPath, TEXT, 'GetStringAtOffset', 'iu', [4, 1]),
+      ['x', 4, 5],
+    );
+
+    // the AT types: one replacement through the element's own seam, and the
+    // diff comes back off the state it reports afterwards
+    signals.length = 0;
+    assert.equal(
+      await call(appBus, editorPath, EDITABLE, 'InsertText', 'isi', [
+        9,
+        ' + 2',
+        4,
+      ]),
+      true,
+    );
+    await until(
+      () =>
+        eventsNamed('TextChanged').some(
+          (s) => s.path === editorPath && s.body[0] === 'insert',
+        ),
+      'the edit as a text-changed insert',
+    );
+    assert.equal(
+      await call(appBus, editorPath, TEXT, 'GetText', 'ii', [0, -1]),
+      'let x = 1 + 2',
+    );
+
+    // …and the caret it moves is a caret the element moved
+    signals.length = 0;
+    assert.equal(
+      await call(appBus, editorPath, TEXT, 'SetCaretOffset', 'i', [3]),
+      true,
+    );
+    await until(
+      () => eventsNamed('TextCaretMoved').some((s) => s.path === editorPath),
+      'the caret move',
+    );
+    assert.equal(await getProp(appBus, editorPath, TEXT, 'CaretOffset'), 3);
+
+    unregisterElement('minieditor');
+    unregisterElement('minidoc');
+    unregisterElement('miniown');
   });
 
   test('unmounting removes the tree and tells the cache', async () => {

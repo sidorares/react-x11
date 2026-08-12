@@ -262,6 +262,11 @@ A composition is in there as itself: a dead key logs one `preedit` entry
 with `:system`, which is how a test catches a screen reader that would echo
 a half-typed accent.
 
+A [registered element](extending.md#text-a-screen-reader-can-read) that
+reports its own text is observed through the same seam, so a package
+shipping an editor or a document view can assert what it says with no bus
+and no desktop — `test/a11y-custom-text.test.js` is the worked pair.
+
 `at.events()` / `at.since()` are precise facts, `at.transcript()` the
 one-line summaries, `at.focusables()` every keyboard stop in Tab order with
 its utterance — a nameless control reads `"(no accessible name)"`, which

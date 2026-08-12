@@ -20,7 +20,11 @@ import {
   intrinsicSize,
   CARET_BLINK_MS,
 } from '../../src/node.js';
-import type { MeasureConstraints, TextStyle } from '../../src/node.js';
+import type {
+  A11yTextState,
+  MeasureConstraints,
+  TextStyle,
+} from '../../src/node.js';
 import type { Rect } from '../../src/types/nodes.js';
 import { XK_ESCAPE, XK_TAB } from '../../src/keysyms.js';
 // the synthetic events, not the DOM's same-named globals
@@ -167,11 +171,43 @@ class ThumbNode extends Node {
 class EditorNode extends Node {
   private caretOn = false;
   private tabEscapes = false;
+  private text = '';
+  private caret = 0;
 
   constructor(props: Record<string, unknown>, app: never) {
     super('codeeditor', props, app);
     this.focusableByDefault = true;
     this.defaultCursor = 'text';
+    // what it is when the application writes no `role` (#257)
+    this.a11yRole = 'textbox';
+  }
+
+  // The accessibility seam (#257): the state a screen reader reads, the two
+  // writes it may make, and the notification that ties them to the element's
+  // own editing.
+  a11yTextState(): A11yTextState {
+    return {
+      value: this.text,
+      caret: this.caret,
+      selectionStart: this.caret,
+      selectionEnd: this.caret,
+      editable: true,
+      multiline: true,
+      preedit: null,
+    };
+  }
+
+  a11ySetSelection(_start: number, end: number): boolean {
+    this.caret = end;
+    this.notifyA11yTextChanged();
+    return true;
+  }
+
+  a11yReplaceText(start: number, end: number, text: string): boolean {
+    this.text = this.text.slice(0, start) + text + this.text.slice(end);
+    this.caret = start + text.length;
+    this.notifyA11yTextChanged();
+    return true;
   }
 
   defaultKeyDown(ev: KeyboardEvent): void {
