@@ -47,7 +47,7 @@ import {
   ATSPI_ROLE_NICK,
   ATSPI_STATE,
   ATSPI_STATE_NICK,
-  a11yRole,
+  atspiRoleOf,
   a11yName,
   a11yStates,
   a11yValue,
@@ -122,7 +122,7 @@ function stateNicksOf(node) {
 export function nodeUtterance(node) {
   return utteranceOf({
     name: a11yName(node),
-    role: ATSPI_ROLE_NICK[a11yRole(node)],
+    role: ATSPI_ROLE_NICK[atspiRoleOf(node)],
     states: stateNicksOf(node),
     value: a11yValue(node),
   });
@@ -308,7 +308,7 @@ export class A11ySpy {
     return {
       node,
       name: a11yName(node),
-      role: ATSPI_ROLE_NICK[a11yRole(node)],
+      role: ATSPI_ROLE_NICK[atspiRoleOf(node)],
       states: stateNicksOf(node),
       utterance: nodeUtterance(node),
     };

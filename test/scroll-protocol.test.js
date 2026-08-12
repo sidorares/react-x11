@@ -25,7 +25,7 @@ import { createClient, StaticFontSource } from 'ntk';
 import { createRoot } from '../src/index.js';
 import { registerElement, unregisterElement } from '../src/host.js';
 import { Node, Scrollable } from '../src/node.js';
-import { a11yRole, ATSPI_ROLE } from '../src/a11y.js';
+import { atspiRoleOf, ATSPI_ROLE } from '../src/a11y.js';
 import { XK_PAGE_DOWN } from '../src/keysyms.js';
 import { createMockApp, spinWheel } from './helpers/mock-app.js';
 
@@ -242,7 +242,7 @@ test('painted content gets the bars, the keys and the scroll-pane role', async (
   );
 
   assert.equal(editor.focusableByDefault, true, 'a tab stop, being scrollable');
-  assert.equal(a11yRole(editor), ATSPI_ROLE.SCROLL_PANE);
+  assert.equal(atspiRoleOf(editor), ATSPI_ROLE.SCROLL_PANE);
 
   editor.focus();
   await tick();

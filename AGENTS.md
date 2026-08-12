@@ -1097,7 +1097,12 @@ right-click used to collapse the selection.
 The AT-SPI accessibility work is done and in core (NEXT_STEPS §11.3,
 [docs/accessibility.md](docs/accessibility.md)): standard `role`/`aria-*`
 props on every element, `src/a11y.js` (the model) + `src/atspi.js` (the
-bridge), Orca-verified. Next: a generic Popover and a file open/save
+bridge), Orca-verified. An element core did not write reaches the same feed
+through the node seam (#257): `a11yRole`, `a11yTextState()` +
+`notifyA11yTextChanged()`, and the two optional writes `a11ySetSelection` /
+`a11yReplaceText` — normalized in `customTextState()` so a third-party
+editor is read by the paths `<textinput>` is read by, never by a second
+model. Next: a generic Popover and a file open/save
 dialog. **#85** (keyboard layout switching ignored) is done — ntk decodes
 the active XKB group, and `src/keyboard.js` keeps shortcuts on the Latin
 keysym even where XQuartz's keymap rewrite has left no Latin group
