@@ -24,7 +24,7 @@
 //
 // See docs/uri-schemes.md. Issue #173.
 
-import { inputTime } from './inputtime.js';
+import { lastInputTime } from './inputtime.js';
 import { liveApps } from './trace-registry.js';
 import { topLevelWindows, windowIdOf } from './windowid.js';
 
@@ -150,7 +150,7 @@ export function activateWindow(target, { timestamp, source } = {}) {
   if (!xid || !root || !X.SendClientMessage || !X.InternAtom) return false;
 
   const when =
-    timestamp === undefined ? (inputTime(app) ?? 0) : (timestamp ?? 0);
+    timestamp === undefined ? (lastInputTime(app) ?? 0) : (timestamp ?? 0);
 
   X.InternAtom(false, ACTIVE_WINDOW, (err, atom) => {
     if (err || !atom) return;

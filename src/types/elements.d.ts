@@ -15,6 +15,7 @@ import type {
 import type { AnchorOptions } from './components.js';
 import type {
   ChangeEvent,
+  ClientMessageEvent,
   EventHandlers,
   MouseEvent,
   ScrollEvent,
@@ -361,6 +362,29 @@ export interface WindowProps
   onStatesChange?: (states: WindowState[]) => void;
   /** The WM close button; opts the window into `WM_DELETE_WINDOW`. */
   onCloseRequest?: (ev: SyntheticEvent<NtkWindow>) => void;
+  /**
+   * Every ClientMessage addressed to this window — the carrier of EWMH,
+   * XEmbed, the system tray, and whatever two copies of one application
+   * agree between themselves.
+   *
+   * `ev.messageType` is the atom's **name**, so a handler is a `switch` over
+   * strings rather than a comparison against ids it had to intern first.
+   * Messages arrive in the order the server sent them, which the chunked
+   * protocols depend on.
+   *
+   * ```jsx
+   * <window onClientMessage={(ev) => {
+   *   if (ev.messageType !== '_NET_SYSTEM_TRAY_OPCODE') return;
+   *   if (ev.data[1] === SYSTEM_TRAY_REQUEST_DOCK) dock(ev.data[2]);
+   * }} />
+   * ```
+   *
+   * react-x11 answers some of these itself: `preventDefault()` stops it
+   * doing so for XDND. Nothing has to be armed — a ClientMessage reaches its
+   * window whatever event mask it selected — so a window without the prop
+   * costs nothing.
+   */
+  onClientMessage?: (ev: ClientMessageEvent) => void;
 }
 
 /**

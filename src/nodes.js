@@ -46,6 +46,7 @@ import {
   XDND_VERSION,
 } from './dnd.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
+import { createClientMessages } from './clientmessage.js';
 import {
   argbVisual,
   compositingActive,
@@ -65,7 +66,7 @@ import { windowIdOf } from './windowid.js';
 import { paintCacheFor } from './paintcache.js';
 import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
-import { inputTime } from './inputtime.js';
+import { lastInputTime } from './inputtime.js';
 import { armPasteState, canPaste } from './pastestate.js';
 import { ctrlChordLetter } from './keysyms.js';
 import {
@@ -4550,7 +4551,7 @@ export class TextInputNode extends Node {
       // what arbitrates a race with another app copying at the same moment.
       // It also saves ntk a round trip asking the server for one, which on
       // PRIMARY is a round trip per selection-extending keystroke.
-      ?.write(text, { selection, time: inputTime(this.app) })
+      ?.write(text, { selection, time: lastInputTime(this.app) })
       .catch((err) => {
         // Losing the race is now possible rather than theoretical: a real
         // event timestamp can be older than another client's, where the
@@ -4571,7 +4572,7 @@ export class TextInputNode extends Node {
       // ICCCM 2.4: convert with the timestamp of the event that asked for
       // the paste, so an owner that has replaced its data since can tell
       // which value was wanted (ntk >= 5.4.0)
-      ?.read({ selection, time: inputTime(this.app) })
+      ?.read({ selection, time: lastInputTime(this.app) })
       .then((text) => {
         if (!this.destroyed && text) this._insert(text);
       })
@@ -6373,10 +6374,27 @@ export class WindowNode extends Scrollable(Node) {
       .setProperty('XdndAware', [XDND_VERSION], { type: 'ATOM' })
       .catch(() => {});
     wnd.on('message', (ev) => {
-      this._dnd.handleMessage(ev);
-      // a drag *out* of this window gets its XdndStatus/XdndFinished back
-      // on the same channel
-      this._dragSession?.handleMessage(ev);
+      // XDND is a *default action* on a ClientMessage, so it follows the same
+      // rule every other one does: it runs after the application's handler
+      // and is skipped when that handler called `preventDefault()`. That is
+      // the seam for a window answering the drag protocol itself.
+      //
+      // `_attachWindowListeners` subscribed to this stream first, so normally
+      // the flag is already decided by the time this runs. `pending()` is the
+      // exception it cannot cover: a message whose type had to be named with
+      // a round trip is dispatched a few turns later, and answering the drag
+      // before the application has been asked would make `preventDefault()`
+      // depend on whether an atom happened to be cached.
+      const said = this._clientMessages?.pending();
+      const route = () => {
+        if (ev.defaultPrevented) return;
+        this._dnd.handleMessage(ev);
+        // a drag *out* of this window gets its XdndStatus/XdndFinished back
+        // on the same channel
+        this._dragSession?.handleMessage(ev);
+      };
+      if (said) said.then(route);
+      else route();
     });
   }
 
@@ -6742,6 +6760,39 @@ export class WindowNode extends Scrollable(Node) {
     });
     wnd.on('expose', (ev) => {
       this.props.onExpose?.(ev);
+    });
+    // Every ClientMessage addressed to this window (src/clientmessage.js).
+    // Unconditional, unlike the two opt-ins below it: a ClientMessage is
+    // delivered to the window's owner whatever event mask it selected, so
+    // there is nothing to arm and nothing a window without the prop pays.
+    // That in turn means the handler can be read from `props` per message —
+    // the rule every other event here follows — instead of being frozen at
+    // realize time.
+    //
+    // Attached before `_initDnd`'s listener on the same stream, which is what
+    // makes `preventDefault()` able to stop react-x11 answering XDND itself.
+    //
+    // Another client asking this one for something is a user action arriving
+    // by another route, so it lands at the priority — and in the paint — a
+    // click would get: `discrete`, like the WM close below.
+    this._clientMessages = createClientMessages(
+      this,
+      discrete((ev) => {
+        // Read here rather than where the message was taken, since a type the
+        // server had to be asked to name puts a round trip in between and
+        // React may have replaced the handler across it.
+        const handler = this.props.onClientMessage;
+        if (!handler) return;
+        runWithPriority(DiscreteEventPriority, () => {
+          callHandler(this, 'onClientMessage', handler, ev);
+        });
+      }),
+    );
+    wnd.on('message', (raw) => {
+      // A window with no handler takes nothing on the queue and asks the
+      // server for nothing, on a stream that carries every XDND step of a
+      // drag passing over it.
+      if (this.props.onClientMessage) this._clientMessages.handle(raw);
     });
     // What the window manager actually did, which is the other half of the
     // controlled pair — the props say what to ask for, this says what is

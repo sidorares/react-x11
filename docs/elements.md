@@ -131,6 +131,7 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `transparent`               | 32-bit ARGB visual — rounded, translucent windows (below)                                                                                     |
 | `transientFor`              | ICCCM `WM_TRANSIENT_FOR` — the window this one belongs to (below)                                                                             |
 | `onStatesChange(states)`    | what the window manager actually did                                                                                                          |
+| `onClientMessage(ev)`       | a ClientMessage addressed to this window — EWMH, XEmbed, the tray (below)                                                                     |
 | `theme`                     | palette that `$token` style values resolve against, for this subtree                                                                          |
 
 Windows may be nested inside other windows (real X11 child windows).
@@ -444,6 +445,62 @@ the normal size first.
 
 `alwaysOnTop` falls back to Apple-WM window levels on XQuartz, where
 quartz-wm does not support `_NET_WM_STATE_ABOVE`.
+
+### `onClientMessage` — speaking a protocol of your own
+
+Nearly every convention layered over X11 is carried by ClientMessage: EWMH's
+requests to the window manager, XEmbed, the system tray, and whatever two
+copies of one application agree between themselves. `onClientMessage` is
+every one of them that was addressed to this window.
+
+```jsx
+<window
+  onClientMessage={(ev) => {
+    if (ev.messageType !== '_NET_SYSTEM_TRAY_OPCODE') return;
+    if (ev.data[1] === SYSTEM_TRAY_REQUEST_DOCK) dock(ev.data[2]);
+  }}
+/>
+```
+
+`ev.messageType` is the atom's **name**, which is the point: without it a
+handler has to intern its atoms first and compare numbers, and cannot say
+anything at all until those round trips have landed. `ev.atom` is the id it
+came in as, `ev.format` is 8, 16 or 32, and `ev.data` is the payload at that
+width — 5 values at 32, 10 at 16, 20 at 8.
+
+Nothing has to be armed. A ClientMessage reaches its window's owner whatever
+event mask that window selected, so a `<window>` without the prop pays
+nothing and one with it needs no other setup.
+
+Three things worth knowing:
+
+- **Messages arrive in the order they were sent.** The chunked protocols
+  depend on it — `_NET_SYSTEM_TRAY_BEGIN_MESSAGE` and the
+  `_NET_SYSTEM_TRAY_MESSAGE_DATA` pieces after it reassemble by arrival order
+  and nothing else. Naming a type this connection has never seen costs one
+  `GetAtomName`, and everything behind it waits rather than overtaking it.
+  `messageType` is therefore `null` only for an atom the **server** does not
+  know, which is a broken sender.
+- **It is scoped to the window the message names**, not to the connection —
+  that is the whole difference from `useApp().X.on('event')`, which sees
+  every event for every window and outlives the element. A message aimed at
+  another window, including the EWMH ones sent to the root, does not arrive
+  here; a window manager wants the raw stream for those
+  (`examples/wm-core.js`).
+- **`preventDefault()` stops react-x11 acting on the message itself**, which
+  today means XDND — for a window answering the drag protocol on its own
+  terms. It does not cover the WM close button; `onCloseRequest` is that
+  seam, and it opts into `WM_DELETE_WINDOW` as well as handling it.
+
+Sending is `useApp().X.SendClientMessage(destination, aboutWindow, atom,
+format, data, eventMask)`, or ntk's `window.sendClientMessage(name, data)`
+which interns the atom for you. Note the two window arguments: EWMH messages
+about a window are delivered to the **root**, and messages to another
+application's window pass an event mask of `0`.
+
+Selections are the other half of most of these protocols, and taking one
+needs a timestamp rather than `CurrentTime`:
+[`lastInputTime` and `serverTime`](clipboard.md#owning-a-selection-of-your-own).
 
 ### Kiosk
 
