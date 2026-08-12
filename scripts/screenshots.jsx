@@ -423,8 +423,10 @@ await scene(async (app, x11Root) => {
   await sleep(150);
 
   // hover Copy, found in the rows the menu really laid out rather than at a
-  // guessed offset
-  const menu = app.popups.at(-1);
+  // guessed offset. The popup comes off the node rather than out of
+  // `app.popups`, which is every override-redirect window the connection
+  // ever made — capturing the wrong one composites garbage.
+  const menu = input._editMenu.window;
   const copy = input._editMenu._editMenuRows.find((r) => r.id === 'copy');
   menu.emit('mousemove', { x: 20, y: copy.y + copy.height / 2 });
   await sleep(50);

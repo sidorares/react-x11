@@ -4158,6 +4158,15 @@ export function openEditMenu(node, at, actions = {}) {
       windowType: 'popup_menu',
     },
     {
+      // **The size goes in the props, not only in the attributes.** A
+      // `<window>`/`<popup>` size is `'auto'` when the props do not name one,
+      // and `realize()` then *measures* the content and overwrites whatever
+      // the attributes said (issue #248) — which for a canvas that only
+      // `flexGrow`s is nothing at all, so this popup opened 1x1 and the menu
+      // was invisible. Every other popup in the tree comes from React, where
+      // one props object is both, so nothing else could reach it.
+      width: geometry.width,
+      height: geometry.height,
       grab: true,
       // a press outside the menu closes it and goes no further, which is
       // what the grab is for

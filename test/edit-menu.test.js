@@ -250,6 +250,23 @@ test('the menu opens at the pointer, in window coordinates', async () => {
   await root.unmount();
 });
 
+test('the popup is the size of the rows, not the size of nothing', async () => {
+  // The size has to reach the window as a *prop*: a `<popup>` with none is
+  // `'auto'`, and `realize()` measures the content before CreateWindow —
+  // which for a canvas that only `flexGrow`s is 1x1, and a 1x1 menu is an
+  // invisible one. Everything else in the tree builds its popup from React,
+  // where one props object is both, so nothing else could catch this.
+  const { root, wnd, editor } = await mount();
+  rightClick(wnd);
+  const popup = editor._editMenu;
+
+  assert.ok(popup.attributes.width > 1 && popup.attributes.height > 1);
+  assert.strictEqual(popup.window.width, popup.attributes.width);
+  assert.strictEqual(popup.window.height, popup.attributes.height);
+
+  await root.unmount();
+});
+
 test('closeEditMenu is idempotent, and an unmount takes the menu with it', async () => {
   const { root, wnd, editor } = await mount();
   rightClick(wnd);
