@@ -80,6 +80,7 @@ import {
 import type {
   ChangeEvent,
   DrawnNode,
+  Rect,
   CompositionEvent,
   KeyboardEvent,
   MouseEvent,
@@ -388,6 +389,69 @@ function Popup() {
     </popup>
   );
 }
+
+// issue #259: selection over read-only text — the geometry every drawn node
+// answers, and the surface a `selectable` element becomes
+function Document() {
+  const doc = useRef<DrawnNode>(null);
+  const para = useRef<DrawnNode>(null);
+  const copy = () => {
+    const node = doc.current;
+    if (!node) return '';
+    const snapshot = node.textSelection;
+    if (!snapshot || snapshot.isCollapsed) return '';
+    const first: { node: DrawnNode; start: number; end: number } | undefined =
+      snapshot.ranges[0];
+    void first;
+    return snapshot.text;
+  };
+  const measure = () => {
+    const node = para.current;
+    if (!node) return;
+    const text: string | null = node.textContent();
+    const index: number = node.textIndexAt(12, 40);
+    const caret: Rect | null = node.textCaretRect(index);
+    const bands: Rect[] = node.textRangeRects(0, index);
+    const lit: { start: number; end: number } | null = node.selectionRange;
+    const ink: string | null = node.selectionColor;
+    void [text, caret, bands, lit, ink];
+    // both ends by hand, and either of the two shorthands
+    node.setSelection({ node, index: 0 }, { node, index: 4 });
+    doc.current?.selectAll().clearSelection();
+    const selected: string = doc.current?.selectedText() ?? '';
+    void selected;
+  };
+  return (
+    <window title="reader">
+      <box
+        ref={doc}
+        selectable
+        tabIndex={-1}
+        selectionColor="#cfe4ff"
+        onSelectionChange={(ev) => {
+          const text: string = ev.text;
+          const empty: boolean = ev.isCollapsed;
+          void [text, empty, ev.target, copy(), measure()];
+        }}
+      >
+        <text ref={para}>the paragraph</text>
+        {/* CSS's user-select: none, for the chrome around a document */}
+        <text selectable={false}>1.</text>
+      </box>
+    </window>
+  );
+}
+
+// @ts-expect-error — `selectable` is a boolean, not CSS's keyword
+const _badSelectable = <box selectable="text" />;
+
+const _badSelectionHandler = (
+  <box
+    selectable
+    // @ts-expect-error — the selection reports state, not a pointer position
+    onSelectionChange={(ev) => void ev.clientX}
+  />
+);
 
 // issue #255: a popup that hangs off a node — or off a rect inside one —
 // and sizes itself from its content, so it never states a position at all
@@ -1104,5 +1168,8 @@ void grow;
 void _div;
 void _img;
 void _classy;
+void Document;
+void _badSelectable;
+void _badSelectionHandler;
 void _badSlider;
 void _badTabs;

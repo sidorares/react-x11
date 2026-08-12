@@ -151,6 +151,37 @@ export declare class Node {
    * elements declare these to `registerElement` instead of overriding. */
   readonly semanticNames: ReadonlySet<string>;
 
+  // --- the text this element answers for (docs/extending.md) ---------------
+  //
+  // Four questions in one index space and one coordinate space: characters
+  // are **code points**, rectangles are in the owning window's coordinates —
+  // the same ones `abs`, `contentBox()` and a mouse event's `x`/`y` use.
+  // An element that answers them can be selected across by a `selectable`
+  // ancestor with no registration of any kind.
+
+  /** This element's text, or null when it has none. The default. */
+  textContent(): string | null;
+  /** The character boundary nearest a point. Clamps to the ends. */
+  textIndexAt(x: number, y: number): number;
+  /** Where a caret at this index stands — a zero-width rect from the top of
+   * the glyphs to the bottom of them. */
+  textCaretRect(index: number): Rect | null;
+  /** The bands a highlight over `[start, end)` fills: one per line, and one
+   * per direction run within a line — a range that crosses from Latin into
+   * Arabic is two stretches of pixels, not the span between them. */
+  textRangeRects(start: number, end: number): Rect[];
+  /** The part of this element's text the document selection covers, or
+   * null. An element that paints its own text fills `textRangeRects` with
+   * `selectionColor` under the glyphs while this is set; that is the whole
+   * contract for taking part in a selection. */
+  readonly selectionRange: { start: number; end: number } | null;
+  /** What to fill those rectangles with while `selectionRange` is set. */
+  readonly selectionColor: string | null;
+  /** An element with a selection of its own — an editor. A `selectable`
+   * document around it skips its subtree whole and leaves its presses
+   * alone. `<textinput>` sets it. */
+  hasOwnSelection: boolean;
+
   /** Draw. A subclass calls `super.paint(ctx)` first, for the background,
    * border and clip, then draws inside `this.abs`. */
   paint(ctx: Context2D): void;
@@ -195,8 +226,17 @@ export declare class Node {
    * `defaultKeyDown`. See docs/extending.md.
    */
   defaultComposition?(ev: CompositionEvent): void;
-  /** The element's own behaviour for a press, after `onMouseDown` handlers:
-   * placing a caret, grabbing a scrollbar thumb, arming a drag. */
+  /**
+   * The element's own behaviour for a press, after `onMouseDown` handlers:
+   * placing a caret, grabbing a scrollbar thumb, arming a drag.
+   *
+   * The base class implements this (and the two below, and `defaultKeyDown`)
+   * to hand the gesture to the nearest `selectable` ancestor, so a press on
+   * anything inside a document reaches the selection. An element that
+   * overrides it and does not call `super` is, by that alone, not part of
+   * one — which is right for anything that edits, and wrong for anything
+   * that only draws.
+   */
   defaultMouseDown?(ev: MouseEvent): void;
   /** Pointer motion while this element holds the press — it keeps receiving
    * these wherever the pointer goes, as `onMouseMove` does not. */

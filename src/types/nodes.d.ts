@@ -43,6 +43,56 @@ export interface DrawnNode {
   /** Whether `node` is this node or a descendant of it (DOM `contains`). */
   contains(node: DrawnNode | null): boolean;
   getClientRects(): Rect[];
+
+  // --- text geometry (docs/elements.md, "Selection") ------------------------
+  //
+  // Every drawn node answers these; an element with no text answers `null`,
+  // `0` and `[]`. Indices are **code points** and rectangles are in the
+  // owning window's coordinates — the same space as `abs` and a mouse
+  // event's `x`/`y`.
+
+  /** This element's text, or null when it has none. */
+  textContent(): string | null;
+  /** The character boundary nearest a point. Clamps to the ends. */
+  textIndexAt(x: number, y: number): number;
+  /** Where a caret at this index stands — a zero-width rect. */
+  textCaretRect(index: number): Rect | null;
+  /** The bands a highlight over `[start, end)` fills: one per line, and one
+   * per direction run within a line. */
+  textRangeRects(start: number, end: number): Rect[];
+  /** The part of this element's text the document selection covers. */
+  readonly selectionRange: { start: number; end: number } | null;
+  /** What to fill `textRangeRects` with while `selectionRange` is set. */
+  readonly selectionColor: string | null;
+
+  // --- being a selection surface (`selectable`) -----------------------------
+
+  /** The selection this element owns, or null when it is not `selectable`.
+   * A snapshot: read it again after a change. */
+  readonly textSelection: TextSelectionSnapshot | null;
+  /** Select everything in this surface, and take PRIMARY with it. */
+  selectAll(): this;
+  /** Drop the selection. PRIMARY is left where it is. */
+  clearSelection(): this;
+  /** What a copy would put on the clipboard. */
+  selectedText(): string;
+  /** Set both ends by hand. `setSelection(null)` clears. */
+  setSelection(anchor: TextPosition | null, focus?: TextPosition | null): this;
+}
+
+/** One end of a selection: a code-point index into an element's text. */
+export interface TextPosition {
+  node: DrawnNode;
+  index: number;
+}
+
+/** What `node.selection` answers with. */
+export interface TextSelectionSnapshot {
+  isCollapsed: boolean;
+  /** The assembled text, with the separators a copy would use. */
+  text: string;
+  /** Every element the selection reaches, in document order. */
+  ranges: readonly (TextPosition & { start: number; end: number })[];
 }
 
 export interface ScrollTarget {

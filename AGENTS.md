@@ -141,6 +141,24 @@ no override-redirect staging (issue #4).
   one would corrupt them undetectably. `preventDefault()` is the usual
   default-action seam, and reaches XDND (`src/dnd.js`), which is the one
   ClientMessage protocol core answers on the same stream.
+- `src/textselection.js` + `src/textrange.js` — selecting read-only text
+  (#259). `textrange.js` is the pure half: words, blocks, and the code
+  point ↔ code unit table anything reading ntk run geometry needs, shared
+  with `<textinput>`'s editing keys so a double click picks the same word in
+  a document and in a field. `textselection.js` is the model — the surface a
+  `selectable` element becomes, and the registry that holds the one rule no
+  surface can hold for itself: **only one selection is visible in an
+  application at a time**, so a drag across a document collapses the
+  highlight in the field beside it and vice versa. Two decisions live there.
+  A participant is any node that answers the four geometry accessors on
+  `Node` (`textContent`, `textIndexAt`, `textCaretRect`, `textRangeRects`),
+  so a terminal written outside this package joins a document with no
+  registration call. And the separators a copy assembles with come from the
+  **layout** rather than from the markup — two pieces of text sharing a band
+  of pixels are joined with a tab, one that starts below the last with a
+  newline — because core cannot know which `<text>` is a table cell, and
+  asking applications to say so would be a second authoring model for
+  something the screen already shows.
 - `src/inputtime.js` — the two selection timestamps, both public since #18's
   second gap: `lastInputTime(app)` is the last input event's server time,
   stashed off the event stream because ICCCM wants "the timestamp of the
@@ -316,7 +334,7 @@ stop it, in one place — see docs/desktop.md for the worked example.
   Runs in CI beside lint. **A prop change is not done until the `.d.ts` and a
   line in the type test change with it** — hand-written declarations drift
   silently otherwise, and nothing else catches it.
-- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,widgets,react-features,windows,wm}`
+- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,selection,widgets,react-features,windows,wm}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). `examples:app` is the showcase: it hosts `form`, `widgets`
   and `tasks` as tabs by importing the panel each of them exports, so a new

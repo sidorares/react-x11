@@ -39,7 +39,7 @@ is _boring_ to a screen reader rather than broken:
 | `<window>`              | frame, named by `title`                                     |
 | `<popup>`               | window (give the content a `role` — `menu`, `dialog`, …)    |
 | `<box>`                 | filler — skipped silently, like GTK's own layout boxes      |
-| `<text>`                | label, reading its content                                  |
+| `<text>`                | label, reading its content — and its selection, if any      |
 | `<textinput>`           | entry: editable, single-line, caret and selection live      |
 | `<textarea>`            | entry: editable, multi-line                                 |
 | `<image>` / `<svg>`     | image, named by `alt`                                       |
@@ -195,6 +195,13 @@ and type. Every edit and caret move emits the precise
 One honest limit: "line" granularity follows hard newlines, not the soft
 wraps of a `<textarea>`'s layout. Orca still reads everything; a
 line-by-line walk of one long wrapped paragraph is one stop, not several.
+
+A `<text>` has the `Text` interface too — readable, with no caret to move.
+What it now also reports is its **selection**: a paragraph inside a
+`selectable` surface ([elements.md](elements.md#selecting-text)) hands over
+the range the user has dragged across, and says so as it moves, so a
+magnifier's highlight and a braille display's cursor sit on the same
+characters the highlight is painted over.
 
 ### While a composition is open
 

@@ -7,6 +7,7 @@ import widgets from './widgets.js';
 import events from './events.js';
 import dates from './dates.js';
 import password from './password.js';
+import selection from './selection.js';
 import tasks from './tasks.js';
 import canvas from './canvas.js';
 import menu from './menu.js';
@@ -30,6 +31,7 @@ const demos = [
   events,
   dates,
   password,
+  selection,
   tasks,
   canvas,
   menu,
