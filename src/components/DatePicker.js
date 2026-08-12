@@ -204,7 +204,7 @@ export function DatePicker({
           borderWidth: theme.borderWidth,
           borderRadius: theme.radius,
           borderColor: focused || open ? theme.borderFocus : theme.border,
-          backgroundColor: disabled ? theme.surfaceHover : theme.background,
+          backgroundColor: disabled ? theme.surfaceHover : theme.surface,
         },
         // hover and press say "this opens", so they belong to the trigger
         // while it is shut and are simply not declared once the calendar is
@@ -224,12 +224,18 @@ export function DatePicker({
         style: [
           capTrim,
           s.label,
-          { color: disabled ? theme.dim : empty ? theme.dim : theme.text },
+          {
+            color: disabled
+              ? theme.textMuted
+              : empty
+                ? theme.textMuted
+                : theme.text,
+          },
         ],
       },
       text,
     ),
-    h(CalendarGlyph, { color: disabled ? theme.border : theme.dim }),
+    h(CalendarGlyph, { color: disabled ? theme.border : theme.textMuted }),
     open &&
       anchor &&
       h(
@@ -249,7 +255,7 @@ export function DatePicker({
           // straight back.
           transparent: true,
           style: {
-            backgroundColor: theme.background,
+            backgroundColor: theme.surface,
             '@supports transparency': { backgroundColor: 'transparent' },
           },
         },
@@ -260,7 +266,7 @@ export function DatePicker({
               s.sheet,
               {
                 borderColor: theme.border,
-                backgroundColor: theme.background,
+                backgroundColor: theme.surface,
                 '@supports transparency': { borderRadius: theme.radiusPopup },
               },
             ],

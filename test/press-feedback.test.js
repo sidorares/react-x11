@@ -290,7 +290,7 @@ test('a held switch tints its track before the thumb moves', async () => {
   assert.ok(track.states[':active'], 'the track heard a press on its thumb');
   assert.strictEqual(
     track._targetStyle.backgroundColor,
-    theme.dimActive,
+    theme.textMutedActive,
     'and answers it, while the thumb has not moved yet',
   );
   assert.strictEqual(

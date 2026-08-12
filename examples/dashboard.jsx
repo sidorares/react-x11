@@ -38,9 +38,9 @@ const s = createStyles({
     backgroundColor: '$panel',
     transition: { backgroundColor: 200 },
   },
-  cardLabel: { fontSize: 12, color: '$dim' },
+  cardLabel: { fontSize: 12, color: '$textMuted' },
   cardValue: { fontSize: 26, color: '$text' },
-  clock: { color: '$dim' },
+  clock: { color: '$textMuted' },
   window: { backgroundColor: '$bg', transition: { backgroundColor: 200 } },
 });
 
@@ -49,7 +49,7 @@ const THEMES = {
     bg: '#f5f6fa',
     panel: '#ffffff',
     text: '#2f3640',
-    dim: '#7f8c8d',
+    textMuted: '#7f8c8d',
     accent: '#2980b9',
     accentText: '#ffffff',
   },
@@ -57,7 +57,7 @@ const THEMES = {
     bg: '#1e272e',
     panel: '#2f3640',
     text: '#f5f6fa',
-    dim: '#95a5a6',
+    textMuted: '#95a5a6',
     accent: '#f39c12',
     accentText: '#1e272e',
   },
@@ -79,10 +79,13 @@ function useClock() {
  * so the library Button follows the Light/Dark toggle. */
 function widgetTheme(t) {
   return {
-    background: t.panel,
+    // the dashboard's own two grounds are exactly the palette's: the page it
+    // is on, and the cards raised off it
+    background: t.bg,
+    surface: t.panel,
     text: t.text,
-    dim: t.dim,
-    border: t.dim,
+    textMuted: t.textMuted,
+    border: t.textMuted,
     borderFocus: t.accent,
     accent: t.accent,
     accentHover: t.accent,
@@ -90,7 +93,7 @@ function widgetTheme(t) {
     surfaceHover: t.bg,
     hoverBackground: t.accent,
     hoverText: t.accentText,
-    track: t.dim,
+    track: t.textMuted,
   };
 }
 

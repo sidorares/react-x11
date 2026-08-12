@@ -179,7 +179,7 @@ function App() {
           <Switch checked={textured} onChange={(ev) => setTextured(ev.value)} />
           <text style={{ fontSize: 13 }}>Texture</text>
           <box style={{ flexGrow: 1 }} />
-          <text style={{ fontSize: 13, color: '$dim' }}>
+          <text style={{ fontSize: 13, color: '$textMuted' }}>
             {picked ? `picked: ${picked}` : 'click a shape'}
           </text>
           <Button onPress={() => setRunning((r) => !r)}>

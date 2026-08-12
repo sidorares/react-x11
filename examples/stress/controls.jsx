@@ -35,7 +35,7 @@ const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0 },
   body: { flexGrow: 1, minHeight: 0, padding: 12, gap: 10 },
   head: { fontSize: 16, color: '$text' },
-  hint: { fontSize: 11, color: '$dim' },
+  hint: { fontSize: 11, color: '$textMuted' },
   card: {
     backgroundColor: '$background',
     borderWidth: 1,
@@ -59,7 +59,7 @@ const s = createStyles({
     flexWrap: 'wrap',
   },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  label: { fontSize: 11, color: '$dim', width: 74 },
+  label: { fontSize: 11, color: '$textMuted', width: 74 },
   inner: {
     height: 120,
     borderWidth: 1,
@@ -313,7 +313,7 @@ export function ControlsPanel() {
               <box style={[s.inner, { overflow: 'scroll' }]}>
                 {Array.from({ length: 20 }, (_, i) => (
                   <box key={i} style={s.row}>
-                    <text style={{ fontSize: 11, color: '$dim' }}>
+                    <text style={{ fontSize: 11, color: '$textMuted' }}>
                       row {String(i).padStart(2, '0')}
                     </text>
                     <textinput

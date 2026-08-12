@@ -344,7 +344,7 @@ pass through. `isOver` is true whenever a drag is over the node,
   }}
   style={{
     backgroundColor: '$panel',
-    ':dragging': { backgroundColor: '$dim' },
+    ':dragging': { backgroundColor: '$textMuted' },
   }}
 />
 ```

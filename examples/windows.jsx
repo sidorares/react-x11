@@ -24,7 +24,7 @@ function Satellite({ id, index, clicks, onClick, onClose }) {
       >
         <text style={{ color: '$text' }}>{`I am window #${id}.`}</text>
         <text
-          style={{ color: '$dim' }}
+          style={{ color: '$textMuted' }}
         >{`${clicks} clicks — in every window`}</text>
         <box style={{ flexDirection: 'row', gap: 8 }}>
           <Button primary onPress={onClick}>
@@ -65,7 +65,7 @@ function App() {
           <text style={{ fontSize: 18, color: '$text' }}>
             One React tree, many windows
           </text>
-          <text style={{ color: '$dim' }}>
+          <text style={{ color: '$textMuted' }}>
             {`${wins.length} satellite${wins.length === 1 ? '' : 's'} open, ${clicks} clicks total`}
           </text>
           <Button primary onPress={open}>

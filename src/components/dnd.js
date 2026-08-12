@@ -68,7 +68,7 @@ export function useDropTarget(options = {}) {
  *   });
  *   return (
  *     <>
- *       <box {...dragProps} style={{ ':dragging': { backgroundColor: '$dim' } }} />
+ *       <box {...dragProps} style={{ ':dragging': { backgroundColor: '$textMuted' } }} />
  *       {isDragging && (
  *         <popup dragPreview x={position.x + 12} y={position.y + 12}>
  *           <Chip label={item.name} />

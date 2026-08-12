@@ -29,17 +29,17 @@ import { DamagePanel } from './damage.jsx';
 import { MixedPanel } from './mixed.jsx';
 
 const PALETTE = {
-  bg: '#f5f6fa',
-  panel: '#ffffff',
+  background: '#f5f6fa',
+  surface: '#ffffff',
   text: '#2d3436',
-  dim: '#7f8c8d',
+  textMuted: '#7f8c8d',
   edge: '#dfe6e9',
 };
 
 const s = createStyles({
-  window: { backgroundColor: '$bg' },
+  window: { backgroundColor: '$background' },
   shell: { flexGrow: 1, minHeight: 0 },
-  tabs: { backgroundColor: '$panel' },
+  tabs: { backgroundColor: '$surface' },
 });
 
 // `content` is a function rather than an element so a panel is built only

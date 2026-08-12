@@ -36,22 +36,49 @@ export interface Theme {
   /** The border of a focused control. Named for focus and not for `:active`,
    * which is the pressed state — the `…Active` tokens below. */
   borderFocus: string;
+  /** The ground: what the window itself is painted with, under everything. */
   background: string;
+  /** What is raised off it — a control's fill, a card, the sheet a menu or a
+   * dialog is drawn on. The same colour as `background` in the light palette
+   * and a step lighter in the dark one, where a card at the ground's own
+   * colour is a card you cannot see. */
+  surface: string;
   text: string;
-  dim: string;
+  /** Secondary ink: a placeholder, a caption, a disabled label. */
+  textMuted: string;
   hoverBackground: string;
   hoverText: string;
   accent: string;
   accentHover: string;
+  /** The letters on an `accent` fill. Derived from it when a palette names
+   * the fill and not the ink — the more legible of this palette's own `text`
+   * and `background` — so an accent light enough that white disappears on it
+   * gets dark letters without being asked. */
   accentText: string;
   surfaceHover: string;
   track: string;
+  /** What a screen says with colour: this failed, this worked, look at this,
+   * here is a note. Each works as ink as well as fill — 4.5:1 against the
+   * palette's own ground — so a validation message and the badge beside it
+   * are one token. `…Text` is the letters on the fill, derived by contrast
+   * like `accentText`. */
+  danger: string;
+  dangerHover: string;
+  dangerText: string;
+  success: string;
+  successText: string;
+  warning: string;
+  warningText: string;
+  info: string;
+  infoText: string;
   /** The pressed step of each fill family: rest → `…Hover` → `…Active`.
    * A control activates on the release, so this is the only thing it can
-   * show while it is being held. */
+   * show while it is being held. `danger` is the only status colour with
+   * one: a destructive button is the only status fill anyone presses. */
   accentActive: string;
   surfaceActive: string;
-  dimActive: string;
+  textMutedActive: string;
+  dangerActive: string;
   /** The keyboard focus ring every focusable node under this palette draws
    * on `:focus-visible` — read by the renderer, not by the widgets. */
   focusRing: string;
@@ -132,7 +159,7 @@ export const ThemeProvider: ComponentType<ThemeProviderProps>;
  * The palette as a bag of tokens, which is what it is at runtime: a theme
  * merges over whatever is above it and a `$name` in a style resolves against
  * the result, so a component that reads tokens by name — a code block asking
- * for `background`/`text`/`dim`, a renderer resolving a palette it was handed
+ * for `surface`/`text`/`textMuted`, a renderer resolving a palette it was handed
  * — can index it. The named tokens keep their types; anything else is
  * `unknown` and has to be narrowed, which is the honest answer for a name
  * only the caller knows.

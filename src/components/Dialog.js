@@ -155,7 +155,7 @@ export function Dialog({
                 gap: 12,
                 borderWidth: theme.borderWidth,
                 borderColor: theme.border,
-                backgroundColor: theme.background,
+                backgroundColor: theme.surface,
               },
               style,
             ],

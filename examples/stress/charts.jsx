@@ -19,7 +19,7 @@ import { createStyles, Slider, Switch } from '../../src/index.js';
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 16, gap: 12 },
   head: { fontSize: 18, color: '$text' },
-  hint: { fontSize: 11, color: '$dim' },
+  hint: { fontSize: 11, color: '$textMuted' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   card: {
     backgroundColor: '$background',
@@ -32,7 +32,7 @@ const s = createStyles({
   },
   title: { fontSize: 12, color: '$text' },
   ctl: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  ctlLabel: { fontSize: 10, color: '$dim', width: 62 },
+  ctlLabel: { fontSize: 10, color: '$textMuted', width: 62 },
   ctlValue: { fontSize: 10, color: '$text', width: 34, textAlign: 'right' },
 });
 

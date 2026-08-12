@@ -242,7 +242,8 @@ Concretely, in this codebase:
   on the press chain — a `<Checkbox>`'s well is a sibling of the label the
   press lands on, and no state block can cross that.
 - A palette has a pressed step for every family that has a hover
-  (`accentActive`, `surfaceActive`, `dimActive`). A theme that names only
+  (`accentActive`, `surfaceActive`, `textMutedActive`, `dangerActive` — the
+  status family's one pressable member). A theme that names only
   the hover gets one derived from it — `stepBeyond` takes the step the
   palette already made and takes it again, so it darkens a light theme and
   lightens a dark one.

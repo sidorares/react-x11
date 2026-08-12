@@ -36,8 +36,12 @@ export function Button({
     ? theme.surfaceHover
     : primary
       ? theme.accent
-      : theme.background;
-  const color = disabled ? theme.dim : primary ? theme.accentText : theme.text;
+      : theme.surface;
+  const color = disabled
+    ? theme.textMuted
+    : primary
+      ? theme.accentText
+      : theme.text;
   return h(
     'box',
     {
@@ -79,7 +83,7 @@ export function Button({
           // resting-coloured ring reads as a rendering bug, not a press
           ':active': {
             backgroundColor: primary ? theme.accentActive : theme.surfaceActive,
-            borderColor: primary ? theme.accentActive : theme.dim,
+            borderColor: primary ? theme.accentActive : theme.textMuted,
           },
           ':focus-visible': {
             borderColor: primary ? theme.accentHover : theme.borderFocus,

@@ -13,7 +13,7 @@
 // wants otherwise says so. See docs/appearance.md.
 
 import { appearanceSnapshot } from './appearance.js';
-import { stepBeyond } from './styles.js';
+import { readableInk, stepBeyond } from './styles.js';
 
 /**
  * The language subtags written right-to-left — CLDR's set, by the language
@@ -98,9 +98,20 @@ export const DefaultTheme = {
   // colour
   border: '#b2bec3',
   borderFocus: '#2980b9',
+  // The ground and the things raised off it. `background` is what the window
+  // *is* — the fill under everything, painted by the window itself — and
+  // `surface` is what sits on it: a control's fill, a card, the sheet a menu
+  // or a dialog is drawn on. They are the same colour here because a white
+  // app on a white ground is what the light palette has always been; a theme
+  // that gives the ground its own tint (GitHub's `#f6f8fa` under white cards,
+  // and every macOS window) is exactly the case that had nowhere to say so.
   background: 'white',
+  surface: 'white',
   text: '#2d3436',
-  dim: '#7f8c8d',
+  // Secondary ink: a placeholder, a caption, the label of a disabled
+  // control. Named for the text it is rather than for how it looks, so that
+  // `textMuted` and `text` read as one family.
+  textMuted: '#7f8c8d',
   hoverBackground: '#2980b9',
   hoverText: 'white',
   accent: '#2980b9',
@@ -108,6 +119,36 @@ export const DefaultTheme = {
   accentText: 'white',
   surfaceHover: '#f1f2f6',
   track: '#dfe6e9',
+  // What a screen has to be able to *say*: this failed, this worked, look at
+  // this, here is a note. Without them every alert, badge and validation
+  // message hard-codes a hex, which is the one thing `$token` exists to
+  // prevent — and those are the colours most likely to be wrong on a dark
+  // desktop, because a red that reads on white disappears on near-black.
+  //
+  // Each is picked to work as **ink as well as fill**: 4.5:1 against this
+  // palette's ground, so "Password too short" under a field is legible
+  // without a second token for the text form of the same idea.
+  //
+  // Only `danger` has the hover and pressed steps, because it is the only
+  // one of the four you ever press — a destructive button. A success or a
+  // warning is something the app says, not something the user clicks; when
+  // one of them ends up on a control, the control is a `<Button>` with a
+  // `danger`-shaped ramp of its own.
+  //
+  // `info` is a blue of its own rather than the accent, even here where the
+  // accent is also blue: a theme with a green accent still gets a blue note,
+  // because that is what a note looks like everywhere — and this one is a
+  // step darker than `accent`, which is a fill first and only clears 4.3:1
+  // as letters.
+  danger: '#c0392b',
+  dangerHover: '#a93226',
+  dangerText: 'white',
+  success: '#1e8449',
+  successText: 'white',
+  warning: '#9a6700',
+  warningText: 'white',
+  info: '#1c6ea4',
+  infoText: 'white',
   // The pressed step of each fill family: rest → …Hover → …Active. Every
   // family that has a hover needs one, because a press is the state a
   // control has to show *before* it has done anything — the activation
@@ -121,7 +162,8 @@ export const DefaultTheme = {
   // gets a press that matches it rather than one inherited from these.
   accentActive: '#154c6d',
   surfaceActive: '#e3e5ed',
-  dimActive: '#4c5a57',
+  textMutedActive: '#4c5a57',
+  dangerActive: '#922b21',
   // The keyboard focus ring. Read by the renderer, not by the widgets: any
   // focusable node under this palette draws it on `:focus-visible`, so a
   // plain `<box focusable>` an application writes is indicated too, and a
@@ -184,10 +226,33 @@ export const DefaultTheme = {
 
 // Which pressed token is derived from which pair, when the palette does not
 // name it: the resting colour of the family and the hover it steps to.
+//
+// `textMutedActive` is measured from `border` because that is the ramp it
+// belongs to: a `<Switch>` that is off has a `border`-coloured track, and
+// the muted ink is the step it takes on hover. The ink and the track share a
+// colour rather than a job.
 const PRESSED_FROM = {
   accentActive: ['accent', 'accentHover'],
-  surfaceActive: ['background', 'surfaceHover'],
-  dimActive: ['border', 'dim'],
+  surfaceActive: ['surface', 'surfaceHover'],
+  textMutedActive: ['border', 'textMuted'],
+  dangerActive: ['danger', 'dangerHover'],
+};
+
+// And which ink goes on which fill. A palette that names a fill and stops
+// there gets the more legible of its own two inks — see `readableInk`.
+//
+// This is what makes the status family cheap to theme: naming four colours
+// is a design decision, and naming the letters that go on top of each of
+// them is bookkeeping that a contrast ratio can do. It is the same for
+// `accent`, where it fixes a real trap — a palette whose accent is a yellow
+// or a lime inherits `accentText: 'white'` and paints an invisible label.
+const TEXT_FROM = {
+  accentText: 'accent',
+  hoverText: 'hoverBackground',
+  dangerText: 'danger',
+  successText: 'success',
+  warningText: 'warning',
+  infoText: 'info',
 };
 
 // And the same for the floating-surface radii, which are a function of the
@@ -213,18 +278,41 @@ const RADIUS_FROM_FONT = {
  * The alternative was three more tokens every theme has to remember, and a
  * theme that forgets one does not fail loudly — it just stops answering
  * presses, in the one state a control has to show while nothing else can.
+ *
+ * **`surface` follows `background` unless it is named**, which is the same
+ * bargain from the other end: a palette that has one ground has one ground,
+ * and only a design that actually raises its cards off it has to say so. Any
+ * other rule would leave a theme that names a `#1f1f23` background with the
+ * built-in dark palette's surface on its controls — a colour from a palette
+ * it had replaced.
  */
 export function resolveTheme(value, base = DefaultTheme) {
   if (!value) return base;
-  const merged = { ...base, ...value };
+  // What this palette said, with that one implication written in, so
+  // everything measured from `surface` below is measured from the right
+  // colour and re-derived when it moved.
+  const named =
+    value.surface == null && value.background != null
+      ? { ...value, surface: value.background }
+      : value;
+  const merged = { ...base, ...named };
   for (const [token, [rest, hover]] of Object.entries(PRESSED_FROM)) {
-    if (value[token] != null) continue;
-    if (value[rest] == null && value[hover] == null) continue;
+    if (named[token] != null) continue;
+    if (named[rest] == null && named[hover] == null) continue;
     merged[token] = stepBeyond(merged[rest], merged[hover]);
   }
-  if (value.fontSize != null) {
+  // The ink follows the fill it goes on, and also the two inks it is chosen
+  // between: a palette that moves only `background` has moved what "the
+  // legible one" means.
+  for (const [token, fill] of Object.entries(TEXT_FROM)) {
+    if (named[token] != null) continue;
+    if (named[fill] == null && named.text == null && named.background == null)
+      continue;
+    merged[token] = readableInk(merged[fill], [merged.text, merged.background]);
+  }
+  if (named.fontSize != null) {
     for (const [token, from] of Object.entries(RADIUS_FROM_FONT)) {
-      if (value[token] == null) merged[token] = from(merged.fontSize);
+      if (named[token] == null) merged[token] = from(merged.fontSize);
     }
   }
   return merged;
@@ -236,21 +324,36 @@ export function resolveTheme(value, base = DefaultTheme) {
  * {@link DefaultTheme}, so every shape token — radius, border width, font
  * size, the control padding — is shared by construction and cannot drift.
  *
- * `resolveTheme` derives the three pressed steps from the hovers named here,
- * and `stepBeyond` takes the direction from the colours themselves, so a
- * press in dark *lightens* where the light palette's darkens. Nothing has to
- * be told which scheme it is in.
+ * `resolveTheme` derives the pressed steps from the hovers named here, and
+ * `stepBeyond` takes the direction from the colours themselves, so a press
+ * in dark *lightens* where the light palette's darkens. Nothing has to be
+ * told which scheme it is in. The status inks are derived too — this palette
+ * names four fills and none of the letters on them, which is what every
+ * theme after it gets to do.
  */
 export const DarkTheme = resolveTheme({
   // A near-black with a little blue in it rather than #000: pure black shows
   // every seam between a window and the widgets on it, and no desktop's dark
   // theme uses it.
   background: '#1e2228',
+  // Here the ground and the surface part company, which is the whole point
+  // of their being two tokens: a card at the ground's own colour is a card
+  // you cannot see, and dark designs raise by lightening because there is no
+  // shadow to cast on near-black.
+  surface: '#252a31',
   surfaceHover: '#2a3038',
   text: '#e6e9ed',
-  dim: '#8b939c',
+  textMuted: '#8b939c',
   border: '#454d55',
   track: '#3a4149',
+  // Lighter and less saturated than the light palette's: the same four
+  // meanings, re-picked to clear 4.5:1 against near-black rather than
+  // against white. `#c0392b` on this ground is a bruise.
+  danger: '#ec6a5e',
+  dangerHover: '#f28d80',
+  success: '#2ecc71',
+  warning: '#f0b429',
+  info: '#5aa4e6',
   // The accent lifts off the darker ground instead of sinking into it, so
   // `accentHover` goes *up* from `accent` here and down in the light palette.
   accent: '#3d8bd4',

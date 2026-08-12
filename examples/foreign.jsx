@@ -137,14 +137,16 @@ function App() {
               padding: 20,
             }}
           >
-            <text style={{ fontSize: 12, color: '$dim', textAlign: 'center' }}>
+            <text
+              style={{ fontSize: 12, color: '$textMuted', textAlign: 'center' }}
+            >
               The pane is gone and the terminal is still running — look for it
               on the desktop, with a window manager frame of its own.
             </text>
           </box>
         )}
 
-        <text style={{ fontSize: 11, color: '$dim' }}>
+        <text style={{ fontSize: 11, color: '$textMuted' }}>
           Keys go to the app first: Ctrl+K is taken here and never reaches the
           client. Everything else is forwarded — click the pane and type.
         </text>

@@ -409,7 +409,7 @@ So a block of quiet type is a `<box>` and not a decision repeated at every
 label inside it:
 
 ```jsx
-<box style={{ color: theme.dim, fontSize: 12 }}>
+<box style={{ color: theme.textMuted, fontSize: 12 }}>
   <text>Last modified</text>
   <text>{row.modified}</text>
   <Icon name="clock" />
@@ -549,8 +549,9 @@ separate X window.
 
 Note that a raw `theme` prop is exactly the object you wrote: it merges, but
 nothing is computed from it. The widget palette's derived tokens — the
-pressed `accentActive`/`surfaceActive`/`dimActive` — are filled in by
-`<ThemeProvider>`, which plants the resolved palette in the tree for this
+pressed `accentActive`/`surfaceActive`/`textMutedActive`/`dangerActive`, the
+`…Text` ink on each fill, and `surface` following `background` — are filled in
+by `<ThemeProvider>`, which plants the resolved palette in the tree for this
 lookup to find. Hand-writing `theme={{ accentHover: … }}` on a box gets the
 merge and not the derivation.
 

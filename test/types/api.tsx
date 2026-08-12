@@ -550,7 +550,15 @@ function Themed() {
   // instead of casting it. Unknown names are `unknown`, so they narrow.
   const pick = (token: string): string =>
     typeof theme[token] === 'string' ? (theme[token] as string) : theme.text;
-  void pick('dim');
+  void pick('textMuted');
+  // issue #258: the ground and what is raised off it are two tokens, and the
+  // status family is what a screen says with colour
+  const _ground: string = theme.background;
+  const _card: string = theme.surface;
+  const _muted: string = theme.textMuted;
+  const _danger: string = theme.danger;
+  const _dangerInk: string = theme.dangerText;
+  const _statuses: string[] = [theme.success, theme.warning, theme.info];
   return (
     <box
       style={{
@@ -570,8 +578,18 @@ const _badTheme = <ThemeProvider value={{ accnet: '#fff' }} />;
 // @ts-expect-error — `borderActive` was the focus border and is `borderFocus`
 const _oldName = <ThemeProvider value={{ borderActive: '#fff' }} />;
 
+// @ts-expect-error — issue #258: `dim` is `textMuted`, named for the text it is
+const _oldDim = <ThemeProvider value={{ dim: '#7f8c8d' }} />;
+
 const _pressedPalette = (
-  <ThemeProvider value={{ surfaceActive: '#ddd', dimActive: '#556' }} />
+  <ThemeProvider value={{ surfaceActive: '#ddd', textMutedActive: '#556' }} />
+);
+
+// a palette names the fills it cares about; the inks on them are derived
+const _statusPalette = (
+  <ThemeProvider
+    value={{ danger: '#c0392b', success: '#1e8449', warning: '#9a6700' }}
+  />
 );
 
 function Widgets() {
@@ -616,7 +634,7 @@ function Widgets() {
           mono
           cacheKey={iconNames[0]}
           onDraw={icons.moreVertical}
-          style={{ width: 12, height: 12, color: '$dim' }}
+          style={{ width: 12, height: 12, color: '$textMuted' }}
         />
         <Checkbox checked={checked} onChange={(ev) => setChecked(ev.value)}>
           check

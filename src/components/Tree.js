@@ -248,7 +248,7 @@ export function Tree({
               // colour separately used to be the thing that stayed grey
               // inside a highlighted row.
               color: item.disabled
-                ? theme.dim
+                ? theme.textMuted
                 : item.id === current
                   ? theme.hoverText
                   : theme.text,
@@ -297,7 +297,7 @@ export function Tree({
               // dimmer than the label on an unselected row, and the row's own
               // ink once it is selected — where "the row's own ink" is what
               // inheritance gives it, with nothing said here
-              style: item.id === current ? null : { color: theme.dim },
+              style: item.id === current ? null : { color: theme.textMuted },
             }),
         ),
         labelContent(item.label),

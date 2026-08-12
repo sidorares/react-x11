@@ -79,12 +79,12 @@ function NoShaders() {
       <text style={{ fontSize: 15, fontWeight: 'bold' }}>
         No shaders on this connection
       </text>
-      <text style={{ color: '$dim' }}>
+      <text style={{ color: '$textMuted' }}>
         {reason
           ? `${reason.code}: ${reason.message}`
           : 'The direct-rendering backend is not available.'}
       </text>
-      <text style={{ color: '$dim' }}>
+      <text style={{ color: '$textMuted' }}>
         GLSL needs ntk's direct backend: a local connection to a server with
         DRI3, the x11-dri addon, and a runtime that can pass file descriptors
         over the socket — which today means Node, not Bun. See docs/gl.md.

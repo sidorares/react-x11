@@ -46,7 +46,7 @@ export function Checkbox({
     onChange?.(changeEvent('checkbox', name, !checked)),
   );
   const fill = disabled
-    ? theme.dim
+    ? theme.textMuted
     : pressed
       ? theme.accentActive
       : hover
@@ -58,8 +58,12 @@ export function Checkbox({
   // cannot be told apart from says nothing about the press.
   const empty = {
     borderColor:
-      pressed || hover ? theme.dim : focused ? theme.borderFocus : theme.border,
-    backgroundColor: pressed ? theme.surfaceActive : theme.background,
+      pressed || hover
+        ? theme.textMuted
+        : focused
+          ? theme.borderFocus
+          : theme.border,
+    backgroundColor: pressed ? theme.surfaceActive : theme.surface,
   };
   return h(
     'box',
@@ -93,7 +97,7 @@ export function Checkbox({
         h(Icon, { name: 'check', size: MARK, color: theme.accentText }),
     ),
     labelContent(children ?? label, {
-      color: disabled ? theme.dim : theme.text,
+      color: disabled ? theme.textMuted : theme.text,
     }),
   );
 }

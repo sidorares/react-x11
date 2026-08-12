@@ -183,10 +183,10 @@ function NoShaders() {
       <text style={{ fontSize: 16, fontWeight: 'bold' }}>
         This one needs the GPU
       </text>
-      <text style={{ color: '$dim' }}>
+      <text style={{ color: '$textMuted' }}>
         {reason ? `${reason.code}: ${reason.message}` : 'No direct backend.'}
       </text>
-      <text style={{ color: '$dim' }}>
+      <text style={{ color: '$textMuted' }}>
         Everything in the panel is GLSL the app wrote, and indirect GLX encodes
         no way to send a shader. Direct rendering wants a local connection to a
         server with DRI3, the x11-dri addon, and Node rather than Bun. See
@@ -203,7 +203,7 @@ function Knob({ label, value, min, max, step, format, onChange }) {
       <box style={{ flexDirection: 'row', alignItems: 'center' }}>
         <text style={{ fontSize: 12 }}>{label}</text>
         <box style={{ flexGrow: 1 }} />
-        <text style={{ fontSize: 12, color: '$dim' }}>
+        <text style={{ fontSize: 12, color: '$textMuted' }}>
           {(format ?? ((v) => v.toFixed(2)))(value)}
         </text>
       </box>
@@ -346,7 +346,7 @@ function App() {
           <Button onPress={() => setRunning((r) => !r)}>
             {running ? 'Pause' : 'Play'}
           </Button>
-          <text style={{ fontSize: 11, color: '$dim' }}>
+          <text style={{ fontSize: 11, color: '$textMuted' }}>
             {shaders
               ? 'Every knob is a uniform write — nothing here recompiles.'
               : 'Controls are live; the scene needs direct rendering.'}

@@ -37,18 +37,82 @@ changes and everything else keeps following. It carries **shape as well as
 colour** — corner radius, border weight, text size and the padding inside a
 control are most of what separates one platform's controls from another's:
 
-| token                                           |                                |
-| ----------------------------------------------- | ------------------------------ |
-| `background` `text` `dim` `border`              | the surface a control sits on  |
-| `accent` `accentHover` `accentText`             | primary buttons, checks, fills |
-| `hoverBackground` `hoverText`                   | selected rows, menu highlights |
-| `surfaceHover` `track` `borderFocus`            | hover fills, tracks, focus     |
-| `accentActive` `surfaceActive` `dimActive`      | the pressed step of each fill  |
-| `radius` `radiusSmall` `borderWidth`            | control shape                  |
-| `radiusPopup` `radiusPopupItem` `radiusTooltip` | floating-surface shape         |
-| `fontSize` `paddingX` `paddingY`                | control size                   |
-| `fontFamily` `monoFamily`                       | the app's two faces            |
-| `direction`                                     | which way the app reads        |
+| token                                                           |                                      |
+| --------------------------------------------------------------- | ------------------------------------ |
+| `background` `surface`                                          | the ground, and what is raised on it |
+| `text` `textMuted` `border`                                     | ink, secondary ink, edges            |
+| `accent` `accentHover` `accentText`                             | primary buttons, checks, fills       |
+| `hoverBackground` `hoverText`                                   | selected rows, menu highlights       |
+| `surfaceHover` `track` `borderFocus`                            | hover fills, tracks, focus           |
+| `danger` `success` `warning` `info` (+`…Text`)                  | what the app says with colour        |
+| `accentActive` `surfaceActive` `textMutedActive` `dangerActive` | the pressed step of each fill        |
+| `radius` `radiusSmall` `borderWidth`                            | control shape                        |
+| `radiusPopup` `radiusPopupItem` `radiusTooltip`                 | floating-surface shape               |
+| `fontSize` `paddingX` `paddingY`                                | control size                         |
+| `fontFamily` `monoFamily`                                       | the app's two faces                  |
+| `direction`                                                     | which way the app reads              |
+
+### The ground and what is on it
+
+`background` is what the **window** is — the fill under everything, painted
+by the window itself. `surface` is what is raised off it: a control's fill, a
+card, the sheet a menu or a dialog is drawn on. The light palette makes them
+the same colour, because a white app on a white ground is what it has always
+been; the dark one lifts `surface` a step, because a card at the ground's own
+colour is a card you cannot see.
+
+A palette that has one ground says so by naming one: **`surface` follows
+`background` unless you name it**, so a theme that only recolours the app
+keeps working and only a design that really raises its cards has a second
+token to fill in.
+
+```jsx
+<ThemeProvider value={{ background: '#f6f8fa', surface: '#ffffff' }}>
+```
+
+`surfaceHover` and `surfaceActive` are that surface's own interaction steps,
+which is what they have always been — before there was a `surface` to be the
+steps of.
+
+### What the app says with colour
+
+`danger`, `success`, `warning` and `info` are the four things a screen has to
+be able to say: this failed, this worked, look at this, here is a note. They
+are what an alert, a badge, a validation message and a toast are coloured
+from, and having them as tokens is what keeps a hard-coded `#e74c3c` — which
+is a bruise on a dark desktop — out of application code.
+
+Each works as **ink as well as fill**: every one clears 4.5:1 against its own
+palette's ground, so the message under a field and the badge beside it are one
+token.
+
+```jsx
+<text style={{ color: '$danger' }}>Password too short</text>
+<box style={{ backgroundColor: '$danger' }}>
+  <text style={{ color: '$dangerText' }}>Delete</text>
+</box>
+```
+
+For the tinted panel an alert usually wants — a wash of the colour rather
+than the colour — tint the fill and leave the ink alone:
+
+```jsx
+import { tint } from 'react-x11/style';
+<box style={{ backgroundColor: tint(theme.danger, 0.12) }}>
+  <text style={{ color: '$danger' }}>Could not save</text>
+</box>;
+```
+
+Only `danger` has `…Hover` and `…Active`, because a destructive button is the
+only status fill anyone presses; the other three are things the app says, not
+things the user clicks.
+
+The `…Text` four are the letters on a status fill, and **a palette almost
+never sets them**: each is derived from the fill it goes on, as the more
+legible of that palette's own `text` and `background`. So a theme whose
+`warning` is a yellow gets dark letters on it without having thought about
+it — and the same rule fixes `accentText`, which used to be inherited as
+white onto accents that could not carry white.
 
 `fontFamily` and `fontSize` are the type this app sets, and text that names
 neither **takes them** — a `<text>`, a `<textinput>`, a widget's own label. So
@@ -124,7 +188,7 @@ height as the `Button` and the `Select` next to it on a form; give it
 `paddingY` and the three agree by construction
 ([styling.md](styling.md#measuring-text-to-its-letters)).
 
-The `…Active` three are the colour a control takes **while it is held**, and
+The `…Active` four are the colour a control takes **while it is held**, and
 a palette almost never sets them: each is derived from the step the palette's
 own hover already makes — `accent` → `accentHover` → one more of the same —
 so it darkens a light theme and lightens a dark one. Set one explicitly and
@@ -265,7 +329,7 @@ icon takes the ink of whatever it is written inside and needs nothing said
 at the call site:
 
 ```jsx
-<box style={{ color: theme.dim, ':hover': { color: theme.accent } }}>
+<box style={{ color: theme.textMuted, ':hover': { color: theme.accent } }}>
   <text>Open recent</text>
   <Icon name="chevronRight" />
 </box>
@@ -313,7 +377,7 @@ import { icons } from 'react-x11';
   mono
   cacheKey="check"
   onDraw={icons.check}
-  style={{ width: 12, height: 12, color: '$dim' }}
+  style={{ width: 12, height: 12, color: '$textMuted' }}
 />;
 ```
 
@@ -374,7 +438,8 @@ would activate anything.
 Nothing is needed to get this: it is what the widgets do. Writing a control
 of your own, `:active` is the state block for it —
 [styling.md](styling.md#inline-pseudo-states) — and the palette's
-`accentActive`/`surfaceActive`/`dimActive` are the colours.
+`accentActive`/`surfaceActive`/`textMutedActive`/`dangerActive` are the
+colours.
 
 ### The change event, and `name`
 
@@ -555,7 +620,7 @@ single letter cycles through the options starting with it.
 `Select` has no provider of its own — it reads the palette from
 [`ThemeProvider`](#theming) like every other widget. The trigger is
 `background`/`text` in a `border` box that turns `borderFocus` on focus or
-while open, the chevron and the placeholder text are `dim`, and the menu
+while open, the chevron and the placeholder text are `textMuted`, and the menu
 highlight is `hoverBackground`/`hoverText`.
 
 ## `Calendar` / `DatePicker`
@@ -913,9 +978,10 @@ another panel of the app — so inside it, `$background` is the bubble and
 `$text` is the ink on it, published through a `ThemeProvider` so that
 `useTheme()` agrees. Write the content the way you would write anything
 else and it is legible in both schemes; hard-code a light text colour and
-it will be invisible on the light bubble a dark palette gives it. `dim` is
-derived for the same reason — the palette's own is a grey chosen against
-the app's background, not against this one.
+it will be invisible on the light bubble a dark palette gives it. `textMuted`
+is derived for the same reason — the palette's own is a grey chosen against
+the app's background, not against this one — and `$surface` is the bubble
+too, so a card written for the app does not light up inside a tooltip.
 
 Where the display composites, the popup is an ARGB window: a bubble rounded
 at `radiusTooltip`, no border, and a small arrow pointing back at the middle

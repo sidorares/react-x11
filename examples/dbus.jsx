@@ -78,7 +78,7 @@ const C = {
   chrome: '$surfaceHover',
   edge: '$border',
   text: '$text',
-  dim: '$dim',
+  dim: '$textMuted',
   // The faintest neutral the palette has — `border` is lighter than `dim` on
   // a light scheme and darker on a dark one, which is "fainter" both times.
   faint: '$border',

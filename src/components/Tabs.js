@@ -192,10 +192,10 @@ export function Tabs({
           },
           labelContent(item.label, {
             color: item.disabled
-              ? theme.dim
+              ? theme.textMuted
               : item.id === selected
                 ? theme.text
-                : theme.dim,
+                : theme.textMuted,
           }),
           h('box', {
             style: [

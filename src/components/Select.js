@@ -351,7 +351,7 @@ export function Select({
           borderWidth: theme.borderWidth,
           borderRadius: theme.radius,
           borderColor: focused || open ? theme.borderFocus : theme.border,
-          backgroundColor: theme.background,
+          backgroundColor: theme.surface,
         },
         // Hover and press belong to the trigger while it is *shut*: they say
         // "this opens". Once the menu is down that is answered, and the
@@ -371,7 +371,7 @@ export function Select({
     },
     h(
       'text',
-      { style: [capTrim, { color: current ? theme.text : theme.dim }] },
+      { style: [capTrim, { color: current ? theme.text : theme.textMuted }] },
       current ? current.label : placeholder,
     ),
     h('box', { style: { flexGrow: 1 } }),
@@ -383,7 +383,7 @@ export function Select({
     h(Icon, {
       name: 'chevronDown',
       size: capBand(theme.fontSize),
-      color: theme.dim,
+      color: theme.textMuted,
     }),
     open &&
       anchor &&
@@ -404,7 +404,7 @@ export function Select({
           // it would put the corners straight back.
           transparent: true,
           style: {
-            backgroundColor: theme.background,
+            backgroundColor: theme.surface,
             '@supports transparency': { backgroundColor: 'transparent' },
           },
         },
@@ -416,7 +416,7 @@ export function Select({
               flexShrink: 1,
               borderWidth: MENU_BORDER,
               borderColor: theme.border,
-              backgroundColor: theme.background,
+              backgroundColor: theme.surface,
               '@supports transparency': { borderRadius: theme.radiusPopup },
             },
           },

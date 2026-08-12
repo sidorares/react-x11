@@ -72,22 +72,22 @@ const s = createStyles({
     minHeight: 0,
     padding: 14,
     gap: 10,
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
   },
   head: { fontSize: 16, color: '$text' },
-  hint: { fontSize: 11, color: '$dim' },
+  hint: { fontSize: 11, color: '$textMuted' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
   wrapRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   spacer: { flexGrow: 1 },
-  label: { fontSize: 11, color: '$dim' },
+  label: { fontSize: 11, color: '$textMuted' },
   strong: { fontSize: 13, color: '$text' },
   // Pinned widths, not minWidths: a box the text cannot resize is what keeps
   // a changing number from relaying out the window. See the Priority panel.
   reading: { fontSize: 20, color: '$text', width: 62 },
-  readingDim: { fontSize: 20, color: '$dim', width: 62 },
-  counter: { fontSize: 11, color: '$dim', width: 118 },
-  counterNarrow: { fontSize: 11, color: '$dim', width: 66 },
-  counters: { fontSize: 11, color: '$dim', width: 460, height: 14 },
+  readingDim: { fontSize: 20, color: '$textMuted', width: 62 },
+  counter: { fontSize: 11, color: '$textMuted', width: 118 },
+  counterNarrow: { fontSize: 11, color: '$textMuted', width: 66 },
+  counters: { fontSize: 11, color: '$textMuted', width: 460, height: 14 },
   light: {
     width: 10,
     height: 10,
@@ -112,7 +112,7 @@ const s = createStyles({
     borderWidth: 1,
     borderColor: '$track',
     borderRadius: 4,
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
   },
   cardHead: { fontSize: 13, color: '$text' },
   fieldWrap: {
@@ -144,7 +144,7 @@ const s = createStyles({
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '$border',
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
   },
   error: { fontSize: 12, color: '#c0392b' },
   skeletonLine: { height: 10, borderRadius: 3, backgroundColor: '$track' },
@@ -653,7 +653,10 @@ export function OptimisticPanel() {
         {shown.map((note) => (
           <box key={note.id} style={s.listRow}>
             <text
-              style={{ fontSize: 12, color: note.pending ? '$dim' : '$text' }}
+              style={{
+                fontSize: 12,
+                color: note.pending ? '$textMuted' : '$text',
+              }}
             >
               {note.text}
             </text>

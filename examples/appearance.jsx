@@ -70,9 +70,9 @@ const s = createStyles({
     transition: { backgroundColor: 180, borderColor: 180 },
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { width: 108, color: '$dim' },
+  name: { width: 108, color: '$textMuted' },
   value: { width: 108, color: '$text' },
-  domain: { color: '$dim', fontSize: 11 },
+  domain: { color: '$textMuted', fontSize: 11 },
   swatch: {
     width: 13,
     height: 13,
@@ -80,9 +80,9 @@ const s = createStyles({
     borderWidth: 1,
     borderColor: '$border',
   },
-  sectionLabel: { color: '$dim', fontSize: 12 },
+  sectionLabel: { color: '$textMuted', fontSize: 12 },
   logLine: { color: '$text', fontSize: 12 },
-  logTime: { color: '$dim', fontSize: 12, width: 62 },
+  logTime: { color: '$textMuted', fontSize: 12, width: 62 },
 });
 
 /** The five fields the hook returns, and what each one may be. */
