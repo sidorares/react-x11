@@ -101,6 +101,7 @@ const root = await createRoot({
   localX, localY,                   // target-relative
   nativeEvent,                      // the raw ntk/X11 event
   shiftKey, ctrlKey,                // on every event, not just keys
+  altKey, metaKey,                  // Mod1 and Mod4 — see Modifiers below
   preventDefault(), stopPropagation(),
   capturePointer(), releasePointer(),   // see Pointer capture below
   // mouse: button, detail (DOM-style click count: 2 = double, 3 = triple)
@@ -129,6 +130,32 @@ onKeyDown={(ev) => {
 That keeps working under a Cyrillic or Greek layout too: `ev.keysym` is the
 Latin keysym for the key however the layout is switched — see
 [Layouts](#layouts).
+
+### Modifiers
+
+Four booleans, DOM names, on **every** event rather than only the keyboard
+ones — a shift+click, an Alt+drag and a Super+wheel all need them:
+
+| property   | X11 modifier | usually |
+| ---------- | ------------ | ------- |
+| `shiftKey` | Shift        | Shift   |
+| `ctrlKey`  | Control      | Ctrl    |
+| `altKey`   | Mod1         | Alt     |
+| `metaKey`  | Mod4         | Super   |
+
+```js
+onKeyDown={(ev) => {
+  if (ev.altKey && ev.keysym === keysymOf('b')) wordLeft();
+}}
+```
+
+**Mod1 is Alt and Mod4 is Super by convention, not by protocol.** X says
+only that there are eight modifier rows and lets the keymap decide which
+keys sit in each; those two are where `setxkbmap` puts Alt and Super, and
+where every toolkit — GTK and Qt included — reads them from. The setup that
+disagrees still has the raw mask: `ev.nativeEvent.buttons` is the state
+field as it arrived, and `MOD` in `react-x11/keysyms` names its bits
+(`MOD.Mod3`, `MOD.Lock` for Caps Lock, and so on).
 
 ## Handlers
 

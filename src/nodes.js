@@ -68,7 +68,7 @@ import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import { lastInputTime } from './inputtime.js';
 import { armPasteState, canPaste } from './pastestate.js';
-import { ctrlChordLetter } from './keysyms.js';
+import { ctrlChordLetter, MOD } from './keysyms.js';
 import {
   editMenuColors,
   editMenuGeometry,
@@ -4108,8 +4108,10 @@ export class TextInputNode extends Node {
       y: native?.y ?? 0,
       target: this,
       nativeEvent: native ?? null,
-      shiftKey: Boolean(native?.buttons & 1),
-      ctrlKey: Boolean(native?.buttons & 4),
+      shiftKey: Boolean(native?.buttons & MOD.Shift),
+      ctrlKey: Boolean(native?.buttons & MOD.Control),
+      altKey: Boolean(native?.buttons & MOD.Alt),
+      metaKey: Boolean(native?.buttons & MOD.Super),
       defaultPrevented: false,
       propagationStopped: false,
       preventDefault() {

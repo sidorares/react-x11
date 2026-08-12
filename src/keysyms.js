@@ -150,8 +150,10 @@ export function ctrlChordLetter(ev) {
 
 /**
  * The X11 modifier mask bits, as they arrive on `ev.nativeEvent.buttons`
- * and as `fireEvent` takes them. Bit 3 (Mod1) is Alt on virtually every
- * layout; the renderer reads Shift, Control and Mod1.
+ * and as `fireEvent` takes them. Bit 3 (Mod1) is Alt and bit 6 (Mod4) is
+ * Super on virtually every layout; those four — Shift, Control, Mod1, Mod4
+ * — are the ones a synthetic event decodes, as `shiftKey`/`ctrlKey`/
+ * `altKey`/`metaKey`.
  */
 export const MOD = {
   Shift: 1,

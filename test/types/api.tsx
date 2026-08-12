@@ -330,6 +330,9 @@ function Events() {
         void ev.key;
         void ev.codepoint;
         void ev.shiftKey;
+        // Mod1 and Mod4, under the names the DOM gives them
+        const chord: boolean = ev.altKey || ev.metaKey;
+        void chord;
         // the Latin keysym, and which layout typed the character
         const layout: number = ev.group;
         void layout;
