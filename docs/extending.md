@@ -229,12 +229,16 @@ answer in all three, and the mode is there for the cases where it is not:
 | `at-most` with 0 | **the smallest it can be drawn at** — an editor: a character or two of one line; something that scrolls inside: honestly small |
 | `exactly`        | the style decided this axis; hand the number back and answer for the other one                                                 |
 
-The `at-most 0` row is the one worth reading twice, because something else
-asks it: `<window minWidth="auto">` measures the smallest size its content
-can be drawn at by laying the tree out with **no room at all** and asking
-every leaf directly ([elements.md](elements.md#a-floor-the-content-decides)).
-An element that answers 0 there is saying it can be squeezed to nothing, and
-the window's floor comes out without it.
+The `at-most 0` row is the one worth reading twice, because it is not only
+the layout that asks it. The renderer measures the smallest size every node
+can be drawn at — by laying the tree out with **no room at all** and asking
+each leaf directly — and writes that back as the element's own floor, so a
+row too narrow for it squeezes it that far and no further
+([elements.md](elements.md#everything-shrinks-nothing-shrinks-to-nothing)).
+The same measurement read at the top of the tree is what
+`<window minWidth="auto">` sends the window manager. An element that answers
+0 there is saying it can be squeezed to nothing, and both floors come out
+without it.
 
 `at-most` is what is _available_, not a cap that will be enforced: an element
 may answer larger and it will be laid out at what it asked for, overflowing

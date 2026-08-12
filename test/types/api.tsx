@@ -166,6 +166,16 @@ const composed: StyleProp = [s.root, false, null, [s.row, { padding: 4 }]];
 const flat: Style = flattenStyle(composed);
 const grow: number | undefined = flat.flexGrow;
 
+// the `flex` shorthand: a share of what is left, or one of CSS's two keywords
+createStyles({
+  fill: { flex: 1 },
+  sized: { flex: 'auto' },
+  rigid: { flex: 'none', flexShrink: 0 },
+});
+
+// @ts-expect-error — 'fill' is not one of them
+createStyles({ bad: { flex: 'fill' } });
+
 // @ts-expect-error — 'sideways' is not a flexDirection
 createStyles({ bad: { flexDirection: 'sideways' } });
 

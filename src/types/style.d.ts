@@ -95,7 +95,17 @@ export interface LayoutStyle {
   alignSelf?: Align;
   alignContent?: Align;
   flexWrap?: FlexWrap;
+  /**
+   * CSS's shorthand: `flex: 1` is `flexGrow: 1, flexShrink: 1,
+   * flexBasis: 0` — take this share of what is left, from a base size of
+   * nothing. `'auto'` grows and shrinks from the content's own size,
+   * `'none'` does neither. A longhand written beside it wins.
+   */
+  flex?: number | 'auto' | 'none';
   flexGrow?: number;
+  /** How eagerly this item gives up the space it has **above its content**;
+   *  `1` by default, as in CSS. It never shrinks past what is inside it —
+   *  say `minWidth: 0` (or an `overflow` that clips) for that. */
   flexShrink?: number;
   flexBasis?: Dimension;
   position?: PositionType;

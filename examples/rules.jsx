@@ -517,13 +517,11 @@ const s = createStyles({
   // the row while it is held: off the page rather than in it, which without
   // a shadow to cast is said with the fill and an edge the flow rows lack
   rowLifted: { backgroundColor: '$background', borderColor: '$border' },
-  // the wrapping half of a row. `flexBasis: 0` because yoga defaults
-  // flexShrink to 0: with `auto`, this takes its content's max-content width
-  // as its base, cannot shrink back, and the fields never wrap at all
+  // the wrapping half of a row. `flex: 1` rather than a content-sized basis:
+  // with `auto` this takes its content's max-content width as its base, and
+  // the fields wrap only once it has been squeezed all the way back to it
   fields: {
-    flexGrow: 1,
-    flexShrink: 1,
-    flexBasis: 0,
+    flex: 1,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',

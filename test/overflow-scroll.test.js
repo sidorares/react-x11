@@ -105,7 +105,7 @@ test('the scroll-container layout defaults come off the style, not a constructor
   );
   assert.equal(grown.current.style.flexBasis, 0, 'flex-basis: 0 injected');
   assert.equal(grown.current.style.minHeight, 0, 'min-height: 0 injected');
-  assert.equal(grown.current.style.flexShrink, 1);
+  assert.equal(grown.current.style.minWidth, 0, 'min-width: 0 injected');
   assert.equal(sized.current.style.flexBasis, undefined, 'sized: left alone');
   assert.equal(sized.current.abs.height, 50);
 });

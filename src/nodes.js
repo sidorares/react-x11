@@ -5,6 +5,9 @@
 import {
   Yoga,
   applyLayoutStyle,
+  applyLayoutDefaults,
+  createLayoutNode,
+  measuringExactly,
   paintPropsChanged,
   textStyleFrom,
   DEFAULT_TEXT_STYLE,
@@ -15,7 +18,7 @@ import {
   flattenStyle,
   validateStyle,
   resolveStyleStates,
-  resolveScrollContainer,
+  resolveComputedStyle,
   hasStateStyles,
   isStyleProp,
   isEventProp,
@@ -745,41 +748,100 @@ function captureLeafHeights(node, out) {
 }
 
 /**
- * Whether this node's laid-out size is already the answer for `axis`, so
- * that what is inside it stops counting towards a floor.
- *
- * The question only arises because the layout being read was run with no
- * room in it: a node whose size came from its container rather than from
- * itself came out at nothing, and nothing is not a measurement. So the test
- * is *who decided this size* —
+ * Whether this node has **named a floor of its own** on `axis` — the cases
+ * where CSS's `min-*: auto` is not the content-based minimum, so the node may
+ * give way to whatever squeezes it and its contents stop counting:
  *
  * - it clips, so what overflows it is not something to make room for. CSS
- *   says the same in `min-width: auto` computing to `0` on anything whose
- *   overflow is not `visible`, and it is the escape hatch Qt spells
- *   `QScrollArea` and GTK spells `min-content-width`;
- * - the author named a size, a floor or a ceiling on this axis. All three
- *   are answers, `minWidth: 0` — "I can be any size" — included;
- * - it was told it may shrink, on the axis its container lays out along.
- *   `flexShrink` is the opt-in, and it means nothing on the other axis.
+ *   computes `min-*: auto` to `0` on anything whose overflow is not
+ *   `visible`, and it is the escape hatch Qt spells `QScrollArea` and GTK
+ *   spells `min-content-width`;
+ * - the author wrote a number in `minWidth`/`minHeight`. `0` — "I can be any
+ *   size" — is the one that matters and the one a scroll container gets
+ *   given.
  *
- * Anything else was sized by its parent — a stretched cross-axis child is
- * the usual one — and has to be looked inside.
+ * This used to read "it was told it may shrink", back when `flexShrink`
+ * defaulted to yoga's `0` and asking for `1` was therefore a statement. Every
+ * node may shrink now (#249), so the clause carried no information and had to
+ * go: `minWidth: 0` is how a style says "down to nothing", and `flexShrink`
+ * is back to meaning only how eagerly the space *above* the floor is given
+ * up.
  */
-function boundsItsOwnContent(node, axis, axisIsMain) {
+function namesOwnFloor(node, axis) {
   const style = node.style;
   if (style.overflow === 'scroll' || style.overflow === 'hidden') return true;
-  const [size, min, max] =
+  return (
+    typeof (axis === 'width' ? style.minWidth : style.minHeight) === 'number'
+  );
+}
+
+/**
+ * Whether this node's laid-out extent in a min-content pass is already the
+ * answer, so there is no need to look inside it. Everything that names a
+ * floor, plus the two other ways a style can bound itself: a **size**, which
+ * a min-content measurement here keeps rather than shrinking past (see
+ * `writeContentFloors`), and a **ceiling**, since CSS clamps the content
+ * suggestion by the specified `max-*` too.
+ */
+function declaresOwnMinimum(node, axis) {
+  if (namesOwnFloor(node, axis)) return true;
+  const style = node.style;
+  const [size, max] =
     axis === 'width'
-      ? [style.width, style.minWidth, style.maxWidth]
-      : [style.height, style.minHeight, style.maxHeight];
-  if (
-    typeof size === 'number' ||
-    typeof min === 'number' ||
-    typeof max === 'number'
-  ) {
-    return true;
+      ? [style.width, style.maxWidth]
+      : [style.height, style.maxHeight];
+  return typeof size === 'number' || typeof max === 'number';
+}
+
+/** In this node's parent's flow at all: an absolute or `display: 'none'`
+ *  child is not a flex item and contributes nothing to what contains it —
+ *  CSS says the same about both. */
+function inFlow(node) {
+  return (
+    node.yoga &&
+    !node.isWindow &&
+    node.style.position !== 'absolute' &&
+    node.style.display !== 'none'
+  );
+}
+
+/** Which axis this node lays its children out along. */
+const mainAxisOf = (node) => {
+  const direction = node.style.flexDirection ?? 'column';
+  return direction === 'row' || direction === 'row-reverse'
+    ? 'width'
+    : 'height';
+};
+
+/**
+ * Put the tree in the state a **min-content** measurement means: a node that
+ * has said how small it can be is let go all the way down to it, and a node
+ * that has not cannot give at all, because what it needs is the thing being
+ * measured.
+ *
+ * This is what the layout pass with no room on offer used to get from yoga's
+ * own `flexShrink: 0` default. Now that the default is CSS's `1` (#249) the
+ * pass has to be told, or every node would shrink to nothing and answer that
+ * the content needs no room — which is true of no content anywhere.
+ */
+function setMeasuringShrink(node, axis) {
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow) continue;
+    child.yoga.setFlexShrink(namesOwnFloor(child, axis) ? 1 : 0);
+    // …and not into a `display: 'none'` subtree, which the measurement does
+    // not read and `writeContentFloors` therefore does not walk back through
+    if (child.style.display === 'none') continue;
+    setMeasuringShrink(child, axis);
   }
-  return axisIsMain && (style.flexShrink ?? 0) > 0;
+}
+
+/** …and back to the layout everything else is run from. */
+function restoreShrink(node) {
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow) continue;
+    child.yoga.setFlexShrink(child.style.flexShrink ?? 1);
+    restoreShrink(child);
+  }
 }
 
 /**
@@ -799,20 +861,27 @@ function boundsItsOwnContent(node, axis, axisIsMain) {
  * `display: 'none'` one is not there at all.
  *
  * `intrinsic` carries what the leaves measured to before the pass being read
- * squashed them — see `_measureMinimum`, which is the only caller that needs
- * it. A container that came out at nothing is recovered by looking inside
- * it; a leaf has nothing inside, so it has to be remembered.
+ * squashed them — see `_measureContentSpans`, which is the only caller that
+ * needs it. A container that came out at nothing is recovered by looking
+ * inside it; a leaf has nothing inside, so it has to be remembered.
+ *
+ * `out` collects, for every node on the way, **the extent it contributes to
+ * the box around it** — which is exactly that node's automatic minimum size,
+ * so one pass and one walk give the whole tree its floors (#249) instead of
+ * a measurement per node. The recursion is therefore over all the children,
+ * even the ones whose own content does not count towards this one's: a
+ * scroll pane contributes nothing to the floor above it and still needs
+ * floors written *inside* it, or the column of rows it holds would shrink to
+ * the viewport and there would be nothing left to scroll.
  */
-function contentSpan(node, axis, intrinsic) {
+function contentSpan(node, axis, intrinsic, out) {
   const yoga = node.yoga;
   const horizontal = axis === 'width';
   const own = horizontal ? yoga.getComputedWidth() : yoga.getComputedHeight();
   const [startEdge, endEdge] = horizontal
     ? [Yoga.EDGE_LEFT, Yoga.EDGE_RIGHT]
     : [Yoga.EDGE_TOP, Yoga.EDGE_BOTTOM];
-  const direction = node.style.flexDirection ?? 'column';
-  const rowFirst = direction === 'row' || direction === 'row-reverse';
-  const axisIsMain = rowFirst === horizontal;
+  const axisIsMain = mainAxisOf(node) === axis;
   let start = Infinity;
   let end = -Infinity;
   // What the children after this one were laid out too early by. A node the
@@ -824,19 +893,25 @@ function contentSpan(node, axis, intrinsic) {
     // the same set that joins the flex tree: a nested <window> is laid out
     // by itself, and a <text> span has no box of its own
     if (!child.yoga || child.isWindow) continue;
-    if (child.style.position === 'absolute') continue;
     if (child.style.display === 'none') continue;
+    const span = contentSpan(child, axis, intrinsic, out);
+    const laidOut = horizontal
+      ? child.yoga.getComputedWidth()
+      : child.yoga.getComputedHeight();
+    // What the child needs from this box. A node that has said how small it
+    // can be is taken at its word — the measuring pass already let it shrink
+    // to exactly that — and anything else is asked what is inside it. Its
+    // laid-out size is deliberately *not* a floor under that answer: nothing
+    // shrank in this pass, so a box that measures its own content is sitting
+    // at its **max**-content size, which is the width a label would like to
+    // be rather than the width it can be squeezed to.
+    const extent = declaresOwnMinimum(child, axis) ? laidOut : span;
+    out?.set(child, extent);
+    if (child.style.position === 'absolute') continue;
     const at =
       (horizontal
         ? child.yoga.getComputedLeft()
         : child.yoga.getComputedTop()) + shift;
-    const laidOut = horizontal
-      ? child.yoga.getComputedWidth()
-      : child.yoga.getComputedHeight();
-    let extent = laidOut;
-    if (!boundsItsOwnContent(child, axis, axisIsMain)) {
-      extent = Math.max(extent, contentSpan(child, axis, intrinsic));
-    }
     // Only along the axis the children are packed on: on the other one they
     // all start from the same edge, so nothing follows anything.
     if (axisIsMain) shift += extent - laidOut;
@@ -845,26 +920,93 @@ function contentSpan(node, axis, intrinsic) {
   }
   if (start === Infinity) {
     // A leaf: nothing inside to look at, and what the pass did to it may
-    // have been a stretch rather than a measurement. So it is asked again —
-    // across, for the size its content cannot go below, which for a
-    // paragraph is its longest word; down, for what it measured before the
-    // collapse, since a height at a settled width is not a leaf's to give.
-    const measured = horizontal
-      ? node._measureFn?.(
-          0,
-          Yoga.MEASURE_MODE_AT_MOST,
-          undefined,
-          Yoga.MEASURE_MODE_UNDEFINED,
-        )?.width
-      : intrinsic?.get(node);
-    return Math.max(own, measured ?? 0);
+    // have been a stretch rather than a measurement. So it is asked again.
+    //
+    // **Across**, a leaf that measures itself answers outright: the width it
+    // gives when offered none is its min-content width, which for a
+    // paragraph is its longest word. That *replaces* the laid-out width
+    // rather than joining it in a `max`, because a measured leaf's base size
+    // is its max-content width — the whole line, unwrapped — and taking the
+    // larger of the two would floor every label at the width it would like
+    // to be. A leaf that measures nothing has only its own box to report.
+    //
+    // **Down**, it is what the leaf measured before the collapse squashed
+    // it: a height at a settled width is not a leaf's to give.
+    if (horizontal) {
+      const measured = node._measureFn?.(
+        0,
+        Yoga.MEASURE_MODE_AT_MOST,
+        undefined,
+        Yoga.MEASURE_MODE_UNDEFINED,
+      )?.width;
+      return measured ?? own;
+    }
+    return Math.max(own, intrinsic?.get(node) ?? 0);
   }
   const edges =
     yoga.getComputedPadding(startEdge) +
     yoga.getComputedPadding(endEdge) +
     yoga.getComputedBorder(startEdge) +
     yoga.getComputedBorder(endEdge);
-  return Math.max(own, end - start + edges);
+  return end - start + edges;
+}
+
+/**
+ * Write CSS's **automatic minimum size** onto every flex item under `node`:
+ * a floor of the extent it needs, along the axis its container lays out on,
+ * and restore the `flexShrink` the measurement borrowed on the way past.
+ *
+ * This is the other half of `flexShrink` defaulting to `1` (#249), and
+ * neither half is any good without the other. Yoga implements the shrink and
+ * not the floor, so a default of `1` on its own shrinks everything to
+ * nothing — a scroll pane's content collapses into its viewport and there is
+ * nothing left to scroll — while a default of `0` never squeezes a row into
+ * the space it has. CSS has both, and what makes its `flex-shrink: 1` safe is
+ * that `min-width: auto` on a flex item resolves to the item's min-content
+ * size. That is what this writes.
+ *
+ * Only the **main** axis, as in CSS: shrinking happens along the axis the
+ * container packs on, and on the other one an item is stretched or fits its
+ * content either way.
+ *
+ * Where this deliberately parts company with CSS is a node that named a
+ * size: CSS floors that at `min(the size, the content)`, so a `height: 40`
+ * box with nothing in it still squashes to nothing in a column too short for
+ * it. That rule is survivable on the web because a `<div>` is a *block*
+ * container and its children are not flex items at all; here every box lays
+ * its children out with flex, so it would apply to the whole tree — and a
+ * row of 40px cells silently 8px tall is not what anyone wrote. **A size
+ * that was named is a size that is kept**, and `minHeight: 0` is how an
+ * author says otherwise.
+ *
+ * `mins` is what every node contributes to the box around it, measured in
+ * one pass by `contentSpan`. `floored` collects what was written so the next
+ * measurement can take it back off — a floor left in place would be read
+ * back as content that cannot give, and could then only ratchet upwards.
+ */
+function writeContentFloors(node, axis, mins, floored) {
+  const axisIsMain = mainAxisOf(node) === axis;
+  const own = axis === 'width' ? 'minWidth' : 'minHeight';
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow) continue;
+    child.yoga.setFlexShrink(child.style.flexShrink ?? 1);
+    if (child.style.display === 'none') continue;
+    // A floor of 0 is what yoga does anyway, and an author who named their
+    // own `minWidth`/`minHeight` has already answered — overwriting it would
+    // put a measurement of ours above a number they wrote.
+    const floor = mins.get(child) ?? 0;
+    if (
+      axisIsMain &&
+      inFlow(child) &&
+      floor > 0 &&
+      typeof child.style[own] !== 'number'
+    ) {
+      if (axis === 'width') child.yoga.setMinWidth(floor);
+      else child.yoga.setMinHeight(floor);
+      floored.add(child);
+    }
+    writeContentFloors(child, axis, mins, floored);
+  }
 }
 
 /**
@@ -1086,8 +1228,9 @@ export class Node {
     this._paintOrderCache = null;
     this._hitBoundsCache = null;
     this._syncStyle(props);
-    this.yoga = yoga ? Yoga.Node.create() : null;
+    this.yoga = yoga ? createLayoutNode() : null;
     if (this.yoga) {
+      applyLayoutDefaults(this.yoga);
       applyLayoutStyle(this.yoga, this.style);
       // An element with a size of its own says so by implementing
       // `measureContent`, and the base class is what wires it to layout —
@@ -1159,7 +1302,7 @@ export class Node {
     }
     this._stateful = hasStateStyles(this._baseStyle);
     return this._retarget(
-      resolveScrollContainer(
+      resolveComputedStyle(
         this._stateful
           ? resolveStyleStates(this._baseStyle, this.states)
           : this._baseStyle,
@@ -1260,8 +1403,14 @@ export class Node {
     if (layoutChanged && this.yoga) {
       applyLayoutStyle(this.yoga, this.style, before);
       // a transition on a layout property costs a layout pass per frame —
-      // the author asked for that by transitioning one (docs/styling.md)
-      if (this.root) this.root.needsLayout = true;
+      // the author asked for that by transitioning one (docs/styling.md) —
+      // and a fresh set of content floors with it, since one of the
+      // properties it can be animating is a padding the floors were measured
+      // through
+      if (this.root) {
+        this.root.needsLayout = true;
+        this.root._floorsDirty = true;
+      }
     }
     // A tick writes `this.style` without going through `_retarget`, so it
     // owes the cascade the same notice — and it is the only thing that owes
@@ -1280,7 +1429,7 @@ export class Node {
     if (this.states[name] === on) return;
     this.states[name] = on;
     if (!this._stateful || this.destroyed) return;
-    const next = resolveScrollContainer(
+    const next = resolveComputedStyle(
       resolveStyleStates(this._baseStyle, this.states),
     );
     if (shallowEqual(next, this._targetStyle)) return;
@@ -3309,9 +3458,9 @@ export const Scrollable = (Base) =>
      * reads, and the reason `overflow: 'scroll'` and `overflow: 'hidden'`
      * are now genuinely different things: both clip, only this one scrolls.
      *
-     * The layout defaults that go with it — `flex-basis: 0`, `min-height: 0`,
-     * `flexShrink: 1` — are folded into the resolved style by
-     * `resolveScrollContainer` (styles.js), so they travel through the same
+     * The layout defaults that go with it — `flex-basis: 0`, `min-width: 0`,
+     * `min-height: 0` — are folded into the resolved style by
+     * `resolveComputedStyle` (styles.js), so they travel through the same
      * diff as any other style and come back off when the overflow does.
      */
     isScroller() {
@@ -5648,6 +5797,12 @@ export class WindowNode extends Scrollable(Node) {
     // it moves (see _sendSizeHints for why the size is part of it)
     this._sentHints = null;
     this._sentHintsAt = null;
+    // The automatic minimum size (#249): the nodes carrying a floor this
+    // window measured, whether the floors are still the answer, and the
+    // width the height half of them was measured for.
+    this._floored = new Set();
+    this._floorsDirty = true;
+    this._floorsWidth = null;
   }
 
   /**
@@ -5656,17 +5811,16 @@ export class WindowNode extends Scrollable(Node) {
    * `minHeight` resolves to.
    *
    * One layout pass **with no space on offer at all**, which is the whole
-   * trick — yoga answers it with every node at the smallest size its own
-   * style allows. Nothing shrinks unless the author said it may (yoga
-   * defaults `flexShrink` to 0, and `overflow: 'scroll'` sets it to 1 along
-   * with `minWidth: 0`), text measures at its longest word, and a wrapping
-   * row wraps at every item. `contentSpan` then reads how far that reached.
+   * trick — every node comes out at the smallest size its own style allows,
+   * text measures at its longest word, and a wrapping row wraps at every
+   * item. `contentSpan` then reads how far that reached, recovering a node
+   * the pass squashed by looking inside it.
    *
    * What it deliberately does *not* do is second-guess that layout. A node
-   * that shrank was told it may shrink, so it contributes what it shrank to
-   * and its content stops counting — CSS's `min-width: 0`, Qt's
-   * `QScrollArea`, GTK's `min-content-width`. All three spell the same
-   * escape hatch, and a scroll container gets it here for free.
+   * that said how small it can be — `minWidth: 0`, or an `overflow` that
+   * clips — is taken at its word and its content stops counting. That is
+   * CSS's `min-width: 0`, Qt's `QScrollArea` and GTK's `min-content-width`,
+   * and a scroll container gets it here for free.
    *
    * `forWidth` is the width the height is measured for, and there has to be
    * one: a paragraph's minimum height is a height *for a width*. GTK asks
@@ -5701,7 +5855,7 @@ export class WindowNode extends Scrollable(Node) {
     this.invalidate(true, null, 'direction');
   }
 
-  _measureMinimum(axis, forWidth) {
+  _measureContentSpans(axis, forWidth, out) {
     const yoga = this.yoga;
     const dir = this._rootDirection;
     // The root carries whatever size the last pass pinned on it, and an
@@ -5709,20 +5863,80 @@ export class WindowNode extends Scrollable(Node) {
     yoga.setWidth(undefined);
     yoga.setHeight(undefined);
     if (axis === 'width') {
+      setMeasuringShrink(this, axis);
       yoga.calculateLayout(0, undefined, dir);
-      return Math.ceil(contentSpan(this, axis));
+      return contentSpan(this, axis, undefined, out);
     }
     // Height takes two passes. The first is the tree at its real width with
     // no bound on the height, which is where every leaf reports the height
     // it actually needs there — a wrapped paragraph's is settled by the
-    // width, and no leaf can give any of it back. The second is the one
-    // that collapses, and it squashes a leaf that a `row` stretches: those
-    // are the ones the map above puts back.
+    // width, and no leaf can give any of it back. It runs before the shrink
+    // is borrowed, since the widths it settles are the real ones. The second
+    // is the one that collapses, and it squashes a leaf that a `row`
+    // stretches: those are the ones the map above puts back.
     yoga.calculateLayout(forWidth, undefined, dir);
     const intrinsic = new Map();
     captureLeafHeights(this, intrinsic);
+    setMeasuringShrink(this, axis);
     yoga.calculateLayout(forWidth, 0, dir);
-    return Math.ceil(contentSpan(this, axis, intrinsic));
+    return contentSpan(this, axis, intrinsic, out);
+  }
+
+  _measureMinimum(axis, forWidth) {
+    // Measured from the styles alone, so the floors this window wrote itself
+    // have to come off first: they were derived from this same measurement,
+    // and left in place they would be read back as content the tree cannot
+    // give up — a floor that could only ever ratchet upwards.
+    this._resetContentFloors();
+    const min = measuringExactly(() =>
+      Math.ceil(this._measureContentSpans(axis, forWidth)),
+    );
+    restoreShrink(this);
+    return min;
+  }
+
+  /**
+   * Give every flex item in this window's tree the floor CSS calls its
+   * automatic minimum size, so that `flexShrink`'s default of `1` squeezes a
+   * row into the space it has without squeezing its contents out of
+   * existence. See `writeContentFloors` for what that means and why both
+   * halves are needed.
+   *
+   * Two measurements, in this order because they depend that way round: the
+   * widths from a pass with no room on offer at all, then — with those floors
+   * already applied — the heights at the width the window is about to be laid
+   * out at, since a minimum height is always a height *for a width*.
+   *
+   * Nothing about this is per frame: the floors are content, so they survive
+   * every frame that did not change any (`_floorsDirty`), which is what keeps
+   * a wheel notch to the one layout pass it always was.
+   */
+  _applyContentFloors(width) {
+    if (!this._floorsDirty && this._floorsWidth === width) return;
+    this._resetContentFloors();
+    measuringExactly(() => {
+      const widths = new Map();
+      this._measureContentSpans('width', undefined, widths);
+      writeContentFloors(this, 'width', widths, this._floored);
+      const heights = new Map();
+      this._measureContentSpans('height', width, heights);
+      writeContentFloors(this, 'height', heights, this._floored);
+    });
+    this._floorsDirty = false;
+    this._floorsWidth = width;
+  }
+
+  /** Take the measured floors back off, leaving each node with whatever its
+   *  own style says. */
+  _resetContentFloors() {
+    if (!this._floored.size) return;
+    for (const node of this._floored) {
+      if (node.destroyed || !node.yoga) continue;
+      node.yoga.setMinWidth(node.style.minWidth);
+      node.yoga.setMinHeight(node.style.minHeight);
+    }
+    this._floored.clear();
+    this._floorsDirty = true;
   }
 
   /**
@@ -7143,6 +7357,9 @@ export class WindowNode extends Scrollable(Node) {
       return false;
     }
     this.querySize = { width, height };
+    // a query block may carry layout properties, so the floors measured from
+    // the styles it is replacing are not the answer any more
+    this._floorsDirty = true;
     for (const node of [...this._sizeQueryNodes]) {
       if (node.destroyed) this._sizeQueryNodes.delete(node);
       else node._sizeQueriesChanged();
@@ -7257,7 +7474,15 @@ export class WindowNode extends Scrollable(Node) {
       }
       (this._frameReasons ??= new Set()).add(reason);
     }
-    if (layoutChanged) this.needsLayout = true;
+    if (layoutChanged) {
+      this.needsLayout = true;
+      // The content floors are measured from the tree, so anything that
+      // changed it has to give them up — and **scrolling does not**, which is
+      // the whole reason this is not just `needsLayout`: a scroll moves an
+      // offset applied during `absolutize` and leaves every yoga node exactly
+      // as it was, at input rate, on the biggest trees in any app.
+      if (reason !== 'scroll') this._floorsDirty = true;
+    }
     // A layout change with no bound named repaints everything, because a
     // reflow can move any node and one that moved leaves stale pixels at a
     // rect its new position does not cover. Naming a node alongside
@@ -7355,6 +7580,7 @@ export class WindowNode extends Scrollable(Node) {
     const layoutRan = this.needsLayout;
     if (this.needsLayout) {
       this._resolveSizeQueries(width, height);
+      this._applyContentFloors(width);
       this.yoga.setWidth(width);
       this.yoga.setHeight(height);
       this.yoga.calculateLayout(width, height, this._rootDirection);
