@@ -149,6 +149,10 @@ a drag — and works with other X11 applications as well as inside the app.
 Their presence is what registers the node, so there is nothing else to
 mount: [drag-and-drop.md](drag-and-drop.md).
 
+`selectable` makes an element a **selection surface**: text inside it can be
+dragged over, copied and handed to the PRIMARY selection. See
+[Selecting text](#selecting-text) below.
+
 ---
 
 ## `<window>`
@@ -1030,6 +1034,133 @@ The cost is real: the precise path rasterizes outlines on every draw and
 caches nothing. That is the right trade for text being animated and the
 wrong one for a paragraph that never changes, which is why `auto` is the
 default rather than the other way round.
+
+## Selecting text
+
+_Issue #259._ A label is not selectable, the way `Gtk.Label` is not: a
+desktop application is full of text that is chrome rather than content, and
+a stray drag lighting up a button's caption is noise. Text becomes
+selectable when an element says so.
+
+```jsx
+<box selectable style={{ padding: 12 }}>
+  <text style={{ fontSize: 20, fontWeight: 'bold' }}>Release notes</text>
+  <text>Everything below this heading can be dragged over and copied.</text>
+</box>
+```
+
+That one prop is the whole feature. The element becomes a **surface**: a
+drag inside it selects across every piece of text under it, a double click
+takes a word, a triple click takes a block, Ctrl+A takes the surface and
+Ctrl+C copies it. Releasing the button hands the text to **PRIMARY**, so a
+middle click in a terminal pastes it — which is what selecting text means
+on X11 ([clipboard.md](clipboard.md)).
+
+### What is in a surface
+
+Everything under it that can answer for its own text, in document order.
+`<text>` can; so can any element that implements the accessors in
+[extending.md](extending.md#answering-for-your-own-text) — a terminal, a log
+view, a code editor written outside this package are all selected across by
+the same drag, with no registration call.
+
+What is **not** in it:
+
+- anything under a `selectable={false}`, which is CSS's `user-select: none`.
+  A list's bullets, a table's chrome, a button's caption inside a document;
+- `<textinput>` and `<textarea>`, and any element that says
+  `hasOwnSelection` — they keep their own selection, and a press in one is
+  theirs;
+- the document views (`<markdown>`, `<html>`, `<svg>`, `<tex>`), which draw
+  their text through an ntk widget that exposes no character geometry to us.
+
+### What a copy assembles
+
+The separators come from the **layout**, not from the markup: core cannot
+know that one `<text>` is a table cell and another is a paragraph, and
+asking every application to say so would be a second authoring model for
+something the screen already shows. Two pieces of text sharing a band of
+pixels are joined with a **tab**; one that starts below the last is joined
+with a **newline**. For a table laid out as rows of cells that is exactly
+"cells with tabs, rows with newlines", and for ordinary prose it is one
+paragraph per line.
+
+```jsx
+// copies as "name\tsize\nnotes\t4 kB"
+<box selectable>
+  <box style={{ flexDirection: 'row' }}>
+    <text style={{ width: 120 }}>name</text>
+    <text>size</text>
+  </box>
+  <box style={{ flexDirection: 'row' }}>
+    <text style={{ width: 120 }}>notes</text>
+    <text>4 kB</text>
+  </box>
+</box>
+```
+
+A list marker excluded with `selectable={false}` is absent from the copied
+text as well as from the highlight, which is the point of excluding it.
+
+### The props
+
+| prop                    |                                                                                           |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| `selectable`            | `true` starts a surface; `false` opts a subtree out of the one above it                   |
+| `selectionColor`        | the highlight behind selected text (default: a tint of the theme's accent)                |
+| `onSelectionChange(ev)` | `ev.text` is what a copy would put on the clipboard, `ev.isCollapsed` whether it is empty |
+
+And on the surface's node, through a ref: `selectAll()`, `clearSelection()`,
+`selectedText()`, `setSelection(anchor, focus)` — each end
+`{ node, index }`, indices in code points — and `textSelection`, a snapshot of
+`{ isCollapsed, text, ranges }`.
+
+### One selection, and where the keys go
+
+**Only one selection is visible in an application at a time.** Selecting in
+a document collapses the highlight in the field beside it, and selecting in
+a field clears the document — the two never both claim to be showing the
+selection, which is a rule core holds rather than one every surface has to
+keep. That is also what makes PRIMARY honest: there is one selection on the
+display, so there is one here.
+
+A surface is a **focus target**, because Ctrl+A and Ctrl+C are keystrokes
+and a keystroke has to arrive somewhere. That puts it in the Tab cycle;
+`tabIndex={-1}` takes it back out while leaving it focusable by a press —
+which is the right choice for a document inside a larger UI, and the wrong
+one for a reader whose window is the document.
+
+The pointer shows an I-beam over a surface, the way it does over a field.
+`style={{ cursor: … }}` overrides it as usual.
+
+The selection is reported to assistive technology as it moves: a `<text>`
+already exposed AT-SPI's text interface, and the range a reader has dragged
+across now travels through it ([accessibility.md](accessibility.md#text-controls)).
+
+### The geometry underneath
+
+The selection is built out of four accessors that every drawn node answers,
+and they are public in their own right — a caret rect is what an
+autocomplete popup anchors to (`<popup anchor={{ to, at }}>`), and a hit
+test is how an app turns a click into a character offset:
+
+```js
+const node = paragraphRef.current;
+node.textContent(); // 'Everything below this heading…'
+node.textIndexAt(ev.x, ev.y); // 14 — window coordinates in, a code point out
+node.textCaretRect(14); // { x, y, width: 0, height }
+node.textRangeRects(4, 14); // the bands a highlight over [4, 14) fills
+```
+
+Indices are **code points**, not UTF-16 units, so an emoji is one position.
+Rectangles are in the owning window's coordinates — the same space as
+`abs`, `contentBox()` and a mouse event's `x`/`y`. `textRangeRects` returns
+one band per line _and_ one per direction run inside a line: a range that
+crosses from Latin into Arabic covers two separate stretches of pixels, and
+a single rectangle drawn between two caret positions would paint over text
+nobody selected.
+
+---
 
 ## `<textinput>`
 

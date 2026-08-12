@@ -33,6 +33,7 @@
     "examples:form": "tsx examples/form.jsx",
     "examples:rules": "tsx examples/rules.jsx",
     "examples:richtext": "tsx examples/richtext.jsx",
+    "examples:selection": "tsx examples/selection.jsx",
     "examples:widgets": "tsx examples/widgets.jsx",
     "examples:datepicker": "tsx examples/datepicker.jsx",
     "examples:password": "tsx examples/password.jsx",

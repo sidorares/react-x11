@@ -356,3 +356,45 @@ const _missingData = <sparkline color="red" />;
 registerElement('broken', { drawn: true });
 
 export default Chart;
+
+// issue #259: an element that answers for its own text joins a `selectable`
+// document — the four accessors and the range it paints, nothing else
+class LogViewNode extends Node {
+  constructor(props: Record<string, unknown>, app: never) {
+    super('logview', props, app);
+    // a log view is read-only: the document around it selects across it
+    this.hasOwnSelection = false;
+  }
+
+  textContent(): string {
+    return String(this.props.buffer ?? '');
+  }
+
+  textIndexAt(x: number, y: number): number {
+    const box = this.contentBox();
+    return Math.max(0, Math.round(x - box.x) + Math.round(y - box.y));
+  }
+
+  textCaretRect(index: number): Rect {
+    const box = this.contentBox();
+    return { x: box.x + index * 8, y: box.y, width: 0, height: 16 };
+  }
+
+  textRangeRects(start: number, end: number): Rect[] {
+    const from = this.textCaretRect(start);
+    const to = this.textCaretRect(end);
+    return [
+      { x: from.x, y: from.y, width: to.x - from.x, height: from.height },
+    ];
+  }
+
+  paint(ctx: unknown): void {
+    super.paint(ctx);
+    const range = this.selectionRange;
+    if (!range) return;
+    const fill: string | null = this.selectionColor;
+    void [this.textRangeRects(range.start, range.end), fill];
+  }
+}
+
+void LogViewNode;

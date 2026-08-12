@@ -537,9 +537,15 @@ export function a11yDescription(node) {
  */
 export function isFocusable(node) {
   if (node.props.disabled) return false;
+  // A `selectable` surface is a focus target for the same reason a scroll
+  // pane is: the keys that operate it — Ctrl+A, Ctrl+C — have to arrive
+  // somewhere, and a document nobody can copy from with the keyboard is a
+  // WCAG 2.1.1 failure on the one feature it exists for. `tabIndex={-1}`
+  // keeps it clickable and takes it back out of the Tab cycle.
+  const byDefault =
+    (node.focusableByDefault ?? false) || node.props.selectable === true;
   return (
-    node.props.focusable ??
-    (node.props.tabIndex != null ? true : (node.focusableByDefault ?? false))
+    node.props.focusable ?? (node.props.tabIndex != null ? true : byDefault)
   );
 }
 
@@ -851,7 +857,14 @@ export function textStateOf(node) {
   if (custom) return custom;
   const spans = node.collectSpans?.([]) ?? [];
   const chars = Array.from(spans.map((s) => s.text).join(''));
-  return { chars, caret: 0, selection: [0, 0], preedit: null };
+  // A label has no caret, but it can have a **selection**: a `<text>` inside
+  // a `selectable` surface is part of a document the user drags across
+  // (#259), and that range is the one thing about a label that moves at
+  // runtime. Reporting it is what puts a magnifier's highlight and a braille
+  // display's cursor on the same characters the highlight is painted over.
+  const range = node.selectionRange;
+  const selection = range ? [range.start, range.end] : [0, 0];
+  return { chars, caret: selection[1], selection, preedit: null };
 }
 
 /**

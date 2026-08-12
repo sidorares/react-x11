@@ -73,6 +73,19 @@ import { lastInputTime } from './inputtime.js';
 import { armPasteState, canPaste } from './pastestate.js';
 import { ctrlChordLetter, MOD } from './keysyms.js';
 import {
+  codePointAtOffset,
+  codePoints,
+  codeUnitOffsets,
+  wordBoundary,
+  wordRangeAt,
+} from './textrange.js';
+import {
+  TextSelection,
+  dropVisibleSelection,
+  selectionSurfaceOf,
+  takeVisibleSelection,
+} from './textselection.js';
+import {
   editMenuColors,
   editMenuGeometry,
   editMenuIndexAt,
@@ -198,6 +211,7 @@ const INVALIDATE_REASONS = new Set([
   'animation', // a transition frame
   'scroll', // scrollTo/scrollBy/scrollIntoView, textarea/textinput panning
   'text', // text content, input value or caret editing
+  'selection', // the document selection lit or unlit a range of text
   'content', // async content arrived (image decode, rich-content reflow)
   'measure', // an element said its own size changed (invalidateMeasure)
   'child-list', // children were added, removed or reordered
@@ -1239,6 +1253,15 @@ export class Node {
       // with (#248), without knowing either of them exists.
       if (typeof this.measureContent === 'function') this._useMeasureContent();
     }
+    // the document selection: the state when this element is a `selectable`
+    // surface, and the part of somebody else's that lands on this one
+    this._textSelection = null;
+    this._selRange = null;
+    // an element with a selection of its own — `<textinput>` — whose subtree
+    // a document around it skips whole rather than lighting up half of what
+    // the user is editing
+    this.hasOwnSelection = false;
+    this._syncSelectable(props);
     if (DEV) devCheckA11yProps(this);
   }
 
@@ -1976,6 +1999,10 @@ export class Node {
    * freed by the caller via freeRecursive on the subtree top. */
   destroySubtree() {
     this.destroyed = true;
+    // a surface that goes away takes its selection with it, and the app-wide
+    // claim on being the one showing one goes with it too
+    this._textSelection?.destroy();
+    if (this.hasOwnSelection) dropVisibleSelection(this);
     for (const child of this.children) child.destroySubtree();
   }
 
@@ -2006,6 +2033,8 @@ export class Node {
     if (Boolean(newProps.trapFocus) !== Boolean((oldProps ?? prev).trapFocus)) {
       this._syncFocusScope();
     }
+    // and so does being a selection surface
+    this._syncSelectable(newProps);
     // drop-target registration follows the props edge, like trapFocus
     if (hasDropProps(newProps) !== hasDropProps(oldProps ?? prev)) {
       const root = this.root;
@@ -2627,6 +2656,162 @@ export class Node {
     ));
   }
 
+  // --- the text an element answers for (issue #259) ------------------------
+  //
+  // Four questions, in one index space and one coordinate space: characters
+  // are **code points** (an emoji is one position, not two — the space ntk's
+  // caret API speaks), and rectangles are in the owning window's coordinates,
+  // the same ones `abs`, `contentBox()` and a mouse event's `x`/`y` are in.
+  //
+  // They are what a selection is made of, and the reason they are on `Node`
+  // rather than on `<text>`: the selection service walks a subtree and asks,
+  // so an element that answers them joins a document without core knowing it
+  // exists. The defaults are the honest answers for an element with no text
+  // — a `<box>` has none, and `null` says so rather than claiming an empty
+  // string sits somewhere inside it.
+
+  /** This element's text, or null when it has none — the string the three
+   * accessors below index into. */
+  textContent() {
+    return null;
+  }
+
+  /** The character boundary nearest a point, in window coordinates. Clamps,
+   * so a point past the end of the text answers with the end of it. */
+  textIndexAt(x, y) {
+    return 0;
+  }
+
+  /** Where a caret at this index would stand, in window coordinates — a
+   * zero-width rect from the top of the glyphs to the bottom of them. */
+  textCaretRect(index) {
+    return null;
+  }
+
+  /**
+   * The bands a highlight over `[start, end)` fills, in window coordinates:
+   * one per line, and more than one on a line whose text changes direction
+   * halfway across it. Empty when the range is empty or off the end.
+   */
+  textRangeRects(start, end) {
+    return [];
+  }
+
+  /**
+   * The part of this element's text the document selection covers, as
+   * `{ start, end }` in code points, or null. An element that paints its own
+   * text paints a band under it while this is set — `textRangeRects` gives
+   * the rectangles and `selectionColor` the fill — and that is the whole of
+   * taking part in a selection. `<text>` keeps no more state than this.
+   */
+  get selectionRange() {
+    return this._selRange
+      ? { start: this._selRange.start, end: this._selRange.end }
+      : null;
+  }
+
+  /** What to fill `textRangeRects` with while `selectionRange` is set: the
+   * surface's `selectionColor`, or the theme's accent tinted. */
+  get selectionColor() {
+    return this._selRange?.color ?? null;
+  }
+
+  // --- being a selection surface -------------------------------------------
+
+  /** `selectable` arrived or left. `true` makes this element the surface a
+   * drag inside it selects across; `false` opts its subtree out of the one
+   * above it, and is read where the surface is looked up. */
+  _syncSelectable(props) {
+    const wanted = props.selectable === true;
+    if (wanted === Boolean(this._textSelection)) return;
+    if (wanted) {
+      this._textSelection = new TextSelection(this);
+      // The I-beam is what says the text here can be taken. A surface is
+      // also a focus target — a11y.js reads the same prop — because Ctrl+C
+      // is a keystroke and a keystroke has to arrive somewhere.
+      this.defaultCursor ??= 'text';
+    } else {
+      this._textSelection.destroy();
+      this._textSelection = null;
+      if (this.defaultCursor === 'text') this.defaultCursor = undefined;
+    }
+  }
+
+  /**
+   * The document selection this element owns, or null: a snapshot of
+   * `{ isCollapsed, text, ranges }`, not a live object.
+   *
+   * Named for the text rather than called `selection`, because a base class
+   * that claims a plain noun claims it from every element built on it — and
+   * `this.selection = ...` in a subclass constructor is then a TypeError
+   * against a getter, which is a bad way to find out.
+   */
+  get textSelection() {
+    const selection = this._textSelection;
+    if (!selection) return null;
+    return {
+      isCollapsed: selection.isCollapsed,
+      text: selection.text(),
+      ranges: [...selection.ranges].map(([node, [start, end]]) => ({
+        node,
+        start,
+        end,
+      })),
+    };
+  }
+
+  /** Select everything in this surface, and take PRIMARY with it. */
+  selectAll() {
+    this._textSelection?.selectAll();
+    return this;
+  }
+
+  /** Drop the selection in this surface. PRIMARY is left where it is: the
+   * text stays pasteable, which is what every other X client does. */
+  clearSelection() {
+    this._textSelection?.clear();
+    return this;
+  }
+
+  /** What a copy would put on the clipboard. */
+  selectedText() {
+    return this._textSelection?.text() ?? '';
+  }
+
+  /** Set both ends by hand — `{ node, index }` each, indices in code points.
+   * `setSelection(null)` is `clearSelection()`. */
+  setSelection(anchor, focus = anchor) {
+    this._textSelection?.setSelection(anchor, focus);
+    return this;
+  }
+
+  /** Another surface is showing the app's selection now. */
+  _selectionLost() {
+    this._textSelection?.lost();
+  }
+
+  // The pointer and the keys a selection is made with. They are default
+  // actions on the *base* class because the press lands on whatever is under
+  // the pointer — a `<text>`, an `<image>`, the gap between two paragraphs —
+  // and every one of them has to reach the surface above it. An element that
+  // takes presses of its own overrides these and is, by that alone, not part
+  // of a document; one that wants both calls `super`.
+  defaultMouseDown(ev) {
+    selectionSurfaceOf(this)?.press(ev);
+  }
+
+  defaultMouseDrag(ev) {
+    selectionSurfaceOf(this)?.drag(ev);
+  }
+
+  defaultMouseUp(ev) {
+    selectionSurfaceOf(this)?.release(ev);
+  }
+
+  defaultKeyDown(ev) {
+    this._textSelection?.keyDown(ev);
+  }
+
   paint(ctx) {
     if (this.hidden) return;
     this._paintBackground(ctx);
@@ -2981,6 +3166,93 @@ function halfLeading(layout) {
   return Math.max(0, (layout.height - (last.baseline + last.descent)) / 2);
 }
 
+/** A selected line with nothing on it still shows, so a blank line inside a
+ * selection does not read as the highlight having stopped. */
+const EMPTY_LINE_BAND = 4;
+
+/**
+ * The rectangles a highlight over `[start, end)` code points fills, in the
+ * layout's own coordinates — one per line, and one per **direction run**
+ * inside a line.
+ *
+ * The per-run walk is the whole reason this is not four lines of caret
+ * arithmetic. A selection is contiguous in *logical* order and a line is
+ * laid out in *visual* order, so in "the file مرحبا here" a range that
+ * crosses into the Arabic covers two disjoint stretches of pixels, and a
+ * single rect from one caret x to the other paints over text nobody
+ * selected. Each run is intersected with the range in code units — the space
+ * ntk reports run extents in — and only a boundary falling *inside* a run
+ * costs a `caretPosition`; a fully covered run is its own two edges, which
+ * with the merge below is what keeps a plain paragraph at one rect per line.
+ *
+ * It belongs in ntk's `TextLayout`, beside the private offset table it
+ * rebuilds here. It is here because the selection needs it now.
+ */
+function rangeBands(layout, text, start, end) {
+  const lines = layout.lines;
+  if (!lines?.length || end <= start) return [];
+  const offsets = codeUnitOffsets(text);
+  const last = offsets.length - 1;
+  const from = offsets[Math.max(0, Math.min(start, last))];
+  const to = offsets[Math.max(0, Math.min(end, last))];
+  if (to <= from) return [];
+  const bands = [];
+  for (const line of lines) {
+    if (line.end <= from || line.start >= to) continue;
+    const spans = [];
+    for (const positioned of line.runs) {
+      const a = Math.max(from, positioned.start);
+      const b = Math.min(to, positioned.end);
+      if (b <= a) continue;
+      const rtl = positioned.run?.direction === 'rtl';
+      const near = line.x + positioned.x;
+      const far = near + positioned.width;
+      // a boundary at the run's own logical edge is that edge — which side
+      // of the pixels it is on is what the run's direction decides
+      const edgeAt = (cu, logicalStart) => {
+        if (logicalStart ? cu <= positioned.start : cu >= positioned.end) {
+          return rtl === logicalStart ? far : near;
+        }
+        return layout.caretPosition(codePointAtOffset(offsets, cu)).x;
+      };
+      const x1 = edgeAt(a, true);
+      const x2 = edgeAt(b, false);
+      spans.push([Math.min(x1, x2), Math.max(x1, x2)]);
+    }
+    if (!spans.length) {
+      bands.push({
+        x: line.x,
+        y: line.y,
+        width: EMPTY_LINE_BAND,
+        height: line.height,
+      });
+      continue;
+    }
+    // Runs also split at every style span, so an ordinary line with a bold
+    // word in it is three rectangles that touch. Merging keeps the common
+    // case at one per line.
+    spans.sort((p, q) => p[0] - q[0]);
+    let [left, right] = spans[0];
+    for (let i = 1; i <= spans.length; i++) {
+      const next = spans[i];
+      if (next && next[0] <= right + 0.5) {
+        right = Math.max(right, next[1]);
+        continue;
+      }
+      if (right > left) {
+        bands.push({
+          x: left,
+          y: line.y,
+          width: right - left,
+          height: line.height,
+        });
+      }
+      if (next) [left, right] = next;
+    }
+  }
+  return bands;
+}
+
 /** Raw string/number children of <text>. */
 export class TextChunkNode extends Node {
   constructor(text, app) {
@@ -3244,14 +3516,88 @@ export class TextNode extends Node {
     };
   }
 
-  paintContent(ctx) {
+  /**
+   * The layout as it is on screen: the shaped paragraph, and where its box
+   * sits in the window. One place, because painting and every geometry
+   * question have to agree about it down to the trim — a caret answered from
+   * a differently-placed layout is a caret in the wrong place, and nothing
+   * about it would look like a bug in this function.
+   */
+  _placedLayout() {
     const content = this.contentBox();
     const layout = this._layoutFor(this._wrapWidth(content.width || Infinity));
-    if (!layout) return;
+    if (!layout) return null;
     // the box was shortened from the top, so the glyphs come up with it
     const trim = this._trim(layout);
-    const y = content.y + halfLeading(layout) - (trim ? trim.top : 0);
-    layout.draw(ctx, content.x, y);
+    return {
+      layout,
+      x: content.x,
+      y: content.y + halfLeading(layout) - (trim ? trim.top : 0),
+    };
+  }
+
+  /** The paragraph as one string — what the indices below index into. A
+   * nested `<text>` is a span of this one, so its characters are in here too,
+   * at the position they are written at. */
+  textContent() {
+    return this.collectSpans([])
+      .map((span) => span.text)
+      .join('');
+  }
+
+  textIndexAt(x, y) {
+    const placed = this._placedLayout();
+    if (!placed) return 0;
+    return placed.layout.indexAt(x - placed.x, y - placed.y);
+  }
+
+  textCaretRect(index) {
+    const placed = this._placedLayout();
+    if (!placed) return null;
+    const caret = placed.layout.caretPosition(index);
+    return {
+      x: placed.x + caret.x,
+      y: placed.y + caret.y,
+      width: 0,
+      height: caret.height,
+    };
+  }
+
+  textRangeRects(start, end) {
+    const placed = this._placedLayout();
+    if (!placed) return [];
+    return rangeBands(placed.layout, this.textContent(), start, end).map(
+      (band) => ({
+        x: placed.x + band.x,
+        y: placed.y + band.y,
+        width: band.width,
+        height: band.height,
+      }),
+    );
+  }
+
+  paintContent(ctx) {
+    const placed = this._placedLayout();
+    if (!placed) return;
+    this._paintSelection(ctx);
+    placed.layout.draw(ctx, placed.x, placed.y);
+  }
+
+  /** The band under the glyphs, when a document selection reaches this
+   * paragraph. Drawn from the same accessors a registered element would use,
+   * so the built-in and the custom surface cannot drift apart. */
+  _paintSelection(ctx) {
+    const range = this._selRange;
+    if (!range || range.end <= range.start) return;
+    const rects = [];
+    for (const r of this.textRangeRects(range.start, range.end)) {
+      rects.push(r.x, r.y, r.width, r.height);
+    }
+    if (!rects.length) return;
+    ctx.fillStyle = range.color;
+    // one Render.FillRectangles for the whole highlight, however many lines
+    // and however many direction changes it took (ntk >= 7.6)
+    ctx.fillRects(rects);
   }
 }
 
@@ -3760,6 +4106,14 @@ export const Scrollable = (Base) =>
      * grows past its viewport becomes reachable the moment it does.
      */
     get focusableByDefault() {
+      return this._scrollsWithKeys();
+    }
+
+    /** Is there anything here for the scroll keys to move? Separate from
+     * `focusableByDefault` because a box can now be a focus target for
+     * another reason — a `selectable` document is one (a11y.js) — and a
+     * document that does not scroll must still leave the arrows alone. */
+    _scrollsWithKeys() {
       return this._maxScroll('y') > 0 || this._maxScroll('x') > 0;
     }
 
@@ -3775,7 +4129,7 @@ export const Scrollable = (Base) =>
     defaultKeyDown(ev) {
       // nothing to scroll, nothing to swallow: a plain box must leave the
       // arrows and Page keys to whatever else would answer them
-      if (!this.focusableByDefault) return undefined;
+      if (!this._scrollsWithKeys()) return super.defaultKeyDown(ev);
       const page = Math.max(1, this.abs.height - SCROLL_KEY_PAGE_OVERLAP);
       // Left and Right are the directions on the *screen*, and `scrollX` runs
       // from the start of the content — so which of them moves it forward
@@ -3803,7 +4157,7 @@ export const Scrollable = (Base) =>
         case XK_SPACE:
           return this.scrollBy({ y: ev.shiftKey ? -page : page });
         default:
-          return undefined;
+          return super.defaultKeyDown(ev);
       }
     }
 
@@ -3933,10 +4287,13 @@ export const Scrollable = (Base) =>
         this.scrollBy(bar.axis === 'x' ? { x: delta } : { y: delta });
         return;
       }
+      // no bar under the press: it belongs to whatever is behind the bars,
+      // which for a `selectable` pane is the selection (issue #259)
+      super.defaultMouseDown(ev);
     }
 
     defaultMouseDrag(ev) {
-      if (this._barGrab == null) return;
+      if (this._barGrab == null) return super.defaultMouseDrag(ev);
       const bar = this._scrollbar(this._barGrab.axis);
       if (!bar || bar.travel <= 0) return;
       const at = along(bar, ev.x, ev.y) - this._barGrab.offset - bar.trackStart;
@@ -3945,8 +4302,12 @@ export const Scrollable = (Base) =>
       this.scrollTo(bar.axis === 'x' ? { x: to } : { y: to });
     }
 
-    defaultMouseUp() {
-      this._barGrab = null;
+    defaultMouseUp(ev) {
+      if (this._barGrab != null) {
+        this._barGrab = null;
+        return;
+      }
+      super.defaultMouseUp(ev);
     }
   };
 
@@ -4168,6 +4529,10 @@ export class TextInputNode extends Node {
     super(kind, props, app);
     this.focusableByDefault = true;
     this.defaultCursor = 'text';
+    // a field's selection is its own: a `selectable` document around it does
+    // not get to light up half of what is being typed, and the two take turns
+    // being the one selection on screen (textselection.js)
+    this.hasOwnSelection = true;
     this._value =
       props.defaultValue != null ? String(props.defaultValue) : null;
     // set only while an onChange/onSubmit handler is on the stack — see
@@ -4311,7 +4676,7 @@ export class TextInputNode extends Node {
   }
 
   _chars() {
-    return Array.from(this.value);
+    return codePoints(this.value);
   }
 
   // --- composition ---------------------------------------------------------
@@ -4852,51 +5217,125 @@ export class TextInputNode extends Node {
     }
   }
 
-  /** Click-to-caret: logical code-point index for a window x coordinate. */
-  _indexAtX(x) {
-    const layout = this._valueLayout();
-    if (!layout) return this._chars().length;
-    const content = this.contentBox();
-    return this._valueIndex(layout.indexAt(x - content.x + this._scrollX, 0));
-  }
-
-  /** Click-to-caret for a mouse event (textarea also uses ev.y). */
+  /** Click-to-caret for a mouse event. Both kinds answer it the same way —
+   * through the field's own geometry accessor, which is the one the caret
+   * and the highlight are drawn from. */
   _indexAtPoint(ev) {
-    return this._indexAtX(ev.x);
+    return this.textIndexAt(ev.x, ev.y);
   }
 
   /** Word range around a code-point index (whitespace-delimited). */
   _wordRangeAt(index) {
-    const chars = this._chars();
-    if (chars.length === 0) return [0, 0];
-    let i = Math.min(index, chars.length - 1);
-    const isSpace = (c) => /\s/.test(c);
-    if (isSpace(chars[i]) && i > 0) i--;
-    let a = i;
-    let b = i;
-    while (a > 0 && !isSpace(chars[a - 1])) a--;
-    while (b < chars.length && !isSpace(chars[b])) b++;
-    return [a, b];
+    return wordRangeAt(this._chars(), index);
   }
 
-  /**
-   * Caret index one word away, the way Ctrl+arrow moves in a text editor:
-   * skip any run of non-word characters, then the word itself. Word
-   * characters are letters, digits and underscore, so "foo-bar" is two
-   * words and "foo_bar" is one.
-   */
+  /** Caret index one word away, the way Ctrl+arrow moves in a text editor. */
   _wordBoundary(from, dir) {
-    const chars = this._chars();
-    const isWord = (c) => /[\p{L}\p{N}_]/u.test(c);
-    let i = Math.max(0, Math.min(from, chars.length));
-    if (dir > 0) {
-      while (i < chars.length && !isWord(chars[i])) i++;
-      while (i < chars.length && isWord(chars[i])) i++;
-    } else {
-      while (i > 0 && !isWord(chars[i - 1])) i--;
-      while (i > 0 && isWord(chars[i - 1])) i--;
-    }
-    return i;
+    return wordBoundary(this._chars(), from, dir);
+  }
+
+  // --- geometry (the accessors every text-bearing element answers) --------
+
+  /**
+   * Where a single line of text sits in the field, and the band a mark over
+   * it fills. Centred on the **capitals**, not on the line box and not on
+   * the ink.
+   *
+   * The layout box carries the line's leading entirely below the glyphs, so
+   * centring that pushes the text visually up (see `halfLeading`). Centring
+   * ascent + descent — what this did — fixes the leading but not the
+   * asymmetry underneath it: a font's ascent clears its capitals by
+   * `ascent - capHeight`, which is not its descent, so a single line of
+   * text sits off-centre by a number that belongs to the typeface. At 14px
+   * that is 0.7px of extra space above the capitals in SF NS and 2.5px the
+   * other way in Helvetica — visible in a field, where there is one short
+   * line and a border close on both sides to measure it against.
+   *
+   * So: put the baseline where the space above the capitals equals the
+   * space under it. A `<text>` says the same thing as `textBoxTrim`, but a
+   * field cannot trim its box — the caret and the selection are measured
+   * against the full line box — so it moves the line instead, and the marks
+   * follow because they are derived from the same origin.
+   */
+  _lineMetrics(layout, content, style) {
+    const line = layout.lines?.[0];
+    const inkHeight = line ? line.ascent + line.descent : layout.height;
+    const ascent = line?.ascent ?? 0;
+    const capHeight = this.app?.fonts
+      ?.match?.(style.family, {
+        weight: style.weight,
+        style: style.style,
+      })
+      ?.metrics?.(style.size)?.capHeight;
+    const textY =
+      capHeight && line
+        ? content.y + (content.height + capHeight) / 2 - ascent
+        : content.y + Math.max(0, (content.height - inkHeight) / 2);
+    // selection/caret read better with breathing room around the glyphs
+    // (a DOM input highlights the whole line box, not just the ink)
+    const markPad = Math.min(3, Math.max(0, textY - content.y));
+    return {
+      textY,
+      markY: textY - markPad,
+      markHeight: inkHeight + markPad * 2,
+      inkHeight,
+    };
+  }
+
+  /** The value's layout and where it is drawn, in window coordinates. The
+   * placeholder is not in it: the accessors answer about the text the field
+   * holds, and an empty field holds none. */
+  _placedValue() {
+    const layout = this._valueLayout();
+    if (!layout) return null;
+    const content = this.contentBox();
+    const metrics = this._lineMetrics(
+      layout,
+      content,
+      this.resolvedTextStyle(),
+    );
+    return { layout, x: content.x - this._scrollX, y: metrics.textY };
+  }
+
+  /** The value. The indices below are into this string, in code points — an
+   * open composition is spliced into what is *drawn* and never into what the
+   * field holds, so it is not in here either. */
+  textContent() {
+    return this.value;
+  }
+
+  textIndexAt(x, y) {
+    const placed = this._placedValue();
+    if (!placed) return this._chars().length;
+    return this._valueIndex(placed.layout.indexAt(x - placed.x, y - placed.y));
+  }
+
+  textCaretRect(index) {
+    const placed = this._placedValue();
+    if (!placed) return null;
+    const caret = placed.layout.caretPosition(this._displayIndex(index));
+    return {
+      x: placed.x + caret.x,
+      y: placed.y + caret.y,
+      width: 0,
+      height: caret.height,
+    };
+  }
+
+  textRangeRects(start, end) {
+    const placed = this._placedValue();
+    if (!placed) return [];
+    return rangeBands(
+      placed.layout,
+      this._displayValue(),
+      this._displayIndex(start),
+      this._displayIndex(end),
+    ).map((band) => ({
+      x: placed.x + band.x,
+      y: placed.y + band.y,
+      width: band.width,
+      height: band.height,
+    }));
   }
 
   defaultMouseDown(ev) {
@@ -4968,7 +5407,22 @@ export class TextInputNode extends Node {
 
   _ownSelection() {
     this._repaint();
-    if (this._caret !== this._anchor) this._copySelection('PRIMARY');
+    if (this._caret === this._anchor) return;
+    // Whatever else on screen was showing a selection stops: the highlight
+    // is a single-owner thing across the whole app, the way PRIMARY is
+    // across the whole display (issue #259).
+    takeVisibleSelection(this);
+    this._copySelection('PRIMARY');
+  }
+
+  /** Another surface took the visible selection. Collapse, rather than only
+   * stop drawing: two lit ranges on one screen is the state this exists to
+   * prevent, and a field that kept its own would light it up again the next
+   * time it was focused. */
+  _selectionLost() {
+    if (this._caret === this._anchor) return;
+    this._anchor = this._caret;
+    this._repaint();
   }
 
   /** The selection stays lit while its own menu is up: the popup holds the
@@ -4987,7 +5441,7 @@ export class TextInputNode extends Node {
   defaultMouseUp() {
     if (!this._dragging) return;
     this._dragging = false;
-    if (this._caret !== this._anchor) this._copySelection('PRIMARY');
+    this._ownSelection();
   }
 
   // --- the built-in edit menu -----------------------------------------
@@ -5273,41 +5727,11 @@ export class TextInputNode extends Node {
       ? (this.props.placeholderColor ?? this.theme.dim)
       : style.color;
     const layout = fonts.layout([{ text: shown, ...style, color }], style);
-    // Centre on the **capitals**, not on the line box and not on the ink.
-    //
-    // The layout box carries the line's leading entirely below the glyphs, so
-    // centring that pushes the text visually up (see `halfLeading`). Centring
-    // ascent + descent — what this did — fixes the leading but not the
-    // asymmetry underneath it: a font's ascent clears its capitals by
-    // `ascent - capHeight`, which is not its descent, so a single line of
-    // text sits off-centre by a number that belongs to the typeface. At 14px
-    // that is 0.7px of extra space above the capitals in SF NS and 2.5px the
-    // other way in Helvetica — visible in a field, where there is one short
-    // line and a border close on both sides to measure it against.
-    //
-    // So: put the baseline where the space above the capitals equals the
-    // space under it. A `<text>` says the same thing as `textBoxTrim`, but a
-    // field cannot trim its box — the caret and the selection are measured
-    // against the full line box — so it moves the line instead, and the marks
-    // below follow because they are derived from the same origin.
-    const line = layout.lines?.[0];
-    const inkHeight = line ? line.ascent + line.descent : layout.height;
-    const ascent = line?.ascent ?? 0;
-    const capHeight = fonts
-      .match?.(style.family, {
-        weight: style.weight,
-        style: style.style,
-      })
-      ?.metrics?.(style.size)?.capHeight;
-    const textY =
-      capHeight && line
-        ? content.y + (content.height + capHeight) / 2 - ascent
-        : content.y + Math.max(0, (content.height - inkHeight) / 2);
-    // selection/caret read better with breathing room around the glyphs
-    // (a DOM input highlights the whole line box, not just the ink)
-    const markPad = Math.min(3, Math.max(0, textY - content.y));
-    const markY = textY - markPad;
-    const markHeight = inkHeight + markPad * 2;
+    const { textY, markY, markHeight } = this._lineMetrics(
+      layout,
+      content,
+      style,
+    );
 
     // Keep the caret inside the viewport — but only while the field is being
     // edited. The caret starts at the *end* of the value, so chasing it
@@ -5510,13 +5934,15 @@ export class TextAreaNode extends TextInputNode {
     if (newProps.rows !== before.rows) this.invalidateMeasure('props');
   }
 
-  _indexAtPoint(ev) {
+  /** The wrapped value flows from the top of the content box, scrolled —
+   * there is no single line to centre, so none of `_lineMetrics` applies.
+   * Everything written against this (`textIndexAt`, `textCaretRect`,
+   * `textRangeRects`, click-to-caret) needs no override. */
+  _placedValue() {
     const layout = this._valueLayout();
-    if (!layout) return this._chars().length;
+    if (!layout) return null;
     const content = this.contentBox();
-    return this._valueIndex(
-      layout.indexAt(ev.x - content.x, ev.y - content.y + this._scrollY),
-    );
+    return { layout, x: content.x, y: content.y - this._scrollY };
   }
 
   /** How far the wrapped text reaches past the viewport. The measurement a

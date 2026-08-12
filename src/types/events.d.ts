@@ -261,6 +261,21 @@ export interface DropTargetProps<T = DrawnNode> {
  * when nothing did — a paste resolving, an undo, a value the parent pushed
  * back. Guard it.
  */
+/**
+ * The document selection in a `selectable` element changed — a drag, a
+ * double click, Ctrl+A, or a `selectAll()` from code. Not a pointer event:
+ * it reports state, and the gesture that moved it has already been
+ * dispatched as one.
+ */
+export interface SelectionChangeEvent<T = DrawnNode> {
+  type: 'selectionChange';
+  target: T;
+  currentTarget: T;
+  /** The selected text, assembled the way a copy would assemble it. */
+  text: string;
+  isCollapsed: boolean;
+}
+
 export interface ChangeEvent<T = TextInputNode> extends Omit<
   SyntheticEvent<T>,
   'nativeEvent'

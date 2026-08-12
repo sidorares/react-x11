@@ -15,6 +15,7 @@ import type {
 import type { AnchorOptions } from './components.js';
 import type {
   ChangeEvent,
+  SelectionChangeEvent,
   ClientMessageEvent,
   EventHandlers,
   MouseEvent,
@@ -179,8 +180,38 @@ export interface A11yProps {
 }
 
 export interface DrawnProps<T = DrawnNode>
-  extends CommonProps, InteractionProps, A11yProps, EventHandlers<T> {
+  extends
+    CommonProps,
+    InteractionProps,
+    A11yProps,
+    SelectionProps<T>,
+    EventHandlers<T> {
   ref?: Ref<T>;
+}
+
+/**
+ * Selecting read-only text. `selectable` on an element makes it the surface
+ * a drag inside it selects across — see
+ * [elements.md](elements.md#selecting-text).
+ */
+export interface SelectionProps<T = DrawnNode> {
+  /**
+   * `true` makes this element a selection surface: a drag across the text
+   * inside it selects, double and triple clicks take a word and a block,
+   * Ctrl+A and Ctrl+C work, and a release takes PRIMARY. It also makes the
+   * element a focus target, so the keys have somewhere to arrive —
+   * `tabIndex={-1}` keeps it out of the Tab cycle.
+   *
+   * `false` opts a subtree out of the surface above it, the way CSS's
+   * `user-select: none` does: a list's bullets, a table's chrome, a button
+   * inside a document.
+   */
+  selectable?: boolean;
+  /** The highlight behind selected text. Defaults to a tint of the theme's
+   * accent, which keeps the ink's own contrast intact on any palette. */
+  selectionColor?: Color;
+  /** The selection in this surface changed. */
+  onSelectionChange?: (ev: SelectionChangeEvent<T>) => void;
 }
 
 // --- windows ---------------------------------------------------------------

@@ -3,7 +3,8 @@
 - [elements.md](elements.md) — the host elements: `<window>`, `<popup>`,
   `<box>`, `<text>`, `<textinput>`, `<textarea>`, `<image>`, `<canvas>`,
   `<foreign>`, and the rich-content wrappers `<markdown>`, `<html>`,
-  `<svg>`, `<tex>`, their props and refs.
+  `<svg>`, `<tex>`, their props and refs — including
+  [selecting read-only text](elements.md#selecting-text) with `selectable`.
 - [styling.md](styling.md) — the `style` prop: layout and paint properties,
   `:hover`/`:focus`/`:active`/`:disabled` blocks, transitions, theme tokens,
   window size queries, `createStyles`.

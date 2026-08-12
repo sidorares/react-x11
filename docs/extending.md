@@ -182,6 +182,102 @@ called with `2` when a glyph can have moved and `1` when only the ink or the
 glyph rounding did. The default re-measures on the first and repaints on the
 second, which is right for most elements.
 
+### Answering for your own text
+
+_Issue #259._ An element that draws text can also let the user **select**
+it. There is no registration call and no list of blessed kinds: a
+`selectable` ancestor walks its subtree and asks every node four questions,
+and an element that answers them is part of the document.
+
+```js
+class LogViewNode extends Node {
+  // the string the three below index into — null (the default) means
+  // "this element has no text", which is the honest answer for a <box>
+  textContent() {
+    return this.lines.join('\n');
+  }
+
+  // window coordinates in, a code-point index out. Clamp: a point past the
+  // end of the text is the end of the text, which is what a drag into the
+  // margin depends on
+  textIndexAt(x, y) {
+    return this._layout().indexAt(x - this._originX(), y - this._originY());
+  }
+
+  // where a caret at that index stands: a zero-width rect, glyph top to
+  // glyph bottom
+  textCaretRect(index) {
+    const caret = this._layout().caretPosition(index);
+    return {
+      x: this._originX() + caret.x,
+      y: this._originY() + caret.y,
+      width: 0,
+      height: caret.height,
+    };
+  }
+
+  // and the bands a highlight over [start, end) fills
+  textRangeRects(start, end) {
+    /* one per line — see below */
+  }
+
+  paint(ctx) {
+    super.paint(ctx);
+    // the range the document selection has claimed of *this* element's
+    // text, pushed down whenever it moves. Paint it under the glyphs.
+    const range = this.selectionRange;
+    if (range) {
+      ctx.fillStyle = this.selectionColor;
+      const rects = [];
+      for (const r of this.textRangeRects(range.start, range.end)) {
+        rects.push(r.x, r.y, r.width, r.height);
+      }
+      ctx.fillRects(rects);
+    }
+    this._layout().draw(ctx, this._originX(), this._originY());
+  }
+}
+```
+
+**Two spaces, and both are the ones already in use.** Indices are **code
+points** — the space ntk's `TextLayout.caretPosition`/`indexAt` speak, so an
+emoji is one position and not two — and rectangles are in the **owning
+window's** coordinates, the same as `abs`, `contentBox()` and a mouse
+event's `x`/`y`. An element that answers in its own local coordinates is one
+whose highlight is drawn somewhere else on the screen.
+
+**Answer from what you draw.** `<text>` computes its layout and its origin
+in one place and uses it for painting and for all four accessors, because a
+caret answered from a differently-placed layout is a caret in the wrong
+place and nothing about it looks like a bug in the accessor. If your element
+scrolls, the origin has the scroll offset in it — that is what makes a hit
+test right after the user has scrolled.
+
+**One band per line, and one per direction run.** A selection is contiguous
+in _logical_ order and a line is laid out in _visual_ order, so a range that
+crosses from Latin into Arabic covers two disjoint stretches of pixels. If
+you are drawing with ntk's `TextLayout`, walk `line.runs` and intersect each
+one with the range rather than filling from one caret x to the other;
+`<text>` does this and `test/text-selection.test.js` pins it.
+
+**Say if you own a selection of your own.** An element that edits — anything
+with a caret the user moves — sets `hasOwnSelection = true` in its
+constructor. A `selectable` document then skips its subtree whole and never
+takes its presses, which is what keeps a `<textinput>` inside a document
+from having half of it lit by somebody else's drag.
+
+**Presses arrive through the base class.** `Node`'s `defaultMouseDown`,
+`defaultMouseDrag`, `defaultMouseUp` and `defaultKeyDown` hand the gesture
+to the nearest `selectable` ancestor, so an element that only draws needs to
+write none of them. An element that overrides one and does not call `super`
+has taken that gesture for itself — right for an editor, and the reason a
+drawing element that wants both should end its handler with
+`super.defaultMouseDown(ev)`.
+
+Everything about the surface side — what a copy assembles, what the
+separators are, which keys are bound — is in
+[elements.md](elements.md#selecting-text).
+
 ### A size of your own
 
 `<box>` is as big as its style and its children say; a gauge, a chart, a
