@@ -550,6 +550,72 @@ When the drawing changes its own extent — a line was typed, rows arrived —
 say so the way any other layout change is said, with
 `this.invalidate(true, this, 'scroll')`; the next pass asks again.
 
+#### Scrolling the pixels, not just the offset
+
+`scrollBy` moves a number; nobody moves pixels. For a drawing that is cheap
+to redraw, that is the end of it — `paintContent` runs again at the new
+offset and the frame is correct. For one that is expensive per row and
+already lives in a retained buffer — a terminal grid, a log view, a minimap,
+a chart that pans — a scroll changes almost nothing: the band that stays
+visible is the same pixels, one shift away. A `Surface` can move that band
+itself, server-side:
+
+```js
+import { Node, Scrollable } from 'react-x11/node';
+import { Surface } from 'react-x11/ntk';
+
+class GridNode extends Scrollable(Node) {
+  ensureSurface(width, height) {
+    if (this.surface?.width === width && this.surface?.height === height)
+      return;
+    this.surface?.destroy();
+    this.surface = new Surface(this.app, { width, height });
+    this.drawRows(this.visibleRows()); // a new buffer starts transparent
+  }
+
+  scrollBy(by) {
+    const from = this.scrollY;
+    super.scrollBy(by);
+    // ask *after*: the scroller clamped it to the extent you reported
+    const dy = from - this.scrollY;
+    if (!dy || !this.surface) return;
+    const all = {
+      x: 0,
+      y: 0,
+      width: this.surface.width,
+      height: this.surface.height,
+    };
+    if (this.surface.copyWithin(all, 0, dy)) this.drawRows(this.exposedBy(dy));
+    else this.drawRows(this.visibleRows());
+  }
+
+  paintContent(ctx) {
+    const box = this.contentBox();
+    ctx.drawImage(this.surface, box.x, box.y);
+  }
+
+  destroySubtree() {
+    this.surface?.destroy();
+    super.destroySubtree();
+  }
+}
+```
+
+`copyWithin(src, dx, dy)` shifts `src` (`{x, y, width, height}`, in surface
+coordinates) in place by an integer delta and answers **whether anything
+survived** — `false` means repaint the lot, which is the branch a fresh
+buffer, a jump to the far end and a resize all take. It is one `CopyArea`
+inside the pixmap: nothing crosses the wire but the request, the overlap is
+safe, and no exposure events come back.
+
+Two things it lines up with. The deltas you are handed are already whole
+pixels — the sub-pixel carry described above exists so that a shift is
+always expressible — so an element scrolling this way never has a fraction
+to round. And `<box overflow="scroll">` has been doing the window-side half
+of this without being asked: a pure scroll of one viewport blits the
+surviving band inside ntk's backing pixmap rather than repainting it. This
+is that optimisation, for a buffer you retained yourself.
+
 ### Drawing once instead of every frame
 
 A drawing that does not change between frames does not have to be redrawn
@@ -641,7 +707,7 @@ not create. Three things it has to do that a GL surface does not:
 | `react-x11/host`    | `registerElement`, `unregisterElement`, `registeredElements`, `hostTypes`, `knownElements`, `drawnKinds` |
 | `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                         |
 | `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary               |
-| `react-x11/ntk`     | ntk itself, re-exported                                                                                  |
+| `react-x11/ntk`     | ntk itself, re-exported — `Surface`, `Path2D`, `Image`, `Pixmap`, the font sources, `createClient`       |
 | `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                     |
 
 **Reach ntk through `react-x11/ntk`, not a second dependency.** Two copies
