@@ -81,7 +81,7 @@ export function Radio({ value, children, label, disabled = false }) {
   // itself — see Checkbox, both for the three-look treatment and for why
   // this is React state rather than an `:active` block.
   const fill = disabled
-    ? theme.dim
+    ? theme.textMuted
     : pressed
       ? theme.accentActive
       : hover
@@ -110,11 +110,11 @@ export function Radio({ value, children, label, disabled = false }) {
           borderColor: selected
             ? fill
             : pressed || hover
-              ? theme.dim
+              ? theme.textMuted
               : focused
                 ? theme.borderFocus
                 : theme.border,
-          backgroundColor: pressed ? theme.surfaceActive : theme.background,
+          backgroundColor: pressed ? theme.surfaceActive : theme.surface,
           alignItems: 'center',
           justifyContent: 'center',
         },
@@ -130,7 +130,7 @@ export function Radio({ value, children, label, disabled = false }) {
         }),
     ),
     labelContent(children ?? label, {
-      color: disabled ? theme.dim : theme.text,
+      color: disabled ? theme.textMuted : theme.text,
     }),
   );
 }

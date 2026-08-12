@@ -23,7 +23,7 @@ import { createStyles, Switch, Table } from '../../src/index.js';
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 16, gap: 10 },
   head: { fontSize: 18, color: '$text' },
-  hint: { fontSize: 11, color: '$dim' },
+  hint: { fontSize: 11, color: '$textMuted' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
   split: { flexDirection: 'row', gap: 12, flexGrow: 1, minHeight: 0 },
   card: {

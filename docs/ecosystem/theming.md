@@ -31,28 +31,51 @@ it a theme _generator_ rather than a swatch book.
 Because every scale has identical structure, one function produces any
 light/dark pairing.
 
+Radix's ladder and the token set line up almost step for step: 1–2 are the
+`background`, 3–5 are the `surface` and its hover, 6–8 the `border`, 9–10 the
+solid fills, 11–12 the ink.
+
 ```jsx
-import { slate, slateDark, grass, grassDark } from '@radix-ui/colors';
+import {
+  slate,
+  slateDark,
+  grass,
+  grassDark,
+  red,
+  redDark,
+  green,
+  greenDark,
+  amber,
+  amberDark,
+  blue,
+  blueDark,
+} from '@radix-ui/colors';
 import { ThemeProvider, Button } from 'react-x11';
 
-function radixTheme({ gray, accent }, dark = false) {
+// step 11 is the readable-on-its-own-background text step of every scale,
+// which is exactly what a status colour has to be here: ink as well as fill
+const ink = (scale) => Object.values(scale)[10];
+
+function radixTheme({ gray, accent, status }) {
   const g = Object.values(gray);
   const a = Object.values(accent);
   return {
-    canvas: g[0],
-    panel: g[1],
-    background: g[2],
+    background: g[0],
+    surface: g[2],
     text: g[11],
-    dim: g[10],
+    textMuted: g[10],
     border: g[6],
     borderFocus: a[7],
     accent: a[8],
     accentHover: a[9],
-    accentText: dark ? g[11] : '#ffffff',
     hoverBackground: a[8],
-    hoverText: '#ffffff',
     surfaceHover: g[3],
     track: g[5],
+    danger: ink(status.red),
+    dangerHover: Object.values(status.red)[11],
+    success: ink(status.green),
+    warning: ink(status.amber),
+    info: ink(status.blue),
     radius: 6,
     radiusSmall: 4,
     borderWidth: 1,
@@ -62,23 +85,39 @@ function radixTheme({ gray, accent }, dark = false) {
   };
 }
 
-const light = radixTheme({ gray: slate, accent: grass });
-const dark = radixTheme({ gray: slateDark, accent: grassDark }, true);
+const status = { red, green, amber, blue };
+const statusDark = {
+  red: redDark,
+  green: greenDark,
+  amber: amberDark,
+  blue: blueDark,
+};
+const light = radixTheme({ gray: slate, accent: grass, status });
+const dark = radixTheme({
+  gray: slateDark,
+  accent: grassDark,
+  status: statusDark,
+});
 
-<window theme={light} style={{ backgroundColor: '$canvas' }}>
-  <ThemeProvider value={light}>
+<ThemeProvider value={light}>
+  <window>
     <Button primary>OK</Button>
-  </ThemeProvider>
-</window>;
+  </window>
+</ThemeProvider>;
 ```
 
 - The dark scales are _separate exports_ (`slateDark`, not `slate.dark`).
 - `Object.values()` ordering relies on the package's insertion order
   (`blue1`…`blue12`). It holds in 3.0.0, but indexing by key
   (``accent[`${name}9`]``) is sturdier if the scale name is handy.
-- Steps 9 and 10 of some scales — yellow, lime, amber, sky, mint — are light
-  enough that `accentText: '#ffffff'` fails contrast. Pick per scale, or
-  compute it with [colord](#colord).
+- Nothing here names `accentText`, `hoverText` or any of the `…Text` four:
+  each is derived from the fill it goes on as the more legible of this
+  palette's `text` and `background`. That is what used to bite here — steps 9
+  and 10 of yellow, lime, amber, sky and mint are light enough that a
+  hard-coded `'#ffffff'` label fails contrast on them, and now the ratio
+  decides. Name one to overrule it.
+- The window needs no `backgroundColor`: with no style of its own it paints
+  `background`, which is the ground this palette just named.
 - The alpha variants (`slateA`) are `#rrggbbaa`, which parses fine, but
   remember a translucent widget composites against the window background, not
   against whatever is behind the window.
@@ -109,11 +148,10 @@ function catppuccinTheme(flavor, accent = 'mauve') {
   );
   const onAccent = flavor.dark ? c.crust : c.base;
   return {
-    canvas: c.base,
-    panel: c.mantle,
-    background: c.surface0,
+    background: c.base,
+    surface: c.surface0,
     text: c.text,
-    dim: c.subtext0,
+    textMuted: c.subtext0,
     border: c.surface1,
     borderFocus: c[accent],
     accent: c[accent],
@@ -123,6 +161,13 @@ function catppuccinTheme(flavor, accent = 'mauve') {
     hoverText: onAccent,
     surfaceHover: c.surface1,
     track: c.surface2,
+    // the four are named colours here, which is the whole appeal of this
+    // package: `red` means the same thing in every flavour
+    danger: c.red,
+    dangerHover: c.maroon,
+    success: c.green,
+    warning: c.yellow,
+    info: c.sapphire,
     radius: 6,
     radiusSmall: 4,
     borderWidth: 1,
@@ -157,9 +202,10 @@ single seed colour into complete light and dark schemes. It is the only
 package here that _generates_ a coherent scheme from one input, which is
 exactly the shape `<window theme>` wants.
 
-M3 roles map nearly 1:1 onto the theme shape: `surface → background`,
-`onSurface → text`, `outlineVariant → border`, `primary → accent`,
-`onPrimary → accentText`.
+M3 roles map nearly 1:1 onto the theme shape: `background → background`,
+`surface → surface`, `onSurface → text`, `outlineVariant → border`,
+`primary → accent`, `onPrimary → accentText` — and `error`, which is the one
+status colour M3 defines, is `danger`.
 
 ```jsx
 import {
@@ -174,11 +220,10 @@ function materialTheme(scheme) {
     Object.entries(scheme.toJSON()).map(([k, v]) => [k, hexFromArgb(v)]),
   );
   return {
-    canvas: c.background,
-    panel: c.surfaceVariant,
-    background: c.surface,
+    background: c.background,
+    surface: c.surface,
     text: c.onSurface,
-    dim: c.onSurfaceVariant,
+    textMuted: c.onSurfaceVariant,
     border: c.outlineVariant,
     borderFocus: c.primary,
     accent: c.primary,
@@ -187,6 +232,8 @@ function materialTheme(scheme) {
     hoverBackground: c.primary,
     hoverText: c.onPrimary,
     surfaceHover: c.surfaceVariant,
+    danger: c.error,
+    dangerText: c.onError,
     track: c.outlineVariant,
     radius: 8,
     radiusSmall: 4,
@@ -224,9 +271,14 @@ A tiny immutable colour-manipulation library: parse, `darken`/`lighten`/
 `contrast()` and `isReadable()`.
 
 The theme shape wants colours no palette ships — `accentHover`,
-`surfaceHover`, and the right `accentText` for an arbitrary accent. colord
-answers all three in a line each, which turns any single brand colour into a
-complete theme without hand-tuning.
+`surfaceHover`, a `dangerHover`. colord answers each in a line, which turns
+a single brand colour into a complete theme without hand-tuning.
+
+The `…Text` inks are the one thing you no longer need it for: `resolveTheme`
+already picks the more legible of the palette's own `text` and `background`
+for every fill that has one. The version below is still worth reading as the
+explicit form — and it is what to write when the two candidates the palette
+happens to hold are not the two you want.
 
 ```jsx
 import { colord, extend } from 'colord';
@@ -328,11 +380,10 @@ import OP from 'open-props';
 const rem = (s) => Math.round(parseFloat(s) * 16); // '1.1rem' -> 18
 
 const theme = {
-  canvas: OP['--gray-0'],
-  panel: OP['--gray-1'],
-  background: OP['--gray-1'],
+  background: OP['--gray-0'],
+  surface: OP['--gray-1'],
   text: OP['--gray-9'],
-  dim: OP['--gray-6'],
+  textMuted: OP['--gray-6'],
   border: OP['--gray-3'],
   borderFocus: OP['--indigo-7'],
   accent: OP['--indigo-7'],
@@ -342,6 +393,11 @@ const theme = {
   hoverText: '#ffffff',
   surfaceHover: OP['--gray-2'],
   track: OP['--gray-3'],
+  danger: OP['--red-8'],
+  dangerHover: OP['--red-9'],
+  success: OP['--green-8'],
+  warning: OP['--yellow-9'],
+  info: OP['--blue-8'],
   radius: parseInt(OP['--radius-2']),
   radiusSmall: parseInt(OP['--radius-1']),
   borderWidth: 1,
@@ -360,7 +416,7 @@ const theme = {
 - Key names include the `--` prefix, so it is bracket access everywhere;
   camelCase aliases exist too (`OP.gray0`).
 - Unlike Radix there are no separate dark scales — a dark theme is your own
-  key-picking (`--gray-12` canvas, `--gray-9` borders).
+  key-picking (`--gray-12` background, `--gray-9` borders).
 
 ## `tailwindcss/colors` {#tailwind-colors}
 
@@ -387,11 +443,10 @@ import { formatHex } from 'culori';
 const hex = (c) => formatHex(c); // 'oklch(54.6% …)' -> '#155dfc'
 
 const theme = {
-  canvas: hex(colors.slate[50]),
-  panel: hex(colors.slate[100]),
-  background: hex(colors.slate[100]),
+  background: hex(colors.slate[50]),
+  surface: hex(colors.slate[100]),
   text: hex(colors.slate[900]),
-  dim: hex(colors.slate[500]),
+  textMuted: hex(colors.slate[500]),
   border: hex(colors.slate[300]),
   borderFocus: hex(colors.blue[600]),
   accent: hex(colors.blue[600]),
@@ -401,6 +456,11 @@ const theme = {
   hoverText: '#ffffff',
   surfaceHover: hex(colors.slate[200]),
   track: hex(colors.slate[300]),
+  danger: hex(colors.red[600]),
+  dangerHover: hex(colors.red[700]),
+  success: hex(colors.green[700]),
+  warning: hex(colors.amber[700]),
+  info: hex(colors.blue[700]),
   radius: 6,
   radiusSmall: 4,
   borderWidth: 1,

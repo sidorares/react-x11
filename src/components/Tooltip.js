@@ -74,7 +74,7 @@ const AUTO_MARGIN = 8;
  * in the content and a `useTheme()` in it describe the surface the content
  * is actually on.
  *
- * `dim` is derived rather than swapped, because the palette's own is a mid
+ * `textMuted` is derived rather than swapped, because the palette's own is a mid
  * grey chosen against the *app's* background. Mixing the bubble's ink
  * towards its surface lands on the muted version of whichever ink this
  * turned out to be.
@@ -93,8 +93,13 @@ const BUBBLE_CONTENT = Object.freeze({
 function invertedSurface(theme) {
   return {
     background: theme.text,
+    // The bubble is both at once for what is inside it: there is nothing
+    // raised off a tooltip, and a card in one that reached for `$surface`
+    // would otherwise take the *app's* surface and light up.
+    surface: theme.text,
     text: theme.background,
-    dim: interpolate(theme.background, theme.text, MUTED) ?? theme.dim,
+    textMuted:
+      interpolate(theme.background, theme.text, MUTED) ?? theme.textMuted,
     border:
       interpolate(theme.background, theme.text, BORDERISH) ?? theme.border,
   };

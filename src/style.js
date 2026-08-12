@@ -20,6 +20,8 @@ export {
   resolveSizeQueries,
   resolveQueries,
   interpolate,
+  tint,
+  readableInk,
   transitionFor,
   ease,
   EMPTY_STYLE,

@@ -29,7 +29,7 @@ const s = createStyles({
   window: { backgroundColor: '$surfaceHover' },
   sidebar: {
     flexGrow: 1,
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
     paddingTop: 12,
     paddingBottom: 12,
   },
@@ -40,7 +40,12 @@ const s = createStyles({
     paddingRight: 12,
     paddingBottom: 8,
   },
-  hint: { fontSize: 11, color: '$dim', paddingLeft: 12, paddingRight: 12 },
+  hint: {
+    fontSize: 11,
+    color: '$textMuted',
+    paddingLeft: 12,
+    paddingRight: 12,
+  },
   spacer: { flexGrow: 1 },
   content: {
     flexGrow: 1,
@@ -58,9 +63,9 @@ const s = createStyles({
     flexShrink: 0,
     backgroundColor: '$background',
   },
-  statusText: { fontSize: 11, color: '$dim' },
+  statusText: { fontSize: 11, color: '$textMuted' },
   treePanel: { flexGrow: 1, minHeight: 0, padding: 12, gap: 8 },
-  treeHint: { fontSize: 11, color: '$dim', flexShrink: 0 },
+  treeHint: { fontSize: 11, color: '$textMuted', flexShrink: 0 },
 });
 
 // The strip lives in the sidebar and the panel on the other side of the

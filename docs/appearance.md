@@ -187,7 +187,7 @@ those a light surface explicitly, as
 palette onto a whole document theme is its own piece of work.
 
 `<tex>` does follow: a formula is a single ink, so it takes one step beyond
-`dim` towards `text` — darker than the prose around it on a light palette,
+`textMuted` towards `text` — darker than the prose around it on a light palette,
 lighter on a dark one, without being told which it is. `style={{ color }}`
 still wins.
 

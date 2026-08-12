@@ -4,18 +4,22 @@
 //
 // They are impressions of the platforms rather than pixel-exact copies —
 // enough to show that the theme carries *shape* as well as colour, which is
-// most of what separates one platform's controls from another's. `canvas`
-// and `panel` are the demo's own tokens, resolved through the `theme` prop
-// as `$canvas` / `$panel`; the rest are what the widgets read.
+// most of what separates one platform's controls from another's.
+//
+// Every key here is a token the widgets read. This demo used to carry two of
+// its own — `canvas` for the window's ground and `panel` for the cards on it
+// — because the palette had one `background` and all three platforms want
+// two: GitHub's `#f6f8fa` controls on white, macOS's white sheets on grey.
+// That is what `background` (the ground) and `surface` (what is raised off
+// it) are now, so the demo's own tokens are gone.
 
 /** GitHub's Primer: square-ish, roomy, green primary buttons. */
 const github = {
   light: {
-    canvas: '#ffffff',
-    panel: '#f6f8fa',
-    background: '#f6f8fa',
+    background: '#ffffff',
+    surface: '#f6f8fa',
     text: '#1f2328',
-    dim: '#656d76',
+    textMuted: '#656d76',
     border: '#d0d7de',
     borderFocus: '#0969da',
     accent: '#1f883d',
@@ -33,11 +37,10 @@ const github = {
     paddingY: 10,
   },
   dark: {
-    canvas: '#0d1117',
-    panel: '#161b22',
-    background: '#21262d',
+    background: '#0d1117',
+    surface: '#21262d',
     text: '#e6edf3',
-    dim: '#8b949e',
+    textMuted: '#8b949e',
     border: '#30363d',
     borderFocus: '#1f6feb',
     accent: '#238636',
@@ -59,11 +62,10 @@ const github = {
 /** macOS: softer greys, tighter type, the system blue. */
 const macos = {
   light: {
-    canvas: '#ececec',
-    panel: '#ffffff',
-    background: '#ffffff',
+    background: '#ececec',
+    surface: '#ffffff',
     text: '#000000',
-    dim: '#8e8e93',
+    textMuted: '#8e8e93',
     border: '#c6c6c8',
     borderFocus: '#007aff',
     accent: '#007aff',
@@ -81,11 +83,10 @@ const macos = {
     paddingY: 9,
   },
   dark: {
-    canvas: '#1e1e1e',
-    panel: '#2c2c2e',
-    background: '#3a3a3c',
+    background: '#1e1e1e',
+    surface: '#3a3a3c',
     text: '#ffffff',
-    dim: '#98989d',
+    textMuted: '#98989d',
     border: '#48484a',
     borderFocus: '#0a84ff',
     accent: '#0a84ff',
@@ -107,11 +108,10 @@ const macos = {
 /** Windows 11 / Fluent: tighter corners, flatter surfaces. */
 const windows = {
   light: {
-    canvas: '#f3f3f3',
-    panel: '#ffffff',
-    background: '#ffffff',
+    background: '#f3f3f3',
+    surface: '#ffffff',
     text: '#1b1b1b',
-    dim: '#5d5d5d',
+    textMuted: '#5d5d5d',
     border: '#d1d1d1',
     borderFocus: '#0067c0',
     accent: '#0067c0',
@@ -129,11 +129,10 @@ const windows = {
     paddingY: 10,
   },
   dark: {
-    canvas: '#202020',
-    panel: '#2b2b2b',
-    background: '#323232',
+    background: '#202020',
+    surface: '#323232',
     text: '#ffffff',
-    dim: '#a0a0a0',
+    textMuted: '#a0a0a0',
     border: '#3d3d3d',
     borderFocus: '#4cc2ff',
     accent: '#4cc2ff',

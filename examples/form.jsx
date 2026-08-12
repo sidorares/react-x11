@@ -74,7 +74,7 @@ export function FormPanel() {
           borderRadius: '$radius',
           borderWidth: '$borderWidth',
           borderColor: '$border',
-          backgroundColor: '$background',
+          backgroundColor: '$surface',
         }}
       />
 
@@ -97,7 +97,7 @@ export function FormPanel() {
       </box>
 
       <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <text style={{ color: '$dim' }}>size</text>
+        <text style={{ color: '$textMuted' }}>size</text>
         <Slider
           min={12}
           max={32}
@@ -105,7 +105,7 @@ export function FormPanel() {
           onChange={(ev) => setSize(ev.value)}
           style={{ flexGrow: 1 }}
         />
-        <text style={{ color: '$dim' }}>{String(size)}</text>
+        <text style={{ color: '$textMuted' }}>{String(size)}</text>
       </box>
 
       <box style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>

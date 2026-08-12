@@ -427,13 +427,13 @@ function App() {
               ? 'The menu is in the panel — right-click here'
               : 'Right-click anywhere below the bar'}
           </text>
-          <text style={{ color: '$dim' }}>
+          <text style={{ color: '$textMuted' }}>
             last choice: <text style={{ color: '$accent' }}>{last}</text>
           </text>
-          <text style={{ color: '$dim' }}>
+          <text style={{ color: '$textMuted' }}>
             wrap lines: {wrap ? 'on' : 'off'}
           </text>
-          <text style={{ color: '$dim' }}>
+          <text style={{ color: '$textMuted' }}>
             Extremes → Large menu items:{' '}
             <text style={{ color: '$accent' }}>
               {large
@@ -441,11 +441,11 @@ function App() {
                 : 'off'}
             </text>
           </text>
-          <text style={{ color: '$dim' }}>
+          <text style={{ color: '$textMuted' }}>
             File → Open/Save runs a real dialog, on this machine's{' '}
             <text style={{ color: '$accent' }}>{backend}</text> backend
           </text>
-          <text style={{ color: '$dim' }}>
+          <text style={{ color: '$textMuted' }}>
             menu bar:{' '}
             <text style={{ color: '$accent' }}>
               {inPanel ? "the desktop's panel" : 'drawn in this window'}

@@ -308,7 +308,7 @@ export function PasswordInput({
       ),
       height: box.height,
       seed: shapeSeed,
-      color: disabled ? theme.dim : theme.text,
+      color: disabled ? theme.textMuted : theme.text,
       length,
     };
     if (drawMask) drawMask(ctx, info);
@@ -347,7 +347,7 @@ export function PasswordInput({
           borderWidth: theme.borderWidth,
           borderRadius: theme.radius,
           borderColor: focused ? theme.borderFocus : theme.border,
-          backgroundColor: disabled ? theme.surfaceHover : theme.background,
+          backgroundColor: disabled ? theme.surfaceHover : theme.surface,
         },
         style,
       ],
@@ -393,7 +393,7 @@ export function PasswordInput({
             },
           })
         : length === 0
-          ? h('text', { style: { color: theme.dim } }, placeholder)
+          ? h('text', { style: { color: theme.textMuted } }, placeholder)
           : h('canvas', {
               // `onDraw` is a plain prop compared by identity, so a fresh
               // closure each render is what repaints the mask — and it
@@ -402,7 +402,7 @@ export function PasswordInput({
               style: { flexGrow: 1, height: lineHeight },
             }),
     ),
-    capsLock && !showing && h(CapsGlyph, { color: theme.dim }),
+    capsLock && !showing && h(CapsGlyph, { color: theme.textMuted }),
     revealable &&
       !disabled &&
       h(
@@ -427,7 +427,7 @@ export function PasswordInput({
         h(Icon, {
           name: showing ? 'eyeOff' : 'eye',
           size: EYE,
-          color: disabled ? theme.border : theme.dim,
+          color: disabled ? theme.border : theme.textMuted,
         }),
       ),
   );

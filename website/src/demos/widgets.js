@@ -13,7 +13,8 @@ import {
 } from 'react-x11';
 
 const macos = {
-  background: '#ffffff', text: '#1d1d1f', dim: '#8e8e93', border: '#d2d2d7',
+  background: '#ececec', surface: '#ffffff', text: '#1d1d1f',
+  textMuted: '#8e8e93', border: '#d2d2d7',
   accent: '#0a84ff', accentHover: '#0060df', accentText: '#ffffff',
   surfaceHover: '#f2f2f7', hoverBackground: '#0a84ff', hoverText: '#ffffff',
   track: '#e5e5ea', borderFocus: '#0a84ff',

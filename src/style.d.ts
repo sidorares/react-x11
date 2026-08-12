@@ -68,6 +68,19 @@ export function resolveQueries(
 ): StyleProperties;
 
 export function interpolate(from: unknown, to: unknown, t: number): unknown;
+/**
+ * A colour at a given opacity — the way to build a status *panel* out of a
+ * status colour: `tint(theme.danger, 0.12)` is a wash of it that the ink on
+ * top keeps its own contrast against, where an opaque tint would have to
+ * have been chosen against an ink it does not own.
+ */
+export function tint(color: string, alpha: number): string;
+/**
+ * Which of `inks` can be read on `fill` — the highest WCAG contrast ratio.
+ * The palette derives `accentText` and the status inks with this; an app
+ * choosing ink for a fill of its own can use the same rule.
+ */
+export function readableInk(fill: string, inks: string[]): string;
 export function transitionFor(
   style: StyleProperties,
   prop: string,

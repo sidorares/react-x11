@@ -18,15 +18,15 @@ import {
 const s = createStyles({
   panel: { flexGrow: 1, padding: 16, gap: 14 },
   heading: { fontSize: 20, color: '$text' },
-  hint: { fontSize: 11, color: '$dim' },
+  hint: { fontSize: 11, color: '$textMuted' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  label: { color: '$dim', width: 110 },
+  label: { color: '$textMuted', width: 110 },
   value: { color: '$text' },
   card: {
     borderWidth: 1,
     borderColor: '$border',
     borderRadius: 6,
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
     padding: 12,
     gap: 10,
   },

@@ -27,7 +27,7 @@ import {
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 10, gap: 8 },
   head: { fontSize: 15, color: '$text' },
-  hint: { fontSize: 10, color: '$dim' },
+  hint: { fontSize: 10, color: '$textMuted' },
   cols: { flexDirection: 'row', gap: 8, flexGrow: 1, minHeight: 0 },
   col: { flexGrow: 1, flexBasis: 0, minWidth: 0, minHeight: 0, gap: 8 },
   // The fixed column deliberately does *not* reuse `col`: flexBasis wins over

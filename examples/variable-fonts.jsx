@@ -90,7 +90,7 @@ const s = createStyles({
   header: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   title: { fontSize: 16, fontWeight: 600, color: '$text' },
   spacer: { flexGrow: 1 },
-  dim: { fontSize: 12, color: '$dim' },
+  dim: { fontSize: 12, color: '$textMuted' },
   card: {
     backgroundColor: '$surfaceHover',
     borderWidth: 1,
@@ -103,11 +103,11 @@ const s = createStyles({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   axisName: { width: 150 },
   axisTag: { fontSize: 13, color: '$text', fontWeight: 500 },
-  axisLabel: { fontSize: 11, color: '$dim' },
+  axisLabel: { fontSize: 11, color: '$textMuted' },
   value: { width: 58, fontSize: 13, color: '$text' },
-  range: { width: 96, fontSize: 11, color: '$dim' },
+  range: { width: 96, fontSize: 11, color: '$textMuted' },
   code: {
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
     borderWidth: 1,
     borderColor: '$border',
     borderRadius: 6,

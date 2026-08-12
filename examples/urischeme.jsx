@@ -34,12 +34,12 @@ const APP_ID = 'com.example.myapp';
 const s = createStyles({
   root: { flexDirection: 'column', padding: 14, gap: 10, flexGrow: 1 },
   heading: { color: '$text', fontSize: 14 },
-  dim: { color: '$dim', fontSize: 11 },
+  dim: { color: '$textMuted', fontSize: 11 },
   panel: {
     flexDirection: 'column',
     gap: 4,
     padding: 10,
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
     borderColor: '$track',
     borderWidth: 1,
     borderRadius: 6,

@@ -46,10 +46,10 @@ export const EDIT_MENU_COLORS = {
 export function editMenuColors(theme) {
   if (!theme) return EDIT_MENU_COLORS;
   return {
-    background: theme.background ?? EDIT_MENU_COLORS.background,
+    background: theme.surface ?? EDIT_MENU_COLORS.background,
     border: theme.border ?? EDIT_MENU_COLORS.border,
     text: theme.text ?? EDIT_MENU_COLORS.text,
-    dim: theme.dim ?? EDIT_MENU_COLORS.dim,
+    dim: theme.textMuted ?? EDIT_MENU_COLORS.dim,
     highlight: theme.hoverBackground ?? EDIT_MENU_COLORS.highlight,
     highlightText: theme.hoverText ?? EDIT_MENU_COLORS.highlightText,
     separator: theme.track ?? EDIT_MENU_COLORS.separator,

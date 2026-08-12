@@ -17,7 +17,7 @@ import { createStyles, Slider } from '../../src/index.js';
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 16, gap: 12 },
   head: { fontSize: 18, color: '$text' },
-  hint: { fontSize: 11, color: '$dim' },
+  hint: { fontSize: 11, color: '$textMuted' },
   row: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
   col: { flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 8 },
   card: {

@@ -20,7 +20,7 @@ import {
 function Row({ label, children, alignItems = 'center' }) {
   return (
     <box style={{ flexDirection: 'row', alignItems: alignItems, gap: 12 }}>
-      <text style={{ color: '$dim', width: 90 }}>{label}</text>
+      <text style={{ color: '$textMuted', width: 90 }}>{label}</text>
       {children}
     </box>
   );
@@ -63,6 +63,42 @@ export function WidgetsPanel() {
         </Tooltip>
         <Button disabled>Disabled</Button>
         <text style={{ color: '$text' }}>{`${presses}×`}</text>
+      </Row>
+
+      {/* The status family (issue #258). A destructive button is a `Button`
+          with the `danger` ramp instead of the accent one — the widget takes
+          the style last, so naming the three states is the whole of it.
+          The label is written out as a `<text>` because `Button` colours a
+          string child itself, and the ink on a status fill is the palette's
+          `$dangerText` — derived from the fill, so it stays legible if the
+          theme moves the red. */}
+      <Row label="Status">
+        <Button
+          style={{
+            backgroundColor: '$danger',
+            borderColor: '$danger',
+            ':hover': {
+              backgroundColor: '$dangerHover',
+              borderColor: '$dangerHover',
+            },
+            ':active': {
+              backgroundColor: '$dangerActive',
+              borderColor: '$dangerActive',
+            },
+          }}
+          onPress={() => setPresses(0)}
+        >
+          <text style={{ color: '$dangerText', textBoxTrim: 'cap-alphabetic' }}>
+            Delete
+          </text>
+        </Button>
+        {/* and the same four colours as *ink*, which is what a validation
+            message or a badge is: each clears 4.5:1 on the palette's ground,
+            so nothing here needs a fill to be legible */}
+        <text style={{ color: '$success' }}>Saved</text>
+        <text style={{ color: '$warning' }}>Check the date</text>
+        <text style={{ color: '$info' }}>Draft</text>
+        <text style={{ color: '$danger' }}>Could not save</text>
       </Row>
 
       <Row label="Checkbox">
@@ -115,7 +151,7 @@ export function WidgetsPanel() {
           <ProgressBar aria-label="Download" value={progress} />
         </box>
         <text
-          style={{ color: '$dim' }}
+          style={{ color: '$textMuted' }}
         >{`${Math.round(progress * 100)}%`}</text>
       </Row>
 
@@ -137,7 +173,7 @@ export function WidgetsPanel() {
             borderRadius: 4,
             borderWidth: 1,
             borderColor: '$border',
-            backgroundColor: '$background',
+            backgroundColor: '$surface',
           }}
         />
       </Row>
@@ -161,7 +197,7 @@ export function WidgetsPanel() {
               borderRadius: 4,
               borderWidth: 1,
               borderColor: '$border',
-              backgroundColor: '$background',
+              backgroundColor: '$surface',
             }}
           />
           <box

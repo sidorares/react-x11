@@ -62,10 +62,12 @@ function SwatchCard({ swatch }) {
         />
         <box style={{ gap: 1 }}>
           <text style={{ color: '$text', fontSize: 13 }}>{swatch.name}</text>
-          <text style={{ color: '$dim', fontSize: 11 }}>{swatch.hex}</text>
+          <text style={{ color: '$textMuted', fontSize: 11 }}>
+            {swatch.hex}
+          </text>
         </box>
       </box>
-      <text style={{ color: '$dim', fontSize: 11 }}>{swatch.use}</text>
+      <text style={{ color: '$textMuted', fontSize: 11 }}>{swatch.use}</text>
     </box>
   );
 }
@@ -77,7 +79,7 @@ function UsageCard({ used }) {
     <box style={{ flexGrow: 1, padding: 10, gap: 7, justifyContent: 'center' }}>
       <text style={{ color: '$text', fontSize: 13 }}>Scratch volume</text>
       <ProgressBar value={used} />
-      <text style={{ color: '$dim', fontSize: 11 }}>
+      <text style={{ color: '$textMuted', fontSize: 11 }}>
         {`${Math.round(used * 100)}% of 240 GB used`}
       </text>
     </box>
@@ -87,7 +89,7 @@ function UsageCard({ used }) {
 function Row({ label, children }) {
   return (
     <box style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-      <text style={{ color: '$dim', width: 92 }}>{label}</text>
+      <text style={{ color: '$textMuted', width: 92 }}>{label}</text>
       {children}
     </box>
   );
@@ -101,7 +103,7 @@ function Panel() {
     <box style={{ flexGrow: 1, padding: 18, gap: 16 }}>
       <box style={{ gap: 3 }}>
         <text style={{ fontSize: 19, color: '$text' }}>Tooltips</text>
-        <text style={{ fontSize: 12, color: '$dim' }}>
+        <text style={{ fontSize: 12, color: '$textMuted' }}>
           {composited
             ? 'compositing: rounded, with an arrow'
             : 'no compositor: square and opaque, no arrow'}
@@ -178,7 +180,7 @@ function Panel() {
             }}
           >
             <text style={{ color: '$text' }}>/scratch</text>
-            <text style={{ color: '$dim', fontSize: 12 }}>
+            <text style={{ color: '$textMuted', fontSize: 12 }}>
               {`${Math.round(used * 100)}%`}
             </text>
           </box>
@@ -186,7 +188,7 @@ function Panel() {
       </Row>
 
       <box style={{ flexGrow: 1 }} />
-      <text style={{ fontSize: 11, color: '$dim' }}>
+      <text style={{ fontSize: 11, color: '$textMuted' }}>
         Move the window against a screen edge to watch “auto” change its mind.
       </text>
     </box>

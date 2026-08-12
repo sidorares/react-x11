@@ -98,7 +98,9 @@ function TaskRow({ task }) {
         backgroundColor: hover ? '$surfaceHover' : '$background',
       }}
     >
-      <text style={{ color: task.done ? '$dim' : '$text' }}>{task.label}</text>
+      <text style={{ color: task.done ? '$textMuted' : '$text' }}>
+        {task.label}
+      </text>
     </Checkbox>
   );
 }
@@ -157,7 +159,7 @@ export function TasksPanel() {
           ))}
         </box>
 
-        <text style={{ color: '$dim' }}>
+        <text style={{ color: '$textMuted' }}>
           {String(remaining)} remaining — click or Tab + Space to toggle, wheel
           to scroll, drag an edge to meet the floor
         </text>

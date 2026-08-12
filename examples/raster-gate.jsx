@@ -221,7 +221,7 @@ function Cell({ index, value, gaugeHeight, gaugeSvg }) {
         backgroundColor: '$background',
       }}
     >
-      <text style={{ fontSize: 11, color: '$dim' }}>{`#${index}`}</text>
+      <text style={{ fontSize: 11, color: '$textMuted' }}>{`#${index}`}</text>
       {kind === 0 && <Gauge value={value} height={gaugeHeight} />}
       {kind === 1 && (
         <Slider value={Math.round(value * 100)} min={0} max={100} />
@@ -337,7 +337,7 @@ function useChurn(running, windowRef) {
 function Field({ label, children }) {
   return (
     <box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-      <text style={{ color: '$dim', fontSize: 12 }}>{label}</text>
+      <text style={{ color: '$textMuted', fontSize: 12 }}>{label}</text>
       {children}
     </box>
   );

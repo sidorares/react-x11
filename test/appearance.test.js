@@ -808,12 +808,12 @@ describe('the palette reaches what has no style of its own', () => {
       );
       await settle();
       const input = app.windows[0]._reactX11Node.children[0];
-      seen.push([input.theme.accent, input.theme.dim]);
+      seen.push([input.theme.accent, input.theme.textMuted]);
       await cleanup();
     }
     assert.deepEqual(seen, [
-      [DefaultTheme.accent, DefaultTheme.dim],
-      [DarkTheme.accent, DarkTheme.dim],
+      [DefaultTheme.accent, DefaultTheme.textMuted],
+      [DarkTheme.accent, DarkTheme.textMuted],
     ]);
   });
 });

@@ -193,12 +193,12 @@ const s = createStyles({
     paddingLeft: 12,
     paddingRight: 12,
     height: 30,
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
   },
   title: { fontSize: 12, color: '$text', width: 84 },
-  hint: { fontSize: 11, color: '$dim' },
+  hint: { fontSize: 11, color: '$textMuted' },
   ctl: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  ctlLabel: { fontSize: 11, color: '$dim' },
+  ctlLabel: { fontSize: 11, color: '$textMuted' },
   ctlValue: { fontSize: 11, color: '$text', width: 30 },
   // The viewport: it takes the space the header leaves and lets the wall
   // overflow it. `overflow: 'scroll'` supplies the `flex-basis: 0` and the

@@ -158,7 +158,7 @@ function App() {
         {/* <image> decodes PNG/JPEG through ntk and uploads once; with only
             one dimension given it keeps the aspect ratio */}
         <image src={PICTURE} style={{ height: 64, borderRadius: 4 }} />
-        <text style={{ color: '$dim' }}>
+        <text style={{ color: '$textMuted' }}>
           {
             '<image> — PNG/JPEG, sized by the layout, uploaded to the server once'
           }

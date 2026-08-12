@@ -409,7 +409,7 @@ export function Table({
                       ? 'chevronUp'
                       : 'chevronDown',
                   size: SORT_MARK,
-                  color: theme.dim,
+                  color: theme.textMuted,
                   style: s.sortMark,
                 }),
             ),

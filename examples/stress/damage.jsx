@@ -28,9 +28,9 @@ import { Button, createStyles, Slider, Switch } from '../../src/index.js';
 const s = createStyles({
   panel: { flexGrow: 1, minHeight: 0, padding: 12, gap: 8 },
   head: { fontSize: 16, color: '$text' },
-  hint: { fontSize: 11, color: '$dim' },
+  hint: { fontSize: 11, color: '$textMuted' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 },
-  label: { fontSize: 11, color: '$dim' },
+  label: { fontSize: 11, color: '$textMuted' },
   grid: {
     flexGrow: 1,
     minHeight: 0,

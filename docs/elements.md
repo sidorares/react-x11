@@ -1425,7 +1425,7 @@ const chevron = (ctx, { width: w, height: h }) => {
   style={{
     width: 12,
     height: 12,
-    color: '$dim',
+    color: '$textMuted',
     ':disabled': { color: '$border' },
   }}
 />;

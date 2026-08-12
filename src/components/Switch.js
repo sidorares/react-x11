@@ -103,10 +103,12 @@ export function Switch({
         },
         !disabled && {
           ':hover': {
-            backgroundColor: checked ? theme.accentHover : theme.dim,
+            backgroundColor: checked ? theme.accentHover : theme.textMuted,
           },
           ':active': {
-            backgroundColor: checked ? theme.accentActive : theme.dimActive,
+            backgroundColor: checked
+              ? theme.accentActive
+              : theme.textMutedActive,
           },
         },
         style,
@@ -117,7 +119,7 @@ export function Switch({
         s.thumb,
         {
           start: checked ? THUMB_ON : THUMB_OFF,
-          backgroundColor: theme.background,
+          backgroundColor: theme.surface,
         },
       ],
     }),

@@ -1600,7 +1600,7 @@ export class Node {
    * the top of the tree the palette's.
    *
    * The ink, the face and the size travel down the tree the way they do in
-   * CSS: `<box style={{ color: theme.dim, fontSize: 12 }}>` is how a caption
+   * CSS: `<box style={{ color: theme.textMuted, fontSize: 12 }}>` is how a caption
    * block, a disabled row or a code panel is written, and it is what makes
    * `color` on a row reach the row's label without the row handing it over.
    * Only the properties in `INHERITED_TEXT_PROPS` travel; a style property on
@@ -5786,7 +5786,7 @@ export class TextInputNode extends Node {
     const isEmpty = text.length === 0;
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
     const color = isEmpty
-      ? (this.props.placeholderColor ?? this.theme.dim)
+      ? (this.props.placeholderColor ?? this.theme.textMuted)
       : style.color;
     const layout = fonts.layout([{ text: shown, ...style, color }], style);
     const { textY, markY, markHeight } = this._lineMetrics(
@@ -5977,7 +5977,7 @@ export class TextAreaNode extends TextInputNode {
     const shown = isEmpty ? (this.props.placeholder ?? '') : text;
     const s = this.resolvedTextStyle();
     const color = isEmpty
-      ? (this.props.placeholderColor ?? this.theme.dim)
+      ? (this.props.placeholderColor ?? this.theme.textMuted)
       : s.color;
     const width = this.contentBox().width || undefined;
     const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}`;

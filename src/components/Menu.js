@@ -332,7 +332,7 @@ function MenuRow({
   const dim = !isEnabled(item);
   const submenu = hasSubmenu(item);
   const accelerator = formatShortcut(item.shortcut);
-  const rowInk = dim ? theme.dim : active ? theme.hoverText : theme.text;
+  const rowInk = dim ? theme.textMuted : active ? theme.hoverText : theme.text;
   if (process.env.NODE_ENV !== 'production') checkShortcut(item);
   return h(
     'box',
@@ -407,7 +407,9 @@ function MenuRow({
     accelerator &&
       h(
         'text',
-        { style: [capTrim, { fontSize }, !active && { color: theme.dim }] },
+        {
+          style: [capTrim, { fontSize }, !active && { color: theme.textMuted }],
+        },
         accelerator,
       ),
     submenu &&
@@ -419,7 +421,7 @@ function MenuRow({
         // stands as tall as its box, so `MENU_ICON_SIZE` would put an arrow
         // beside the label taller than the label.
         size: capBand(fontSize),
-        style: !active && { color: theme.dim },
+        style: !active && { color: theme.textMuted },
       }),
   );
 }
@@ -591,7 +593,7 @@ function MenuLevel({
       // was, and the list box's rounding is gated off to match.
       transparent: true,
       style: {
-        backgroundColor: theme.background,
+        backgroundColor: theme.surface,
         '@supports transparency': { backgroundColor: 'transparent' },
       },
     },
@@ -606,7 +608,7 @@ function MenuLevel({
           padding: MENU_PAD,
           borderWidth: MENU_BORDER,
           borderColor: theme.border,
-          backgroundColor: theme.background,
+          backgroundColor: theme.surface,
           '@supports transparency': { borderRadius: theme.radiusPopup },
         },
       },
@@ -1205,7 +1207,7 @@ export function MenuBar({
             // the base colour that says so. The menu opens on the release,
             // so `:active` is the whole of the answer to a held press.
             openIndex !== index && {
-              ':hover': { backgroundColor: theme.background },
+              ':hover': { backgroundColor: theme.surface },
               ':active': { backgroundColor: theme.surfaceActive },
             },
           ],

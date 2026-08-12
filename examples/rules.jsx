@@ -46,10 +46,10 @@ import {
 // `<ThemeProvider value={LIGHT} dark={DARK}>` layers the dark one on when the
 // desktop is dark, so this follows the machine the way the widgets do.
 //
-// Four of the design's colours are the *standard* tokens — `text`, `dim`,
-// `border`, `background` — because that is what they are, and naming them
-// privately would mean a sheet whose ink and a `Select` whose ink were two
-// different decisions that happened to agree. What stays private is what the
+// Four of the design's colours are the *standard* tokens — `text`,
+// `textMuted`, `border`, `background` — because that is what they are, and
+// naming them privately would mean a sheet whose ink and a `Select` whose ink
+// were two different decisions that happened to agree. What stays private is what the
 // design actually adds: the sheet under the rows, the bracket rail, the
 // true/false chips, the drop target.
 //
@@ -61,7 +61,7 @@ const LIGHT = {
   // the standard four, which the built-in widgets read too
   background: '#ffffff',
   text: '#18181b',
-  dim: '#71717a',
+  textMuted: '#71717a',
   border: '#e4e4e7',
   // this design's own
   page: '#ffffff',
@@ -94,7 +94,7 @@ const LIGHT = {
 const DARK = {
   background: '#1f1f23',
   text: '#f4f4f5',
-  dim: '#a1a1aa',
+  textMuted: '#a1a1aa',
   border: '#3f3f46',
   page: '#18181b',
   row: '#232327',
@@ -496,7 +496,7 @@ const s = createStyles({
     cursor: 'pointer',
     ':hover': { borderColor: '$faint' },
   },
-  joinText: { fontSize: 12, color: '$dim' },
+  joinText: { fontSize: 12, color: '$textMuted' },
 
   // the grey capsule a rule or an action lives in
   row: {
@@ -555,8 +555,8 @@ const s = createStyles({
     borderRadius: 10,
     backgroundColor: '$rowLocked',
   },
-  word: { color: '$dim', fontSize: 14 },
-  lockedWord: { color: '$dim', fontSize: 14 },
+  word: { color: '$textMuted', fontSize: 14 },
+  lockedWord: { color: '$textMuted', fontSize: 14 },
 
   handle: {
     width: 20,

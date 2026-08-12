@@ -32,7 +32,7 @@ const s = createStyles({
     flexGrow: 1,
     paddingTop: 16,
     gap: 14,
-    backgroundColor: '$canvas',
+    backgroundColor: '$background',
     transition: { backgroundColor: 180 },
   },
   bar: {
@@ -48,7 +48,7 @@ const s = createStyles({
   spacerHide: { flexGrow: 1, '@width < 520': { display: 'none' } },
   caption: {
     fontSize: 11,
-    color: '$dim',
+    color: '$textMuted',
     '@width < 520': { display: 'none' },
   },
   // the gallery scrolls when the window is too short for it, which is easy
@@ -69,14 +69,14 @@ const s = createStyles({
     padding: 12,
     gap: 10,
     borderRadius: 8,
-    backgroundColor: '$panel',
+    backgroundColor: '$surface',
     transition: { backgroundColor: 180 },
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  label: { width: 74, fontSize: 12, color: '$dim' },
-  heading: { fontSize: 12, color: '$dim' },
+  label: { width: 74, fontSize: 12, color: '$textMuted' },
+  heading: { fontSize: 12, color: '$textMuted' },
   icon: { width: 16, height: 16 },
-  note: { fontSize: 11, color: '$dim' },
+  note: { fontSize: 11, color: '$textMuted' },
 });
 
 /** Sun and moon, drawn as declarative SVG so they take the theme's ink. */
@@ -122,7 +122,7 @@ export function ThemingPanel() {
 
   return (
     // One provider, both channels: the widgets read it with useTheme() and
-    // `$canvas`/`$panel` below resolve against the same palette.
+    // `$background`/`$surface` below resolve against the same palette.
     //
     // `colorScheme={mode}` pins the subtree to whichever scheme this palette
     // *is*, which is what stops a light theme being layered over a dark base

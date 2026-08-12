@@ -250,7 +250,7 @@ export const TEXT_PAINT_PROPS = new Set(['textRendering']);
 
 /**
  * The text properties that **inherit** — the ones a node hands down to
- * everything drawing text inside it, so `<box style={{ color: theme.dim }}>`
+ * everything drawing text inside it, so `<box style={{ color: theme.textMuted }}>`
  * dims the labels under it the way it would in CSS.
  *
  * This is CSS's inherited set narrowed to what a *descendant* can act on: the
@@ -751,6 +751,56 @@ export function stepBeyond(from, to) {
   if (!a || !b) return to;
   const step = (i) => Math.min(1, Math.max(0, b[i] + (b[i] - a[i])));
   return rgba([step(0), step(1), step(2), step(3)]);
+}
+
+/**
+ * WCAG relative luminance — the perceptual lightness contrast is measured
+ * in, which is not the mean of the channels: green carries most of it and
+ * blue almost none, so `#0000ff` and `#00ff00` are worlds apart here and
+ * three pixels apart in a channel average.
+ */
+function luminance(c) {
+  const linear = (v) =>
+    v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  return 0.2126 * linear(c[0]) + 0.7152 * linear(c[1]) + 0.0722 * linear(c[2]);
+}
+
+/**
+ * Which of `inks` can be read on `fill` — the one with the most contrast,
+ * WCAG's ratio.
+ *
+ * This is what keeps a palette from having to name the ink on every fill it
+ * names. The two candidates a palette always has are its own `text` and its
+ * own `background`, and one of them is readable on any fill by construction:
+ * a fill light enough to swallow the light one is dark enough to show the
+ * dark one. So `resolveTheme` derives `accentText` and the status inks from
+ * the family colour, and a theme that names a yellow warning gets dark
+ * letters on it without having thought about it.
+ *
+ * Ratio rather than a lightness threshold because a threshold is exactly the
+ * thing that fails on the mid-tones: an accent at L*55 is on whichever side
+ * of 50% the theme's own ink is not, and only a comparison knows which.
+ *
+ * Returns the first ink where a colour will not parse, which is the same
+ * "keep going with what you were given" the rest of this file does.
+ */
+export function readableInk(fill, inks) {
+  const bg = cssColorStraight(fill);
+  if (!bg) return inks[0];
+  const lb = luminance(bg);
+  let best = inks[0];
+  let bestRatio = -1;
+  for (const ink of inks) {
+    const c = cssColorStraight(ink);
+    if (!c) continue;
+    const li = luminance(c);
+    const ratio = (Math.max(lb, li) + 0.05) / (Math.min(lb, li) + 0.05);
+    if (ratio > bestRatio) {
+      bestRatio = ratio;
+      best = ink;
+    }
+  }
+  return best;
 }
 
 /**

@@ -201,7 +201,7 @@ export function Slider({
           flexBasis: 0,
           height: height,
           borderRadius: height / 2,
-          backgroundColor: disabled ? theme.dim : theme.accent,
+          backgroundColor: disabled ? theme.textMuted : theme.accent,
         },
       }),
       h('box', {
@@ -226,7 +226,7 @@ export function Slider({
           : focused || dragging
             ? theme.accentHover
             : theme.border,
-        backgroundColor: disabled ? theme.surfaceHover : theme.background,
+        backgroundColor: disabled ? theme.surfaceHover : theme.surface,
         pointerEvents: 'none',
       },
     }),

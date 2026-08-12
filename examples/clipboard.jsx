@@ -35,7 +35,7 @@ const s = createStyles({
     flexDirection: 'column',
     gap: 6,
     padding: 10,
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
     borderColor: '$track',
     borderWidth: 1,
     borderRadius: 6,
@@ -43,7 +43,7 @@ const s = createStyles({
     minWidth: 0,
   },
   heading: { color: '$text', fontSize: 13 },
-  dim: { color: '$dim', fontSize: 11 },
+  dim: { color: '$textMuted', fontSize: 11 },
   button: {
     padding: 6,
     backgroundColor: '$surfaceHover',

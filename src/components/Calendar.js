@@ -209,7 +209,7 @@ function NavButton({ direction, disabled, onPress, theme }) {
       size: NAV_CHEVRON,
       // The button carries the `:hover`, but colour does not reach down to
       // the glyph — disabled is the state that has to be passed by hand.
-      color: disabled ? theme.border : theme.dim,
+      color: disabled ? theme.border : theme.textMuted,
     }),
   );
 }
@@ -219,7 +219,7 @@ function DayCell({ day, state, theme, band, onPick, onHover, dayContent }) {
   const color = selected
     ? theme.accentText
     : blocked || outside
-      ? theme.dim
+      ? theme.textMuted
       : theme.text;
   const markers = dayContent?.(day, { ...state, color });
 
@@ -565,7 +565,7 @@ export function Calendar({
           { key: i, style: s.weekdayCell },
           h(
             'text',
-            { style: [capTrim, s.weekdayLabel, { color: theme.dim }] },
+            { style: [capTrim, s.weekdayLabel, { color: theme.textMuted }] },
             label,
           ),
         ),
