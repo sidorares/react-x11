@@ -3,6 +3,7 @@ export { createStyles, flattenStyle } from './styles.js';
 export { windowIdOf, useWindowId, useTopLevelWindow } from './windowid.js';
 export { launchTimestamp, notifyStartupComplete } from './startup.js';
 export { activateWindow } from './activate.js';
+export { lastInputTime, serverTime } from './inputtime.js';
 export {
   onAppActivate,
   onAppOpen,

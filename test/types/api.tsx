@@ -38,6 +38,7 @@ import {
   NoFileDialogError,
   openFile,
   saveFile,
+  serverTime,
   sessionBus,
   systemBus,
   useApp,
@@ -53,6 +54,7 @@ import {
   createStyles,
   Dialog,
   flattenStyle,
+  lastInputTime,
   launchTimestamp,
   MenuBar,
   notifyStartupComplete,
@@ -228,6 +230,15 @@ function Elements() {
       style={s.root}
       onCloseRequest={() => {}}
       onResize={(ev) => void (ev.resized && ev.width + ev.height)}
+      onClientMessage={(ev) => {
+        // the name is what a handler branches on; null only for an atom the
+        // server itself does not know
+        if (ev.messageType === '_NET_SYSTEM_TRAY_OPCODE') {
+          void (ev.data[1] + ev.data[2]);
+          ev.preventDefault();
+        }
+        void (ev.atom + ev.format + Number(ev.defaultPrevented));
+      }}
     >
       <box
         ref={boxRef}
@@ -917,6 +928,21 @@ function _Clip() {
     void [app, text, rich, png, first, offered];
   }
   void go;
+  return null;
+}
+
+// the two selection timestamps, straight off what useApp() hands back
+function _SelectionTime() {
+  const app = useApp();
+  async function own(wid: number, selection: number) {
+    // there was a user action, so ICCCM wants that event's own time
+    const when: number | undefined = lastInputTime(app);
+    app.X.SetSelectionOwner(wid, selection, when);
+    // and there was not, so ask the server rather than writing CurrentTime
+    const now: number = await serverTime(app);
+    app.X.SetSelectionOwner(wid, selection, now);
+  }
+  void own;
   return null;
 }
 

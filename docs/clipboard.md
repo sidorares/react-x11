@@ -141,6 +141,41 @@ This is also why a `write()` can fail: if another client copied with a newer
 timestamp, the server refuses ours, and the promise rejects rather than
 pretending.
 
+### Owning a selection of your own
+
+The same rule governs every other selection — a system tray takes
+`_NET_SYSTEM_TRAY_S<screen>`, a clipboard manager takes `CLIPBOARD_MANAGER`,
+an input method takes `XIM_SERVERS` — and there the timestamp is yours to
+supply. Both of the values worth supplying are exported:
+
+```jsx
+import { lastInputTime, serverTime, useApp } from 'react-x11';
+
+const app = useApp();
+
+// the user did something, and ICCCM wants that event's own time
+const take = (wid, selection) =>
+  app.X.SetSelectionOwner(wid, selection, lastInputTime(app));
+
+// nothing did — a tray takes its selection when it starts
+const claim = async (wid, selection) =>
+  app.X.SetSelectionOwner(wid, selection, await serverTime(app));
+```
+
+`lastInputTime(app)` is free: it is the timestamp of the last input event
+this connection saw, which is what react-x11 already stamps copies with, and
+what EWMH calls `_NET_WM_USER_TIME`. It is `undefined` before any input has
+arrived.
+
+`serverTime(app)` is one round trip and always answers. Reach for it when
+there is no user action to name — and **do not** write `lastInputTime(app) ??
+0` instead. Zero is `CurrentTime`, which ICCCM 2.1 forbids for exactly the
+reason above: the server accepts it, two clients racing for one selection
+cannot be ordered by it, and the loser is never told it lost.
+
+`serverTime` resolves `0` if the server has not answered within five seconds.
+It never rejects and never hangs.
+
 ## Reaching ntk directly
 
 `useClipboard()` is a thin layer over ntk's `app.clipboard` and adds only the

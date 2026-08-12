@@ -384,3 +384,45 @@ export interface WindowResizeEvent {
   window: NtkWindow;
   target: NtkWindow;
 }
+
+/**
+ * `<window onClientMessage>`: a ClientMessage addressed to this window —
+ * EWMH, XEmbed, the system tray, or a convention two copies of one
+ * application agreed between themselves.
+ *
+ * Not a synthetic event: a ClientMessage is addressed to a *window*, so
+ * there is no node under it, nothing to hit test and no chain to bubble
+ * along. Delivered in arrival order, which the chunked protocols depend on.
+ */
+export interface ClientMessageEvent {
+  /** X event type number (33, ClientMessage). */
+  type: number;
+  /**
+   * The message type atom's **name** — `'_NET_SYSTEM_TRAY_OPCODE'`,
+   * `'_XEMBED'`, `'WM_PROTOCOLS'` — which is what a handler branches on.
+   *
+   * `null` for an atom this connection has never named. An application
+   * acting on a protocol has interned its atoms already, so that is the
+   * passive-observer case rather than a coin flip; {@link atom} is exact
+   * either way.
+   */
+  messageType: string | null;
+  /** The message type atom id, as it arrived. */
+  atom: number;
+  /** How wide the 20 payload bytes are read. */
+  format: 8 | 16 | 32;
+  /** 5 values at format 32, 10 at 16, 20 at 8. */
+  data: number[];
+  /** The window it was delivered to. */
+  window: NtkWindow;
+  target: NtkWindow;
+  /** ntk's raw event. */
+  nativeEvent: unknown;
+  defaultPrevented: boolean;
+  /**
+   * Stop react-x11 acting on this message itself — which today means XDND,
+   * for a window answering the drag protocol on its own terms. It does not
+   * reach the WM close button; `onCloseRequest` is that seam.
+   */
+  preventDefault(): void;
+}

@@ -126,6 +126,29 @@ no override-redirect staging (issue #4).
   does not, converted from notches to pixels here (#273) — focus/Tab).
   Three ancestor-chain diffs live here and share one shape — `:hover`,
   `:active` over the press chain, and `:focus-within`.
+- `src/clientmessage.js` — `<window onClientMessage>`: the element-scoped
+  seam for the protocols X layers on ClientMessage (EWMH, XEmbed, the system
+  tray), where the alternative was `X.on('event')` over the whole connection
+  — which is what `src/xsettings.js` still does internally, correctly, since
+  a settings daemon's window is nobody's element. Two decisions live there.
+  The type is handed over as the atom's **name**, so a handler is a `switch`
+  over strings rather than an atom table it had to intern first; and because
+  a protocol an application only _receives_ has never named its atoms, an
+  unknown one costs a `GetAtomName` — behind which **every message queues**.
+  That FIFO gate is not optional and `test/client-message.test.js` pins it:
+  the tray's balloon messages and XEmbed's opcodes reassemble by arrival
+  order alone, so a round trip that let a later message overtake an earlier
+  one would corrupt them undetectably. `preventDefault()` is the usual
+  default-action seam, and reaches XDND (`src/dnd.js`), which is the one
+  ClientMessage protocol core answers on the same stream.
+- `src/inputtime.js` — the two selection timestamps, both public since #18's
+  second gap: `lastInputTime(app)` is the last input event's server time,
+  stashed off the event stream because ICCCM wants "the timestamp of the
+  event that caused this" and the causing event is four frames above the code
+  that copies; `serverTime(app)` derives a fresh one for an acquisition no
+  user action caused. The failure they exist to prevent is silent —
+  `CurrentTime` is accepted by the server and leaves two clients racing for a
+  selection unorderable — so neither should ever be `?? 0`-ed at a call site.
 - `src/compose.js` — dead keys and the Compose key (#272): the sequence
   table and the state machine `EventManager` runs between an application's
   `onKeyDown` and the element's `defaultKeyDown`. The dead-key half is

@@ -33,7 +33,7 @@
 import { XEMBED, XEmbedSocket } from 'ntk';
 
 import { isFocusable } from './a11y.js';
-import { inputTime } from './inputtime.js';
+import { lastInputTime } from './inputtime.js';
 import { Node, pixelFor } from './nodes.js';
 
 const px = (v) => Math.max(1, Math.round(v || 0));
@@ -258,7 +258,7 @@ export class ForeignNode extends Node {
   defaultFocus(info) {
     const socket = this.socket;
     if (!socket || !this.client) return;
-    const time = inputTime(this.app);
+    const time = lastInputTime(this.app);
     socket.activate(true, { time });
     const detail =
       info?.reason === 'key'
@@ -276,7 +276,7 @@ export class ForeignNode extends Node {
   defaultBlur() {
     const socket = this.socket;
     if (!socket) return;
-    const time = inputTime(this.app);
+    const time = lastInputTime(this.app);
     if (this._focusSent) {
       socket.send(XEMBED.FOCUS_OUT, 0, 0, 0, { time });
       this._focusSent = false;

@@ -15,7 +15,7 @@
 // Everything on the wire is still ntk's. `root.app.clipboard` remains the
 // documented escape hatch for anything this does not cover.
 
-import { inputTime } from './inputtime.js';
+import { lastInputTime } from './inputtime.js';
 import { decodeData, parseUriList, resolveType } from './transfer.js';
 
 /** Ask the owner what it has, so a group name can be resolved against a
@@ -43,7 +43,7 @@ export function createClipboard(app) {
   const opts = ({ selection = 'CLIPBOARD', timeout, time } = {}) => ({
     selection,
     ...(timeout === undefined ? {} : { timeout }),
-    time: time === undefined ? inputTime(app) : time,
+    time: time === undefined ? lastInputTime(app) : time,
   });
 
   return {

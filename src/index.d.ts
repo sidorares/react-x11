@@ -125,8 +125,12 @@ export interface Clipboard {
 /**
  * The ntk connection this tree renders onto — `app.fonts`, `app.cursors`,
  * `app.X` and the rest. Throws outside a tree rendered by `createRoot()`.
+ *
+ * The same type {@link Root.app} has, so what `createRoot()` hands back and
+ * what a component reaches for are one thing; ntk's own surface is behind an
+ * index signature rather than declared here.
  */
-export function useApp(): unknown;
+export function useApp(): NtkApp;
 
 /** The clipboard, scoped to this tree's connection. */
 export function useClipboard(): Clipboard;
@@ -331,6 +335,30 @@ export function launchTimestamp(): number | null;
  * `startupNotification: { completeOn: 'manual' }`.
  */
 export function notifyStartupComplete(): void;
+
+/**
+ * The server timestamp of the last input event this connection saw, or
+ * `undefined` when none has arrived yet.
+ *
+ * ICCCM's "the timestamp of the event that caused this" and EWMH's
+ * `_NET_WM_USER_TIME`, which is what a selection acquired *because the user
+ * did something* has to be stamped with. Never substitute `0` for the
+ * `undefined`: that is `CurrentTime`, which ICCCM 2.1 forbids and which
+ * leaves two clients racing for one selection unable to be ordered. Where
+ * there is no user action to name, {@link serverTime} is the answer.
+ */
+export function lastInputTime(app: NtkApp): number | undefined;
+
+/**
+ * A current timestamp from this connection's server, for an operation no
+ * user action caused — a tray taking its manager selection at startup, say.
+ *
+ * One round trip: there is no request that asks for the time, so this
+ * appends zero bytes to a property on a 1x1 window of ours and reads the
+ * time off the resulting `PropertyNotify`. Resolves `0` (`CurrentTime`) if
+ * the server has not answered within five seconds; never rejects.
+ */
+export function serverTime(app: NtkApp): Promise<number>;
 
 /** A mounted tree, as returned by {@link createRoot}. */
 export interface Root {
