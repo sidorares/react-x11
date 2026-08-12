@@ -18,6 +18,12 @@ export const Clipboard: new (...args: unknown[]) => unknown;
 export const Path2D: new (...args: unknown[]) => unknown;
 export const Image: new (...args: unknown[]) => unknown;
 export const Pixmap: new (...args: unknown[]) => unknown;
+/**
+ * Draw once, composite many — and, for an element that scrolls a retained
+ * buffer, `copyWithin(src, dx, dy)` shifts the surviving band server-side.
+ * See [extending.md](../docs/extending.md).
+ */
+export const Surface: new (...args: unknown[]) => unknown;
 export const Yoga: Record<string, unknown>;
 /** `code` values on a failed GL setup — see `<Canvas3D fallback>`. */
 export const GLXError: {
