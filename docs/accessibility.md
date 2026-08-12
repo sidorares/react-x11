@@ -196,6 +196,38 @@ One honest limit: "line" granularity follows hard newlines, not the soft
 wraps of a `<textarea>`'s layout. Orca still reads everything; a
 line-by-line walk of one long wrapped paragraph is one stop, not several.
 
+### While a composition is open
+
+A dead key or a half-typed Compose sequence puts text on the screen that is
+in nobody's value yet ([events.md](events.md#composition)). The `Text`
+interface answers with **what is drawn**, that preedit included, and its
+offsets index that string — because every geometric answer beside it is
+read off the layout of the same string, and a magnifier tracking character
+3 has to land on the glyph a sighted user sees. `CaretOffset` is at the far
+end of the composition, where the next keystroke of the sequence appears.
+
+Which part of it is uncommitted is said twice, so a reader can act on
+either:
+
+- the preedit is its own **attribute run** — `underline: single`, the
+  registered AT-SPI attribute for what is literally drawn, plus
+  `composition: true`, which is this renderer's own because AT-SPI
+  registers nothing for a preedit;
+- its churn is **`:system`** text — `text-changed:insert:system` when the
+  accent appears, `delete:system` when it changes or is abandoned. That is
+  the suffix Gecko established for a change the user did not type, and it
+  is what lets a reader stay quiet through a composition.
+
+What the sequence **commits** is a plain `insert` of the finished
+character: `é` is what the user typed, and it is spoken, once, as one
+insertion — the same event an ordinary keystroke produces, which is also
+why it is one undo step and not two.
+
+Nothing here is announced through `announce()`. A live-region announcement
+on top of the text-changed feed would have a screen reader say the accent
+twice; an application that wants to narrate composition state can call
+`announce()` itself from `onCompositionUpdate`.
+
 ## The compatibility ladder
 
 `createRoot()` starts one climb per process, off the critical path:
@@ -367,3 +399,8 @@ deterministic.
   Orca's per-keystroke echo of _keys themselves_; typed characters already
   arrive through text-changed events.
 - **Soft-wrap line granularity** in `<textarea>`, per above.
+- **An input method** — dead keys and Compose are the whole composition
+  story today, so a script that needs a candidate window (any CJK) cannot
+  be typed at all, accessibly or otherwise. What an IME would report is
+  already here: the preedit is a text run and its own `:system` feed, so
+  the work left is the input method, not its accessibility.

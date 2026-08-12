@@ -254,6 +254,11 @@ through.
 A composition is abandoned, never half-committed, when focus leaves, when the
 window loses the keyboard, or when a press puts the caret somewhere else.
 
+A screen reader is told the same story: the preedit is a text run of its
+own and its churn is marked as text the user did not type, so the accent is
+not read out and the character it commits is —
+[accessibility.md](accessibility.md#while-a-composition-is-open).
+
 ### Changing the table
 
 ```js

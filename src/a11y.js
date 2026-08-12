@@ -704,18 +704,55 @@ export const hasTextInterface = (node) =>
  * The code points and caret/selection of anything with a Text interface —
  * offsets in AT-SPI are code points, which is also exactly what
  * TextInputNode's `_chars()`/`_caret` already count.
+ *
+ * The string is the one the control **draws**, an open composition
+ * included, and the offsets are indices into it. That is not a detail of
+ * wording: every geometric answer the Text interface gives — the extents of
+ * character *n*, the offset under a point, where the caret is — is read off
+ * the layout of the displayed string (`_valueLayout`), so reporting the
+ * committed value while a preedit is showing would put a magnifier's
+ * highlight and a braille cursor a preedit's width to the left of the
+ * glyphs they are tracking.
+ *
+ * `preedit` is which part of it is uncommitted — `{ offset, length, text }`
+ * in the same code-point space, or null. It is what lets a reader tell a
+ * composition from the character it commits: the bridge marks the
+ * composition's own churn `:system` and leaves the commit a plain insert
+ * (see `_diffText` in atspi.js).
  */
 export function textStateOf(node) {
   if (isTextControl(node)) {
+    const shown = node._displayValue ? node._displayValue() : null;
+    const toDisplay = (index) => node._displayIndex?.(index) ?? index;
+    const [start, end] = node._selection?.() ?? [0, 0];
+    const preedit = node._preedit ?? '';
     return {
-      chars: node._chars(),
-      caret: node._caret ?? 0,
-      selection: node._selection?.() ?? [0, 0],
+      chars: shown === null ? node._chars() : Array.from(shown),
+      caret: toDisplay(node._caret ?? 0),
+      selection: [toDisplay(start), toDisplay(end)],
+      preedit: preedit
+        ? {
+            offset: node._preeditStart?.() ?? 0,
+            length: Array.from(preedit).length,
+            text: preedit,
+          }
+        : null,
     };
   }
   const spans = node.collectSpans?.([]) ?? [];
   const chars = Array.from(spans.map((s) => s.text).join(''));
-  return { chars, caret: 0, selection: [0, 0] };
+  return { chars, caret: 0, selection: [0, 0], preedit: null };
+}
+
+/**
+ * Whether a `[offset, offset + length)` code-point range lies inside the
+ * composition of a `textStateOf` state — the question that separates a
+ * preedit's own churn from an edit the user made.
+ */
+export function inPreedit(state, offset, length) {
+  const pre = state?.preedit;
+  if (!pre) return false;
+  return offset >= pre.offset && offset + length <= pre.offset + pre.length;
 }
 
 /** Common-prefix/suffix diff of two code-point arrays →

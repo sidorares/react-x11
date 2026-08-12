@@ -78,6 +78,7 @@ export interface A11ySpyEvent {
     | 'value'
     | 'text-insert'
     | 'text-delete'
+    | 'preedit'
     | 'caret'
     | 'selection'
     | 'announce'
@@ -90,13 +91,15 @@ export interface A11ySpyEvent {
   /** For `state`: the AT-SPI state nick, and whether it turned on. */
   state?: string;
   on?: boolean;
-  /** For `name` / `announce` / `text-*`. */
+  /** For `name` / `announce` / `text-*` / `preedit` — on a `preedit` this
+   * is what the composition now shows, `''` when it was abandoned or has
+   * just committed. */
   name?: string;
   text?: string;
   assertive?: boolean;
   /** For `value`. */
   value?: number;
-  /** For `text-*` / `caret`. */
+  /** For `text-*` / `caret` / `preedit`. */
   offset?: number;
   /** For `selection`. */
   start?: number;

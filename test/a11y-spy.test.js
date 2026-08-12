@@ -18,6 +18,9 @@ import {
   renderX11,
   userEvent,
   utteranceOf,
+  keysymOf,
+  XK_DEAD_ACUTE,
+  XK_ESCAPE,
   XK_RIGHT,
   XK_SPACE,
 } from '../src/testing/index.js';
@@ -155,6 +158,48 @@ test('typing echoes through text-changed, character by character', async () => {
   assert.deepEqual(inserts, ['h', 'i']);
   // the name is still the placeholder — a value is not a name
   assert.equal(at.focused().utterance, 'Name, entry');
+});
+
+test('a composition is one preedit, then the character it commits', async () => {
+  const { at, getByRole } = await renderX11(h(App), { a11y: true });
+  const input = getByRole('textbox');
+  await userEvent.click(input);
+  at.since(); // the focus that put the caret there
+
+  // The dead key. Something is on the screen and nothing was typed, which
+  // is a distinction a reader has to be able to make: echoing `´` as an
+  // insertion is how a screen reader reads out characters the user never
+  // committed, and saying nothing at all is how it goes silent for anyone
+  // typing an accented language.
+  await userEvent.key(XK_DEAD_ACUTE, { target: input });
+  assert.deepEqual(
+    at.since().map((e) => e.summary),
+    ['preedit: "´"'],
+  );
+  assert.equal(input.value, '', 'the value is untouched while composing');
+
+  // The letter. One insert, of the character the sequence made.
+  await userEvent.key(keysymOf('e'), { target: input });
+  assert.deepEqual(
+    at.since().map((e) => e.summary),
+    ['preedit: cleared', 'insert: "é"'],
+  );
+  assert.equal(input.value, 'é');
+});
+
+test('an abandoned composition is a preedit that inserts nothing', async () => {
+  const { at, getByRole } = await renderX11(h(App), { a11y: true });
+  const input = getByRole('textbox');
+  await userEvent.click(input);
+  await userEvent.key(XK_DEAD_ACUTE, { target: input });
+  at.since();
+
+  await userEvent.key(XK_ESCAPE, { target: input });
+  assert.deepEqual(
+    at.since().map((e) => e.summary),
+    ['preedit: cleared'],
+  );
+  assert.equal(input.value, '');
 });
 
 test('announce() is observable, and reports delivery', async () => {
