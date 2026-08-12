@@ -36,8 +36,11 @@ export function screenRect(node) {
   };
 }
 
-/** Where the node's owner window is on the screen. */
-function windowOrigin(node) {
+/** Where the node's owner window is on the screen. Exported for the one
+ * caller that anchors to a *point* rather than to a node's rect — the edit
+ * menu opens at the pointer, whose coordinates arrive window-relative on the
+ * event (`openEditMenu`, nodes.js). */
+export function windowOrigin(node) {
   const win = node?.root?.window;
   return win?._screenOrigin ?? { x: win?.x ?? 0, y: win?.y ?? 0 };
 }

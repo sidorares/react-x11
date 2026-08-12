@@ -95,8 +95,16 @@ export async function captureDrawable(app, drawable) {
  * screen, and a window drawn at depth 24 has no alpha channel to report —
  * carrying through whatever the conversion produced for it would make the
  * PNG partly transparent for no reason a reader of the file could guess.
+ *
+ * **The offset is rounded**, because a pixel index is a whole number and
+ * nothing here would have said otherwise: a half-pixel `oy` multiplies into
+ * half a row, so the copy lands shifted by half the destination's width and
+ * wraps around its right edge — a picture of the right menu, sheared and cut
+ * in two, from a caller that only asked for the middle of a widget.
  */
 export function blit(png, src, ox = 0, oy = 0) {
+  ox = Math.round(ox);
+  oy = Math.round(oy);
   for (let y = 0; y < src.height; y++) {
     for (let x = 0; x < src.width; x++) {
       const dx = ox + x;

@@ -122,7 +122,9 @@ useEffect(() => {
 
 The built-in edit menu on `<textinput>`/`<textarea>` already does this for
 its Paste row — see [elements.md](elements.md#the-right-click-menu). This is
-the same mechanism, for your own menus.
+the same mechanism, for your own menus. If what you are building _is_ an edit
+menu, open the standard one instead and the Paste row comes with it
+([extending.md](extending.md#the-standard-edit-menu)).
 
 `watch()` is a server-side subscription, not a poll — it costs nothing until
 something changes. `owner === 0` means nothing is on the clipboard, which is

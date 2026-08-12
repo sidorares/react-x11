@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
-import { PasswordInput, createRoot } from '../src/index.js';
+import { PasswordInput, createRoot, openEditMenu } from '../src/index.js';
 import { createMockApp } from './helpers/mock-app.js';
 import {
   hash32,
@@ -277,7 +277,9 @@ test('a revealed field still lets nothing out by a selection', async () => {
     'neither Ctrl+C nor Ctrl+X put the secret on a selection, and Ctrl+A took no PRIMARY',
   );
 
-  const menu = input._editMenuItems().map((item) => item.id);
+  // and the menu the field opens has no rows for them at all
+  openEditMenu(input, { x: 0, y: 0 }, input._editActions());
+  const menu = input._editMenu._editMenuRows.map((row) => row.id);
   assert.ok(
     !menu.includes('copy') && !menu.includes('cut'),
     'nor does the menu',

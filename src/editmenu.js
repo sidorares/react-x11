@@ -1,13 +1,12 @@
 /**
- * The built-in edit menu for `<textinput>` / `<textarea>` — geometry and
- * painting.
+ * The standard edit menu — its rows, their geometry and their painting.
  *
  * A browser gives `<input>` a context menu without being asked, and that is
  * the bar here: a bare `<textinput>` gets Undo/Cut/Copy/Paste with no
  * wiring at all. That rules out building it from the `Menu` components,
  * which live a layer above the nodes and cannot be mounted from one — so
- * the rows are measured and drawn here, and the node hangs them in a
- * `<popup>` (see `TextInputNode._openEditMenu`).
+ * the rows are measured and drawn here, and a node hangs them in a
+ * `<popup>` (`openEditMenu`, nodes.js, which is the public seam).
  *
  * Deliberately free of node imports: this takes plain data, a measuring
  * function and a 2d context. It can be tested without a tree, and falls
@@ -55,6 +54,86 @@ export function editMenuColors(theme) {
     highlightText: theme.hoverText ?? EDIT_MENU_COLORS.highlightText,
     separator: theme.track ?? EDIT_MENU_COLORS.separator,
   };
+}
+
+/**
+ * The rows, in the standard order, each enabled exactly when it would do
+ * something — the whole of the menu's policy, as a pure function of the
+ * verbs a target offers (`openEditMenu`, nodes.js).
+ *
+ * **A verb that was not handed over is a row that is not there**, rather
+ * than a greyed one. It was motivated by `<textinput sensitive>`, where a
+ * disabled Copy over a password reads as a bug in the application rather
+ * than as a decision — but it is also exactly what a surface with nothing
+ * to edit needs: a read-only view that offers `copy` and `selectAll` gets a
+ * two-row menu, not six rows with four of them dead. So this is the rule,
+ * not an exception in the field: never render a verb the caller withheld.
+ *
+ * Enablement is the other half and is *not* the caller's to decide row by
+ * row: Cut and Copy follow the selection, Paste follows what the server
+ * says about the clipboard, and Undo/Redo/Select All follow the three
+ * `can*` answers only their owner can give. One implementation of that is
+ * the point of the seam.
+ *
+ * @param {object} actions the verb interface — see `openEditMenu`
+ * @param {{canPaste?: boolean}} [state] what only the connection knows
+ */
+export function editMenuItems(actions = {}, { canPaste = true } = {}) {
+  const has = (verb) => typeof actions[verb] === 'function';
+  const selected = Boolean(actions.hasSelection);
+  const groups = [
+    [
+      has('undo') && {
+        id: 'undo',
+        label: 'Undo',
+        shortcut: [['Control', 'Z']],
+        enabled: Boolean(actions.canUndo),
+      },
+      has('redo') && {
+        id: 'redo',
+        label: 'Redo',
+        shortcut: [['Control', 'Shift', 'Z']],
+        enabled: Boolean(actions.canRedo),
+      },
+    ],
+    [
+      has('cut') && {
+        id: 'cut',
+        label: 'Cut',
+        shortcut: [['Control', 'X']],
+        enabled: selected,
+      },
+      has('copy') && {
+        id: 'copy',
+        label: 'Copy',
+        shortcut: [['Control', 'C']],
+        enabled: selected,
+      },
+      has('paste') && {
+        id: 'paste',
+        label: 'Paste',
+        shortcut: [['Control', 'V']],
+        enabled: canPaste,
+      },
+    ],
+    [
+      has('selectAll') && {
+        id: 'selectAll',
+        label: 'Select All',
+        shortcut: [['Control', 'A']],
+        // the default is "there is something to select": only the target
+        // knows when everything already is
+        enabled: actions.canSelectAll !== false,
+      },
+    ],
+  ]
+    .map((group) => group.filter(Boolean))
+    .filter((group) => group.length > 0);
+  // a separator between the groups that survived, and never one at either
+  // end — a menu missing a whole group must not show the gap where it was
+  return groups.flatMap((group, i) =>
+    i === 0 ? group : [{ type: 'separator' }, ...group],
+  );
 }
 
 /**

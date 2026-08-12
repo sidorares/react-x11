@@ -140,6 +140,28 @@ test('blit places a capture at an offset and clips at the edges', async () => {
       'the source origin lands at the offset',
     );
     assert.deepStrictEqual(at(2, H / 2), [0, 0, 0], 'nothing wraps around');
+
+    // A half-pixel offset is half a *row*: unrounded it multiplies into
+    // half the destination's width, so the copy lands sheared sideways and
+    // wraps around the right edge. `shotOver` passes the middle of a widget,
+    // which is fractional whenever the widget has an odd height.
+    const frac = new PNG({ width: W, height: H });
+    frac.data.fill(0);
+    blit(frac, shot, 0, H / 2 + 0.5);
+    const fracAt = (x, y) => {
+      const i = (y * frac.width + x) * 4;
+      return [...frac.data.slice(i, i + 3)];
+    };
+    assert.deepStrictEqual(
+      fracAt(2, H / 2 + 1),
+      RED,
+      'the offset is rounded to a whole row',
+    );
+    assert.deepStrictEqual(
+      fracAt(W / 2 + 2, H / 2),
+      [0, 0, 0],
+      'and nothing is sheared half a width sideways',
+    );
   } finally {
     await x11Root.unmount();
     await app.close();

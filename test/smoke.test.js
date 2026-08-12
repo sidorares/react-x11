@@ -4749,7 +4749,7 @@ test('textinput: select-all owns PRIMARY, both ways in', async () => {
 
   const { input, writes: menuWrites } = await mountSelected();
   menuWrites.length = 0;
-  input._runEditAction('selectAll');
+  input._editActions().selectAll();
   assert.deepStrictEqual(input._selection(), [0, 11]);
   assert.deepStrictEqual(
     menuWrites.at(-1),
@@ -4760,6 +4760,23 @@ test('textinput: select-all owns PRIMARY, both ways in', async () => {
 
 const rightClick = (wnd, x = 40, y = 10) =>
   wnd.emit('mousedown', { x, y, keycode: 3 });
+
+/** The rows of the edit menu `node` has open, as `{id: enabled}`. They are
+ * painted into a canvas, so there is no tree to query them out of. */
+const menuRows = (node) =>
+  Object.fromEntries(
+    node._editMenu._editMenuRows
+      .filter((row) => !row.separator)
+      .map((row) => [row.id, row.enabled]),
+  );
+
+/** Choose a row of the open menu the way the pointer does — the click lands
+ * at a y coordinate, and the menu works out which row that is. */
+function chooseRow(node, id) {
+  const popup = node._editMenu;
+  const row = popup._editMenuRows.find((r) => r.id === id);
+  popup.children[0].props.onMouseUp({ y: row.y + row.height / 2 });
+}
 
 test('textinput: right-click keeps the selection it lands inside', async () => {
   const { app, wnd, input } = await mountSelected();
@@ -4804,13 +4821,7 @@ test('textinput: right-click opens a menu whose rows match the state', async () 
   assert.ok(input._editMenu, 'a popup is open');
   assert.strictEqual(app.windows.length, before + 1, 'and it is a real window');
 
-  const rows = Object.fromEntries(
-    input
-      ._editMenuItems()
-      .filter((i) => i.type !== 'separator')
-      .map((i) => [i.id, i.enabled]),
-  );
-  assert.deepStrictEqual(rows, {
+  assert.deepStrictEqual(menuRows(input), {
     undo: false, // nothing has been edited yet
     redo: false,
     cut: true, // there is a selection
@@ -4827,7 +4838,7 @@ test('textinput: choosing Copy closes the menu and copies', async () => {
   const x11Root = await createRoot({ app });
   rightClick(wnd);
 
-  input._chooseEditMenu('copy');
+  chooseRow(input, 'copy');
   assert.strictEqual(input._editMenu, null, 'the menu closes');
   assert.deepStrictEqual(writes.at(-1), ['hello world', 'CLIPBOARD']);
   assert.deepStrictEqual(input._selection(), [0, 11], 'selection survives');
@@ -4840,7 +4851,7 @@ test('textinput: Cut through the menu is one undoable step', async () => {
   const { app, wnd, input } = await mountSelected();
   const x11Root = await createRoot({ app });
   rightClick(wnd);
-  input._chooseEditMenu('cut');
+  chooseRow(input, 'cut');
 
   assert.strictEqual(input.value, '');
   assert.strictEqual(input.canUndo, true);
@@ -4870,7 +4881,7 @@ test('textinput: arrows walk the menu, skipping disabled rows', async () => {
   const x11Root = await createRoot({ app });
   rightClick(wnd);
   const canvas = input._editMenu.children[0];
-  const items = input._editMenuItems();
+  const rows = input._editMenu._editMenuRows;
 
   // Undo and Redo are disabled and Select All is too, so Down from nothing
   // lands on Cut — the first row that would actually do something
@@ -4878,7 +4889,7 @@ test('textinput: arrows walk the menu, skipping disabled rows', async () => {
   canvas.props.onKeyDown({ keysym: 0xff0d }); // Enter
   assert.strictEqual(input._editMenu, null, 'Enter chose a row and closed');
   assert.strictEqual(input.value, '', 'and the row it chose was Cut');
-  assert.strictEqual(items[3].id, 'cut');
+  assert.strictEqual(rows[3].id, 'cut');
 
   await x11Root.unmount();
 });
@@ -4993,7 +5004,7 @@ test('textarea: right-click gets the same menu', async () => {
 
   rightClick(wnd, 20, 20);
   assert.ok(area._editMenu, 'the editing core is shared, so the menu is too');
-  area._chooseEditMenu('selectAll');
+  chooseRow(area, 'selectAll');
   assert.deepStrictEqual(area._selection(), [0, 3]);
 
   await x11Root.unmount();
