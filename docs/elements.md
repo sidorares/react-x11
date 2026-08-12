@@ -31,7 +31,7 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
 - **Flex**: `flexDirection` (`row`, `column`, `row-reverse`,
   `column-reverse`), `justifyContent` (`flex-start`, `center`, `flex-end`,
   `space-between`, `space-around`, `space-evenly`), `alignItems`,
-  `alignSelf`, `alignContent`, `flexWrap`, `flexGrow`, `flexShrink`,
+  `alignSelf`, `alignContent`, `flexWrap`, `flex`, `flexGrow`, `flexShrink`,
   `flexBasis`, `gap`, `rowGap`, `columnGap`
 - **Position**: `position` (`relative`, `absolute`, `static`), `top`,
   `right`, `bottom`, `left`
@@ -40,13 +40,51 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
 - **Visibility**: `display` (`flex`, `none`), `overflow` (`visible`,
   `hidden`, `scroll`)
 
-**yoga defaults `flexShrink` to 0, where CSS defaults it to 1.** An item
-whose base size comes from its content therefore refuses to shrink, and
-content wider than the space available pushes the row past its container
-instead of being squeezed into it. Write `flex: 1` in full —
-`{ flexGrow: 1, flexBasis: 0, minWidth: 0 }` — for anything that should take
-the space that is left rather than the space its content wants.
-A box with `overflow: 'scroll'` applies exactly that to itself by default.
+### Everything shrinks, nothing shrinks to nothing
+
+`flexShrink` is `1`, as in CSS: an item hands back the space it has spare
+when the row it is in runs short, rather than pushing the row past its
+container. And **it never gives up what is inside it** — every item carries a
+floor of its own min-content size, which is CSS's automatic minimum size
+(`min-width: auto` on a flex item) written out by the renderer, since yoga
+implements the shrinking half and not the floor half. A row of chips squeezes
+until it wraps; a label squeezes to its longest word; a `height: 40` row
+stays 40 tall.
+
+Three ways a style says otherwise:
+
+| write                             | to mean                                   |
+| --------------------------------- | ----------------------------------------- |
+| `flexShrink: 0`                   | never give up any space at all            |
+| `minWidth: 0` / `minHeight: 0`    | this may shrink past its content, to zero |
+| `overflow: 'hidden'` / `'scroll'` | the same, and clip what no longer fits    |
+
+The last two are CSS's own rule — `min-*: auto` computes to `0` on anything
+whose overflow is not `visible` — and they are what makes a scroll pane
+possible: a viewport is a box that is _allowed_ to be smaller than what is
+inside it. A `<box overflow="scroll">` gets `minWidth: 0` and `minHeight: 0`
+for free.
+
+One deliberate difference from CSS: **a size that was named is kept**. CSS
+floors an item at `min(the size it was given, its content)`, so an empty
+`height: 40` box squashes to nothing in a column too short for it; that is
+survivable on the web because a `<div>` is a _block_ container and its
+children are not flex items at all, and it is not survivable here, where
+every box lays its children out with flex. Say `minHeight: 0` to get CSS's
+answer for one.
+
+The measurement costs the tree an extra layout pass per axis, on frames that
+change the layout — a scroll, which moves no box, keeps the single pass it
+always had.
+
+### `flex`, the shorthand
+
+`flex: 1` is `{ flexGrow: 1, flexShrink: 1, flexBasis: 0 }` — "take this
+share of what is left, from a base size of nothing" — which is what makes it
+the right thing for a pane that should fill its window rather than its
+content. `flex: 'auto'` grows and shrinks from the content's own size, and
+`flex: 'none'` does neither. A longhand written beside it wins, so
+`{ flex: 1, flexBasis: 'auto' }` reads the way it does in CSS.
 
 ## Paint properties
 
@@ -216,24 +254,25 @@ and the floor is how far it still reached. What each node contributes is
 whatever its own style lets it shrink to, which makes the interesting part
 what _doesn't_ count:
 
-| the node                                               | contributes       |
-| ------------------------------------------------------ | ----------------- |
-| a rigid box (`flexShrink` is 0 by default — see above) | its whole size    |
-| a wrapping row                                         | its widest item   |
-| text                                                   | its longest word  |
-| `overflow: 'scroll'` / `'hidden'`                      | nothing           |
-| `flexShrink: 1`, or a `minWidth: 0` of its own         | what it shrank to |
+| the node                          | contributes      |
+| --------------------------------- | ---------------- |
+| a box that named a size           | that size        |
+| a wrapping row                    | its widest item  |
+| text                              | its longest word |
+| `overflow: 'scroll'` / `'hidden'` | nothing          |
+| a `minWidth: 0` of its own        | nothing          |
+| a `minWidth: 240` of its own      | 240              |
 
 A registered element contributes whatever its `measureContent` answers when
 asked for the smallest size it can be drawn at — see
 [extending.md](extending.md#a-size-of-your-own).
 
-The last two rows are the escape hatch, and they are the same one CSS,
-Qt and GTK all spell — `min-width: 0`, `QScrollArea`, `min-content-width`.
-A node that was told it may shrink is taken at its word and its contents
-stop counting, so a window around a scrolling pane is floored by everything
-_except_ that pane. Naming a number (`minWidth: 240` on the box) is an
-answer too, and stops the measurement there.
+This is the same measurement every node's own floor comes from (above), read
+at the top of the tree — so the escape hatch is the same one, and it is the
+one CSS, Qt and GTK all spell: `min-width: 0`, `QScrollArea`,
+`min-content-width`. A node that named a floor of its own is taken at its
+word and its contents stop counting, so a window around a scrolling pane is
+floored by everything _except_ that pane.
 
 `maxWidth`/`maxHeight` take `'auto'` as well, and it means the other half of
 the pair: **the size the content wanted** — the natural size above, not the
@@ -266,10 +305,10 @@ Three things worth knowing before reaching for it:
   so an auto window around a long list opens as tall as the screen. Give the
   window a `height`, or the scrolling box a `maxHeight`, if the scrolling is
   meant to happen inside a smaller window.
-- With no available width nothing wraps (and yoga defaults `flexShrink` to
-  0 — see [styling.md](styling.md)), so an auto width is the **unwrapped**
-  row. That makes the width font-dependent: the same window is wider under a
-  wide UI face than under a narrow one.
+- The natural size is measured with **no available width**, where nothing
+  wraps and nothing is short of room to shrink into, so an auto width is the
+  **unwrapped** row. That makes the width font-dependent: the same window is
+  wider under a wide UI face than under a narrow one.
 - Measuring costs an extra layout pass per frame that lays out, for as long
   as the window is still tracking. A window with both sizes given pays
   nothing.
@@ -813,20 +852,20 @@ never moves the caret.
 
 ### The layout defaults it brings
 
-`overflow: 'scroll'` folds four CSS idioms into the resolved style, so a
+`overflow: 'scroll'` folds three CSS idioms into the resolved style, so a
 scroll container does not have to restate them:
 
 | default                        | when                                     |
 | ------------------------------ | ---------------------------------------- |
 | `flexBasis: 0`                 | `flexGrow > 0` and no `width` / `height` |
-| `flexShrink: 1`                | always (yoga's own default is `0`)       |
 | `minWidth: 0` / `minHeight: 0` | always                                   |
 
 `min-*: 0` is the CSS spec's own rule — `min-*: auto` computes to `0` on a
-flex item whose overflow is not `visible` — and the other two are what
-`flex: 1` means. Without them a header/scroll/footer window grows past its
-own bounds as rows are added and the footer is pushed out of view. Set any
-of them yourself to opt out; an explicit value always wins.
+flex item whose overflow is not `visible` — and it is what lets a viewport be
+smaller than what is inside it, which is what scrolling is. The zero basis is
+half of what `flex: 1` means. Without them a header/scroll/footer window
+grows past its own bounds as rows are added and the footer is pushed out of
+view. Set either yourself to opt out; an explicit value always wins.
 
 ### Props
 

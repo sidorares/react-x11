@@ -4,7 +4,7 @@ export default {
   description:
     'Layout is yoga — the same flexbox engine React Native uses. Every <box> ' +
     'is one yoga node, laid out in the renderer and painted into the window; ' +
-    'none of these are X windows. Try changing flexDirection, gap or flexGrow.',
+    'none of these are X windows. Try changing flexDirection, gap or flex.',
   code: `import React, { useState } from 'react';
 import { createRoot } from 'react-x11';
 
@@ -13,8 +13,7 @@ const COLORS = ['#2980b9', '#27ae60', '#e67e22', '#8e44ad'];
 function Panel({ label, grow, color }) {
   return (
     <box style={{
-      flexGrow: grow,
-      flexBasis: 0,
+      flex: grow,
       backgroundColor: color,
       borderRadius: 8,
       padding: 12,
@@ -49,15 +48,15 @@ function App() {
         </text>
       </box>
 
-      {/* the flex container: children share the space by flexGrow */}
+      {/* the flex container: children share the space by their flex share */}
       <box style={{
         flexGrow: 1,
         flexDirection: row ? 'row' : 'column',
         gap: 10,
       }}>
-        <Panel label="flexGrow 1" grow={1} color={COLORS[0]} />
-        <Panel label="flexGrow 2" grow={2} color={COLORS[1]} />
-        <Panel label="flexGrow 1" grow={1} color={COLORS[2]} />
+        <Panel label="flex 1" grow={1} color={COLORS[0]} />
+        <Panel label="flex 2" grow={2} color={COLORS[1]} />
+        <Panel label="flex 1" grow={1} color={COLORS[2]} />
       </box>
 
       {/* absolute positioning works too, relative to the nearest ancestor */}

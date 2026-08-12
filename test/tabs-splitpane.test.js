@@ -241,11 +241,11 @@ test('SplitPane sizes the first pane and gives the rest to the second', async ()
 });
 
 test('the second pane does not grow to fit content wider than it', async () => {
-  // Yoga defaults flexShrink to 0 where CSS defaults it to 1, so a pane left
-  // at `flexBasis: auto` takes its content's max-content width as a base and
-  // then cannot shrink back to the space actually available. The symptom is a
-  // wrapping row that never wraps and overflows the window instead, which is
-  // invisible in the empty-pane test above: with no content there is no
+  // A pane left at `flexBasis: auto` takes its content's max-content width
+  // as a base, and shrinking only ever brings it back to the content's own
+  // floor — which for a row of rigid cards is that same width. The symptom is
+  // a wrapping row that never wraps and overflows the window instead, which
+  // is invisible in the empty-pane test above: with no content there is no
   // natural width for the basis to pick up.
   const app = createMockApp();
   const x11Root = await createRoot({ app });

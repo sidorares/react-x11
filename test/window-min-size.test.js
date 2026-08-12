@@ -2,10 +2,11 @@
 //
 // The floor is measured by laying the tree out with no room at all and
 // reading how far it still reached — so what a node contributes is whatever
-// its own style lets it shrink to, and a node that was told it may shrink
-// (`flexShrink`, `overflow: 'scroll'`) contributes nothing. That is the
-// escape hatch Qt spells `QScrollArea` and GTK spells `min-content-width`,
-// and most of what is asserted here is which side of it a node falls on.
+// its own style lets it shrink to, and a node that named a floor of its own
+// (`minWidth: 0`, `overflow: 'scroll'`) contributes that instead of its
+// content. That is the escape hatch Qt spells `QScrollArea` and GTK spells
+// `min-content-width`, and most of what is asserted here is which side of it
+// a node falls on.
 //
 // Headless, so there are no fonts and text measures 0x0 (see AGENTS.md): the
 // content is sized boxes throughout, and the height-for-width case is built
@@ -125,7 +126,7 @@ test('a column is floored by its widest row, not by their sum', async () => {
 
 test('a scroll container contributes nothing to the floor', async () => {
   // The escape hatch, and it costs the author nothing to reach: `overflow:
-  // 'scroll'` already resolves to `minWidth: 0, flexShrink: 1`, so the pass
+  // 'scroll'` already resolves to `minWidth: 0, minHeight: 0`, so the pass
   // that measures the floor finds a pane that can give everything. What is
   // left is the rigid sidebar beside it.
   const { wnd, root } = await mount(
@@ -148,7 +149,33 @@ test('a scroll container contributes nothing to the floor', async () => {
   await root.unmount();
 });
 
-test('a box told it may shrink is taken at its word', async () => {
+test('a box that says minWidth: 0 is taken at its word', async () => {
+  const { wnd, root } = await mount(
+    h(
+      'window',
+      { minWidth: 'auto', width: 600, height: 200 },
+      h(
+        'box',
+        { style: { flexDirection: 'row' } },
+        h(
+          'box',
+          { key: 'giving', style: { minWidth: 0 } },
+          box({ width: 400, height: 20 }, 'inside'),
+        ),
+        box({ width: 100, height: 20 }, 'rigid'),
+      ),
+    ),
+  );
+  assert.strictEqual(hintsOf(wnd).minWidth, 100);
+  await root.unmount();
+});
+
+test('flexShrink alone gives up no content (#249)', async () => {
+  // The same tree with the escape hatch spelled the way it used to be. Back
+  // when yoga's `flexShrink: 0` was the default, asking for `1` was a
+  // statement — "this one can give" — and the floor read it as one. Every
+  // node may shrink now, so it says nothing about how far, and the 400px
+  // box inside still has to fit.
   const { wnd, root } = await mount(
     h(
       'window',
@@ -161,11 +188,11 @@ test('a box told it may shrink is taken at its word', async () => {
           { key: 'giving', style: { flexShrink: 1 } },
           box({ width: 400, height: 20 }, 'inside'),
         ),
-        box({ width: 100, height: 20, flexShrink: 0 }, 'rigid'),
+        box({ width: 100, height: 20 }, 'rigid'),
       ),
     ),
   );
-  assert.strictEqual(hintsOf(wnd).minWidth, 100);
+  assert.strictEqual(hintsOf(wnd).minWidth, 500);
   await root.unmount();
 });
 

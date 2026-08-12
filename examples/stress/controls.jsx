@@ -47,10 +47,10 @@ const s = createStyles({
   title: { fontSize: 12, color: '$text' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   // A row of things sized by their own text — buttons, chips — has to wrap.
-  // Yoga defaults flexShrink to 0, so without this they do not compress to
-  // fit, they overflow: three buttons that sit comfortably in a 250px card in
-  // one font run off the edge of it in a wider one. Anything laid out against
-  // the metrics of the font you happened to test with is a latent bug, and a
+  // They compress only as far as the words inside them, so without this they
+  // overflow: three buttons that sit comfortably in a 250px card in one font
+  // run off the edge of it in a wider one. Anything laid out against the
+  // metrics of the font you happened to test with is a latent bug, and a
   // desktop app cannot know the metrics in advance.
   buttonRow: {
     flexDirection: 'row',

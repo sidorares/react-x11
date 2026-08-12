@@ -1070,8 +1070,9 @@ export function MenuBar({
           // scroll to once the cut lands, so the bar answers no keys and
           // takes no wheel (docs/elements.md).
           overflow: 'scroll',
-          // A scroll container brings `flexShrink: 1`; a menu bar is not a
-          // thing that gives up height when the window is short.
+          // A scroll container brings `minHeight: 0` with it; a menu bar is
+          // not a thing that gives up height when the window is short, so it
+          // opts out of shrinking altogether.
           flexShrink: 0,
         },
         style,

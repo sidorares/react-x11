@@ -51,6 +51,28 @@ const DISPLAY = {
   none: Yoga.DISPLAY_NONE,
 };
 
+/**
+ * CSS's `flex` shorthand, as the three properties it sets. A number is
+ * `flex: <grow> 1 0` — "take this share of what is left, from a base size of
+ * nothing" — which is what `flex: 1` means everywhere it is written; the two
+ * keywords are CSS's own, `'auto'` for "grow and shrink from my content" and
+ * `'none'` for "do neither".
+ *
+ * It is here rather than in `LAYOUT_APPLIERS` because a shorthand is not a
+ * yoga property: it expands into three of them before the diff runs, so
+ * `{ flex: 1, flexBasis: 'auto' }` resolves the way CSS does — the longhand
+ * after the shorthand wins — and the applier for each still sees a plain
+ * value changing.
+ */
+const FLEX_SHORTHAND = {
+  none: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
+  auto: { flexGrow: 1, flexShrink: 1, flexBasis: 'auto' },
+};
+
+const isFlexShorthand = (v) =>
+  (typeof v === 'number' && Number.isFinite(v) && v >= 0) ||
+  (typeof v === 'string' && v in FLEX_SHORTHAND);
+
 const OVERFLOW = {
   visible: Yoga.OVERFLOW_VISIBLE,
   hidden: Yoga.OVERFLOW_HIDDEN,
@@ -379,6 +401,9 @@ const STATE_PROPS = new Set([...PAINT_PROPS, 'color']);
 
 const STYLE_PROPS = new Set([
   ...Object.keys(LAYOUT_APPLIERS),
+  // the one layout property that is not a yoga property: a shorthand for
+  // three of them, expanded by `resolveComputedStyle`
+  'flex',
   ...PAINT_PROPS,
   ...TEXT_LAYOUT_PROPS,
   ...TEXT_PAINT_PROPS,
@@ -541,6 +566,13 @@ function validateStyle(style, where) {
     }
     if (!STYLE_PROPS.has(key)) {
       throw new Error(`react-x11: unknown style property "${key}" in ${where}`);
+    }
+    if (key === 'flex' && !isFlexShorthand(style[key])) {
+      throw new Error(
+        `react-x11: invalid flex ${JSON.stringify(style[key])} in ${where} ` +
+          '(expected a number — flex: 1 is flexGrow: 1, flexShrink: 1, ' +
+          "flexBasis: 0 — or 'auto' / 'none')",
+      );
     }
   }
 }
@@ -832,43 +864,117 @@ export function resolveTokens(style, theme, where = 'style', strict = true) {
 export { validateStyle };
 
 /**
- * The layout defaults `overflow: 'scroll'` implies, folded into the resolved
- * style so they travel through the ordinary diff — a scroll container is a
- * *style*, not a species of node, and every one of these is a CSS idiom the
- * author would otherwise have to remember.
+ * The style the layout is actually run from: the `flex` shorthand expanded,
+ * and the defaults `overflow: 'scroll'` implies folded in. Both are things a
+ * style *means* rather than things it says, and doing them here — once, on
+ * the resolved object — is what lets everything downstream stay a flat diff
+ * of yoga properties.
+ *
+ * Returns `style` itself when there is nothing to add, so identity comparisons
+ * upstream keep meaning "the style did not change".
+ *
+ * The scroll-container half, property by property:
  *
  * - **`min-width/height: 0`** is the spec's own rule, not an invention: CSS
  *   computes `min-*: auto` to `0` on a flex item whose overflow is not
- *   `visible`. Yoga does not, and without it the item's min-content size is
- *   a floor the viewport cannot shrink below.
- * - **`flexShrink: 1`** because yoga's default is `0`, which sizes the
- *   viewport to its content — a scroll container has to yield to the layout
- *   around it instead.
+ *   `visible`. It is the one place the automatic minimum size (`Node`'s
+ *   content floors) does not apply, and the reason a viewport can be smaller
+ *   than what is inside it — which is what scrolling is.
  * - **`flexBasis: 0`** — what CSS's `flex: 1` means — only when the author
  *   asked it to grow and gave it no size of its own. A flex item's base size
  *   is its content, and a window whose scrolling pane holds more rows than
  *   fit grew *past* the window, pushing the footer out of view however small
  *   the window got. Zeroing the basis fixes the whole ancestor chain at once,
  *   since the content stops counting towards any of their heights.
- *
- * Returns `style` itself when there is nothing to add, so identity comparisons
- * upstream keep meaning "the style did not change".
  */
-export function resolveScrollContainer(style) {
-  if (style.overflow !== 'scroll') return style;
-  const out = { ...style };
-  if (out.flexShrink === undefined) out.flexShrink = 1;
-  if (out.minWidth === undefined) out.minWidth = 0;
-  if (out.minHeight === undefined) out.minHeight = 0;
-  if (
-    out.flexBasis === undefined &&
-    out.width === undefined &&
-    out.height === undefined &&
-    (out.flexGrow ?? 0) > 0
-  ) {
-    out.flexBasis = 0;
+export function resolveComputedStyle(style) {
+  const scrolls = style.overflow === 'scroll';
+  if (style.flex === undefined && !scrolls) return style;
+  const out = {};
+  if (style.flex !== undefined) {
+    const expansion =
+      typeof style.flex === 'number'
+        ? { flexGrow: style.flex, flexShrink: 1, flexBasis: 0 }
+        : FLEX_SHORTHAND[style.flex];
+    if (!expansion) {
+      throw new Error(
+        `react-x11: invalid flex ${JSON.stringify(style.flex)} ` +
+          "(expected a number, 'auto' or 'none')",
+      );
+    }
+    Object.assign(out, expansion);
+  }
+  // after the expansion, so a longhand written beside the shorthand wins
+  for (const key of Object.keys(style)) {
+    if (key !== 'flex') out[key] = style[key];
+  }
+  if (scrolls) {
+    if (out.minWidth === undefined) out.minWidth = 0;
+    if (out.minHeight === undefined) out.minHeight = 0;
+    if (
+      out.flexBasis === undefined &&
+      out.width === undefined &&
+      out.height === undefined &&
+      (out.flexGrow ?? 0) > 0
+    ) {
+      out.flexBasis = 0;
+    }
   }
   return out;
+}
+
+/**
+ * The renderer's own yoga config — one for the process, shared by every node
+ * — which exists so that a **measurement** can be taken off the pixel grid.
+ *
+ * Yoga rounds a finished layout to whole pixels, and does it on absolute
+ * positions, so a box 36.4 tall reads back as 36 or 37 depending on where it
+ * landed. Summing those with exact paddings is how a min-content measurement
+ * of 36.4 comes out as 37 — and a floor of 37 does not hold a box at the size
+ * it already was, it *grows* it, one pixel per nesting level, all the way up
+ * the tree. Measuring with the grid switched off is what keeps a floor a
+ * promise not to shrink rather than an instruction to grow.
+ *
+ * The final layout — the one that decides where anything is actually drawn —
+ * always runs rounded, which is what keeps a border on a whole pixel.
+ */
+let config = null;
+const layoutConfig = () => (config ??= Yoga.Config.create());
+
+/** A yoga node in the renderer's config. */
+export const createLayoutNode = () => Yoga.Node.create(layoutConfig());
+
+/**
+ * Run `measure` with the pixel grid switched off, and put it back however
+ * that goes: a throw here would otherwise leave every later layout in the
+ * process unrounded, which is a class of blurry-by-a-half-pixel bug nothing
+ * would connect back to this.
+ */
+export function measuringExactly(measure) {
+  const cfg = layoutConfig();
+  cfg.setPointScaleFactor(0);
+  try {
+    return measure();
+  } finally {
+    cfg.setPointScaleFactor(1);
+  }
+}
+
+/**
+ * The yoga defaults that are not CSS's, written once per node.
+ *
+ * `applyLayoutStyle` only calls a setter for a property that **changed**, so
+ * a style that never mentions `flexShrink` never reaches the `?? 1` in its
+ * applier and yoga's own `0` would stand. A default that only exists in the
+ * reset path is not a default; this is where it actually happens.
+ *
+ * The pair to it is the automatic minimum size — a flex item that may shrink
+ * still cannot shrink below its content unless it says so. Yoga has no such
+ * rule, so the renderer measures the floors itself; see `Node`'s content
+ * floors in nodes.js.
+ */
+export function applyLayoutDefaults(yogaNode) {
+  yogaNode.setFlexShrink(1);
 }
 
 /**

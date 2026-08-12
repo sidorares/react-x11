@@ -119,7 +119,10 @@ no override-redirect staging (issue #4).
   face, the size — what travels down the tree) and `LOCAL_TEXT_PROPS` (what
   shapes a node's own box and therefore cannot arrive from above). Which
   side a text property is on decides who has to react when it moves, so a
-  new one goes in exactly one of them.
+  new one goes in exactly one of them. And the two places a style means more
+  than it says: `resolveComputedStyle` (the `flex` shorthand, and the
+  defaults `overflow: 'scroll'` implies) and `applyLayoutDefaults` (the yoga
+  defaults that are not CSS's — `flexShrink`, see the gotcha below).
 - `src/events.js` — `EventManager`: ntk window events → synthetic events
   (click synthesis, hover enter/leave diffing, the wheel — ntk's `wheel`
   event, XI2 valuators where the server has them and buttons 4-7 where it
@@ -954,21 +957,40 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   monotonicity test catches it.
 - **Layouts sized against one font break in another.** `sans-serif` is
   whatever fontconfig hands you, and a row of things sized by their own text
-  does not compress to fit (see the `flexShrink` note below) — it overflows and
-  gets clipped. Three buttons that sat comfortably in a 250px card under the
-  test fonts ran off the edge of it on a real desktop. Rows of buttons or chips
-  want `flexWrap: 'wrap'`. `npm run stress:check -- --wide` renders the whole
-  app in a monospace UI face and fails on any node overflowing a pinned-width
-  ancestor, which is the pass that would have caught it.
-- **Yoga defaults `flexShrink` to 0**, where CSS defaults it to 1. A box with
-  `flexGrow: 1` and the default `flexBasis: auto` therefore takes its
-  content's max-content size as its base and **cannot shrink back** to the
-  space actually available — a wrapping row inside it never wraps and
-  overflows instead. Use `flexBasis: 0` for "take whatever is left"; that is
-  what `SplitPane`'s second pane does, with a regression test in
-  `test/tabs-splitpane.test.js`. Note also that `flexBasis` wins over `width`
-  on the main axis, so spreading a `flexBasis: 0` style into a fixed-width
-  box collapses it to nothing.
+  compresses only as far as the words inside it (see the content floors
+  below) — past that it overflows and gets clipped. Three buttons that sat
+  comfortably in a 250px card under the test fonts ran off the edge of it on
+  a real desktop. Rows of buttons or chips want `flexWrap: 'wrap'`.
+  `npm run stress:check -- --wide` renders the whole app in a monospace UI
+  face and fails on any node overflowing a pinned-width ancestor, which is
+  the pass that would have caught it.
+- **`flexShrink` defaults to 1 and every flex item carries a content floor**
+  (#249, `nodes.js`: `contentSpan`, `writeContentFloors`). Yoga defaults the
+  shrink to 0 and has no floor at all, and **neither of its two answers is
+  usable on its own**: with 0 a row never squeezes into the space it has, and
+  with 1 everything collapses to nothing — scrolling stops existing, because
+  a pane's content shrinks to its viewport. CSS has both halves, so the
+  renderer measures the missing one: one min-content pass per axis on any
+  frame that changes the layout, written onto the yoga nodes as
+  `minWidth`/`minHeight` and taken back off before the next measurement.
+  Things to know before touching it:
+  - the measuring passes run **`measuringExactly`** (yoga's pixel grid off).
+    Rounded sizes summed with exact paddings make a floor a pixel too tall,
+    and a floor that exceeds the natural size does not hold a box, it
+    _grows_ it — a pixel per nesting level, all the way up.
+  - the measuring passes also **borrow `flexShrink`** (`setMeasuringShrink`):
+    min-content means "nothing gives", so a pass run at the real default
+    would answer that the content needs no room at all.
+  - `_floorsDirty` is what keeps this off the input path — `invalidate()`
+    sets it for every layout change **except a scroll**, which moves no yoga
+    node.
+  - the deliberate deviation from CSS is that a **named size is kept**: CSS
+    floors an item at `min(its size, its content)`, which is fine on the web
+    where a `<div>` is a block container and its children are not flex items,
+    and is not fine here where every box is a flex container. `minHeight: 0`
+    is how a style asks for CSS's answer.
+  - `flexBasis` still wins over `width` on the main axis, so spreading a
+    `flexBasis: 0` style into a fixed-width box collapses it to nothing.
 
 - **No X11 side effects in the render phase.** Window nodes are handles
   until `realize(parentWindow)` runs in the commit phase
@@ -981,8 +1003,9 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
 - `<popup>` is a `WindowNode` subclass with `isPopup = true`: allowed as a
   child of drawn nodes (bookkeeping only — no yoga, no reparent, own
   paint/event root). A scrolling `<box>` applies its offset during `absolutize`,
-  so painting and hit testing see shifted rects; it defaults `flexShrink`
-  to 1 (yoga's 0 would size the viewport to its content). The wheel default
+  so painting and hit testing see shifted rects; it defaults `minWidth` and
+  `minHeight` to 0, which is what lets a viewport be smaller than what is
+  inside it (CSS's own rule, and the content floors read it). The wheel default
   action (EventManager) scrolls the nearest enclosing scroll pane unless
   `preventDefault()` is called.
 - Closing an app right after `setTitle`/`setActions` crashed ntk <= 3.1.0
