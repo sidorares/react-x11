@@ -15,6 +15,7 @@ import { noteInputTime } from './inputtime.js';
 import { hooks as a11yHooks, isFocusable } from './a11y.js';
 import { Composer, composeTableFor } from './compose.js';
 import { acceleratorKeysym } from './keyboard.js';
+import { MOD } from './keysyms.js';
 
 const XK_TAB = 0xff09;
 // The core protocol has no wheel: it is a click of button 4/5 (vertical) or
@@ -39,9 +40,6 @@ const WHEEL_BUTTONS = new Set([4, 5, 6, 7]);
  */
 export const WHEEL_NOTCH_PX = 48;
 const RIGHT_BUTTON = 3;
-// X11 KeyButMask bit for Mod1 (Alt on virtually every layout), same bitmask
-// `shiftKey`/`ctrlKey` above already read `buttons` from.
-const MOD1_MASK = 8;
 
 /** How many leading entries two node paths share. */
 function sharedPrefix(a, b) {
@@ -75,10 +73,19 @@ class SyntheticEvent {
     this.target = manager._public(target);
     this.currentTarget = null;
     this.nativeEvent = native;
-    // X11 modifier mask: bit 0 Shift, bit 2 Control. Carried on every
-    // event, not just keys — shift+click needs it too.
-    this.shiftKey = Boolean(native?.buttons & 1);
-    this.ctrlKey = Boolean(native?.buttons & 4);
+    // X11 modifier mask, DOM names: bit 0 Shift, bit 2 Control, bit 3 Mod1,
+    // bit 6 Mod4. Carried on every event, not just keys — shift+click needs
+    // it too, and so does Alt+drag.
+    //
+    // Mod1 is Alt and Mod4 is Super by *convention*: the protocol says only
+    // that there are eight modifier rows, and which keys sit in them is
+    // whatever the keymap says. Every toolkit ships the convention anyway
+    // (GTK and Qt decode exactly these two), and the setup that remaps them
+    // still has the raw mask on `nativeEvent.buttons`.
+    this.shiftKey = Boolean(native?.buttons & MOD.Shift);
+    this.ctrlKey = Boolean(native?.buttons & MOD.Control);
+    this.altKey = Boolean(native?.buttons & MOD.Alt);
+    this.metaKey = Boolean(native?.buttons & MOD.Super);
     this.defaultPrevented = false;
     this.propagationStopped = false;
     if (extra) Object.assign(this, extra);
@@ -463,7 +470,7 @@ export class EventManager {
   _onMouseDown(native) {
     // the wheel arrived as `wheel`, with a distance the press cannot carry
     if (WHEEL_BUTTONS.has(native.keycode)) return;
-    if (clickToComponentHandler && Boolean(native.buttons & MOD1_MASK)) {
+    if (clickToComponentHandler && Boolean(native.buttons & MOD.Alt)) {
       clickToComponentHandler(this._hit(native), native);
       return;
     }

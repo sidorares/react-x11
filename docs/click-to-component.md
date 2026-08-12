@@ -54,10 +54,9 @@ babel/jsx-source plugin, no build-time instrumentation:
   resolve source maps itself at runtime).
 
 Alt+Click is recognized in `EventManager._onMouseDown`
-(`src/events.js`) — `native.buttons & 8` is X11's `Mod1Mask` bit, the same
-`buttons` bitmask `shiftKey`/`ctrlKey` already read elsewhere in that file —
-ahead of the normal press handling, so it never also starts a drag or moves
-focus.
+(`src/events.js`) — `native.buttons & MOD.Alt` is X11's `Mod1Mask` bit, the
+same `buttons` bitmask every synthetic event's `altKey` reads — ahead of the
+normal press handling, so it never also starts a drag or moves focus.
 
 GUI editors (cursor/code/code-insiders/windsurf, or any unrecognized
 `REACT_X11_EDITOR` value treated as a raw scheme) are opened by navigating

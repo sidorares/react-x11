@@ -40,6 +40,14 @@ export interface SyntheticEvent<T = DrawnNode> {
   nativeEvent: NativeEvent;
   shiftKey: boolean;
   ctrlKey: boolean;
+  /**
+   * X11 Mod1 — Alt on virtually every keymap, but a convention rather than
+   * a rule of the protocol. `nativeEvent.buttons` has the raw mask for a
+   * setup that remaps it.
+   */
+  altKey: boolean;
+  /** X11 Mod4 — Super, under the DOM's name for it. Same caveat as `altKey`. */
+  metaKey: boolean;
   defaultPrevented: boolean;
   propagationStopped: boolean;
   /** Suppress the element's built-in behaviour (editing, wheel scrolling…). */
