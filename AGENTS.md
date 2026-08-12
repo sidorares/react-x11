@@ -931,6 +931,15 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   needle was skipping clips nobody needed, because each of those rebuilt an a8
   mask. Measure a change in wall clock or in Composite pixels before optimising
   a request count — `npm run bench` reports both for that reason.
+- **A clip bounds the pixels, not the drawing.** Anything drawn per line, per
+  row or per cell has to be culled to the viewport by the code that draws it:
+  the clip discards what falls outside, but only after the request has been
+  built, sent and turned into a masked composite. `<textarea>` drew a fill
+  per selected line, so Ctrl+A in a 400-line value cost 422 requests to light
+  the seven lines on screen; drawing only the visible ones — and drawing them
+  as one `ctx.fillRects` batch (ntk >= 7.6, one `Render.FillRectangles`) —
+  made it 25, and flat in the size of the value. `test/selection-batch.test.js`
+  measures the two sizes against each other rather than pinning a number.
 - **Interpolate colours premultiplied.** `transparent` is _black_ at zero
   alpha, so lerping the four straight channels drags every fade-in towards
   black on the way: half way from `transparent` to a near-white hover fill

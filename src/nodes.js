@@ -5217,21 +5217,19 @@ export class TextInputNode extends Node {
     const from = layout.caretPosition(start);
     const to = layout.caretPosition(start + Array.from(this._preedit).length);
     ctx.fillStyle = style.color;
-    // a line loop rather than one rectangle, because `<textarea>` shares
-    // this and a composition at a wrap point is two spans
+    // a span per line rather than one rectangle, because `<textarea>` shares
+    // this and a composition at a wrap point is two spans — drawn as one
+    // batch, so the underline costs one request however it wraps
+    const rects = [];
     for (let li = from.line; li <= to.line; li++) {
       const line = layout.lines[li];
       if (!line) break;
       const x0 = li === from.line ? from.x : line.x;
       const x1 = li === to.line ? to.x : line.x + line.width;
       if (x1 <= x0) continue;
-      ctx.fillRect(
-        originX + x0,
-        originY + line.y + line.ascent + 1,
-        x1 - x0,
-        1,
-      );
+      rects.push(originX + x0, originY + line.y + line.ascent + 1, x1 - x0, 1);
     }
+    if (rects.length) ctx.fillRects(rects);
   }
 }
 
@@ -5530,19 +5528,36 @@ export class TextAreaNode extends TextInputNode {
       // Tinting the surface instead leaves the ink's own contrast intact.
       ctx.fillStyle =
         this.props.selectionColor ?? tint(this.theme.accent, 0.35);
-      for (let li = posA.line; li <= posB.line; li++) {
+      // Only the lines on screen, and all of them in one request. Ctrl+A in
+      // a 5000-line value selects 5000 lines and shows twenty: the clip
+      // throws the rest away *after* they have been sent, which is the one
+      // cost a clip cannot save. `indexAt` finds the first visible line
+      // without walking the list to it — conservatively, since an index on a
+      // wrap boundary answers with the line before, and one rect outside the
+      // clip is free where a scan of every line above the viewport is not.
+      const bottom = this._scrollY + content.height;
+      const first = Math.max(
+        posA.line,
+        layout.caretPosition(layout.indexAt(-1e6, this._scrollY)).line,
+      );
+      const rects = [];
+      for (let li = first; li <= posB.line; li++) {
         const line = layout.lines[li];
+        if (!line || line.y > bottom) break;
         const x0 = li === posA.line ? posA.x : line.x;
         const x1 = li === posB.line ? posB.x : line.x + line.width;
         // a selected bare newline still shows as a sliver
         const w = Math.max(x1 - x0, 4);
-        ctx.fillRect(
+        rects.push(
           originX + x0,
           originY + line.y,
           w,
           line.ascent + line.descent,
         );
       }
+      // one `Render.FillRectangles` for the whole highlight, where a fill per
+      // line is a full-surface-masked composite per line (ntk >= 7.6)
+      if (rects.length) ctx.fillRects(rects);
     }
 
     layout.draw(ctx, originX, originY);

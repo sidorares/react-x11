@@ -156,6 +156,20 @@ export function createMockApp() {
         fillRect(x, y, w, h) {
           ops.push(['fillRect', x, y, w, h, ctx.fillStyle]);
         },
+        // A batch is `fillRect` per rectangle — that is what ntk's own
+        // `fillRects` promises, and the only difference there is the request
+        // count, which a mock with no server does not have. So it records
+        // the fills themselves: an assertion on what was drawn holds whether
+        // the drawing batched or not, and `[x, y, w, h]` quadruples and one
+        // flat list are the same drawing too.
+        fillRects(rects) {
+          const flat = Array.isArray(rects?.[0]) ? rects.flat() : (rects ?? []);
+          for (let i = 0; i + 3 < flat.length; i += 4) {
+            if (flat[i + 2] > 0 && flat[i + 3] > 0) {
+              ctx.fillRect(flat[i], flat[i + 1], flat[i + 2], flat[i + 3]);
+            }
+          }
+        },
         // ntk's context has this beside `fillRect`, so an `onDraw` that
         // outlines a box paints on a real server and used to crash on the
         // mock — a missing method here is an app's headless test failing at

@@ -49,11 +49,14 @@ function bars(ctx, { width, height, seed, color }) {
   const step = width / count;
   ctx.fillStyle = color;
   let n = seed >>> 0;
+  const rects = [];
   for (let i = 0; i < count && i * step < width; i++) {
     n = (n * 1103515245 + 12345) >>> 0;
     const h = 2 + ((n >>> 16) % Math.max(2, height - 2));
-    ctx.fillRect(i * step, height - h, Math.max(1, step - 2), h);
+    rects.push(i * step, height - h, Math.max(1, step - 2), h);
   }
+  // bars in one colour are one request, not one each
+  ctx.fillRects(rects);
 }
 
 /** The panel, without a window round it, so examples/app.jsx can show it in

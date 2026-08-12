@@ -337,6 +337,11 @@ operations. No server, no connection, much faster, and no pixels — good for
 asserting on layout and on the node tree, which is most tests. Input
 injection is not available and says so.
 
+A batch records as the fills it stands for: `ctx.fillRects([[x, y, w, h], …])`
+leaves one `fillRect` operation per rectangle, because the only difference
+between them is a request count and there is no server here to send it to. So
+an assertion on what a drawing painted holds whether or not it batched.
+
 ## Testing Library itself
 
 It does not work here and no shim will fix it: its queries are built on a
