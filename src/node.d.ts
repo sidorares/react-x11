@@ -120,6 +120,11 @@ export declare class Node {
   readonly style: Style;
   /** The nearest `theme` at or above this node. */
   readonly theme: Record<string, unknown> | null;
+  /** Which way this node reads, resolved — `'ltr'` or `'rtl'`, never
+   * `'inherit'`. Yoga has already mirrored the boxes, so this is for what an
+   * element draws *inside* one: which side a mark sits on, which way a
+   * chevron points, what a pointer coordinate means. */
+  readonly direction: 'ltr' | 'rtl';
   /** Style names this element owns as its own semantics. Registered
    * elements declare these to `registerElement` instead of overriding. */
   readonly semanticNames: ReadonlySet<string>;

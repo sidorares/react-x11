@@ -16,6 +16,9 @@ export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { useFrame } from './frame3d.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
 export { announce } from './a11y.js';
+// the standard Undo/Cut/Copy/Paste menu, for an element that edits or
+// selects text of its own — `<textinput>`'s own menu is a caller of it
+export { closeEditMenu, editMenuOpen, openEditMenu } from './nodes.js';
 export { useSessionBus, useSystemBus } from './bushooks.js';
 export { REGISTRAR_NAME, useGlobalMenu } from './globalmenu.js';
 export {

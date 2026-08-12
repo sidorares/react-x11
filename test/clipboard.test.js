@@ -12,7 +12,12 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
-import { createRoot, useApp, useClipboard } from '../src/index.js';
+import {
+  closeEditMenu,
+  createRoot,
+  useApp,
+  useClipboard,
+} from '../src/index.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -289,31 +294,42 @@ async function mountInput() {
   return { app, wnd, input, x11Root };
 }
 
-const pasteRow = (input) =>
-  input._editMenuItems().find((r) => r.id === 'paste');
+/** Open the field's edit menu, read the Paste row out of the menu that
+ * really opened, and close it again. Whether the row is live is the whole
+ * question here, so it has to come from the rows the menu built rather than
+ * from asking the field a second time. */
+async function pasteRow(wnd, input) {
+  wnd.emit('mousedown', { x: 40, y: 10, keycode: 3 });
+  await tick();
+  const row = input._editMenu._editMenuRows.find((r) => r.id === 'paste');
+  closeEditMenu(input);
+  await tick();
+  return row;
+}
 
 test('Paste greys out once the server says the clipboard is empty', async () => {
   const { app, wnd, input, x11Root } = await mountInput();
-  const open = () => wnd.emit('mousedown', { x: 40, y: 10, keycode: 3 });
 
-  // nothing known yet: the row is live, which is where it started
-  assert.equal(pasteRow(input).enabled, true, 'optimistic before tracking');
+  // nothing known yet: the first open arms the watch, and its own row is
+  // live, which is where the row started
+  const first = await pasteRow(wnd, input);
+  assert.equal(first.enabled, true, 'optimistic before tracking');
 
-  open(); // arms the watch
-  await tick();
-  input._closeEditMenu();
-  await tick();
   assert.equal(
-    pasteRow(input).enabled,
+    (await pasteRow(wnd, input)).enabled,
     false,
     'seeded from the server: nothing owns CLIPBOARD',
   );
 
   await app.clipboard.write('now there is something');
-  assert.equal(pasteRow(input).enabled, true, 'the watch woke it up');
+  assert.equal(
+    (await pasteRow(wnd, input)).enabled,
+    true,
+    'the watch woke it up',
+  );
 
   await app.clipboard.clear();
-  assert.equal(pasteRow(input).enabled, false, 'and put it back');
+  assert.equal((await pasteRow(wnd, input)).enabled, false, 'and put it back');
   await x11Root.unmount();
 });
 
@@ -322,7 +338,7 @@ test('one watch per app, however many times a menu opens', async () => {
   for (let i = 0; i < 5; i++) {
     wnd.emit('mousedown', { x: 40, y: 10, keycode: 3 });
     await tick();
-    input._closeEditMenu();
+    closeEditMenu(input);
     await tick();
   }
   assert.equal(
@@ -341,8 +357,6 @@ test('a clipboard that cannot be watched leaves Paste alone', async () => {
     write: () => Promise.resolve(),
     read: () => Promise.resolve('x'),
   };
-  wnd.emit('mousedown', { x: 40, y: 10, keycode: 3 });
-  await tick();
-  assert.equal(pasteRow(input).enabled, true);
+  assert.equal((await pasteRow(wnd, input)).enabled, true);
   await x11Root.unmount();
 });

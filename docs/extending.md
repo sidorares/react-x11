@@ -433,6 +433,89 @@ of milliseconds apart. Stop the timer in `defaultBlur` _and_ in
 `destroySubtree`: a node that unmounts while focused is forgotten rather than
 blurred, so `defaultBlur` is not guaranteed to run.
 
+### The standard edit menu
+
+A `<textinput>` gets a right-click Undo / Cut / Copy / Paste / Select All
+menu without being asked. An element that edits or selects text of its own
+gets **the same menu** — not one that looks like it — by naming its verbs
+and letting core do the rest (issue #256):
+
+```js
+import { openEditMenu } from 'react-x11';
+
+class EditorNode extends Node {
+  defaultContextMenu(ev) {
+    openEditMenu(
+      this,
+      { x: ev.x, y: ev.y },
+      {
+        canUndo: this.canUndo,
+        undo: () => this.undo(),
+        canRedo: this.canRedo,
+        redo: () => this.redo(),
+        hasSelection: !this.selection.isEmpty(),
+        cut: () => this.cut(),
+        copy: () => this.copy(),
+        paste: () => this.paste(),
+        selectAll: () => this.selectAll(),
+      },
+    );
+  }
+}
+```
+
+What that buys, and the reason it is worth an export rather than a recipe:
+the rows and their order, the enablement rules, Paste watching **selection
+ownership** instead of asking the server on the way to opening a menu
+([elements.md](elements.md#the-right-click-menu)), the arrow keys and
+Escape, the pointer grab that dismisses it, and handing the keyboard back to
+wherever it came from afterwards. `<textinput>` is a caller of this function,
+which is what keeps the two from drifting.
+
+**A verb you leave out is a row that is not there** — not a greyed one. It
+was `<textinput sensitive>` that motivated the rule, where a disabled Copy
+over a password reads as a bug in the application rather than as a decision,
+but it is also exactly what a **read-only** surface needs: a rendered
+document that can be selected and copied passes three things and gets a
+two-row menu, with no dead Undo, Cut or Paste to explain.
+
+```js
+openEditMenu(
+  node,
+  { x, y },
+  {
+    hasSelection: selection.hasSelection(),
+    copy,
+    selectAll,
+  },
+);
+```
+
+Leave out every verb and nothing opens at all.
+
+**Enablement is not yours to decide row by row.** You answer three questions
+only the target can answer — `canUndo`, `canRedo`, `canSelectAll` (which
+defaults to true: the surface is empty, or all of it is selected already) —
+and hand over `hasSelection`. Cut and Copy follow the selection, Paste
+follows what the server has said about the clipboard. That is the part a
+second implementation would get subtly wrong.
+
+`at` is where the pointer was, in the **owner window's** coordinates — the
+`x`/`y` a synthetic event carries. A surface with no caret has nothing else
+to offer, and this is what it already has; the menu is placed on the screen
+from there, clamped into the monitor it opens on.
+
+Two more functions come with it, both for the element rather than the menu:
+
+| function              |                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `editMenuOpen(node)`  | is the menu up? An element that paints a selection asks — the popup holds the keyboard, so the element is not focused, and the selection has to stay lit     |
+| `closeEditMenu(node)` | close it. The menu already closes itself on a choice, Escape and a press outside; this is for content that changed underneath it, or a surface that scrolled |
+
+They are exported from the **package root** rather than from
+`react-x11/node`, because the caller is not always an element: a component
+that wraps one opens the same menu from an `onContextMenu` handler and a ref.
+
 ### Scrolling content you painted
 
 A `<box overflow="scroll">` scrolls **children**: layout knows where they

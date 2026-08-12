@@ -392,6 +392,65 @@ export function createRoot(options?: RootOptions): Promise<Root>;
  */
 export function announce(text: string, opts?: { assertive?: boolean }): boolean;
 
+/**
+ * The verbs the standard edit menu is opened with — what a target can do,
+ * and what each of those is worth right now.
+ *
+ * **A verb left out is a row that is not there**, rather than a greyed one:
+ * a password field passes no `copy` and no `cut`, a read-only surface passes
+ * only `copy` and `selectAll`, and neither shows a dead row explaining
+ * itself. Enablement is not the caller's to decide row by row — Cut and Copy
+ * follow `hasSelection`, Paste follows what the server says about the
+ * clipboard — which is the point of sharing the implementation.
+ */
+export interface EditMenuActions {
+  /** Whether there is a selection: what Cut and Copy are enabled by. */
+  hasSelection?: boolean;
+  /** Whether there is anything to undo. Undo is greyed without it. */
+  canUndo?: boolean;
+  undo?(): void;
+  canRedo?: boolean;
+  redo?(): void;
+  cut?(): void;
+  copy?(): void;
+  paste?(): void;
+  /** Defaults to `true`. `false` greys Select All — the surface is empty, or
+   * all of it is selected already. */
+  canSelectAll?: boolean;
+  selectAll?(): void;
+}
+
+/**
+ * Open the standard Undo / Redo / Cut / Copy / Paste / Select All menu on a
+ * node, for a target that speaks {@link EditMenuActions}.
+ *
+ * This is `<textinput>`'s own right-click menu, exported because everything
+ * about it except the verbs is worth having once: the enablement rules,
+ * Paste watching selection ownership rather than asking the server on the
+ * way to opening a menu, the arrow keys and Escape, the pointer grab that
+ * dismisses it, and handing the keyboard back afterwards. See
+ * [extending.md](../docs/extending.md).
+ *
+ * `at` is where the pointer was, in the **owner window's** coordinates —
+ * `ev.x`/`ev.y` from the event that asked for the menu, which is what a
+ * surface with no caret of its own already has.
+ */
+export function openEditMenu(
+  node: DrawnNode,
+  at: { x: number; y: number },
+  actions: EditMenuActions,
+): void;
+
+/** Whether `node` has the standard edit menu open. An element that paints a
+ * selection asks: the popup holds the keyboard, so the element is not
+ * focused, and the text the menu is about to act on has to stay lit. */
+export function editMenuOpen(node: DrawnNode): boolean;
+
+/** Close it, if it is open. The menu already closes itself on a choice, a
+ * press outside and Escape; this is for an element that has decided the menu
+ * no longer applies — its content changed underneath it, or it scrolled. */
+export function closeEditMenu(node: DrawnNode): void;
+
 /** The react-reconciler instance. Escape hatch; not a stable API. */
 export const Renderer: any;
 

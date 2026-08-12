@@ -54,7 +54,12 @@ import {
   watchCompositing,
 } from './compositing.js';
 import { availableArea } from './screens.js';
-import { anchorOffscreen, anchorRect } from './anchor.js';
+import {
+  anchorArea,
+  anchorOffscreen,
+  anchorRect,
+  windowOrigin,
+} from './anchor.js';
 import { baseTheme } from './palette.js';
 import { callHandler } from './errors.js';
 import {
@@ -73,6 +78,7 @@ import {
   editMenuColors,
   editMenuGeometry,
   editMenuIndexAt,
+  editMenuItems,
   editMenuStep,
   paintEditMenu,
 } from './editmenu.js';
@@ -3990,6 +3996,221 @@ const UNDO_LIMIT = 200;
  */
 export const CARET_BLINK_MS = 530;
 
+// --- the standard edit menu ------------------------------------------------
+//
+// Right-click gets Undo/Cut/Copy/Paste with no wiring, the way a browser
+// gives `<input>` one. The rows cannot be `Menu` components — those are
+// React over the nodes, and a node cannot mount one — so the menu is a
+// `<popup>` built here with a `<canvas>` child that paints the rows
+// (src/editmenu.js) and handles its own pointer and key events. That reuses
+// the popup's pointer grab, dismissal and focus rather than reinventing
+// them.
+//
+// `<textinput>` is a *caller* of this, not its owner (issue #256): the
+// enablement rules, the PRIMARY/CLIPBOARD subtleties and the menu's keyboard
+// handling are the parts a second editable element would otherwise have to
+// re-debug, so they live here, once, behind a verb interface anything can
+// speak.
+
+/** Where the popup goes: at `at`, which is in the owner window's coordinates
+ * the way a synthetic event's `x`/`y` are, pulled back inside the monitor
+ * when the menu would hang off an edge of it. */
+function editMenuOrigin(node, at, size) {
+  const origin = windowOrigin(node);
+  let x = origin.x + (Number.isFinite(at?.x) ? at.x : (node.abs?.x ?? 0));
+  let y = origin.y + (Number.isFinite(at?.y) ? at.y : (node.abs?.y ?? 0));
+  // the monitor's work area rather than the whole virtual desktop, so a menu
+  // near a seam flips back onto the screen it was opened on — the same
+  // answer `<ContextMenu>` clamps a pointer-anchored menu into. Clamped, not
+  // flipped: there is no anchor rect to flip around.
+  const area = anchorArea(node);
+  if (area) {
+    x = Math.max(area.x, Math.min(x, area.x + area.width - size.width));
+    y = Math.max(area.y, Math.min(y, area.y + area.height - size.height));
+  }
+  return { x, y };
+}
+
+/**
+ * Open the standard edit menu on `node`, for a target that speaks a small
+ * verb interface.
+ *
+ * This is what `<textinput>`'s own right-click menu is, and the reason it is
+ * exported is that everything about it except the verbs is worth having
+ * once: which rows are enabled, Paste watching selection ownership rather
+ * than asking the server on the way to opening a menu, the arrow keys and
+ * Escape, the pointer grab that dismisses it, and handing the keyboard back
+ * where it came from afterwards.
+ *
+ * ```js
+ * openEditMenu(node, { x: ev.x, y: ev.y }, {
+ *   canUndo: this.canUndo,  undo: () => this.undo(),
+ *   canRedo: this.canRedo,  redo: () => this.redo(),
+ *   hasSelection: this.hasSelection(),
+ *   cut: () => this.cut(),
+ *   copy: () => this.copy(),
+ *   paste: () => this.paste(),
+ *   selectAll: () => this.selectAll(),
+ * });
+ * ```
+ *
+ * **A verb you leave out is a row that is not there**, rather than a greyed
+ * one — see `editMenuItems`. A read-only surface passes `hasSelection`,
+ * `copy` and `selectAll` and gets a two-row menu; a password field passes no
+ * `copy` and no `cut` and gets a menu that offers neither. Leave out every
+ * verb and nothing opens at all.
+ *
+ * @param {Node} node the element the menu belongs to. The popup hangs off it
+ *   in the tree, so it goes away with the element and counts as inside it
+ *   for `:focus-within`.
+ * @param {{x: number, y: number}} at where the pointer was, in the owner
+ *   window's coordinates — `ev.x`/`ev.y` from the event that asked for the
+ *   menu. A surface with no caret has nothing else to offer, and this is
+ *   what it already has.
+ * @param {object} actions the verbs, and what each is worth right now:
+ *   `hasSelection` (Cut and Copy follow it), `canUndo`, `canRedo`,
+ *   `canSelectAll` (defaults to true), and the functions `undo`, `redo`,
+ *   `cut`, `copy`, `paste`, `selectAll`.
+ */
+export function openEditMenu(node, at, actions = {}) {
+  closeEditMenu(node);
+  if (!node?.root || node.destroyed) return;
+  const app = node.app;
+  const clipboard = app?.clipboard ?? null;
+  // From here on the menu knows whether there is anything to paste. This
+  // first open still shows the row enabled — the answer arrives after it
+  // is drawn — which is the pre-tracking behaviour, and correct far more
+  // often than not.
+  if (typeof actions.paste === 'function') armPasteState(app, clipboard);
+  const items = editMenuItems(actions, {
+    // greyed only when the server has told us the selection is unowned
+    // (pastestate.js). Never a round trip on the way to opening a menu.
+    canPaste: Boolean(clipboard) && canPaste(app),
+  });
+  if (items.length === 0) return;
+
+  const style = node.resolvedTextStyle();
+  const geometry = editMenuGeometry(
+    items,
+    (text) => app?.fonts?.layout(text, style)?.width,
+  );
+  const { x, y } = editMenuOrigin(node, at, geometry);
+  const colors = editMenuColors(node.theme);
+  const state = { active: -1 };
+  const choose = (id) => {
+    closeEditMenu(node);
+    // the target's own entry point, so the row can never drift from what
+    // the equivalent shortcut does
+    if (id) actions[id]?.();
+  };
+
+  const canvas = new CanvasNode(
+    {
+      focusable: true,
+      style: { flexGrow: 1 },
+      onDraw: (ctx) =>
+        paintEditMenu(ctx, {
+          geometry,
+          active: state.active,
+          colors,
+          radius: node.theme?.radius ?? 4,
+          layoutOf: (text, color) =>
+            app?.fonts?.layout([{ text, ...style, color }], style),
+        }),
+      onMouseMove: (mv) => {
+        const next = editMenuIndexAt(geometry, mv.y);
+        if (next === state.active) return;
+        state.active = next;
+        popup.invalidate(false, null, 'style-state');
+      },
+      onMouseUp: (mv) => {
+        const i = editMenuIndexAt(geometry, mv.y);
+        if (i !== -1) choose(geometry.rows[i].id);
+        else closeEditMenu(node);
+      },
+      onKeyDown: (k) => {
+        if (k.keysym === XK_ESCAPE) return closeEditMenu(node);
+        if (k.keysym === XK_UP || k.keysym === XK_DOWN) {
+          state.active = editMenuStep(
+            geometry,
+            state.active,
+            k.keysym === XK_DOWN ? 1 : -1,
+          );
+          popup.invalidate(false, null, 'style-state');
+          return;
+        }
+        if (k.keysym === XK_RETURN || k.keysym === XK_KP_ENTER) {
+          const row = geometry.rows[state.active];
+          if (row && !row.separator) choose(row.id);
+        }
+      },
+    },
+    app,
+  );
+
+  const popup = new PopupNode(
+    app,
+    {
+      x,
+      y,
+      width: geometry.width,
+      height: geometry.height,
+      windowType: 'popup_menu',
+    },
+    {
+      grab: true,
+      // a press outside the menu closes it and goes no further, which is
+      // what the grab is for
+      onDismiss: () => closeEditMenu(node),
+    },
+  );
+  popup.insertBefore(canvas, null);
+  node.insertBefore(popup, null);
+  popup.realize(null);
+  // the rows as they were built, for a test to read: they are painted into a
+  // canvas, so there is no tree for `screen` to query them out of
+  popup._editMenuRows = geometry.rows;
+  node._editMenu = popup;
+  // read *before* the menu takes the keyboard, and handed back on close
+  node._editMenuRestore = node._focusManager()?.focused ?? null;
+  // the menu takes the keyboard so arrows and Escape reach it rather than
+  // the element behind it
+  popup.events?.focus?.(canvas);
+}
+
+/** Whether `node` has the standard edit menu open. An element that paints a
+ * selection asks: the popup holds the keyboard, so the element is not
+ * focused, and the text the menu is about to act on has to stay visibly
+ * selected. */
+export function editMenuOpen(node) {
+  return Boolean(node?._editMenu);
+}
+
+/** Close it, if it is open. The menu closes itself on a choice, a press
+ * outside and Escape; this is for an element that has decided the menu no
+ * longer applies — its content changed underneath it, or it scrolled. */
+export function closeEditMenu(node) {
+  const popup = node?._editMenu;
+  if (!popup) return;
+  node._editMenu = null;
+  const restore = node._editMenuRestore;
+  node._editMenuRestore = null;
+  // the popup is a child, so a node destroyed while its menu was up took the
+  // menu with it: there is nothing left to remove and nowhere to hand the
+  // keyboard back to
+  if (node.destroyed) return;
+  node.removeChild(popup);
+  const events = node._focusManager();
+  if (!events) return;
+  // focus goes back where the menu took it from, so typing carries on where
+  // it left off — as a pointer focus, since a right-click is what opened the
+  // menu and a ring appearing on the way back would be news to nobody. A
+  // surface that was not focusable in the first place gets nothing back,
+  // rather than the destroyed menu canvas keeping the keyboard.
+  const alive = restore && !restore.destroyed && a11yFocusable(restore);
+  events.focus(alive ? restore : null, 'pointer');
+}
+
 /**
  * <textinput>: single-line editable text. Caret/selection via ntk TextLayout
  * prefix measurement, editing via the EventManager default-action hooks
@@ -4031,7 +4252,7 @@ export class TextInputNode extends Node {
     // part of `value`, and never in the history — see `defaultComposition`
     this._preedit = '';
     this._preeditAt = 0;
-    // the open built-in edit menu, if any (see _openEditMenu)
+    // the open edit menu, if any (see `openEditMenu`)
     this._editMenu = null;
   }
 
@@ -4811,7 +5032,7 @@ export class TextInputNode extends Node {
    * keyboard, so `_focused` is false, but the text the menu is about to act
    * on has to stay visibly selected. */
   _showsSelection() {
-    return this._focused || Boolean(this._editMenu);
+    return this._focused || editMenuOpen(this);
   }
 
   defaultMouseDrag(ev) {
@@ -4828,212 +5049,47 @@ export class TextInputNode extends Node {
 
   // --- the built-in edit menu -----------------------------------------
   //
-  // Right-click gets Undo/Cut/Copy/Paste with no wiring, the way a browser
-  // gives `<input>` one. The rows cannot be `Menu` components — those are
-  // React over the nodes, and a node cannot mount one — so the menu is a
-  // `<popup>` built here with a `<canvas>` child that paints the rows
-  // (src/editmenu.js) and handles its own pointer and key events. That
-  // reuses the popup's pointer grab, dismissal and focus rather than
-  // reinventing them. `contextMenu={false}` opts out, as does
+  // The menu itself is `openEditMenu` (above): core's, exported, and shared
+  // with anything else that edits or selects text (#256). What is left here
+  // is the only part that is the field's — which verbs it offers, and what
+  // each of them is worth right now. `contextMenu={false}` opts out, as does
   // `preventDefault()` in an `onContextMenu` handler.
 
-  /** The rows, with each one enabled only when it would do something. */
-  _editMenuItems() {
+  /** The verbs the standard menu is opened with. Every one of them is the
+   * keyboard path's own entry point, so a row can never drift from what its
+   * shortcut does. */
+  _editActions() {
     const [a, b] = this._selection();
-    const hasSelection = a !== b;
     const length = this._chars().length;
-    return [
-      {
-        id: 'undo',
-        label: 'Undo',
-        shortcut: [['Control', 'Z']],
-        enabled: this.canUndo,
-      },
-      {
-        id: 'redo',
-        label: 'Redo',
-        shortcut: [['Control', 'Shift', 'Z']],
-        enabled: this.canRedo,
-      },
-      { type: 'separator' },
-      // A `sensitive` field offers neither: they are not disabled rows, they
-      // are absent, because a greyed Copy over a password reads as a bug in
-      // the application rather than as a decision.
+    return {
+      canUndo: this.canUndo,
+      undo: () => this.undo(),
+      canRedo: this.canRedo,
+      redo: () => this.redo(),
+      hasSelection: a !== b,
+      // A `sensitive` field offers neither Cut nor Copy: they are not
+      // disabled rows, they are absent, because a greyed Copy over a
+      // password reads as a bug in the application rather than as a
+      // decision. Paste stays — a secret still has to be got in.
       ...(this.props.sensitive
-        ? []
-        : [
-            {
-              id: 'cut',
-              label: 'Cut',
-              shortcut: [['Control', 'X']],
-              enabled: hasSelection,
+        ? null
+        : {
+            cut: () => {
+              const [from, to] = this._selection();
+              this._copySelection();
+              if (from !== to) this._deleteRange(from, to);
             },
-            {
-              id: 'copy',
-              label: 'Copy',
-              shortcut: [['Control', 'C']],
-              enabled: hasSelection,
-            },
-          ]),
-      {
-        id: 'paste',
-        label: 'Paste',
-        shortcut: [['Control', 'V']],
-        // greyed only when the server has told us the selection is unowned
-        // (pastestate.js). Never a round trip on the way to opening a menu.
-        enabled: Boolean(this._clipboardApi()) && canPaste(this.app),
-      },
-      { type: 'separator' },
-      {
-        id: 'selectAll',
-        label: 'Select All',
-        shortcut: [['Control', 'A']],
-        enabled: length > 0 && !(a === 0 && b === length),
-      },
-    ];
-  }
-
-  /** Run a row. Everything here is the keyboard path's own entry point, so
-   * the menu can never drift from what the shortcuts do. */
-  _runEditAction(id) {
-    const [a, b] = this._selection();
-    if (id === 'undo') this.undo();
-    else if (id === 'redo') this.redo();
-    else if (id === 'copy') this._copySelection();
-    else if (id === 'cut') {
-      this._copySelection();
-      if (a !== b) this._deleteRange(a, b);
-    } else if (id === 'paste') this._pasteFrom();
-    else if (id === 'selectAll') this._selectAll();
+            copy: () => this._copySelection(),
+          }),
+      paste: () => this._pasteFrom(),
+      canSelectAll: length > 0 && !(a === 0 && b === length),
+      selectAll: () => this._selectAll(),
+    };
   }
 
   defaultContextMenu(ev) {
     if (this.props.contextMenu === false) return;
-    this._openEditMenu(ev);
-  }
-
-  /** Where the popup goes: at the pointer in root coordinates, pulled back
-   * inside the screen when it would hang off the right or bottom edge. */
-  _editMenuOrigin(ev, size) {
-    const owner = this.root;
-    const native = ev.nativeEvent;
-    let x = native?.rootx;
-    let y = native?.rooty;
-    if (x == null || y == null) {
-      // no native event (synthesized, or a test): fall back to the node's
-      // own position within its window plus wherever that window is
-      const origin = owner?.window?._screenOrigin ?? { x: 0, y: 0 };
-      x = origin.x + (ev.x ?? this.abs.x);
-      y = origin.y + (ev.y ?? this.abs.y);
-    }
-    const screen = this.app?.X?.display?.screen?.[0];
-    if (screen?.pixel_width) {
-      x = Math.max(0, Math.min(x, screen.pixel_width - size.width));
-      y = Math.max(0, Math.min(y, screen.pixel_height - size.height));
-    }
-    return { x, y };
-  }
-
-  _openEditMenu(ev) {
-    this._closeEditMenu();
-    // From here on the menu knows whether there is anything to paste. This
-    // first open still shows the row enabled — the answer arrives after it
-    // is drawn — which is the pre-tracking behaviour, and correct far more
-    // often than not.
-    armPasteState(this.app, this._clipboardApi());
-    const items = this._editMenuItems();
-    const geometry = editMenuGeometry(
-      items,
-      (text) => this._layoutOf(text)?.width,
-    );
-    const { x, y } = this._editMenuOrigin(ev, geometry);
-    const colors = editMenuColors(this.theme);
-    const style = this.resolvedTextStyle();
-    const state = { active: -1 };
-
-    const canvas = new CanvasNode(
-      {
-        focusable: true,
-        style: { flexGrow: 1 },
-        onDraw: (ctx) =>
-          paintEditMenu(ctx, {
-            geometry,
-            active: state.active,
-            colors,
-            radius: this.theme?.radius ?? 4,
-            layoutOf: (text, color) =>
-              this.app?.fonts?.layout([{ text, ...style, color }], style),
-          }),
-        onMouseMove: (mv) => {
-          const next = editMenuIndexAt(geometry, mv.y);
-          if (next === state.active) return;
-          state.active = next;
-          popup.invalidate(false, null, 'style-state');
-        },
-        onMouseUp: (mv) => {
-          const i = editMenuIndexAt(geometry, mv.y);
-          if (i !== -1) this._chooseEditMenu(geometry.rows[i].id);
-          else this._closeEditMenu();
-        },
-        onKeyDown: (k) => {
-          if (k.keysym === XK_ESCAPE) return this._closeEditMenu();
-          if (k.keysym === XK_UP || k.keysym === XK_DOWN) {
-            state.active = editMenuStep(
-              geometry,
-              state.active,
-              k.keysym === XK_DOWN ? 1 : -1,
-            );
-            popup.invalidate(false, null, 'style-state');
-            return;
-          }
-          if (k.keysym === XK_RETURN || k.keysym === XK_KP_ENTER) {
-            const row = geometry.rows[state.active];
-            if (row && !row.separator) this._chooseEditMenu(row.id);
-          }
-        },
-      },
-      this.app,
-    );
-
-    const popup = new PopupNode(
-      this.app,
-      {
-        x,
-        y,
-        width: geometry.width,
-        height: geometry.height,
-        windowType: 'popup_menu',
-      },
-      {
-        grab: true,
-        // a press outside the menu closes it and goes no further, which is
-        // what the grab is for
-        onDismiss: () => this._closeEditMenu(),
-      },
-    );
-    popup.insertBefore(canvas, null);
-    this.insertBefore(popup, null);
-    popup.realize(null);
-    this._editMenu = popup;
-    // the menu takes the keyboard so arrows and Escape reach it rather than
-    // editing the text behind it
-    popup.events?.focus?.(canvas);
-  }
-
-  _chooseEditMenu(id) {
-    this._closeEditMenu();
-    if (id) this._runEditAction(id);
-  }
-
-  _closeEditMenu() {
-    const popup = this._editMenu;
-    if (!popup) return;
-    this._editMenu = null;
-    this.removeChild(popup);
-    // focus goes back to the field, so typing carries on where it left off —
-    // as a pointer focus, since a right-click is what opened the menu and a
-    // ring appearing on the way back would be news to nobody
-    if (!this.destroyed) this._focusManager()?.focus(this, 'pointer');
+    openEditMenu(this, { x: ev.x, y: ev.y }, this._editActions());
   }
 
   defaultFocus() {
@@ -5066,9 +5122,6 @@ export class TextInputNode extends Node {
   destroySubtree() {
     clearInterval(this._blinkTimer);
     this._blinkTimer = null;
-    // the popup is a child, so the walk below destroys it — just drop the
-    // handle so a later close does not try to remove it twice
-    this._editMenu = null;
     super.destroySubtree();
   }
 

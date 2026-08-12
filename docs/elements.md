@@ -1090,6 +1090,12 @@ To replace it with your own, set `contextMenu={false}` and render a
 `ContextMenu` — `onContextMenu` still fires. To suppress it for one event,
 call `ev.preventDefault()` in an `onContextMenu` handler.
 
+The menu is not the field's private property: `openEditMenu(node, at,
+actions)` opens this one for anything that edits or selects text — a code
+editor, a rendered document with a selection — and `<textinput>`'s own menu
+is a caller of it, which is what keeps the two the same menu. See
+[extending.md](extending.md#the-standard-edit-menu).
+
 ### `sensitive`
 
 `<textinput sensitive>` is a field whose text **never reaches a selection**.

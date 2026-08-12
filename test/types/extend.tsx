@@ -37,6 +37,8 @@ import {
 } from '../../src/style.js';
 import type { Style } from '../../src/style.js';
 import { ctrlChordLetter, keysymOf } from '../../src/keysyms.js';
+import { closeEditMenu, editMenuOpen, openEditMenu } from '../../src/index.js';
+import type { EditMenuActions } from '../../src/index.js';
 
 // The element, declared to JSX exactly as docs/extending.md shows.
 declare module '../../src/jsx-runtime.js' {
@@ -205,6 +207,26 @@ class EditorNode extends Node {
 
   defaultMouseUp(_ev: MouseEvent): void {}
 
+  // the standard edit menu, opened with this element's own verbs (#256)
+  defaultContextMenu(ev: MouseEvent): void {
+    openEditMenu(
+      this,
+      { x: ev.x, y: ev.y },
+      {
+        hasSelection: this.caretOn,
+        canUndo: false,
+        undo: () => {},
+        cut: () => {},
+        copy: () => {},
+        paste: () => {},
+        canSelectAll: true,
+        selectAll: () => {},
+      },
+    );
+    const _open: boolean = editMenuOpen(this);
+    if (_open) closeEditMenu(this);
+  }
+
   defaultFocus(): void {
     // the timer is node's; what this pins is the cadence it runs at
     const _every: number = CARET_BLINK_MS;
@@ -313,6 +335,15 @@ function Chart() {
     </box>
   );
 }
+
+// a read-only surface offers only what it can do; the rows it left out are
+// absent rather than greyed, which is what makes this shape the whole API
+const readOnlyVerbs: EditMenuActions = {
+  hasSelection: true,
+  copy: () => {},
+  selectAll: () => {},
+};
+void readOnlyVerbs;
 
 // @ts-expect-error — `data` is required on <sparkline>
 const _missingData = <sparkline color="red" />;
