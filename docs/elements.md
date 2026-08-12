@@ -1184,6 +1184,19 @@ conical, `setLineDash`, round caps/joins, images, text — XRender-backed),
 translated to the node's origin and clipped to its bounds. `onDraw` runs on
 every repaint of the window.
 
+A drawing made of many small rectangles in one colour — a sparkline, a heat
+map, row striping, terminal cells — has a batch primitive, and the
+difference is a whole frame's worth of requests:
+
+```jsx
+ctx.fillStyle = theme.accent;
+ctx.fillRects(bars); // [[x, y, w, h], …] or one flat [x, y, w, h, x, …]
+```
+
+`fillRects` is `fillRect` per rectangle — the same fill style, alpha,
+composite op and clip — sent as a single `Render.FillRectangles` where the
+loop would have sent one composite each.
+
 ### `cacheKey` — draw it once
 
 A drawing that does not change between frames does not have to be redrawn
