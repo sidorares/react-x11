@@ -63,6 +63,33 @@ export interface TextStyle {
 }
 
 /**
+ * What an element holding text tells an assistive technology
+ * (`a11yTextState`). Offsets are **code points**, counted the way
+ * `Array.from(value).length` counts, and index `value` — the string the
+ * element *draws*, an open composition included.
+ */
+export interface A11yTextState {
+  /** The text as drawn. */
+  value: string;
+  /** Where the caret is. Defaults to `selectionEnd`. */
+  caret?: number;
+  /** The selected range; equal offsets mean a bare caret. Default 0. */
+  selectionStart?: number;
+  selectionEnd?: number;
+  /** Whether this is text the user edits — an editor rather than a viewer.
+   * Sets the EDITABLE state and, with `a11yReplaceText`, the AT-SPI
+   * EditableText interface. */
+  editable?: boolean;
+  /** One line or many. Left unsaid, neither state is claimed rather than
+   * guessed from the current value. */
+  multiline?: boolean;
+  /** The part of `value` that is an open composition — a dead key, a
+   * half-typed Compose sequence — so a reader can tell it from the
+   * character it commits. `offset` is where it starts in `value`. */
+  preedit?: { offset: number; text: string } | null;
+}
+
+/**
  * The `measureContent` body for content with a natural size and an aspect
  * ratio to keep — `<image>` and `<svg>` are written on it:
  *
@@ -204,6 +231,44 @@ export declare class Node {
   /** The cursor to show over this element when nothing in the style says
    * otherwise — `'text'` for something editable. A `cursor` style wins. */
   defaultCursor?: string;
+  /**
+   * The ARIA role this element is when the application writes none — the
+   * registered-element counterpart of `<textinput>` defaulting to
+   * `textbox`. A `role` prop still wins, and an unknown name warns in
+   * development. Assign it in the constructor.
+   */
+  a11yRole?: string;
+  /**
+   * What text this element holds, for the AT-SPI `Text` interface and the
+   * test spy (docs/accessibility.md). `null` when it holds none. Implement
+   * it and an editor, a viewer or a terminal is readable, navigable and
+   * announced through the same paths `<textinput>` uses.
+   *
+   * Called several times per change, so answer from state the element
+   * already holds — never a shaping pass or a copy of a buffer.
+   */
+  a11yTextState?(): A11yTextState | null;
+  /**
+   * An assistive technology moved the caret or the selection: `start` and
+   * `end` are code-point offsets into the reported `value`, and the caret
+   * belongs at `end`. Return false to refuse. Without it an AT can read
+   * this element but not navigate it.
+   */
+  a11ySetSelection?(start: number, end: number): boolean;
+  /**
+   * An assistive technology edited the text: replace `[start, end)` with
+   * `text`. Insert, delete and replace-everything all arrive here. Only an
+   * element that implements this exposes AT-SPI's `EditableText`, so an
+   * editor without it is read but never typed into.
+   */
+  a11yReplaceText?(start: number, end: number, text: string): boolean;
+  /**
+   * The text reported by `a11yTextState()` may have moved — an edit, a
+   * caret move, a selection change, a composition. Free when no assistive
+   * technology is listening, so call it from every path that changes the
+   * text rather than guarding it.
+   */
+  notifyA11yTextChanged(): void;
   /** Props changed. A subclass calls `super.applyProps(next, prev)`. */
   applyProps(
     nextProps: Record<string, unknown>,

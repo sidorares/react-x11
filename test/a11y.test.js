@@ -19,7 +19,7 @@ import {
 import {
   ATSPI_ROLE,
   ATSPI_STATE,
-  a11yRole,
+  atspiRoleOf,
   roleNameOf,
   a11yChildren,
   a11yParent,
@@ -77,19 +77,19 @@ test('kind defaults: an unlabelled tree is boring, not wrong', async () => {
       h('box', { style: { overflow: 'scroll' } }, h('box')),
     ),
   );
-  assert.equal(a11yRole(root), ATSPI_ROLE.FRAME);
+  assert.equal(atspiRoleOf(root), ATSPI_ROLE.FRAME);
   const box = find(root, (n) => n.kind === 'box');
-  assert.equal(a11yRole(box), ATSPI_ROLE.FILLER);
+  assert.equal(atspiRoleOf(box), ATSPI_ROLE.FILLER);
   assert.equal(
-    a11yRole(find(root, (n) => n.kind === 'text')),
+    atspiRoleOf(find(root, (n) => n.kind === 'text')),
     ATSPI_ROLE.LABEL,
   );
   assert.equal(
-    a11yRole(find(root, (n) => n.kind === 'textinput')),
+    atspiRoleOf(find(root, (n) => n.kind === 'textinput')),
     ATSPI_ROLE.ENTRY,
   );
   assert.equal(
-    a11yRole(find(root, (n) => n.isScroller?.())),
+    atspiRoleOf(find(root, (n) => n.isScroller?.())),
     ATSPI_ROLE.SCROLL_PANE,
   );
 });
@@ -104,10 +104,10 @@ test('the role prop maps to AT-SPI, and an unknown one falls back', async () => 
       h('box', { role: 'no-such-role' }),
     ),
   );
-  assert.equal(a11yRole(byRole(root, 'button')), ATSPI_ROLE.BUTTON);
-  assert.equal(a11yRole(byRole(root, 'switch')), ATSPI_ROLE.SWITCH);
+  assert.equal(atspiRoleOf(byRole(root, 'button')), ATSPI_ROLE.BUTTON);
+  assert.equal(atspiRoleOf(byRole(root, 'switch')), ATSPI_ROLE.SWITCH);
   // unknown: reads as the element default rather than vanishing
-  assert.equal(a11yRole(byRole(root, 'no-such-role')), ATSPI_ROLE.FILLER);
+  assert.equal(atspiRoleOf(byRole(root, 'no-such-role')), ATSPI_ROLE.FILLER);
   assert.equal(roleNameOf(byRole(root, 'button')), 'button');
 });
 

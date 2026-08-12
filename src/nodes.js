@@ -1970,6 +1970,21 @@ export class Node {
     return false;
   }
 
+  /**
+   * The text this element reports through `a11yTextState()` may have moved
+   * — an edit, a caret move, a selection change, a composition (#257). The
+   * same notification `<textinput>`'s `_repaint` makes, and the reason an
+   * assistive technology hears a third-party editor at all: the state is
+   * *pulled* when this says it is worth pulling.
+   *
+   * Free when nobody is listening — one property read, the hook slots being
+   * null until a bridge or the test spy fills them — so an element may call
+   * it on every edit without asking whether accessibility is on.
+   */
+  notifyA11yTextChanged() {
+    a11yHooks.textState?.(this);
+  }
+
   /** Where focus for this node lives: its own window's EventManager, or —
    * inside a `<popup>`, which never receives the X input focus — the owner
    * window's (see EventManager.focusManager). */

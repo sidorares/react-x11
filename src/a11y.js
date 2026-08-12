@@ -390,23 +390,37 @@ const INTERNAL_KINDS = new Set(['textchunk', 'svgchild']);
  */
 const scrolls = (node) => !node.isWindow && node.isScroller?.() === true;
 
-/** The web role name in force on a node: the `role` prop, else the kind's
- * default name (only the kinds with real semantics have one). */
+/**
+ * The web role name in force on a node, in the order the answers get less
+ * specific: what the application wrote, what the element says it is
+ * (`node.a11yRole` — a registered element's own default, see
+ * docs/extending.md), what it holds, whether it scrolls, and finally the
+ * kind's default name (only the kinds with real semantics have one).
+ *
+ * A registered element's declaration sits **above** the scroller rule on
+ * purpose: an editor that scrolls its own painted text is a text box that
+ * happens to scroll, and reading it as a scroll pane would lose the only
+ * part a screen reader cares about.
+ */
 export function roleNameOf(node) {
   const role = node.props?.role;
   if (typeof role === 'string' && role !== '') return role;
+  const own = node.a11yRole;
+  if (typeof own === 'string' && own !== '') return own;
+  const text = textRoleName(node);
+  if (text !== null) return text;
   if (scrolls(node)) return 'scrollable';
   return KIND_ROLE_NAMES[node.kind] ?? null;
 }
 
-/** The AT-SPI role number for a node. An unknown `role` string falls back
- * to the kind default rather than to nothing — a typo should not turn a
- * button into a filler silently, but it must not crash either; the DEV
- * check below is what reports it. */
-export function a11yRole(node) {
-  const role = node.props?.role;
-  if (typeof role === 'string') {
-    const mapped = ROLE_TO_ATSPI.get(role);
+/** The AT-SPI role number for a node, by the same order. An unknown role
+ * string falls back to the next answer rather than to nothing — a typo
+ * should not turn a button into a filler silently, but it must not crash
+ * either; the DEV check below is what reports it. */
+export function atspiRoleOf(node) {
+  for (const name of [node.props?.role, node.a11yRole, textRoleName(node)]) {
+    if (typeof name !== 'string') continue;
+    const mapped = ROLE_TO_ATSPI.get(name);
     if (mapped !== undefined) return mapped;
   }
   if (scrolls(node)) return ATSPI_ROLE.SCROLL_PANE;
@@ -477,8 +491,9 @@ export function subtreeText(node) {
       parts.push(n.text);
       return;
     }
-    // do not read a nested widget's editable content as its parent's label
-    if (n.kind === 'textinput' || n.kind === 'textarea') return;
+    // do not read a nested control's own text as its parent's label — its
+    // value is its Text interface, not a name for whatever contains it
+    if (n !== node && textShapeOf(n) !== null) return;
     for (const child of n.children ?? []) {
       if (!child.isWindow) walk(child);
     }
@@ -615,9 +630,15 @@ export function a11yStates(node) {
 
   const readOnly = props['aria-readonly'] === true;
   if (readOnly) bit(states, S.READ_ONLY);
-  if (node.kind === 'textinput' || node.kind === 'textarea') {
-    bit(states, node.kind === 'textarea' ? S.MULTI_LINE : S.SINGLE_LINE);
-    if (!props.disabled && !readOnly) bit(states, S.EDITABLE);
+  const text = textShapeOf(node);
+  if (text) {
+    // `multiline` is a claim about the element's shape, so a registered
+    // element that makes none gets neither state rather than a guess read
+    // off its current value — which would report the shape *changing* the
+    // first time somebody pressed Enter.
+    if (text.multiline === true) bit(states, S.MULTI_LINE);
+    else if (text.multiline === false) bit(states, S.SINGLE_LINE);
+    if (text.editable && !props.disabled && !readOnly) bit(states, S.EDITABLE);
   }
 
   if (node.isWindow) {
@@ -691,14 +712,101 @@ export function a11yActivatable(node) {
 // technology read out of this control right now?
 // --------------------------------------------------------------------------
 
-/** Kinds whose value is editable text with a caret. */
-export const isTextControl = (node) =>
+/** The built-in editable controls, which report through their own
+ * internals rather than through the seam below. */
+export const isNativeTextControl = (node) =>
   node.kind === 'textinput' || node.kind === 'textarea';
 
-/** Kinds that expose the AT-SPI Text interface at all — the editable
- * controls plus `<text>` labels, which are readable but caret-less. */
+/**
+ * A registered element's own answer to "what text am I holding, and where
+ * is the caret" (issue #257), normalized into the shape the bridge and the
+ * spy already speak — or null for an element that holds none.
+ *
+ * The element writes `{ value, caret, selectionStart, selectionEnd,
+ * editable, multiline, preedit }` and every field but `value` is optional;
+ * offsets are code points (`Array.from`), clamped here so a stale caret an
+ * element hands over cannot become an out-of-range answer on the wire.
+ * Everything downstream — character counts, word and line granularity,
+ * attribute runs, the text-changed diff — is then the same code that
+ * serves `<textinput>`, which is the point: a third-party editor is
+ * readable by the same paths, not by a parallel set of them.
+ *
+ * This is called several times per change (role, states, the diff), so an
+ * element's implementation has to be a cheap read of what it already
+ * holds — never a shaping pass or a copy of its buffer.
+ */
+export function customTextState(node) {
+  if (typeof node.a11yTextState !== 'function') return null;
+  const state = node.a11yTextState();
+  if (state == null) return null;
+  const chars = Array.from(String(state.value ?? ''));
+  const at = (value, fallback) => {
+    const index = Math.trunc(Number(value));
+    return Number.isFinite(index)
+      ? Math.max(0, Math.min(index, chars.length))
+      : fallback;
+  };
+  const start = at(state.selectionStart, 0);
+  const end = at(state.selectionEnd, start);
+  const composing = state.preedit ? String(state.preedit.text ?? '') : '';
+  return {
+    chars,
+    caret: at(state.caret, end),
+    selection: [Math.min(start, end), Math.max(start, end)],
+    preedit: composing
+      ? {
+          offset: at(state.preedit.offset, 0),
+          length: Array.from(composing).length,
+          text: composing,
+        }
+      : null,
+    editable: state.editable === true,
+    multiline: typeof state.multiline === 'boolean' ? state.multiline : null,
+  };
+}
+
+/**
+ * What kind of text an element holds — whether it is editable, and whether
+ * it is one line or many (`null` for an element that has not said). Null
+ * when it holds none.
+ */
+export function textShapeOf(node) {
+  if (isNativeTextControl(node)) {
+    return { editable: true, multiline: node.kind === 'textarea' };
+  }
+  const custom = customTextState(node);
+  if (!custom) return null;
+  return { editable: custom.editable, multiline: custom.multiline };
+}
+
+/** The role an element reporting text falls back to when it declares
+ * none: an entry when an assistive technology may type into it, a
+ * document when it may only read. */
+function textRoleName(node) {
+  const shape = textShapeOf(node);
+  if (!shape) return null;
+  return shape.editable ? 'textbox' : 'document';
+}
+
+/** Whether the value is editable text with a caret — what the EDITABLE
+ * state and the AT-SPI EditableText interface are about. */
+export const isTextControl = (node) => textShapeOf(node)?.editable === true;
+
+/** Everything that exposes the AT-SPI Text interface at all — the editable
+ * controls, `<text>` labels (readable but caret-less), and any registered
+ * element reporting a text state, editable or not. The read-only tier is
+ * what makes a document viewer with a selection speak: markdown, a code
+ * block, a terminal. */
 export const hasTextInterface = (node) =>
-  isTextControl(node) || node.kind === 'text';
+  isNativeTextControl(node) ||
+  node.kind === 'text' ||
+  customTextState(node) !== null;
+
+/** Whether an assistive technology can write to this element's text: the
+ * built-ins always can, a registered element when it implements the write
+ * half of the seam. */
+export const acceptsTextEdits = (node) =>
+  isNativeTextControl(node) || typeof node.a11yReplaceText === 'function';
 
 /**
  * The code points and caret/selection of anything with a Text interface —
@@ -721,7 +829,7 @@ export const hasTextInterface = (node) =>
  * (see `_diffText` in atspi.js).
  */
 export function textStateOf(node) {
-  if (isTextControl(node)) {
+  if (isNativeTextControl(node)) {
     const shown = node._displayValue ? node._displayValue() : null;
     const toDisplay = (index) => node._displayIndex?.(index) ?? index;
     const [start, end] = node._selection?.() ?? [0, 0];
@@ -739,6 +847,8 @@ export function textStateOf(node) {
         : null,
     };
   }
+  const custom = customTextState(node);
+  if (custom) return custom;
   const spans = node.collectSpans?.([]) ?? [];
   const chars = Array.from(spans.map((s) => s.text).join(''));
   return { chars, caret: 0, selection: [0, 0], preedit: null };
@@ -791,16 +901,20 @@ const warned = new Set();
  * warning list that lags the spec teaches people to stop trusting it.
  */
 export function devCheckA11yProps(node) {
-  const role = node.props?.role;
-  if (role == null) return;
-  if (typeof role !== 'string' || ROLE_TO_ATSPI.has(role)) return;
-  if (role === 'none' || role === 'presentation') return;
-  if (warned.has(role)) return;
-  warned.add(role);
-  console.warn(
-    `react-x11: unknown role "${role}" on <${node.kind}> — it will read as ` +
-      `the element default. Known roles: ${KNOWN_ROLES.join(', ')}.`,
-  );
+  // the element's own default is checked too: a registered element that
+  // misspells its `a11yRole` is silently the kind default forever, and it
+  // is written once in a constructor rather than visibly at a call site
+  for (const role of [node.props?.role, node.a11yRole]) {
+    if (role == null) continue;
+    if (typeof role !== 'string' || ROLE_TO_ATSPI.has(role)) continue;
+    if (role === 'none' || role === 'presentation') continue;
+    if (warned.has(role)) continue;
+    warned.add(role);
+    console.warn(
+      `react-x11: unknown role "${role}" on <${node.kind}> — it will read ` +
+        `as the element default. Known roles: ${KNOWN_ROLES.join(', ')}.`,
+    );
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -820,7 +934,8 @@ export function devCheckA11yProps(node) {
  *  - `propsChanged(node)` — after applyProps landed new props.
  *  - `textContent(node)` — a text chunk's string changed.
  *  - `textState(node)` — a text control's value/caret/selection may have
- *    moved (funnelled through `_repaint`, which every edit path calls).
+ *    moved (funnelled through `_repaint`, which every edit path calls, and
+ *    through `Node.notifyA11yTextChanged()` for a registered element).
  *  - `focus(previous, next)` — the owning manager moved focus.
  *  - `windowFocus(windowNode, focused)` — the WM moved input focus.
  *  - `commit()` — a React commit finished (resetAfterCommit).

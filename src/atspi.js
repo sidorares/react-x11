@@ -39,7 +39,7 @@ import {
   ATSPI_STATE,
   ATSPI_STATE_NICK,
   ATSPI_ROLE_NICK,
-  a11yRole,
+  atspiRoleOf,
   a11yErased,
   a11yPruned,
   a11yChildren,
@@ -52,6 +52,8 @@ import {
   a11yAttributes,
   a11yActivatable,
   isTextControl,
+  isNativeTextControl,
+  acceptsTextEdits,
   hasTextInterface,
   textStateOf,
   inPreedit,
@@ -429,19 +431,19 @@ const AccessibleImpl = {
     return [];
   },
   GetRole() {
-    return a11yRole(this.n);
+    return atspiRoleOf(this.n);
   },
   // The AT-SPI role name, not the ARIA one the app wrote — see
   // ATSPI_ROLE_NICK. The ARIA role is reported through `xml-roles` in
   // GetAttributes, as the browsers do.
   GetRoleName() {
-    return ATSPI_ROLE_NICK[a11yRole(this.n)] ?? 'unknown';
+    return ATSPI_ROLE_NICK[atspiRoleOf(this.n)] ?? 'unknown';
   },
   GetLocalizedRoleName() {
     // No localisation here: answering the untranslated name is what a
     // toolkit with no message catalogue should do, and libatspi falls back
     // to its own translations anyway.
-    return ATSPI_ROLE_NICK[a11yRole(this.n)] ?? 'unknown';
+    return ATSPI_ROLE_NICK[atspiRoleOf(this.n)] ?? 'unknown';
   },
   GetState() {
     return a11yStates(this.n);
@@ -622,10 +624,7 @@ const TextImpl = {
     return chars[offset].codePointAt(0);
   },
   SetCaretOffset(offset) {
-    const node = this.n;
-    if (typeof node._moveCaret !== 'function') return false;
-    node._moveCaret(valueOffset(node, offset), false);
-    return true;
+    return this.b.setCaret(this.n, offset);
   },
   GetAttributes(offset) {
     return attributeRun(textStateOf(this.n), offset);
@@ -679,44 +678,29 @@ const TextImpl = {
   },
   RemoveSelection(index) {
     if (index !== 0) return false;
-    const node = this.n;
-    if (typeof node._moveCaret !== 'function') return false;
-    node._moveCaret(node._caret ?? 0, false);
-    return true;
+    return this.b.setCaret(this.n, textStateOf(this.n).caret);
   },
 };
 
+/**
+ * Every write is one replacement — `editText(node, start, end, text)` —
+ * because that is the one primitive both sides can implement: the
+ * built-ins have `_commit`, and a registered element implements
+ * `a11yReplaceText`, which it needs anyway for its own editing.
+ */
 const EditableTextImpl = {
   SetTextContents(newContents) {
-    return this.b.editText(this.n, () => {
-      const chars = Array.from(String(newContents));
-      this.n._commit(chars, chars.length);
-    });
+    const { chars } = textStateOf(this.n);
+    return this.b.editText(this.n, 0, chars.length, newContents);
   },
   InsertText(position, text, length) {
-    return this.b.editText(this.n, () => {
-      const node = this.n;
-      const at = valueOffset(node, position);
-      const chars = node._chars();
-      const insert = Array.from(String(text)).slice(
-        0,
-        length < 0 ? undefined : length,
-      );
-      chars.splice(at, 0, ...insert);
-      node._commit(chars, at + insert.length);
-    });
+    const insert = Array.from(String(text))
+      .slice(0, length < 0 ? undefined : length)
+      .join('');
+    return this.b.editText(this.n, position, position, insert);
   },
   DeleteText(start, end) {
-    return this.b.editText(this.n, () => {
-      const node = this.n;
-      const a = valueOffset(node, start);
-      const b = valueOffset(node, end);
-      const chars = node._chars();
-      const s = Math.min(a, b);
-      const e = Math.max(a, b);
-      chars.splice(s, e - s);
-      node._commit(chars, s);
-    });
+    return this.b.editText(this.n, start, end, '');
   },
   CopyText(start, end) {
     this.b.copyTextRange(this.n, start, end);
@@ -729,6 +713,8 @@ const EditableTextImpl = {
   PasteText(position) {
     const node = this.n;
     if (!this.b.editable(node)) return false;
+    // the clipboard round trip is the built-ins' own: an element with a
+    // seam of its own is handed the text, not asked to fetch it
     if (typeof node._pasteFrom !== 'function') return false;
     node._moveCaret?.(valueOffset(node, position), false);
     node._pasteFrom('CLIPBOARD');
@@ -803,7 +789,13 @@ class AtspiBridge {
     if (a11yActivatable(node)) ifaces.push(IFACE.ACTION);
     if (a11yValue(node) !== null) ifaces.push(IFACE.VALUE);
     if (hasTextInterface(node)) ifaces.push(IFACE.TEXT);
-    if (isTextControl(node)) ifaces.push(IFACE.EDITABLE_TEXT);
+    // EditableText only where an edit would actually land: a registered
+    // element that reports editable text but implements no write seam is
+    // readable and reports its own edits, and an interface whose every
+    // method answered false would be a lie an AT cannot see through
+    if (isTextControl(node) && acceptsTextEdits(node)) {
+      ifaces.push(IFACE.EDITABLE_TEXT);
+    }
     return ifaces;
   }
 
@@ -994,18 +986,53 @@ class AtspiBridge {
     if (node.props?.disabled || node.props?.['aria-readonly'] === true) {
       return false;
     }
+    return acceptsTextEdits(node);
+  }
+
+  /**
+   * Replace `[start, end)` — in the displayed string, which is what the AT
+   * was told — with `text`. Insert, delete and set-the-lot are all this
+   * with one end moved, and a registered element answers it whole through
+   * `a11yReplaceText` rather than through five methods it would have to
+   * keep consistent with each other.
+   */
+  editText(node, start, end, text) {
+    if (!this.editable(node)) return false;
+    const { chars: shown } = textStateOf(node);
+    const from = clampOffset(Math.min(start, end), shown.length);
+    const to = clampOffset(Math.max(start, end), shown.length);
+    if (!isNativeTextControl(node)) {
+      return node.a11yReplaceText(from, to, String(text)) !== false;
+    }
+    if (typeof node._commit !== 'function') return false;
+    const a = valueOffset(node, from);
+    const b = valueOffset(node, to);
+    const chars = node._chars();
+    const insert = Array.from(String(text));
+    chars.splice(a, b - a, ...insert);
+    node._commit(chars, a + insert.length);
     return true;
   }
 
-  editText(node, edit) {
-    if (!this.editable(node)) return false;
-    if (typeof node._commit !== 'function') return false;
-    edit();
-    return true;
+  /** Put the caret at an offset, selecting nothing. Legitimate on a
+   * read-only element too — caret browsing through a document is a read,
+   * not an edit. */
+  setCaret(node, offset) {
+    return this.setTextSelection(node, offset, offset);
   }
 
   setTextSelection(node, start, end) {
-    if (!isTextControl(node) || node.destroyed) return false;
+    if (node.destroyed) return false;
+    if (typeof node.a11ySetSelection === 'function') {
+      const { chars } = textStateOf(node);
+      return (
+        node.a11ySetSelection(
+          clampOffset(start, chars.length),
+          clampOffset(end, chars.length),
+        ) !== false
+      );
+    }
+    if (!isNativeTextControl(node)) return false;
     node._anchor = valueOffset(node, start);
     node._caret = valueOffset(node, end);
     node._repaint?.();
@@ -1013,7 +1040,7 @@ class AtspiBridge {
   }
 
   copyTextRange(node, start, end) {
-    if (!isTextControl(node) || node.destroyed) return;
+    if (!isNativeTextControl(node) || node.destroyed) return;
     if (typeof node._copySelection !== 'function') return;
     const caret = node._caret;
     const anchor = node._anchor;
@@ -1081,7 +1108,7 @@ class AtspiBridge {
       a11yChildren(node).length,
       this.interfacesOf(node),
       a11yName(node),
-      a11yRole(node),
+      atspiRoleOf(node),
       a11yDescription(node),
       a11yStates(node),
     ];

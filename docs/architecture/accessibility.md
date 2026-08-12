@@ -277,6 +277,47 @@ exactly as the GTK bridge does.
   single mutation point typing uses, so `onChange` fires and undo history
   records — an AT edit _is_ a user edit. Offsets need no conversion
   anywhere: AT-SPI counts code points, and `_chars()`/`_caret` already do.
+  Every write is expressed as **one replacement** — `[start, end) := text`
+  — because that is the primitive both implementations can offer: the
+  built-ins splice and `_commit`, and a registered element implements
+  `a11yReplaceText`, which its own editing needs anyway. Set-the-lot,
+  insert and delete are that call with one end moved.
+
+## 8a. Text from elements core did not write (#257)
+
+A registered element draws text core cannot see: `<textinput>`'s state is
+read off `_chars()`/`_caret`/`_selection`, which a `<codeeditor>` in
+another package does not have. The seam is a **pull** — `a11yTextState()`
+answers `{ value, caret, selectionStart, selectionEnd, editable,
+multiline, preedit }` — plus a **push** that says it is worth pulling,
+`Node.notifyA11yTextChanged()`, which is the same `hooks.textState` slot
+`_repaint` already fed. Three consequences make it the cheap shape:
+
+- **One normalizer, no second model.** `customTextState()` turns the
+  element's answer into the `{ chars, caret, selection, preedit }` the
+  bridge and the spy already speak, clamping the offsets on the way — so
+  granularity, attribute runs, the diff, `:system` composition marking and
+  the spy's transcript are the same code paths `<textinput>` uses. A
+  third-party editor cannot be read _differently_ from core's, only less.
+- **Two tiers, because viewers are not degenerate editors.** `editable`
+  splits them: without it an element is `Text` and a `document` role,
+  which is exactly the markdown/code-block/terminal case (selection,
+  Ctrl+C, no caret semantics); with it, EDITABLE, an `entry` role, and —
+  only if `a11yReplaceText` exists — the `EditableText` interface.
+  Exporting an interface whose every method answered false would be a lie
+  an AT has no way to test.
+- **Declared, not inferred.** `a11yRole` is the element's own default
+  role (below a `role` prop, above the scroller rule, so an editor that
+  scrolls is still an entry), and `multiline` is a claim rather than a
+  guess off the value — inferring it from a `\n` would report the
+  element's _shape_ changing the first time somebody pressed Enter, the
+  same objection that keeps the scroll-pane role off `isScroller()`
+  flicker.
+
+Deliberately not in the seam: per-character extents (they need a layout
+only the element has; the fallback is the element's own rect, which is
+honest and keeps a magnifier tracking something real) and AT-driven
+copy/paste, which stay the built-ins' clipboard round trip.
 
 ## 9. Testing
 

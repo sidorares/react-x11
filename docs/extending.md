@@ -433,6 +433,93 @@ of milliseconds apart. Stop the timer in `defaultBlur` _and_ in
 `destroySubtree`: a node that unmounts while focused is forgotten rather than
 blurred, so `defaultBlur` is not guaranteed to run.
 
+### Text a screen reader can read
+
+An element that draws text of its own is, to an assistive technology,
+nothing at all: a painted rectangle with no characters, no caret and no
+selection in it. `<textinput>` is not — it implements AT-SPI's `Text` and
+`EditableText` interfaces in full — and the difference is one method
+(issue #257):
+
+```js
+class EditorNode extends Node {
+  a11yTextState() {
+    return {
+      value: this.lines.join('\n'), // what is drawn
+      caret: this.caret, // code points, into `value`
+      selectionStart: this.anchor,
+      selectionEnd: this.caret,
+      editable: true,
+      multiline: true,
+    };
+  }
+
+  insert(text) {
+    // …the element's own edit…
+    this.notifyA11yTextChanged();
+  }
+}
+```
+
+That alone buys the whole read side: character count, reading by character,
+word and line, the caret, the selection, and the `text-changed` /
+`text-caret-moved` / `text-selection-changed` deltas Orca narrates from —
+through the same code that serves `<textinput>`, so a third-party editor is
+read by the paths core is read by rather than by a parallel set of them.
+
+| member                              | when                                                                                                                              |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `a11yTextState()`                   | always, for an element holding text. `null` for one that holds none                                                               |
+| `notifyA11yTextChanged()`           | every edit, caret move, selection change and composition — the state is _pulled_ when this says it moved                          |
+| `a11ySetSelection(start, end)`      | an AT moved the caret or selected a range; the caret belongs at `end`. Without it the element is read but not navigated           |
+| `a11yReplaceText(start, end, text)` | an AT edited: replace that range. Insert, delete and set-the-lot all arrive here. Without it the element is read but not typed in |
+| `a11yRole`                          | the ARIA role this element is when the app writes none — `'textbox'`, `'log'`, `'document'`. Assign it in the constructor         |
+
+**The two tiers are the two kinds of element.** A viewer — a markdown
+document, a code block, a log, a terminal — reports `value` and a selection
+and stops there: it gets the `Text` interface, a `document` role, and a
+selection an AT can read and set, which is the whole of what "select this
+paragraph and copy it" needs. An editor adds `editable: true` and
+`a11yReplaceText`, which is what turns on the EDITABLE state and the
+`EditableText` interface. An element that claims `editable` without
+implementing the write **is** still announced as editable and reports its
+own edits — it simply is not exposed as one an AT may type into, because an
+interface whose every method answered "no" is a lie an AT cannot see
+through.
+
+Four details, each of which is a defect the other way round:
+
+**Offsets are code points and they index what you draw.** `Array.from(value)`
+is the counting, and `value` is the string on the screen — an open
+composition included, because every geometric answer beside it (the extents
+of character _n_, a magnifier's highlight) is read off the glyphs a sighted
+user sees. Say which part is uncommitted with `preedit: { offset, text }`
+and its churn is marked as text the user did not type, exactly as
+`<textinput>`'s is ([accessibility.md](accessibility.md#while-a-composition-is-open)).
+Offsets you report are clamped for you, so a caret left stale between an
+edit and your own bookkeeping cannot become an out-of-range answer on the
+wire.
+
+**`notifyA11yTextChanged()` is free when nobody is listening** — one
+property read, the hook slots being empty until a bridge or the test spy
+fills them. So call it from every path that moves the text, rather than
+asking whether accessibility is on.
+
+**`a11yTextState()` is called several times per change**, for the role, the
+states and the diff. Answer from state the element already holds; it must
+not shape, copy a buffer, or invalidate.
+
+**Say `multiline`.** Left unsaid, neither the single-line nor the
+multi-line state is claimed — better than a guess read off the current
+value, which would report the element's shape _changing_ the first time
+somebody pressed Enter.
+
+The behaviour is assertable without a screen reader, a desktop or a bus:
+`renderX11(el, { a11y: true })` hands back a spy that records the same feed
+([accessibility.md](accessibility.md#asserting-what-a-screen-reader-would-hear)),
+and `test/a11y-custom-text.test.js` in this repo is a worked editor and a
+worked viewer driven through it.
+
 ### Scrolling content you painted
 
 A `<box overflow="scroll">` scrolls **children**: layout knows where they
