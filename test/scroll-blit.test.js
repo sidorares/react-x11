@@ -366,3 +366,36 @@ test('a blitted scroll is byte-identical to the repaint it replaced', async (t) 
     await app.close();
   }
 });
+
+test('damage claimed before the frame’s first scrollTo keeps the full repaint (#295)', async () => {
+  const { wnd, root, ref } = await mount();
+  await tick();
+  const row = root.children[0].children[2];
+  wnd.calls.length = 0;
+  // The race: the claim lands first, while no scroll is pending, so the
+  // claim-time cancel in WindowNode.invalidate never tests it — and the
+  // viewport claim that follows coalesces the rect away (addDamageRect
+  // keeps the list disjoint), leaving the pure-scroll gate nothing to see.
+  root.invalidate(false, row);
+  ref.current.scrollTo(48);
+  await tick();
+  assert.strictEqual(blits(wnd).length, 0, 'not a pure scroll: no blit');
+});
+
+test('a claim between two scrolls cannot re-arm the blit mid-frame (#295)', async () => {
+  const { wnd, root, ref } = await mount();
+  await tick();
+  const row = root.children[0].children[2];
+  wnd.calls.length = 0;
+  ref.current.scrollTo(48); // arms, origin = the frame's true start
+  root.invalidate(false, row); // the claim-time cancel un-arms the blit
+  ref.current.scrollBy(48); // must not re-arm from the mid-frame origin
+  await tick();
+  assert.strictEqual(
+    blits(wnd).length,
+    0,
+    'a poisoned frame stays poisoned: pixels at the true origin were ' +
+      'never repainted, so a blit from the mid-frame origin would move ' +
+      'a band displaced by the first delta',
+  );
+});

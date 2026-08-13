@@ -263,6 +263,13 @@ const NO_SCROLL_BLIT = process.env.REACT_X11_NO_SCROLL_BLIT === '1';
 // exposed strip is most of a repaint anyway.
 const SCROLL_BLIT_MIN_KEEP = 0.5;
 
+// A scroll that must not blit this frame: content inside the viewport
+// already changed (see the arming check in scrollTo, and the claim-time
+// cancel in WindowNode.invalidate — react-x11#295). Truthy on purpose, so
+// scrollTo's `??=` cannot re-arm over it, and reset by _applyScrollBlits'
+// up-front clear like any real origin, so it lives exactly one frame.
+const BLIT_POISONED = Object.freeze({ poisoned: true });
+
 const rectContains = (outer, inner) =>
   outer.x <= inner.x &&
   outer.y <= inner.y &&
@@ -4068,6 +4075,24 @@ export const Scrollable = (Base) =>
       if (next.x === this.scrollX && next.y === this.scrollY) return;
       const root = this.root;
       if (root) {
+        // Arming is the one moment the evidence still exists: the viewport
+        // claim recorded below coalesces earlier claims into itself
+        // (addDamageRect keeps the list disjoint), after which a change
+        // inside the viewport is indistinguishable from the scroll's own
+        // claim — the blind spot the claim-time cancel in
+        // WindowNode.invalidate cannot cover (react-x11#295). The scroll
+        // has not claimed yet, so damage already overlapping this viewport
+        // is foreign by construction: poison the frame instead of arming,
+        // and the full-viewport repaint below stays in force.
+        if (this._pendingBlitFrom == null && Array.isArray(root._damage)) {
+          const zone = insetRect(this.abs, -(DAMAGE_SLOP * 2 + 1));
+          for (const rect of root._damage) {
+            if (rectsOverlap(rect, zone)) {
+              this._pendingBlitFrom = BLIT_POISONED;
+              break;
+            }
+          }
+        }
         // The offsets whose pixels are on screen, captured before the first
         // change of the frame: the frame's blit fast path (issue #138) shifts
         // from *these* to wherever layout settles, however many scrollTo
@@ -8028,13 +8053,19 @@ export class WindowNode extends Scrollable(Node) {
       this._scrollClaim !== damage
     ) {
       const rect = damage.paintBounds ? damage.paintBounds() : damage;
-      for (const sv of [...pendingScrolls]) {
+      for (const sv of pendingScrolls) {
         if (
           !sv.abs ||
           rectsOverlap(rect, insetRect(sv.abs, -(DAMAGE_SLOP * 2 + 1)))
         ) {
-          pendingScrolls.delete(sv);
-          sv._pendingBlitFrom = null;
+          // Poison rather than disarm (react-x11#295): a null here would
+          // let a second scrollTo in the same frame re-arm from a
+          // mid-frame origin, and the blit would then move pixels that
+          // were never repainted at that origin — a band displaced by the
+          // first scroll's delta. The node stays in pendingScrolls so the
+          // up-front clear in _applyScrollBlits resets the poison exactly
+          // like a real origin.
+          sv._pendingBlitFrom = BLIT_POISONED;
         }
       }
     }
@@ -8227,6 +8258,9 @@ export class WindowNode extends Scrollable(Node) {
     // whether their regions interact is not worth it
     if (nodes.length !== 1) return;
     const node = nodes[0];
+    // a poisoned frame (react-x11#295) falls back to the full-viewport
+    // claim the scroll recorded, like every other declined gate here
+    if (from === BLIT_POISONED) return;
     if (NO_SCROLL_BLIT || !from || node.destroyed || node.root !== this) return;
     const wnd = this.window;
     if (typeof wnd?.scrollRegion !== 'function') return; // ntk without #139
