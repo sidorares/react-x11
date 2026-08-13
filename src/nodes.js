@@ -227,6 +227,7 @@ const INVALIDATE_REASONS = new Set([
   'mount', // the window was just realized; its first frame
   'expose', // ntk asked for a redraw (backing store invalidated)
   'highlight', // DevTools hover highlight
+  'trace-updates', // DevTools' outline of what just re-rendered
   'capabilities', // a compositor started or stopped: what the window may paint
 ]);
 
@@ -2310,6 +2311,31 @@ export class Node {
         bottom: r.y + r.height,
       },
     ];
+  }
+
+  /**
+   * React Native's measure contract, which is what DevTools' style editor
+   * calls to draw the box model beside the style it is editing:
+   * `(x, y, width, height, left, top)` — position within the parent, size,
+   * then position within the window. A node with no laid-out rect calls
+   * back with nothing, the "unmeasurable" answer the editor checks for.
+   */
+  measure(callback) {
+    if (typeof callback !== 'function') return;
+    const r = this.abs;
+    if (!(r.width > 0 || r.height > 0)) {
+      callback();
+      return;
+    }
+    const parent = this.parent?.abs;
+    callback(
+      parent ? r.x - parent.x : r.x,
+      parent ? r.y - parent.y : r.y,
+      r.width,
+      r.height,
+      r.x,
+      r.y,
+    );
   }
 
   /**
@@ -6872,6 +6898,7 @@ export class WindowNode extends Scrollable(Node) {
     wnd.getClientRects ??= () => [
       { x: 0, y: 0, left: 0, top: 0, width: wnd.width, height: wnd.height },
     ];
+    wnd.measure ??= (callback) => callback?.(0, 0, wnd.width, wnd.height, 0, 0);
     wnd.ownerDocument ??= DEVTOOLS_FAKE_DOCUMENT;
     this._attachWindowListeners();
     for (const child of this.children) {
@@ -8205,7 +8232,12 @@ export class WindowNode extends Scrollable(Node) {
     if (typeof wnd?.scrollRegion !== 'function') return; // ntk without #139
     // the debug overlays and the DevTools highlight draw over the whole
     // window; a blit would drag shifted copies of them along
-    if (debugPaint || process.env.REACT_X11_DEBUG_LAYOUT || this._highlight) {
+    if (
+      debugPaint ||
+      process.env.REACT_X11_DEBUG_LAYOUT ||
+      this._highlight ||
+      this._traceUpdates
+    ) {
       return;
     }
     if (!Array.isArray(this._damage)) return; // unbounded frame already
@@ -8447,6 +8479,17 @@ export class WindowNode extends Scrollable(Node) {
         ctx.fillStyle = 'rgba(41, 128, 185, 0.35)';
         ctx.fillRect(r.x, r.y, r.width, r.height);
       }
+      if (this._traceUpdates) {
+        ctx.lineWidth = 2;
+        for (const r of this._traceUpdates) {
+          ctx.strokeStyle = r.color;
+          ctx.beginPath();
+          // inset by the stroke so an outline on a rect flush with the
+          // window edge is not half-clipped away
+          ctx.rect(r.x + 1, r.y + 1, r.width - 2, r.height - 2);
+          ctx.stroke();
+        }
+      }
       if (debugPaint) {
         // Stroke the pass's rect in this frame's colour ("repaint rainbow"):
         // a region repainting every frame strobes, one that repaints once
@@ -8602,6 +8645,25 @@ export class WindowNode extends Scrollable(Node) {
       rects.push(n.abs);
     }
     for (const rect of rects) this.invalidate(false, rect, 'highlight');
+  }
+
+  /**
+   * DevTools' "highlight updates when components render": outline the rects
+   * that just re-rendered, in the colour the backend assigned each one (it
+   * ramps with the update count and fades them out on its own clock, so
+   * this is a dumb overlay — `rects` is the whole state, `null` clears it).
+   */
+  setTraceUpdates(rects) {
+    const previous = this._traceUpdates;
+    const next = rects?.length ? rects : null;
+    if (!previous && !next) return;
+    this._traceUpdates = next;
+    // The stroke sits inside the rect, but a rect whose node has since
+    // moved or gone claims where it *was*; both lists are claimed for the
+    // same reason setHighlight claims both of its rects.
+    for (const r of [...(previous ?? []), ...(next ?? [])]) {
+      this.invalidate(false, r, 'trace-updates');
+    }
   }
 
   /** REACT_X11_DEBUG_LAYOUT=1: outline every drawn node, color by depth. */

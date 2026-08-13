@@ -377,6 +377,20 @@ export declare class Node {
     reason?: string,
   ): void;
   getClientRects(): Rect[];
+  /** React Native's measure contract — position in the parent, size, then
+   * position in the window — which DevTools' style editor calls to draw
+   * the box model. Calls back with nothing for a node with no laid-out
+   * rect. */
+  measure(
+    callback: (
+      x?: number,
+      y?: number,
+      width?: number,
+      height?: number,
+      left?: number,
+      top?: number,
+    ) => void,
+  ): void;
 }
 
 /**

@@ -13,6 +13,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setClickToComponentHandler } from './events.js';
+import { selectInDevTools } from './DevToolsIntegration.js';
 
 const STACK_FRAME = /^\s*at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?\s*$/;
 
@@ -161,6 +162,10 @@ function handleClick(node, native) {
     // Alt+Shift+Click
     logOwnerChain(fiber);
   }
+  // With DevTools attached, the click that says which element this is says
+  // it there too — the tree jumps to the component instead of the user
+  // hunting for the row they just clicked. Nothing to do when it is not.
+  selectInDevTools(node);
   flashHighlight(node);
   openInEditor(location);
 }

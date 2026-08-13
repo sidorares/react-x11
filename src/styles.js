@@ -422,6 +422,12 @@ const STYLE_PROPS = new Set([
 
 export const isStyleProp = (name) => STYLE_PROPS.has(name);
 
+/** Every style property, by name. DevTools' style editor takes this list as
+ * `nativeStyleEditorValidAttributes` — what it offers to add to an element
+ * — so it is the same set `isStyleProp` answers for rather than a second
+ * list that could drift from it. */
+export const STYLE_PROP_NAMES = Object.freeze([...STYLE_PROPS].sort());
+
 const isState = (key) => key.charCodeAt(0) === 58; /* ':' */
 
 /**
