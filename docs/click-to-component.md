@@ -25,6 +25,11 @@ Alt+Shift+Click also logs the full ownership chain (who rendered who, up to
 the root) to the console — handy when the immediate owner is a shared
 wrapper rather than the component you actually meant.
 
+With React DevTools attached as well (`REACT_X11_DEVTOOLS=1`, see
+[devtools.md](devtools.md)), the same click also selects that element in the
+DevTools tree — one click to the source _and_ to its props. Nothing changes
+when DevTools is absent, which is the usual case.
+
 `REACT_X11_EDITOR` picks the editor (`cursor` by default): `code`,
 `code-insiders`, `windsurf`, `vim`, `nvim`, or any other value, treated as a
 custom URI scheme.

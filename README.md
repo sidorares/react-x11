@@ -338,10 +338,14 @@ REACT_X11_DEVTOOLS=1 npm run examples:dashboard   # 2. run any example with the 
 ```
 
 The component tree, props and hook state show up live in the DevTools
-window; selecting a component inspects it, and hovering an element in the
-tree tints its rect in the X11 window (highlight-on-hover).
-`REACT_X11_DEVTOOLS_HOST` / `REACT_X11_DEVTOOLS_PORT` override the default
-`localhost:8097`. See [docs/devtools.md](docs/devtools.md).
+window, and editing any of them re-renders the app. Hovering an element in
+the tree tints its rect in the X11 window; the toolbar's crosshair picks an
+element by clicking it in the app; "highlight updates when components
+render" outlines the rects that just re-rendered; the style editor edits a
+selected element's style live; and the Profiler can restart the app to
+record its mount. `REACT_X11_DEVTOOLS_HOST` / `REACT_X11_DEVTOOLS_PORT`
+override the default `localhost:8097`. See
+[docs/devtools.md](docs/devtools.md).
 
 Two more debugging aids:
 

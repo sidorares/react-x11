@@ -21,6 +21,7 @@ function pressKey(app, wnd, { keysym, codepoint, buttons = 0, time }) {
 }
 
 const XK = {
+  Escape: 0xff1b,
   BackSpace: 0xff08,
   Tab: 0xff09,
   Return: 0xff0d,
@@ -1762,6 +1763,319 @@ test('DevTools agent highlight tints the hovered node', async () => {
   );
 
   await x11Root.unmount();
+});
+
+// The overlay DevTools draws for "highlight updates when components
+// render". The backend owns the colour ramp and the fade-out clock and
+// hands over the whole live set each time, so the host redraws rather than
+// accumulates — a rect that stops being sent has to stop being painted.
+test('DevTools trace updates outline the rects that re-rendered', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { attachTraceUpdatesAgent } =
+    await import('../src/DevToolsIntegration.js');
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 100 },
+      React.createElement(
+        'box',
+        { style: { flexDirection: 'row', flexGrow: 1 } },
+        React.createElement('box', { style: { flexGrow: 1 } }),
+        React.createElement('box', { style: { flexGrow: 1 } }),
+      ),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const [left, right] = wnd._reactX11Node.children[0].children;
+
+  const agent = new EventEmitter();
+  attachTraceUpdatesAgent(agent);
+
+  const outlines = (from) =>
+    wnd.ctx.ops
+      .slice(from)
+      .filter(([op, color]) => op === 'stroke' && String(color).startsWith('#'))
+      .map(([, color]) => color);
+
+  let before = wnd.ctx.ops.length;
+  agent.emit('drawTraceUpdates', [
+    { node: left, color: '#37afa9' },
+    { node: right, color: '#febc38' },
+  ]);
+  await tick();
+  assert.deepStrictEqual(
+    outlines(before),
+    ['#37afa9', '#febc38'],
+    'one outline per node, in the colour the backend assigned it',
+  );
+  const rects = wnd.ctx.ops
+    .slice(before)
+    .filter(([op]) => op === 'rect')
+    .map(([, x, y, w, h]) => [x, y, w, h]);
+  assert.ok(
+    rects.some(([x, y, w, h]) => x === 101 && y === 1 && w === 98 && h === 98),
+    `the right box's rect is outlined inside its bounds, got ${JSON.stringify(rects)}`,
+  );
+
+  // the backend expired one of them: what it no longer sends is no longer
+  // painted, without the other one flickering off and on
+  before = wnd.ctx.ops.length;
+  agent.emit('drawTraceUpdates', [{ node: left, color: '#63b19e' }]);
+  await tick();
+  assert.deepStrictEqual(outlines(before), ['#63b19e']);
+
+  before = wnd.ctx.ops.length;
+  agent.emit('disableTraceUpdates');
+  await tick();
+  assert.deepStrictEqual(
+    outlines(before),
+    [],
+    'turning the setting off clears the overlay',
+  );
+
+  await x11Root.unmount();
+});
+
+// The element picker: with no DOM to listen on, the backend hands the
+// pointer to the host and waits to be told what was picked.
+test('DevTools picker selects the element under the pointer', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { attachPickerAgent } = await import('../src/DevToolsIntegration.js');
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const clicks = [];
+  x11Root.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 100 },
+      React.createElement(
+        'box',
+        { style: { flexDirection: 'row', flexGrow: 1 } },
+        React.createElement('box', { style: { flexGrow: 1 } }),
+        React.createElement('box', {
+          style: { flexGrow: 1 },
+          onClick: () => clicks.push('right'),
+        }),
+      ),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  const right = wnd._reactX11Node.children[0].children[1];
+
+  const selected = [];
+  const stopped = [];
+  const agent = Object.assign(new EventEmitter(), {
+    getIDForHostInstance: () => 7,
+    selectNode: (node) => selected.push(node),
+    stopInspectingNative: (value) => stopped.push(value),
+  });
+  attachPickerAgent(agent);
+  agent.emit('startInspectingNative');
+
+  wnd.emit('mousemove', { x: 150, y: 50 });
+  await tick();
+  const tint = () =>
+    wnd.ctx.ops.filter(
+      ([op, , , , , style]) =>
+        op === 'fillRect' && style === 'rgba(41, 128, 185, 0.35)',
+    );
+  assert.deepStrictEqual(
+    tint().at(-1),
+    ['fillRect', 100, 0, 100, 100, 'rgba(41, 128, 185, 0.35)'],
+    'motion tints whatever is under the pointer',
+  );
+
+  wnd.emit('mousedown', { x: 150, y: 50, keycode: 1 });
+  wnd.emit('mouseup', { x: 150, y: 50, keycode: 1 });
+  await tick();
+  // identity, not deepStrictEqual: a failing diff of two retained nodes
+  // walks the whole tree and reports nothing useful
+  assert.strictEqual(selected.length, 1, 'exactly one element selected');
+  assert.ok(selected[0] === right, 'the press selects the element under it');
+  assert.deepStrictEqual(stopped, [true], 'and tells DevTools picking is over');
+  assert.deepStrictEqual(
+    clicks,
+    [],
+    'the app never sees the press that picked an element',
+  );
+
+  // and with picking over, the app has its pointer back
+  wnd.emit('mousedown', { x: 150, y: 50, keycode: 1 });
+  wnd.emit('mouseup', { x: 150, y: 50, keycode: 1 });
+  await tick();
+  assert.deepStrictEqual(clicks, ['right']);
+
+  await x11Root.unmount();
+});
+
+test('Escape cancels the DevTools picker and hands the pointer back', async () => {
+  const { EventEmitter } = await import('node:events');
+  const { attachPickerAgent } = await import('../src/DevToolsIntegration.js');
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const clicks = [];
+  x11Root.render(
+    React.createElement('window', { width: 200, height: 100 }, [
+      React.createElement('box', {
+        key: 'b',
+        style: { flexGrow: 1 },
+        onClick: () => clicks.push('box'),
+      }),
+    ]),
+  );
+  await tick();
+  const wnd = app.windows[0];
+
+  const stopped = [];
+  const agent = Object.assign(new EventEmitter(), {
+    getIDForHostInstance: () => 7,
+    selectNode: () => {},
+    stopInspectingNative: (value) => stopped.push(value),
+  });
+  attachPickerAgent(agent);
+  agent.emit('startInspectingNative');
+
+  pressKey(app, wnd, { keysym: XK.Escape });
+  await tick();
+  assert.deepStrictEqual(stopped, [false], 'DevTools is told picking is off');
+
+  wnd.emit('mousedown', { x: 50, y: 50, keycode: 1 });
+  wnd.emit('mouseup', { x: 50, y: 50, keycode: 1 });
+  await tick();
+  assert.deepStrictEqual(clicks, ['box'], 'the app has its pointer back');
+
+  await x11Root.unmount();
+});
+
+test('selectInDevTools reveals a node when an agent is attached', async () => {
+  const { selectInDevTools } = await import('../src/DevToolsIntegration.js');
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 100 },
+      React.createElement('box', { style: { flexGrow: 1 } }),
+    ),
+  );
+  await tick();
+  const box = app.windows[0]._reactX11Node.children[0];
+
+  assert.strictEqual(
+    selectInDevTools(box),
+    false,
+    'no DevTools attached: click-to-component just opens the editor',
+  );
+
+  const selected = [];
+  const previous = global.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  global.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    reactDevtoolsAgent: {
+      getIDForHostInstance: (node) => (node === box ? 4 : null),
+      selectNode: (node) => selected.push(node),
+    },
+  };
+  try {
+    assert.strictEqual(selectInDevTools(box), true);
+    assert.strictEqual(selected.length, 1);
+    assert.ok(selected[0] === box);
+    // an element DevTools' filters hid has no id, and no message to send
+    const other = app.windows[0]._reactX11Node;
+    assert.strictEqual(selectInDevTools(other), false);
+    assert.strictEqual(selected.length, 1);
+  } finally {
+    if (previous === undefined) delete global.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+    else global.__REACT_DEVTOOLS_GLOBAL_HOOK__ = previous;
+  }
+
+  await x11Root.unmount();
+});
+
+test('DevTools style editor gets a flat style and a measurable node', async () => {
+  const { resolveStyle } = await import('../src/DevToolsIntegration.js');
+  const { STYLE_PROP_NAMES } = await import('../src/styles.js');
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    React.createElement(
+      'window',
+      { width: 200, height: 100 },
+      React.createElement('box', {
+        style: [{ flexGrow: 1, padding: 4 }, { padding: 8 }],
+      }),
+    ),
+  );
+  await tick();
+  const box = app.windows[0]._reactX11Node.children[0];
+
+  assert.deepStrictEqual(
+    resolveStyle([{ flexGrow: 1, padding: 4 }, { padding: 8 }]),
+    { flexGrow: 1, padding: 8 },
+    'array styles arrive flattened, later entries winning',
+  );
+  assert.deepStrictEqual(
+    resolveStyle({ color: 'red', ':hover': { color: 'blue' } }),
+    { color: 'red' },
+    'state blocks are not editable values and are left out',
+  );
+  assert.ok(
+    STYLE_PROP_NAMES.includes('padding') && STYLE_PROP_NAMES.includes('color'),
+    'the valid-attribute list is the style vocabulary itself',
+  );
+
+  // the box model beside the style comes from measure(), RN's contract
+  let measured = null;
+  box.measure((...args) => {
+    measured = args;
+  });
+  assert.deepStrictEqual(measured, [0, 0, 200, 100, 0, 0]);
+
+  await x11Root.unmount();
+});
+
+test('DevTools settings survive a restart, session state does not', async () => {
+  const { createStorage } = await import('../src/DevToolsIntegration.js');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const fsp = await import('node:fs/promises');
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'react-x11-devtools-'));
+  const file = path.join(dir, 'nested', 'devtools.json');
+  const previous = process.env.REACT_X11_DEVTOOLS_STATE;
+  process.env.REACT_X11_DEVTOOLS_STATE = file;
+  try {
+    const store = createStorage(true);
+    assert.strictEqual(store.getItem('missing'), null);
+    store.setItem('React::DevTools::componentFilters', '[{"type":1}]');
+    // a second process reading the same file is the whole point
+    assert.strictEqual(
+      createStorage(true).getItem('React::DevTools::componentFilters'),
+      '[{"type":1}]',
+    );
+    store.removeItem('React::DevTools::componentFilters');
+    assert.strictEqual(createStorage(true).length, 0);
+
+    const session = createStorage(false);
+    session.setItem('selection', '3');
+    assert.strictEqual(session.getItem('selection'), '3');
+    assert.deepStrictEqual(
+      session.toJSON(),
+      { selection: '3' },
+      'session state is what a reload-and-profile restart carries over',
+    );
+    assert.strictEqual(
+      createStorage(true).getItem('selection'),
+      null,
+      'and it never reaches the file',
+    );
+  } finally {
+    if (previous === undefined) delete process.env.REACT_X11_DEVTOOLS_STATE;
+    else process.env.REACT_X11_DEVTOOLS_STATE = previous;
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('rich content elements mount, update and unmount headlessly', async () => {

@@ -30,6 +30,7 @@
     "filedialog:probe": "node scripts/filedialog-probe.mjs",
     "a11y:probe": "node scripts/a11y-probe.mjs",
     "globalmenu:host": "node scripts/globalmenu-host.mjs",
+    "devtools:proxy": "node scripts/devtools-proxy.mjs",
     "examples:form": "tsx examples/form.jsx",
     "examples:rules": "tsx examples/rules.jsx",
     "examples:richtext": "tsx examples/richtext.jsx",

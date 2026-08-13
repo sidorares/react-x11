@@ -18,6 +18,7 @@ import { acceleratorKeysym } from './keyboard.js';
 import { MOD } from './keysyms.js';
 
 const XK_TAB = 0xff09;
+const XK_ESCAPE = 0xff1b;
 // The core protocol has no wheel: it is a click of button 4/5 (vertical) or
 // 6/7 (horizontal). ntk derives its `wheel` event from those presses — or,
 // where the connection has XI2, from the scroll valuators that carry the real
@@ -125,6 +126,18 @@ class SyntheticEvent {
 let clickToComponentHandler = null;
 export function setClickToComponentHandler(fn) {
   clickToComponentHandler = fn;
+}
+
+// DevTools' element picker (see DevToolsIntegration.js). While a handler is
+// installed the pointer belongs to DevTools, not to the app: motion, press
+// and release are answered with the node under the pointer and go no
+// further, so picking an element cannot also hover a row, press a button or
+// start a drag. `Escape` cancels. Installed only while the user is actually
+// picking — the crosshair in the DevTools toolbar — so the cost outside
+// that is one null check per event.
+let inspectHandler = null;
+export function setInspectHandler(fn) {
+  inspectHandler = fn;
 }
 
 /**
@@ -470,6 +483,10 @@ export class EventManager {
   _onMouseDown(native) {
     // the wheel arrived as `wheel`, with a distance the press cannot carry
     if (WHEEL_BUTTONS.has(native.keycode)) return;
+    if (inspectHandler) {
+      inspectHandler('select', this._hit(native), native);
+      return;
+    }
     if (clickToComponentHandler && Boolean(native.buttons & MOD.Alt)) {
       clickToComponentHandler(this._hit(native), native);
       return;
@@ -525,6 +542,9 @@ export class EventManager {
 
   _onMouseUp(native) {
     if (WHEEL_BUTTONS.has(native.keycode)) return; // wheel release
+    // the press that picked an element never reached the app; its release
+    // must not either, or a control sees a mouseup it was never pressed for
+    if (inspectHandler) return;
     runWithPriority(DiscreteEventPriority, () => {
       // a completed drag ends the gesture: no mouseup, no click — as in
       // the DOM, where dragend replaces them
@@ -574,6 +594,10 @@ export class EventManager {
   }
 
   _onMouseMove(native) {
+    if (inspectHandler) {
+      inspectHandler('move', this._hit(native), native);
+      return;
+    }
     runWithPriority(ContinuousEventPriority, () => {
       // an active drag owns the pointer: drag-path diffing replaces hover,
       // onDrag replaces mousemove. Below the threshold this falls through.
@@ -798,6 +822,20 @@ export class EventManager {
   }
 
   _onKey(name, native) {
+    if (inspectHandler) {
+      // Escape is the way out of a picker the user changed their mind
+      // about; every other key is swallowed with the pointer.
+      const wnd = this.node.window;
+      const keysym = acceleratorKeysym(
+        this.node.app,
+        native.keycode,
+        native.baseKeysym ?? wnd?.X?.keycode2keysyms?.[native.keycode]?.[0],
+      );
+      if (name === 'KeyDown' && keysym === XK_ESCAPE) {
+        inspectHandler('cancel', null, native);
+      }
+      return;
+    }
     runWithPriority(DiscreteEventPriority, () => {
       const wnd = this.node.window;
       // ntk decodes the key on the way in (window.js decorates the event
