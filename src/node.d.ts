@@ -6,7 +6,12 @@
  * internal and may change in a patch release. docs/extending.md is the
  * contract in prose.
  */
-import type { Rect, NtkApp } from './types/nodes.js';
+import type {
+  Rect,
+  NtkApp,
+  TextPosition,
+  TextSelectionSnapshot,
+} from './types/nodes.js';
 import type {
   FontStyle,
   FontWeight,
@@ -186,6 +191,26 @@ export declare class Node {
    * document around it skips its subtree whole and leaves its presses
    * alone. `<textinput>` sets it. */
   hasOwnSelection: boolean;
+
+  // --- being a selection surface -------------------------------------------
+  //
+  // The base class implements these for every node, which is what lets a
+  // registered element be passed anywhere a `DrawnNode` is taken — the
+  // interface in `types/nodes.d.ts` lists them, so leaving them out here
+  // made a subclass stop being one.
+
+  /** The selection this element owns, or null when it is not `selectable`.
+   * A snapshot: read it again after a change. */
+  readonly textSelection: TextSelectionSnapshot | null;
+  /** Select everything in this surface, and take PRIMARY with it. */
+  selectAll(): this;
+  /** Drop the selection. PRIMARY is left where it is: the text stays
+   * pasteable, which is what every other X client does. */
+  clearSelection(): this;
+  /** What a copy would put on the clipboard. */
+  selectedText(): string;
+  /** Set both ends by hand. `setSelection(null)` clears. */
+  setSelection(anchor: TextPosition | null, focus?: TextPosition | null): this;
 
   /** Draw. A subclass calls `super.paint(ctx)` first, for the background,
    * border and clip, then draws inside `this.abs`. */
