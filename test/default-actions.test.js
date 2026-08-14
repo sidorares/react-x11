@@ -15,8 +15,8 @@ import React from 'react';
 import { createRoot } from '../src/index.js';
 import { registerElement, unregisterElement } from '../src/host.js';
 import { Node, CARET_BLINK_MS } from '../src/node.js';
-import { XK_TAB, XK_ESCAPE, XK_LEFT } from '../src/keysyms.js';
-import { createMockApp } from './helpers/mock-app.js';
+import { XK_TAB, XK_ESCAPE, XK_LEFT, MOD } from '../src/keysyms.js';
+import { createMockApp, spinWheel } from './helpers/mock-app.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -100,6 +100,51 @@ class EditorNode extends Node {
     clearInterval(this.blinkTimer);
     this.blinkTimer = null;
     super.destroySubtree();
+  }
+}
+
+/**
+ * The other element under test: a scene, the shape issue #302 was found
+ * building. It draws a graph into one node, so its wheel is a zoom about the
+ * pointer rather than a scroll and the hover it paints is the node under the
+ * pointer rather than a `:hover` block on a child that does not exist.
+ */
+class PaneNode extends Node {
+  constructor(props, app) {
+    super('minipane', props, app);
+    this.log = [];
+    this.zoom = 1;
+    this.hovered = null;
+  }
+
+  defaultWheel(ev) {
+    this.log.push(
+      `wheel:${ev.deltaY}@${ev.x},${ev.y}${ev.ctrlKey ? '+ctrl' : ''}`,
+    );
+    // `zooms={false}` is the same element declining the gesture, which is
+    // what puts it back in the scroll chain
+    if (this.props.zooms === false) return;
+    this.zoom *= Math.exp(-ev.deltaY / 400);
+    ev.preventDefault(); // consumed, whether or not anything "scrolled"
+  }
+
+  defaultMouseMove(ev) {
+    this.hovered = { x: ev.localX, y: ev.localY };
+    this.log.push(`move:${ev.x},${ev.y}`);
+  }
+
+  defaultMouseLeave() {
+    this.hovered = null;
+    this.log.push('leave');
+  }
+
+  defaultMouseDown(ev) {
+    this.log.push('down');
+    if (this.props.captures !== false) ev.capturePointer();
+  }
+
+  defaultMouseDrag(ev) {
+    this.log.push(`drag:${ev.x}`);
   }
 }
 
@@ -351,6 +396,208 @@ test('focus and blur bracket the element behaviour, including the window losing 
   await tick();
   assert.deepStrictEqual(editor.log, ['focus', 'blur', 'focus', 'blur']);
   assert.strictEqual(editor.blinkTimer, null, 'nothing left ticking');
+});
+
+// --- the wheel and hover motion (#302) --------------------------------------
+//
+// The two inputs that never reached the seam. `isScroller`/`scrollBy` route
+// the wheel for content that scrolls and hand out deltas only; a pane whose
+// wheel is a zoom about the pointer needs the point, the modifiers, and to
+// answer the gesture whether or not anything "can scroll". And core already
+// computes the hover path per motion for `:hover` and `onMouseEnter`/`Leave`
+// — an element painting its own hover state just could not hear it.
+
+/** Mount `<minipane>` over a tall sibling in a window that may scroll, so
+ * the chain behind the element is a real one for it to keep or hand on. */
+async function mountPane({ props = {}, windowProps = {} } = {}) {
+  register('minipane', {
+    create: (p, app) => new PaneNode(p, app),
+    childrenAllowed: false,
+    override: true,
+  });
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  const ref = React.createRef();
+  root.render(
+    h(
+      'window',
+      { width: 300, height: 200, ...windowProps },
+      h('minipane', {
+        ref,
+        style: { width: 200, height: 100, flexShrink: 0 },
+        ...props,
+      }),
+      h('box', { style: { height: 400, flexShrink: 0 } }),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+  return { app, root, wnd, windowNode: wnd._reactX11Node, pane: ref.current };
+}
+
+test('the wheel reaches the element with the point and the modifiers', async () => {
+  const { wnd, pane } = await mountPane();
+  spinWheel(wnd, 50, 40, { deltaY: 1, buttons: MOD.Control });
+  await tick();
+  assert.deepStrictEqual(pane.log, ['wheel:48@50,40+ctrl']);
+  assert.ok(pane.zoom < 1, 'and the zoom it drove is about that point');
+});
+
+test('consuming the wheel keeps it from the scroll chain', async () => {
+  const { wnd, windowNode, pane } = await mountPane({
+    windowProps: { style: { overflow: 'scroll' } },
+  });
+  spinWheel(wnd, 50, 40);
+  await tick();
+  assert.strictEqual(pane.log.length, 1, 'the element answered it');
+  assert.strictEqual(windowNode.scrollY, 0, 'so the window behind it did not');
+});
+
+test('…and leaving it alone puts the element back in the chain', async () => {
+  const { wnd, windowNode, pane } = await mountPane({
+    props: { zooms: false },
+    windowProps: { style: { overflow: 'scroll' } },
+  });
+  spinWheel(wnd, 50, 40);
+  await tick();
+  assert.deepStrictEqual(pane.log, ['wheel:48@50,40'], 'it was offered first');
+  assert.strictEqual(pane.zoom, 1, 'and declined the gesture');
+  assert.strictEqual(windowNode.scrollY, 48, 'so the walk ran as before');
+});
+
+test('an app handler still gets the wheel first, and can veto it', async () => {
+  const seen = [];
+  const { wnd, pane } = await mountPane({
+    props: {
+      onWheel: (ev) => {
+        seen.push(ev.deltaY);
+        ev.preventDefault();
+      },
+    },
+  });
+  spinWheel(wnd, 50, 40);
+  await tick();
+  assert.deepStrictEqual(seen, [48], 'the handler ran');
+  assert.deepStrictEqual(pane.log, [], 'and the element behaviour did not');
+
+  // …while a handler that only watches leaves the element its wheel
+  const watched = await mountPane({
+    props: { onWheel: () => seen.push('saw') },
+  });
+  spinWheel(watched.wnd, 50, 40);
+  await tick();
+  assert.deepStrictEqual(seen, [48, 'saw']);
+  assert.deepStrictEqual(watched.pane.log, ['wheel:48@50,40']);
+});
+
+test('the fraction a touchpad measured reaches the element whole', async () => {
+  // the chain spends whole pixels and carries the rest, because a fractional
+  // scroll offset is one the blit cannot shift — a zoom factor is continuous
+  // and gets the delta as it was measured
+  const { wnd, windowNode, pane } = await mountPane({
+    props: { zooms: false },
+    windowProps: { style: { overflow: 'scroll' } },
+  });
+  spinWheel(wnd, 50, 40, { deltaY: 1 / 128, smooth: true });
+  await tick();
+  assert.deepStrictEqual(pane.log, ['wheel:0.375@50,40']);
+  assert.strictEqual(windowNode.scrollY, 0, 'a third of a pixel moves nothing');
+});
+
+test('hover motion reaches the element, and the leave that ends it', async () => {
+  const { wnd, pane } = await mountPane();
+
+  wnd.emit('mousemove', { x: 20, y: 30 });
+  await tick();
+  assert.deepStrictEqual(
+    pane.log,
+    ['move:20,30'],
+    'the first one is the enter',
+  );
+  assert.deepStrictEqual(pane.hovered, { x: 20, y: 30 }, 'local, as elsewhere');
+
+  wnd.emit('mousemove', { x: 40, y: 30 });
+  await tick();
+  assert.deepStrictEqual(pane.log, ['move:20,30', 'move:40,30']);
+
+  // out of the element's box, still inside the window
+  wnd.emit('mousemove', { x: 250, y: 30 });
+  await tick();
+  assert.deepStrictEqual(pane.log, ['move:20,30', 'move:40,30', 'leave']);
+  assert.strictEqual(pane.hovered, null, 'the highlight went with it');
+});
+
+test('the pointer leaving the window is a leave as well', async () => {
+  const { wnd, pane } = await mountPane();
+  wnd.emit('mousemove', { x: 20, y: 30 });
+  wnd.emit('mouseout', { x: -1, y: 30 });
+  await tick();
+  assert.deepStrictEqual(pane.log, ['move:20,30', 'leave']);
+});
+
+test('app handlers get motion and the leave first, and can veto either', async () => {
+  const seen = [];
+  const { wnd, pane } = await mountPane({
+    props: {
+      onMouseMove: (ev) => {
+        seen.push('move');
+        ev.preventDefault();
+      },
+      onMouseLeave: (ev) => {
+        seen.push('leave');
+        ev.preventDefault();
+      },
+    },
+  });
+  wnd.emit('mousemove', { x: 20, y: 30 });
+  wnd.emit('mousemove', { x: 250, y: 30 });
+  await tick();
+  assert.deepStrictEqual(seen, ['move', 'leave'], 'both handlers ran');
+  assert.deepStrictEqual(pane.log, [], 'and neither default action after them');
+
+  // …and handlers that only watch leave the element both of them
+  const watched = await mountPane({
+    props: {
+      onMouseMove: () => seen.push('saw move'),
+      onMouseLeave: () => seen.push('saw leave'),
+    },
+  });
+  watched.wnd.emit('mousemove', { x: 20, y: 30 });
+  watched.wnd.emit('mousemove', { x: 250, y: 30 });
+  await tick();
+  assert.deepStrictEqual(seen, ['move', 'leave', 'saw move', 'saw leave']);
+  assert.deepStrictEqual(watched.pane.log, ['move:20,30', 'leave']);
+});
+
+test('a capture keeps the motion on the drag hook', async () => {
+  const { wnd, pane } = await mountPane();
+  wnd.emit('mousedown', { x: 20, y: 30, keycode: 1 });
+  wnd.emit('mousemove', { x: 250, y: 30 });
+  await tick();
+  // hover is frozen for the length of the gesture, so the motion of one is
+  // the drag's and not also the hover's
+  assert.deepStrictEqual(pane.log, ['down', 'drag:250']);
+  assert.strictEqual(pane.hovered, null);
+
+  // …and a press that did not capture leaves hover live, in that order: what
+  // the pointer is over still lights up while the press follows it
+  const loose = await mountPane({ props: { captures: false } });
+  loose.wnd.emit('mousedown', { x: 20, y: 30, keycode: 1 });
+  loose.wnd.emit('mousemove', { x: 40, y: 30 });
+  await tick();
+  assert.deepStrictEqual(loose.pane.log, ['down', 'move:40,30', 'drag:40']);
+});
+
+test('a node that unmounts while hovered is forgotten, not left', async () => {
+  const { root, wnd, pane } = await mountPane();
+  wnd.emit('mousemove', { x: 20, y: 30 });
+  await tick();
+  assert.deepStrictEqual(pane.log, ['move:20,30'], 'hovered, and painting it');
+
+  pane.log.length = 0;
+  root.render(h('window', { width: 300, height: 200 }));
+  await tick();
+  assert.deepStrictEqual(pane.log, [], 'the same rule focus follows');
 });
 
 test('CARET_BLINK_MS is the cadence <textinput> blinks at', async () => {

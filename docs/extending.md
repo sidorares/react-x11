@@ -420,6 +420,9 @@ a React component wrapping the element.
 | `defaultMouseDown(ev)`   | a press. Place a caret, grab a handle; `ev.capturePointer()` to keep the rest of the gesture                                                                                                                                |
 | `defaultMouseDrag(ev)`   | motion while _this_ element holds the press — including outside its box, which `onMouseMove` does not give you                                                                                                              |
 | `defaultMouseUp(ev)`     | that press was released                                                                                                                                                                                                     |
+| `defaultMouseMove(ev)`   | the pointer moved over this element, no button down — light the node, the edge, the handle it is over. The first one after it arrives is the enter                                                                          |
+| `defaultMouseLeave(ev)`  | …and the pointer left: put that back                                                                                                                                                                                        |
+| `defaultWheel(ev)`       | the wheel, before the scroll chain — for the element whose wheel is not a scroll. `ev.preventDefault()` consumes it                                                                                                         |
 | `defaultContextMenu(ev)` | right-click, after the press: open your own menu. Separate so suppressing it keeps the caret placement                                                                                                                      |
 | `defaultFocus(info)`     | this element became the focused node (or its window got the X focus back): start the caret blinking. `info` is `{ reason, backwards }` — `'key'` with a direction is a Tab, which is the only thing that has ever needed it |
 | `defaultBlur()`          | focus left, or the window lost it: stop it                                                                                                                                                                                  |
@@ -472,13 +475,46 @@ class EditorNode extends Node {
 }
 ```
 
-Four details worth having in writing:
+Details worth having in writing:
 
 **A gesture is vetoed once, at its press.** `defaultMouseDrag` and
 `defaultMouseUp` are the continuation of the press `defaultMouseDown` got, so
 a handler that prevented the press means none of the three run — an element
 never hears about motion it has no press behind, and does not need a
 `dragging` flag of its own to discover that.
+
+**Hover is motion, not a state you are handed.** `defaultMouseMove` runs for
+the element the pointer is over — coalesced to once per frame, like every
+motion — and `defaultMouseLeave` when it goes elsewhere, which is everything
+a scene element needs to light the node, edge or handle under the pointer and
+put it back. There is no `defaultMouseEnter`: the first motion after the
+pointer arrives _is_ the enter, and it carries the position an enter would
+have to be asked for. A capture suspends the pair — while a gesture owns the
+pointer, hover stays frozen where it was and the motion goes to
+`defaultMouseDrag` instead. And a node that unmounts while hovered is
+_forgotten_ rather than left, exactly as one that unmounts while focused is,
+so anything with a lifetime behind the highlight is released in
+`destroySubtree` as well.
+
+**The wheel that is not a scroll.** `canScroll`/`scrollBy`
+([below](#scrolling-content-you-painted)) route the wheel for content that
+scrolls, and they hand the element deltas only — which is the whole of the
+gesture when the answer is "move by that much". It is not the whole of a zoom
+about the pointer: that needs the point that must _not_ move (`ev.x`/`ev.y`)
+and the modifier that tells a zoom from a pan, and it answers the wheel
+whether or not anything "can scroll". `defaultWheel(ev)` is the whole event,
+at the node under the pointer, before the chain walks; `ev.preventDefault()`
+consumes it and the walk never runs. The deltas are as the device measured
+them, fractions included — the whole-pixel rule the chain follows is there
+for the scroll blit, and a zoom factor is continuous.
+
+```js
+defaultWheel(ev) {
+  if (!ev.ctrlKey) return;             // an unmodified wheel still scrolls
+  this.zoomAbout(ev.x, ev.y, Math.exp(-ev.deltaY / 400));
+  ev.preventDefault();                 // …and this one was mine
+}
+```
 
 **Focus is a prerequisite, not a consequence.** Keys are delivered to the
 focused node, and nothing focuses an element that has not said it can be:
@@ -733,6 +769,12 @@ which is what a browser does and what a user flicking through a long page
 expects. `<textarea>` is the worked example in core — it scrolls wrapped text
 it painted, and since it answers `canScroll` off that text, a short one hands
 the gesture outward rather than swallowing it.
+
+The one thing ahead of the walk is the hit node's own `defaultWheel`
+([above](#behaviour-of-your-own)) — for an element whose wheel is not a
+scroll at all, a pane that zooms about the pointer. Consuming the event there
+is what keeps the walk from running; leaving it alone is what puts the
+element back in this chain.
 
 Answer `canScroll` from the **extent, not the position**: a viewport already
 scrolled to its bottom should keep the rest of a flick rather than pass it

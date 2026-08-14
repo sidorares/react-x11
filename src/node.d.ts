@@ -22,6 +22,7 @@ import type {
   CompositionEvent,
   KeyboardEvent,
   MouseEvent,
+  WheelEvent,
 } from './types/events.js';
 
 /** ntk's 2d context. Typed loosely — it is ntk's API, not ours. */
@@ -306,6 +307,33 @@ export declare class Node {
   defaultMouseDrag?(ev: MouseEvent): void;
   /** The press this element received has been released. */
   defaultMouseUp?(ev: MouseEvent): void;
+  /**
+   * Plain pointer motion over this element, with no button down — the hook
+   * for an element that paints its own hover state, a scene where the node
+   * or handle under the pointer lights up.
+   *
+   * The element under the pointer gets it, so the first one after the
+   * pointer arrives is also the enter. Not delivered while a pointer
+   * capture is in force: that motion belongs to the gesture, and
+   * `defaultMouseDrag` is where it goes.
+   */
+  defaultMouseMove?(ev: MouseEvent): void;
+  /** The pointer left this element — clear what `defaultMouseMove` lit. A
+   * node that unmounts while hovered is *forgotten* rather than left, the
+   * way focus is, so a subtree torn down under the pointer never sees it. */
+  defaultMouseLeave?(ev: MouseEvent): void;
+  /**
+   * The wheel over this element, before the scroll chain gets it: a pane
+   * whose wheel is a zoom about the pointer rather than a scroll, which
+   * needs `ev.x`/`ev.y` and the modifiers as much as the deltas.
+   *
+   * `ev.preventDefault()` consumes it, and the chain then never runs — the
+   * answer for a gesture that is handled whether or not anything moved. An
+   * element whose wheel really is a scroll implements `canScroll`/`scrollBy`
+   * instead and joins the chain. Deltas are pixels, fractional where the
+   * device measured a fraction: the whole-pixel rule is the chain's.
+   */
+  defaultWheel?(ev: WheelEvent): void;
   /** Right-click, after `onContextMenu` handlers: open the element's own
    * menu. Separate from the press so suppressing the menu does not also
    * give up the caret placement `defaultMouseDown` did. */
