@@ -6065,6 +6065,17 @@ export class TextInputNode extends Node {
     // timer for it.
     if (caretBlink) {
       this._blinkTimer = setInterval(() => {
+        // A field can still hold focus when the connection goes — an app
+        // closing its own client, a server exit, a test closing the app it
+        // lent the root. Nothing blurs the field on that route, so this is
+        // the timer's own exit: the next tick would paint a caret onto a
+        // closing connection and throw out of the frame clock, where there
+        // is nothing to catch it.
+        if (this.destroyed || this.app?.X?._closing) {
+          clearInterval(this._blinkTimer);
+          this._blinkTimer = null;
+          return;
+        }
         this._caretOn = !this._caretOn;
         // twice a second, forever, for as long as a field has focus: the one
         // repaint that most wants to cost only the field it happens in
@@ -8423,6 +8434,14 @@ export class WindowNode extends Scrollable(Node) {
     // owes nothing at all.
     clearPendingFrame(this);
     if (this.destroyed || !this.yoga || !this.window) return;
+    // A frame is scheduled a tick before it is painted, and the connection
+    // can go in between: an app closing its own client, a server exit, a
+    // test closing the app it lent the root. Nothing unmounts the tree on
+    // that route, so the frame arrives with a live window node and a dead
+    // socket, and the first request it makes throws out of the frame clock
+    // where there is nothing waiting to catch it. There is no screen left to
+    // paint to, so this owes nothing either.
+    if (this.app?.X?._closing) return;
     // a transientFor whose owner was not realized yet at commit time. The
     // frame after the mount is the first moment refs have attached, so the
     // common "two <window>s in one tree" case resolves here rather than
