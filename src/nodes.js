@@ -2632,6 +2632,13 @@ export class Node {
    * moved something — and each of them falls back to repainting the rect,
    * which is the behaviour without this call at all.
    *
+   * All of those are about `rect`, not about this node (issue #309). An
+   * element with furniture pinned to a corner of its pane — a minimap, zoom
+   * controls, a HUD strip that has to repaint on a pan frame and whose
+   * pixels must not ride the blit — carves it out of the region it shifts
+   * and claims it as ordinary damage. Those claims land beside the rect and
+   * the frame stays a blit.
+   *
    * Returns whether the frame is still a blit candidate. The real answer
    * arrives as `paintDamage()`, because most of the gates cannot be decided
    * until the frame closes; a `false` here is only the ones that can.
@@ -2672,9 +2679,17 @@ export class Node {
       // inside the rect is indistinguishable from this call's own claim.
       // The same reasoning, and the same poison rather than a disarm, as
       // scrollTo (react-x11#295).
-      const zone = insetRect(rect, -(DAMAGE_SLOP * 2 + 1));
+      //
+      // The zone is `rect` itself, where scrollTo's is the viewport plus
+      // slop (issue #309): the claim recorded below *is* this rect, so a
+      // claim it could swallow has to overlap it, and every claim carries
+      // its own slop already — `paintBounds` inflates a node's region by
+      // `DAMAGE_SLOP` on every side, so ink that bleeds into `rect` is
+      // claimed overlapping it. Furniture *beside* the rect — a minimap in
+      // a corner the element carved out and repaints itself — is not a
+      // change to the pixels about to move.
       for (const claimed of root._damage) {
-        if (rectsOverlap(claimed, zone)) {
+        if (rectsOverlap(claimed, rect)) {
           this._pendingBlitFrom = BLIT_POISONED;
           break;
         }
@@ -8262,13 +8277,25 @@ export class WindowNode extends Scrollable(Node) {
     ) {
       const rect = damage.paintBounds ? damage.paintBounds() : damage;
       for (const sv of pendingScrolls) {
-        // an element blitting a region of its own drawing (issue #303) is
-        // waiting on that region, not on the whole node it lives in
-        const waiting = sv._pendingBlitContents?.rect ?? sv.abs;
-        if (
-          !waiting ||
-          rectsOverlap(rect, insetRect(waiting, -(DAMAGE_SLOP * 2 + 1)))
-        ) {
+        // An element blitting a region of its own drawing (issue #303) is
+        // waiting on that region, not on the whole node it lives in — and
+        // it is waiting on it *exactly* (issue #309). Its claim is the rect
+        // itself, and `_blitKeptDamage` recognises it as the rect itself, so
+        // a foreign claim that could be swallowed by it has to overlap it:
+        // the ring outside is beyond reach. A scroll container's claim is
+        // its viewport plus slop and is recognised to that tolerance, so a
+        // claim in that ring *can* merge into it without ever touching the
+        // viewport — and the wider zone is what keeps it out.
+        //
+        // The difference is what lets an element carve furniture out of the
+        // rect it blits — a minimap pinned to a corner, a strip it repaints
+        // itself — and keep the pan at blit cost while that furniture
+        // claims beside it.
+        const contents = sv._pendingBlitContents;
+        const waiting = contents
+          ? contents.rect
+          : sv.abs && insetRect(sv.abs, -(DAMAGE_SLOP * 2 + 1));
+        if (!waiting || rectsOverlap(rect, waiting)) {
           // Poison rather than disarm (react-x11#295): a null here would
           // let a second scrollTo in the same frame re-arm from a
           // mid-frame origin, and the blit would then move pixels that
@@ -8618,8 +8645,16 @@ export class WindowNode extends Scrollable(Node) {
    * virtualized table's row swap, a hover restyle mid-scroll, a coalesce
    * that swallowed the claim into a bigger box — means pixels in there
    * changed, and changed pixels must not be blitted around.
+   *
+   * `exact` is how an element blit asks for the strict form of that: the
+   * claim has to still *be* `vp`, not merely cover it within the slop
+   * (issue #309). The claim is dropped here in favour of the strips the
+   * shift exposed, so anything merged into it is dropped with it — and the
+   * damage cap merges neighbours on its own, without a claim-time gate to
+   * poison first. Requiring the rect back unchanged is what lets the
+   * claim-time gate narrow to `vp` itself and let furniture beside it live.
    */
-  _blitKeptDamage(vp) {
+  _blitKeptDamage(vp, exact = false) {
     const keep = [];
     let sawClaim = false;
     const slopped = insetRect(vp, -(DAMAGE_SLOP + 1));
@@ -8628,7 +8663,14 @@ export class WindowNode extends Scrollable(Node) {
         keep.push(rect);
         continue;
       }
-      if (rectContains(rect, vp) && rectContains(slopped, rect)) {
+      if (
+        exact
+          ? rect.x === vp.x &&
+            rect.y === vp.y &&
+            rect.width === vp.width &&
+            rect.height === vp.height
+          : rectContains(rect, vp) && rectContains(slopped, rect)
+      ) {
         sawClaim = true;
         continue;
       }
@@ -8700,7 +8742,7 @@ export class WindowNode extends Scrollable(Node) {
       if (child.style?.display === 'none') continue;
       if (rectsOverlap(child._subtreeBounds(), vp)) return;
     }
-    const keep = this._blitKeptDamage(vp);
+    const keep = this._blitKeptDamage(vp, true);
     if (!keep) return;
     if (!this._scrollBlitSafe(node, vp)) return;
     // the element's deltas are already how far the pixels moved, the sense

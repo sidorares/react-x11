@@ -118,5 +118,13 @@
     "replies": 10,
     "composites": 606,
     "compositePixels": 298517
+  },
+  "scene: 5 pan steps with a HUD strip beside them": {
+    "requests": 3059,
+    "bytesOut": 610088,
+    "bytesIn": 352,
+    "replies": 11,
+    "composites": 1971,
+    "compositePixels": 1097691
   }
 }
