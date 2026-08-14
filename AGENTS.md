@@ -1144,7 +1144,11 @@ through the node seam (#257): `a11yRole`, `a11yTextState()` +
 `notifyA11yTextChanged()`, and the two optional writes `a11ySetSelection` /
 `a11yReplaceText` — normalized in `customTextState()` so a third-party
 editor is read by the paths `<textinput>` is read by, never by a second
-model. Next: a generic Popover and a file open/save
+model. An element that draws _things_ rather than text says so the same way
+(#304): `a11yScene()` lists them, `notifyA11ySceneChanged()` says the list
+moved, `a11ySceneAction()` takes what an AT does to one — reconciled by
+`id` into objects carrying ordinary `role`/`aria-*` props, so the whole
+model reads them as it reads a `<box>`. Next: a generic Popover and a file open/save
 dialog. **#85** (keyboard layout switching ignored) is done — ntk decodes
 the active XKB group, and `src/keyboard.js` keeps shortcuts on the Latin
 keysym even where XQuartz's keymap rewrite has left no Latin group

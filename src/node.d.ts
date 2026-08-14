@@ -96,6 +96,56 @@ export interface A11yTextState {
 }
 
 /**
+ * One thing an element drew, as an assistive technology should meet it
+ * (`a11yScene`). Everything but `id` and `rect` is optional, and what is
+ * left out is simply not claimed.
+ */
+export interface A11ySceneItem {
+  /** This item's name for the whole time it is on screen. Identity is
+   * matched on it frame to frame, so a fresh id per frame is a child that
+   * is destroyed and recreated under every screen reader holding it. */
+  id: string;
+  /** Where it is drawn, in the owning window's coordinates — the same
+   * space as `abs` and a mouse event's `x`/`y`. Where AT focus draws and
+   * what a magnifier follows. */
+  rect: Rect;
+  /** The ARIA role it plays. `'group'` when it says none, which is
+   * audible and promises nothing. A role that promises activation
+   * (`button`, `option`, `treeitem`, …) gives it an AT-SPI action, and so
+   * does the element implementing `a11ySceneAction`. */
+  role?: string;
+  /** What a screen reader says. Anything unnamed is announced as having no
+   * accessible name, which is the defect being loud rather than hidden. */
+  name?: string;
+  description?: string;
+  /** Whether an AT may put its focus here. Default true. */
+  focusable?: boolean;
+  states?: {
+    selected?: boolean;
+    checked?: boolean | 'mixed';
+    expanded?: boolean;
+    disabled?: boolean;
+    busy?: boolean;
+    /** The element's own keyboard cursor — the item arrow keys would act
+     * on. Element-internal focus never reaches the window's focus manager,
+     * so this is the only way it is reported. */
+    focused?: boolean;
+  };
+  /** Anything else this item would carry as an element: `aria-level`,
+   * `aria-posinset`/`aria-setsize` (Orca's "3 of 7"), `aria-valuenow`,
+   * `aria-keyshortcuts`, `aria-hidden`. Read exactly as they are on a
+   * `<box>`; the fields above win where they overlap. */
+  props?: Record<string, unknown>;
+  /** A scene with structure — series and points, groups and nodes. Ids are
+   * matched within their parent, so they only have to be unique there. */
+  children?: A11ySceneItem[];
+}
+
+/** What an assistive technology asks an element to do with one of the
+ * things it drew. */
+export type A11ySceneAction = 'activate' | 'focus' | 'scroll';
+
+/**
  * The `measureContent` body for content with a natural size and an aspect
  * ratio to keep — `<image>` and `<svg>` are written on it:
  *
@@ -418,6 +468,33 @@ export declare class Node {
    * text rather than guarding it.
    */
   notifyA11yTextChanged(): void;
+  /**
+   * The interactive things this element draws, as accessible children
+   * (docs/extending.md). Without it a scene of any size is one accessible
+   * — "Flow graph, group" — and nothing in it can be found, named or
+   * activated.
+   *
+   * Called once per question asked about this element's children, so
+   * answer from state the element already holds: no layout pass, no copy.
+   */
+  a11yScene?(): A11ySceneItem[];
+  /**
+   * An assistive technology acted on one of them: `id` is the one this
+   * element gave it. Return `true` to claim the action; anything else
+   * falls back to core — a synthetic click at the item's rect for
+   * `activate`, focusing the element for `focus`, revealing the element
+   * for `scroll` — so an element only answers what it has a better answer
+   * for.
+   */
+  a11ySceneAction?(id: string, action: A11ySceneAction): boolean | void;
+  /**
+   * The scene reported by `a11yScene()` has changed — an item added or
+   * removed, one selected, the keyboard cursor moved. A commit re-reads it
+   * on its own, so this is for what the element does between commits: a
+   * drag, an animation, its own arrow keys. Free when nothing is
+   * listening.
+   */
+  notifyA11ySceneChanged(): void;
   /** Props changed. A subclass calls `super.applyProps(next, prev)`. */
   applyProps(
     nextProps: Record<string, unknown>,

@@ -447,19 +447,25 @@ export function a11yPruned(node) {
 
 /**
  * A node's children as assistive technology sees them: pruned subtrees
- * gone, erased nodes replaced by their children. `<glarea>` children are 3D
- * scene nodes with their own vocabulary and no rectangles — a glarea is a
- * leaf up here.
+ * gone, erased nodes replaced by their children, and — for an element that
+ * draws its own scene — the items it says are in it (see below).
+ * `<glarea>` children are 3D scene nodes with their own vocabulary and no
+ * rectangles — a glarea is a leaf up here.
  */
 export function a11yChildren(node) {
   if (node.kind === 'glarea') return [];
   const out = [];
-  for (const child of node.children ?? []) {
-    if (child.destroyed || a11yPruned(child)) continue;
-    if (a11yErased(child)) out.push(...a11yChildren(child));
-    else out.push(child);
-  }
+  for (const child of node.children ?? []) accessibleInto(out, child);
+  // What an element drew comes after what it holds: both are its children,
+  // and only the retained ones have an order React gave them.
+  for (const item of a11ySceneItems(node)) accessibleInto(out, item);
   return out;
+}
+
+function accessibleInto(out, child) {
+  if (child.destroyed || a11yPruned(child)) return;
+  if (a11yErased(child)) out.push(...a11yChildren(child));
+  else out.push(child);
 }
 
 /** The accessible parent: the nearest ancestor that is itself in the
@@ -476,6 +482,230 @@ export function a11yParent(node) {
 export function a11yIndexIn(parent, node) {
   return a11yChildren(parent).indexOf(node);
 }
+
+// --------------------------------------------------------------------------
+// The scene an element draws (issue #304)
+// --------------------------------------------------------------------------
+//
+// A registered element that draws N interactive things — a graph, a chart, a
+// timeline, a seating plan — is one retained node, so it is one accessible:
+// "Flow graph, group", and nothing inside it exists. The way out is the same
+// one every canvas-scene toolkit ends up at (the web's fallback DOM, Qt's
+// QAccessibleInterface children): the element *describes* what it drew, and
+// those descriptions become accessible children.
+//
+// They are objects rather than plain descriptors because the bridge exports
+// one accessible per child and keys it on the object — a list rebuilt every
+// frame would otherwise be a tree that replaces itself between two reads,
+// with every ref an AT is holding dead. `id` is what survives the frame;
+// everything else is re-read from the element each time.
+//
+// Everything below is written so that a scene item is read by the same
+// functions a `<box>` is read by: it carries `props` in the same `role` /
+// `aria-*` vocabulary, an `abs` rect in the same window coordinates, and a
+// `parent`. There is no second model here, only a second way of producing
+// the one there is.
+
+/** The shared empty list, so a node with no scene allocates nothing. */
+const NO_ITEMS = Object.freeze([]);
+
+/** The states a scene item declares, and the prop each is read as. The
+ * element writes `selected`; the model reads `aria-selected` — the same
+ * props the element itself would have carried, so states are derived by
+ * `a11yStates` rather than by a table of their own. */
+const ITEM_STATE_PROPS = Object.entries({
+  selected: 'aria-selected',
+  checked: 'aria-checked',
+  expanded: 'aria-expanded',
+  busy: 'aria-busy',
+  disabled: 'disabled',
+});
+
+const finite = (value) => (Number.isFinite(value) ? value : 0);
+
+/**
+ * One thing an element drew, as an accessibility object. Data and identity
+ * only: what an assistive technology *does* to it is routed back to the
+ * element by the bridge, which is where every other AT-initiated behaviour
+ * lives.
+ */
+class SceneItem {
+  constructor(owner, parent, id) {
+    /** The element that drew this and the id it knows it by — the two
+     * halves of an action's address. */
+    this.a11yOwner = owner;
+    this.a11yId = id;
+    // The owner's element name on purpose: an item is part of that element,
+    // so a DEV warning about a role names the tag its author wrote rather
+    // than a word from in here. The role never falls through to the kind
+    // table anyway — `a11yRole` below is always set.
+    this.kind = owner.kind;
+    this.parent = parent;
+    this.children = NO_ITEMS;
+    this.props = {};
+    this.abs = { x: 0, y: 0, width: 0, height: 0 };
+    this.destroyed = false;
+    this.hidden = false;
+    /** What an item is when it names no role: audible, and promising
+     * nothing the element has not said. A real role — `listitem`,
+     * `button`, `treeitem` — is what makes it activatable. */
+    this.a11yRole = 'group';
+    /** The element's own keyboard cursor. It never reaches the window's
+     * focus manager, which is still holding the element itself. */
+    this.a11yFocused = false;
+    this.focusableByDefault = true;
+    /** id -> SceneItem for the nested scene, built only if there is one. */
+    this._a11ySceneCache = null;
+  }
+
+  /** The owning window, for the states and the coordinate systems. */
+  get root() {
+    return this.a11yOwner.root;
+  }
+
+  get isWindow() {
+    return false;
+  }
+
+  /** Re-read one frame's description. Same object, new facts. */
+  _read(desc) {
+    const props = { ...desc.props };
+    if (desc.role != null) props.role = desc.role;
+    if (desc.name != null) props['aria-label'] = String(desc.name);
+    if (desc.description != null) {
+      props['aria-description'] = String(desc.description);
+    }
+    const states = desc.states;
+    if (states) {
+      for (const [name, prop] of ITEM_STATE_PROPS) {
+        if (states[name] !== undefined) props[prop] = states[name];
+      }
+    }
+    this.props = props;
+    this.a11yFocused = states?.focused === true;
+    this.focusableByDefault = desc.focusable !== false;
+    const rect = desc.rect;
+    this.abs = {
+      x: finite(rect?.x),
+      y: finite(rect?.y),
+      width: finite(rect?.width),
+      height: finite(rect?.height),
+    };
+    const children = desc.children;
+    if (Array.isArray(children) && children.length > 0) {
+      this._a11ySceneCache ??= new Map();
+      this.children = reconcileScene(
+        this.a11yOwner,
+        this,
+        children,
+        this._a11ySceneCache,
+      );
+    } else {
+      if (this._a11ySceneCache?.size > 0) dropScene(this._a11ySceneCache);
+      this.children = NO_ITEMS;
+    }
+  }
+}
+
+/** An item that left the scene is defunct rather than forgotten: an AT may
+ * still be holding it, and the bridge has to walk the subtree it is losing
+ * to release the paths under it. */
+function markGone(item) {
+  item.destroyed = true;
+  for (const child of item.children) markGone(child);
+}
+
+function dropScene(cache) {
+  for (const item of cache.values()) markGone(item);
+  cache.clear();
+}
+
+const badIds = new Set();
+
+function devCheckItemId(owner, id, duplicate) {
+  if (process.env.NODE_ENV === 'production') return;
+  const key = `${owner.kind}:${id}:${duplicate}`;
+  if (badIds.has(key)) return;
+  badIds.add(key);
+  console.warn(
+    duplicate
+      ? `react-x11: <${owner.kind}> reported two accessible children with ` +
+          `the id "${id}" — ids address an item for the whole time it is on ` +
+          'screen, so the second one is dropped.'
+      : `react-x11: <${owner.kind}> reported an accessible child with no ` +
+          'id. An id is what keeps a child the same object across frames, ' +
+          'so this one is dropped.',
+  );
+}
+
+/**
+ * Match one frame's descriptions against the objects the last frame left:
+ * an id that is still there keeps its object — and with it its D-Bus path,
+ * its snapshot and every ref an AT is holding — a new one gets one, and one
+ * that is gone is marked defunct and dropped.
+ */
+function reconcileScene(owner, parent, declared, cache) {
+  if (!Array.isArray(declared) || declared.length === 0) {
+    if (cache.size > 0) dropScene(cache);
+    return NO_ITEMS;
+  }
+  const items = [];
+  const seen = new Set();
+  for (const desc of declared) {
+    const id = desc == null ? '' : String(desc.id ?? '');
+    if (id === '' || seen.has(id)) {
+      devCheckItemId(owner, id, id !== '');
+      continue;
+    }
+    seen.add(id);
+    let item = cache.get(id);
+    if (!item) {
+      item = new SceneItem(owner, parent, id);
+      cache.set(id, item);
+    }
+    item._read(desc);
+    items.push(item);
+  }
+  for (const [id, item] of cache) {
+    if (seen.has(id)) continue;
+    markGone(item);
+    cache.delete(id);
+  }
+  return items;
+}
+
+/**
+ * What an element says it drew, as accessibility objects with an identity
+ * that survives the frame. Empty — and free — for everything that draws no
+ * scene, which is every element core ships.
+ *
+ * Called once per question the bridge answers about the element's children,
+ * so `a11yScene()` has to be a cheap read of what the element already
+ * holds, exactly as `a11yTextState()` is.
+ */
+export function a11ySceneItems(node) {
+  if (typeof node.a11yScene !== 'function') return NO_ITEMS;
+  node._a11ySceneCache ??= new Map();
+  return reconcileScene(node, node, node.a11yScene(), node._a11ySceneCache);
+}
+
+/** The accessible children of a node that are drawn rather than retained:
+ * an element's own scene, or a scene item's nested one. */
+export function sceneChildrenOf(node) {
+  if (typeof node.a11yScene === 'function') return a11ySceneItems(node);
+  return node.a11yOwner ? node.children : NO_ITEMS;
+}
+
+/** The scene items a node last reported, without asking it again — for
+ * teardown, where the element is going away and its answer is moot. */
+export function knownSceneItems(node) {
+  if (typeof node.a11yScene !== 'function') return NO_ITEMS;
+  const cache = node._a11ySceneCache;
+  return cache && cache.size > 0 ? [...cache.values()] : NO_ITEMS;
+}
+
+/** Whether this object is one of an element's drawn children. */
+export const isSceneItem = (node) => node instanceof SceneItem;
 
 // --------------------------------------------------------------------------
 // Name, description, states, value
@@ -584,8 +814,11 @@ export function a11yStates(node) {
     bit(states, S.SENSITIVE);
   }
   if (isFocusable(node)) bit(states, S.FOCUSABLE);
-  const manager = node._focusManager?.();
-  if (manager?.focused === node) bit(states, S.FOCUSED);
+  // A scene item's focus is the element's own answer: a cursor inside a
+  // drawn scene never reaches the window's focus manager, which is still
+  // holding the element itself.
+  const focused = node.a11yFocused ?? node._focusManager?.()?.focused === node;
+  if (focused) bit(states, S.FOCUSED);
 
   if (effectivelyVisible(node)) {
     bit(states, S.VISIBLE);
@@ -708,6 +941,11 @@ export function a11yAttributes(node) {
  * the tree, so the promise still holds). */
 export function a11yActivatable(node) {
   if (typeof node.props?.onClick === 'function') return true;
+  // A drawn item whose element answers actions is activatable whatever it
+  // is called: implementing the seam is the same promise a handler is, and
+  // the roles a scene reaches for — `listitem` for a graph node — are
+  // mostly ones ARIA does not make that promise about.
+  if (typeof node.a11yOwner?.a11ySceneAction === 'function') return true;
   const role = roleNameOf(node);
   return role !== null && ACTIVATABLE_ROLES.has(role);
 }
@@ -944,7 +1182,10 @@ export function devCheckA11yProps(node) {
  *    `<window>` entered or left a container.
  *  - `attached(parent, child)` — a node joined a live tree (also popups).
  *  - `detach(parent, child)` — about to leave; called while still wired.
- *  - `propsChanged(node)` — after applyProps landed new props.
+ *  - `propsChanged(node)` — after applyProps landed new props, and through
+ *    `Node.notifyA11ySceneChanged()` when what an element drew moved
+ *    without any prop doing so. Both mean the same thing to a listener:
+ *    re-read this node's accessible facts and announce the difference.
  *  - `textContent(node)` — a text chunk's string changed.
  *  - `textState(node)` — a text control's value/caret/selection may have
  *    moved (funnelled through `_repaint`, which every edit path calls, and
