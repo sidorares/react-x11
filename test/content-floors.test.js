@@ -15,6 +15,7 @@ import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
 import { createStyles } from '../src/styles.js';
+import { registerElement, unregisterElement } from '../src/host.js';
 import { Node } from '../src/node.js';
 import { createMockApp, spinWheel } from './helpers/mock-app.js';
 
@@ -220,6 +221,99 @@ test('an absolutely positioned child is floored by nothing', async () => {
     'its own 50%, not its content',
   );
   await root.unmount();
+});
+
+// --- the width the heights are measured for ---------------------------------
+
+// A paragraph, as layout sees one: `LINE` pixels of text that can be squeezed
+// down to its longest word and takes another line every time it is. There are
+// no fonts here (see the top of this file), and a `<text>` is nothing more
+// than this to yoga — a leaf whose height is a function of its width.
+const WORD = 50;
+const LINE = 100;
+const LINE_HEIGHT = 20;
+
+class ParagraphNode extends Node {
+  constructor(props, app) {
+    super('paragraph', props, app);
+  }
+
+  measureContent({ width }) {
+    const w = Math.max(WORD, Math.min(LINE, width));
+    return { width: w, height: LINE_HEIGHT * Math.ceil(LINE / w) };
+  }
+}
+
+/**
+ * The arrangement of issue #311: a horizontally scrolling row, a column with
+ * no width of its own, a row that aligns to `flex-start`, and inside that a
+ * row that centres one paragraph. `scroll` and `center` are the two of those
+ * four that dropping either used to fix it.
+ */
+const scrollerTree = (scroll, center, refs) =>
+  box(
+    {
+      flexDirection: 'row',
+      flexGrow: 1,
+      ...(scroll ? { overflow: 'scroll' } : {}),
+    },
+    h(
+      'box',
+      null,
+      box(
+        { flexDirection: 'row', alignItems: 'flex-start' },
+        box({ width: 20, height: 20 }), // the gutter
+        h(
+          'box',
+          { style: { flexDirection: 'column' } },
+          h(
+            'box',
+            {
+              ref: refs.row,
+              style: {
+                flexDirection: 'row',
+                ...(center ? { alignItems: 'center' } : {}),
+              },
+            },
+            h('paragraph', { ref: refs.label }),
+          ),
+        ),
+      ),
+    ),
+  );
+
+test('a scroller measures the heights inside it at their real width', async () => {
+  // The heights the floors are written from come from a pass that collapses
+  // the tree to nothing, and that pass has no business re-deciding the
+  // widths on the way — a minimum height is always a height *for a width*.
+  // It did anyway: a box measured against a zero cross size is answered from
+  // its bounds without its children being laid out, and where the width was
+  // undefined too — which is what a *horizontally* scrolling box hands its
+  // content — that bound was the min-content floor written a moment earlier.
+  // The paragraph was measured at its longest word, took two lines, and the
+  // row around it kept the two-line height while the paragraph itself, laid
+  // out for real at its full width, took one (#311).
+  registerElement('paragraph', {
+    create: (props, app) => new ParagraphNode(props, app),
+  });
+  try {
+    for (const [scroll, center] of [
+      [false, true],
+      [true, false],
+      [true, true],
+    ]) {
+      const refs = { row: React.createRef(), label: React.createRef() };
+      const { root } = await mount(scrollerTree(scroll, center, refs));
+      assert.deepStrictEqual(
+        [refs.row.current.abs.height, refs.label.current.abs.height],
+        [LINE_HEIGHT, LINE_HEIGHT],
+        `one line tall, with scroll=${scroll} center=${center}`,
+      );
+      await root.unmount();
+    }
+  } finally {
+    unregisterElement('paragraph');
+  }
 });
 
 // --- what it costs ----------------------------------------------------------
