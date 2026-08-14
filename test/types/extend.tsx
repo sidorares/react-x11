@@ -67,6 +67,10 @@ declare module '../../src/jsx-runtime.js' {
         // synthetic event rather than the DOM's same-named one
         onKeyDown?: (ev: KeyboardEvent) => void;
       };
+      flow: {
+        nodes: { id: string; x: number; y: number }[];
+        style?: Style;
+      };
     }
   }
 }
@@ -334,6 +338,55 @@ registerElement('miniticker', {
   childrenAllowed: false,
 });
 
+// An element that draws a whole scene into one node (#301): it reads the
+// rect of the pass it is being painted for, and the damage for the props it
+// diffs itself is its own to claim. Both shapes of the commit half are here
+// so both compile; a real element picks the one that fits.
+class FlowNode extends Node {
+  constructor(props: Record<string, unknown>, app: never) {
+    super('flow', props, app);
+  }
+
+  paintContent(_ctx: unknown): void {
+    // null outside a paint and on an unbounded one, and both read the same:
+    // nothing bounds you, draw the lot
+    const damage: Rect | null = this.paintDamage();
+    for (const box of this.routedBounds()) {
+      if (damage && box.x > damage.x + damage.width) continue;
+      void box;
+    }
+  }
+
+  routedBounds(): Rect[] {
+    return [this.contentBox()];
+  }
+
+  applyProps(
+    next: Record<string, unknown>,
+    prev: Record<string, unknown>,
+  ): void {
+    const before = prev ?? this.props;
+    super.applyProps(next, prev);
+    // …so the only claim for a drag step is the box that actually moved
+    if (next.nodes !== before.nodes) this.invalidate(false, this.abs, 'props');
+  }
+
+  paintChanged(
+    next: Record<string, unknown>,
+    prev: Record<string, unknown>,
+  ): boolean {
+    const claimed: ReadonlySet<string> = this.selfDamagedProps;
+    if (claimed.has('nodes') && next.nodes !== prev.nodes) return false;
+    return super.paintChanged(next, prev);
+  }
+}
+
+registerElement('flow', {
+  create: (props, app) => new FlowNode(props, app as never),
+  semanticNames: ['nodes'],
+  selfDamagedProps: ['nodes'],
+});
+
 registerElement('gauge', {
   create: (props, app) => new GaugeNode(props, app as never),
   semanticNames: ['ticks'],
@@ -368,6 +421,7 @@ function Chart() {
       <thumb />
       {/* an app handler and the element's own behaviour, composed */}
       <codeeditor value="const x = 1" onKeyDown={(ev) => void ev.keysym} />
+      <flow nodes={[{ id: 'a', x: 0, y: 0 }]} />
     </box>
   );
 }

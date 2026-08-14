@@ -4,7 +4,7 @@
 // `textAlign` are the inputs to a `<text>`'s measure function, and none of
 // them is a yoga property or a paint property. So a commit that changes one
 // and nothing else reaches `applyProps` with nothing for `applyLayoutStyle`
-// to notice and nothing for `_paintChanged` to claim — the frame is already
+// to notice and nothing for `paintChanged` to claim — the frame is already
 // decided by the time `TextNode.applyProps` marks the layout dirty. Ask for
 // no relayout there and the cleared layout is never rebuilt: React's state
 // is new, the node's props are new, the font manager hands back the right

@@ -7,7 +7,7 @@
 // The ticker is the interesting damage case: a timer changes a handful of
 // cells per tick while the rest of the table holds still. Each tick is a
 // React commit that walks the mounted rows, so it is exactly the case
-// `_paintChanged` exists for — an unchanged row whose style object was
+// `paintChanged` exists for — an unchanged row whose style object was
 // rebuilt must not claim damage. Watch the frame log: ticks should report a
 // rect around the changed rows, not the window.
 //

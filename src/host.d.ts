@@ -48,6 +48,19 @@ export interface ElementDefinition {
    * development.
    */
   semanticNames?: string[];
+  /**
+   * Prop names whose damage this element's own `applyProps` claims — so a
+   * commit that changes one of them contributes no damage of its own,
+   * instead of widening the frame to the whole node.
+   *
+   * For an element that draws a **scene** into one node: a graph view handed
+   * a new `nodes` array per drag step invalidates the box the dragged node
+   * moved through, and without this the commit claims the whole pane over
+   * the top of it. Everything left out keeps core's conservative answer, and
+   * an element that names a prop it does not actually claim shows stale
+   * pixels — see `Node.paintChanged` and docs/extending.md.
+   */
+  selfDamagedProps?: string[];
   /** Reject children, naming this element, instead of laying out something
    * that will never paint. Default true. */
   childrenAllowed?: boolean;

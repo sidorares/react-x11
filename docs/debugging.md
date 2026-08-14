@@ -115,6 +115,13 @@ Full repaints are the renderer's main performance bug class (see
 them. Expected full repaints exist too — a resize, the first frame after a
 mount, ntk invalidating its backing store — and their reasons say so.
 
+A bounded frame can still be doing the work of an unbounded one, and this is
+where to notice it: an element that draws a whole **scene** into one node — a
+graph view, a chart, an editor — is one node to the damage machinery, so a
+tight outline around what moved can sit over a pane that redrew all of
+itself inside it. Such an element reads the pass's rect and claims its own
+commits ([extending.md](extending.md#drawing-a-scene-into-one-node)).
+
 ## `REACT_X11_NO_SCROLL_BLIT=1`
 
 Disables the scroll-blit fast path (a pure scroll `CopyArea`s the

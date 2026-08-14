@@ -48,7 +48,8 @@
   and how the declarations are kept from drifting.
 - [extending.md](extending.md) — `registerElement()` and the subpath
   exports: adding a host element from outside the package, the node
-  contract, and the two definition fields that fail far from their cause.
+  contract, the two definition fields that fail far from their cause, and
+  the damage seam an element that draws a whole scene reads and claims.
 - [embedding.md](embedding.md) — `<foreign>`: another application's window
   inside yours. XEmbed and the plain-reparent path most clients actually
   want, why unmount hands the window back rather than destroying it, and

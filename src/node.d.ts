@@ -160,6 +160,11 @@ export declare class Node {
   /** Style names this element owns as its own semantics. Registered
    * elements declare these to `registerElement` instead of overriding. */
   readonly semanticNames: ReadonlySet<string>;
+  /** Prop names whose damage this element's own `applyProps` claims, and
+   * which `paintChanged` therefore does not damage the whole node for.
+   * Empty unless declared — registered elements declare theirs to
+   * `registerElement`, so the common case needs no subclass. */
+  readonly selfDamagedProps: ReadonlySet<string>;
 
   // --- the text this element answers for (docs/extending.md) ---------------
   //
@@ -215,6 +220,34 @@ export declare class Node {
   /** Draw. A subclass calls `super.paint(ctx)` first, for the background,
    * border and clip, then draws inside `this.abs`. */
   paint(ctx: Context2D): void;
+  /**
+   * The rect this paint pass is repainting, or null when it is repainting
+   * the whole window — and null outside a paint, which means the same
+   * thing: nothing is bounding you, so draw everything.
+   *
+   * An element whose node is one node never needs it; being painted at all
+   * means it is inside the pass. An element that draws a **scene** into one
+   * node culls against it the way core culls the tree, instead of redrawing
+   * the scene into a clip that throws most of it away. Window coordinates,
+   * the same space as `abs`; read-only.
+   */
+  paintDamage(): Rect | null;
+  /**
+   * Did anything this node draws change? True damages the whole node, false
+   * contributes no damage at all, and the default answers true for any prop
+   * that is not identical to the one it replaced — conservative, because a
+   * wrong "no" is a stale pixel nothing comes back to fix.
+   *
+   * Overridden by an element that claims its own damage and can say so only
+   * by looking at the values; an element that can say so by *name* declares
+   * `selfDamagedProps` instead. Either way, call `super.paintChanged` for
+   * everything the element does not know about — `style` is compared by the
+   * caller and is never yours to excuse.
+   */
+  paintChanged(
+    nextProps: Record<string, unknown>,
+    prevProps: Record<string, unknown>,
+  ): boolean;
   /**
    * Implemented by an element whose size comes from its content — a gauge, a
    * chart, a terminal, an editor. Called during layout whenever the box's

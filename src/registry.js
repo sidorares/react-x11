@@ -20,7 +20,16 @@
 //   vocabulary — `width`, `stroke`, `opacity` — throws on its own props in
 //   development and works in production, which is the worst shape a bug
 //   can have.
-import { DRAWN_KINDS, CUSTOM_SEMANTIC_NAMES, Node } from './nodes.js';
+//
+// And one that is an optimisation rather than a trap, `selfDamagedProps`,
+// which is the commit half of the damage seam `Node.paintDamage()` opens
+// (issue #301).
+import {
+  DRAWN_KINDS,
+  CUSTOM_SEMANTIC_NAMES,
+  CUSTOM_SELF_DAMAGED,
+  Node,
+} from './nodes.js';
 
 /** kind -> definition. Insertion-ordered, which is the order errors list. */
 const registry = new Map();
@@ -79,6 +88,12 @@ function assertNode(node, type) {
  *   window instead (`GlAreaNode` is the worked example).
  * @param {string[]} [definition.semanticNames] prop names this element owns
  *   even though they are also style names.
+ * @param {string[]} [definition.selfDamagedProps] prop names whose damage
+ *   the element's own `applyProps` claims, so a commit that changes one does
+ *   not also damage the whole node. For an element that draws a scene into
+ *   one node and invalidates the part of it that moved; an element that
+ *   answers wrong shows stale pixels, so everything left out stays core's
+ *   conservative answer (docs/extending.md).
  * @param {boolean} [definition.childrenAllowed=true] reject children in DEV
  *   with a message naming the element, rather than laying out something
  *   that cannot paint.
@@ -122,6 +137,7 @@ export function registerElement(type, definition) {
     create,
     drawn = true,
     semanticNames = [],
+    selfDamagedProps = [],
     childrenAllowed = true,
   } = definition;
 
@@ -137,6 +153,15 @@ export function registerElement(type, definition) {
   } else {
     CUSTOM_SEMANTIC_NAMES.delete(type);
   }
+
+  // Both maps are keyed on the kind and cleared when the name is not
+  // claimed, so re-registering with `override` cannot leave the previous
+  // definition's declarations behind for the new one to inherit.
+  if (selfDamagedProps.length > 0) {
+    CUSTOM_SELF_DAMAGED.set(type, new Set(selfDamagedProps));
+  } else {
+    CUSTOM_SELF_DAMAGED.delete(type);
+  }
 }
 
 /** Undo a registration. Mostly for tests, which must not leak an element
@@ -144,6 +169,7 @@ export function registerElement(type, definition) {
 export function unregisterElement(type) {
   DRAWN_KINDS.delete(type);
   CUSTOM_SEMANTIC_NAMES.delete(type);
+  CUSTOM_SELF_DAMAGED.delete(type);
   return registry.delete(type);
 }
 

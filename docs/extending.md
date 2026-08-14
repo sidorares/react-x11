@@ -54,6 +54,7 @@ first created, so a late registration only affects trees mounted after it.
 | `create(props, app, hostCtx)` | builds the node. `app` is the ntk connection — the second argument every built-in node constructor takes. Must return a `Node`.       |
 | `drawn`                       | default `true`: lays out with yoga and paints into the owning window. `false` for a node that owns a real child X window (see below). |
 | `semanticNames`               | prop names this element owns even though they are also style names                                                                    |
+| `selfDamagedProps`            | prop names whose damage the element's own `applyProps` claims (see [Drawing a scene](#drawing-a-scene-into-one-node))                 |
 | `childrenAllowed`             | default `true`; `false` rejects children by name instead of laying out something that never paints                                    |
 | `override`                    | replace an existing registration. Off by default — two packages claiming one name is a conflict worth hearing about                   |
 
@@ -86,6 +87,7 @@ that only draws needs a constructor and a `paint`. What you may override:
 | `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.            |
 | `paintContent(ctx)`            | draw _between_ the background and the children — where the built-ins draw, and what a scroller needs (below) |
 | `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.                |
+| `paintChanged(next, prev)`     | did anything you draw change? Only for an element that claims its own damage (below)                         |
 | `measureContent(constraints)`  | your content has a size of its own (below). Leaves only — an element that measures has no children.          |
 | `default*(ev)`                 | the element's own behaviour for a key, a press or focus (below) — what makes it _interactive_.               |
 | `hitTest(x, y)`                | non-rectangular hit areas. The default walks children in reverse paint order.                                |
@@ -112,6 +114,9 @@ And what you read:
   ([styling.md](styling.md#direction-and-the-logical-edges)).
 - `this.root` — the owning `<window>` node; `this.app` — the ntk connection.
 - `this.theme` — the nearest theme at or above this node.
+- `this.paintDamage()` — the rect the pass being painted covers, or `null`
+  for a full one. Only an element that draws a whole scene needs it
+  ([below](#drawing-a-scene-into-one-node)).
 
 To ask for a repaint: `this.invalidate(layout, damage, reason)`. Pass the
 damage — `this` is usually it, or a rect when you know a tighter one. An
@@ -885,6 +890,124 @@ to round. And `<box overflow="scroll">` has been doing the window-side half
 of this without being asked: a pure scroll of one viewport blits the
 surviving band inside ntk's backing pixmap rather than repainting it. This
 is that optimisation, for a buffer you retained yourself.
+
+### Drawing a scene into one node
+
+_Issue #301._ A frame repaints **rects, not windows**: claims coalesce into
+disjoint rectangles, each gets its own clipped pass, and a subtree that lands
+outside the pass being painted emits no drawing at all. All of that has one
+granularity — the retained node — which is exactly right until your element
+_is_ the scene. A graph view, a chart, a timeline, a code editor: the tree
+says "one node, 1100×700", so a pass over the 80×40 box a dragged node moved
+through redraws all three hundred nodes, all seven hundred edges, the grid
+and the minimap into a clip that throws almost all of it away.
+
+Two accessors make such an element a member of the same machinery rather
+than the one exception to it. Both are opt-in, and both keep core's answer
+when you say nothing.
+
+**Painting: `paintDamage()`.** The rect this pass covers, in the owning
+window's coordinates — the same space as `abs` and a mouse event's `x`/`y` —
+or `null` when the frame is unbounded and everything has to be drawn. Cull
+against it exactly as core culls the tree:
+
+```js
+class FlowNode extends Node {
+  paintContent(ctx) {
+    // null outside a paint and on a full pass, and both mean the same
+    // thing: nothing bounds you, draw the lot
+    const damage = this.paintDamage();
+    for (const cell of this.gridCells()) {
+      if (damage && !overlaps(cell, damage)) continue;
+      this.drawCell(ctx, cell);
+    }
+    for (const edge of this.edges) {
+      if (damage && !overlaps(edge.routedBounds, damage)) continue;
+      this.drawEdge(ctx, edge);
+    }
+    // …nodes, minimap, controls
+  }
+}
+```
+
+**Committing: `selfDamagedProps`.** `applyProps` damages the whole node when
+any non-event prop changes identity, which is right for every element whose
+node _is_ what changed and always-everything for a scene pane. A controlled
+graph app commits a new `nodes` array per drag step, so each step is one
+scoped claim from the gesture plus one full-pane claim from the commit — and
+the full-pane claim wins. Name the props whose damage your own `applyProps`
+claims and the commit contributes none of its own:
+
+```js
+registerElement('flow', {
+  create: (props, app) => new FlowNode(props, app),
+  semanticNames: ['nodes', 'edges'],
+  // "my applyProps diffs these and invalidates what actually moved"
+  selfDamagedProps: ['nodes', 'edges'],
+});
+```
+
+```js
+class FlowNode extends Node {
+  applyProps(next, prev) {
+    const before = prev ?? this.props;
+    super.applyProps(next, prev); // claims nothing for `nodes`
+    if (next.nodes !== before.nodes) {
+      // …so this is the only claim, and it is the box that moved
+      this.invalidate(
+        false,
+        this.movedBounds(next.nodes, before.nodes),
+        'props',
+      );
+    }
+  }
+}
+```
+
+When the answer depends on the _values_ rather than the names, override
+**`paintChanged(next, prev)`** instead — it is what the list feeds, so the
+two are the same seam:
+
+```js
+paintChanged(next, prev) {
+  if (next.nodes !== prev.nodes && onlyPositionsMoved(next.nodes, prev.nodes)) {
+    return false; // folded in place above, and the moved box is claimed
+  }
+  return super.paintChanged(next, prev);
+}
+```
+
+Three things about that contract, in the order they bite:
+
+**Everything you do not recognise goes to `super`.** An element that answers
+"nothing changed" about a prop it does not actually claim shows a stale
+pixel, and nothing comes back to fix it — so the override answers for the
+props it knows and hands the rest to core, which is conservative on purpose.
+That is what keeps an `aria-label`, a `title`, or a prop the element grows
+next year correct without anybody remembering this method exists.
+
+**A style change is not yours to excuse.** `style` is compared by value by
+the caller and never reaches either seam: what it moves is the background,
+the border and the clip that `Node.paint` draws for you.
+
+**Claim before you skip.** `selfDamagedProps` only says the commit will not
+claim — it does not claim anything on your behalf. An element that names a
+prop and then forgets to invalidate for it renders nothing at all on that
+change, which at least fails loudly the first time you drag something.
+
+And one place `paintDamage()` does not belong: inside `paintCached`
+([below](#drawing-once-instead-of-every-frame)). That draws into a surface in
+its own coordinates, and a copy culled against the window's damage is stored
+half-drawn under a key that says it is whole — so every later frame that hits
+the key gets the hole.
+
+Worth it because the numbers are not small. `@react-x11/components`' `<Flow>`
+on a 300-node / 745-edge scene at 1100×700 costs ~2470 X requests and ~150 ms
+per drag step redrawing the pane, and ~400 requests / ~30 ms with the two
+seams — the same frame, with the parts of it nobody can see left unsent.
+`REACT_X11_DEBUG_PAINT=1` is how to watch it: the pass's rect is stroked in
+the frame's colour, so a scene that is still repainting whole strobes across
+the pane instead of outlining what moved ([debugging.md](debugging.md)).
 
 ### Drawing once instead of every frame
 
