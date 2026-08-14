@@ -444,6 +444,23 @@ export class EventManager {
         smooth: Boolean(native.smooth),
       });
       if (ev.defaultPrevented) return;
+      // The element's own wheel, ahead of the scroll chain and in its own
+      // shape: the whole event, at the node the pointer is over. A graph
+      // pane's wheel is a zoom about the pointer, which needs the point that
+      // must not move (`ev.x`/`ev.y`) and the modifiers that say zoom from
+      // pan — neither of which a protocol handing out deltas can carry — and
+      // it answers the gesture whether or not anything "can scroll". An
+      // element whose wheel *is* a scroll stays on `canScroll`/`scrollBy`
+      // below; this is for the ones whose wheel is not (issue #302).
+      //
+      // It reads the delta before the truncation, fractions and all: whole
+      // pixels are the scroll blit's business, and a zoom factor is
+      // continuous.
+      target.defaultWheel?.(ev);
+      // …and consuming it ends the event here, so the chain never runs. Same
+      // word one layer down as everywhere else in the seam: what it prevents
+      // is the default action left after this one.
+      if (ev.defaultPrevented) return;
       // **The default action moves whole pixels and keeps the change.** A
       // scroll offset that is not an integer costs the scroll blit — the
       // server-side copy that makes a scroll cheap can only shift by whole
@@ -614,6 +631,15 @@ export class EventManager {
       if (this.downNode && !captured)
         this._setPressed(this._pressedAlong(path));
       const ev = this.dispatch('MouseMove', target, native, undefined, path);
+      // Hover motion, for an element that paints its own hover state — the
+      // node, the edge or the handle under the pointer lights up. Core
+      // already computes the path this needs, once per motion, for `:hover`
+      // and `onMouseEnter`/`Leave`; the element could not hear it (#302).
+      //
+      // Not while a capture holds the pointer: hover is deliberately frozen
+      // for the length of a gesture (see `_updateHover` above), and the
+      // motion of a gesture is `defaultMouseDrag`'s to deliver.
+      if (!captured && !ev.defaultPrevented) target.defaultMouseMove?.(ev);
       // drags deliver to the pressed node even when the pointer leaves it —
       // unless the press that started them was vetoed, see `_downDefaulted`
       if (this._downDefaulted && this.downNode && !this.downNode.destroyed) {
@@ -719,13 +745,20 @@ export class EventManager {
     const common = sharedPrefix(oldPath, newPath);
     for (let i = oldPath.length - 1; i >= common; i--) {
       const n = oldPath[i];
-      if (!n.destroyed) {
-        // the hover path is the ancestor chain, so a `:hover` block on a
-        // parent lights up while a child is hovered — CSS semantics, for
-        // free, because the path is already computed for enter/leave
-        n.setStyleState(':hover', false);
-        n.props.onMouseLeave?.(this._makeEvent('mouseLeave', native, n));
-      }
+      if (n.destroyed) continue;
+      // the hover path is the ancestor chain, so a `:hover` block on a
+      // parent lights up while a child is hovered — CSS semantics, for
+      // free, because the path is already computed for enter/leave
+      n.setStyleState(':hover', false);
+      const handler = n.props.onMouseLeave;
+      // the event is built only for a node with somewhere to deliver it:
+      // this loop runs per motion, over a whole ancestor chain (issue #188)
+      if (!handler && !n.defaultMouseLeave) continue;
+      const ev = this._makeEvent('mouseLeave', native, n);
+      handler?.(ev);
+      // …and the element clears the hover state it painted itself, after
+      // the application handler and vetoed by it, like the rest of the seam
+      if (!ev.defaultPrevented) n.defaultMouseLeave?.(ev);
     }
     for (let i = common; i < newPath.length; i++) {
       const n = newPath[i];

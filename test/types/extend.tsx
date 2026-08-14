@@ -32,6 +32,7 @@ import type {
   CompositionEvent,
   KeyboardEvent,
   MouseEvent,
+  WheelEvent,
 } from '../../src/types/events.js';
 import {
   isStyleProp,
@@ -343,11 +344,37 @@ registerElement('miniticker', {
 // diffs itself is its own to claim. Both shapes of the commit half are here
 // so both compile; a real element picks the one that fits.
 class FlowNode extends Node {
+  private zoom = 1;
+  private hovered: string | null = null;
+
   constructor(props: Record<string, unknown>, app: never) {
     super('flow', props, app);
   }
 
+  // …and the two inputs the seam was missing (#302): a wheel that is a zoom
+  // about the pointer rather than a scroll, and the hover this element paints
+  // itself. Both after the app's handlers, both vetoed by `preventDefault`.
+  defaultWheel(ev: WheelEvent): void {
+    if (!ev.ctrlKey) return; // an unmodified wheel still scrolls the pane
+    const at: { x: number; y: number } = { x: ev.x, y: ev.y };
+    this.zoom *= Math.exp(-ev.deltaY / 400);
+    void at;
+    ev.preventDefault(); // consumed: the scroll chain never runs
+  }
+
+  defaultMouseMove(ev: MouseEvent): void {
+    this.hovered = `${ev.localX},${ev.localY}`;
+    this.invalidate(false, this.abs, 'content');
+  }
+
+  defaultMouseLeave(_ev: MouseEvent): void {
+    this.hovered = null;
+    this.invalidate(false, this.abs, 'content');
+  }
+
   paintContent(_ctx: unknown): void {
+    void this.hovered;
+    void this.zoom;
     // null outside a paint and on an unbounded one, and both read the same:
     // nothing bounds you, draw the lot
     const damage: Rect | null = this.paintDamage();

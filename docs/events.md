@@ -17,11 +17,13 @@ events dispatched over the drawn node tree with DOM-like semantics.
 
 Step 4 is a documented seam, not a privilege of the built-in elements: an
 element added with `registerElement` implements the same `defaultKeyDown` /
-`defaultMouseDown` / … methods and gets the same ordering
-([extending.md](extending.md#behaviour-of-your-own)). The wheel's default
-action is the same story in a different shape — it walks out from the target
-asking each node `canScroll(deltaX, deltaY)`, so an element that scrolls
-content it painted joins the chain by answering
+`defaultMouseDown` / `defaultMouseMove` / … methods and gets the same
+ordering ([extending.md](extending.md#behaviour-of-your-own)). The wheel has
+one more layer than the rest: the node under the pointer gets `defaultWheel`
+first — for a pane whose wheel is a zoom rather than a scroll — and unless it
+consumes the event, the scroll chain walks outward from the target asking
+each node `canScroll(deltaX, deltaY)`, which is how an element that scrolls
+content it painted joins in
 ([extending.md](extending.md#scrolling-content-you-painted)).
 
 `ev.stopPropagation()` stops the walk. Handlers always read from current
@@ -213,9 +215,12 @@ inside an open menu moves a notch at a time. Needs ntk >= 7.5.0.
 
 Shift turns a vertical scroll sideways for a device with only one axis (the
 convention every toolkit follows); a device that reports its own horizontal
-axis keeps what it reported. The default action is the scroll chain — see
+axis keeps what it reported. The default action is the hit node's own
+`defaultWheel` and then the scroll chain — see
+[extending.md](extending.md#behaviour-of-your-own) for the element whose
+wheel is a zoom rather than a scroll, and
 [extending.md](extending.md#scrolling-content-you-painted) for how anything
-joins it.
+joins the chain.
 
 ## Composition: dead keys and Compose {#composition}
 
