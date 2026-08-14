@@ -391,7 +391,30 @@ class PanSceneNode extends SceneNode {
     this.panY += dy;
     this.scrollContents(this.contentBox(), dx, dy);
   }
+
+  /**
+   * The same pan with a HUD along the bottom of the pane (issue #309): a
+   * minimap and zoom controls, which have to repaint on a pan frame and
+   * whose pixels must not ride the blit. The element carves their strip out
+   * of the region it shifts and claims it as ordinary damage, so the two
+   * claims sit edge to edge.
+   */
+  panBeside(dx, dy) {
+    this.panX += dx;
+    this.panY += dy;
+    const box = this.contentBox();
+    const hud = {
+      x: box.x,
+      y: box.y + box.height - HUD_HEIGHT,
+      width: box.width,
+      height: HUD_HEIGHT,
+    };
+    this.scrollContents({ ...box, height: box.height - HUD_HEIGHT }, dx, dy);
+    this.invalidate(false, hud, 'props');
+  }
 }
+
+const HUD_HEIGHT = 60;
 
 const PAN_COLS = SCENE_COLS + 2;
 const PAN_ROWS = SCENE_ROWS + 2;
@@ -810,6 +833,32 @@ const SCENARIOS = [
         run: async (app, x11Root) => {
           for (let i = 0; i < 5; i++) {
             pane.pan(7, 5);
+            ctl.frame();
+            await settle(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
+    // The same five steps with furniture up (issue #309). A pane's minimap
+    // and zoom controls have to repaint on a pan frame, and their pixels
+    // must not ride the blit — so the element carves their strip out of the
+    // region it shifts and claims it itself. The claim lands *beside* the
+    // blit rect, which is the whole point: the gate is the rect, not the
+    // node, so the pan stays a blit and pays for the strip on top.
+    'scene: 5 pan steps with a HUD strip beside them',
+    (() => {
+      let ctl;
+      let pane;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, panSceneWindow());
+          pane = ctl.root.children.find((n) => n.kind === 'panscene');
+        },
+        run: async (app, x11Root) => {
+          for (let i = 0; i < 5; i++) {
+            pane.panBeside(7, 5);
             ctl.frame();
             await settle(app);
           }

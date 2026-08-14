@@ -39,6 +39,15 @@ const CELL = 40;
 // behind the same `null`.
 const INSET = 40;
 const VP = { x: INSET, y: INSET, width: W - 2 * INSET, height: H - 2 * INSET };
+// the furniture strip along the bottom of the pane (issue #309)
+const BAND = 80;
+const CARVED = { ...VP, height: VP.height - BAND };
+const FURNITURE = {
+  x: VP.x,
+  y: VP.y + VP.height - BAND,
+  width: VP.width,
+  height: BAND,
+};
 
 const overlaps = (a, b) =>
   a.x < b.x + b.width &&
@@ -70,6 +79,37 @@ class PanNode extends Node {
     this.panX += dx;
     this.panY += dy;
     return this.scrollContents(this.viewport(), dx, dy);
+  }
+
+  /**
+   * The same pan with furniture in the way (issue #309): a strip along the
+   * bottom of the pane — a minimap, a zoom control — that has to repaint on
+   * a pan frame and whose pixels must *not* ride the blit. The element
+   * carves it out of the region it shifts and claims it as ordinary damage,
+   * so the two claims sit edge to edge with nothing between them.
+   */
+  panBeside(dx, dy, band = BAND) {
+    this.panX += dx;
+    this.panY += dy;
+    const vp = this.viewport();
+    const armed = this.scrollContents(
+      { ...vp, height: vp.height - band },
+      dx,
+      dy,
+    );
+    this.invalidate(false, this.furniture(band), 'props');
+    return armed;
+  }
+
+  /** The strip the pan above leaves to itself. */
+  furniture(band = BAND) {
+    const vp = this.viewport();
+    return {
+      x: vp.x,
+      y: vp.y + vp.height - band,
+      width: vp.width,
+      height: band,
+    };
   }
 
   /**
@@ -291,6 +331,109 @@ test('other damage inside the region keeps the full repaint', async () => {
   assert.deepStrictEqual(blits(wnd), [], 'not a pure shift: no blit');
   assert.deepStrictEqual(node.passes, [{ ...VP }]);
   assert.ok(root._lastDamageRects, 'still bounded, just not narrowed');
+});
+
+// --- furniture beside the rect (issue #309) ------------------------------
+//
+// The gate above is the blit *rect*, not the node it lives in. An element
+// whose pane has a minimap or zoom controls pinned to a corner has to
+// repaint them on a pan frame — their pixels must not ride the blit — so it
+// carves them out of the region it shifts and claims them itself. Those
+// claims land beside the rect, edge to edge with it, and a node-granular
+// gate would cancel every pan frame that had the HUD up.
+
+test('furniture beside the blit rect coexists with it', async () => {
+  const { wnd, node, root } = await mount();
+
+  assert.strictEqual(node.panBeside(0, 40), true, 'still a blit candidate');
+  await tick();
+
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', { ...CARVED }, 0, 40]]);
+  assert.deepStrictEqual(
+    root._lastDamageRects,
+    [
+      { ...FURNITURE },
+      { x: CARVED.x, y: CARVED.y, width: CARVED.width, height: 40 },
+    ],
+    'the furniture and the strip the shift exposed — not the pane',
+  );
+  assert.ok(
+    area(root._lastDamageRects) < VP.width * VP.height * 0.6,
+    `repainted ${area(root._lastDamageRects)}px² of ${VP.width * VP.height}`,
+  );
+});
+
+test('furniture claimed before the pan lets it arm too', async () => {
+  // the arming gate reads the claims already recorded, and it reads them
+  // against the rect for the same reason
+  const { wnd, node } = await mount();
+
+  node.invalidate(false, node.furniture(), 'props');
+  assert.strictEqual(node.scrollContents({ ...CARVED }, 0, 40), true);
+  await tick();
+
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', { ...CARVED }, 0, 40]]);
+});
+
+test('a claim one pixel inside the blit rect still poisons it', async () => {
+  // the line the gate draws: beside is beside, over is over. Both orders,
+  // because arming and claiming are two different checks.
+  const over = {
+    ...FURNITURE,
+    y: FURNITURE.y - 1,
+    height: FURNITURE.height + 1,
+  };
+
+  const after = await mount();
+  after.node.scrollContents({ ...CARVED }, 0, 40);
+  after.node.invalidate(false, over, 'props');
+  await tick();
+  assert.deepStrictEqual(blits(after.wnd), [], 'claimed after arming');
+
+  const before = await mount();
+  before.node.invalidate(false, over, 'props');
+  assert.strictEqual(
+    before.node.scrollContents({ ...CARVED }, 0, 40),
+    false,
+    'claimed before arming, and the call says so',
+  );
+  await tick();
+  assert.deepStrictEqual(blits(before.wnd), []);
+});
+
+test('a claim the damage cap merged into the blit claim keeps the repaint', async () => {
+  // The other half of the narrowed gate. A claim beside the rect is let
+  // through, and the cap (four rects) merges the pair that wastes least —
+  // which is exactly a claim flush against the rect. The frame gets the
+  // claim back bigger than the rect it armed for: the blit would drop that
+  // claim in favour of the exposed strip, taking the merged furniture with
+  // it, so the whole thing falls back.
+  const { wnd, node, root } = await mount();
+
+  node.scrollContents({ ...CARVED }, 0, 40);
+  // flush against the claim, and two pixels tall: a merge of the two is
+  // still within the tolerance the scroll path recognises its claim by
+  node.invalidate(false, { ...FURNITURE, height: 2 }, 'props');
+  for (let i = 0; i < 4; i++) {
+    node.invalidate(
+      false,
+      { x: VP.x + i * 90, y: FURNITURE.y + 40, width: 20, height: 20 },
+      'props',
+    );
+  }
+  await tick();
+
+  assert.deepStrictEqual(
+    blits(wnd),
+    [],
+    'the claim came back a different rect',
+  );
+  assert.ok(
+    root._lastDamageRects.some(
+      (r) => r.height > CARVED.height && r.y === CARVED.y,
+    ),
+    'and the merged claim is repainted whole, furniture included',
+  );
 });
 
 test('damage claimed before the frame’s first pan poisons it (#295)', async () => {
@@ -561,6 +704,70 @@ test('a blitted pan is byte-identical to the repaint it replaced', async (t) => 
     assert.ok(
       blitted.equals(repainted),
       'blitted pixels differ from a full repaint of the same scene',
+    );
+  } finally {
+    await x11Root.unmount();
+    await app.close();
+  }
+});
+
+test('so is one that carved furniture out of the region (#309)', async (t) => {
+  // The pixels behind the claim-time gate: the pane shifts everything but a
+  // strip along its bottom, which is claimed as ordinary damage and repaints
+  // at the new offset. A blit that dragged the strip's pixels along, or a
+  // frame that dropped its claim, shows up here as a difference.
+  register();
+  const app = await headlessApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const ref = React.createRef();
+    const instance = await new Promise((resolve) =>
+      x11Root.render(
+        h(
+          'window',
+          { width: W, height: H, style: { backgroundColor: '#101820' } },
+          h('pan', { ref, style: { flexGrow: 1, margin: INSET } }),
+        ),
+        resolve,
+      ),
+    );
+    if (typeof instance.scrollRegion !== 'function') {
+      t.skip('installed ntk has no Window.scrollRegion yet');
+      return;
+    }
+    const node = ref.current;
+    const root = node.root;
+    const frame = () => {
+      root._scheduled = false;
+      root.flush();
+    };
+    frame();
+    await settle(app);
+
+    let blitCalls = 0;
+    const real = instance.scrollRegion.bind(instance);
+    instance.scrollRegion = (...args) => {
+      blitCalls += 1;
+      return real(...args);
+    };
+
+    node.panBeside(20, 30);
+    frame();
+    await settle(app);
+    assert.strictEqual(blitCalls, 1, 'the fast path fired beside the strip');
+    assert.ok(root._lastDamageRects, 'and the frame stayed bounded');
+    const blitted = await readPixels(
+      root._ctx ?? (root._ctx = root.window.getContext('2d')),
+    );
+
+    root.invalidate(false);
+    frame();
+    await settle(app);
+    const repainted = await readPixels(root._ctx);
+
+    assert.ok(
+      blitted.equals(repainted),
+      'the carved pan differs from a full repaint of the same scene',
     );
   } finally {
     await x11Root.unmount();

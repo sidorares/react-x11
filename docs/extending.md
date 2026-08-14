@@ -1216,6 +1216,29 @@ rects and the merges balloon back towards the whole viewport; with no bars
 the L is two disjoint rects and stays two. A drag-pan is diagonal almost
 every frame, so this is the case rather than the corner.
 
+**Every gate above is about `rect`, not about your node.** A pane usually
+has furniture pinned to a corner — a minimap, zoom controls, a HUD strip —
+that has to repaint on a pan frame and whose pixels must _not_ ride the blit.
+Carve it out of the region you shift and claim it the ordinary way; the claim
+lands beside the rect and the frame stays a blit:
+
+```js
+onDragPan(dx, dy) {
+  this.panX += dx;
+  this.panY += dy;
+  const box = this.contentBox();
+  const hud = { ...box, y: box.y + box.height - HUD, height: HUD };
+  this.scrollContents({ ...box, height: box.height - HUD }, dx, dy);
+  this.invalidate(false, hud, 'props'); // repainted, not shifted
+}
+```
+
+A claim that _reaches into_ the rect — by so much as a pixel — still declines
+the frame, and that is the whole of the rule (issue #309). Overlay panels
+mounted as sibling nodes work the same way, as long as they sit outside the
+rect: one drawing over it is dragged along by the blit, so it declines
+instead.
+
 **Zoom is not a blit.** Scaling resamples; it is a full repaint and should
 be. That is the right trade: a zoom is a gesture step, a pan is sixty of them
 a second.
@@ -1223,7 +1246,9 @@ a second.
 The protocol bench prices it at five diagonal pan steps over a 374-cell scene
 — 983 requests / 606 composites / 0.30 Mpx, against 9845 / 6533 / 4.22 for
 the same five steps under `REACT_X11_NO_SCROLL_BLIT=1`, which is exactly the
-fallback every gate here takes.
+fallback every gate here takes. The same five steps with a HUD strip claimed
+beside the region cost 3059 / 1971 / 1.10 — the blit plus the strip, where
+the whole pane repainting is that 9845 again.
 
 If your element keeps its drawing in a `Surface` of its own rather than
 drawing it live, the shift you want is
