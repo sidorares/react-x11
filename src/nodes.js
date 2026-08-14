@@ -124,6 +124,12 @@ export const DRAWN_KINDS = new Set([
  * element gets the exemption without subclassing the getter. */
 export const CUSTOM_SEMANTIC_NAMES = new Map();
 
+/** kind -> prop names a registered element claims the damage for itself.
+ * Filled by registry.js, read by `Node.selfDamagedProps` — the same
+ * arrangement as above, for the other declaration a scene-drawing element
+ * makes (issue #301). */
+export const CUSTOM_SELF_DAMAGED = new Map();
+
 // X ConfigureWindow stack-mode: Below places the window directly under the
 // named sibling (X11 protocol, ConfigureWindow).
 const STACK_BELOW = 1;
@@ -611,6 +617,11 @@ function assertNoFlatStyleProps(props, kind, semantic) {
 // it. `<window width>` is the X window's width; `<box width>` would be yoga
 // style, and there is no element where a name means both.
 const NO_SEMANTIC_NAMES = new Set();
+
+// And the default for the other declaration: an element that has not said
+// otherwise claims nothing for itself, so every prop it holds is core's to
+// be conservative about.
+const NO_SELF_DAMAGED = new Set();
 
 // X window geometry is CARD16 and coordinates are INT16, so a window wider
 // than this cannot be positioned or damaged coherently even where the server
@@ -1507,6 +1518,20 @@ export class Node {
   }
 
   /**
+   * Prop names whose damage this element's own `applyProps` claims, and
+   * which `paintChanged` therefore does not claim the whole node for.
+   *
+   * Empty for everything that has not said otherwise, which is what keeps
+   * the default conservative. Registered elements declare theirs to
+   * `registerElement`, so the common case needs no subclass; an element
+   * whose answer depends on the *values* rather than the names overrides
+   * `paintChanged` instead.
+   */
+  get selfDamagedProps() {
+    return CUSTOM_SELF_DAMAGED.get(this.kind) ?? NO_SELF_DAMAGED;
+  }
+
+  /**
    * The theme in force here: the nearest `theme` prop at or above this node,
    * with an inner one merged over the outer so a panel can restate a colour
    * or two without repeating a palette. Popups resolve through their place
@@ -2068,9 +2093,15 @@ export class Node {
     if (layoutChanged) {
       this._invalidateLayout('props');
     } else {
+      // The style half is asked here rather than inside `paintChanged`, and
+      // stays core's answer: what a style change moves is the background,
+      // the border and the clip that `Node.paint` draws, so an element is
+      // not in a position to excuse one.
+      const styleChanged =
+        style !== prevStyle && paintPropsChanged(style, prevStyle);
       this.root?.invalidate(
         false,
-        this._paintChanged(newProps, prev, style, prevStyle) ? this : NO_DAMAGE,
+        styleChanged || this.paintChanged(newProps, prev) ? this : NO_DAMAGE,
         'props',
       );
     }
@@ -2079,16 +2110,12 @@ export class Node {
   }
 
   /**
-   * Did anything this node *draws* change?
+   * Did anything this node *draws* change? Answering true damages the whole
+   * node; answering false contributes no damage at all.
    *
    * Deliberately conservative, because the cost of a wrong "no" is a stale
-   * pixel that nothing will come back to fix. Paint-relevant style is asked
-   * about by value, so a style object React rebuilt with the same contents
-   * costs nothing — that is the whole point, since React rebuilds sibling
-   * styles on every render and a commit would otherwise damage every node it
-   * walked.
-   *
-   * Everything else falls back to "yes it changed", which is what makes this
+   * pixel that nothing will come back to fix. A prop that is not equal to
+   * the one it replaced is "yes it changed", which is what makes the default
    * safe without knowing about subclasses: `<image src>`, `<canvas onDraw>`,
    * a `value`, a `placeholder`, a `caretColor` — any prop a subclass paints
    * from is a prop, so a change to it lands here as an inequality and damages
@@ -2098,13 +2125,38 @@ export class Node {
    *  - `children`, which the reconciler mutates through appendChild /
    *    removeChild / commitTextUpdate, each of which invalidates on its own;
    *  - event handlers, rebuilt every render and never painted;
-   *  - `style`, already compared by value above.
+   *  - `style`, compared by value by the caller — so a style object React
+   *    rebuilt with the same contents costs nothing, which is the whole
+   *    point, since React rebuilds sibling styles on every render and a
+   *    commit would otherwise damage every node it walked.
+   *
+   * **The seam (issue #301).** "The node" is the wrong granularity for an
+   * element that draws a *scene*: a graph view handed a new `nodes` array
+   * every drag step has already claimed the box the dragged node moved
+   * through, and this answering "yes" over the top widens that to the whole
+   * pane and throws the scoped work away. Such an element either names those
+   * props in `selfDamagedProps` — the declarative form, and what
+   * `registerElement({ selfDamagedProps })` fills — or overrides this method
+   * when the answer depends on the values rather than the names:
+   *
+   * ```js
+   * paintChanged(next, prev) {
+   *   // my own applyProps diffed these and claimed exactly what moved
+   *   if (onlyPositionsMoved(next.nodes, prev.nodes)) return false;
+   *   return super.paintChanged(next, prev);   // everything else is core's
+   * }
+   * ```
+   *
+   * An override that answers wrong shows stale pixels, so the part it does
+   * not know about has to reach `super` — a new `aria-label`, a prop the
+   * element grows next year.
    */
-  _paintChanged(newProps, prev, style, prevStyle) {
-    if (style !== prevStyle && paintPropsChanged(style, prevStyle)) return true;
+  paintChanged(newProps, prev) {
+    const claimed = this.selfDamagedProps;
     const keys = new Set([...Object.keys(newProps), ...Object.keys(prev)]);
     for (const key of keys) {
       if (key === 'children' || key === 'style' || isEventProp(key)) continue;
+      if (claimed.has(key)) continue;
       if (newProps[key] !== prev[key]) return true;
     }
     return false;
@@ -2496,6 +2548,34 @@ export class Node {
    */
   invalidate(layoutChanged = false, damage = null, reason = null) {
     this.root?.invalidate(layoutChanged, damage, reason);
+  }
+
+  /**
+   * The rect this paint pass is repainting, or null when it is repainting
+   * the whole window — and null outside a paint, which reads the same way:
+   * nothing is bounding you, so draw everything (issue #301).
+   *
+   * The other end of `invalidate`. A frame repaints one damage rect per
+   * pass, clipped to it and with whole subtrees outside it culled, so an
+   * element whose node *is* one node — a `<box>`, a `<text>` — never needs
+   * this: being painted at all already means it is inside. An element that
+   * draws a **scene** into one node does: without it, a `<flow>` handed a
+   * pass over the 80×40 box a dragged node moved through redraws all three
+   * hundred nodes, all seven hundred edges, the grid and the minimap into a
+   * clip that throws almost all of it away. With it, the element culls the
+   * same way core culls the tree.
+   *
+   * Window coordinates, the same space as `abs`, `contentBox()` and an
+   * event's `x`/`y`. Read-only, like `abs`: it is this frame's own rect and
+   * the clip is already set from it.
+   *
+   * Never inside `paintCached`, which draws into a surface in its own
+   * coordinates: a cached copy culled against the window's damage is stored
+   * half-drawn under a key claiming it is whole, and every later frame that
+   * hits the key gets the hole.
+   */
+  paintDamage() {
+    return this.root?._paintDamage ?? null;
   }
 
   /**
@@ -4396,7 +4476,7 @@ export class CanvasNode extends Node {
     super.applyProps(newProps, oldProps);
     // onDraw is read at paint time, so a new closure means new content — but
     // it also matches /^on[A-Z]/, which is how the base class recognises an
-    // event handler, so `_paintChanged` skips it and this is the only place
+    // event handler, so `paintChanged` skips it and this is the only place
     // that notices. Damage is bounded to this canvas: an unbounded call here
     // made every re-render of a component that draws through <canvas> repaint
     // the whole window, which is what a Checkbox's tick and a Select's chevron

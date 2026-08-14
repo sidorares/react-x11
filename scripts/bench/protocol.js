@@ -27,6 +27,8 @@ import { compositePixels, countStream } from './xcount.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../../src/index.js');
+const { registerElement } = await import('../../src/host.js');
+const { Node } = await import('../../src/node.js');
 
 const require = createRequire(import.meta.url);
 const fontDir = join(
@@ -260,6 +262,103 @@ function absBoxWindow(left, color) {
     }),
   );
 }
+
+// --- a scene drawn into one node (issue #301) ---------------------------
+//
+// The shape `@react-x11/components`' <Flow> has: one registered element
+// draws a whole graph, so to the damage machinery the scene is a single
+// retained node. A "drag step" is a controlled app committing a new array
+// and the element invalidating the box that actually moved — which only
+// stays scoped because of the two seams. `selfDamagedProps` keeps the
+// commit from claiming the pane over the top of it, and `paintDamage()` is
+// what the paint culls the other 299 cells against.
+
+const SCENE_COLS = 20;
+const SCENE_ROWS = 15;
+const SCENE_CELLS = SCENE_COLS * SCENE_ROWS;
+
+const sceneCells = (moved = -1) =>
+  Array.from({ length: SCENE_CELLS }, (_, i) =>
+    i === moved ? '#e74c3c' : i % 3 ? '#dfe6e9' : '#b2bec3',
+  );
+
+class SceneNode extends Node {
+  cellRect(i) {
+    const box = this.contentBox();
+    const w = box.width / SCENE_COLS;
+    const h = box.height / SCENE_ROWS;
+    return {
+      x: box.x + (i % SCENE_COLS) * w,
+      y: box.y + Math.floor(i / SCENE_COLS) * h,
+      width: w,
+      height: h,
+    };
+  }
+
+  paintContent(ctx) {
+    // null on an unbounded pass, which is the "draw everything" answer
+    const damage = this.paintDamage();
+    const cells = this.props.cells ?? [];
+    for (let i = 0; i < cells.length; i++) {
+      const r = this.cellRect(i);
+      if (
+        damage &&
+        !(
+          r.x < damage.x + damage.width &&
+          damage.x < r.x + r.width &&
+          r.y < damage.y + damage.height &&
+          damage.y < r.y + r.height
+        )
+      ) {
+        continue;
+      }
+      ctx.fillStyle = cells[i];
+      ctx.beginPath();
+      ctx.roundRect(r.x + 1, r.y + 1, r.width - 2, r.height - 2, 3);
+      ctx.fill();
+      ctx.strokeStyle = '#2d343680';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  applyProps(next, prev) {
+    const before = prev ?? this.props;
+    // claims nothing for `cells`, because the element claims it below
+    super.applyProps(next, prev);
+    if (next.cells === before.cells) return;
+    let box = null;
+    for (let i = 0; i < next.cells.length; i++) {
+      if (next.cells[i] === before.cells?.[i]) continue;
+      const r = this.cellRect(i);
+      box = box
+        ? {
+            x: Math.min(box.x, r.x),
+            y: Math.min(box.y, r.y),
+            width:
+              Math.max(box.x + box.width, r.x + r.width) - Math.min(box.x, r.x),
+            height:
+              Math.max(box.y + box.height, r.y + r.height) -
+              Math.min(box.y, r.y),
+          }
+        : r;
+    }
+    if (box) this.invalidate(false, box, 'props');
+  }
+}
+
+registerElement('scene', {
+  create: (props, app) => new SceneNode('scene', props, app),
+  semanticNames: ['cells'],
+  selfDamagedProps: ['cells'],
+});
+
+const sceneWindow = (cells) =>
+  React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    React.createElement('scene', { cells, style: { flexGrow: 1, margin: 8 } }),
+  );
 
 /** Mount a tree, settle it, and hand back the root node plus a frame pump.
  * The mount is what `prepare` pays for, so `run` measures only repaints. */
@@ -582,6 +681,44 @@ const SCENARIOS = [
                 absBoxWindow(40 + (i + 1) * 30, '#3498db'),
                 resolve,
               ),
+            );
+            ctl.frame();
+            await settle(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
+    // Issue #301: five drag steps over a 300-cell scene drawn into ONE
+    // registered element. Each step is a React commit with a new `cells`
+    // array plus the element's own claim on the cell that moved.
+    //
+    // Baselined with both seams live, the way the scroll-blit scenario is:
+    // --check only fails on an increase, so a change that quietly stopped
+    // either of them working lands squarely here — and it takes both, which
+    // is the part worth writing down. The same five steps measured with one
+    // seam at a time, against 239 requests / 0.08 Mpx for the pair:
+    //
+    //   neither                     9054 reqs, 6005 composites, 4.09 Mpx
+    //   selfDamagedProps only       9054 reqs, 6005 composites, 3.35 Mpx
+    //   paintDamage() only          9054 reqs, 6005 composites, 4.09 Mpx
+    //
+    // A scoped commit whose paint cannot read the rect redraws all 300 cells
+    // into a clip that keeps four — the wire cost is identical and only the
+    // server's rasterization narrows. A paint that culls, in a frame the
+    // commit widened to the whole pane, has nothing to cull against.
+    'scene: 5 drag steps over 300 cells in one node',
+    (() => {
+      let ctl;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, sceneWindow(sceneCells()));
+        },
+        run: async (app, x11Root) => {
+          for (let i = 0; i < 5; i++) {
+            await new Promise((resolve) =>
+              x11Root.render(sceneWindow(sceneCells(i)), resolve),
             );
             ctl.frame();
             await settle(app);

@@ -102,5 +102,13 @@
     "replies": 7,
     "composites": 10,
     "compositePixels": 31320
+  },
+  "scene: 5 drag steps over 300 cells in one node": {
+    "requests": 239,
+    "bytesOut": 45076,
+    "bytesIn": 288,
+    "replies": 9,
+    "composites": 133,
+    "compositePixels": 75896
   }
 }
