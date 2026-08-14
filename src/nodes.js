@@ -891,6 +891,54 @@ function restoreShrink(node) {
 }
 
 /**
+ * Pin every box under `node` at the width the pass just settled it at, so
+ * that the collapse which follows can only take **height** away.
+ *
+ * A minimum height is always a height *for a width* (`_applyContentFloors`),
+ * and the width it is for is the one the first pass settled — the tree at the
+ * size it is really about to be laid out at. The collapsing pass is asked
+ * only how much of that height the tree can give back, and it has no business
+ * re-deciding the widths on the way. Left to itself it does, because offering
+ * no height at all is not a small layout but a degenerate one: yoga answers a
+ * box measured against a zero cross size out of its bounds, without laying
+ * its children out at all, and where the width on offer was *also* undefined
+ * that bound is the node's `min-width` — the min-content floor this same
+ * routine wrote a moment earlier. Under a horizontally scrolling box the
+ * width is exactly what is undefined, a scroll container withholding its
+ * main-axis size from a child's flex basis the way browsers do. So the
+ * subtree was laid out at min-content **width**, where a label takes two
+ * lines, and the two-line height became the floor of the row around it: one
+ * line of text in a box that reserved two (issue #311).
+ *
+ * Pinning is enough because that answer is only wrong where there was no
+ * width to answer with — a box that names its own is measured at it whatever
+ * else the pass is doing, and its children are laid out inside that. It costs
+ * nothing either: every leaf is offered the width it was already measured at,
+ * so the paragraphs the first pass shaped come back out of the layout cache.
+ */
+function freezeWidths(node) {
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow) continue;
+    // as in `setMeasuringShrink`: a `display: 'none'` subtree was not laid
+    // out, so there is no width in there to keep
+    if (child.style.display === 'none') continue;
+    child.yoga.setWidth(child.yoga.getComputedWidth());
+    freezeWidths(child);
+  }
+}
+
+/** …and back to the width the style asks for. Walks what `freezeWidths`
+ *  walked, so a box it never pinned is never written to either. */
+function restoreWidths(node) {
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow) continue;
+    if (child.style.display === 'none') continue;
+    child.yoga.setWidth(child.style.width);
+    restoreWidths(child);
+  }
+}
+
+/**
  * How far this node's content actually reaches along one axis, in its own
  * coordinate space — the reading of a layout the root was given no room for,
  * where `getComputedWidth()` says nothing (a root offered 0 is clamped to 0)
@@ -6635,13 +6683,18 @@ export class WindowNode extends Scrollable(Node) {
     // width, and no leaf can give any of it back. It runs before the shrink
     // is borrowed, since the widths it settles are the real ones. The second
     // is the one that collapses, and it squashes a leaf that a `row`
-    // stretches: those are the ones the map above puts back.
+    // stretches: those are the ones the map above puts back. The widths the
+    // first pass settled are held across the second (`freezeWidths`), which
+    // is the only thing keeping it a collapse rather than a second opinion.
     yoga.calculateLayout(forWidth, undefined, dir);
     const intrinsic = new Map();
     captureLeafHeights(this, intrinsic);
+    freezeWidths(this);
     setMeasuringShrink(this, axis);
     yoga.calculateLayout(forWidth, 0, dir);
-    return contentSpan(this, axis, intrinsic, out);
+    const span = contentSpan(this, axis, intrinsic, out);
+    restoreWidths(this);
+    return span;
   }
 
   _measureMinimum(axis, forWidth) {
