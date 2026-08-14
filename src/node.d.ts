@@ -234,6 +234,24 @@ export declare class Node {
    */
   paintDamage(): Rect | null;
   /**
+   * "The pixels in `rect` moved by (dx, dy); the rest of it is new" — for an
+   * element with a viewport of its own, whose pan is a scroll in every way
+   * but the bookkeeping.
+   *
+   * Claims `rect`, and arms the frame to blit the surviving band inside the
+   * backing store instead — after which the claim is narrowed to the band
+   * the shift exposed, which is what `paintDamage()` hands the paint. The
+   * element draws the strip and nothing else, without asking whether the
+   * blit happened.
+   *
+   * `dx`/`dy` are how far the **pixels** moved, the sense `Surface.copyWithin`
+   * uses rather than a scroll offset's, and whole. `rect` is in window
+   * coordinates and inside this node. The return says whether the frame is
+   * still a blit candidate; the gates that matter close at frame time, and
+   * every one of them falls back to repainting `rect`.
+   */
+  scrollContents(rect: Rect, dx: number, dy: number): boolean;
+  /**
    * Did anything this node draws change? True damages the whole node, false
    * contributes no damage at all, and the default answers true for any prop
    * that is not identical to the one it replaced — conservative, because a

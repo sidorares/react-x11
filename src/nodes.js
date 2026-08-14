@@ -276,6 +276,13 @@ const SCROLL_BLIT_MIN_KEEP = 0.5;
 // up-front clear like any real origin, so it lives exactly one frame.
 const BLIT_POISONED = Object.freeze({ poisoned: true });
 
+// A frame armed by `Node.scrollContents` rather than by a scroll offset
+// (issue #303): there is no origin to record, because the element handed
+// over the shift itself. Truthy for the same reason as the poison — so the
+// `??=` in both arming paths reads "already armed" — with the rect and the
+// net delta in `_pendingBlitContents` beside it.
+const BLIT_CONTENTS = Object.freeze({ contents: true });
+
 const rectContains = (outer, inner) =>
   outer.x <= inner.x &&
   outer.y <= inner.y &&
@@ -2579,6 +2586,106 @@ export class Node {
   }
 
   /**
+   * "The pixels in `rect` moved by (dx, dy); the rest of it is new" — the
+   * public form of the dance `<box overflow="scroll">` has been doing since
+   * issue #138, for an element with a viewport of its own (issue #303).
+   *
+   * A pan is a scroll in every way but the bookkeeping: it translates every
+   * pixel of the pane, so an element that can only say "everything changed"
+   * repaints the lot, sixty times a second, for a frame whose content is
+   * already on screen one shift away. This claims `rect` — the conservative
+   * answer, and the one that stands if anything below declines — and arms
+   * the frame to blit instead: at frame time core asks ntk to move the
+   * surviving band inside the backing store (`Window.scrollRegion`) and
+   * **narrows this claim to the band the shift exposed**, which is what
+   * `paintDamage()` then hands the paint. So the element draws the strip and
+   * nothing else, without ever asking whether the blit happened.
+   *
+   * `dx`/`dy` are **how far the pixels moved**, the sense `Surface.copyWithin`
+   * and `Window.scrollRegion` use rather than a scroll offset's — panning a
+   * graph right by 10 is `dx: 10`, and the exposed band is down the left
+   * edge. Whole pixels, both of them, and `rect` in window coordinates
+   * (`abs`, `contentBox()`, an event's `x`/`y`) and inside this node.
+   *
+   * The element promises one thing in return: that inside `rect` the frame
+   * really is that translation and nothing else. Every other way it could be
+   * false is core's to check — a claim from anywhere else reaching into the
+   * rect, a sibling drawing over it, a child of this node laid out on top of
+   * it, an ancestor's border ring or rounded corner, a layout pass that
+   * moved something — and each of them falls back to repainting the rect,
+   * which is the behaviour without this call at all.
+   *
+   * Returns whether the frame is still a blit candidate. The real answer
+   * arrives as `paintDamage()`, because most of the gates cannot be decided
+   * until the frame closes; a `false` here is only the ones that can.
+   */
+  scrollContents(rect, dx, dy) {
+    const root = this.root;
+    if (
+      !root ||
+      this.destroyed ||
+      !rect ||
+      !(rect.width > 0) ||
+      !(rect.height > 0)
+    ) {
+      return false;
+    }
+    // Nothing moved, so there is nothing to claim either — an element
+    // rounding a gesture to whole pixels lands here on most events.
+    if (!dx && !dy) return true;
+    const pending = this._pendingBlitContents;
+    // The rect has to be the same one all frame: two different regions of
+    // one node shifting by different deltas is not one CopyArea, and the
+    // second claim would coalesce into the first past the point either can
+    // be told apart. Same for a Scrollable element that also scrolls its
+    // offsets this frame — two shifts of the same pixels, and a frame can
+    // only have one.
+    if (
+      this._pendingBlitFrom != null &&
+      (!pending ||
+        pending.rect.x !== rect.x ||
+        pending.rect.y !== rect.y ||
+        pending.rect.width !== rect.width ||
+        pending.rect.height !== rect.height)
+    ) {
+      this._pendingBlitFrom = BLIT_POISONED;
+    } else if (this._pendingBlitFrom == null && Array.isArray(root._damage)) {
+      // Arming is the one moment the evidence still exists — the claim
+      // below coalesces earlier ones into itself, after which a change
+      // inside the rect is indistinguishable from this call's own claim.
+      // The same reasoning, and the same poison rather than a disarm, as
+      // scrollTo (react-x11#295).
+      const zone = insetRect(rect, -(DAMAGE_SLOP * 2 + 1));
+      for (const claimed of root._damage) {
+        if (rectsOverlap(claimed, zone)) {
+          this._pendingBlitFrom = BLIT_POISONED;
+          break;
+        }
+      }
+    }
+    const state = (this._pendingBlitContents ??= {
+      // our own copy: the caller's rect is very often the live
+      // `contentBox()` of a node that is about to be laid out again
+      rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      dx: 0,
+      dy: 0,
+    });
+    // several pans in one frame blit once, by the net shift — the same
+    // coalescing scrollTo gets from recording an origin
+    state.dx += dx;
+    state.dy += dy;
+    this._pendingBlitFrom ??= BLIT_CONTENTS;
+    (root._pendingScrolls ??= new Set()).add(this);
+    // ...and the claim about to be recorded is the shift itself, not a
+    // reason to un-blit it. `state.rect` by identity, so a second call this
+    // frame is recognised as the same claim rather than as foreign damage.
+    root._scrollClaim = state.rect;
+    root.invalidate(false, state.rect, 'scroll');
+    root._scrollClaim = null;
+    return this._pendingBlitFrom !== BLIT_POISONED;
+  }
+
+  /**
    * A layout-affecting change confined to this node: claim the subtree as
    * it stands now, and queue it for a second claim once layout has run —
    * the same before/after protocol `_childListChanged` uses. Anything
@@ -4173,6 +4280,10 @@ export const Scrollable = (Base) =>
             }
           }
         }
+        // An element that also shifted its own drawing this frame
+        // (`scrollContents`, issue #303) is two shifts of the same pixels,
+        // and a frame can only have one.
+        if (this._pendingBlitContents) this._pendingBlitFrom = BLIT_POISONED;
         // The offsets whose pixels are on screen, captured before the first
         // change of the frame: the frame's blit fast path (issue #138) shifts
         // from *these* to wherever layout settles, however many scrollTo
@@ -8134,9 +8245,12 @@ export class WindowNode extends Scrollable(Node) {
     ) {
       const rect = damage.paintBounds ? damage.paintBounds() : damage;
       for (const sv of pendingScrolls) {
+        // an element blitting a region of its own drawing (issue #303) is
+        // waiting on that region, not on the whole node it lives in
+        const waiting = sv._pendingBlitContents?.rect ?? sv.abs;
         if (
-          !sv.abs ||
-          rectsOverlap(rect, insetRect(sv.abs, -(DAMAGE_SLOP * 2 + 1)))
+          !waiting ||
+          rectsOverlap(rect, insetRect(waiting, -(DAMAGE_SLOP * 2 + 1)))
         ) {
           // Poison rather than disarm (react-x11#295): a null here would
           // let a second scrollTo in the same frame re-arm from a
@@ -8333,7 +8447,11 @@ export class WindowNode extends Scrollable(Node) {
     const nodes = [...pending];
     pending.clear();
     const from = nodes[0]._pendingBlitFrom;
-    for (const n of nodes) n._pendingBlitFrom = null;
+    const contents = nodes[0]._pendingBlitContents;
+    for (const n of nodes) {
+      n._pendingBlitFrom = null;
+      n._pendingBlitContents = null;
+    }
     // two viewports scrolling in one frame is rare enough that sorting out
     // whether their regions interact is not worth it
     if (nodes.length !== 1) return;
@@ -8359,6 +8477,13 @@ export class WindowNode extends Scrollable(Node) {
     // pure scroll, and a blit under rearranged content would shift stale
     // pixels into place the repaint no longer covers
     if (layoutMoved) return;
+    // From here the two arming paths part company: an element handed us the
+    // region and the shift itself (issue #303), where a scroll container is
+    // its whole viewport shifted by the change in its offsets.
+    if (contents) {
+      this._applyContentsBlit(node, contents, width, height);
+      return;
+    }
     // children clip to the border box, so a border ring or rounded corner
     // would be shifted like content — any painted side counts
     const blitBorder = resolveBorderWidths(node.style, node.direction);
@@ -8403,26 +8528,8 @@ export class WindowNode extends Scrollable(Node) {
     ) {
       return;
     }
-    // A pure scroll and nothing else: the frame's only claim touching the
-    // viewport must be the viewport claim itself (scrollTo's, with its
-    // slop). Any other rect reaching in — a virtualized table's row swap, a
-    // hover restyle mid-scroll — means content changed, and changed pixels
-    // must not be blitted around.
-    const keep = [];
-    let sawClaim = false;
-    const slopped = insetRect(vp, -(DAMAGE_SLOP + 1));
-    for (const rect of this._damage) {
-      if (!rectsOverlap(rect, vp)) {
-        keep.push(rect);
-        continue;
-      }
-      if (rectContains(rect, vp) && rectContains(slopped, rect)) {
-        sawClaim = true;
-        continue;
-      }
-      return;
-    }
-    if (!sawClaim) return;
+    const keep = this._blitKeptDamage(vp);
+    if (!keep) return;
     if (!this._scrollBlitSafe(node, vp)) return;
     // scroll offsets grow down/right; the pixels move the other way
     // (0 - x rather than -x: negating +0 yields -0, which survives into
@@ -8482,6 +8589,129 @@ export class WindowNode extends Scrollable(Node) {
     }
     const crossBar = node._scrollbar(axis === 'y' ? 'x' : 'y');
     if (crossBar) rects = addDamageRect(rects, scrollbarTrackRect(crossBar));
+    this._damage = rects;
+  }
+
+  /**
+   * The frame's damage with the shift's own claim taken out, or null if the
+   * shift is not the only thing that happened inside `vp`.
+   *
+   * The claim recorded by `scrollTo` (with its slop) or by `scrollContents`
+   * (exactly `vp`) is the one rect allowed to reach in. Anything else — a
+   * virtualized table's row swap, a hover restyle mid-scroll, a coalesce
+   * that swallowed the claim into a bigger box — means pixels in there
+   * changed, and changed pixels must not be blitted around.
+   */
+  _blitKeptDamage(vp) {
+    const keep = [];
+    let sawClaim = false;
+    const slopped = insetRect(vp, -(DAMAGE_SLOP + 1));
+    for (const rect of this._damage) {
+      if (!rectsOverlap(rect, vp)) {
+        keep.push(rect);
+        continue;
+      }
+      if (rectContains(rect, vp) && rectContains(slopped, rect)) {
+        sawClaim = true;
+        continue;
+      }
+      return null;
+    }
+    return sawClaim ? keep : null;
+  }
+
+  /**
+   * The other half of the blit: a region an element shifted itself
+   * (`Node.scrollContents`, issue #303).
+   *
+   * The gates are the scroll path's, minus everything that was about a
+   * scroll container — there are no offsets to be whole, no scrollbars to
+   * repair, and no extent that decided the delta — and plus the two things
+   * only an element-owned region raises: the region has to be inside what
+   * the element itself draws, and this node's *children* are laid out over
+   * that drawing rather than being it.
+   *
+   * Diagonal shifts are allowed here, unlike the scroll path, and that is
+   * the point rather than an oversight: a pan is diagonal almost every
+   * frame, and the reason the scroll path takes one axis at a time is that
+   * the L of exposed strips overlaps the scrollbar rects and the merges
+   * balloon back towards the whole viewport. With no bars the L is two
+   * disjoint rects and stays two.
+   */
+  _applyContentsBlit(node, { rect: vp, dx, dy }, width, height) {
+    // only a whole-pixel shift of a whole-pixel region is a copy
+    if (!isIntegerRect(vp)) return;
+    if (!Number.isInteger(dx) || !Number.isInteger(dy)) return;
+    // the net shift of the frame, which several pans can cancel out of
+    if (dx === 0 && dy === 0) return;
+    if (Math.abs(dx) >= vp.width || Math.abs(dy) >= vp.height) return;
+    // the worth-it heuristics, the scroll path's: below these the plain
+    // repaint is one cheap pass and the bookkeeping outweighs it
+    const area = vp.width * vp.height;
+    if (area < SCROLL_BLIT_MIN_AREA) return;
+    const kept = (vp.width - Math.abs(dx)) * (vp.height - Math.abs(dy));
+    if (kept < area * SCROLL_BLIT_MIN_KEEP) return;
+    // the band shifts in from inside the window; a region poking out of it
+    // has nothing there to shift
+    if (
+      vp.x < 0 ||
+      vp.y < 0 ||
+      vp.x + vp.width > width ||
+      vp.y + vp.height > height
+    ) {
+      return;
+    }
+    // Inside the element, and clear of its own border ring and rounded
+    // corners: those are `Node.paint`'s, not the element's drawing, and
+    // they do not translate. A solid background does, so the fill under the
+    // region is not a reason to decline.
+    const bw = resolveBorderWidths(node.style ?? EMPTY_STYLE, node.direction);
+    const inset = Math.max(
+      bw.top,
+      bw.right,
+      bw.bottom,
+      bw.left,
+      node.style?.borderRadius ?? 0,
+    );
+    if (!rectContains(insetRect(node.abs, inset), vp)) return;
+    // A scroll container's children *are* the scrolled content, which is
+    // why _scrollBlitSafe skips that subtree. An element's are not: it
+    // draws the region in paintContent and its children are laid out on
+    // top, so one reaching in would have its pixels dragged along.
+    for (const child of node.children) {
+      if (child.isWindow || !child.yoga || child.hidden) continue;
+      if (child.style?.display === 'none') continue;
+      if (rectsOverlap(child._subtreeBounds(), vp)) return;
+    }
+    const keep = this._blitKeptDamage(vp);
+    if (!keep) return;
+    if (!this._scrollBlitSafe(node, vp)) return;
+    // the element's deltas are already how far the pixels moved, the sense
+    // scrollRegion takes (0 + x rather than x: a caller's -0 would survive
+    // into request buffers and test comparisons)
+    if (!this.window.scrollRegion({ ...vp }, 0 + dx, 0 + dy)) return;
+    let rects = keep;
+    // The strips the shift exposed, on the sides the pixels came from. The
+    // horizontal one takes the full width and the vertical one takes what
+    // is left, so a diagonal shift claims two rects that do not overlap —
+    // overlapping claims merge into their box, and the box of an L is the
+    // whole region again.
+    if (dy !== 0) {
+      rects = addDamageRect(rects, {
+        x: vp.x,
+        y: dy > 0 ? vp.y : vp.y + vp.height + dy,
+        width: vp.width,
+        height: Math.abs(dy),
+      });
+    }
+    if (dx !== 0) {
+      rects = addDamageRect(rects, {
+        x: dx > 0 ? vp.x : vp.x + vp.width + dx,
+        y: dy > 0 ? vp.y + dy : vp.y,
+        width: Math.abs(dx),
+        height: vp.height - Math.abs(dy),
+      });
+    }
     this._damage = rects;
   }
 

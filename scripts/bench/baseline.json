@@ -49,25 +49,25 @@
   },
   "mount: window with 40 boxes and labels": {
     "requests": 104,
-    "bytesOut": 3976,
-    "bytesIn": 864,
-    "replies": 25,
+    "bytesOut": 3992,
+    "bytesIn": 896,
+    "replies": 26,
     "composites": 21,
     "compositePixels": 298240
   },
   "scroll: 10 notches over 500 rows": {
-    "requests": 340,
-    "bytesOut": 14168,
-    "bytesIn": 544,
-    "replies": 17,
+    "requests": 332,
+    "bytesOut": 12120,
+    "bytesIn": 576,
+    "replies": 18,
     "composites": 81,
     "compositePixels": 644480
   },
   "svg: 100 unchanged icons, full repaint": {
-    "requests": 104,
-    "bytesOut": 3672,
-    "bytesIn": 96,
-    "replies": 3,
+    "requests": 106,
+    "bytesOut": 3704,
+    "bytesIn": 128,
+    "replies": 4,
     "composites": 101,
     "compositePixels": 200000
   },
@@ -110,5 +110,13 @@
     "replies": 9,
     "composites": 133,
     "compositePixels": 75896
+  },
+  "scene: 5 pan steps over 374 cells in one node": {
+    "requests": 983,
+    "bytesOut": 177444,
+    "bytesIn": 320,
+    "replies": 10,
+    "composites": 606,
+    "compositePixels": 298517
   }
 }

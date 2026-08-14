@@ -353,6 +353,69 @@ registerElement('scene', {
   selfDamagedProps: ['cells'],
 });
 
+// --- and panning it (issue #303) ----------------------------------------
+//
+// The other half of the same pane's cost. A drag step moves one cell and
+// claims the box it moved through; a *pan* translates every pixel, so the
+// scoped claim the seams above buy is the whole pane by construction — and
+// the frame is one CopyArea away from being right. `scrollContents` is that
+// call: the surviving band shifts inside the backing store and the claim
+// narrows to the strips the shift exposed, which `paintDamage()` then hands
+// the paint.
+//
+// The grid here is a *world* grid, one period wider than the pane on every
+// side, so a pan always has cells to bring in — a scene whose content
+// stopped at the viewport edge would flatter the exposed strip.
+
+class PanSceneNode extends SceneNode {
+  constructor(kind, props, app) {
+    super(kind, props, app);
+    this.panX = 0;
+    this.panY = 0;
+  }
+
+  cellRect(i) {
+    const box = this.contentBox();
+    const w = box.width / SCENE_COLS;
+    const h = box.height / SCENE_ROWS;
+    return {
+      x: box.x + ((i % PAN_COLS) - 1) * w + this.panX,
+      y: box.y + (Math.floor(i / PAN_COLS) - 1) * h + this.panY,
+      width: w,
+      height: h,
+    };
+  }
+
+  pan(dx, dy) {
+    this.panX += dx;
+    this.panY += dy;
+    this.scrollContents(this.contentBox(), dx, dy);
+  }
+}
+
+const PAN_COLS = SCENE_COLS + 2;
+const PAN_ROWS = SCENE_ROWS + 2;
+const panCells = () =>
+  Array.from({ length: PAN_COLS * PAN_ROWS }, (_, i) =>
+    i % 3 ? '#dfe6e9' : '#b2bec3',
+  );
+
+registerElement('panscene', {
+  create: (props, app) => new PanSceneNode('panscene', props, app),
+  semanticNames: ['cells'],
+  selfDamagedProps: ['cells'],
+});
+
+const panSceneWindow = () =>
+  React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+    React.createElement('panscene', {
+      cells: panCells(),
+      style: { flexGrow: 1, margin: 8 },
+    }),
+  );
+
 const sceneWindow = (cells) =>
   React.createElement(
     'window',
@@ -720,6 +783,33 @@ const SCENARIOS = [
             await new Promise((resolve) =>
               x11Root.render(sceneWindow(sceneCells(i)), resolve),
             );
+            ctl.frame();
+            await settle(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
+    // The pan (issue #303). Five diagonal steps of the same pane: every
+    // pixel translates, so the damage seams of #301 have nothing to scope
+    // to and the frame is the whole pane by construction. `scrollContents`
+    // turns each step into one CopyArea plus the two strips it exposed.
+    // The same five steps under REACT_X11_NO_SCROLL_BLIT=1 — every gate
+    // here falls back to exactly that — cost 9845 requests / 6533
+    // composites / 4.22 Mpx, against 982 / 606 / 0.30 with the blit.
+    'scene: 5 pan steps over 374 cells in one node',
+    (() => {
+      let ctl;
+      let pane;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, panSceneWindow());
+          pane = ctl.root.children.find((n) => n.kind === 'panscene');
+        },
+        run: async (app, x11Root) => {
+          for (let i = 0; i < 5; i++) {
+            pane.pan(7, 5);
             ctl.frame();
             await settle(app);
           }

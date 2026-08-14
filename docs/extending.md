@@ -933,6 +933,11 @@ of this without being asked: a pure scroll of one viewport blits the
 surviving band inside ntk's backing pixmap rather than repainting it. This
 is that optimisation, for a buffer you retained yourself.
 
+An element that draws its content live rather than into a surface asks for
+the window-side half directly, with
+[`scrollContents`](#panning-a-scene-you-drew) — the same shift, one layer
+out.
+
 ### Drawing a scene into one node
 
 _Issue #301._ A frame repaints **rects, not windows**: claims coalesce into
@@ -1050,6 +1055,84 @@ seams — the same frame, with the parts of it nobody can see left unsent.
 `REACT_X11_DEBUG_PAINT=1` is how to watch it: the pass's rect is stroked in
 the frame's colour, so a scene that is still repainting whole strobes across
 the pane instead of outlining what moved ([debugging.md](debugging.md)).
+
+#### Panning a scene you drew
+
+_Issue #303._ The two seams above scope a frame to the part of the scene
+that changed. A **pan** has no such part: it translates every pixel, so the
+honest claim is the whole pane and the honest frame is a full repaint — of a
+picture that is already on screen, one shift away from being right.
+
+That is the shape `<box overflow="scroll">` has been treating as a special
+case since issue #138: blit the band that survives inside ntk's backing
+store, repaint only the strip the shift exposed. `scrollContents` is that
+same dance, for a viewport of your own:
+
+```js
+class FlowNode extends Node {
+  onDragPan(dx, dy) {
+    this.panX += dx;
+    this.panY += dy;
+    // "the pixels in here moved by (dx, dy); the rest of it is new"
+    this.scrollContents(this.contentBox(), dx, dy);
+  }
+
+  paintContent(ctx) {
+    // …and this is the exposed strip, not the pane. Nothing here changes.
+    const damage = this.paintDamage();
+    for (const item of this.scene()) {
+      if (damage && !overlaps(item.bounds, damage)) continue;
+      this.draw(ctx, item);
+    }
+  }
+}
+```
+
+The call claims `rect` — the conservative answer, and the one that stands if
+anything declines — and arms the frame to blit instead. At frame time core
+asks ntk to move the surviving band and **narrows that claim to the band the
+shift exposed**, which is what `paintDamage()` then hands your paint. So the
+element draws the strip and nothing else without ever asking whether the
+blit happened, and every gate below falls back to repainting `rect`, which is
+the behaviour without the call at all.
+
+Four things worth knowing, in the order they bite:
+
+**`dx`/`dy` are how far the pixels moved.** The sense `Surface.copyWithin`
+and ntk's `scrollRegion` use, not a scroll offset's: panning the scene right
+by ten is `dx: 10`, and the exposed band is down the left edge. Both whole
+pixels — a fractional shift is not a copy — and `rect` in window coordinates
+(the same space as `abs`, `contentBox()` and an event's `x`/`y`) and inside
+your node.
+
+**You promise one thing: that inside `rect` the frame really is that
+translation.** Everything else is core's to check, and each of them declines
+rather than misrenders — a claim from anywhere else reaching into the rect, a
+sibling drawing over it, a child of your node laid out on top of it, your own
+border ring or rounded corner, a layout pass that moved something, a region
+too small or a shift too large to be worth it. Several pans in one frame
+coalesce into one blit by their net shift; two different regions of one node
+do not, and fall back.
+
+**Diagonal is fine here**, unlike the scroll containers' one-axis-at-a-time
+rule. That rule exists because the L of exposed strips overlaps the scrollbar
+rects and the merges balloon back towards the whole viewport; with no bars
+the L is two disjoint rects and stays two. A drag-pan is diagonal almost
+every frame, so this is the case rather than the corner.
+
+**Zoom is not a blit.** Scaling resamples; it is a full repaint and should
+be. That is the right trade: a zoom is a gesture step, a pan is sixty of them
+a second.
+
+The protocol bench prices it at five diagonal pan steps over a 374-cell scene
+— 983 requests / 606 composites / 0.30 Mpx, against 9845 / 6533 / 4.22 for
+the same five steps under `REACT_X11_NO_SCROLL_BLIT=1`, which is exactly the
+fallback every gate here takes.
+
+If your element keeps its drawing in a `Surface` of its own rather than
+drawing it live, the shift you want is
+[`copyWithin`](#scrolling-the-pixels-not-just-the-offset) on that surface —
+same idea, one layer in.
 
 ### Drawing once instead of every frame
 
