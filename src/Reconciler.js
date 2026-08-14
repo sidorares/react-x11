@@ -46,6 +46,10 @@ import { beginCompose } from './compose.js';
 import { beginKeyboard } from './keyboard.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
+import { beginDesktopSettings, endDesktopSettings } from './desktopsettings.js';
+import { endIdle } from './idle.js';
+import { endKeyboardState } from './keyboardstate.js';
+import { endXSettings } from './xsettings.js';
 import { watchAppearance } from './appearance.js';
 import { ForeignNode } from './foreignnodes.js';
 import { GlAreaNode } from './glnodes.js';
@@ -752,6 +756,15 @@ export async function createRoot(options = {}) {
   // no window ever has to wait to know how big it is allowed to be.
   await beginScreens(app);
 
+  // How fast a caret blinks, how long a double click has, how far a press
+  // moves before it is a drag. **Not** awaited, unlike the two above: the
+  // renderer reads these synchronously but only on an interaction — a focus,
+  // a click, a drag — which is always many milliseconds after startup, so
+  // making every app wait five round trips for them would buy nothing. A
+  // field focused on the very first frame gets the built-in defaults and the
+  // desktop's cadence from its next focus on (src/desktopsettings.js).
+  beginDesktopSettings(app);
+
   // The desktop switching between light and dark reaches the widgets through
   // React — `useTheme()` subscribes — but the other theme route is the node
   // tree, which React does not re-render. This is that half: drop the cached
@@ -792,6 +805,14 @@ export async function createRoot(options = {}) {
       stopAppearance();
       endCompositing(app);
       endScreens(app);
+      endDesktopSettings(app);
+      endIdle(app);
+      endKeyboardState(app);
+      // The XSETTINGS session outlives both of its readers otherwise: it
+      // holds a PropertyChange selection on the settings daemon's window and
+      // an XFixes watch on the selection, neither of which anything else
+      // takes off.
+      endXSettings(app);
       if (owned) {
         unregisterApp(app);
         await app.close();

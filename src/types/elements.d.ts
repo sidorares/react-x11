@@ -314,7 +314,7 @@ export interface WindowProps
    * Applied before the window is mapped, which is the only way to open
    * already fullscreen rather than flashing at the normal size first.
    */
-  states?: WindowState[];
+  states?: WindowStateName[];
   /** Sugar for `states={['fullscreen']}`; they union. */
   fullscreen?: boolean;
   /** Sugar for `states={['above']}`; they union. */
@@ -390,7 +390,7 @@ export interface WindowProps
    * what makes react-x11 watch `_NET_WM_STATE`, so a window with no handler
    * costs nothing.
    */
-  onStatesChange?: (states: WindowState[]) => void;
+  onStatesChange?: (states: WindowStateName[]) => void;
   /** The WM close button; opts the window into `WM_DELETE_WINDOW`. */
   onCloseRequest?: (ev: SyntheticEvent<NtkWindow>) => void;
   /**
@@ -422,8 +422,11 @@ export interface WindowProps
  * `_NET_WM_STATE` names, lower-cased without the atom prefix. `'maximized'`
  * is the one that is not an atom: EWMH maximizes an axis at a time, and it
  * expands to the vert/horz pair.
+ *
+ * These are what a `<window>` **asks for**. What the window manager actually
+ * did is `useWindowState()`, whose `states` is a list of these.
  */
-export type WindowState =
+export type WindowStateName =
   | 'modal'
   | 'sticky'
   | 'maximized'

@@ -81,6 +81,12 @@
   for apps that only want to follow the desktop, why the answer is remembered
   on disk so the first frame is not a flash, and what each rung of the ladder
   can actually answer.
+- [system.md](system.md) — the machine around the app: `useScreens()` for the
+  monitor layout, `useWindowState()` for what the window manager actually did,
+  `useIdle()`/`useKeepAwake()`, `useKeyboardState()` for Caps Lock and the live
+  layout, `useDesktopSettings()` for the timings the built-in controls already
+  follow, and `useLocale()`. Also what each one answers on a display with the
+  extension missing, and why `obscured` is always false under a compositor.
 - [remote.md](remote.md) — the flagship case: running the app on one
   machine and drawing to a display on another. `ssh -X` vs `-Y`, what the
   protocol costs on a link, the other X servers, and why Xwayland works

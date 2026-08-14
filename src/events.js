@@ -11,6 +11,7 @@ import {
 import { flushPendingFrames } from './frames.js';
 import { callHandler } from './errors.js';
 import { armDrag } from './dnd.js';
+import { desktopSettings } from './desktopsettings.js';
 import { noteInputTime } from './inputtime.js';
 import { hooks as a11yHooks, isFocusable } from './a11y.js';
 import { Composer, composeTableFor } from './compose.js';
@@ -227,15 +228,25 @@ export class EventManager {
     return this._focusOwner ?? this;
   }
 
-  /** DOM-style click counting: repeated presses within 400ms / 4px bump
-   * `detail` (2 = double click, 3 = triple …). */
+  /**
+   * DOM-style click counting: repeated presses close enough together in time
+   * and space bump `detail` (2 = double click, 3 = triple …).
+   *
+   * The window and the distance are the desktop's — `Net/DoubleClickTime`
+   * and `Net/DoubleClickDistance` — falling back to 400ms/4px where no
+   * settings daemon answered. A double click that needs to be faster here
+   * than everywhere else on the desktop is a double click people miss.
+   */
   _clickDetail(native) {
     const now = Date.now();
     const last = this._lastClick;
+    const { doubleClickMs, doubleClickDistance } = desktopSettings(
+      this.node?.app,
+    );
     const detail =
-      now - last.time < 400 &&
-      Math.abs(native.x - last.x) <= 4 &&
-      Math.abs(native.y - last.y) <= 4
+      now - last.time < doubleClickMs &&
+      Math.abs(native.x - last.x) <= doubleClickDistance &&
+      Math.abs(native.y - last.y) <= doubleClickDistance
         ? last.detail + 1
         : 1;
     this._lastClick = { time: now, x: native.x, y: native.y, detail };

@@ -15,8 +15,15 @@ import type {
   BusKind,
   BusRef,
   BusStatus,
+  DesktopSettings,
   FileDialogBackend,
+  KeyboardState,
   MessageBus,
+  Screen,
+  Screens,
+  SystemLocale,
+  WindowState,
+  WindowStateName,
 } from 'react-x11';
 import {
   Button,
@@ -43,10 +50,19 @@ import {
   systemBus,
   useApp,
   useClipboard,
+  useDesktopSettings,
   useFileDialog,
   useGlobalMenu,
+  useIdle,
+  useKeepAwake,
+  useKeyboardState,
+  useLocale,
+  useScreens,
   useSessionBus,
   useSystemBus,
+  useWindowState,
+  keepAwake,
+  systemLocale,
   ContextMenu,
   createRoot,
   DatePicker,
@@ -1187,6 +1203,70 @@ function _Files() {
   return null;
 }
 
+/** The system hooks: the machine around the app. */
+function _System() {
+  const win = useRef(null);
+
+  const { screens, primary, workArea, virtual, source }: Screens = useScreens();
+  const first: Screen | undefined = screens[0];
+  // `name` is null until RandR answers, so it is not assignable to `string`.
+  const name: string | null = first?.name ?? null;
+  const hz: number | null = first?.refreshRate ?? null;
+  const turned: 0 | 90 | 180 | 270 = first?.rotation ?? 0;
+  // @ts-expect-error — the screen list is read-only
+  screens.push(first!);
+  void [primary, workArea, virtual, source, name, hz, turned];
+
+  // No argument infers the window; a ref is the exact form.
+  const state: WindowState = useWindowState();
+  const exact: WindowState = useWindowState(win);
+  const states: readonly WindowStateName[] = state.states;
+  const desktop: number | null = state.desktop;
+  // @ts-expect-error — `visible` is a boolean, not a rect
+  const bad: object = exact.visible;
+  void [states, desktop, bad];
+
+  const away: boolean = useIdle(5 * 60_000);
+  useKeepAwake(away, 'Rendering');
+  // The reason is optional.
+  useKeepAwake(false);
+  // @ts-expect-error — a timeout is required, and is a number
+  useIdle();
+
+  const keys: KeyboardState = useKeyboardState();
+  const layout: string | null = keys.layout;
+  const layouts: readonly string[] = keys.layouts;
+  void [keys.capsLock, keys.numLock, keys.group, layout, layouts];
+
+  const feel: DesktopSettings = useDesktopSettings();
+  const blinkFor: number = feel.caretBlink ? feel.caretBlinkMs : 0;
+  void [
+    feel.doubleClickMs,
+    feel.doubleClickDistance,
+    feel.dragThreshold,
+    blinkFor,
+  ];
+
+  const { locale, direction, weekStartsOn, timeZone }: SystemLocale =
+    useLocale();
+  const rtl: boolean = direction === 'rtl';
+  void [locale, weekStartsOn, timeZone, rtl];
+
+  return <window ref={win} width={400} height={300} />;
+}
+
+/** The imperative twins, for host-side code with no component to hang off. */
+async function _SystemImperative() {
+  const release: () => void = await keepAwake({ reason: 'Exporting' });
+  release();
+  await keepAwake();
+  const here: SystemLocale = systemLocale();
+  // @ts-expect-error — the snapshot is read-only
+  here.locale = 'fr-FR';
+}
+
+void _System;
+void _SystemImperative;
 void _Files;
 void _Bus;
 void _DeepLinks;
