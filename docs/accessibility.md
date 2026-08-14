@@ -297,6 +297,55 @@ The seam is observed by the test spy exactly as core's is, so an editor in
 another package can assert what it says with no bus and no desktop —
 [below](#asserting-what-a-screen-reader-would-hear).
 
+### A scene of your own
+
+The other half of the same gap. A [registered element](extending.md) that
+_draws_ interactive things — a graph pane, a chart, a timeline, a seating
+plan — is one node, so it is one accessible: "Flow graph, group", with
+three hundred selectable nodes inside it that no assistive technology can
+see. It says what it drew and each one becomes a child:
+
+```js
+class FlowNode extends Node {
+  a11yScene() {
+    return this.nodes.map((node) => ({
+      id: node.id, // stable while it is on screen: this is identity
+      role: 'listitem',
+      name: node.label,
+      rect: node.rect, // window coordinates
+      states: {
+        selected: this.selection.has(node.id),
+        focused: this.cursor === node.id,
+      },
+    }));
+  }
+
+  select(id) {
+    /* …the element's own selection… */ this.notifyA11ySceneChanged();
+  }
+}
+```
+
+| member                        |                                                                                                       |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `a11yScene()`                 | `[{ id, rect, role, name, description, focusable, states, props, children }]`                         |
+| `notifyA11ySceneChanged()`    | the scene moved between commits — a drag, an animation, your own arrow keys                           |
+| `a11ySceneAction(id, action)` | an AT sent `'activate'`, `'focus'` or `'scroll'`. `true` claims it; anything else keeps core's answer |
+
+They are read by the same model everything else is: `role` and the
+`aria-*`-shaped states above become the AT-SPI role and state set, `rect`
+becomes the Component extents a magnifier tracks and focus is drawn around,
+and a change to any of it is announced as that child changing rather than as
+the pane being replaced. Keyboard navigation _between_ items stays the
+element's own — the window's focus manager holds the element, which is why
+`states.focused` is the only way the cursor inside it is reported.
+
+Activation with no `a11ySceneAction` is a synthetic click at the item's own
+rect, which is exactly what a mouse user does to it; the seam is for the
+elements where that is not the truth. See
+[extending.md](extending.md#a-scene-a-screen-reader-can-walk) for the whole
+contract.
+
 ## The compatibility ladder
 
 `createRoot()` starts one climb per process, off the critical path:
@@ -346,6 +395,9 @@ whatever the tree says. The seams, in increasing order of involvement:
 - `a11yTextState()` + `notifyA11yTextChanged()` — when your element draws
   text of its own, which is the one thing props cannot express
   ([above](#text-of-your-own)).
+- `a11yScene()` + `notifyA11ySceneChanged()` — when your element draws
+  interactive _things_ of its own, which is the other one
+  ([above](#a-scene-of-your-own)).
 
 ## Testing and verifying
 

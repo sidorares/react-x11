@@ -661,6 +661,98 @@ The behaviour is assertable without a screen reader, a desktop or a bus:
 and `test/a11y-custom-text.test.js` in this repo is a worked editor and a
 worked viewer driven through it.
 
+### A scene a screen reader can walk
+
+_Issue #304._ An element that draws a hundred interactive things is still
+one node, so it is one accessible: a graph pane full of selectable,
+draggable, connectable nodes reads out as **"Flow graph, group"** and stops
+there. Nothing in it can be found, named, activated or told apart, and no
+amount of `role`/`aria-*` on the element itself changes that — the objects
+an assistive technology would need are not in the tree, because you drew
+them.
+
+Describe them and they are:
+
+```js
+class FlowNode extends Node {
+  a11yScene() {
+    return this.nodes.map((node) => ({
+      id: node.id, // stable for as long as it is on screen
+      role: 'listitem',
+      name: node.label,
+      rect: node.rect, // window coordinates, like `abs`
+      states: {
+        selected: this.selection.has(node.id),
+        focused: this.cursor === node.id,
+      },
+    }));
+  }
+
+  select(id) {
+    // …the element's own selection…
+    this.notifyA11ySceneChanged();
+  }
+}
+```
+
+Each becomes a real child of your element's accessible: named, placed,
+walked into, focusable, with `selected` announced as it changes — the same
+model a `<box role="listitem" aria-selected>` goes through, because that is
+literally what these are read as. `id` is the whole of what core needs from
+you: it is what makes the child that was there last frame the same child
+this frame, and therefore what keeps every reference a screen reader is
+holding alive across a scene you rebuild sixty times a second.
+
+| member                        | when                                                                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `a11yScene()`                 | always, for an element that draws interactive things. Called once per question about your children — a cheap read, never a pass |
+| `notifyA11ySceneChanged()`    | the scene moved between commits: a drag, an animation, your own arrow keys. A commit re-reads it on its own                     |
+| `a11ySceneAction(id, action)` | an AT acted on one of them. Return `true` to claim it; anything else keeps core's answer                                        |
+
+What one item may say:
+
+| field                  |                                                                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `id`                   | required. Its name for as long as it is drawn — ids are matched within their parent, not globally                    |
+| `rect`                 | required. Where it is, in window coordinates: where AT focus is drawn and what a magnifier follows                   |
+| `role`                 | an ARIA role. `'group'` if it says none                                                                              |
+| `name` / `description` | what a screen reader says. An unnamed item announces as having none, which is the defect being loud                  |
+| `states`               | `selected`, `checked`, `expanded`, `disabled`, `busy`, and `focused` for your own keyboard cursor                    |
+| `focusable`            | default true                                                                                                         |
+| `props`                | anything else an element carries — `aria-posinset`/`aria-setsize` for Orca's "3 of 7", `aria-level`, `aria-valuenow` |
+| `children`             | a scene with structure: series and points, groups and nodes                                                          |
+
+Four things worth knowing before you write one:
+
+**`focused` is the only way your cursor is reported.** The window's focus
+manager holds your element, not the thing inside it that arrow keys move —
+which is right, and it means the state has to come from you. Reporting it
+is all that is asked: navigation between items stays yours.
+
+**Actions fall back rather than fail.** With no `a11ySceneAction`, an
+activation is a synthetic click at the item's own rect — you hit-test your
+scene already, so the rect is the whole address and an AT's click is
+indistinguishable from a mouse user's. `focus` focuses the element,
+`scroll` reveals it. Implement the seam for the cases where that is wrong
+(an activation that is not a click, a cursor to move, a viewport of your
+own to scroll), claim those with `true`, and let the rest fall through.
+
+**An action needs a role that promises one** — `button`, `option`,
+`treeitem`, `checkbox` — _or_ your `a11ySceneAction`, which is the same
+promise made directly. A `listitem` with neither is read, not clicked, the
+same as everywhere else in ARIA.
+
+**`a11yScene()` is called once per question**, so answer from what you
+already hold. It is the same rule `a11yTextState()` follows, for the same
+reason: a shaping pass or a copy of your model behind it turns a screen
+reader walking the tree into a frame budget.
+
+Assertable with no bus and no desktop, through the same spy:
+`renderX11(el, { a11y: true })` records an item's states changing exactly as
+it records a `<Checkbox>`'s, and `test/a11y-scene.test.js` is a worked graph
+pane. The wire itself — children, extents, actions — is covered in
+`test/atspi.test.js`.
+
 ### The standard edit menu
 
 A `<textinput>` gets a right-click Undo / Cut / Copy / Paste / Select All
@@ -1047,6 +1139,10 @@ And one place `paintDamage()` does not belong: inside `paintCached`
 its own coordinates, and a copy culled against the window's damage is stored
 half-drawn under a key that says it is whole — so every later frame that hits
 the key gets the hole.
+
+The same scene has a second one-node problem, in the accessible tree rather
+than in the frame: see [A scene a screen reader can
+walk](#a-scene-a-screen-reader-can-walk).
 
 Worth it because the numbers are not small. `@react-x11/components`' `<Flow>`
 on a 300-node / 745-edge scene at 1100×700 costs ~2470 X requests and ~150 ms

@@ -52,6 +52,7 @@ import {
   a11yStates,
   a11yValue,
   a11yParent,
+  sceneChildrenOf,
   hasTextInterface,
   textStateOf,
   inPreedit,
@@ -343,6 +344,10 @@ export class A11ySpy {
     if (node.destroyed || CONTENT_KINDS.has(node.kind)) return;
     if (!this._snapshots.has(node)) this._resnapshot(node);
     for (const child of node.children ?? []) this._snapshotTree(child);
+    // what an element drew is baselined with everything else, or the first
+    // thing that happens to an item — the selection landing on it — reads
+    // as a mount and says nothing
+    for (const item of sceneChildrenOf(node)) this._snapshotTree(item);
   }
 
   /**
@@ -460,6 +465,12 @@ export class A11ySpy {
         });
       }
     }
+
+    // An element that draws its own children reports them through the one
+    // notification it makes about itself (#304), so they are diffed here
+    // rather than through a feed of their own — a scene item is a node to
+    // everything above.
+    for (const item of sceneChildrenOf(node)) this._diffNode(item);
   }
 }
 

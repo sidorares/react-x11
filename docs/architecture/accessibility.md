@@ -189,6 +189,10 @@ The accessible tree is the node tree through three rules:
   is _boring_ rather than noisy. Everything with real semantics defaults to
   them (window→FRAME, text→LABEL, textinput→ENTRY, image→IMAGE, …).
 
+…plus a fourth source of children that is not in the node tree at all: what
+a registered element says it drew (§8b), appended after whatever it holds
+retained.
+
 Two structural notes. `<popup>`s stay **nested**: a popup's `parent` is the
 JSX node it was written under, so a menu appears inside the widget that
 opened it — GTK4 does the same with popovers, and it preserves context that
@@ -318,6 +322,59 @@ Deliberately not in the seam: per-character extents (they need a layout
 only the element has; the fallback is the element's own rect, which is
 honest and keeps a magnifier tracking something real) and AT-driven
 copy/paste, which stay the built-ins' clipboard round trip.
+
+## 8b. Structure from elements core did not write (#304)
+
+The same gap one level up. An element that _draws_ N interactive things is
+one node and therefore one accessible — a graph pane reads as "group" with
+nothing inside — and unlike the text case there is no prop that could have
+said otherwise, because the objects an AT needs do not exist anywhere.
+`a11yScene()` is the pull that produces them: `[{ id, rect, role, name,
+states, props, children }]`, with `Node.notifyA11ySceneChanged()` as the
+push, routed through the existing `hooks.propsChanged` slot because
+"re-read this node's accessible facts and announce the difference" is
+exactly what that slot already means.
+
+Four decisions, in the order they bite:
+
+- **Objects, not descriptors.** Everything else here is answered from the
+  live tree (§4), and a scene has no live tree to answer from — the
+  element rebuilds its description every frame. So a11y.js reconciles the
+  frame's descriptions against the last frame's by `id` and returns the
+  _same_ objects where the id survived. That is what an export can be keyed
+  on: paths, snapshots and every ref an AT is holding stay valid across a
+  scene rebuilt sixty times a second, and an id that disappears is marked
+  defunct rather than forgotten, so the bridge can still walk what it is
+  losing. Identity is the one thing core cannot derive, which is why `id`
+  is the only required field besides the rect.
+- **A scene item is read by the model, not beside it.** It carries `props`
+  in the same `role`/`aria-*` vocabulary and an `abs` rect in the same
+  window coordinates, so `atspiRoleOf`, `a11yName`, `a11yStates`,
+  `a11yAttributes`, the extents, the cache items, the snapshot diff and the
+  test spy are all the code that already existed — the same "no second
+  model" rule §8a's normalizer follows. The friendly `states: { selected,
+checked, expanded, disabled, busy }` is a table of five entries into
+  those props; `focused` is the exception, because element-internal focus
+  never reaches a window's focus manager and there is no ARIA spelling for
+  it.
+- **Actions fall back rather than fail.** `a11ySceneAction(id, action)`
+  claims with `true`; anything else takes core's answer — for `activate`, a
+  synthetic click through the ordinary dispatch at the item's own rect. An
+  element hit-tests its scene already, so that is not an approximation of
+  the user's click, it _is_ it. A single multiplexed hook (rather than one
+  method per action) is what makes claiming `focus` and leaving `activate`
+  to core the default reading of the code rather than a trap.
+- **An action is offered where one lands.** The role table decides as it
+  does everywhere else, plus: an element that implements the seam makes
+  every item it drew activatable, because implementing it is the same
+  promise a handler is — and the roles a scene reaches for (`listitem` for
+  a graph node) are mostly ones ARIA promises nothing about.
+
+Deferred with it: hit testing descends into items (`GetAccessibleAtPoint`
+answers with the item under the point, which is what a magnifier following
+the pointer needs), but the **testing queries** still walk retained nodes
+only, so `getByRole` cannot find a drawn item — the same shape as #260,
+and it wants that issue's answer rather than a second one here.
 
 ## 9. Testing
 

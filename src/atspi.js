@@ -45,6 +45,8 @@ import {
   a11yChildren,
   a11yParent,
   a11yIndexIn,
+  sceneChildrenOf,
+  knownSceneItems,
   a11yName,
   a11yDescription,
   a11yStates,
@@ -459,6 +461,22 @@ const AccessibleImpl = {
   },
 };
 
+/** The innermost scene item covering a window-coordinate point, or the node
+ * itself. Last one wins: items are declared in the order they were drawn,
+ * so the one on top is the one the user sees. */
+function deepestItemAt(node, x, y) {
+  let found = node;
+  for (const item of sceneChildrenOf(node)) {
+    if (item.destroyed || a11yPruned(item)) continue;
+    const r = item.abs;
+    if (x < r.x || y < r.y || x >= r.x + r.width || y >= r.y + r.height) {
+      continue;
+    }
+    found = deepestItemAt(item, x, y);
+  }
+  return found;
+}
+
 const ComponentImpl = {
   Contains(x, y) {
     const r = this.b.extentsOf(this.n, COORD_SCREEN);
@@ -477,6 +495,10 @@ const ComponentImpl = {
     }
     let hit = win.hitTest?.(wx, wy) ?? null;
     while (hit && (a11yErased(hit) || a11yPruned(hit))) hit = hit.parent;
+    // Hit testing stops at the retained tree, so an element that draws a
+    // scene answers with itself; the item under the point is what a
+    // magnifier following the pointer is actually over.
+    if (hit) hit = deepestItemAt(hit, wx, wy);
     return hit ? this.b.refFor(hit) : this.b.nullRef();
   },
   GetExtents(coordType) {
@@ -496,20 +518,23 @@ const ComponentImpl = {
     return LAYER_WIDGET;
   },
   GrabFocus() {
-    if (typeof this.n.focus !== 'function') return false;
-    this.n.focus();
-    return true;
+    return this.b.grabFocus(this.n);
   },
   GetAlpha() {
     return 1.0;
   },
   ScrollTo() {
+    if (this.b.sceneAction(this.n, 'scroll')) return true;
+    // A scene item has no layout of its own, so the most core can reveal is
+    // the element that drew it — an element that can do better says so
+    // through the action above.
+    const target = this.n.a11yOwner ?? this.n;
     // `isScroller()`, not "has the method": every `<box>` carries
     // `scrollIntoView` now, and one that is not a scroll container would end
     // the walk having revealed nothing
-    for (let p = this.n.parent; p; p = p.parent) {
+    for (let p = target.parent; p; p = p.parent) {
       if (p.isScroller?.()) {
-        p.scrollIntoView(this.n);
+        p.scrollIntoView(target);
         return true;
       }
     }
@@ -855,6 +880,9 @@ class AtspiBridge {
       value: a11yValue(node)?.now ?? null,
       ifaces: this.exported.get(node)?.ifaces ?? [],
       text: null,
+      // the drawn children, which arrive and leave without a mount to
+      // notice them; the shared empty list for everything that draws none
+      scene: sceneChildrenOf(node),
     };
     if (hasTextInterface(node)) {
       const { chars, caret, selection, preedit } = textStateOf(node);
@@ -949,14 +977,50 @@ class AtspiBridge {
 
   // ---- AT-initiated behaviour -----------------------------------------
 
+  /**
+   * Offer an action on a scene item to the element that drew it. `true`
+   * means the element handled it; anything else — including not
+   * implementing the seam — falls through to core's default, which is why
+   * an element may answer only the actions it has an answer for.
+   */
+  sceneAction(node, action) {
+    const owner = node.a11yOwner;
+    if (!owner || owner.destroyed) return false;
+    return owner.a11ySceneAction?.(node.a11yId, action) === true;
+  }
+
+  /** GrabFocus. An element owns the keyboard among the items it drew — the
+   * window's focus manager only ever holds the element — so the item asks
+   * it first and otherwise focuses the element itself, which is where the
+   * keys that move between items go anyway. */
+  grabFocus(node) {
+    if (this.sceneAction(node, 'focus')) return true;
+    const target = node.a11yOwner ?? node;
+    if (typeof target.focus !== 'function') return false;
+    target.focus();
+    return true;
+  }
+
   /** DoAction("activate"): a synthetic click through the same dispatch a
    * real press uses — capture, bubble, default actions, discrete-priority
    * commit and paint — so an AT's activation is indistinguishable from the
-   * user's. */
+   * user's. On a scene item it is the click a mouse user would make on
+   * what was drawn there: the element hit-tests its own scene already, so
+   * the item's rect is the whole address, and an element whose activation
+   * is not a click says so through `a11ySceneAction`. */
   activate(node) {
+    if (node.a11yOwner) {
+      if (this.sceneAction(node, 'activate')) return true;
+      if (node.destroyed) return false;
+      return this._click(node.a11yOwner, node.abs);
+    }
+    return this._click(node, node.abs);
+  }
+
+  _click(node, rect) {
     const manager = node.root?.events;
     if (!manager || node.destroyed) return false;
-    const abs = node.abs ?? { x: 0, y: 0, width: 0, height: 0 };
+    const abs = rect ?? { x: 0, y: 0, width: 0, height: 0 };
     const native = {
       x: Math.round(abs.x + abs.width / 2),
       y: Math.round(abs.y + abs.height / 2),
@@ -1224,10 +1288,13 @@ class AtspiBridge {
       const wasExported = this.exported.has(child);
       const childPath = this.pathOf(child);
       const childRef = [this.bus.name, childPath];
-      // unexport the whole subtree the AT may hold refs into; each exported
-      // node also tells the client caches it is gone
+      // unexport the whole subtree the AT may hold refs into — the drawn
+      // children included, read from what the element last said rather than
+      // by asking one that is being torn down; each exported node also
+      // tells the client caches it is gone
       const walk = (n) => {
         for (const c of n.children ?? []) walk(c);
+        for (const item of knownSceneItems(n)) walk(item);
         this._unexport(n);
       };
       walk(child);
@@ -1369,6 +1436,59 @@ class AtspiBridge {
       }
     }
     if (before.text && now.text) this._diffText(node, before.text, now.text);
+    if (before.scene.length > 0 || now.scene.length > 0) {
+      this._diffScene(node, before.scene, now.scene);
+    }
+  }
+
+  /**
+   * The items an element drew, as children arriving and leaving. Identity
+   * is the element's own id, resolved in a11y.js, so a scene rebuilt every
+   * frame produces events only where something actually changed — and a
+   * surviving item is re-diffed through `syncNode`, the same path a
+   * `<box>`'s props take, which is what gets its name and its selected
+   * state onto the bus without a second diff living here.
+   */
+  _diffScene(parent, before, now) {
+    const kept = new Set(now);
+    for (const item of before) {
+      if (kept.has(item)) continue;
+      if (!this.exported.has(item)) continue;
+      const ref = [this.bus.name, this.pathOf(item)];
+      const walk = (n) => {
+        for (const c of n.children ?? []) walk(c);
+        this._unexport(n);
+      };
+      walk(item);
+      this._signal(
+        this.pathOf(parent),
+        IFACE.EVENT_OBJECT,
+        'ChildrenChanged',
+        'remove',
+        // where it was: the retained children it sat behind, then its own
+        // place in the scene it has just left
+        a11yChildren(parent).length - now.length + before.indexOf(item),
+        0,
+        ['(so)', ref],
+      );
+    }
+    const gone = new Set(before);
+    for (const item of now) {
+      if (gone.has(item)) {
+        this.syncNode(item);
+        continue;
+      }
+      this.emitCacheAdd(item);
+      this._signal(
+        this.pathOf(parent),
+        IFACE.EVENT_OBJECT,
+        'ChildrenChanged',
+        'add',
+        a11yIndexIn(parent, item),
+        0,
+        ['(so)', this.refFor(item)],
+      );
+    }
   }
 
   syncText(node) {

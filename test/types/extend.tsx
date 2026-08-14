@@ -21,6 +21,8 @@ import {
   CARET_BLINK_MS,
 } from '../../src/node.js';
 import type {
+  A11ySceneAction,
+  A11ySceneItem,
   A11yTextState,
   MeasureConstraints,
   TextStyle,
@@ -524,3 +526,59 @@ class LogViewNode extends Node {
 }
 
 void LogViewNode;
+
+// An element that draws a scene (#304): what it painted, as accessible
+// children, and the actions an assistive technology sends back.
+class GraphPaneNode extends Node {
+  private selected: string | null = null;
+  private cursor: string | null = null;
+
+  constructor(props: Record<string, unknown>, app: never) {
+    super('graphpane', props, app);
+    this.focusableByDefault = true;
+  }
+
+  private items(): Array<{ id: string; label: string; ports: string[] }> {
+    return (this.props.nodes ?? []) as Array<{
+      id: string;
+      label: string;
+      ports: string[];
+    }>;
+  }
+
+  a11yScene(): A11ySceneItem[] {
+    return this.items().map((node, i) => ({
+      id: node.id,
+      role: 'listitem',
+      name: node.label,
+      rect: { x: this.abs.x, y: this.abs.y + i * 24, width: 120, height: 24 },
+      states: {
+        selected: this.selected === node.id,
+        focused: this.cursor === node.id,
+      },
+      props: { 'aria-posinset': i + 1, 'aria-setsize': this.items().length },
+      children: node.ports.map((port) => ({
+        id: port,
+        role: 'option',
+        name: port,
+        rect: { x: this.abs.x, y: this.abs.y + i * 24, width: 12, height: 12 },
+      })),
+    }));
+  }
+
+  a11ySceneAction(id: string, action: A11ySceneAction): boolean {
+    if (action === 'focus') {
+      this.cursor = id;
+      this.notifyA11ySceneChanged();
+      return true;
+    }
+    return false; // activate and scroll keep core's answer
+  }
+
+  select(id: string): void {
+    this.selected = id;
+    this.notifyA11ySceneChanged();
+  }
+}
+
+void GraphPaneNode;

@@ -2236,6 +2236,23 @@ export class Node {
     a11yHooks.textState?.(this);
   }
 
+  /**
+   * The scene this element reports through `a11yScene()` has changed — an
+   * item added or removed, one selected, the element's own cursor moved
+   * onto another one (#304). The children an assistive technology is
+   * holding are re-read and the difference announced.
+   *
+   * A scene that is a function of the props needs no call: a commit already
+   * re-reads it. This is for everything the element does on its own —
+   * a drag, an animation, its own arrow keys.
+   *
+   * Free when nobody is listening, the same one property read
+   * `notifyA11yTextChanged()` costs.
+   */
+  notifyA11ySceneChanged() {
+    a11yHooks.propsChanged?.(this);
+  }
+
   /** Where focus for this node lives: its own window's EventManager, or —
    * inside a `<popup>`, which never receives the X input focus — the owner
    * window's (see EventManager.focusManager). */

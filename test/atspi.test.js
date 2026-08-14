@@ -40,13 +40,21 @@ const EDITABLE = 'org.a11y.atspi.EditableText';
 const VALUE = 'org.a11y.atspi.Value';
 const PROPERTIES = 'org.freedesktop.DBus.Properties';
 
-const ROLE = { APPLICATION: 75, FRAME: 23, BUTTON: 43, ENTRY: 79, LABEL: 29 };
+const ROLE = {
+  APPLICATION: 75,
+  FRAME: 23,
+  BUTTON: 43,
+  ENTRY: 79,
+  LABEL: 29,
+  LIST_ITEM: 32,
+};
 const STATE = {
   CHECKED: 4,
   EDITABLE: 7,
   ENABLED: 8,
   FOCUSABLE: 11,
   FOCUSED: 12,
+  SELECTED: 23,
 };
 const hasState = ([lo, hi], bit) =>
   bit < 32 ? Boolean(lo & (1 << bit)) : Boolean(hi & (1 << (bit - 32)));
@@ -817,6 +825,224 @@ describe('the AT-SPI bridge', { concurrency: 1, ...needsBroker }, () => {
     unregisterElement('minieditor');
     unregisterElement('minidoc');
     unregisterElement('miniown');
+  });
+
+  test('a drawn scene is children an AT can walk, name and act on', async () => {
+    // #304: an element that paints N interactive things is one accessible
+    // to the bridge and therefore one object to Orca — "group", nothing
+    // inside. What it says it drew has to arrive as real children, with
+    // rectangles, states, and actions that reach the element.
+    const { registerElement, unregisterElement } =
+      await import('../src/host.js');
+    const { Node } = await import('../src/node.js');
+
+    const clicks = [];
+    const routed = [];
+    let graphNode = null;
+
+    class MiniGraphNode extends Node {
+      constructor(props, app, kind = 'minigraph') {
+        super(kind, props, app);
+        this.focusableByDefault = true;
+        this.selected = null;
+      }
+      a11yScene() {
+        return (this.props.nodes ?? []).map((node, i) => ({
+          id: node.id,
+          role: this.props.itemRole ?? 'button',
+          name: node.label,
+          rect: {
+            x: this.abs.x + 8,
+            y: this.abs.y + 8 + i * 30,
+            width: 120,
+            height: 24,
+          },
+          states: { selected: this.selected === node.id },
+        }));
+      }
+      select(id) {
+        this.selected = id;
+        this.notifyA11ySceneChanged();
+      }
+    }
+
+    /** The other half of the seam: an element that answers for itself. */
+    class MiniChartNode extends MiniGraphNode {
+      constructor(props, app) {
+        super(props, app, 'minichart');
+      }
+      a11ySceneAction(id, action) {
+        routed.push([id, action]);
+        return true;
+      }
+    }
+
+    registerElement('minigraph', {
+      create: (props, app) => (graphNode = new MiniGraphNode(props, app)),
+      semanticNames: ['nodes', 'itemRole'],
+      childrenAllowed: false,
+    });
+    registerElement('minichart', {
+      create: (props, app) => new MiniChartNode(props, app),
+      semanticNames: ['nodes', 'itemRole'],
+      childrenAllowed: false,
+    });
+
+    const nodes = [
+      { id: 'fetch', label: 'Fetch' },
+      { id: 'parse', label: 'Parse' },
+    ];
+    const graph = (props) =>
+      h(
+        'window',
+        { title: 'Bridge Test', width: 320, height: 200 },
+        h('minigraph', {
+          nodes,
+          onClick: (ev) => clicks.push([ev.x, ev.y]),
+          style: { width: 200, height: 100 },
+          ...props,
+        }),
+        h('minichart', {
+          nodes,
+          // a role ARIA promises no activation for: the element answering
+          // actions is what makes these activatable anyway
+          itemRole: 'listitem',
+          style: { width: 200, height: 100 },
+        }),
+      );
+    x11Root.render(graph());
+    await settle();
+
+    const [graphRef, chartRef] = await call(
+      appBus,
+      framePath,
+      ACCESSIBLE,
+      'GetChildren',
+    );
+    const graphPath = graphRef[1];
+    const items = await call(appBus, graphPath, ACCESSIBLE, 'GetChildren');
+    assert.equal(items.length, 2, 'one accessible per drawn node');
+    const [fetchPath, parsePath] = items.map((ref) => ref[1]);
+
+    assert.equal(
+      await call(appBus, fetchPath, ACCESSIBLE, 'GetRole'),
+      ROLE.BUTTON,
+    );
+    assert.equal(
+      await getProp(appBus, parsePath, ACCESSIBLE, 'Name'),
+      'Parse',
+      'named, where the element was one nameless group',
+    );
+    assert.equal(
+      await call(appBus, parsePath, ACCESSIBLE, 'GetIndexInParent'),
+      1,
+    );
+    assert.deepEqual(
+      await getProp(appBus, parsePath, ACCESSIBLE, 'Parent'),
+      [appBus, graphPath],
+      'the element is the parent an AT walks back up to',
+    );
+
+    // a rectangle is what focus is drawn around and what a magnifier tracks
+    const extents = await call(
+      appBus,
+      parsePath,
+      COMPONENT,
+      'GetExtents',
+      'u',
+      [1],
+    );
+    assert.deepEqual(extents.slice(2), [120, 24]);
+    // …and the point inside it answers with the item, not with the element
+    const atPoint = await call(
+      appBus,
+      graphPath,
+      COMPONENT,
+      'GetAccessibleAtPoint',
+      'iiu',
+      [extents[0] + 4, extents[1] + 4, 1],
+    );
+    assert.deepEqual(atPoint, [appBus, parsePath]);
+
+    // activating one is the click a mouse user would make on it, at the
+    // rect the element drew — the element hit-tests its own scene already
+    assert.equal(
+      await call(appBus, parsePath, ACTION, 'DoAction', 'i', [0]),
+      true,
+    );
+    await until(() => clicks.length === 1, 'the click at the item');
+    const [x, y] = clicks[0];
+    assert.ok(
+      x >= extents[0] && x < extents[0] + 120,
+      'inside the item horizontally',
+    );
+    assert.ok(y >= extents[1] && y < extents[1] + 24, 'and vertically');
+
+    // a scene the element changes on its own reaches the bus as that child
+    // changing, not as the pane being rebuilt
+    signals.length = 0;
+    graphNode.select('parse');
+    await until(
+      () =>
+        eventsNamed('StateChanged').some(
+          (s) => s.path === parsePath && s.body[0] === 'selected',
+        ),
+      'the selection as a state change on the item',
+    );
+    assert.ok(
+      hasState(
+        await call(appBus, parsePath, ACCESSIBLE, 'GetState'),
+        STATE.SELECTED,
+      ),
+    );
+
+    // an item that leaves is a child removed, and its path goes with it
+    signals.length = 0;
+    x11Root.render(graph({ nodes: [nodes[0]] }));
+    await settle();
+    await until(
+      () =>
+        eventsNamed('ChildrenChanged').some(
+          (s) => s.path === graphPath && s.body[0] === 'remove',
+        ),
+      'the child removal',
+    );
+    await until(async () => {
+      try {
+        await call(appBus, parsePath, ACCESSIBLE, 'GetRole');
+        return false;
+      } catch {
+        return true; // the path went with it
+      }
+    }, 'the departed item to be unexported');
+    assert.equal(
+      (await call(appBus, graphPath, ACCESSIBLE, 'GetChildren')).length,
+      1,
+    );
+
+    // …and an element with an answer of its own is the one that acts
+    const chartItems = await call(
+      appBus,
+      chartRef[1],
+      ACCESSIBLE,
+      'GetChildren',
+    );
+    assert.equal(
+      await call(appBus, chartItems[1][1], ACTION, 'DoAction', 'i', [0]),
+      true,
+    );
+    assert.equal(
+      await call(appBus, chartItems[0][1], COMPONENT, 'GrabFocus'),
+      true,
+    );
+    assert.deepEqual(routed, [
+      ['parse', 'activate'],
+      ['fetch', 'focus'],
+    ]);
+    assert.equal(clicks.length, 1, 'and core did not click as well');
+
+    unregisterElement('minigraph');
+    unregisterElement('minichart');
   });
 
   test('unmounting removes the tree and tells the cache', async () => {
