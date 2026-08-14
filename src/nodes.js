@@ -58,6 +58,11 @@ import {
 } from './compositing.js';
 import { availableArea } from './screens.js';
 import {
+  DEFAULTS as DESKTOP_DEFAULTS,
+  desktopSettings,
+} from './desktopsettings.js';
+import { endWindowState } from './windowstate.js';
+import {
   anchorArea,
   anchorOffscreen,
   anchorRect,
@@ -4784,16 +4789,22 @@ const SCROLL_KEY_PAGE_OVERLAP = 24;
 const UNDO_LIMIT = 200;
 
 /**
- * How long a caret stays in each of its two states, in milliseconds. GTK,
- * Qt and Windows all land within a few tens of milliseconds of this, and a
- * blink that is out of step with the rest of the desktop is noticed even
- * when the number cannot be named.
+ * How long a caret stays in each of its two states, in milliseconds, on a
+ * desktop that did not say.
+ *
+ * A desktop that *did* say — `Net/CursorBlinkTime`, and `Net/CursorBlink: 0`
+ * for "do not blink at all" — is read through `desktopSettings(app)` at the
+ * moment a field takes focus. This is the floor under that, and what a
+ * connection with no settings daemon uses; it lives in `desktopsettings.js`
+ * beside the rest of them so there is one number rather than two.
  *
  * Exported from `react-x11/node` because an element that edits text draws
  * its own caret and would otherwise hardcode a second cadence — two carets
- * on one screen blinking against each other (issue #251).
+ * on one screen blinking against each other (issue #251). An element with a
+ * live connection to hand should prefer `useDesktopSettings().caretBlinkMs`,
+ * which is this value already reconciled with the desktop.
  */
-export const CARET_BLINK_MS = 530;
+export const CARET_BLINK_MS = DESKTOP_DEFAULTS.caretBlinkMs;
 
 // --- the standard edit menu ------------------------------------------------
 //
@@ -5996,13 +6007,23 @@ export class TextInputNode extends Node {
   defaultFocus() {
     this._focused = true;
     this._caretOn = true;
-    this._blinkTimer = setInterval(() => {
-      this._caretOn = !this._caretOn;
-      // twice a second, forever, for as long as a field has focus: the one
-      // repaint that most wants to cost only the field it happens in
-      this.root?.invalidate(false, this, 'caret');
-    }, CARET_BLINK_MS);
-    this._blinkTimer.unref?.();
+    // The desktop's cadence, read at focus rather than at import: XSETTINGS
+    // is started but not awaited by createRoot, so this is the first moment
+    // it is reliably in — and a field focused before that gets the default
+    // and the desktop's answer from the next focus on.
+    const { caretBlink, caretBlinkMs } = desktopSettings(this.root?.app);
+    // `Net/CursorBlink: 0` is an accessibility setting, not a preference: a
+    // solid caret is still a caret, so the field draws one and never arms a
+    // timer for it.
+    if (caretBlink) {
+      this._blinkTimer = setInterval(() => {
+        this._caretOn = !this._caretOn;
+        // twice a second, forever, for as long as a field has focus: the one
+        // repaint that most wants to cost only the field it happens in
+        this.root?.invalidate(false, this, 'caret');
+      }, caretBlinkMs);
+      this._blinkTimer.unref?.();
+    }
     this.root?.invalidate(false, this, 'focus');
   }
 
@@ -7943,6 +7964,9 @@ export class WindowNode extends Scrollable(Node) {
     clearPendingFrame(this);
     this._unwatchCompositing?.();
     this._unwatchCompositing = null;
+    // `useWindowState()`'s listeners, and the raw VisibilityNotify handler
+    // it put on the shared connection, which nothing else would take off
+    endWindowState(this);
     // Before the owner's next layout pass, which is this same commit: a
     // popup that has gone still holds a subscription to the window it was
     // anchored to, and answering that notification would configure a dead

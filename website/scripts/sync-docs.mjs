@@ -192,6 +192,7 @@ const ORDER = [
   'uri-schemes.md',
   'filedialog.md',
   'appearance.md',
+  'system.md',
   'remote.md',
   'security.md',
   'packaging.md',

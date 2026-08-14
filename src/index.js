@@ -37,6 +37,14 @@ export {
 export { useFileDialog } from './filedialoghooks.js';
 export { systemAppearance } from './appearance.js';
 export { useSystemAppearance } from './appearancehooks.js';
+export { useScreens } from './screenshooks.js';
+export { useWindowState } from './windowstate.js';
+export { keepAwake } from './idle.js';
+export { useIdle, useKeepAwake } from './idlehooks.js';
+export { useKeyboardState } from './keyboardstatehooks.js';
+export { useDesktopSettings } from './desktopsettingshooks.js';
+export { systemLocale } from './locale.js';
+export { useLocale } from './localehooks.js';
 export {
   useDropTarget,
   useDragSource,

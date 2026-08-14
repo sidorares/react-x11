@@ -25,6 +25,7 @@ import {
   ContinuousEventPriority,
 } from './priority.js';
 import { callHandler, reportHandlerError } from './errors.js';
+import { desktopSettings } from './desktopsettings.js';
 import { discrete } from './events.js';
 import {
   TEXT_TARGETS,
@@ -1067,8 +1068,12 @@ export class DropSession {
 // transports apart except by asking.
 // ---------------------------------------------------------------------------
 
-/** DOM-ish drag threshold: a press is a click until it moves this far. */
-const DRAG_THRESHOLD = 4;
+// How far a press moves before it is a drag rather than a click lives in
+// `desktopsettings.js`: it is `Net/DndDragThreshold` where the desktop
+// published one, and this renderer's own 4px where it did not. A drag that
+// starts sooner here than in every other application is a drag people begin
+// by accident.
+
 /** How long to wait for a target's XdndFinished before ending the drag
  * anyway — the mirror of the drop side's watchdog. */
 const FINISH_TIMEOUT = 5_000;
@@ -1213,7 +1218,7 @@ export class DragSession {
     if (this.phase === 'armed') {
       const moved =
         Math.abs(native.x - this.press.x) + Math.abs(native.y - this.press.y);
-      if (moved < DRAG_THRESHOLD) return false;
+      if (moved < desktopSettings(this.app).dragThreshold) return false;
       if (!this._start(native)) return false;
     }
     if (this.phase !== 'dragging') return false;

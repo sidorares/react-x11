@@ -21,6 +21,7 @@ export * from './types/dbus.js';
 export * from './types/application.js';
 export * from './types/filedialog.js';
 export * from './types/appearance.js';
+export * from './types/system.js';
 
 /**
  * The XID of the X11 window a ref points at, or `null` if there is not one

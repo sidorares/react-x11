@@ -249,6 +249,14 @@ describe('the XSETTINGS payload', () => {
         X.InternAtom(false, name, (e, a) => (e ? rej(e) : res(a))),
       );
 
+    // `createRoot` starts XSETTINGS itself now (the interaction settings the
+    // caret and the drag threshold read), and `beginXSettings` is memoized
+    // per connection — so the session that already exists latched onto a
+    // display with no daemon on it. Take it down before standing one up: on
+    // a real server XFixes would re-latch when the selection changed hands,
+    // and the in-process server has no XFixes.
+    endXSettings(app);
+
     // A settings daemon, in miniature: a window that owns the selection and
     // carries the property.
     const manager = X.AllocID();
@@ -295,6 +303,9 @@ describe('the XSETTINGS payload', () => {
     const { app } = await renderX11(React.createElement('box'), {
       fonts: FONTS,
     });
+    // …and here so that the null being asserted is this call's answer rather
+    // than the one `createRoot` already got.
+    endXSettings(app);
     await beginXSettings(app);
     assert.equal(xsettings(app), null);
     endXSettings(app);

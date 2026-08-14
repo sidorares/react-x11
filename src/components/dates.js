@@ -195,27 +195,12 @@ function formatter(locale, options) {
   return f;
 }
 
-/**
- * Which day the week starts on for a locale: `0` Sunday … `6` Saturday.
- *
- * The runtime knows this — CLDR carries it — but only through
- * `Intl.Locale#getWeekInfo`, which is recent enough that a small-ICU build or
- * an older V8 has neither it nor the `weekInfo` property it was proposed as.
- * So it is feature-detected, and what is left when it is missing is **Monday**:
- * ISO 8601's answer, and the one most of the world uses.
- */
-export function localeWeekStart(locale) {
-  try {
-    const info = new Intl.Locale(locale ?? undefined);
-    const week = info.getWeekInfo?.() ?? info.weekInfo;
-    // CLDR counts 1 Monday … 7 Sunday; JS counts 0 Sunday … 6 Saturday
-    if (week?.firstDay) return week.firstDay % 7;
-  } catch {
-    // an invalid locale tag: the caller's formatters will complain about it
-    // more usefully than a week-start fallback could
-  }
-  return 1;
-}
+// Which day the week starts on lives in `locale.js` now, beside the rest of
+// what a locale decides — `useLocale()` reports the same number, and a
+// calendar and the app around it disagreeing about when the week starts is
+// exactly the bug two copies of this would produce. Re-exported because
+// `Calendar` has always imported it from here.
+export { localeWeekStart } from '../locale.js';
 
 /** `['Mon', 'Tue', …]` in the locale, rotated to start on `weekStartsOn`. */
 export function weekdayLabels(locale, weekStartsOn = 1) {

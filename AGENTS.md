@@ -1155,6 +1155,25 @@ keysym even where XQuartz's keymap rewrite has left no Latin group
 (docs/events.md "Layouts"). One open issue left from that pair: **#86**
 `sans-serif` resolves to a CJK font on macOS.
 
+The **system hooks** are in ([docs/system.md](docs/system.md)): `useScreens()`
+(Xinerama for the geometry during `createRoot`, a RandR walk behind it for
+names/primary/mm/refresh), `useWindowState()` (`_NET_WM_STATE` via ntk's
+`statechange`, VisibilityNotify, focus), `useIdle()`/`useKeepAwake()` (SYNC
+`IDLETIME` alarms, no polling, with MIT-SCREEN-SAVER under them),
+`useKeyboardState()` (XKB `StateNotify` — Caps Lock before the first
+keystroke, which `PasswordInput` wanted), `useDesktopSettings()` and
+`useLocale()`. The last one is not only a hook: **the caret cadence, the
+double-click window and the drag threshold were four hardcoded constants and
+now come off XSETTINGS**, so `Net/CursorBlink: 0` — an accessibility setting —
+finally stops the caret blinking. Worth knowing when working here: the
+in-process test server has RENDER, BIG-REQUESTS and XC-MISC and _none_ of
+those extensions, so the reply decoders are tested as pure functions and the
+stores through their `set*ForTests` seams — the end-to-end walks only happen
+against a real display. Three bugs in this work were only visible there
+(`available` leaking a whole monitor record, XQuartz's synthetic 1 Hz mode,
+and its literal `empty` XKB layout); `scripts/` has no probe for it, so run
+one by hand against `$DISPLAY` before believing a protocol path.
+
 ## Pull requests
 
 - When a PR contains changes that can be detected by eye (rendering,
