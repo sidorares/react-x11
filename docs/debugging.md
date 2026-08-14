@@ -131,6 +131,11 @@ plain path on the same build, and as first aid if a scroll ever
 misrenders. Read once at startup, like the switches above, and like them
 it answers only to `1` — any other value leaves the blit on.
 
+It covers the element-owned form of the same shift as well —
+[`scrollContents`](extending.md#panning-a-scene-you-drew), which a pane
+that pans a scene it drew itself calls — so a scene that misrenders while
+panning is one variable away from being told apart from one that misdraws.
+
 ## `REACT_X11_NO_TRANSPARENCY=1`
 
 Makes every display answer the way one with no 32-bit visual does:

@@ -346,6 +346,7 @@ registerElement('miniticker', {
 class FlowNode extends Node {
   private zoom = 1;
   private hovered: string | null = null;
+  private dragFrom: { x: number; y: number } | null = null;
 
   constructor(props: Record<string, unknown>, app: never) {
     super('flow', props, app);
@@ -370,6 +371,19 @@ class FlowNode extends Node {
   defaultMouseLeave(_ev: MouseEvent): void {
     this.hovered = null;
     this.invalidate(false, this.abs, 'content');
+  }
+
+  // …and the pan (#303): the pixels moved, so the frame is a blit and a
+  // strip rather than a repaint of everything the drag translated
+  defaultMouseDrag(ev: MouseEvent): void {
+    const from = this.dragFrom ?? { x: ev.x, y: ev.y };
+    this.dragFrom = { x: ev.x, y: ev.y };
+    const armed: boolean = this.scrollContents(
+      this.contentBox(),
+      ev.x - from.x,
+      ev.y - from.y,
+    );
+    void armed;
   }
 
   paintContent(_ctx: unknown): void {

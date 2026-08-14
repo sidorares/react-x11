@@ -110,5 +110,13 @@
     "replies": 9,
     "composites": 133,
     "compositePixels": 75896
+  },
+  "scene: 5 pan steps over 374 cells in one node": {
+    "requests": 983,
+    "bytesOut": 177444,
+    "bytesIn": 320,
+    "replies": 10,
+    "composites": 606,
+    "compositePixels": 298517
   }
 }
