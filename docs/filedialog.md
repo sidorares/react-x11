@@ -204,8 +204,5 @@ See [dbus.md](dbus.md) for the connection these sit on.
 
 - `npm run examples:menu` — a File menu whose Open/Save entries are real, with
   the rung this machine landed on shown in the window.
-- `npm run examples:richtext` — "open a .md…" loads a real file into the
-  `<markdown>` element.
-
-Force the bottom rung anywhere with `backend: 'builtin'`, which is also how the
-tests exercise it.
+  Force the bottom rung anywhere with `backend: 'builtin'`, which is also how the
+  tests exercise it.

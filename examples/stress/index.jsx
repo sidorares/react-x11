@@ -11,7 +11,7 @@
 // and so change the very number it was reporting. See perf.js.
 //
 // Panels:
-//   Typography  every text style axis, plus <markdown>/<html>/<tex>
+//   Typography  every text style axis on the same paragraph
 //   Charts      SVG geometry recomputed from sliders
 //   Data        a windowed 50k-row table and a live ticker
 //   Controls    every component, in awkward nestings

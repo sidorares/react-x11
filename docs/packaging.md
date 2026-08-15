@@ -94,13 +94,14 @@ This did not work until recently, and the reason is worth keeping: Node's SEA
 evaluates the embedded main as **CommonJS** — there is no `package.json`
 inside the blob for it to consult, and the `.mjs` name has no effect on an
 embedded script — while the stack forced ESM, because esbuild will not emit
-CommonJS for a graph containing top-level await. The await was not ours:
-`yoga-layout`'s default entry is `const Yoga = wrapAssembly(await
-loadYoga())`, ntk imported it for `HtmlView`, and every app inherited it.
-**ntk 5** loads the layout engine through `yoga-layout/load` instead — enums
-synchronously, WebAssembly during `createClient()` — and react-x11 moved its
+CommonJS for a graph containing top-level await. The await came from the
+layout engine: `yoga-layout`'s default entry is
+`const Yoga = wrapAssembly(await loadYoga())`, and every app inherited it.
+`src/yoga.js` loads the engine through `yoga-layout/load` instead — enums
+synchronously, WebAssembly during `createRoot()` — and react-x11 moved its
 own three `await import()`s for DevTools, click-to-component and tracing out
-of module scope. Nothing in the graph has a top-level await now.
+of module scope. Nothing in the graph has a top-level await now, and
+`test/yoga.test.js` fails the build if an import puts one back.
 
 Verified: a bundle of react-x11, react, ntk and node-x11's in-process X
 server mounts a 40-row tree and paints it — 157 requests in 7 socket writes —

@@ -515,33 +515,6 @@ test('<canvas cacheKey> is opt-in, and caches when opted in', async () => {
   await app.close();
 });
 
-test('the same formula twice is one <tex> entry', async () => {
-  const app = await headlessApp();
-  const formula = (props) =>
-    React.createElement(
-      'window',
-      { width: W, height: H, style: { backgroundColor: '#ffffff' } },
-      ...Array.from({ length: 3 }, (_, i) =>
-        React.createElement('tex', {
-          key: i,
-          source: 'x^2',
-          style: { position: 'absolute', left: 4, top: i * 40 },
-          ...props,
-        }),
-      ),
-    );
-  const ctl = await mount(app, formula({}));
-  const cache = ctl.root._paintCache;
-  // TexBox memoizes its *layout* per node, so without this each of the three
-  // rasterized itself on every frame
-  assert.equal(cache.entries.size, 1, 'three copies, one rendered');
-
-  const renders = cache.stats.renders;
-  await repaint(app, ctl);
-  assert.equal(cache.stats.renders, renders, 'and a repaint re-renders none');
-  await app.close();
-});
-
 // --- a third-party element opts in ------------------------------------------
 //
 // The protocol lives on Node and the registry takes a Node subclass, so the

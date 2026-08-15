@@ -61,13 +61,8 @@ import {
   UNSUPPORTED_KINDS,
   createSceneNode,
 } from './scene3d.js';
-import {
-  MarkdownNode,
-  HtmlNode,
-  SvgNode,
-  SvgChildNode,
-  TexNode,
-} from './richnodes.js';
+import { SvgNode, SvgChildNode } from './svgnodes.js';
+import { loadLayout } from './yoga.js';
 
 // The renderer name and version DevTools shows. Read from package.json so
 // they cannot drift — but **guarded**, because a single-file bundle has no
@@ -97,10 +92,7 @@ export const HOST_TYPES = [
   'canvas',
   'textinput',
   'textarea',
-  'markdown',
-  'html',
   'svg',
-  'tex',
   'glarea',
   'foreign',
 ];
@@ -146,7 +138,6 @@ const HostConfig = {
     return {
       isInsideText: false,
       isInsideSvg: false,
-      isInsideRichText: false,
       isInside3d: false,
     };
   },
@@ -156,10 +147,6 @@ const HostConfig = {
       isInsideText: parentHostContext.isInsideText || type === 'text',
       // <svg> children are declarative SVG elements, not react-x11 nodes
       isInsideSvg: parentHostContext.isInsideSvg || type === 'svg',
-      // <markdown>/<html>/<tex> take their content as a string child
-      // (react-markdown style); no elements are allowed inside
-      isInsideRichText:
-        type === 'markdown' || type === 'html' || type === 'tex',
       // inside <glarea> the children are scene nodes, not drawn nodes
       isInside3d: parentHostContext.isInside3d || type === 'glarea',
     };
@@ -200,12 +187,6 @@ const HostConfig = {
       const node = new SvgChildNode(type, props, rootContainer);
       node._reactFiber = internalHandle;
       return node;
-    }
-    if (hostContext.isInsideRichText) {
-      throw new Error(
-        `react-x11: <${type}> is not allowed inside <markdown>/<html>/<tex>; ` +
-          'their content is a string child (or the source prop).',
-      );
     }
     if (hostContext.isInsideText && type !== 'text') {
       throw new Error(
@@ -286,17 +267,8 @@ const HostConfig = {
       case 'canvas':
         node = new CanvasNode(props, rootContainer);
         break;
-      case 'markdown':
-        node = new MarkdownNode(props, rootContainer);
-        break;
-      case 'html':
-        node = new HtmlNode(props, rootContainer);
-        break;
       case 'svg':
         node = new SvgNode(props, rootContainer);
-        break;
-      case 'tex':
-        node = new TexNode(props, rootContainer);
         break;
       case 'glarea':
         node = new GlAreaNode(props, rootContainer);
@@ -346,15 +318,10 @@ const HostConfig = {
   },
 
   createTextInstance(text, rootContainer, hostContext) {
-    if (
-      !hostContext.isInsideText &&
-      !hostContext.isInsideRichText &&
-      !hostContext.isInsideSvg
-    ) {
+    if (!hostContext.isInsideText && !hostContext.isInsideSvg) {
       throw new Error(
         `react-x11: raw text ${JSON.stringify(text)} must be wrapped in a ` +
-          '<text> element (or be the string child of <markdown>/<html>/' +
-          '<tex>/an SVG <text>).',
+          '<text> element (or be the string child of an SVG <text>).',
       );
     }
     return new TextChunkNode(text, rootContainer);
@@ -675,7 +642,16 @@ function watchConnection(app, onDisconnect, deliberate) {
  * Anything else ntk understands, build the client yourself and pass `app`.
  */
 export async function createRoot(options = {}) {
-  await loadIntegrations(); // null when there is nothing to install
+  // Before anything builds a node: every drawn node creates a yoga node in
+  // its constructor, and the engine's WebAssembly is loaded rather than
+  // imported (src/yoga.js — a top-level await here would cost every app the
+  // single-executable build). ntk's createClient used to do this while the
+  // engine was still ntk's, which also covered `createRoot({ app })`; it is
+  // ours now, so this is the one place that has to know. Concurrent with the
+  // connection rather than before it — both are I/O, neither needs the other.
+  const layout = loadLayout();
+  const integrations = loadIntegrations(); // null when there is nothing to install
+  await Promise.all([layout, integrations]);
   if (isNtkApp(options)) {
     throw new Error(
       'react-x11: createRoot takes an options object — pass the connection ' +

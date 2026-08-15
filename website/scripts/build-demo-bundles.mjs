@@ -22,9 +22,8 @@
 // choice rather than a constraint.
 //
 // Note the two things that are NOT stubbed out here but are in ntk's own
-// playground bundle: yoga-layout (react-x11's layout engine — react-x11
-// imports Yoga *from* ntk so renderer and widgets share one WASM instance)
-// and node-x11's GLX emulator.
+// playground bundle: yoga-layout (react-x11's own layout engine, reached
+// through `src/yoga.js`) and node-x11's GLX emulator.
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';

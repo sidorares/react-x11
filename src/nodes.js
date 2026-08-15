@@ -3,7 +3,6 @@
 // ntk's frame clock. Only <window> owns a real X11 window (see NEXT_STEPS.md
 // §4 for the rationale).
 import {
-  Yoga,
   applyLayoutStyle,
   applyLayoutDefaults,
   createLayoutNode,
@@ -38,6 +37,7 @@ import {
   resolveBorderColors,
   tint,
 } from './styles.js';
+import { Yoga } from './yoga.js';
 import { cssColorStraight } from 'ntk';
 import { EventManager, discrete, WHEEL_NOTCH_PX } from './events.js';
 import {
@@ -118,10 +118,7 @@ export const DRAWN_KINDS = new Set([
   'canvas',
   'textinput',
   'textarea',
-  'markdown',
-  'html',
   'svg',
-  'tex',
 ]);
 
 /** kind -> style names a registered element claims as its own semantics.
@@ -2011,10 +2008,9 @@ export class Node {
     // A node's size comes from its measure function or from its children,
     // never both — and yoga does not merely refuse the second one, it aborts
     // the WebAssembly module, which takes the process down naming nothing
-    // the developer wrote. The built-ins reach it too: `<text>`, `<markdown>`
-    // and friends are turned away earlier by `createInstance`, which knows
-    // what their content is, but `<image>`, `<textinput>` and `<textarea>`
-    // arrive here.
+    // the developer wrote. The built-ins reach it too: `<text>` is turned
+    // away earlier by `createInstance`, which knows what its content is, but
+    // `<image>`, `<svg>`, `<textinput>` and `<textarea>` arrive here.
     if (this._measureFn && this._joinsYoga(child)) {
       throw new Error(
         `react-x11: <${this.kind}> measures its own content, so it cannot ` +
@@ -4428,8 +4424,8 @@ export const Scrollable = (Base) =>
 
     /**
      * A box with something to scroll is a tab stop, so a pane of
-     * *unfocusable* content — a log, a long `<text>`, a `<markdown>` — can be
-     * read without a pointer. Before this the only way to scroll one was the
+     * *unfocusable* content — a log, a long `<text>`, a rendered document —
+     * can be read without a pointer. Before this the only way to scroll one was the
      * wheel, which is a WCAG 2.1.1 failure on the most ordinary layout the
      * library has.
      *

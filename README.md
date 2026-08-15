@@ -89,8 +89,9 @@ three:
   your `recharts` do not come with you; the state, data-fetching, validation
   and math libraries mostly do. [docs/ecosystem.md](docs/ecosystem.md) says
   which is which, and what the failure looks like when it is the wrong one.
-- **60 fps, video, or a webview.** `<html>` renders a subset through ntk's
-  own layout engine and is not a browser.
+- **rendering HTML.** There is no HTML element and no webview. Rich
+  documents are markdown, through `<Markdown>` in
+  [`@react-x11/components`](https://github.com/sidorares/react-x11-components).
 - **text entry outside Latin.** See [Known issues](#known-issues).
 
 | `examples/dashboard.jsx` — context theming, hooks | `examples/tasks.jsx` — useReducer, textinput, scrolling |
@@ -178,10 +179,7 @@ and [docs/](docs/README.md) for the full API reference.
 | `<textinput>` | single-line editor: caret/selection via ntk's TextLayout caret API, clipboard (CLIPBOARD + X11 PRIMARY), word select, undo/redo, right-click menu                                                  |
 | `<image>`     | PNG/JPEG from `src`, natural-size aware                                                                                                                                                            |
 | `<canvas>`    | escape hatch: `onDraw={(ctx, {width, height}) => …}` with ntk's canvas-like 2d context (XRender-backed)                                                                                            |
-| `<markdown>`  | ntk MarkdownView: headings, tables, highlighted fences, math; `onLink`                                                                                                                             |
-| `<html>`      | ntk HtmlView: CSS cascade, block/flex layout, images; `onLink`                                                                                                                                     |
 | `<svg>`       | static SVG through ntk SvgView, sized like `<image>`                                                                                                                                               |
-| `<tex>`       | a KaTeX formula (ntk `layoutTex`), intrinsically sized                                                                                                                                             |
 | `<glarea>`    | an OpenGL surface over indirect GLX; the 3D scene below lives inside it                                                                                                                            |
 
 Widget **components** (plain React on top of the primitives, themable via

@@ -175,7 +175,7 @@ single mount.
 
 ## The paint cache — `REACT_X11_NO_PAINT_CACHE`, `REACT_X11_PAINT_CACHE=verify`
 
-`<svg>` and `<tex>` render their content once and composite the result on
+`<svg>` renders its content once and composites the result on
 later repaints, keyed on _what is drawn_ rather than on which node drew it —
 so a wall of 400 cells holding eight distinct icons keeps eight rendered
 copies, and a repaint of unchanged content is one composite per cell. Your own

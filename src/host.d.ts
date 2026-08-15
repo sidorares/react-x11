@@ -21,7 +21,6 @@ import type { NtkApp } from './types/nodes.js';
 export interface HostContext {
   isInsideText: boolean;
   isInsideSvg: boolean;
-  isInsideRichText: boolean;
   isInside3d: boolean;
 }
 

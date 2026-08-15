@@ -1,8 +1,12 @@
 /**
  * `react-x11/ntk` — the toolkit underneath, re-exported so an extension
  * package does not declare a second, independently-versioned `ntk`
- * dependency. Two copies in a process means two Yoga instances and two font
- * caches, and a node built against one cannot be painted by the other.
+ * dependency. Two copies in a process means two font caches and two glyph
+ * atlases, and a node built against one cannot be painted by the other.
+ *
+ * The layout engine is not here: react-x11 owns Yoga now, and an element
+ * never needs it — `measureContent` states its constraints in words so that
+ * yoga's ABI stays out of the extension seam.
  *
  * ntk ships no types of its own, so these are deliberately loose rather
  * than a hand-written mirror that would drift out of date silently. The
@@ -24,7 +28,6 @@ export const Pixmap: new (...args: unknown[]) => unknown;
  * See [extending.md](../docs/extending.md).
  */
 export const Surface: new (...args: unknown[]) => unknown;
-export const Yoga: Record<string, unknown>;
 /** `code` values on a failed GL setup — see `<Canvas3D fallback>`. */
 export const GLXError: {
   NO_EXTENSION: 'GLX_NO_EXTENSION';

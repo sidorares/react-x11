@@ -48,20 +48,7 @@ const s = createStyles({
   clock: { fontSize: 30, fontFamily: 'monospace', color: '$text' },
 });
 
-const DOC = `### Release notes
-
-Damage is now **bounded** for arbitrary React updates, not just for the
-interaction paths. A node claims damage only when something it *draws*
-changed, so a sibling whose style object was rebuilt with the same contents
-costs nothing.
-
-1. paint-relevant style compared by value
-2. every non-style prop compared by identity
-3. \`children\`, \`style\` and event handlers skipped
-
-> A frame that no node claims repaints everything — safe by construction,
-> which is also why a single-change test cannot prove a missed repaint.
-`;
+const DOC = `Damage is bounded for arbitrary React updates, not just for the interaction paths. A node claims damage only when something it draws changed, so a sibling whose style object was rebuilt with the same contents costs nothing. A frame that no node claims repaints everything — safe by construction, which is also why a single-change test cannot prove a missed repaint.`;
 
 const ROWS = Array.from({ length: 400 }, (_, i) => ({
   id: i,
@@ -170,8 +157,8 @@ export function MixedPanel() {
           </box>
 
           <box style={s.card}>
-            <text style={s.title}>&lt;markdown&gt;</text>
-            <markdown style={{ flexShrink: 0 }}>{DOC}</markdown>
+            <text style={s.title}>release notes</text>
+            <text style={s.hint}>{DOC}</text>
           </box>
         </box>
 

@@ -28,8 +28,7 @@ import {
   WindowNode,
   PopupNode,
 } from '../src/nodes.js';
-import { MarkdownNode, HtmlNode, SvgNode, TexNode } from '../src/richnodes.js';
-import { DefaultTheme } from '../src/palette.js';
+import { SvgNode } from '../src/svgnodes.js';
 import { GlAreaNode } from '../src/glnodes.js';
 import { ForeignNode } from '../src/foreignnodes.js';
 import { isStyleProp } from '../src/styles.js';
@@ -49,10 +48,7 @@ const BUILD = {
   textarea: (app, props) => new TextAreaNode(props, app),
   image: (app, props) => new ImageNode(props, app),
   canvas: (app, props) => new CanvasNode(props, app),
-  markdown: (app, props) => new MarkdownNode(props, app),
-  html: (app, props) => new HtmlNode(props, app),
   svg: (app, props) => new SvgNode(props, app),
-  tex: (app, props) => new TexNode(props, app),
   glarea: (app, props) => new GlAreaNode(props, app),
   foreign: (app, props) => new ForeignNode(props, app),
 };
@@ -143,8 +139,8 @@ test('a style name is style on every element that does not claim it', () => {
 // The declarations are the list of props an element documents, so they are
 // the other half of the check: a declared prop that is also a style name has
 // to be one the element claims, or writing it throws in development and
-// works in production. `<tex color>` was declared, read, and claimed by
-// nobody — the exact shape.
+// works in production. Issue #118 was exactly that shape: a `color` prop
+// declared and read by an element that never claimed the name.
 function declaredProps() {
   const src = readFileSync(
     new URL('../src/types/elements.d.ts', import.meta.url),
@@ -199,10 +195,10 @@ test('a declared prop that is also a style name is one the element claims', () =
 
 test('only the window elements claim style names as their own props', () => {
   // Issue #118 had two possible resolutions, and this pins the one taken:
-  // `<image>`, `<svg>` and `<tex>` are sized and coloured by style like
-  // everything else, rather than growing `semanticNames` of their own. A
-  // window is the exception because its `width` is the X window's, which
-  // yoga has no say in.
+  // `<image>` and `<svg>` are sized and coloured by style like everything
+  // else, rather than growing `semanticNames` of their own. A window is the
+  // exception because its `width` is the X window's, which yoga has no say
+  // in.
   const app = createMockApp();
   for (const kind of HOST_TYPES) {
     const claimed = [...BUILD[kind](app, {}).semanticNames].filter(isStyleProp);
@@ -310,22 +306,4 @@ test('<svg> content still reflows when both dimensions are fixed', async () => {
   node.root._scheduled = false;
   node.root.flush();
   assert.deepStrictEqual([node.abs.width, node.abs.height], [24, 24]);
-});
-
-test('<tex> takes its ink colour from the style', () => {
-  const app = createMockApp();
-  const node = new TexNode({ source: 'x^2', size: 12 }, app);
-  node._syncStyle({ source: 'x^2', style: { color: '#ff0000' } });
-  node._ensureBox();
-  assert.match(node._boxKey, /#ff0000/, 'the layout is keyed on the style');
-  // Without one it is the palette's text colour, not a fixed shade: the
-  // palette follows the desktop, and a hardcoded `#222222` is invisible on a
-  // dark one. `createMockApp()` pins the light palette.
-  const plain = new TexNode({ source: 'x^2', size: 12 }, app);
-  plain._ensureBox();
-  assert.match(
-    plain._boxKey,
-    new RegExp(DefaultTheme.text.replace('#', '\\#')),
-    'and defaults to the palette without one',
-  );
 });

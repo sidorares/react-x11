@@ -56,12 +56,20 @@ no override-redirect staging (issue #4).
   material state + one `CallList` per mesh). `src/geometry3d.js` generates
   the primitives, `src/mat4.js` is the matrix math, `src/raycast3d.js` +
   `src/pointer3d.js` are picking and mesh pointer events.
-- `src/richnodes.js` — rich-content elements (`<markdown>`, `<html>`,
-  `<svg>`, `<tex>`) wrapping ntk's document widgets in standalone mode:
-  the widget's `layout(width)`/`contentHeight` feeds a yoga measure
-  function, `draw(ctx, x, y)` paints, `onInvalidate` (ntk ≥ 3.4.0)
-  reflows on async content (HtmlView images and SVGs; MarkdownView is
-  synchronous).
+- `src/svgnodes.js` — `<svg>` over ntk's `SvgView`: `SvgNode` (sized from
+  its viewBox like `<image>`, cached as coverage when the drawing is one
+  colour) and `SvgChildNode`, the declarative SVG elements underneath it,
+  serialized into the DOM SvgView consumes. It used to hold `<markdown>`,
+  `<html>` and `<tex>` beside it, over ntk's document widgets; those were
+  removed in 2.0 — a document rendered as one opaque widget can neither be
+  selected across blocks nor re-rendered a block at a time, and the
+  successors are `<Markdown>`/`<Formula>` in `@react-x11/components`,
+  composed from public host elements.
+- `src/yoga.js` — the layout engine. Enums synchronously, WebAssembly
+  behind `loadLayout()`, which `createRoot()` awaits before anything builds
+  a node. **Never import `yoga-layout`'s default entry** — it is a
+  top-level await, and one import costs every app the single-executable
+  build (docs/packaging.md); `test/yoga.test.js` enforces this.
 - `src/anchor.js` — where a `<popup>` goes: `anchorRect` and the screen
   area it flips and clamps against. Core rather than widget code because
   **both** callers need it and only one is a widget — a `<popup anchor>`
@@ -338,7 +346,7 @@ stop it, in one place — see docs/desktop.md for the worked example.
   Runs in CI beside lint. **A prop change is not done until the `.d.ts` and a
   line in the type test change with it** — hand-written declarations drift
   silently otherwise, and nothing else catches it.
-- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,richtext,selection,widgets,react-features,windows,wm}`
+- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,selection,widgets,react-features,windows,wm}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). `examples:app` is the showcase: it hosts `form`, `widgets`
   and `tasks` as tabs by importing the panel each of them exports, so a new
@@ -749,10 +757,12 @@ is the one kind of doc link nothing in CI checks.
 - The package is **ESM** (`"type": "module"`). ntk is ESM with top-level
   await in its graph; yoga-layout is ESM WASM. Everything imports statically
   now (no `require`).
-- ntk >= 3.4.0 comes from npm. Yoga is imported **from ntk**, so renderer
-  and ntk widgets share one WASM instance — do not add a direct
-  yoga-layout dependency. `<textinput>` caret math uses ntk 3.3.0's
-  `TextLayout.caretPosition`/`indexAt`.
+- ntk comes from npm. Yoga is **ours** (`src/yoga.js`) — it used to be
+  imported from ntk so that renderer and ntk's document widgets shared one
+  WASM instance, but those widgets are gone and the renderer is the only
+  layout consumer left. Import the engine from `./yoga.js`, never from
+  `yoga-layout` directly (see the note under Layout). `<textinput>` caret
+  math uses ntk 3.3.0's `TextLayout.caretPosition`/`indexAt`.
 - Text measurement runs through a yoga **measure function** calling ntk's
   `FontManager.layout` (`TextLayout`), memoized per max-width. Any change to
   text content or text style props must call `_textContentChanged()` →

@@ -638,35 +638,11 @@ export interface CanvasProps extends DrawnProps<DrawnNode> {
   mono?: boolean;
 }
 
-// --- rich content ----------------------------------------------------------
-
-export interface MarkdownProps extends DrawnProps<DrawnNode> {
-  /** Markdown text, or pass it as children. */
-  source?: string;
-  onLink?: (href: string, ev: MouseEvent<DrawnNode>) => void;
-  theme?: Record<string, unknown>;
-}
-
-export interface HtmlProps extends DrawnProps<DrawnNode> {
-  source?: string;
-  stylesheet?: string | string[];
-  baseUrl?: string;
-  loadResource?: ((url: string, info: { element: unknown }) => unknown) | null;
-  onLink?: (href: string, ev: MouseEvent<DrawnNode>, element: unknown) => void;
-  theme?: Record<string, unknown>;
-}
+// --- vector drawings -------------------------------------------------------
 
 export interface SvgProps extends DrawnProps<DrawnNode> {
   source?: string;
   viewBox?: string;
-}
-
-// The ink colour is `style={{ color }}`: `color` is a style name, so it is
-// not a prop here.
-export interface TexProps extends DrawnProps<DrawnNode> {
-  source?: string;
-  /** Base font size — the formula's em, in px. */
-  size?: number;
 }
 
 // --- GL --------------------------------------------------------------------
@@ -995,10 +971,7 @@ export interface ReactX11Elements {
   textarea: TextAreaProps;
   image: ImageProps;
   canvas: CanvasProps;
-  markdown: MarkdownProps;
-  html: HtmlProps;
   svg: SvgProps;
-  tex: TexProps;
   glarea: GlAreaProps;
   foreign: ForeignProps;
 

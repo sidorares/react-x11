@@ -191,7 +191,7 @@ also what makes `<div>` a compile error. See
 The repo carries a
 [tour of runnable examples](https://github.com/sidorares/react-x11/tree/master/examples),
 each a single file: `simple`, `xeyes` (the `<canvas>` escape hatch),
-`dashboard`, `tasks`, `form`, `widgets`, `menu`, `theming`, `richtext`,
+`dashboard`, `tasks`, `form`, `widgets`, `menu`, `theming`,
 `windows`, `three` — and `wm`, a reparenting **window manager** whose frames
 are react-x11 components.
 

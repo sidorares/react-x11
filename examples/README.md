@@ -25,13 +25,12 @@ Roughly in the order worth reading them:
 | [`tasks.jsx`](tasks.jsx)                   | `useReducer`, dispatch through context, list rendering, scrolling `<box>`, keyboard throughout                                                                                                                  |
 | [`form.jsx`](form.jsx)                     | `<textinput>`, `Select`, `RadioGroup`, `Slider`, `Checkbox`, and a modal `Dialog`                                                                                                                               |
 | [`rules.jsx`](rules.jsx)                   | a WHEN/THEN rule builder: a recursive tree that edits itself, with drag-to-reorder and `<svg>` icons                                                                                                            |
-| [`widgets.jsx`](widgets.jsx)               | the gallery: every standard component in one window, with a live `<markdown>` preview                                                                                                                           |
+| [`widgets.jsx`](widgets.jsx)               | the gallery: every standard component in one window, `<textinput>` and `<textarea>` included                                                                                                                    |
 | [`react-features.jsx`](react-features.jsx) | React itself: priority, `<Suspense>`, `useOptimistic`, `<Activity>`, and where an error boundary goes                                                                                                           |
 | [`menu.jsx`](menu.jsx)                     | `MenuBar` and `ContextMenu` over real `<popup>` windows that flip at screen edges — File → Open… is a real file dialog, and the bar moves to the desktop's panel where there is one (`npm run globalmenu:host`) |
 | [`tooltips.jsx`](tooltips.jsx)             | hints that are text and hints that are components, `direction="auto"`, and the arrow an ARGB popup can have                                                                                                     |
 | [`theming.jsx`](theming.jsx)               | the style engine end to end: three themes in light and dark, switched at runtime                                                                                                                                |
 | [`appearance.jsx`](appearance.jsx)         | follows the desktop's light/dark, accent, contrast and reduced motion — change your theme while it runs                                                                                                         |
-| [`richtext.jsx`](richtext.jsx)             | `<markdown>` with highlighted and math fences, a live `<tex>` formula, JSX `<svg>`, `<image>`                                                                                                                   |
 | [`variable-fonts.jsx`](variable-fonts.jsx) | pick a font file and get a control per axis it actually has — sliders, a `Switch` for a binary axis, the named instances, and the `<text>` that would draw it                                                   |
 | [`windows.jsx`](windows.jsx)               | many top-level windows from one React tree, sharing state, closing via `onCloseRequest`                                                                                                                         |
 | [`app.jsx`](app.jsx)                       | the showcase: `SplitPane` + `Tabs` hosting `form`, `widgets` and `tasks` as panels                                                                                                                              |
@@ -61,14 +60,14 @@ npm run stress:check -- --png      # ...and write a PNG per panel to /tmp
 Six panels, built to be poked at by hand for correctness **and** for
 performance:
 
-| panel      |                                                                            |
-| ---------- | -------------------------------------------------------------------------- |
-| Typography | every text style axis on one paragraph, plus `<markdown>`/`<html>`/`<tex>` |
-| Charts     | four SVG drawings whose geometry is recomputed from sliders                |
-| Data       | a windowed 50,000-row table beside a table that ticks on a timer           |
-| Controls   | every component, in deliberately awkward nestings                          |
-| Damage     | a cell grid with a chosen number of changes per commit                     |
-| Mixed      | all of it at once, animating, for the worst case                           |
+| panel      |                                                                  |
+| ---------- | ---------------------------------------------------------------- |
+| Typography | every text style axis on one paragraph, bidi and inline spans    |
+| Charts     | four SVG drawings whose geometry is recomputed from sliders      |
+| Data       | a windowed 50,000-row table beside a table that ticks on a timer |
+| Controls   | every component, in deliberately awkward nestings                |
+| Damage     | a cell grid with a chosen number of changes per commit           |
+| Mixed      | all of it at once, animating, for the worst case                 |
 
 Each panel's file opens with a "what to look for" list — the things that are
 easy to get subtly wrong and easy to miss unless you know to check.

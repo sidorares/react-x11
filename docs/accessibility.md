@@ -45,7 +45,6 @@ is _boring_ to a screen reader rather than broken:
 | `<image>` / `<svg>`     | image, named by `alt`                                       |
 | `overflow: 'scroll'`    | scroll pane (and a tab stop when it can scroll — see below) |
 | `<canvas>` / `<glarea>` | drawing area / canvas — name them if they carry meaning     |
-| `<markdown>` / `<html>` | document                                                    |
 
 Focus, enabled/disabled, checked, selected, expanded and the rest are read
 from the same live state the widgets draw from — the `focusable` rule, the

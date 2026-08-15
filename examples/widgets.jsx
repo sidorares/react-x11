@@ -1,7 +1,6 @@
 // Widget gallery: every standard component in one window — Button,
 // Checkbox, Radio/RadioGroup, Switch, Slider, ProgressBar, Select,
-// Tooltip, <textinput> — plus a live <markdown> preview of what you type
-// into the <textarea>.
+// Tooltip, <textinput> and <textarea>.
 // Run with: npm run examples:widgets  (needs an X server / DISPLAY)
 import React, { useEffect, useState } from 'react';
 import {
@@ -37,7 +36,7 @@ export function WidgetsPanel() {
   const [volume, setVolume] = useState(40);
   const [progress, setProgress] = useState(0.2);
   const [note, setNote] = useState(
-    '## Live preview\n\nType **markdown** — `code`, [links](https://x.org)\nand lists all render below.\n',
+    'A multi-line field: Enter inserts a newline, and the caret moves by\nvisual line rather than by index.\n',
   );
 
   // demo animation: creep the progress bar while "notifications" are on
@@ -178,46 +177,21 @@ export function WidgetsPanel() {
         />
       </Row>
 
-      <Row label="Markdown" alignItems="flex-start">
-        {/* `flex: 1` — the zero basis is the point: with a content-sized
-            basis the markdown's natural width sets this column's base size
-            and pushes the row past the window edge. `minWidth: 0` lets it go
-            below the content's floor as well */}
-        <box style={{ flex: 1, minWidth: 0, gap: 8 }}>
-          {/* the textarea is the source, the <markdown> element is the
-              preview: every keystroke re-parses through ntk's
-              MarkdownView, which is cheap enough for a document this size */}
-          <textarea
-            rows={4}
-            value={note}
-            onChange={(ev) => setNote(ev.target.value)}
-            style={{
-              flexGrow: 0,
-              padding: 8,
-              borderRadius: 4,
-              borderWidth: 1,
-              borderColor: '$border',
-              backgroundColor: '$surface',
-            }}
-          />
-          <box
-            style={{
-              overflow: 'scroll',
-              height: 110,
-              padding: 4,
-              borderRadius: 4,
-              borderWidth: 1,
-              borderColor: '$track',
-              // `<markdown>` draws with ntk's own document palette — its own
-              // colours for headings, code, links and quotes — and does not
-              // follow this one, so the surface under it stays light. That
-              // is what "override if needed" is for.
-              backgroundColor: 'white',
-            }}
-          >
-            <markdown style={{ padding: 6 }}>{note}</markdown>
-          </box>
-        </box>
+      <Row label="Notes" alignItems="flex-start">
+        <textarea
+          rows={4}
+          value={note}
+          onChange={(ev) => setNote(ev.target.value)}
+          style={{
+            flexGrow: 1,
+            minWidth: 0,
+            padding: 8,
+            borderRadius: 4,
+            borderWidth: 1,
+            borderColor: '$border',
+            backgroundColor: '$surface',
+          }}
+        />
       </Row>
     </box>
   );

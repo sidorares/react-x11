@@ -330,10 +330,7 @@ function Elements() {
           ctx.fillRect(0, 0, width / 2, height);
         }}
       />
-      <markdown source="# hi" onLink={(href) => void href.length} />
-      <html source="<p>hi</p>" stylesheet="p { margin: 0 }" />
       <svg source="<svg/>" />
-      <tex source="e^{i\\pi}" size={18} style={{ color: '#222' }} />
     </window>
   );
 }
@@ -393,8 +390,8 @@ const _classy = <box className="nope" />;
 const _sized = <image src="./logo.png" width={40} />;
 // @ts-expect-error — nor is <svg>
 const _svg = <svg source="<svg/>" height={40} />;
-// @ts-expect-error — <tex> ink colour is style={{ color }}
-const _inked = <tex source="x^2" color="#222" />;
+// @ts-expect-error — and <svg>'s ink is style={{ color }}, not a prop
+const _inked = <svg source="<svg/>" color="#222" />;
 
 // A <window> size is pixels or 'auto', and leaving it out is the same
 // request as 'auto' — the two axes are independent.

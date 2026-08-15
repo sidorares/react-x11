@@ -111,10 +111,11 @@ that opens your desktop.
   your clipboard. Connecting to an X display is trusting it completely —
   there is no protocol-level way to do otherwise, and no library can add
   one. `DISPLAY=evil.example:0` is equivalent to handing over the session.
-- Sanitize content. `<markdown>`, `<html>` and `<svg>` render what you give
-  them through ntk's document widgets. `<html>`'s `loadResource` hook is
-  where a remote fetch would happen, and it is yours to police — untrusted
-  markup should be treated the way you would treat it in a browser.
+- Sanitize content. `<svg>` renders the markup you give it through ntk's
+  SvgView, and a document component renders the source you hand it —
+  untrusted markup should be treated the way you would treat it in a
+  browser. Anything that fetches a remote resource on a document's behalf
+  is yours to police.
 - Isolate one window from another within an app. Every node in a root shares
   one connection and one process; `trapFocus` is a focus policy, not a
   security boundary, and neither is a modal `Dialog`

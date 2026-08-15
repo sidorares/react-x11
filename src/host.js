@@ -19,10 +19,7 @@ const BUILT_IN = Object.freeze([
   'canvas',
   'textinput',
   'textarea',
-  'markdown',
-  'html',
   'svg',
-  'tex',
   'glarea',
   'foreign',
 ]);

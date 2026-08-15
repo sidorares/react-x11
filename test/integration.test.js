@@ -624,14 +624,19 @@ test('centered text is vertically balanced (half-leading)', async () => {
   }
 });
 
-test('rich content scrolled out of a scroll box leaves no ink behind', async () => {
+test('vector content scrolled out of a scroll box leaves no ink behind', async () => {
   const { app } = await createHeadlessApp();
   const x11Root = await createRoot({ app });
   try {
-    // a math fence: KaTeX draws glyph runs and vector shapes of its own,
-    // which used to bypass the 2d clip and paint over whatever was above
-    // the scroll box once they were scrolled out (fixed in ntk 3.7.1)
-    const source = `# Heading\n\n\`\`\`math\n\\sqrt{\\frac{x+1}{2}}\n\`\`\`\n\n${'filler paragraph. '.repeat(40)}\n`;
+    // `<svg>` draws glyph runs and vector shapes of its own, which used to
+    // bypass the 2d clip and paint over whatever was above the scroll box
+    // once they were scrolled out (fixed in ntk 3.7.1). The guard was
+    // written against a KaTeX math fence in `<markdown>`; that element is
+    // gone, and `<svg>` is what still reaches the same drawing path.
+    const drawing =
+      '<svg viewBox="0 0 10 40">' +
+      '<rect width="10" height="40" fill="#101010"/>' +
+      '<circle cx="5" cy="20" r="4" fill="#303030"/></svg>';
     const wnd = await render(
       React.createElement(
         'window',
@@ -643,7 +648,14 @@ test('rich content scrolled out of a scroll box leaves no ink behind', async () 
           React.createElement(
             'box',
             { style: { overflow: 'scroll', flexGrow: 1 } },
-            React.createElement('markdown', { source }),
+            // taller than the box, so scrolling drags it under the band
+            ...Array.from({ length: 6 }, (_, i) =>
+              React.createElement('svg', {
+                key: i,
+                source: drawing,
+                style: { width: 60, height: 240, flexShrink: 0 },
+              }),
+            ),
           ),
         ),
       ),
@@ -653,7 +665,7 @@ test('rich content scrolled out of a scroll box leaves no ink behind', async () 
     const node = wnd._reactX11Node;
     const scroll = node.children[0].children[1];
 
-    // wait until the document has laid out and drawn something
+    // wait until the drawings have laid out and painted something
     await waitForInk(
       ctx,
       300,
@@ -661,7 +673,7 @@ test('rich content scrolled out of a scroll box leaves no ink behind', async () 
       { x: 20, y: 80, width: 260, height: 200 },
       isDark,
       20,
-      'markdown ink inside the scroll box',
+      'svg ink inside the scroll box',
     );
 
     const inkAbove = async () => {
@@ -691,114 +703,6 @@ test('rich content scrolled out of a scroll box leaves no ink behind', async () 
   }
 });
 
-test('<markdown> survives a document being typed down to nothing', async () => {
-  const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
-  try {
-    let setText;
-    const Host = () => {
-      const [text, set] = React.useState('# hello\n\nsome **text**');
-      setText = set;
-      return React.createElement(
-        'window',
-        { width: 300, height: 200, style: { backgroundColor: 'white' } },
-        React.createElement(
-          'box',
-          { style: { overflow: 'scroll', flexGrow: 1 } },
-          React.createElement('markdown', { style: { padding: 6 } }, text),
-        ),
-      );
-    };
-    await render(React.createElement(Host), x11Root);
-
-    // a live preview goes through these states on the way to empty, and a
-    // blank block lays out with no spans at all — which used to throw
-    // inside TextLayout and take the frame with it (ntk 3.7.2)
-    for (const value of ['# h', '#', '', ' ', '\n\n', '- ']) {
-      setText(value);
-      await new Promise((resolve) => setTimeout(resolve, 60));
-    }
-    await settle(app);
-
-    await x11Root.unmount();
-    await settle(app);
-  } finally {
-    await app.close();
-  }
-});
-
-test('<markdown> renders through MarkdownView and dispatches onLink', async () => {
-  const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
-  try {
-    const clicked = [];
-    const wnd = await render(
-      React.createElement(
-        'window',
-        { width: 300, height: 200, style: { backgroundColor: 'white' } },
-        React.createElement('markdown', {
-          source: '# Heading\n\n[the link](https://example.com/)',
-          onLink: (href) => clicked.push(href),
-        }),
-      ),
-      x11Root,
-    );
-    const ctx = wnd.getContext('2d');
-
-    // heading ink (2em bold) in the top region
-    await waitForInk(
-      ctx,
-      300,
-      200,
-      { x: 0, y: 0, width: 200, height: 50 },
-      isDark,
-      20,
-      'markdown heading ink',
-    );
-    // the link paragraph paints in the theme link color; click it
-    const linkPixels = await waitForInk(
-      ctx,
-      300,
-      200,
-      { x: 0, y: 0, width: 300, height: 120 },
-      ([r, g, b]) => b > 140 && b - r > 60 && b - g > 40,
-      5,
-      'link-colored ink',
-    );
-    const [lx, ly] = linkPixels[Math.floor(linkPixels.length / 2)];
-    wnd.emit('mousedown', { x: lx, y: ly, keycode: 1 });
-    wnd.emit('mouseup', { x: lx, y: ly, keycode: 1 });
-    assert.deepStrictEqual(clicked, ['https://example.com/']);
-
-    await x11Root.unmount();
-  } finally {
-    await app.close();
-  }
-});
-
-test('<html> renders styled boxes through HtmlView', async () => {
-  const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
-  try {
-    const wnd = await render(
-      React.createElement(
-        'window',
-        { width: 200, height: 120, style: { backgroundColor: 'white' } },
-        React.createElement('html', {
-          source:
-            '<div style="width: 80px; height: 40px; background: #0000ff; margin: 0"></div>',
-        }),
-      ),
-      x11Root,
-    );
-    const ctx = wnd.getContext('2d');
-    await waitForPixel(ctx, 200, 120, 20, 20, [0, 0, 255], 'html div blue');
-    await x11Root.unmount();
-  } finally {
-    await app.close();
-  }
-});
-
 test('<svg> scales its viewBox into the content box', async () => {
   const { app } = await createHeadlessApp();
   const x11Root = await createRoot({ app });
@@ -818,68 +722,6 @@ test('<svg> scales its viewBox into the content box', async () => {
     const ctx = wnd.getContext('2d');
     await waitForPixel(ctx, 100, 100, 30, 30, [255, 0, 0], 'svg rect red');
     await waitForPixel(ctx, 100, 100, 80, 80, [255, 255, 255], 'outside white');
-    await x11Root.unmount();
-  } finally {
-    await app.close();
-  }
-});
-
-test('<tex> lays out and draws a formula', async () => {
-  const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
-  try {
-    const wnd = await render(
-      React.createElement(
-        'window',
-        { width: 200, height: 80, style: { backgroundColor: 'white' } },
-        React.createElement('tex', {
-          source: 'x = \\frac{1}{2}',
-          size: 32,
-          displayMode: true,
-        }),
-      ),
-      x11Root,
-    );
-    const ctx = wnd.getContext('2d');
-    await waitForInk(
-      ctx,
-      200,
-      80,
-      { x: 0, y: 0, width: 150, height: 80 },
-      isDark,
-      15,
-      'tex formula ink',
-    );
-    await x11Root.unmount();
-  } finally {
-    await app.close();
-  }
-});
-
-test('<html> repaints when async content arrives (ntk onInvalidate)', async () => {
-  const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
-  try {
-    // an <img> decodes off the render pass, so the first paint has nothing to
-    // draw there; HtmlView then fires onInvalidate, which is the only thing
-    // that gets the element re-measured and painted again
-    const svg =
-      'data:image/svg+xml,' +
-      encodeURIComponent(
-        '<svg viewBox="0 0 4 4"><rect width="4" height="4" fill="#0000ff"/></svg>',
-      );
-    const wnd = await render(
-      React.createElement(
-        'window',
-        { width: 200, height: 120, style: { backgroundColor: 'white' } },
-        React.createElement('html', {
-          source: `<div style="margin:0;padding:0"><img width="40" height="40" src="${svg}"></div>`,
-        }),
-      ),
-      x11Root,
-    );
-    const ctx = wnd.getContext('2d');
-    await waitForPixel(ctx, 200, 120, 20, 20, [0, 0, 255], 'html svg img blue');
     await x11Root.unmount();
   } finally {
     await app.close();
@@ -923,34 +765,6 @@ test('<svg> JSX children render and update declaratively', async () => {
       'children rect green',
     );
 
-    await x11Root.unmount();
-  } finally {
-    await app.close();
-  }
-});
-
-test('<markdown> accepts its content as a string child', async () => {
-  const { app } = await createHeadlessApp();
-  const x11Root = await createRoot({ app });
-  try {
-    const wnd = await render(
-      React.createElement(
-        'window',
-        { width: 300, height: 100, style: { backgroundColor: 'white' } },
-        React.createElement('markdown', null, '# From a child string'),
-      ),
-      x11Root,
-    );
-    const ctx = wnd.getContext('2d');
-    await waitForInk(
-      ctx,
-      300,
-      100,
-      { x: 0, y: 0, width: 280, height: 50 },
-      isDark,
-      20,
-      'child-string markdown heading ink',
-    );
     await x11Root.unmount();
   } finally {
     await app.close();
