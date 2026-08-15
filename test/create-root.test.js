@@ -9,6 +9,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { StaticFontSource } from 'ntk';
 import { createRoot } from '../src/index.js';
+import { setDesktopSettingsForTests } from '../src/desktopsettings.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -206,5 +207,41 @@ test('a root that borrows a connection can outlive another root on it', async ()
   assert.ok(
     !second.calls.some(([name]) => name === 'destroy'),
     'and left the second tree standing on the same connection',
+  );
+});
+
+test('a caret stops blinking when the connection closes under it', async () => {
+  // A focused field arms an interval that repaints twice a second for as
+  // long as it holds focus, and closing the connection does not blur it —
+  // an app that closes its own client, or a test that closes the app it
+  // lent the root. The tick after the close used to reach the wire and
+  // throw "client is in closing state" out of the frame clock, where
+  // nothing is waiting to catch it: an uncaught exception with no test
+  // still running to attribute it to, which is what made
+  // test/selection-batch.test.js flake on the slower CI runners.
+  const root = await createRoot(headlessStream());
+  const ref = React.createRef();
+  root.render(
+    h(
+      'window',
+      { width: 60, height: 40 },
+      h('textinput', { ref, defaultValue: 'x', style: { width: 40 } }),
+    ),
+  );
+  await tick();
+  const input = ref.current;
+  setDesktopSettingsForTests(root.app, { caretBlinkMs: 5 });
+  input.defaultFocus();
+  assert.ok(input._blinkTimer, 'the caret is blinking');
+
+  // the first paint off the wire before the close, so the timer is the only
+  // thing left that can talk to the connection
+  await new Promise((resolve) => root.app.X.GetInputFocus(() => resolve()));
+  await root.app.close();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.strictEqual(
+    input._blinkTimer,
+    null,
+    'the first tick on a closing connection disarms the timer',
   );
 });
