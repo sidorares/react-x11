@@ -5842,6 +5842,15 @@ export class TextInputNode extends Node {
     const line = layout.lines?.[0];
     const inkHeight = line ? line.ascent + line.descent : layout.height;
     const ascent = line?.ascent ?? 0;
+    // Where the painter puts the first baseline inside the layout box. It is
+    // **not** `ascent`: the line carries its leading above the glyphs too, so
+    // on a face with a real line gap the two are pixels apart. Verdana's gap
+    // is 0.03em and the error rounds away; Hiragino Sans — which is what
+    // `sans-serif` resolves to on a macOS box with Homebrew's fontconfig
+    // first on PATH (#86) — carries 0.5em, and every field drew its text
+    // three pixels low. Positioning by `ascent` was the whole of that bug.
+    const baseline = line?.baseline ?? ascent;
+    const leading = baseline - ascent;
     const capHeight = this.app?.fonts
       ?.match?.(style.family, {
         weight: style.weight,
@@ -5850,14 +5859,17 @@ export class TextInputNode extends Node {
       ?.metrics?.(style.size)?.capHeight;
     const textY =
       capHeight && line
-        ? content.y + (content.height + capHeight) / 2 - ascent
-        : content.y + Math.max(0, (content.height - inkHeight) / 2);
+        ? content.y + (content.height + capHeight) / 2 - baseline
+        : content.y + Math.max(0, (content.height - inkHeight) / 2) - leading;
+    // The glyphs start a leading below the box they are drawn in, and the
+    // marks are measured against the glyphs rather than against the box.
+    const inkTop = textY + leading;
     // selection/caret read better with breathing room around the glyphs
     // (a DOM input highlights the whole line box, not just the ink)
-    const markPad = Math.min(3, Math.max(0, textY - content.y));
+    const markPad = Math.min(3, Math.max(0, inkTop - content.y));
     return {
       textY,
-      markY: textY - markPad,
+      markY: inkTop - markPad,
       markHeight: inkHeight + markPad * 2,
       inkHeight,
     };
