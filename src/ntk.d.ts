@@ -8,6 +8,10 @@
  * never needs it — `measureContent` states its constraints in words so that
  * yoga's ABI stays out of the extension seam.
  *
+ * Documents are not here either: ntk 8 removed `MarkdownView`, `HtmlView` and
+ * `layoutTex` with the engine. Use `@react-x11/components` for those;
+ * `SvgView` remains, since a drawing is not a document.
+ *
  * ntk ships no types of its own, so these are deliberately loose rather
  * than a hand-written mirror that would drift out of date silently. The
  * named exports are the ones an extension actually reaches for; anything

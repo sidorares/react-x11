@@ -54,6 +54,9 @@ const entrySource = [
   "export * as reactX11 from 'react-x11';",
   "export { default as React } from 'react';",
   "export * as ntk from 'ntk';",
+  // the layout engine is react-x11's, not ntk's, since ntk 8 — check-bundle
+  // asserts on it, and it is what a demo doing its own layout would reach for
+  "export * as yoga from 'react-x11/yoga';",
   "export { default as x11 } from 'x11';",
   "export * as xserver from 'x11/lib/xserver/index.js';",
   "export { createStreamPair } from 'x11/lib/xserver/index.js';",
@@ -120,6 +123,9 @@ await esbuild.build({
   alias: {
     // the renderer, the toolkit and the protocol client (single instances)
     'react-x11': path.join(repoRoot, 'src', 'index.js'),
+    // `alias` matches whole specifiers, so a subpath needs its own entry —
+    // without this, 'react-x11/yoga' is rewritten to '<…>/src/index.js/yoga'
+    'react-x11/yoga': path.join(repoRoot, 'src', 'yoga.js'),
     ntk: path.join(repoRoot, 'node_modules', 'ntk', 'lib', 'index.js'),
     x11: x11Dir,
     // ONE React. The entry resolves 'react' from website/node_modules
