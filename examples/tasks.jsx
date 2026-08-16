@@ -68,9 +68,15 @@ function AddTask() {
         onSubmit={add}
         style={{
           flexGrow: 1,
-          padding: 8,
-          borderRadius: 4,
-          borderWidth: 1,
+          // The palette's control padding, which is what makes this field
+          // exactly as tall as the Add button beside it: a field's box is
+          // its capitals, so this is the same sum the button is.
+          paddingTop: '$paddingY',
+          paddingBottom: '$paddingY',
+          paddingLeft: 10,
+          paddingRight: 10,
+          borderRadius: '$radius',
+          borderWidth: '$borderWidth',
           borderColor: '$border',
           backgroundColor: '$background',
         }}

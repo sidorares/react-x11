@@ -5404,7 +5404,7 @@ export class TextInputNode extends Node {
     const cap = this.app?.fonts
       ?.match?.(style.family, { weight: style.weight, style: style.style })
       ?.metrics?.(style.size)?.capHeight;
-    return cap || this._lineHeight();
+    return cap ? Math.round(cap) : this._lineHeight();
   }
 
   /** Shaped layout of the current value, cached per (value, style).
