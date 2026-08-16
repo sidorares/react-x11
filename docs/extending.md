@@ -77,6 +77,31 @@ precedent: on a `<window>` it is the X window's width and never style.
 `react-x11/style`'s `isStyleProp(name)` is how to check whether a name you
 are about to use needs declaring.
 
+## Registering under hot reload {#hot-reload}
+
+Register at module scope — the pattern everything above shows, and the one
+tree-shaking forces on a component library. That module scope re-runs when
+[`react-x11/refresh`](ecosystem/dev-tooling.md#react-refresh) hot-reloads
+the module, so `registerElement` has a re-registration policy rather than
+a footnote:
+
+- **The same `create` reference is never a conflict.** A definition
+  arriving twice replaces silently, latest flags winning.
+- **Under an active hot-reload session, any duplicate replaces silently.**
+  The session begins with the first hot re-import and covers the rest of
+  the process: from then on, "already registered" would only mean
+  "registered by the previous version of yourself". Mounted nodes keep the
+  old prototype until they remount — the same staleness contract Fast
+  Refresh has for classes; new mounts get the new definition.
+- **Outside a session, a duplicate still throws.** Two packages claiming
+  one element name in a plain run is a conflict to be told about, and
+  `override: true` remains the way to say a replacement is deliberate.
+
+One thing the hot loader adds: inside a hot module, call it through a
+namespace or default import (`Host.registerElement(...)`) — a _named_
+import called at module top level is a transform error there, because
+named-import bindings initialize in a microtask after a reload.
+
 ## The node contract
 
 `Node` already implements the whole reconciler-facing surface, so an element

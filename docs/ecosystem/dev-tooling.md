@@ -146,10 +146,15 @@ What is _not_ enforced, so it is not rediscovered as a bug:
 - **Module-scope side effects re-run on every reload** of the module and
   of everything between it and its boundary. Keep hot modules'
   top level idempotent, and keep identity that must survive (contexts,
-  stores, `registerElement` calls) in modules outside the hot graph — via
-  the `ignore` seam or by extension. A re-registration policy so a
-  reloaded `registerElement` does not throw is
-  [#318](https://github.com/sidorares/react-x11/issues/318).
+  stores) in modules outside the hot graph — via the `ignore` seam or by
+  extension. `registerElement` at module scope is safe: once the first hot
+  re-import begins, a duplicate registration replaces silently instead of
+  throwing (the
+  [re-registration policy](../extending.md#hot-reload)) — mounted nodes keep the old
+  prototype until they remount, the same staleness contract Fast Refresh
+  has for classes. Remember the named-import rule applies to it like
+  anything else: call it as `Host.registerElement(...)` through a
+  namespace or default import.
 - Stack traces through hot modules are off by the prelude's lines (four,
   plus your own `prelude` entries). Dev-only.
 - Fast Refresh needs the dev reconciler; `NODE_ENV=production` is a
