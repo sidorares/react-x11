@@ -13,7 +13,7 @@ import { callHandler } from './errors.js';
 import { armDrag } from './dnd.js';
 import { desktopSettings } from './desktopsettings.js';
 import { noteInputTime } from './inputtime.js';
-import { hooks as a11yHooks, isFocusable } from './a11y.js';
+import { hooks as a11yHooks, isFocusable, effectivelyVisible } from './a11y.js';
 import { Composer, composeTableFor } from './compose.js';
 import { acceleratorKeysym } from './keyboard.js';
 import { MOD } from './keysyms.js';
@@ -142,6 +142,20 @@ export function setInspectHandler(fn) {
 }
 
 /**
+ * `createRoot({ restoreFocusOnReveal })`: whether a subtree coming back
+ * brings the keyboard back with it (`EventManager.subtreeRevealed`).
+ */
+export function beginFocus(app, option) {
+  if (app) app._reactX11RestoreFocus = option !== false;
+}
+
+/** Defaults to on for an app that never went through `createRoot` — a mock,
+ * a unit test — the way `composeTableFor` falls back to the built-ins. */
+function restoresFocusOnReveal(app) {
+  return app?._reactX11RestoreFocus ?? true;
+}
+
+/**
  * Wrap an ntk event callback for a *discrete* event — one whose response is
  * a single visual state, so there is nothing a frame's wait could coalesce
  * it with. That is everything ntk does not coalesce: mousedown/mouseup,
@@ -190,6 +204,9 @@ export class EventManager {
     this._previousFocus = null;
     // focus scopes, innermost last: [{ node, restore }]
     this.scopes = [];
+    // what focus to hand back to a subtree that comes out of hiding, keyed by
+    // the node that hid: hidden node → { node, visible } (subtreeHidden)
+    this._hiddenFocus = new WeakMap();
     // resolved lazily for popups: the manager that owns focus (focusManager)
     this._focusOwner = null;
     // the dead-key/Compose state machine, built on the first key (undefined
@@ -994,10 +1011,15 @@ export class EventManager {
    * back-Tab, because that is what tells an embedded client whether to focus
    * its first widget or its last (`<foreign>`, src/foreignnodes.js). It
    * reaches the node through `defaultFocus({ reason, backwards })`.
+   *
+   * `restoring` says this is a subtree coming back out of hiding rather than
+   * focus going somewhere new (`subtreeRevealed`), and it turns off the two
+   * things that move the world to meet the node.
    */
-  focus(node, reason = 'script', backwards = false) {
+  focus(node, reason = 'script', options = {}) {
     const manager = this.focusManager;
-    if (manager !== this) return manager.focus(node, reason, backwards);
+    if (manager !== this) return manager.focus(node, reason, options);
+    const { backwards = false, restoring = false } = options;
     if (node === this.focused) return;
     // before `focused` moves, so the element that was collecting the
     // sequence is the one told to drop it
@@ -1020,11 +1042,17 @@ export class EventManager {
       old.root?.invalidate(false, old, 'focus');
     }
     if (node) {
-      // keys only reach a node whose window has the X focus
-      if (!this.windowFocused) this.node.window?.focus?.();
+      // keys only reach a node whose window has the X focus — but a restore
+      // must not *take* it: a window revealing something in the background
+      // would pull the keyboard off another application, and SetInputFocus
+      // on a window the reveal has not mapped yet is a BadMatch.
+      if (!this.windowFocused && !restoring) this.node.window?.focus?.();
       node.setStyleState(':focus', true);
       node.setStyleState(':focus-visible', reason !== 'pointer');
-      this._scrollIntoView(node);
+      // …and nothing scrolls to meet it either: the node is coming back to
+      // the arrangement it left, and this reveal's layout has not run, so a
+      // scroll here would be computed from a rect that does not exist yet.
+      if (!restoring) this._scrollIntoView(node);
       if (this.windowFocused) node.defaultFocus?.({ reason, backwards });
       node.props.onFocus?.(this._makeEvent('focus', null, node));
       node.root?.invalidate(false, node, 'focus');
@@ -1090,9 +1118,25 @@ export class EventManager {
     const focused = this.focused;
     // focus only comes back if it was inside the scope that just closed
     if (focused && !this._within(focused, node)) return;
-    const restore = scope.restore;
-    const alive = restore && !restore.destroyed && this._isFocusable(restore);
-    this.focus(alive ? restore : null);
+    this.focus(this._canRestoreTo(scope.restore) ? scope.restore : null);
+  }
+
+  /**
+   * Somewhere focus can be handed *back* to: still in the tree, still
+   * focusable, and still on screen.
+   *
+   * Three callers ask it — a focus scope closing, an edit menu closing
+   * (`closeEditMenu`, nodes.js) and a subtree coming out of hiding — and the
+   * third is why the question includes visibility. Whatever a modal was
+   * opened from may have suspended while it was up, and handing the keyboard
+   * back to it would put keys on an invisible control by the other route.
+   *
+   * "Still in the tree" is part of the same answer rather than a check of its
+   * own: `effectivelyVisible` starts at `destroyed`, since a node that has
+   * left is not on screen either.
+   */
+  _canRestoreTo(node) {
+    return Boolean(node && this._isFocusable(node) && effectivelyVisible(node));
   }
 
   /** The innermost live focus scope, or the window node when there is none.
@@ -1134,11 +1178,15 @@ export class EventManager {
   /** Focusable nodes in tree order, from `root` down. Windows are their own
    * focus roots, so a nested `<window>` or `<popup>` is not walked into —
    * except when it _is_ the root, which is how a modal popup's own
-   * focusables are reached. */
+   * focusables are reached.
+   *
+   * Invisible either way is invisible: `display: 'none'` takes a subtree out
+   * of the layout, the paint and the hit test, so Tab has no business
+   * landing in it either. */
   _focusables(root = this._scopeRoot()) {
     const out = [];
     const walk = (node) => {
-      if (node.hidden) return;
+      if (node.hidden || node.style.display === 'none') return;
       if (this._isFocusable(node)) out.push(node);
       for (const child of node.children) {
         if (!child.isWindow) walk(child);
@@ -1173,7 +1221,9 @@ export class EventManager {
     const index = list.indexOf(this.focused);
     if (index === -1) {
       // nothing focused, or focus sits outside the current scope: Tab enters
-      this.focus(backwards ? list[list.length - 1] : list[0], 'key', backwards);
+      this.focus(backwards ? list[list.length - 1] : list[0], 'key', {
+        backwards,
+      });
       return;
     }
     this.focus(
@@ -1181,8 +1231,80 @@ export class EventManager {
         ? list[(index || list.length) - 1]
         : list[(index + 1) % list.length],
       'key',
-      backwards,
+      { backwards },
     );
+  }
+
+  /**
+   * A subtree just stopped being visible: `<Suspense>` showing its fallback,
+   * `<Activity mode="hidden">`, or a style that turned `display: 'none'`.
+   *
+   * **Focus follows visibility.** Every other route already read it that way
+   * — `hitTest` and `paintOrder` skip the node, `_focusables` will not Tab
+   * into it — and focus was the one left open, so keys kept landing on a
+   * control the user could no longer see and the application's state kept
+   * advancing from them (issue #202). In a browser the browser plays this
+   * part; here nobody did.
+   *
+   * The question is **containment**, not identity. React calls `hideInstance`
+   * on the topmost host instance of a hidden branch, so in any tree deeper
+   * than one node the focused control still has `hidden === false` itself and
+   * is invisible only because a yoga ancestor is `DISPLAY_NONE` — the same
+   * question `popScope` asks on the way out of a modal. `effectivelyVisible`
+   * is the second half of it, and it is what tells a `<box>` inside the
+   * hidden node from a `<popup>` hanging off it: a popup is its own X window,
+   * nothing unmapped it, and it is still on screen holding the keyboard.
+   */
+  subtreeHidden(node) {
+    const manager = this.focusManager;
+    if (manager !== this) return manager.subtreeHidden(node);
+    const focused = this.focused;
+    if (!focused || !node.contains(focused)) return;
+    if (effectivelyVisible(focused)) return;
+    // Ring included: a restore puts back the state hiding took away rather
+    // than making a new focus, and whether the user could see where focus
+    // was is part of that state.
+    this._hiddenFocus.set(node, {
+      node: focused,
+      visible: focused.states[':focus-visible'] === true,
+    });
+    this.focus(null);
+  }
+
+  /**
+   * …and the way back, which is the half that is a decision rather than a
+   * bug fix.
+   *
+   * It restores. `<Activity>` exists to keep what a hidden subtree had, and a
+   * boundary re-suspending is not something the user did — so a field they
+   * were typing in comes back focused and they carry on, instead of being
+   * silently dropped out of it by a fallback that flashed.
+   *
+   * Two rules keep that from being focus stealing, and they are what make the
+   * restore safe enough to be the default. It only happens when **nothing
+   * else has the keyboard**: anything focused while the subtree was away
+   * keeps focus, so a reveal somewhere the user is not looking can never take
+   * over what they are doing. And it is a *restore* rather than a navigation
+   * — no scroll, no pull on the X input focus (see `focus`).
+   *
+   * `createRoot({ restoreFocusOnReveal: false })` is the way out, for an app
+   * that wants the browser's answer: focus that fell to the body stays there,
+   * and coming back is the user's own Tab.
+   */
+  subtreeRevealed(node) {
+    const manager = this.focusManager;
+    if (manager !== this) return manager.subtreeRevealed(node);
+    const was = this._hiddenFocus.get(node);
+    if (!was) return;
+    this._hiddenFocus.delete(node);
+    if (this.focused) return;
+    if (!restoresFocusOnReveal(this.node.app)) return;
+    // it may have been unmounted, or hidden again by something inside the
+    // subtree, while it was away
+    if (!this._canRestoreTo(was.node)) return;
+    this.focus(was.node, was.visible ? 'script' : 'pointer', {
+      restoring: true,
+    });
   }
 
   /** Called when a node leaves the tree so stale references don't linger. */

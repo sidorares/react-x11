@@ -136,7 +136,16 @@ no override-redirect staging (issue #4).
   event, XI2 valuators where the server has them and buttons 4-7 where it
   does not, converted from notches to pixels here (#273) — focus/Tab).
   Three ancestor-chain diffs live here and share one shape — `:hover`,
-  `:active` over the press chain, and `:focus-within`.
+  `:active` over the press chain, and `:focus-within`. **Focus follows
+  visibility** (#202): a subtree that goes off the screen — `hideInstance`
+  for `<Suspense>`/`<Activity>`, a `display: 'none'`, a `<popup>` unmapped —
+  gives up the keyboard, and gets it back on the reveal unless something
+  else took it meanwhile. Two things about that are easy to undo. The
+  question is _containment_, since React only hides the topmost host
+  instance of a branch and the focused control is usually deeper; and the
+  restore is not a navigation — it neither scrolls nor calls `SetInputFocus`,
+  because a background window revealing something must not take the keyboard
+  off another application.
 - `src/clientmessage.js` — `<window onClientMessage>`: the element-scoped
   seam for the protocols X layers on ClientMessage (EWMH, XEmbed, the system
   tray), where the alternative was `X.on('event')` over the whole connection

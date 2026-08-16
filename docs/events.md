@@ -511,6 +511,31 @@ when the window is focused again. Calling `focus()` on a node in a window
 that does not have the input focus asks for it (X `SetInputFocus`), though
 a window manager is free to refuse.
 
+### Focus and visibility
+
+**Focus follows visibility.** A subtree that goes off the screen gives up
+the keyboard: a `<Suspense>` boundary showing its fallback, an `<Activity
+mode="hidden">`, a `display: 'none'`, a `<popup>` being unmapped. The
+focused node fires `onBlur`, `:focus`/`:focus-within` come off, and keys go
+to the window instead — because a control nobody can see must not be
+collecting keystrokes, and the application's state must not advance from
+them. Tab skips invisible nodes for the same reason.
+
+**And it comes back with it.** When the subtree is revealed, focus returns
+to where it was, ring and all, so a boundary that re-suspended mid-edit
+leaves the user typing where they were. Two rules keep that from being
+focus stealing:
+
+- it only happens when **nothing else has the keyboard** — anything focused
+  while the subtree was away keeps focus;
+- it is a restore rather than a navigation: no scrolling into view, and no
+  X `SetInputFocus`, so a background window revealing something never takes
+  the keyboard off another application.
+
+`createRoot({ restoreFocusOnReveal: false })` turns the second half off, for
+an app that wants the browser's answer — focus that fell to nothing stays
+there, and coming back is the user's own Tab. The release is not optional.
+
 ## Cursors
 
 The `cursor` style property (`'pointer'`, `'text'`, `'wait'`, `'move'`,

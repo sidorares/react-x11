@@ -782,8 +782,9 @@ const bit = (states, state) => {
 };
 
 /** True when the node and every ancestor up to its window is neither
- * `hidden` nor `display: 'none'`. */
-function effectivelyVisible(node) {
+ * `hidden` nor `display: 'none'`. Shared with the focus manager, which
+ * releases focus on exactly this answer turning false (src/events.js). */
+export function effectivelyVisible(node) {
   for (let n = node; n; n = n.parent) {
     if (n.destroyed || n.hidden || n.style?.display === 'none') return false;
     if (n.isWindow) break;
