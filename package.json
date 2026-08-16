@@ -42,6 +42,7 @@
     "examples:raster-gate": "tsx examples/raster-gate.jsx",
     "examples:stress": "tsx examples/stress/index.jsx",
     "examples:foreign": "tsx examples/foreign.jsx",
+    "labs:text-baseline": "tsx examples/labs/text-baseline.jsx",
     "examples:gl": "tsx examples/gl.jsx",
     "examples:three": "tsx examples/three.jsx",
     "examples:shader": "tsx examples/shader.jsx",
