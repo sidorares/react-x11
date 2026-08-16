@@ -1118,9 +1118,25 @@ export class EventManager {
     const focused = this.focused;
     // focus only comes back if it was inside the scope that just closed
     if (focused && !this._within(focused, node)) return;
-    const restore = scope.restore;
-    const alive = restore && !restore.destroyed && this._isFocusable(restore);
-    this.focus(alive ? restore : null);
+    this.focus(this._canRestoreTo(scope.restore) ? scope.restore : null);
+  }
+
+  /**
+   * Somewhere focus can be handed *back* to: still in the tree, still
+   * focusable, and still on screen.
+   *
+   * Three callers ask it — a focus scope closing, an edit menu closing
+   * (`closeEditMenu`, nodes.js) and a subtree coming out of hiding — and the
+   * third is why the question includes visibility. Whatever a modal was
+   * opened from may have suspended while it was up, and handing the keyboard
+   * back to it would put keys on an invisible control by the other route.
+   *
+   * "Still in the tree" is part of the same answer rather than a check of its
+   * own: `effectivelyVisible` starts at `destroyed`, since a node that has
+   * left is not on screen either.
+   */
+  _canRestoreTo(node) {
+    return Boolean(node && this._isFocusable(node) && effectivelyVisible(node));
   }
 
   /** The innermost live focus scope, or the window node when there is none.
@@ -1283,12 +1299,12 @@ export class EventManager {
     this._hiddenFocus.delete(node);
     if (this.focused) return;
     if (!restoresFocusOnReveal(this.node.app)) return;
-    const target = was.node;
     // it may have been unmounted, or hidden again by something inside the
     // subtree, while it was away
-    if (target.destroyed || !effectivelyVisible(target)) return;
-    if (!this._isFocusable(target)) return;
-    this.focus(target, was.visible ? 'script' : 'pointer', { restoring: true });
+    if (!this._canRestoreTo(was.node)) return;
+    this.focus(was.node, was.visible ? 'script' : 'pointer', {
+      restoring: true,
+    });
   }
 
   /** Called when a node leaves the tree so stale references don't linger. */

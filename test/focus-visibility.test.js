@@ -431,6 +431,55 @@ test('a popup that is still on screen keeps the keyboard', async () => {
   await root.unmount();
 });
 
+test('a modal closing does not hand the keyboard to a field that hid meanwhile', async () => {
+  // The other direction into the same defect: a focus scope hands focus back
+  // to whatever it was opened from, and that panel may have gone away while
+  // the modal was up. Nothing released it — focus was in the modal, not in
+  // the panel — so the restore is the last place that has to ask.
+  let setState;
+  const App = () => {
+    const [{ modal, panel }, set] = React.useState({
+      modal: false,
+      panel: true,
+    });
+    setState = set;
+    return h(
+      'window',
+      { width: 200, height: 140 },
+      h(
+        'box',
+        { style: { display: panel ? 'flex' : 'none' } },
+        h(
+          'box',
+          null,
+          h('textinput', { name: 'behind', autoFocus: true, style: FIELD }),
+        ),
+      ),
+      modal
+        ? h(
+            'popup',
+            { trapFocus: true, x: 10, y: 10, width: 120, height: 60 },
+            h('textinput', { name: 'modal', autoFocus: true, style: FIELD }),
+          )
+        : null,
+    );
+  };
+  const { root, events } = await mount(h(App));
+  assert.equal(focusedName(events), 'behind');
+
+  await flush(() => setState({ modal: true, panel: true }));
+  assert.equal(focusedName(events), 'modal', 'the dialog took the keyboard');
+
+  // the panel behind it goes away while the dialog is up, and the dialog
+  // then closes: the field it would hand focus back to is not on screen
+  await flush(() => setState({ modal: true, panel: false }));
+  await flush(() => setState({ modal: false, panel: false }));
+
+  assert.equal(focusedName(events), null, 'so nothing gets it back');
+
+  await root.unmount();
+});
+
 test('a field unmounted while hidden is not focused when the tree comes back', async () => {
   let setState;
   const App = () => {

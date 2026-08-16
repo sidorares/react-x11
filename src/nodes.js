@@ -5090,10 +5090,10 @@ export function closeEditMenu(node) {
   // focus goes back where the menu took it from, so typing carries on where
   // it left off — as a pointer focus, since a right-click is what opened the
   // menu and a ring appearing on the way back would be news to nobody. A
-  // surface that was not focusable in the first place gets nothing back,
-  // rather than the destroyed menu canvas keeping the keyboard.
-  const alive = restore && !restore.destroyed && a11yFocusable(restore);
-  events.focus(alive ? restore : null, 'pointer');
+  // surface that was not focusable in the first place, or that stopped being
+  // on screen while the menu was up, gets nothing back rather than the
+  // destroyed menu canvas keeping the keyboard.
+  events.focus(events._canRestoreTo(restore) ? restore : null, 'pointer');
 }
 
 /**
