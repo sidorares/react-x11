@@ -34,9 +34,11 @@ Three things about that command are load-bearing.
 **`--format=esm` is the easy path, not the only one.** It tolerates top-level
 await anywhere in the graph; `cjs` does not, and refuses to build with
 `Top-level await is currently not supported with the "cjs" output format`.
-Since ntk 5 nothing in this stack forces the issue — see
-[tier 3](#tier-3--node-single-executable), which needs `cjs` — so the choice
-is only about what your own code does at module scope.
+Nothing in this stack forces the issue — ntk has had no top-level await
+since 5, and the layout engine, which was the other source of one, is loaded
+rather than imported here (below). See
+[tier 3](#tier-3--node-single-executable), which needs `cjs`; the choice is
+only about what your own code does at module scope.
 
 **The `--banner:js` is not optional.** node-x11 is CommonJS and uses dynamic
 `require`, which esbuild cannot resolve statically. Without the banner the

@@ -14,5 +14,12 @@
 // outside needs it either: an element's `measureContent` is handed its
 // constraints in words (`'at-most'`, `'exactly'`), precisely so that yoga's
 // ABI does not become part of the extension seam.
+//
+// Documents are not here either, and never were ntk's to give: ntk 8 removed
+// `MarkdownView`, `HtmlView` and `layoutTex` along with the layout engine, so
+// `export *` no longer carries them. A package that was reaching through here
+// for one — they were reachable but never declared — wants
+// `@react-x11/components` (`<Markdown>`, `<Formula>`). `SvgView` is still
+// here; a drawing is not a document.
 export * from 'ntk';
 export { default } from 'ntk';

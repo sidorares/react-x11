@@ -56,22 +56,29 @@ assert.ok(globalThis.Buffer, 'Buffer global installed by the bundle');
 assert.notStrictEqual(globalThis.Buffer, nodeBuffer, "it is the bundle's own");
 assert.ok(globalThis.process?.env, 'process global installed by the bundle');
 
-// yoga is what react-x11 lays out with. Since ntk 5 its enums are there on
-// import and the WebAssembly arrives with loadLayout() — which createClient()
+// yoga is what react-x11 lays out with, and since ntk 8 it is react-x11's own
+// (`react-x11/yoga`) rather than something ntk re-exports. Its enums are there
+// on import and the WebAssembly arrives with loadLayout() — which createRoot()
 // calls, and which is what keeps top-level await out of the bundle (see the
 // repo's docs/packaging.md). Both halves are checked: constants first, then
 // the assembly, which is what breaks if the WASM ever fails to load here.
 assert.strictEqual(
-  typeof rx.ntk.Yoga?.FLEX_DIRECTION_ROW,
+  typeof rx.yoga.Yoga?.FLEX_DIRECTION_ROW,
   'number',
-  'ntk.Yoga enums on import',
+  'yoga enums on import',
 );
-await rx.ntk.loadLayout();
 assert.strictEqual(
-  typeof rx.ntk.Yoga?.Node?.create,
-  'function',
-  'ntk.Yoga assembly after loadLayout()',
+  rx.yoga.layoutLoaded(),
+  false,
+  'and not loaded before asked',
 );
+await rx.yoga.loadLayout();
+assert.strictEqual(
+  typeof rx.yoga.Yoga?.Node?.create,
+  'function',
+  'yoga assembly after loadLayout()',
+);
+assert.strictEqual(rx.yoga.layoutLoaded(), true, 'layoutLoaded() agrees');
 
 // --- JSX transform ---------------------------------------------------------
 const compiled = rx.transformJsx(
