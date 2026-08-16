@@ -1278,3 +1278,18 @@ void _badSelectable;
 void _badSelectionHandler;
 void _badSlider;
 void _badTabs;
+
+// `react-x11/yoga` — the engine, for a package that implements a layout
+// algorithm of its own (@react-x11/components' <Html> and its `display: flex`).
+// An *element* never needs this: measureContent speaks in words.
+import { Yoga as LayoutYoga, loadLayout } from 'react-x11/yoga';
+const _engine: Promise<unknown> = loadLayout().then(() => {
+  const node = LayoutYoga.Node.create();
+  node.setWidth(120);
+  node.calculateLayout(120, 40, LayoutYoga.DIRECTION_LTR);
+  const w: number = node.getComputedWidth();
+  node.freeRecursive();
+  return w;
+});
+// the flat enum constants are numbers
+const _edge: number = LayoutYoga.EDGE_LEFT;

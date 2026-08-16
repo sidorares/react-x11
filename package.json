@@ -138,6 +138,10 @@
       "types": "./src/style.d.ts",
       "default": "./src/style.js"
     },
+    "./yoga": {
+      "types": "./src/yoga.d.ts",
+      "default": "./src/yoga.js"
+    },
     "./ntk": {
       "types": "./src/ntk.d.ts",
       "default": "./src/ntk.js"
