@@ -423,7 +423,7 @@ palette, so text that names none of this is set in the theme's `text`,
 
 It reaches everything that draws with type, not just `<text>`: a
 `<textinput>`, a `<canvas mono>` (which is what an `<Icon>` is), an `<svg>`
-resolving `fill="currentColor"`, a `<tex>` formula, and any custom element
+resolving `fill="currentColor"`, and any custom element
 that asks `node.resolvedTextStyle()`
 ([extending.md](extending.md#text-of-your-own)). A nested `<text>` span is
 the same mechanism seen from closer up.

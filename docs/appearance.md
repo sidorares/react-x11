@@ -177,20 +177,6 @@ window said, so enlarging a dark window flashed a white strip — and it
 survived, because a grow inside the pixmap's headroom reallocates nothing and
 so nothing damages it.
 
-### What does not follow
-
-`<markdown>` and `<html>` draw with **ntk's own document palette** — its own
-colours for headings, code, links, quotes and syntax highlighting — and do not
-read this one. On a dark desktop that is dark text on a dark surface, so give
-those a light surface explicitly, as
-[`examples/richtext.jsx`](../examples/richtext.jsx) does. Mapping a react-x11
-palette onto a whole document theme is its own piece of work.
-
-`<tex>` does follow: a formula is a single ink, so it takes one step beyond
-`textMuted` towards `text` — darker than the prose around it on a light palette,
-lighter on a dark one, without being told which it is. `style={{ color }}`
-still wins.
-
 ### Testing
 
 `react-x11/test` **pins the colour scheme to light**, and that is not a

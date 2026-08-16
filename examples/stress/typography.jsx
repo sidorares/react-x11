@@ -1,6 +1,5 @@
 // Text correctness: the same paragraph set in every combination the style
-// channel offers, plus the three rich-content elements next to each other so
-// their metrics can be compared by eye.
+// channel offers, so the faces and metrics can be compared by eye.
 //
 // What to look for:
 //   - wrapping at the column edge, not one word early or late
@@ -10,7 +9,6 @@
 //     a font problem, not a layout one)
 //   - the bidi line reading right-to-left with the Latin word left-to-right
 //     inside it, and its punctuation on the correct end
-//   - <tex>, <markdown> and <html> all sitting on the same left edge
 import React, { useState } from 'react';
 import { createStyles, Slider } from '../../src/index.js';
 
@@ -70,37 +68,6 @@ const VARIANTS = [
 // Bidi: Hebrew with an embedded Latin word. The Latin runs LTR inside an RTL
 // paragraph, and the full stop belongs at the *left* end of the line.
 const BIDI = 'הטקסט הזה נכתב בעברית עם המילה react באמצע.';
-
-const MARKDOWN = `## Markdown
-
-Inline **bold**, *italic*, \`code\`, and a [link](https://x.org).
-
-- a bullet
-- another, long enough to wrap when the column is narrow enough to make it
-- \`nested code\`
-
-> A block quote, which should indent and carry a rule.
-
-| column | value |
-| ------ | ----: |
-| alpha  |    12 |
-| beta   |   345 |
-
-\`\`\`js
-const answer = 42; // syntax highlighted
-\`\`\`
-`;
-
-const HTML = `<h2>HTML</h2>
-<p>Its own CSS cascade: <b>bold</b>, <i>italic</i>,
-<span style="color:#e74c3c">coloured</span>, and
-<code>inline code</code>.</p>
-<ul><li>list marker</li><li>second item</li></ul>
-<p style="border-left:3px solid #0984e3; padding-left:8px">
-A bordered block, to check border painting and padding.</p>
-`;
-
-const TEX = String.raw`\int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}`;
 
 export function TypographyPanel() {
   const [size, setSize] = useState(13);
@@ -183,44 +150,6 @@ export function TypographyPanel() {
             </text>{' '}
             spans, which all share one baseline.
           </text>
-        </box>
-
-        <box style={s.row}>
-          <box style={s.col}>
-            <box style={s.card}>
-              <text style={s.label}>&lt;markdown&gt;</text>
-              <markdown style={{ flexShrink: 0 }}>{MARKDOWN}</markdown>
-            </box>
-          </box>
-          <box style={s.col}>
-            <box style={s.card}>
-              <text style={s.label}>&lt;html&gt;</text>
-              <html style={{ flexShrink: 0 }}>{HTML}</html>
-            </box>
-            <box style={s.card}>
-              <text style={s.label}>&lt;tex&gt; displayMode</text>
-              <tex displayMode size={size + 4}>
-                {TEX}
-              </tex>
-              {/* <tex> cannot go *inside* <text> (only nested spans and
-                  strings can), so an inline formula is a row instead. Its
-                  baseline is not aligned with the surrounding text yet —
-                  that is the open gap noted in NEXT_STEPS §1, and this row
-                  is where you can see it. */}
-              <box
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <text style={{ fontSize: size }}>and inline:</text>
-                <tex size={size}>{String.raw`e^{i\pi} + 1 = 0`}</tex>
-                <text style={{ fontSize: size }}>on the same row.</text>
-              </box>
-            </box>
-          </box>
         </box>
       </box>
     </box>

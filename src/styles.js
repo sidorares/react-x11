@@ -1,11 +1,11 @@
 // Style props → yoga setters (layout) and paint metadata. Flat, ink-style
 // props: <box flexDirection="row" padding={8} backgroundColor="#eee">.
 // Numbers are pixels; strings like '50%' / 'auto' pass through to yoga.
-// Yoga comes from ntk (>= 3.1.0) so renderer and ntk widgets share one
-// WASM instance and enum set.
-import { Yoga, cssColorStraight } from 'ntk';
+// The engine is ours (`./yoga.js`) — the enum tables below are built at
+// module scope, which is what that module's synchronous half is for.
+import { cssColorStraight } from 'ntk';
 
-export { Yoga };
+import { Yoga } from './yoga.js';
 
 const FLEX_DIRECTION = {
   row: Yoga.FLEX_DIRECTION_ROW,

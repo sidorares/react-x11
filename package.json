@@ -33,7 +33,6 @@
     "devtools:proxy": "node scripts/devtools-proxy.mjs",
     "examples:form": "tsx examples/form.jsx",
     "examples:rules": "tsx examples/rules.jsx",
-    "examples:richtext": "tsx examples/richtext.jsx",
     "examples:selection": "tsx examples/selection.jsx",
     "examples:widgets": "tsx examples/widgets.jsx",
     "examples:datepicker": "tsx examples/datepicker.jsx",
@@ -79,7 +78,8 @@
   },
   "dependencies": {
     "ntk": "^7.7.0",
-    "react-reconciler": "^0.33.0"
+    "react-reconciler": "^0.33.0",
+    "yoga-layout": "^3.2.1"
   },
   "optionalDependencies": {
     "dbus-native": "^0.15.1"
@@ -99,6 +99,7 @@
     "eslint-plugin-react": "^7.37.5",
     "globals": "^17.8.0",
     "hot-module-replacement": "^4.0.0",
+    "katex": "^0.18.1",
     "prettier": "^3.6.0",
     "react": "^19.2.8",
     "react-devtools-core": "^7.0.1",

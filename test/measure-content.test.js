@@ -378,9 +378,9 @@ test('invalidateMeasure() on an element that measures nothing says so', async ()
 
 test('the built-ins that measure are held to it too', async () => {
   // Not a new restriction — yoga has always aborted on this — but the error
-  // now names both elements instead of killing the process. `<text>`,
-  // `<markdown>` and `<tex>` are turned away earlier still, by the
-  // reconciler, which knows what their content is supposed to be.
+  // now names both elements instead of killing the process. `<text>` is
+  // turned away earlier still, by the reconciler, which knows what its
+  // content is supposed to be.
   await rejectsQuietly(
     () =>
       mount(

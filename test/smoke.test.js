@@ -2078,32 +2078,29 @@ test('DevTools settings survive a restart, session state does not', async () => 
   }
 });
 
-test('rich content elements mount, update and unmount headlessly', async () => {
+test('<svg> mounts, updates and unmounts headlessly', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
-  const ui = (md) =>
+  const ui = (fill) =>
     React.createElement(
       'window',
       { width: 400, height: 300 },
-      React.createElement('markdown', null, md), // string child (react-markdown style)
-      React.createElement('html', { source: '<p>hello</p>' }),
       React.createElement(
         'svg',
         { viewBox: '0 0 10 10', style: { width: 20, height: 20 } },
-        React.createElement('rect', { width: 10, height: 10, fill: '#f00' }),
+        React.createElement('rect', { width: 10, height: 10, fill }),
       ),
       React.createElement('svg', {
         source: '<svg viewBox="0 0 10 10"><circle r="5" fill="#00f"/></svg>',
       }),
-      React.createElement('tex', { size: 20 }, 'x^2'),
     );
 
-  x11Root.render(ui('# One'));
+  x11Root.render(ui('#f00'));
   await tick(); // paint flush: no fonts on the mock app, must not throw
   const [wnd] = app.windows;
-  assert.ok(wnd.mapped, 'window mounted with rich content children');
+  assert.ok(wnd.mapped, 'window mounted with vector children');
 
-  x11Root.render(ui('# Two'));
+  x11Root.render(ui('#0f0'));
   await tick();
 
   await x11Root.unmount();

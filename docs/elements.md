@@ -831,7 +831,7 @@ resets to 0, as it does in CSS.
 
 **It is also a tab stop, and answers the keyboard**, whenever it has
 somewhere to scroll — which is what lets a pane of unfocusable content (a
-log, a long `<text>`, a `<markdown>`) be read without a pointer at all:
+log, a long `<text>`, a rendered document) be read without a pointer at all:
 
 | key                 |                                      |
 | ------------------- | ------------------------------------ |
@@ -1071,7 +1071,7 @@ What is **not** in it:
 - `<textinput>` and `<textarea>`, and any element that says
   `hasOwnSelection` — they keep their own selection, and a press in one is
   theirs;
-- the document views (`<markdown>`, `<html>`, `<svg>`, `<tex>`), which draw
+- `<svg>`, and any registered element that draws its own text, which draw
   their text through an ntk widget that exposes no character geometry to us.
 
 ### What a copy assembles
@@ -1396,7 +1396,7 @@ complaint — see [Runtime diagnostics](debugging.md#the-paint-cache--react_x11_
 Leave `cacheKey` unset for anything animated, or driven by state outside the
 props.
 
-`<svg>` and `<tex>` do this automatically: their content is fully described by
+`<svg>` does this automatically: its content is fully described by
 their props, so the renderer can build the key itself.
 
 ### `mono` — one colour, and the colour out of the key
@@ -1747,58 +1747,21 @@ No shadows, and no GPU picking. There are no camera _elements_ either: the
 
 ---
 
-## Rich content
+## Vector drawings
 
-Thin wrappers over ntk's document widgets in standalone mode. The widget's
-own layout feeds a yoga measure function: given the width the flexbox
-offers, the element reports the document's content height — so rich content
-participates in flex layout and scrolls naturally inside a scrolling box.
-Spacing comes from the box model (`padding` prop), not a widget page margin.
+`<svg>` is a drawing, laid out like an `<image>`: it reports an intrinsic
+size and scales into the content box it is given.
 
-Async content — an `<img>` inside `<html>` — reflows when it arrives via
-ntk's `onInvalidate` widget hook (added in ntk 3.4.0; the declared
-dependency is ntk 5). `<markdown>` lays out synchronously and never needs a
-second pass.
-
-`<markdown>`, `<html>` and `<tex>` take their content as a **string
-child** (the react-markdown convention) or a `source` prop; the child
-wins when both are present. Use a template-literal expression — JSX
-collapses newlines in literal text:
-
-```jsx
-<markdown onLink={open}>{`
-# Hi
-
-Some *markdown*.
-`}</markdown>
-```
-
-### `<markdown>`
-
-ntk `MarkdownView`: headings, emphasis, lists, quotes, tables,
-syntax-highlighted code fences, `math`/`latex` fences (KaTeX).
-
-| prop               |                                                                                 |
-| ------------------ | ------------------------------------------------------------------------------- |
-| children           | markdown text (string), or use `source`                                         |
-| `source`           | markdown text                                                                   |
-| `onLink(href, ev)` | a rendered link was clicked                                                     |
-| `theme`            | MarkdownView theme overrides (`{size, color, family, linkColor, codeTheme, …}`) |
-
-### `<html>`
-
-ntk `HtmlView`: its own CSS cascade (document `<style>`s plus the
-`stylesheet` prop), block/flex layout, images.
-
-| prop                           |                                               |
-| ------------------------------ | --------------------------------------------- |
-| children                       | HTML markup (string), or use `source`         |
-| `source`                       | HTML document or fragment                     |
-| `stylesheet`                   | extra author CSS (string or array)            |
-| `baseUrl`                      | resolve relative image `src` against this     |
-| `loadResource(url, {element})` | custom resource loader (or `null` to disable) |
-| `onLink(href, ev, element)`    | a link was clicked                            |
-| `theme`                        | base look (`{family, size, color}`)           |
+Documents used to live here too — `<markdown>`, `<html>` and `<tex>`, thin
+wrappers over ntk's document widgets. They were removed in react-x11 2.0:
+each rendered a whole document as one opaque drawing, which foreclosed the
+two things a document most needs — text selection across blocks, and
+re-rendering only the block that changed while content streams in. Their
+successors are components in
+[`@react-x11/components`](https://github.com/sidorares/react-x11-components),
+composed from public host elements rather than wrapping a widget:
+`<Markdown>` (GFM, selectable, streaming-friendly) and `<Formula>` (KaTeX,
+selectable), with `<RichText>` and `<CodeBlock>` underneath them.
 
 ### `<svg>`
 
@@ -1857,19 +1820,3 @@ not a re-render, and every colour of it shares one rendered copy. Drawings with
 two colours or a gradient bake their colours in, which is right: those colours
 belong to the drawing rather than to the UI. Nothing to configure either way.
 `REACT_X11_DEBUG_PAINT_CACHE=1` shows what is being kept.
-
-### `<tex>`
-
-A KaTeX formula via ntk `layoutTex` — an intrinsically-sized box (no
-wrapping), drawn as server-side glyphs/rects.
-
-| prop          |                                         |
-| ------------- | --------------------------------------- |
-| children      | TeX source (string), or use `source`    |
-| `source`      | TeX source                              |
-| `size`        | base font size (the formula em), px     |
-| `displayMode` | KaTeX display mode (default `false`)    |
-| `katex`       | extra KaTeX options (macros, strict, …) |
-
-The ink colour is `style={{ color }}` (default `#222222`), like `<text>` —
-`color` is a style name, so it is not a prop here.

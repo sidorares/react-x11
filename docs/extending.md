@@ -1350,9 +1350,15 @@ not create. Three things it has to do that a GL surface does not:
 | `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                     |
 
 **Reach ntk through `react-x11/ntk`, not a second dependency.** Two copies
-of ntk in one process means two Yoga instances and two font caches, and a
+of ntk in one process means two font caches and two glyph atlases, and a
 node built against one cannot be painted by the other — a failure that
-looks like a layout bug rather than a dependency bug.
+looks like a drawing bug rather than a dependency bug.
+
+The layout engine is not among these entry points, and that is deliberate:
+`measureContent` is handed its constraints in words (`'exactly'`,
+`'at-most'`, `'unconstrained'`) rather than yoga's integers, so an element
+never links against the engine and yoga's ABI never becomes part of this
+seam.
 
 ## Typing
 
