@@ -9,6 +9,10 @@
 import React, { useRef, useState } from 'react';
 import { startTrace } from 'react-x11/debug';
 import { XK_MULTI_KEY, isDeadKeysym } from 'react-x11/keysyms';
+import { onReload, performReactRefresh } from 'react-x11/refresh';
+import { registerRefresh, createTransformer } from 'react-x11/refresh/loader';
+import type { ReloadEvent } from 'react-x11/refresh';
+import type { RefreshOptions } from 'react-x11/refresh/loader';
 import type {
   BusHandle,
   CalendarHandle,
@@ -1262,6 +1266,32 @@ async function _SystemImperative() {
   here.locale = 'fr-FR';
 }
 
+// react-x11/refresh — the hot-reload pair
+async function _Refresh() {
+  const unsubscribe = onReload((event: ReloadEvent) => {
+    const urls: string[] = event.urls;
+    const applied: boolean = event.refreshed;
+    void [urls, applied];
+  });
+  unsubscribe();
+  performReactRefresh();
+
+  const options: RefreshOptions = {
+    extensions: ['.jsx'],
+    ignore: (path) => path.includes('/stores/'),
+    jsxRuntime: 'classic',
+    prelude: ['globalThis.__TOOL__ = true'],
+  };
+  await registerRefresh(options);
+  // @ts-expect-error — only the classic runtime is supported
+  await registerRefresh({ jsxRuntime: 'automatic' });
+  const transformer = await createTransformer(options);
+  const hot: boolean = transformer.matches('/app/App.jsx');
+  const { code } = transformer.transform('export {}', '/app/App.jsx');
+  void [hot, code, transformer.preludeLineCount];
+}
+
+void _Refresh;
 void _System;
 void _SystemImperative;
 void _Files;

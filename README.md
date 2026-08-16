@@ -317,16 +317,15 @@ To have it manage your real session instead — including replacing
 npm run examples:tasks:hot     # then edit examples/tasks.jsx while it runs
 ```
 
-Runs the tasks example under
-[hot-module-replacement](https://github.com/sidorares/hot-module-replacement)'s
-ESM hooks (Node ≥ 22.15) with React **Fast Refresh**: saving
-`examples/tasks.jsx` updates the edited components in place. The X11
-connection, the mounted window, and component state — the task list, even
-half-typed text in the input — survive the reload (a component whose hook
-signature changed remounts alone). `examples/hmr-register.mjs` wires up the
-transform half (babel JSX + react-refresh, chained under the HMR hooks),
-`examples/hmr-refresh.js` the runtime half, and `examples/tasks-hot.jsx` is
-the hot entry — the pattern works for any example split the same way.
+Runs the tasks example under the supported hot-reload entry point,
+`react-x11/refresh` (`node --import react-x11/refresh/register`, Node ≥
+22.15), with React **Fast Refresh**: saving `examples/tasks.jsx` updates
+the edited components in place. The X11 connection, the mounted window,
+and component state — the task list, even half-typed text in the input —
+survive the reload (a component whose hook signature changed remounts
+alone). Any app adopts it the same way — no accept handlers, no loader
+files to copy; see
+[docs/ecosystem/dev-tooling.md](docs/ecosystem/dev-tooling.md#react-refresh).
 
 ## React DevTools
 

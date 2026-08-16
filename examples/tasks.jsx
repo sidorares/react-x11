@@ -9,7 +9,7 @@
 // — or hot-reloadable with: npm run examples:tasks:hot  (edit this file
 // while it runs; see tasks-hot.jsx)
 import React, { useContext, useMemo, useReducer, useState } from 'react';
-import { Button, Checkbox, createRoot } from '../src/index.js';
+import ReactX11, { Button, Checkbox } from '../src/index.js';
 import { DispatchContext } from './tasks-context.js';
 
 const initialState = {
@@ -192,8 +192,11 @@ function App() {
 export default App;
 
 // Skip the autorun under hot reload too: tasks-hot.jsx owns the root
-// there, and this module re-evaluates on every reload.
+// there, and this module re-evaluates on every reload. The default import
+// (not the named `createRoot`) because this call sits at module top level:
+// the hot loader rejects named-import calls there — under a reload those
+// bindings initialize in a microtask.
 if (!process.env.REACT_X11_NO_AUTORUN && !import.meta.hot) {
-  const root = await createRoot();
+  const root = await ReactX11.createRoot();
   root.render(<App />);
 }

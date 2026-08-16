@@ -363,23 +363,24 @@ stop it, in one place — see docs/desktop.md for the worked example.
   React **Fast Refresh**: edit `examples/tasks.jsx` while it runs and the
   edited components update in place — connection, window, and component
   state (the task list, half-typed input text) survive; a component whose
-  hook signature changed remounts alone. `examples/hmr-register.mjs`
+  hook signature changed remounts alone. Runs under the supported entry
+  point, `src/refresh/` (issue #317): `--import react-x11/refresh/register`
   chains a sync babel loader (JSX classic + `react-refresh/babel`,
-  `retainLines`) under `hot-module-replacement`'s ESM hooks (Node ≥
-  22.15, `module.registerHooks`); `examples/hmr-refresh.js` injects the
-  refresh runtime into the reconciler (must be the entry's first import);
-  `examples/tasks-hot.jsx` is the accept boundary, calling
-  `performReactRefresh()` on accept. Constraints inside hot modules: no
+  `retainLines`, plus a per-module boundary footer) under
+  `hot-module-replacement`'s ESM hooks (Node ≥ 22.15,
+  `module.registerHooks`); `src/refresh/index.js` is the runtime half,
+  auto-imported into every hot module's prelude, exposing `onReload` for
+  tools. A module whose exports are all components self-accepts, so no
+  accept handlers are written by hand. The constraints — no
   _named_-import calls at module top level (bindings become `let`s
   initialized in a microtask — use the default import, e.g.
-  `React.createContext`), and identity that must survive a reload
-  (contexts, stores) lives in its own untouched module
-  (`examples/tasks-context.js`). Loader-chain gotcha: the HMR import
-  rewrite emits no trailing semicolon, so anything the babel stage
-  puts _after an import on the same line_ becomes a syntax error — keep
-  one statement per line in injected preludes and use the classic JSX
-  runtime (the automatic runtime appends its `react/jsx-runtime` import
-  to the last import's line).
+  `React.createContext`), classic JSX runtime only, one statement per
+  injected prelude line — are enforced as transform/registration errors
+  (`test/refresh-transform.test.js` pins the messages;
+  `test/refresh-hot.test.js` is the end-to-end reload). Identity that
+  must survive a reload (contexts, stores) lives in its own untouched
+  module (`examples/tasks-context.js`), or behind the `ignore` option of
+  `registerRefresh` (`react-x11/refresh/loader`).
 - `npm run screenshots` — regenerate the README/docs images
   (`docs/img/*.png`) headlessly: renders the real examples into the
   in-process X server, drives them through the real event pipeline, and

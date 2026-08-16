@@ -181,7 +181,7 @@ written out in full on the category page.
 | Package                                    | Integration                                                |                                                            |
 | ------------------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------- |
 | `react-devtools-core`                      | out of the box — already wired behind `REACT_X11_DEVTOOLS` | [dev tooling](ecosystem/dev-tooling.md#react-devtools)     |
-| `react-refresh` + `hot-module-replacement` | out of the box — setup already in-repo                     | [dev tooling](ecosystem/dev-tooling.md#react-refresh)      |
+| `react-refresh` + `hot-module-replacement` | supported — the `react-x11/refresh` entry point            | [dev tooling](ecosystem/dev-tooling.md#react-refresh)      |
 | `node --inspect` (built-in)                | out of the box                                             | [dev tooling](ecosystem/dev-tooling.md#node-inspect)       |
 | `0x`                                       | out of the box                                             | [dev tooling](ecosystem/dev-tooling.md#0x)                 |
 | `@welldone-software/why-did-you-render`    | out of the box                                             | [dev tooling](ecosystem/dev-tooling.md#why-did-you-render) |

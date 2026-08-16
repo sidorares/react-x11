@@ -20,7 +20,7 @@
     "examples:xeyes": "tsx examples/xeyes.jsx",
     "examples:dashboard": "tsx examples/dashboard.jsx",
     "examples:tasks": "tsx examples/tasks.jsx",
-    "examples:tasks:hot": "node --enable-source-maps --import ./examples/hmr-register.mjs examples/tasks-hot.jsx",
+    "examples:tasks:hot": "node --enable-source-maps --import react-x11/refresh/register examples/tasks-hot.jsx",
     "examples:menu": "tsx examples/menu.jsx",
     "examples:variable-fonts": "tsx examples/variable-fonts.jsx",
     "examples:tooltips": "tsx examples/tooltips.jsx",
@@ -85,7 +85,25 @@
     "dbus-native": "^0.15.1"
   },
   "peerDependencies": {
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "@babel/core": "^8.0.0",
+    "@babel/plugin-transform-react-jsx": "^8.0.0",
+    "hot-module-replacement": "^4.0.1",
+    "react-refresh": "^0.18.0"
+  },
+  "peerDependenciesMeta": {
+    "@babel/core": {
+      "optional": true
+    },
+    "@babel/plugin-transform-react-jsx": {
+      "optional": true
+    },
+    "hot-module-replacement": {
+      "optional": true
+    },
+    "react-refresh": {
+      "optional": true
+    }
   },
   "overrides": {
     "brace-expansion": "^5.0.8"
@@ -98,7 +116,7 @@
     "eslint": "^9.32.0",
     "eslint-plugin-react": "^7.37.5",
     "globals": "^17.8.0",
-    "hot-module-replacement": "^4.0.0",
+    "hot-module-replacement": "^4.0.1",
     "katex": "^0.18.1",
     "prettier": "^3.6.0",
     "react": "^19.2.8",
@@ -145,6 +163,18 @@
     "./test": {
       "types": "./src/testing/index.d.ts",
       "default": "./src/testing/index.js"
+    },
+    "./refresh": {
+      "types": "./src/refresh/index.d.ts",
+      "default": "./src/refresh/index.js"
+    },
+    "./refresh/register": {
+      "types": "./src/refresh/register.d.ts",
+      "default": "./src/refresh/register.js"
+    },
+    "./refresh/loader": {
+      "types": "./src/refresh/loader.d.ts",
+      "default": "./src/refresh/loader.js"
     },
     "./keysyms": {
       "types": "./src/keysyms.d.ts",
