@@ -381,6 +381,10 @@ const s = createStyles({
   what: { flexGrow: 1, fontSize: 13, color: '$text' },
   whatPending: { color: '$textMuted' },
   tick: { width: 12, fontSize: 11, color: '$success' },
+  // Wide enough for the widest thing that goes in it, and told not to wrap:
+  // a fixed-width column that can wrap is a row whose height changes with its
+  // content, which in a scrollback means the whole list reflows.
+  when: { width: 42, fontSize: 11, color: '$textMuted', textWrap: 'nowrap' },
 
   composer: {
     flexDirection: 'row',
@@ -430,10 +434,16 @@ const s = createStyles({
   footerLabel: { fontSize: 11, color: '$textMuted' },
 });
 
+// `hour12: false` rather than the locale's own choice, because this column is
+// a fixed width beside a message and "09:28 AM" is half again as wide as
+// "09:28" — enough to wrap onto two lines in an en-US locale, which is what it
+// did. A chat timestamp is a glance, not a reading, so the stable width is
+// worth more here than matching the desktop's clock format.
 const clock = (at) =>
   new Date(at).toLocaleTimeString(undefined, {
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
   });
 
 // ---------------------------------------------------------------------------
@@ -495,9 +505,7 @@ function Scrollback({ channel, messages }) {
           <text style={s.who}>{m.from}</text>
           <text style={[s.what, m.pending && s.whatPending]}>{m.text}</text>
           <text style={s.tick}>{m.pending ? '' : m.mine ? '✓' : ''}</text>
-          <text style={{ width: 40, fontSize: 11, color: '$textMuted' }}>
-            {clock(m.at)}
-          </text>
+          <text style={s.when}>{clock(m.at)}</text>
         </box>
       ))}
     </box>
