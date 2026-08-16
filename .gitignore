@@ -2,6 +2,9 @@ node_modules/
 *.log
 .DS_Store
 
+# scratch copies the refresh e2e test edits while it runs
+test/fixtures/refresh-run-*/
+
 # framed screenshots are machine-specific (they capture the local WM's
 # decorations), so they are generated on demand rather than committed
 docs/img/framed/

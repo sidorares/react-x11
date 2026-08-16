@@ -133,11 +133,12 @@ npm run examples:tasks:hot     # then edit examples/tasks.jsx while it runs
 
 Edited components update in place through React Fast Refresh — the
 connection, the window and component state (the task list, half-typed input)
-all survive. [`tasks-hot.jsx`](tasks-hot.jsx) is the accept boundary,
-[`hmr-register.mjs`](hmr-register.mjs) is the loader chain, and
-[`tasks-context.js`](tasks-context.js) exists so context identity survives a
-reload. The constraints on what may live inside a hot module are in
-[AGENTS.md](../AGENTS.md#commands).
+all survive. The example runs under the supported entry point
+(`node --import react-x11/refresh/register`): [`tasks-hot.jsx`](tasks-hot.jsx)
+is an ordinary entry, and [`tasks-context.js`](tasks-context.js) exists so
+context identity survives a reload. The constraints on what may live inside
+a hot module are enforced by the loader and documented in
+[docs/ecosystem/dev-tooling.md](../docs/ecosystem/dev-tooling.md#react-refresh).
 
 ## The window manager
 

@@ -116,31 +116,28 @@ full model — pseudo-states, size queries, theme tokens, transitions,
 
 ## Hot reloading
 
-React **Fast Refresh** works, under
-[hot-module-replacement](https://github.com/sidorares/hot-module-replacement)'s
-ESM loader hooks (Node ≥ 22.15). Edit a component while the program is
-running and it updates in place — the X connection, the mounted window and
-component state (a task list, half-typed text in an input) all survive. A
-component whose hook signature changed remounts by itself.
+React **Fast Refresh** is a supported entry point, `react-x11/refresh`
+(Node ≥ 22.15). Edit a component while the program is running and it
+updates in place — the X connection, the mounted window and component
+state (a task list, half-typed text in an input) all survive. A component
+whose hook signature changed remounts by itself.
 
-The repo wires it up in three small files you can copy:
-
-| file                                                                                                        | job                                                                                                        |
-| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| [`examples/hmr-register.mjs`](https://github.com/sidorares/react-x11/tree/master/examples/hmr-register.mjs) | the transform half — a sync babel loader (classic JSX + `react-refresh/babel`) chained under the HMR hooks |
-| [`examples/hmr-refresh.js`](https://github.com/sidorares/react-x11/tree/master/examples/hmr-refresh.js)     | the runtime half — injects the refresh runtime into the reconciler; must be the entry's first import       |
-| [`examples/tasks-hot.jsx`](https://github.com/sidorares/react-x11/tree/master/examples/tasks-hot.jsx)       | the accept boundary, calling `performReactRefresh()`                                                       |
+One import, no changes to the app's entry:
 
 ```bash
-git clone https://github.com/sidorares/react-x11 && cd react-x11 && npm install
-npm run examples:tasks:hot     # then edit examples/tasks.jsx while it runs
+npm install --save-dev @babel/core @babel/plugin-transform-react-jsx react-refresh hot-module-replacement
+node --enable-source-maps --import react-x11/refresh/register hello.jsx
 ```
 
-Two constraints apply _inside_ a hot module: no calls on **named** imports
-at module top level (those bindings become `let`s initialised in a
-microtask — use the default import, `React.createContext`), and identity
-that must survive a reload (contexts, stores) belongs in its own module that
-the reload does not touch.
+The loader decides per `.jsx` module whether it is a refresh boundary (all
+exports are components) and wires everything itself; `onReload` from
+`react-x11/refresh` is the seam for a tool that wants to observe reloads.
+The constraints — no calls on **named** imports at module top level, and
+identity that must survive a reload (contexts, stores) in its own module
+the reload does not touch — are enforced by the loader with errors that
+name the fix. The full story is in
+**[dev tooling](/docs/reference/ecosystem/dev-tooling#react-refresh)**; a
+running example is `npm run examples:tasks:hot` in the repo.
 
 `bun --hot` is not a substitute. Its `import.meta.hot` API belongs to the
 bundler and dev server, not the CLI runtime, where the property is

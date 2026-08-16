@@ -68,52 +68,92 @@ X11 window. See [devtools](../devtools.md) for the full walkthrough.
 
 ## react-refresh {#react-refresh}
 
-**Out of the box — the setup is already in the repo.** react-refresh@0.18.0
-with hot-module-replacement@4.0.0.
-
-Fast Refresh without a bundler: edit a component, and the mounted X11 window
-updates in place with hook state intact. `examples/hmr-register.mjs` and
-`examples/hmr-refresh.js` are the two halves.
+**Supported — `react-x11/refresh` is the entry point.** Fast Refresh
+without a bundler: edit a component, and the mounted X11 window updates in
+place with hook state intact. The X connection, the window, the task list,
+half-typed text in an input — all survive.
 
 ```sh
-node --enable-source-maps --import ./examples/hmr-register.mjs examples/tasks-hot.jsx
+node --enable-source-maps --import react-x11/refresh/register app.jsx
 ```
 
-Node 22.15 or newer is required, for synchronous `module.registerHooks`.
-`hmr-register.mjs` stacks two loader layers: babel (classic JSX transform
-plus `react-refresh/babel`) instruments every `.jsx` component, and above it
-`hot-module-replacement` rewrites static imports into live bindings and wires
-`import.meta.hot`. `hmr-refresh.js` is the runtime half, and its ordering is
-load-bearing: `RefreshRuntime.injectIntoGlobalHook(globalThis)` must patch
-the DevTools hook _before_ the renderer registers, which is why the react-x11
-import below it is dynamic.
-
-The hot boundary excludes `node_modules` and `src/`, so React, the renderer
-and `react-refresh/runtime` stay singletons — the X connection and the
-mounted window survive reloads, and only app modules re-execute.
+The app's entry needs no changes. The loader instruments every `.jsx`
+module and decides per module whether it is a **refresh boundary**: a
+module whose exports are all components self-accepts, so an edit to it (or
+to anything below it with no boundary of its own) re-evaluates up to that
+module and re-renders the edited components in place. A component whose
+hook signature changed remounts alone. There are no accept handlers to
+write; the one optional seam is the reload event:
 
 ```js
-// Minimal hot entry for an app (mirrors examples/tasks-hot.jsx):
-import { performReactRefresh } from './examples/hmr-refresh.js'; // FIRST import
-import { createRoot } from 'react-x11'; // safe now: the global hook is patched
-import { App } from './app-ui.jsx'; // hot: lives in the reloadable graph
+import { onReload } from 'react-x11/refresh';
 
-(await createRoot()).render(<App />);
-import.meta.hot?.accept('./app-ui.jsx', () => {
-  performReactRefresh();
+onReload(({ urls, refreshed }) => {
+  console.log(`${urls.length} module(s) reloaded`);
 });
 ```
 
-- **Named imports in hot modules re-initialize in a microtask** after a
-  reload, so module top-level code must not call them synchronously. Use the
+Node 22.15 or newer is required, for synchronous `module.registerHooks`,
+and the toolchain rides four optional peer dependencies:
+
+```sh
+npm install --save-dev @babel/core @babel/plugin-transform-react-jsx react-refresh hot-module-replacement
+```
+
+Under the hood two loader layers stack: babel (classic JSX transform plus
+`react-refresh/babel`) instruments the components, and above it
+`hot-module-replacement` rewrites static imports into live bindings and
+wires `import.meta.hot`. The runtime half patches the DevTools global hook
+before the renderer registers with it — ordering the loader guarantees by
+injecting the runtime import into every hot module's prelude. The hot
+boundary excludes `node_modules` and react-x11's own sources, so React,
+the renderer and `react-refresh/runtime` stay singletons.
+
+A tool that needs the seams — a workbench, a custom dev loop — writes its
+own two-line `--import` module instead of `react-x11/refresh/register`:
+
+```js
+// tool-register.mjs, then: node --import ./tool-register.mjs app.jsx
+import { registerRefresh } from 'react-x11/refresh/loader';
+
+await registerRefresh({
+  extensions: ['.jsx'], // which files are hot modules
+  ignore: (path) => path.includes('/stores/'), // identity that must survive
+  prelude: ['globalThis.__TOOL__ = true'], // injected into every hot module
+});
+```
+
+The constraints are enforced errors now, not folklore:
+
+- **A named import called at module top level inside a hot module is a
+  transform error.** Named imports become live bindings initialized in a
+  microtask, so at module scope the value is still undefined. Use the
   default import at top level (`React.createContext(...)`, not
-  `createContext(...)`). Inside components anything goes.
-- The import-rewrite layer emits replacements with no trailing semicolon, so
-  hot modules want one statement per line.
-- Stack traces through hot modules are off by the prelude's four lines.
-  Dev-only.
-- Fast Refresh needs the dev reconciler (`NODE_ENV` unset or `development`).
-  There is no production hot path, by design.
+  `createContext(...)`); inside components anything goes.
+- **Only the classic JSX runtime.** `jsxRuntime: 'automatic'` throws: the
+  automatic runtime appends its `react/jsx-runtime` import to the last
+  import's line, which the line-oriented import rewrite breaks.
+- **One statement per prelude entry.** A `prelude` entry holding two
+  statements or a newline throws, because the import rewrite replaces a
+  whole import statement's span on its line.
+
+What is _not_ enforced, so it is not rediscovered as a bug:
+
+- An edit only reaches the tree if a boundary sits on its import chain.
+  The entry itself (no exports) is not one — editing it needs a restart.
+  So does a module whose importers dead-end without any component-only
+  module above.
+- **Module-scope side effects re-run on every reload** of the module and
+  of everything between it and its boundary. Keep hot modules'
+  top level idempotent, and keep identity that must survive (contexts,
+  stores, `registerElement` calls) in modules outside the hot graph — via
+  the `ignore` seam or by extension. A re-registration policy so a
+  reloaded `registerElement` does not throw is
+  [#318](https://github.com/sidorares/react-x11/issues/318).
+- Stack traces through hot modules are off by the prelude's lines (four,
+  plus your own `prelude` entries). Dev-only.
+- Fast Refresh needs the dev reconciler; `NODE_ENV=production` is a
+  registration error. There is no production hot path, by design.
 
 ## `node --inspect` {#node-inspect}
 
