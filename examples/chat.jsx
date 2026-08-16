@@ -335,15 +335,29 @@ const s = createStyles({
   channelOn: { backgroundColor: '$accent' },
   channelName: { flexGrow: 1, fontSize: 13, color: '$text' },
   channelNameOn: { color: '$accentText' },
+  // A pill, not a padded label. Padding round a `<text>` gives it the font's
+  // **line box** — which carries the leading, and leaves more room above the
+  // digits than below, so the count rides low. On a face with a real line gap
+  // that is visible; `sans-serif` on macOS can resolve to one (#86).
+  //
+  // Two things fix it and both are worth having: a fixed height centred with
+  // flex, so the pill does not depend on font metrics at all, and
+  // `textBoxTrim` on the label so what gets centred is the digits rather than
+  // the line box around them.
+  unreadPill: {
+    minWidth: 16,
+    height: 16,
+    paddingStart: 5,
+    paddingEnd: 5,
+    borderRadius: 8,
+    backgroundColor: '$accent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   unread: {
     fontSize: 10,
     color: '$accentText',
-    backgroundColor: '$accent',
-    paddingStart: 5,
-    paddingEnd: 5,
-    paddingTop: 1,
-    paddingBottom: 1,
-    borderRadius: 8,
+    textBoxTrim: 'cap-alphabetic',
   },
 
   main: { flexGrow: 1 },
@@ -648,7 +662,9 @@ export function ChatPanel({ transport, nick = 'you' }) {
                 {channel}
               </text>
               {unread[channel] ? (
-                <text style={s.unread}>{String(unread[channel])}</text>
+                <box style={s.unreadPill}>
+                  <text style={s.unread}>{String(unread[channel])}</text>
+                </box>
               ) : null}
             </box>
           );
