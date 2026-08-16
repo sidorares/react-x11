@@ -137,7 +137,7 @@ The constraints are enforced errors now, not folklore:
   statements or a newline throws, because the import rewrite replaces a
   whole import statement's span on its line.
 
-What is *not* enforced, so it is not rediscovered as a bug:
+What is _not_ enforced, so it is not rediscovered as a bug:
 
 - An edit only reaches the tree if a boundary sits on its import chain.
   The entry itself (no exports) is not one — editing it needs a restart.

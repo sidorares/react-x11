@@ -100,10 +100,7 @@ test(
         'useState state should survive the reload',
       );
       await waitFor(/RELOAD refreshed=true count=1/, 'the onReload event');
-      assert.ok(
-        !stderr.includes('Error'),
-        `child logged an error:\n${stderr}`,
-      );
+      assert.ok(!stderr.includes('Error'), `child logged an error:\n${stderr}`);
     } finally {
       child.kill();
       rmSync(dir, { recursive: true, force: true });

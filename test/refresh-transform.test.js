@@ -17,7 +17,10 @@ describe('the transform', () => {
   test('instruments components and injects the refresh prelude + footer', async () => {
     const t = await createTransformer();
     const { code } = t.transform(COMPONENT, '/tmp/app.jsx');
-    assert.match(code, /import __ReactX11Refresh from "file:.*refresh.index\.js"/);
+    assert.match(
+      code,
+      /import __ReactX11Refresh from "file:.*refresh.index\.js"/,
+    );
     assert.match(code, /\$RefreshReg\$/, 'components should be registered');
     assert.match(code, /React\.createElement/, 'classic JSX runtime');
     assert.match(
@@ -90,8 +93,15 @@ describe('enforced constraint: no named-import calls at module top level', () =>
           '/tmp/ctx.jsx',
         ),
       (err) => {
-        assert.match(err.message, /`createContext` is a named import called at module top level/);
-        assert.match(err.message, /React\.createContext/, 'the fix is in the message');
+        assert.match(
+          err.message,
+          /`createContext` is a named import called at module top level/,
+        );
+        assert.match(
+          err.message,
+          /React\.createContext/,
+          'the fix is in the message',
+        );
         assert.match(err.message, /ctx\.jsx/, 'the module is named');
         return true;
       },
