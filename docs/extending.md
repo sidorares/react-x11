@@ -1346,6 +1346,7 @@ not create. Three things it has to do that a GL surface does not:
 | `react-x11/host`    | `registerElement`, `unregisterElement`, `registeredElements`, `hostTypes`, `knownElements`, `drawnKinds` |
 | `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                         |
 | `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary               |
+| `react-x11/yoga`    | the layout engine — `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed; see below                       |
 | `react-x11/ntk`     | ntk itself, re-exported — `Surface`, `Path2D`, `Image`, `Pixmap`, the font sources, `createClient`       |
 | `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                     |
 
@@ -1354,11 +1355,38 @@ of ntk in one process means two font caches and two glyph atlases, and a
 node built against one cannot be painted by the other — a failure that
 looks like a drawing bug rather than a dependency bug.
 
-The layout engine is not among these entry points, and that is deliberate:
+**An element does not need the layout engine, and that is deliberate.**
 `measureContent` is handed its constraints in words (`'exactly'`,
 `'at-most'`, `'unconstrained'`) rather than yoga's integers, so an element
-never links against the engine and yoga's ABI never becomes part of this
-seam.
+never links against it and yoga's ABI never becomes part of this seam. If you
+are writing an element and reaching for `react-x11/yoga`, the answer is
+almost certainly `measureContent`.
+
+`react-x11/yoga` is for the case that is genuinely different: a package
+implementing a **layout algorithm of its own** that wants to delegate part of
+it. `@react-x11/components`'s `<Html>` is the worked example — its
+`display: flex` builds a small yoga tree, asks it, and reads the answer back
+rather than re-deriving flexbox, which is long, subtle, and silently wrong
+when it is wrong.
+
+Such a package must use **this** engine rather than its own `yoga-layout`
+dependency, for the same reason it must reach ntk through `react-x11/ntk`:
+two instances are two WebAssembly modules, and a node created by one cannot
+be inserted into a tree owned by the other. That failure surfaces as a crash
+inside the engine, naming nothing you wrote.
+
+```ts
+import { Yoga, loadLayout } from 'react-x11/yoga';
+
+await loadLayout(); // createRoot() has already done this inside an app
+const root = Yoga.Node.create();
+root.setFlexDirection(Yoga.FLEX_DIRECTION_ROW);
+```
+
+The enum constants are readable from the first tick; `Node` and `Config`
+throw until the assembly is loaded, which `createRoot()` awaits before it
+builds anything (docs/packaging.md explains why it is loaded rather than
+imported).
 
 ## Typing
 
