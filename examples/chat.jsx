@@ -376,14 +376,17 @@ const s = createStyles({
     borderTopWidth: 1,
     borderColor: '$border',
   },
+  // The palette's own control padding, not a number picked by eye: a field's
+  // box is its capitals, so `$paddingY` twice plus the border is the same sum
+  // a <Button> is, and the two line up. A hand-picked 6 made this composer
+  // 24px tall next to a 36px Send. See docs/styling.md.
   input: {
     flexGrow: 1,
-    fontSize: 13,
-    paddingStart: 8,
-    paddingEnd: 8,
-    paddingTop: 6,
-    paddingBottom: 6,
-    borderWidth: 1,
+    paddingStart: 10,
+    paddingEnd: 10,
+    paddingTop: '$paddingY',
+    paddingBottom: '$paddingY',
+    borderWidth: '$borderWidth',
     borderColor: '$border',
     borderRadius: '$radius',
     ':focus': { borderColor: '$accent' },
