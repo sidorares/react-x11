@@ -3,7 +3,12 @@
 // they are errors, and this file pins the error and the seam both.
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
+import * as nodeModule from 'node:module';
 import { createTransformer, registerRefresh } from '../src/refresh/loader.js';
+
+// The Node floor check sits in front of option validation, so these
+// registerRefresh assertions only hold where the floor is met.
+const hooksSupported = typeof nodeModule.registerHooks === 'function';
 
 const COMPONENT = `
 import React from 'react';
@@ -168,7 +173,9 @@ describe('registerRefresh guards', () => {
   test('rejects a non-function ignore before touching the hooks', async () => {
     await assert.rejects(
       registerRefresh({ ignore: '/stores/' }),
-      /ignore must be a function/,
+      hooksSupported
+        ? /ignore must be a function/
+        : /needs module\.registerHooks/,
     );
   });
 });
