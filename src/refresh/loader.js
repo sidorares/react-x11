@@ -26,6 +26,7 @@
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { markHotReloadSession } from '../registry.js';
 
 const RUNTIME_URL = new URL('./index.js', import.meta.url).href;
 const SRC_DIR = fileURLToPath(new URL('../', import.meta.url));
@@ -371,6 +372,12 @@ export async function registerRefresh(options = {}) {
       if (!url.startsWith('file:')) {
         return nextLoad(url, context);
       }
+      // A ?hmr=N request is a hot re-import about to re-run a module
+      // scope. Told to the registry *before* the module evaluates — the
+      // first reloaded module may itself call registerElement at top
+      // level — and checked on every extension, because a chain reload
+      // re-imports plain .js modules this hook does not transform.
+      if (/[?&]hmr=\d+/.test(url)) markHotReloadSession();
       const fileUrl = new URL(url);
       fileUrl.search = ''; // hot-module-replacement cache-busts with ?hmr=N
       if (!transformer.matches(fileUrl.pathname)) {

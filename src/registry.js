@@ -36,6 +36,26 @@ const registry = new Map();
 
 const RESERVED = new Set(['textchunk', 'svgchild']);
 
+// The re-registration policy for hot reload (issue #318). Module-scope
+// registration is the pattern the docs recommend and tree-shaking forces on
+// component libraries, and a hot re-import runs that module scope again —
+// so under an active reload session a duplicate registration replaces
+// silently instead of throwing. The flag is flipped by react-x11/refresh's
+// loader the moment the first hot re-import is compiled (before it
+// evaluates, so the first reloaded module's own registerElement is already
+// covered), and never outside a hot dev loop — a plain run still hears
+// about two packages claiming one name. It stays one-way on purpose: after
+// the first reload every registration may be a re-run of code that
+// registered before, and there is no later moment at which that stops
+// being true. The setter takes `false` only so tests can restore the
+// default; nothing else should ever pass it.
+let hotReloadSession = false;
+
+/** @internal — called by react-x11/refresh; not part of the public API. */
+export function markHotReloadSession(active = true) {
+  hotReloadSession = active;
+}
+
 function assertNode(node, type) {
   if (!(node instanceof Node)) {
     throw new Error(
@@ -126,11 +146,24 @@ export function registerElement(type, definition) {
     );
   }
   if (registry.has(type) && !definition.override) {
-    throw new Error(
-      `react-x11: <${type}> is already registered. Pass { override: true } ` +
-        'if replacing it is deliberate — two packages claiming one element ' +
-        'name is usually not.',
-    );
+    // Identical re-registration — the same create() reference — is the
+    // same definition arriving twice (a module evaluated twice, a test
+    // registering in a loop) and never a conflict; the latest flags win.
+    // Everything else is a real collision unless a hot-reload session is
+    // re-running module scopes, which is the one loop where "already
+    // registered" means "registered by the previous version of yourself".
+    // Mounted nodes keep the old prototype until they remount — the same
+    // staleness contract React Refresh has for classes.
+    const identical = registry.get(type).create === definition.create;
+    if (!identical && !hotReloadSession) {
+      throw new Error(
+        `react-x11: <${type}> is already registered. Pass { override: true } ` +
+          'if replacing it is deliberate — two packages claiming one element ' +
+          'name is usually not. (Under hot reload a module re-registering ' +
+          'its own elements replaces them silently; this error means two ' +
+          'different definitions collided outside any reload.)',
+      );
+    }
   }
 
   const {

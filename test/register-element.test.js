@@ -204,6 +204,44 @@ test('the registry refuses names that could not work, and silent clashes', () =>
   });
 });
 
+// The re-registration policy for hot reload (#318): module-scope
+// registration re-runs on a hot re-import, so it must not collide with
+// itself — while two genuinely different definitions still do.
+test('the same create() reference re-registers without a conflict', () => {
+  const create = (p, a) => new Node('samedef', p, a);
+  register('samedef', { create });
+  // identical definition arriving twice — never a conflict, latest flags win
+  registerElement('samedef', { create, drawn: false });
+  assert.ok(!drawnKinds().includes('samedef'));
+  registerElement('samedef', { create });
+  assert.ok(drawnKinds().includes('samedef'));
+});
+
+test('a hot-reload session replaces module-scope registrations silently', async () => {
+  const { markHotReloadSession } = await import('../src/registry.js');
+  register('hotel', {
+    create: (p, a) => new Node('hotel', p, a),
+    semanticNames: ['size'],
+  });
+  markHotReloadSession();
+  try {
+    // a re-evaluated module registers a *new* create() under the old name
+    registerElement('hotel', { create: (p, a) => new Node('hotel', p, a) });
+    assert.strictEqual(
+      registeredElements().filter((t) => t === 'hotel').length,
+      1,
+    );
+  } finally {
+    markHotReloadSession(false);
+  }
+  // outside the session the collision is loud again
+  assert.throws(
+    () =>
+      registerElement('hotel', { create: (p, a) => new Node('hotel', p, a) }),
+    /already registered/,
+  );
+});
+
 test('a create() that returns the wrong thing is caught at the source', async () => {
   register('wrong', { create: () => ({ kind: 'wrong' }) });
   await rejectsQuietly(
