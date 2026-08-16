@@ -168,9 +168,15 @@ export function WidgetsPanel() {
           placeholder="Type here…"
           style={{
             flexGrow: 1,
-            padding: 8,
-            borderRadius: 4,
-            borderWidth: 1,
+            // The palette's control padding: this is the gallery, so a field
+            // that is not the same height as the buttons above it is the one
+            // thing this file must not show.
+            paddingTop: '$paddingY',
+            paddingBottom: '$paddingY',
+            paddingLeft: 10,
+            paddingRight: 10,
+            borderRadius: '$radius',
+            borderWidth: '$borderWidth',
             borderColor: '$border',
             backgroundColor: '$surface',
           }}
