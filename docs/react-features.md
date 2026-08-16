@@ -218,6 +218,13 @@ to the fallback and jumps back on reveal.
 </Suspense>
 ```
 
+**Focus goes with the hidden tree and comes back with it.** A field inside
+the boundary gives up the keyboard when the fallback appears — nothing
+invisible collects keystrokes — and gets it back on the reveal unless
+something else took focus meanwhile, so a boundary that re-suspends
+mid-edit does not drop the user out of what they were typing. See
+[events.md](events.md#focus-and-visibility) for the rules and the way out.
+
 If a `<window>` is inside the boundary, hiding it **unmaps the real window**.
 The window manager treats the reveal as a new window: it may re-place it,
 restack it, or apply its own geometry, and anything the user did to it can be
@@ -379,9 +386,12 @@ unaffected and work normally.
 
 Open bugs where a React feature does not yet mean here what it should:
 
-- [#202](https://github.com/sidorares/react-x11/issues/202) — hiding a
-  subtree with `<Suspense>` or `<Activity>` does not move focus out of it, so
-  a focused control keeps receiving keystrokes while invisible.
+- A `<popup>` written inside a subtree that `<Suspense>` or `<Activity>`
+  hides stays on screen: React hides the topmost host instance of the branch
+  and the popup is its own X window below it, so nothing unmaps it. Focus
+  follows what is actually visible, so the popup keeps the keyboard — but
+  the popup itself has to be conditional in your JSX rather than left to the
+  boundary.
 - The bundled types declare `invalidate()` on every node; at runtime only the
   owning `<window>` has it. Reach it as `ref.current.root` — or better, drive
   repaints through props and `cacheKey`.

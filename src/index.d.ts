@@ -286,6 +286,20 @@ export interface RootOptions {
    *   a character: `{ 52: 'z' }`.
    */
   accelerators?: 'latin' | 'layout' | Record<number, number | string>;
+  /**
+   * Whether a subtree coming back out of hiding takes the keyboard back with
+   * it (docs/events.md, "Focus and visibility"). Default `true`.
+   *
+   * Hiding a subtree — `<Suspense>` showing its fallback, `<Activity
+   * mode="hidden">`, a `display: 'none'` — always releases focus inside it,
+   * since keys must not land on a control nobody can see. Revealing it puts
+   * focus back where it was, but only when nothing else has taken the
+   * keyboard in the meantime.
+   *
+   * `false` is the browser's answer: focus that fell to nothing stays there,
+   * and coming back is the user's own Tab.
+   */
+  restoreFocusOnReveal?: boolean;
 }
 
 export interface ComposeOptions {

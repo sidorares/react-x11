@@ -43,6 +43,7 @@ import {
 import { hooks as a11yHooks, startA11y } from './a11y.js';
 import { beginStartup } from './startup.js';
 import { beginCompose } from './compose.js';
+import { beginFocus } from './events.js';
 import { beginKeyboard } from './keyboard.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
@@ -712,6 +713,12 @@ export async function createRoot(options = {}) {
   // process, and only `compose: 'system'` or a file of your own reads
   // anything from disk.
   beginCompose(app, rest.compose);
+
+  // Whether a subtree coming back out of hiding — a `<Suspense>` boundary
+  // resolving, an `<Activity>` shown again — takes the keyboard back with it
+  // (src/events.js, `subtreeRevealed`). On by default; `false` is the
+  // browser's answer, where focus stays wherever the hide dropped it.
+  beginFocus(app, rest.restoreFocusOnReveal);
 
   // Which keysym a shortcut matches when the layout is not Latin
   // (src/keyboard.js). Pure bookkeeping — the work happens per key event,

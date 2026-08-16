@@ -996,6 +996,13 @@ async function main() {
   // (a third name is caught at runtime rather than here: a string satisfies
   // `Record<number, string>`, since indexing one gives a string back)
 
+  // focus comes back with a subtree that was hidden, unless an app says not
+  const noRestore = await createRoot({ restoreFocusOnReveal: false });
+  await noRestore.unmount();
+
+  // @ts-expect-error — it is on or off, not a moment
+  await createRoot({ restoreFocusOnReveal: 'reveal' });
+
   root.render(<Scene />);
   root.render(<RawGl />);
   root.render(<Popup />, () => {});

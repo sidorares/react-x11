@@ -1479,6 +1479,12 @@ export class Node {
     if (!inThemeWalk && displayed.direction !== this.style.direction) {
       this._redirectSubtree();
     }
+    // `display: 'none'` hides a subtree as completely as React's own flag
+    // does, whether it arrived from a prop, a state block or a size query —
+    // so focus leaves it by the same rule (`_visibilityChanged`).
+    if (displayed.display !== this.style.display) {
+      this._visibilityChanged(this.style.display !== 'none');
+    }
     return this.style;
   }
 
@@ -2230,6 +2236,22 @@ export class Node {
           : Yoga.DISPLAY_FLEX,
       );
     }
+    this._visibilityChanged(!hidden);
+  }
+
+  /**
+   * Whether this subtree is on screen just changed, so focus has to follow
+   * it — released when it goes, handed back when it returns. The rule and
+   * the reasoning live on the focus manager (`subtreeHidden`, events.js);
+   * this is the funnel every route to it comes through: the `hidden` flag
+   * React sets for `<Suspense>`/`<Activity>`, and `display: 'none'` from a
+   * style, a state block or a size query (`_retarget`).
+   */
+  _visibilityChanged(visible) {
+    const events = this._focusManager();
+    if (!events) return;
+    if (visible) events.subtreeRevealed(this);
+    else events.subtreeHidden(this);
   }
 
   /**
@@ -8269,6 +8291,11 @@ export class WindowNode extends Scrollable(Node) {
    */
   setHidden(hidden) {
     this.hidden = hidden;
+    // An unmapped window is off screen however focused the server thinks it
+    // is, and a `<popup>` is worse than that: it shares the owner window's
+    // keyboard, so a node inside one that is no longer on screen would go on
+    // taking keys the owner window is still receiving.
+    this._visibilityChanged(!hidden);
     // A map still queued for the end of this commit reads `hidden` when it
     // runs, so there is nothing to send here — and an unmap sent now would
     // do nothing anyway, the server not having mapped the window yet
