@@ -98,12 +98,25 @@ const BOT_LINES = {
 
 /**
  * A fake server. Bots post on a timer, sends take `latency` ms, and
- * `failSends` makes the next one throw — which is the only way to see an
+ * `state.failNext` makes the next one throw — which is the only way to see an
  * optimistic message roll back.
+ *
+ * `hold: true` parks every send instead of timing it, until `flush()` lets
+ * them go. That exists for the tests and is worth having in the example
+ * rather than beside it: an optimistic entry only exists between the send and
+ * its answer, so a test that asserts on that state is racing a timer, and on
+ * a loaded CI runner it loses. A fake server you can pause has no window to
+ * miss. It is also the honest shape for a fake — real latency is not a
+ * constant, and pretending otherwise is what makes a test flaky at 3am.
  */
-export function fixtureTransport({ latency = 450, botEvery = 6000 } = {}) {
+export function fixtureTransport({
+  latency = 450,
+  botEvery = 6000,
+  hold = false,
+} = {}) {
   const listeners = new Set();
   const statusListeners = new Set();
+  const held = [];
   let timer = null;
   let turn = 0;
   let status = 'offline';
@@ -135,12 +148,18 @@ export function fixtureTransport({ latency = 450, botEvery = 6000 } = {}) {
       }
     },
     async send(channel, text, from) {
-      await new Promise((resolve) => setTimeout(resolve, latency));
+      await (hold
+        ? new Promise((resolve) => held.push(resolve))
+        : new Promise((resolve) => setTimeout(resolve, latency)));
       if (state.failNext) {
         state.failNext = false;
         throw new Error('the server dropped it');
       }
       return { id: messageId(), channel, from, text, at: Date.now() };
+    },
+    /** Let every held send finish. Only meaningful with `hold: true`. */
+    flush() {
+      held.splice(0).forEach((resolve) => resolve());
     },
     onMessage(fn) {
       listeners.add(fn);

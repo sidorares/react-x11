@@ -36,13 +36,16 @@ afterEach(() => {
   clearHistory();
 });
 
-// No bots, so nothing arrives that a test did not ask for. The latency is
-// deliberately *not* zero: an optimistic entry only exists between the send
-// and its resolution, so a transport that answered instantly would leave
-// nothing to assert and the two send tests would pass without testing
-// anything.
+// No bots, so nothing arrives that a test did not ask for — and `hold`, so
+// sends park until `flush()` rather than finishing on a timer.
+//
+// The timer version of this raced. An optimistic entry only exists between
+// the send and its answer, so asserting on it means getting there first, and
+// a 150ms window is a coin flip on a loaded runner. Holding the send makes
+// the window unbounded and the test deterministic: there is no duration
+// anywhere in this file.
 const testTransport = (overrides = {}) =>
-  fixtureTransport({ latency: 150, botEvery: 0, ...overrides });
+  fixtureTransport({ hold: true, botEvery: 0, ...overrides });
 
 async function mount(transport) {
   const handle = await renderX11(React.createElement(App, { transport }), {
@@ -69,14 +72,17 @@ const channelRow = (channel) => screen.getByRole('listitem', { name: channel });
 
 describe('examples/chat', () => {
   test('an optimistic message appears, then reconciles', async () => {
-    await mount(testTransport());
+    const transport = testTransport();
+    await mount(transport);
 
     await userEvent.type(composer('#general'), 'hello x11\n');
 
-    // Present before the transport resolves, and unacknowledged: this is the
-    // optimistic entry, which the pane draws without a tick.
+    // The send is parked, so this is the optimistic entry and nothing else:
+    // on screen, and unacknowledged — the pane draws no tick until delivery.
     assert.match(textOf(log('#general')), /hello x11/);
     assert.doesNotMatch(textOf(log('#general')), /✓/);
+
+    transport.flush();
 
     // The delivered message replaces it — same line, now acknowledged, and
     // still only one of it.
@@ -100,6 +106,8 @@ describe('examples/chat', () => {
 
     await userEvent.type(composer('#general'), 'this one drops\n');
     assert.match(textOf(log('#general')), /this one drops/);
+
+    transport.flush();
 
     // Nothing in the example removes it. React discards the optimistic state
     // when the transition ends, and the real list never had it.
