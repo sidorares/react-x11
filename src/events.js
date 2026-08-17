@@ -209,6 +209,10 @@ export class EventManager {
     this._hiddenFocus = new WeakMap();
     // resolved lazily for popups: the manager that owns focus (focusManager)
     this._focusOwner = null;
+    // on a *top-level* window's manager: which of this window's managers
+    // took node focus last, and so answers keys addressed to any of them
+    // (`_keyManager`). Its own, until a nested `<window>` says otherwise.
+    this._focusHolder = null;
     // the dead-key/Compose state machine, built on the first key (undefined
     // until then, null when the app turned composition off)
     this._composerInstance = undefined;
@@ -243,6 +247,57 @@ export class EventManager {
     const manager = this.node.parent?.root?.events;
     if (manager && manager !== this) this._focusOwner = manager.focusManager;
     return this._focusOwner ?? this;
+  }
+
+  /**
+   * The manager of the top-level window this one belongs to.
+   *
+   * A nested `<window>` is a child X window *inside* a top-level one, and a
+   * `<popup>` hangs off it; the X input focus only ever lands on the
+   * top-level (or, for a managed popup, on the popup itself, whose keys the
+   * owner already answers). So the top-level is the one place where "which
+   * of our windows is the keyboard's" can be recorded — see `_keyManager`.
+   */
+  get topLevelManager() {
+    const manager = this.focusManager;
+    const owner = manager.node.parent?.root?.events;
+    return owner && owner !== manager ? owner.topLevelManager : manager;
+  }
+
+  /**
+   * The manager a key that arrived *here* should be dispatched through.
+   *
+   * Focus is per `<window>` (docs/events.md), but delivery is not ours to
+   * choose: X sends a key to the focus window, or to the descendant of it
+   * the pointer happens to be over. With a nested `<window>` those come
+   * apart — the field is focused in the inner window's manager while the
+   * keyboard belongs to the outer one — and the key used to be dispatched
+   * against a manager with no focused node at all, which is a key that
+   * types nothing. It also meant *the pointer* decided whether typing
+   * worked: park it over the inner window and the same keystroke arrived
+   * somewhere else.
+   *
+   * So the window that holds the focused node answers, whichever of this
+   * top-level's windows the key was addressed to. `focus()` records it
+   * because only it knows the order they were focused in; a record whose
+   * node has since gone is no better than none (issue #331).
+   */
+  _keyManager() {
+    const manager = this.focusManager;
+    const holder = manager.topLevelManager._focusHolder;
+    // The record wins over this window's own `focused`, which is not the
+    // same question: focus is per window, so a nested `<window>` the user
+    // has since left still has a focused node in it. One of them is where
+    // the user is typing, and that is the one that took focus last.
+    if (
+      holder &&
+      !holder.node.destroyed &&
+      holder.focused &&
+      !holder.focused.destroyed
+    ) {
+      return holder;
+    }
+    return manager;
   }
 
   /**
@@ -897,6 +952,13 @@ export class EventManager {
       }
       return;
     }
+    // The key is this application's; which of its windows the server
+    // addressed it to is not the same question as which window is holding
+    // the keyboard (`_keyManager`). Redirected whole rather than target by
+    // target, so composition, the focus scope Tab cycles inside and the
+    // handlers the event bubbles through are all that window's.
+    const manager = this._keyManager();
+    if (manager !== this) return manager._onKey(name, native);
     runWithPriority(DiscreteEventPriority, () => {
       const wnd = this.node.window;
       // ntk decodes the key on the way in (window.js decorates the event
@@ -1027,6 +1089,9 @@ export class EventManager {
     const old = this.focused;
     this._previousFocus = old;
     this.focused = node;
+    // …and this window is now the one the top-level's keys belong to,
+    // whichever of its windows they are addressed to (`_keyManager`)
+    if (node) this.topLevelManager._focusHolder = this;
     if (old && !old.destroyed) {
       // Claimed *first*, while the ring is still on: a node's damage bound
       // only reaches outside its box while it is actually drawing an

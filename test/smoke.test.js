@@ -3318,6 +3318,56 @@ test('<popup trapFocus> traps Tab and restores focus when it closes', async () =
   await x11Root.unmount();
 });
 
+// Which window the server hands a key to is not ours to choose: it goes to
+// the window holding the X input focus, or to whichever descendant of it the
+// pointer is over. A nested `<window>` puts those two apart — focus is per
+// window, and the keyboard belongs to the top-level — so a key can land on
+// one window while another holds the focused node, and it used to be
+// dispatched against a manager with nothing focused in it and type nothing
+// (issue #331). It also made *the pointer* decide, which is why both
+// directions are here.
+test('a key reaches the focused node whichever window it was sent to', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const refs = { outer: null, inner: null };
+  x11Root.render(
+    React.createElement(
+      'window',
+      { width: 400, height: 300 },
+      React.createElement('textinput', {
+        ref: (n) => (refs.outer = n),
+        defaultValue: '',
+        style: { height: 24 },
+      }),
+      React.createElement(
+        'window',
+        { width: 200, height: 100, x: 10, y: 40 },
+        React.createElement('textinput', {
+          ref: (n) => (refs.inner = n),
+          defaultValue: '',
+          style: { height: 24 },
+        }),
+      ),
+    ),
+  );
+  await tick();
+  const [outerWnd, innerWnd] = app.windows;
+  assert.ok(innerWnd, 'the nested <window> is a window of its own');
+
+  refs.inner.focus();
+  pressKey(app, outerWnd, { keysym: 0x68, codepoint: 0x68 });
+  await tick();
+  assert.strictEqual(refs.inner.value, 'h', 'the top-level passed it inwards');
+
+  refs.outer.focus();
+  pressKey(app, innerWnd, { keysym: 0x69, codepoint: 0x69 });
+  await tick();
+  assert.strictEqual(refs.outer.value, 'i', 'and the nested window outwards');
+  assert.strictEqual(refs.inner.value, 'h', 'without typing twice');
+
+  await x11Root.unmount();
+});
+
 test('Dialog: modal popup, Escape closes it, focus goes back', async () => {
   const { Dialog, Button } = await import('../src/index.js');
   const app = createMockApp();
