@@ -69,12 +69,14 @@ export function Radio({ value, children, label, disabled = false }) {
   } = useControl(disabled, () => {
     if (!selected) group.emit(value);
   });
-  const onKeyDown = props.onKeyDown;
-  if (onKeyDown) {
+  // The arrows are the group's, and they are all this handler is for: Space
+  // and Enter are the click core makes of them on anything with an `onClick`
+  // (issue #329), which for a radio is `useControl`'s. A disabled radio takes
+  // no keys and gets no handler — it has no `onClick` either.
+  if (!disabled) {
     props.onKeyDown = (ev) => {
       if (ev.keysym === XK_DOWN || ev.keysym === XK_RIGHT) group.move(1);
       else if (ev.keysym === XK_UP || ev.keysym === XK_LEFT) group.move(-1);
-      else onKeyDown(ev);
     };
   }
   // The dot only appears on the release, so the well answers the press

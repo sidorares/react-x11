@@ -5,15 +5,7 @@
 import React, { useRef, useState } from 'react';
 import { createStyles } from '../styles.js';
 import { labelContent, useDirection, useTheme } from './theme.js';
-import {
-  XK_DOWN,
-  XK_END,
-  XK_HOME,
-  XK_LEFT,
-  XK_RETURN,
-  XK_RIGHT,
-  XK_UP,
-} from './keys.js';
+import { XK_DOWN, XK_END, XK_HOME, XK_LEFT, XK_RIGHT, XK_UP } from './keys.js';
 
 const h = React.createElement;
 
@@ -125,11 +117,11 @@ export function Tabs({
         return;
       default:
     }
-    // in manual mode focus and selection differ, so commit what the focus
-    // is on rather than what is already selected
-    if (manual && (ev.keysym === XK_RETURN || ev.codepoint === 32)) {
-      select(focusedId);
-    }
+    // Space and Enter are not here: in manual mode, where focus and
+    // selection differ, committing the focused tab is exactly the click
+    // that tab's own `onClick` is, and core makes those keys that click
+    // (issue #329). In automatic mode the tab is already selected and the
+    // click is a no-op.
   };
 
   const active = items.find((item) => item.id === selected);

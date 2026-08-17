@@ -384,3 +384,214 @@ test('Switch and Slider clear the 24px minimum', async () => {
   await settle();
   assert.strictEqual(switched, true, 'a press in the slop toggles the switch');
 });
+
+// --- 4. Space and Enter are a click ----------------------------------------
+//
+// The same complaint as section 1, one rung out (#329). The ring arrived and
+// the activation did not: a focusable `<box onClick>` took focus, drew a
+// ring, was reachable by Tab and was activatable by Orca — the AT-SPI bridge
+// dispatches a synthetic click for anything with an `onClick` — and did
+// nothing at all when a keyboard-only user pressed Space or Enter. It is one
+// click now, `synthesizeClick`, and all three routes go through it.
+
+const XK_RETURN = 0xff0d;
+const XK_KP_ENTER = 0xff8d;
+const XK_A = 0x0061;
+
+/** A press that carries a code point as well as a keysym, the way ntk's
+ *  decoded event does — `press` above sends only the keysym. */
+function type(app, wnd, keysym, codepoint, { shift = false } = {}) {
+  const keycode = (keysym % 248) + 8;
+  app.X.keycode2keysyms[keycode] = [keysym];
+  wnd.emit('keydown', { keycode, keysym, codepoint, buttons: shift ? 1 : 0 });
+}
+
+/** A `<box focusable onClick>` that records the whole gesture, so a test can
+ *  compare what the keyboard sent with what the pointer sends. */
+const recorder = (log, props) =>
+  h('box', {
+    focusable: true,
+    style: { width: 60, height: 20 },
+    onMouseDown: () => log.push('down'),
+    onMouseUp: () => log.push('up'),
+    onClick: () => log.push('click'),
+    ...props,
+  });
+
+test('a focusable box with an onClick answers Space and Enter', async () => {
+  const log = [];
+  const { app, wnd, root } = await mount(recorder(log));
+  const box = root.children[0];
+  box.focus();
+
+  press(app, wnd, XK_SPACE);
+  assert.deepStrictEqual(log, ['down', 'up', 'click'], 'Space presses it');
+
+  log.length = 0;
+  press(app, wnd, XK_RETURN);
+  assert.deepStrictEqual(log, ['down', 'up', 'click'], 'and so does Enter');
+
+  log.length = 0;
+  press(app, wnd, XK_KP_ENTER);
+  assert.deepStrictEqual(log, ['down', 'up', 'click'], 'and the keypad one');
+
+  // ntk decodes a key into keysym *and* code point; a widget's hand-rolled
+  // mapping always read the code point, so the rule that replaced them has
+  // to answer both spellings of the same key
+  log.length = 0;
+  type(app, wnd, XK_SPACE, 32);
+  assert.deepStrictEqual(log, ['down', 'up', 'click'], 'a decoded Space too');
+
+  log.length = 0;
+  press(app, wnd, XK_A);
+  assert.deepStrictEqual(log, [], 'an ordinary letter is not an activation');
+});
+
+test('the keyboard sends the gesture the pointer sends', async () => {
+  const keyboard = [];
+  const pointer = [];
+  const { app, wnd, root } = await mount(
+    h('box', { style: { gap: 10, padding: 10 } }, [
+      h('box', { key: 'k' }, recorder(keyboard)),
+      h('box', { key: 'p' }, recorder(pointer)),
+    ]),
+  );
+  const [byKey, byPointer] = root.children[0].children.map(
+    (n) => n.children[0],
+  );
+
+  byKey.focus();
+  press(app, wnd, XK_RETURN);
+  pressButton(wnd, byPointer.abs.x + 5, byPointer.abs.y + 5);
+  await settle();
+  assert.deepStrictEqual(
+    keyboard,
+    pointer,
+    'press, release, click — a control acting on the press hears it either way',
+  );
+});
+
+test('a press on the keyboard carries the modifiers it was made with', async () => {
+  let ev = null;
+  const { app, wnd, root } = await mount(
+    h('box', {
+      focusable: true,
+      style: { width: 60, height: 20 },
+      onClick: (e) => (ev = e),
+    }),
+  );
+  root.children[0].focus();
+
+  type(app, wnd, XK_RETURN, undefined, { shift: true });
+  assert.ok(ev, 'the click arrived');
+  assert.strictEqual(ev.shiftKey, true, 'Shift+Enter reads as a shift-click');
+  assert.strictEqual(ev.detail, 1, 'and as a single click');
+});
+
+test('preventDefault in the element’s own onKeyDown suppresses it', async () => {
+  const log = [];
+  const { app, wnd, root } = await mount(
+    recorder(log, {
+      onKeyDown: (ev) => {
+        log.push(`key:${ev.keysym}`);
+        ev.preventDefault();
+      },
+    }),
+  );
+  root.children[0].focus();
+
+  press(app, wnd, XK_RETURN);
+  assert.deepStrictEqual(
+    log,
+    [`key:${XK_RETURN}`],
+    'the handler ran and the click did not',
+  );
+});
+
+test('a role is not a click: nothing with no onClick is activated', async () => {
+  const log = [];
+  const { app, wnd, root } = await mount(
+    h('box', {
+      focusable: true,
+      role: 'button',
+      style: { width: 60, height: 20 },
+      onMouseDown: () => log.push('down'),
+      onKeyDown: () => log.push('key'),
+    }),
+  );
+  root.children[0].focus();
+
+  press(app, wnd, XK_SPACE);
+  assert.deepStrictEqual(
+    log,
+    ['key'],
+    'a role advertises an action to an AT; it is not one',
+  );
+});
+
+test('a text input types a space rather than pressing itself', async () => {
+  const log = [];
+  const { app, wnd, root } = await mount(
+    h('textinput', {
+      defaultValue: 'a',
+      style: { width: 80 },
+      onClick: () => log.push('click'),
+    }),
+  );
+  const input = find(root, (n) => n.kind === 'textinput');
+  input.focus();
+
+  type(app, wnd, XK_SPACE, 32);
+  await settle();
+  assert.strictEqual(input.value, 'a ', 'the space was typed');
+  assert.deepStrictEqual(log, [], 'and nothing was activated');
+});
+
+// The one place two default actions want the same key, and the answer the
+// scroll pane's own `defaultKeyDown` already gives: it takes Space before
+// the base class ever sees it.
+test('a scrolling box keeps Space for paging and activates on Enter', async () => {
+  const log = [];
+  const { app, wnd, root } = await mount(
+    h(
+      'box',
+      {
+        style: { overflow: 'scroll', width: 100, height: 100 },
+        onClick: () => log.push('click'),
+      },
+      h('box', { style: { height: 400 } }),
+    ),
+  );
+  const view = root.children[0];
+  view.focus();
+
+  press(app, wnd, XK_SPACE);
+  assert.strictEqual(view.scrollY, 76, 'Space still pages the pane');
+  assert.deepStrictEqual(log, [], 'and does not press it');
+
+  press(app, wnd, XK_RETURN);
+  assert.deepStrictEqual(log, ['click'], 'Enter, which pages nothing, does');
+});
+
+test('a focusable row inside a scroll pane takes the keys, and always did', async () => {
+  const log = [];
+  const { app, wnd, root } = await mount(
+    h(
+      'box',
+      { style: { overflow: 'scroll', width: 100, height: 100 } },
+      h('box', { style: { height: 400 } }, recorder(log, { role: 'option' })),
+    ),
+  );
+  const view = root.children[0];
+  const row = find(root, (n) => n.props.role === 'option');
+  row.focus();
+
+  press(app, wnd, XK_SPACE);
+  assert.deepStrictEqual(log, ['down', 'up', 'click'], 'the row is pressed');
+  assert.strictEqual(
+    view.scrollY,
+    0,
+    'and the pane does not page — it never did with a row focused, ' +
+      'because a default action runs on the focused node',
+  );
+});

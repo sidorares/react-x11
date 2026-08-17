@@ -809,7 +809,7 @@ window, valid after layout).
 
 With `overflow: 'scroll'` it is also the **scroll container** — see below.
 
-## Scrolling: `overflow: 'scroll'`
+## Scrolling: `overflow: 'scroll'` {#scrolling}
 
 There is no scrolling _element_. A `<box>` — or a `<window>` — whose style
 says `overflow: 'scroll'` becomes a clipped viewport over its own
@@ -846,6 +846,13 @@ nothing. **The wheel chains past it** to the next scroll container out — the
 same thing a browser does — so declaring a pane scrollable never steals a
 gesture the window would have answered. The keys are a default action, so an
 `onKeyDown` of your own runs first and `preventDefault()` cancels them.
+
+A pane that also has an `onClick` keeps Space for paging: paging is the
+pane's own default action and runs ahead of the keyboard activation Space
+would otherwise be, so such a pane pages with Space and activates with Enter
+([events.md](events.md#space-and-enter-are-a-click)). A focusable row _inside_
+a pane takes both keys and pages with neither — a default action runs on the
+focused node, and that is the row.
 
 The bar belongs to the scroller, not to the content painted under it — the
 same rule a browser applies — so a press on the thumb never reaches the row

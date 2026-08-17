@@ -39,7 +39,12 @@ import {
 } from './styles.js';
 import { Yoga } from './yoga.js';
 import { cssColorStraight } from 'ntk';
-import { EventManager, discrete, WHEEL_NOTCH_PX } from './events.js';
+import {
+  EventManager,
+  discrete,
+  synthesizeClick,
+  WHEEL_NOTCH_PX,
+} from './events.js';
 import {
   DropSession,
   dndAtoms,
@@ -74,6 +79,7 @@ import {
   hooks as a11yHooks,
   isFocusable as a11yFocusable,
   devCheckA11yProps,
+  hasClickHandler,
 } from './a11y.js';
 import { windowIdOf } from './windowid.js';
 import { paintCacheFor } from './paintcache.js';
@@ -3137,8 +3143,55 @@ export class Node {
     selectionSurfaceOf(this)?.release(ev);
   }
 
+  /**
+   * The selection keys, and then **Space or Enter on anything clickable**.
+   *
+   * A focusable node with an `onClick` used to take focus, draw a ring, be
+   * reachable by Tab and be activatable by a screen reader — and do nothing
+   * at all when the keyboard pressed it (issue #329). It looked operable and
+   * was not, which is the failure mode a focus ring makes *worse*: the ring
+   * is a promise. Every control an application builds out of a `<box>`
+   * rather than out of `Button` had it, silently.
+   *
+   * It is the click itself, not a second definition of one: `synthesizeClick`
+   * is the function an AT's `DoAction("activate")` already went through, so
+   * a control that acts on the press hears the press either way and the two
+   * paths cannot drift. The rule for *what* is activatable is the same one
+   * the bridge writes down — there is an `onClick` here — minus the bridge's
+   * role clause, which advertises an action to something that cannot press a
+   * key (a11y.js, `hasClickHandler`).
+   *
+   * **One key rule, no role table.** The web gives `checkbox` Space and not
+   * Enter, and a link Enter and not Space, because on the web those keys are
+   * already spoken for — Space scrolls the page, Enter submits the form.
+   * Neither is true here: a default action runs on the focused node, so the
+   * scroll pane a row sits in never sees the row's Space, and there is no
+   * implicit submit. All a role table could buy, then, is *fewer* keys
+   * working on a control that draws a focus ring — which is the bug.
+   *
+   * The two ways out, both ordinary: `preventDefault()` in the element's own
+   * `onKeyDown` (the seam an application uses — a `<box>` that wants Enter
+   * for something else), and overriding this method (the seam an element
+   * uses). A scroll pane that is *itself* clickable takes the third: its
+   * `defaultKeyDown` answers Space with a page and never reaches here, so
+   * paging keeps the key it has always had and Enter activates.
+   */
   defaultKeyDown(ev) {
     this._textSelection?.keyDown(ev);
+    if (ev.defaultPrevented) return;
+    const enter = ev.keysym === XK_RETURN || ev.keysym === XK_KP_ENTER;
+    // Space by either name: `XK_space` *is* code point 32 — a Latin-1 keysym
+    // and its character are the same number — and both fields are read
+    // because a synthetic event may carry only one of them, the way the
+    // scroll keys next door read the keysym and every widget read the code
+    // point. A key an open composition took reaches no default action at all.
+    const space = ev.keysym === XK_SPACE || ev.codepoint === 32;
+    if (!enter && !space) return;
+    if (!hasClickHandler(this)) return;
+    // consumed, said the way every default action says it: what it prevents
+    // is the default action after this one
+    ev.preventDefault();
+    synthesizeClick(this, this.abs, ev.nativeEvent);
   }
 
   paint(ctx) {

@@ -62,7 +62,7 @@ import {
   diffChars,
 } from './a11y.js';
 import { onApp } from './trace-registry.js';
-import { discrete } from './events.js';
+import { synthesizeClick } from './events.js';
 import { callHandler } from './errors.js';
 
 const ROOT_PATH = '/org/a11y/atspi/accessible/root';
@@ -1004,7 +1004,8 @@ class AtspiBridge {
   /** DoAction("activate"): a synthetic click through the same dispatch a
    * real press uses — capture, bubble, default actions, discrete-priority
    * commit and paint — so an AT's activation is indistinguishable from the
-   * user's. On a scene item it is the click a mouse user would make on
+   * user's, and from the keyboard's, which reaches `synthesizeClick` too
+   * (events.js). On a scene item it is the click a mouse user would make on
    * what was drawn there: the element hit-tests its own scene already, so
    * the item's rect is the whole address, and an element whose activation
    * is not a click says so through `a11ySceneAction`. */
@@ -1012,37 +1013,9 @@ class AtspiBridge {
     if (node.a11yOwner) {
       if (this.sceneAction(node, 'activate')) return true;
       if (node.destroyed) return false;
-      return this._click(node.a11yOwner, node.abs);
+      return synthesizeClick(node.a11yOwner, node.abs);
     }
-    return this._click(node, node.abs);
-  }
-
-  _click(node, rect) {
-    const manager = node.root?.events;
-    if (!manager || node.destroyed) return false;
-    const abs = rect ?? { x: 0, y: 0, width: 0, height: 0 };
-    const native = {
-      x: Math.round(abs.x + abs.width / 2),
-      y: Math.round(abs.y + abs.height / 2),
-      buttons: 0,
-      keycode: 1,
-    };
-    // The whole press gesture, not just the click: several controls act on
-    // the *press* — `Select` and `MenuBar` drop their menus on mousedown,
-    // the way real menus do — and an AT activation has to reach those too.
-    // Handlers only; the coordinate-driven defaults (caret placement, drag
-    // arming) stay out, because a synthesized centre point is not a place
-    // the user chose.
-    discrete(() => {
-      manager.dispatch('MouseDown', node, native, { button: 1, detail: 1 });
-      if (!node.destroyed) {
-        manager.dispatch('MouseUp', node, native, { button: 1 });
-      }
-      if (!node.destroyed) {
-        manager.dispatch('Click', node, native, { button: 1, detail: 1 });
-      }
-    })(native);
-    return true;
+    return synthesizeClick(node, node.abs);
   }
 
   editable(node) {

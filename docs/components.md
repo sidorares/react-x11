@@ -390,8 +390,11 @@ control and nothing else says so.
 
 `Button`, `Checkbox`, `Radio`/`RadioGroup`, `Switch` and `ProgressBar` share
 one piece of plumbing, `useControl(disabled, onActivate)`: it makes the
-control focusable, activates it on click or Space (Enter as well, for
-`Button`), sets the pointer cursor, and expresses hover, press and focus
+control focusable, activates it on click — and so on Space and Enter, which
+are a click on anything with an `onClick`
+([events.md](events.md#space-and-enter-are-a-click)), the widgets having no
+key mapping of their own any more — sets the pointer cursor, and expresses
+hover, press and focus
 feedback as `:hover`/`:active`/`:focus` style blocks rather than React state
 — so moving the pointer over a control repaints one node instead of
 rendering.
