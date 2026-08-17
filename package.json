@@ -7,7 +7,7 @@
     "src"
   ],
   "scripts": {
-    "test": "node --test --test-timeout=60000",
+    "test": "node --import tsx --test --test-timeout=60000",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -24,6 +24,7 @@
     "examples:menu": "tsx examples/menu.jsx",
     "examples:variable-fonts": "tsx examples/variable-fonts.jsx",
     "examples:tooltips": "tsx examples/tooltips.jsx",
+    "examples:chat": "tsx examples/chat.jsx",
     "examples:clipboard": "tsx examples/clipboard.jsx",
     "examples:dbus": "tsx examples/dbus.jsx",
     "examples:urischeme": "tsx examples/urischeme.jsx",
