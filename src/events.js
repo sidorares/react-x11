@@ -220,6 +220,15 @@ export class EventManager {
     // until told otherwise: ntk < 3.7 never reports focus changes, and a
     // toolkit that believed it was unfocused would blink no caret at all.
     this.windowFocused = true;
+    // on a *focus* manager: which of the windows sharing this focus holds
+    // the X input focus, when it is not this one — a managed `<popup>` is a
+    // window the WM focuses in its own right (`keyboardFocused`). Null until
+    // one of them says so, which leaves the answer this window's own.
+    this._keyboardWindow = null;
+    // what the focused node was last told about the keyboard, so the two
+    // windows' focus events settle it once rather than twice
+    // (`_syncDefaultFocus`)
+    this._defaultFocusOn = false;
     this._lastClick = { time: 0, x: 0, y: 0, detail: 0 };
     // the sub-pixel part of a smooth scroll the default action has not spent
     // yet — see `_onWheel`, which moves whole pixels so the scroll blit stays
@@ -247,6 +256,53 @@ export class EventManager {
     const manager = this.node.parent?.root?.events;
     if (manager && manager !== this) this._focusOwner = manager.focusManager;
     return this._focusOwner ?? this;
+  }
+
+  /**
+   * Whether the keyboard is on this focus — which is not the same question
+   * as whether it is on this *window*.
+   *
+   * One node is focused per focus manager, and a manager can span more than
+   * one X window: a `<popup>` shares its owner's focus, and a managed one —
+   * a `<Dialog>` — is a real window the window manager focuses in its own
+   * right. Opening one moves the X focus off the owner and onto the popup,
+   * so the owner's `windowFocused` goes false at the very moment the field
+   * inside the dialog starts receiving keys. Asking the owner alone is how
+   * a focused field ends up with a `:focus` ring and no caret (issue #333).
+   *
+   * So the answer is the group's: whichever of its windows last took the X
+   * focus, or this one while none has said otherwise.
+   */
+  get keyboardFocused() {
+    const manager = this.focusManager;
+    if (manager !== this) return manager.keyboardFocused;
+    // a dialog that closed while it held the keyboard leaves a record of a
+    // window that is not there any more, and the answer is this one's again
+    if (manager._keyboardWindow?.node.destroyed) manager._keyboardWindow = null;
+    return (manager._keyboardWindow ?? manager).windowFocused;
+  }
+
+  /**
+   * Tell the focused node whether the keyboard is actually on it — the
+   * `_focused` flag, the caret and its blink timer, which is everything
+   * `:focus` does not cover.
+   *
+   * Driven from here rather than from either window's focus event, because
+   * the two arrive in an order nobody chooses: opening a `<Dialog>` blurs
+   * the owner *before* it focuses the popup, and only one of those two
+   * managers has the focused node. Running it on both, against the group's
+   * answer, settles them the same way whichever lands last — and the record
+   * of what the node was last told is what keeps a `defaultFocus` from
+   * arming a second blink timer over the first.
+   */
+  _syncDefaultFocus() {
+    const on = this.keyboardFocused;
+    if (on === this._defaultFocusOn) return;
+    this._defaultFocusOn = on;
+    const node = this.focused;
+    if (!node || node.destroyed) return;
+    if (on) node.defaultFocus?.();
+    else node.defaultBlur?.();
   }
 
   /**
@@ -370,16 +426,23 @@ export class EventManager {
    * suspended, and `<window onFocus/onBlur>` gets told.
    */
   _onWindowFocus(focused, native) {
-    if (this.windowFocused === focused) return;
+    const changed = this.windowFocused !== focused;
     this.windowFocused = focused;
+    // Recorded even when nothing changed here. A window assumes it has the
+    // keyboard until told otherwise (`windowFocused`), so the FocusIn that
+    // actually hands a managed `<popup>` the keyboard is a no-op *for the
+    // popup* — while the manager holding the focused node is another one
+    // again, and has just been told the keyboard left (`keyboardFocused`).
+    const manager = this.focusManager;
+    if (focused) manager._keyboardWindow = this;
+    else if (manager._keyboardWindow === this) manager._keyboardWindow = null;
     // a half-typed accent does not wait for the user to come back: the keys
     // that would finish it are going somewhere else now
-    if (!focused) this._endComposition(native);
-    const node = this.focused;
-    if (node && !node.destroyed) {
-      if (focused) node.defaultFocus?.();
-      else node.defaultBlur?.();
-    }
+    if (changed && !focused) this._endComposition(native);
+    // …and the focused node hears the focus group's answer, not this
+    // window's, whichever of them the X focus just moved between
+    manager._syncDefaultFocus();
+    if (!changed) return;
     // …and the things that keep a window of their own open on the strength
     // of this one having focus — a menu, a dropdown — which the focused node
     // keeping its focus would otherwise never tell (`WindowNode`, nodes.js)
@@ -1089,6 +1152,9 @@ export class EventManager {
     const old = this.focused;
     this._previousFocus = old;
     this.focused = node;
+    // nothing has been told anything about the keyboard yet, whatever the
+    // node that just gave up focus was told (`_syncDefaultFocus`)
+    this._defaultFocusOn = false;
     // …and this window is now the one the top-level's keys belong to,
     // whichever of its windows they are addressed to (`_keyManager`)
     if (node) this.topLevelManager._focusHolder = this;
@@ -1107,18 +1173,24 @@ export class EventManager {
       old.root?.invalidate(false, old, 'focus');
     }
     if (node) {
-      // keys only reach a node whose window has the X focus — but a restore
+      // Keys only reach a node whose window has the X focus — but a restore
       // must not *take* it: a window revealing something in the background
       // would pull the keyboard off another application, and SetInputFocus
-      // on a window the reveal has not mapped yet is a BadMatch.
-      if (!this.windowFocused && !restoring) this.node.window?.focus?.();
+      // on a window the reveal has not mapped yet is a BadMatch. Asked of
+      // the focus group rather than of this window, or focusing something
+      // inside an open `<Dialog>` would drag the keyboard off the dialog
+      // and back onto the window that owns it.
+      if (!this.keyboardFocused && !restoring) this.node.window?.focus?.();
       node.setStyleState(':focus', true);
       node.setStyleState(':focus-visible', reason !== 'pointer');
       // …and nothing scrolls to meet it either: the node is coming back to
       // the arrangement it left, and this reveal's layout has not run, so a
       // scroll here would be computed from a rect that does not exist yet.
       if (!restoring) this._scrollIntoView(node);
-      if (this.windowFocused) node.defaultFocus?.({ reason, backwards });
+      if (this.keyboardFocused) {
+        this._defaultFocusOn = true;
+        node.defaultFocus?.({ reason, backwards });
+      }
       node.props.onFocus?.(this._makeEvent('focus', null, node));
       node.root?.invalidate(false, node, 'focus');
     }

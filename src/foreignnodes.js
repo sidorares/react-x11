@@ -205,7 +205,8 @@ export class ForeignNode extends Node {
     // activation and the focus-in that went out before it was there — a
     // terminal spawned into a focused pane, which is the ordinary case.
     const manager = this._focusManager();
-    if (manager?.focused === this && manager.windowFocused) this.defaultFocus();
+    if (manager?.focused === this && manager.keyboardFocused)
+      this.defaultFocus();
     this.props.onEmbedded?.({ ...this.client, node: this });
   }
 
