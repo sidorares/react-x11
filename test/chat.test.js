@@ -170,6 +170,14 @@ describe('examples/chat', () => {
     });
   });
 
+  // Not tested here: that the current channel keeps its accent under the
+  // pointer. It is a `:hover` block winning over a base colour, which is a
+  // paint-time decision, and every attempt to read it back through `pixelAt`
+  // in this harness returned an unpainted white window — a harness problem
+  // rather than an app one, but a test that cannot see the thing it names is
+  // worse than none. Verified on a real display instead; the styles carry the
+  // reason in a comment.
+
   test('a channel keeps its draft across a switch', async () => {
     await mount(testTransport());
 

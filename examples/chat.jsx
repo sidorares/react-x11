@@ -267,7 +267,7 @@ export function ircTransport({
 // `use(promise)` needs the *same* promise back on every render for a given
 // input, or the component suspends forever on a new one. A module-level cache
 // keyed by what identifies the request is the whole trick — the same shape
-// examples/react-features.jsx uses, and the one thing about Suspense that has
+// examples/react-features.jsx used, and the one thing about Suspense that has
 // to be got right before anything else works.
 // ---------------------------------------------------------------------------
 
@@ -330,9 +330,23 @@ const s = createStyles({
     paddingTop: 6,
     paddingBottom: 6,
     borderRadius: '$radius',
-    ':hover': { backgroundColor: '$surfaceActive' },
+    ':hover': { backgroundColor: '$surfaceHover' },
+    // A press state as well as a hover, because the row acts on the release
+    // and the press is where the user starts waiting — AGENTS.md, "answer the
+    // input, not the outcome".
+    ':active': { backgroundColor: '$surfaceActive' },
   },
-  channelOn: { backgroundColor: '$accent' },
+  // The selected row needs its **own** hover and press. State blocks from the
+  // base style still apply once the two are merged, so without these the
+  // plain `:hover` paints over the accent and the current channel stops
+  // looking current exactly while the pointer is on it. `<Button primary>`
+  // carries accentHover/accentActive for the same reason rather than
+  // inheriting the surface ones.
+  channelOn: {
+    backgroundColor: '$accent',
+    ':hover': { backgroundColor: '$accentHover' },
+    ':active': { backgroundColor: '$accentActive' },
+  },
   channelName: { flexGrow: 1, fontSize: 13, color: '$text' },
   channelNameOn: { color: '$accentText' },
   // A pill, not a padded label. Padding round a `<text>` gives it the font's
