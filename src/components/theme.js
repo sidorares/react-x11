@@ -10,7 +10,6 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { useAppearanceWhen } from '../appearancehooks.js';
 import { DarkTheme, DefaultTheme, resolveTheme } from '../palette.js';
-import { XK_RETURN } from './keys.js';
 
 const h = React.createElement;
 
@@ -216,13 +215,18 @@ export function useControl(disabled, onActivate, { styled = false } = {}) {
   const [pressed, setPressed] = useState(false);
   const activation = {
     focusable: true,
+    // The click, and nothing else: Space and Enter are a click on anything
+    // with an `onClick` now (`Node.defaultKeyDown`, issue #329), so the
+    // hand-rolled key mapping that used to live here is gone — and with it
+    // the reason a widget answered the keyboard while a hand-built control
+    // beside it did not.
+    //
     // the event travels: `ButtonProps.onPress` has always been declared as
     // taking one, and a handler that wants `ev.shiftKey` or `ev.detail` —
-    // shift-click, double-click — has no other way to get it
+    // shift-click, double-click — has no other way to get it. From the
+    // keyboard it is the synthesized click, carrying the key press's own
+    // modifiers, so Shift+Enter still reads as a shift-click.
     onClick: (ev) => onActivate?.(ev),
-    onKeyDown: (ev) => {
-      if (ev.codepoint === 32 || ev.keysym === XK_RETURN) onActivate?.(ev);
-    },
   };
   const props = disabled
     ? // the node still has to *say* it is disabled: `:disabled` style

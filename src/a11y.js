@@ -933,12 +933,30 @@ export function a11yAttributes(node) {
   return attrs;
 }
 
+/**
+ * **The one thing "activatable" means**: there is a click here to make.
+ *
+ * Three input routes stand on this — the pointer, an AT's `DoAction`, and
+ * the keyboard's Space/Enter (`Node.defaultKeyDown`, nodes.js) — and they
+ * all dispatch the same click, so a control cannot answer one of them and
+ * not another. It lives here, beside the bridge's rule, because the bridge
+ * is the layer that already had to write the rule down.
+ */
+export const hasClickHandler = (node) =>
+  typeof node.props?.onClick === 'function';
+
 /** Whether the bridge should offer an "activate" action: an explicit
  * handler, or a role that promises one (widgets often keep the handler on
  * an ancestor of the role-carrying node — activation is dispatched through
- * the tree, so the promise still holds). */
+ * the tree, so the promise still holds).
+ *
+ * The role half is an AT's alone: it *advertises* an action to something
+ * that has no other way to ask for one, and the click it dispatches is
+ * answered by whichever ancestor holds the handler. The keyboard needs no
+ * advertisement — a key press is already at the node — so it takes the
+ * first clause and stops there (`hasClickHandler`). */
 export function a11yActivatable(node) {
-  if (typeof node.props?.onClick === 'function') return true;
+  if (hasClickHandler(node)) return true;
   // A drawn item whose element answers actions is activatable whatever it
   // is called: implementing the seam is the same promise a handler is, and
   // the roles a scene reaches for — `listitem` for a graph node — are

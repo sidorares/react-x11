@@ -83,7 +83,6 @@ import {
   createRoot,
   createStyles,
 } from '../src/index.js';
-import { XK_RETURN } from '../src/keysyms.js';
 
 const CHANNELS = ['#general', '#x11', '#react'];
 
@@ -1045,18 +1044,11 @@ export function ChatPanel({ transport, nick = 'you' }) {
               aria-label={channel}
               aria-selected={on}
               focusable
+              // Space and Enter come with it: an `onClick` on a focusable
+              // node is a click the keyboard can make too (issue #329), so
+              // the row that draws a focus ring answers the keys the ring
+              // promises without six lines saying so.
               onClick={() => open(channel)}
-              // A focusable `<box>` is **not** activated by Space or Enter.
-              // `Button` gets that from `useControl`; a raw box gets a focus
-              // ring and nothing else, which is the worst of both — it looks
-              // reachable and does not answer. The keys belong to whatever
-              // draws the ring.
-              onKeyDown={(ev) => {
-                if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
-                  ev.preventDefault();
-                  open(channel);
-                }
-              }}
             >
               <text style={[s.channelName, on && s.channelNameOn]}>
                 {channel}
@@ -1165,12 +1157,6 @@ export function ChatPanel({ transport, nick = 'you' }) {
                     aria-label={c.name}
                     focusable
                     onClick={() => join(c.name)}
-                    onKeyDown={(ev) => {
-                      if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
-                        ev.preventDefault();
-                        join(c.name);
-                      }
-                    }}
                   >
                     <text style={s.directoryName}>{c.name}</text>
                     <text style={s.directoryUsers}>{String(c.users)}</text>

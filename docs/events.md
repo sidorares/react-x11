@@ -161,19 +161,59 @@ field as it arrived, and `MOD` in `react-x11/keysyms` names its bits
 
 ## Handlers
 
-| handler                                                           | notes                                                                                                                   |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks                                   |
-| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                                              |
-| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing                                                                     |
-| `onWheel`                                                         | pixels, from the device or from X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go |
-| `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu                                    |
-| `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Tab cycles focus unless the element took it                              |
-| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — a dead key, a Compose sequence; see below                                                      |
-| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                                                |
-| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, the same shape as the hover pair above                                             |
-| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)                                          |
-| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                                                          |
+| handler                                                           | notes                                                                                                                    |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks                                    |
+| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                                               |
+| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing                                                                      |
+| `onWheel`                                                         | pixels, from the device or from X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go  |
+| `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu                                     |
+| `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Space/Enter click an `onClick`, and Tab cycles focus, unless it took them |
+| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — a dead key, a Compose sequence; see below                                                       |
+| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                                                 |
+| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, the same shape as the hover pair above                                              |
+| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)                                           |
+| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                                                           |
+
+## Space and Enter are a click {#space-and-enter-are-a-click}
+
+**An `onClick` on a focusable node is operable from the keyboard, with
+nothing else written.** Space or Enter on it dispatches the click — the whole
+press gesture, mousedown then mouseup then click, through the ordinary path —
+so a control hand-built out of a `<box>` behaves like a `<Button>`:
+
+```jsx
+<box focusable role="option" aria-selected={on} onClick={() => open(channel)}>
+  <text>{channel}</text>
+</box>
+```
+
+The keys are a **default action**, which is the whole of the contract:
+
+- `preventDefault()` in the node's own `onKeyDown` takes the key back — that
+  is how a widget that answers Enter with something other than its click
+  (`Tree` opens a branch; the click only moves the selection) keeps it;
+- a node with no `onClick` is untouched, whatever its `role` says. A role
+  advertises an action to an assistive technology, which has no other way to
+  ask; a key press is already at the node, so there is nothing to advertise
+  and nothing to activate. `role="button"` with only an `onKeyDown` stays
+  yours;
+- `<textinput>` and `<textarea>` never activate: their own `defaultKeyDown`
+  answers the keystroke, so Space types a space;
+- **a scroll pane keeps Space.** Space and Shift+Space page a scrolling `<box>`
+  ([elements.md](elements.md#scrolling)) — that is a default action too, and
+  the pane answers it before this one, so a clickable pane pages with Space
+  and activates with Enter. A focusable row _inside_ a pane is not affected
+  either way: default actions run on the focused node, and the pane is not
+  it.
+
+Modifiers travel: the synthesized click carries the key press's own modifier
+mask, so Shift+Enter reaches `onClick` as a shift-click.
+
+It is the same function an assistive technology's activation goes through, on
+purpose — one definition of "activate" for the pointer, the keyboard and
+Orca, which cannot then disagree about a control
+([accessibility.md](accessibility.md#at-driven-controls)).
 
 ## The wheel {#wheel}
 

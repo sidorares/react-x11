@@ -192,6 +192,10 @@ export function Tree({
       default:
     }
     if (ev.keysym === XK_RETURN || ev.codepoint === 32) {
+      // the tree's own answer to these keys, so the row's click default
+      // action must not also run: a row's click *moves the selection*,
+      // which is a different thing from opening what is already selected
+      ev.preventDefault();
       if (row?.branch) toggle(row.item.id);
       if (row) onActivate?.(row.item.id, row.item);
       return;

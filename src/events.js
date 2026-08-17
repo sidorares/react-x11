@@ -183,6 +183,52 @@ export function discrete(fn) {
   };
 }
 
+/**
+ * Activate a node the way a finger would: the **whole press gesture**
+ * through the normal dispatch — capture, bubble, handlers, the
+ * discrete-priority commit and the paint that follows it.
+ *
+ * One function, because there is more than one way to ask for it and they
+ * must not drift: an AT's `DoAction("activate")` (atspi.js) and the
+ * keyboard's Space/Enter on a focused control (`Node.defaultKeyDown`,
+ * nodes.js) both land here, so a control that acts on the *press* — `Select`
+ * and `MenuBar` drop their menus on mousedown, the way real menus do — is
+ * reached by either, and neither can be the one input route a widget forgot.
+ *
+ * Handlers only: the coordinate-driven default actions (caret placement,
+ * drag arming) stay out, because the centre of a rect is not a place the
+ * user chose.
+ *
+ * `source` is the native event that asked, when there was one — a key press.
+ * It carries the modifier mask and the X timestamp across, so Shift+Enter on
+ * a control reads as a shift-click and a handler that raises a window has a
+ * real time to do it with. An AT activation has neither and passes nothing.
+ */
+export function synthesizeClick(node, rect, source = null) {
+  const manager = node?.root?.events;
+  if (!manager || node.destroyed) return false;
+  const abs = rect ?? { x: 0, y: 0, width: 0, height: 0 };
+  const native = {
+    x: Math.round(abs.x + abs.width / 2),
+    y: Math.round(abs.y + abs.height / 2),
+    // the X `state` mask, which is where SyntheticEvent reads shift/ctrl/
+    // alt/super from on *every* event, not just keys
+    buttons: source?.buttons ?? 0,
+    keycode: 1,
+    time: source?.time,
+  };
+  discrete(() => {
+    manager.dispatch('MouseDown', node, native, { button: 1, detail: 1 });
+    if (!node.destroyed) {
+      manager.dispatch('MouseUp', node, native, { button: 1 });
+    }
+    if (!node.destroyed) {
+      manager.dispatch('Click', node, native, { button: 1, detail: 1 });
+    }
+  })(native);
+  return true;
+}
+
 export class EventManager {
   constructor(windowNode) {
     this.node = windowNode;

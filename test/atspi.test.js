@@ -315,7 +315,10 @@ describe('the AT-SPI bridge', { concurrency: 1, ...needsBroker }, () => {
     await until(() => pressed === 1, 'the onClick handler');
 
     // Controls that act on the *press* — Select and MenuBar drop their
-    // menus on mousedown — must hear an AT activation too.
+    // menus on mousedown — must hear an AT activation too. The keyboard
+    // sends this same gesture through this same function, and the pair of
+    // assertions that says so is in test/accessibility.test.js §4 (#329):
+    // one definition of "activate", so the two paths cannot drift.
     let pressedDown = 0;
     x11Root.render(
       h(

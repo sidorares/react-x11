@@ -554,6 +554,15 @@ to force. Consuming it means calling `ev.preventDefault()` from the default
 action: what that prevents is the default action _after_ this one, which for
 Tab is the focus cycle.
 
+**`super.defaultKeyDown(ev)` is the base class's own behaviour**, and there
+are two things in it: the text-selection keys, and Space/Enter dispatching
+the node's `onClick` as a click
+([events.md](events.md#space-and-enter-are-a-click)). An override that
+answers the keystroke itself — an editor, where Space types a space — simply
+does not call it, which is what `<textinput>` does. One that answers a few
+keys and leaves the rest, as the scroll pane does, ends its `default:` branch
+with `return super.defaultKeyDown(ev)` and keeps both.
+
 An element that eats Tab has taken the keyboard user's only way out of it, so
 it owes them another. The convention, above and worth converging on: **Escape
 arms one pass-through Tab.** Escape on its own does nothing visible, the next

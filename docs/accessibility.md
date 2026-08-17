@@ -116,6 +116,14 @@ indistinguishable from a finger.
 click — because several controls act on the press: `Select` and `MenuBar`
 drop their menus on it, the way real menus do.)
 
+**The keyboard shares that click.** Space and Enter on a focused element with
+an `onClick` dispatch the same gesture through the same function, so a
+keyboard user and a screen-reader user are never served differently by the
+same element — see [events.md](events.md#space-and-enter-are-a-click). The
+role half of the rule above stays the AT's: a role _advertises_ an action to
+something that cannot press a key, and a `role="button"` with no `onClick`
+has no click for a key to be.
+
 The one thing that does need a handler is a _value_ write — Orca adjusting
 a slider through the Value interface. The handler receives one argument:
 
