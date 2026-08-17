@@ -27,7 +27,6 @@
     "examples:tooltips": "tsx examples/tooltips.jsx",
     "examples:chat": "tsx examples/chat.jsx",
     "examples:clipboard": "tsx examples/clipboard.jsx",
-    "examples:dbus": "tsx examples/dbus.jsx",
     "examples:urischeme": "tsx examples/urischeme.jsx",
     "filedialog:probe": "node scripts/filedialog-probe.mjs",
     "a11y:probe": "node scripts/a11y-probe.mjs",
