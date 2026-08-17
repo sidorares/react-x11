@@ -83,6 +83,7 @@ import {
   createRoot,
   createStyles,
 } from '../src/index.js';
+import { XK_RETURN } from '../src/keysyms.js';
 
 const CHANNELS = ['#general', '#x11', '#react'];
 
@@ -793,8 +794,12 @@ export function ChatPanel({ transport, nick = 'you' }) {
 
   const join = useCallback(
     (raw) => {
-      const name = raw.trim().replace(/^#*/, '#');
-      if (name === '#') return;
+      // `##chat` and `#chat` are different channels — the `##` prefix is a
+      // real convention, not a typo to tidy up. Only add a `#` when there is
+      // not one already.
+      const typed = raw.trim();
+      if (!typed || /^#+$/.test(typed)) return;
+      const name = typed.startsWith('#') ? typed : `#${typed}`;
       setJoining(false);
       setChannels((prev) => (prev.includes(name) ? prev : [...prev, name]));
       setByChannel((prev) => (name in prev ? prev : { ...prev, [name]: [] }));
@@ -832,7 +837,7 @@ export function ChatPanel({ transport, nick = 'you' }) {
 
   return (
     <box style={s.root}>
-      <box style={s.sidebar} role="list" aria-label="channels">
+      <box style={s.sidebar} role="listbox" aria-label="channels">
         <box style={s.sidebarTop}>
           <text style={s.sidebarHead}>CHANNELS</text>
           {/* A menu bar of exactly one menu, which is what a "…" button is.
@@ -869,11 +874,22 @@ export function ChatPanel({ transport, nick = 'you' }) {
             <box
               key={channel}
               style={[s.channel, on && s.channelOn]}
-              role="listitem"
+              role="option"
               aria-label={channel}
               aria-selected={on}
               focusable
               onClick={() => open(channel)}
+              // A focusable `<box>` is **not** activated by Space or Enter.
+              // `Button` gets that from `useControl`; a raw box gets a focus
+              // ring and nothing else, which is the worst of both — it looks
+              // reachable and does not answer. The keys belong to whatever
+              // draws the ring.
+              onKeyDown={(ev) => {
+                if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
+                  ev.preventDefault();
+                  open(channel);
+                }
+              }}
             >
               <text style={[s.channelName, on && s.channelNameOn]}>
                 {channel}

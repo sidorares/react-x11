@@ -31,6 +31,7 @@ import {
   userEvent,
   waitFor,
   within,
+  XK_RETURN,
 } from '../src/testing/index.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
@@ -75,7 +76,7 @@ async function mount(transport) {
 
 const composer = (channel) => screen.getByPlaceholder(`message ${channel}`);
 const log = (channel) => screen.getByTestName(`log-${channel}`);
-const channelRow = (channel) => screen.getByRole('listitem', { name: channel });
+const channelRow = (channel) => screen.getByRole('option', { name: channel });
 
 /** The `msg-<id>` testname of the row carrying `text`, or undefined. */
 function rowIdFor(channel, text) {
@@ -193,6 +194,21 @@ describe('examples/chat', () => {
 
     transport.leave('#x11');
     assert.ok(!transport.channels.includes('#x11'));
+  });
+
+  test('a focused channel is activated by Enter, not only by a click', async () => {
+    await mount(testTransport());
+
+    // Tab-reachable and ring-drawing is not the same as working. A focusable
+    // <box> gets no Space/Enter handling from core — `Button` gets that from
+    // `useControl` — so a row that only had `onClick` looked reachable and
+    // did not answer, which is the worst of both.
+    const target = channelRow('#x11');
+    target.focus();
+    await userEvent.key(XK_RETURN);
+
+    await waitFor(() => screen.getByPlaceholder('message #x11'));
+    assert.equal(channelRow('#x11').props['aria-selected'], true);
   });
 
   test('a channel keeps its draft across a switch', async () => {
