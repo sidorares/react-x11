@@ -236,8 +236,40 @@ export function ircTransport({
 
   const line = (text) => socket?.write(`${text}\r\n`);
 
+  // A join can be refused, and the refusal arrives as a numeric rather than
+  // as anything resembling a message. Swallow it and the pane simply stays
+  // empty for ever, which is indistinguishable from a quiet channel — the
+  // reading is "this example is broken". `+r` is the common one: plenty of
+  // channels require a registered nick, and a fresh nick is not one.
+  const JOIN_REFUSED = {
+    471: 'the channel is full',
+    473: 'invite only',
+    474: 'you are banned',
+    475: 'the channel needs a key',
+    477: 'the channel needs a registered nick — /msg NickServ, or pick another',
+    403: 'no such channel',
+  };
+
   const handle = (raw) => {
     if (raw.startsWith('PING')) return line(`PONG ${raw.slice(5)}`);
+
+    // :server <code> <nick> #channel :text
+    const numeric = /^:\S+ (\d{3}) \S+ (#\S+) :(.*)$/.exec(raw);
+    if (numeric) {
+      const why = JOIN_REFUSED[Number(numeric[1])];
+      if (why) {
+        emit({
+          id: messageId(),
+          channel: numeric[2],
+          from: '*',
+          text: `could not join — ${why}`,
+          at: Date.now(),
+          system: true,
+        });
+      }
+      return;
+    }
+
     // :nick!user@host PRIVMSG #channel :text
     const match = /^:([^!]+)![^ ]+ PRIVMSG (#[^ ]+) :(.*)$/.exec(raw);
     if (!match) return;
@@ -427,6 +459,9 @@ const s = createStyles({
   who: { width: 74, fontSize: 12, color: '$textMuted', textAlign: 'end' },
   what: { flexGrow: 1, fontSize: 13, color: '$text' },
   whatPending: { color: '$textMuted' },
+  // A line the client wrote, not a person — a refused join, say. Reads as
+  // chrome rather than as something somebody said.
+  whatSystem: { color: '$warning', fontStyle: 'italic' },
   tick: { width: 12, fontSize: 11, color: '$success' },
   // Wide enough for the widest thing that goes in it, and told not to wrap:
   // a fixed-width column that can wrap is a row whose height changes with its
@@ -553,7 +588,15 @@ function Scrollback({ channel, messages }) {
         // twice while the send resolves.
         <box key={m.id} data-testname={`msg-${m.id}`} style={s.line}>
           <text style={s.who}>{m.from}</text>
-          <text style={[s.what, m.pending && s.whatPending]}>{m.text}</text>
+          <text
+            style={[
+              s.what,
+              m.pending && s.whatPending,
+              m.system && s.whatSystem,
+            ]}
+          >
+            {m.text}
+          </text>
           <text style={s.tick}>{m.pending ? '' : m.mine ? '✓' : ''}</text>
           <text style={s.when}>{clock(m.at)}</text>
         </box>
