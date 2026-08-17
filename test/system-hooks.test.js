@@ -755,14 +755,18 @@ describe('desktop interaction settings', () => {
     const { app } = await renderX11(h('box'), { backend: 'mock' });
     const events = app.windows[0]._reactX11Node.events;
     setDesktopSettingsForTests(app, {
-      doubleClickMs: 1,
+      // Wide enough that the clock can never be what decides this. The
+      // window used to be 1ms, which reads as "time is irrelevant here" and
+      // means the opposite: two calls more than a millisecond apart are a
+      // fresh click, and on a loaded CI runner they are. It failed twice on
+      // the Node 20 job for that reason and nothing else.
+      doubleClickMs: 60_000,
       doubleClickDistance: 0,
     });
     const at = (x, y) => ({ x, y });
-    // Distance rather than time, because the clock cannot be held still here
-    // and two calls in one tick are 0ms apart whatever the window is. A
-    // desktop that demands the second click land on the same pixel makes one
-    // 3px away a fresh click.
+    // Distance rather than time: with the window that wide, only the pointer
+    // can end a double-click. A desktop that demands the second click land on
+    // the same pixel makes one 3px away a fresh click.
     assert.equal(events._clickDetail(at(10, 10)), 1);
     assert.equal(events._clickDetail(at(13, 10)), 1);
     // …and on the same pixel, still a double
