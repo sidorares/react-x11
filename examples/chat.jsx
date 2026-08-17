@@ -1,7 +1,11 @@
 // A chat client, and the app React's concurrent features were designed for.
 //
 //   npm run examples:chat                       # a bundled fake server
-//   CHAT_IRC=irc.libera.chat npm run examples:chat --  --nick=yourname
+//
+//   # a real network. Name the channels: the three this demo uses by default
+//   # are real ones, and joining them because an example said so is rude.
+//   CHAT_IRC=irc.libera.chat \
+//     npm run examples:chat -- --nick=yourname --channels='#somewhere'
 //
 // Nothing here is a panel with a switch on it: every React feature below is
 // load-bearing, doing the job it exists for, and the way to see one working
@@ -41,7 +45,15 @@
 // through one with the timers turned all the way down.
 //
 // `ircTransport()` is the real thing — IRC is a line protocol you can hold in
-// your head, which is why it is the one here. Same four methods.
+// your head, which is why it is the one here. Same interface, and the
+// difference between them is the point: connect to a real server and the
+// channels open **empty**, because IRC has no scrollback. `history()` is on
+// the transport for exactly that reason. It was not, once, and a real session
+// opened with the fake's bots discussing CRTs — which is the failure mode a
+// seam exists to prevent, arrived at by leaving one method out of it.
+//
+// `--channels` and `CHAT_CHANNELS` pick what to join; `CHAT_IRC_PORT`
+// defaults to 6667.
 //
 // A disconnect is *not* a react-x11 disconnect. If the X server goes away,
 // nothing in this file helps: every window id and pixmap dies with the
@@ -112,6 +124,7 @@ const BOT_LINES = {
 export function fixtureTransport({
   latency = 450,
   botEvery = 6000,
+  historyDelay = 600,
   hold = false,
 } = {}) {
   const listeners = new Set();
@@ -130,6 +143,7 @@ export function fixtureTransport({
 
   return {
     state,
+    channels: CHANNELS,
     get status() {
       return status;
     },
@@ -156,6 +170,25 @@ export function fixtureTransport({
         throw new Error('the server dropped it');
       }
       return { id: messageId(), channel, from, text, at: Date.now() };
+    },
+    /** The scrollback this fake pretends was already there. */
+    history(channel) {
+      return new Promise((resolve) =>
+        setTimeout(
+          () =>
+            resolve(
+              (BOT_LINES[channel] ?? []).map(([from, text], i) => ({
+                id: `h${channel}${i}`,
+                channel,
+                from,
+                text,
+                at: Date.now() - (10 - i) * 60000,
+                history: true,
+              })),
+            ),
+          historyDelay,
+        ),
+      );
     },
     /** Let every held send finish. Only meaningful with `hold: true`. */
     flush() {
@@ -214,6 +247,7 @@ export function ircTransport({
 
   return {
     state: { failNext: false },
+    channels,
     get status() {
       return status;
     },
@@ -245,6 +279,13 @@ export function ircTransport({
       );
       return { id: messageId(), channel, from, text, at: Date.now() };
     },
+    /** IRC has no scrollback. A channel starts empty and fills as people
+     *  talk; catching up on what was said before you joined is a bouncer's
+     *  job, not the protocol's. Answering `[]` rather than inventing
+     *  something is the whole point of this method being on the transport. */
+    history() {
+      return Promise.resolve([]);
+    },
     onMessage(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -269,38 +310,30 @@ export function ircTransport({
 // keyed by what identifies the request is the whole trick — the same shape
 // examples/react-features.jsx used, and the one thing about Suspense that has
 // to be got right before anything else works.
+//
+// **The scrollback belongs to the transport**, which is not where this
+// started: history was a module-level function that returned the fixture's
+// lines whatever transport was connected, so a real IRC session still opened
+// with `ada` and `grace` talking about CRTs. A fake that leaks into the real
+// thing is worse than no fake. `history(channel)` is the fourth method on the
+// contract for that reason, and the cache is keyed by transport as well as by
+// channel so two of them cannot share an answer.
 // ---------------------------------------------------------------------------
 
-const historyCache = new Map();
+const historyCache = new WeakMap();
 
-export function loadHistory(channel, { delay = 600 } = {}) {
-  let promise = historyCache.get(channel);
-  if (!promise) {
-    promise = new Promise((resolve) =>
-      setTimeout(
-        () =>
-          resolve(
-            (BOT_LINES[channel] ?? []).map(([from, text], i) => ({
-              id: `h${channel}${i}`,
-              channel,
-              from,
-              text,
-              at: Date.now() - (10 - i) * 60000,
-              history: true,
-            })),
-          ),
-        delay,
-      ),
-    );
-    historyCache.set(channel, promise);
-  }
+export function loadHistory(transport, channel) {
+  let byChannel = historyCache.get(transport);
+  if (!byChannel) historyCache.set(transport, (byChannel = new Map()));
+  let promise = byChannel.get(channel);
+  if (!promise) byChannel.set(channel, (promise = transport.history(channel)));
   return promise;
 }
 
-/** Tests and "reload" want a cold cache. */
-export function clearHistory() {
-  historyCache.clear();
-}
+/** A WeakMap needs no clearing — a transport that goes out of scope takes
+ *  its cached history with it, and each test builds a fresh one. Kept as a
+ *  no-op so callers do not have to care which it is. */
+export function clearHistory() {}
 
 // ---------------------------------------------------------------------------
 
@@ -535,7 +568,7 @@ function Scrollback({ channel, messages }) {
  * it. Nothing below serialises anything to the parent.
  */
 function ChannelPane({ channel, transport, nick, messages, onDelivered }) {
-  const history = use(loadHistory(channel));
+  const history = use(loadHistory(transport, channel));
   const [draft, setDraft] = useState('');
   const [failed, setFailed] = useState(null);
   const [, startTransition] = useTransition();
@@ -624,9 +657,14 @@ function Breaker() {
 // ---------------------------------------------------------------------------
 
 export function ChatPanel({ transport, nick = 'you' }) {
-  const [current, setCurrent] = useState(CHANNELS[0]);
+  // The sidebar shows what the transport actually joined, not a constant. A
+  // real server takes a channel list from the command line, and a window
+  // listing three channels while the connection sits in a different three is
+  // the kind of wrong that looks like a rendering bug.
+  const channels = transport.channels ?? CHANNELS;
+  const [current, setCurrent] = useState(channels[0]);
   const [byChannel, setByChannel] = useState(() =>
-    Object.fromEntries(CHANNELS.map((c) => [c, []])),
+    Object.fromEntries(channels.map((c) => [c, []])),
   );
   const [unread, setUnread] = useState({});
   const [status, setStatus] = useState(transport.status);
@@ -681,7 +719,7 @@ export function ChatPanel({ transport, nick = 'you' }) {
     <box style={s.root}>
       <box style={s.sidebar} role="list" aria-label="channels">
         <text style={s.sidebarHead}>CHANNELS</text>
-        {CHANNELS.map((channel) => {
+        {channels.map((channel) => {
           const on = channel === current;
           return (
             <box
@@ -724,7 +762,7 @@ export function ChatPanel({ transport, nick = 'you' }) {
           </Button>
         </box>
 
-        {CHANNELS.map((channel) => (
+        {channels.map((channel) => (
           <Activity
             key={channel}
             mode={channel === current ? 'visible' : 'hidden'}
@@ -769,8 +807,24 @@ export function ChatPanel({ transport, nick = 'you' }) {
 function transportFromEnv() {
   const host = process.env.CHAT_IRC;
   if (!host) return fixtureTransport();
-  const nickArg = process.argv.find((a) => a.startsWith('--nick='));
-  return ircTransport({ host, nick: nickArg?.slice(7) || undefined });
+  const arg = (name) =>
+    process.argv
+      .find((a) => a.startsWith(`--${name}=`))
+      ?.split('=')
+      .slice(1)
+      .join('=');
+  // The three channel names this demo uses are real ones on a real network,
+  // and joining them because an example hardcoded them is rude. Say which.
+  const channels = (process.env.CHAT_CHANNELS ?? arg('channels'))
+    ?.split(',')
+    .map((c) => c.trim())
+    .filter(Boolean);
+  return ircTransport({
+    host,
+    port: Number(process.env.CHAT_IRC_PORT ?? 6667),
+    nick: arg('nick') || undefined,
+    channels: channels?.length ? channels : undefined,
+  });
 }
 
 export function App({ transport, nick }) {
