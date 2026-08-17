@@ -4,7 +4,7 @@
 // — no reaching into `src/nodes.js`, no hand-built harness — which is the
 // point: if this file needs an internal, the entry point is missing
 // something.
-import { test, afterEach } from 'node:test';
+import { test, afterEach, describe } from 'node:test';
 import assert from 'node:assert';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
@@ -280,6 +280,111 @@ test('Escape closes a Dialog, through the focus trap', async () => {
   assert.ok(queryByTestName('dialog-body'));
   await userEvent.key(XK_ESCAPE);
   assert.strictEqual(queryByTestName('dialog-body'), null);
+});
+
+// A dialog in an application that opens its **own** `<window>`, which is
+// every application there is — and, through `renderX11`, the harness's
+// window with the app's one inside it. That second window is the whole of
+// what issue #331 was: the field focused, drew its ring, and typed nothing,
+// because the keys the server handed to the outer window were dispatched
+// against a manager that had no focused node in it.
+//
+// Everything here fails on the commit before this one, and the reason each
+// one is here is that the failure is not narrow: a `<textinput>`, a
+// `<textarea>` and a `Button`'s Space are three different default actions
+// off the same missing route.
+describe('keys reach a Dialog opened by an app with its own <window>', () => {
+  const JoinApp = ({ open = true, onClose = () => {}, onJoin = () => {} }) => {
+    const [channel, setChannel] = React.useState('');
+    const [topic, setTopic] = React.useState('');
+    return h(
+      'window',
+      { width: 480, height: 340, title: 'app' },
+      h('textinput', {
+        placeholder: 'composer',
+        style: { height: 28 },
+      }),
+      h(
+        Dialog,
+        {
+          open,
+          title: 'Join a channel',
+          onClose,
+          actions: h(Button, { label: 'Join', onPress: () => onJoin(channel) }),
+        },
+        h('textinput', {
+          autoFocus: true,
+          placeholder: '#channel',
+          value: channel,
+          onChange: (ev) => setChannel(ev.value),
+          style: { height: 28 },
+        }),
+        h('textarea', {
+          placeholder: 'why',
+          value: topic,
+          onChange: (ev) => setTopic(ev.value),
+          style: { height: 48 },
+        }),
+      ),
+    );
+  };
+
+  const mount = (props) => renderX11(h(JoinApp, props), { fonts });
+
+  test('a <textinput> inside it types, and reports what was typed', async () => {
+    const { getByPlaceholder } = await mount();
+    const field = getByPlaceholder('#channel');
+    assert.strictEqual(field.focused, true, 'autoFocus took focus');
+    await userEvent.type(field, '#x11');
+    assert.strictEqual(field.value, '#x11');
+  });
+
+  test('so does a <textarea>', async () => {
+    const { getByPlaceholder } = await mount();
+    const area = getByPlaceholder('why');
+    await userEvent.type(area, 'hi');
+    assert.strictEqual(area.value, 'hi');
+  });
+
+  test("and Space activates a Button's default action", async () => {
+    const joined = [];
+    const { getByPlaceholder, getByRole } = await mount({
+      onJoin: (name) => joined.push(name),
+    });
+    await userEvent.type(getByPlaceholder('#channel'), '#x11');
+    getByRole('button', { name: 'Join' }).focus();
+    await userEvent.key(keysymOf(' '));
+    assert.deepStrictEqual(joined, ['#x11']);
+  });
+
+  test('Tab moves between the fields and stays in the dialog', async () => {
+    const { getByPlaceholder, getByRole } = await mount();
+    const field = getByPlaceholder('#channel');
+    const area = getByPlaceholder('why');
+    const composer = getByPlaceholder('composer');
+    await userEvent.tab();
+    assert.strictEqual(area.focused, true, 'Tab reached the second field');
+    await userEvent.tab();
+    assert.strictEqual(
+      getByRole('button', { name: 'Join' }).focused,
+      true,
+      'then the action button',
+    );
+    await userEvent.tab();
+    assert.strictEqual(field.focused, true, 'and wrapped back to the first');
+    assert.strictEqual(
+      composer.focused,
+      false,
+      'the trap held — Tab never left the dialog',
+    );
+  });
+
+  test('and Escape still closes it', async () => {
+    const closed = [];
+    await mount({ onClose: () => closed.push('close') });
+    await userEvent.key(XK_ESCAPE);
+    assert.deepStrictEqual(closed, ['close']);
+  });
 });
 
 test('withFrameClock drives a transition instead of sleeping through it', async () => {

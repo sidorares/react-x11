@@ -511,6 +511,16 @@ when the window is focused again. Calling `focus()` on a node in a window
 that does not have the input focus asks for it (X `SetInputFocus`), though
 a window manager is free to refuse.
 
+Which of an application's windows a key is _delivered_ to is a separate
+question again, and not one the application answers: the server sends it to
+the window holding the input focus, or to whichever descendant of that
+window the pointer happens to be over. A nested `<window>` and a `<popup>`
+put the two apart — the field is focused inside them, the keyboard belongs
+to the top-level — so a key is dispatched to **the node that has focus**,
+whichever of that top-level's windows it arrived at, and bubbles from there
+out through the JSX tree. Where more than one window holds a focused node,
+the one focused last is where the user is typing and the one that answers.
+
 ### Focus and visibility
 
 **Focus follows visibility.** A subtree that goes off the screen gives up
