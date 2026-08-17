@@ -72,6 +72,11 @@ import { Node, Scrollable } from '../src/node.js';
 // Two elements of our own
 // ---------------------------------------------------------------------------
 
+// One set of column widths, used by the header and the rows. Two lists that
+// happen to agree drift the moment one changes — which is what a header that
+// did not line up with its own table looked like.
+const COL = { pid: 58, spark: 60 * 3, num: 52, gap: 8, pad: 12 };
+
 const SAMPLE_PX = 3; // one sample is this many pixels wide
 const HISTORY = 60; // …and this many are kept
 const CORES = Math.max(1, cpus().length);
@@ -342,17 +347,22 @@ const s = createStyles({
   headRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingStart: 12,
-    paddingEnd: 12,
+    gap: COL.gap,
+    paddingStart: COL.pad,
+    paddingEnd: COL.pad,
     paddingTop: 8,
     paddingBottom: 4,
   },
-  list: { flexGrow: 1, overflow: 'scroll', paddingStart: 12, paddingEnd: 12 },
+  list: {
+    flexGrow: 1,
+    overflow: 'scroll',
+    paddingStart: COL.pad,
+    paddingEnd: COL.pad,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: COL.gap,
     paddingTop: 2,
     paddingBottom: 2,
     borderRadius: '$radius',
@@ -364,11 +374,22 @@ const s = createStyles({
     ':hover': { backgroundColor: '$accentHover' },
     ':active': { backgroundColor: '$accentActive' },
   },
-  pid: { width: 58, fontSize: 11, color: '$textMuted', textAlign: 'end' },
-  name: { flexGrow: 1, fontSize: 12, color: '$text' },
-  num: { width: 52, fontSize: 11, color: '$text', textAlign: 'end' },
+  pid: { width: COL.pid, fontSize: 11, color: '$textMuted', textAlign: 'end' },
+  // `overflow: 'hidden'` is what keeps a long name inside its column instead
+  // of running under the graph beside it. There is no `text-overflow:
+  // ellipsis` here, so the name is trimmed with one in JS as well — the clip
+  // is the backstop for the case the trim misjudges.
+  nameCell: { flexGrow: 1, overflow: 'hidden' },
+  name: { fontSize: 12, color: '$text', textWrap: 'nowrap' },
+  spark: { width: COL.spark },
+  num: { width: COL.num, fontSize: 11, color: '$text', textAlign: 'end' },
   onAccent: { color: '$accentText' },
   colHead: { fontSize: 10, color: '$textMuted' },
+  headNum: { textAlign: 'end' },
+  headCell: {
+    ':hover': { backgroundColor: '$surfaceHover' },
+    borderRadius: '$radius',
+  },
 
   footer: {
     flexDirection: 'row',
@@ -382,6 +403,13 @@ const s = createStyles({
     borderColor: '$border',
   },
 });
+
+/** No `text-overflow: ellipsis` in react-x11, so the trim is here. Generous
+ *  on purpose: the column clips whatever this misjudges, and a name cut two
+ *  characters early reads worse than one cut exactly. */
+function clip(name, max = 44) {
+  return name.length > max ? `${name.slice(0, max - 1)}…` : name;
+}
 
 const SORTS = {
   cpu: (a, b) => b.cpu - a.cpu,
@@ -407,10 +435,13 @@ function ProcessRow({ row, selected, onSelect }) {
       }}
     >
       <text style={[s.pid, selected && s.onAccent]}>{String(row.pid)}</text>
-      <text style={[s.name, selected && s.onAccent]}>{row.name}</text>
+      <box style={s.nameCell}>
+        <text style={[s.name, selected && s.onAccent]}>{clip(row.name)}</text>
+      </box>
       <sparkline
         data={row.history ?? []}
         max={100}
+        style={s.spark}
         color={selected ? '#ffffff' : '#7ee787'}
       />
       <text style={[s.num, selected && s.onAccent]}>{row.cpu.toFixed(1)}</text>
@@ -508,22 +539,45 @@ export function MonitorPanel({ sampler }) {
       {/* pixels, not children: scroll it back through the samples */}
       <cpuhistory series={load} style={s.graph} aria-label="load over time" />
 
-      <box style={s.headRow}>
+      {/* The header is the row's own column widths, not a strip of buttons
+          with padding of their own — which is what made it drift out of line
+          with the table underneath it. One `COL` for both. */}
+      <box style={s.headRow} role="row">
         {[
-          ['pid', 'PID'],
-          ['name', 'process'],
-          ['cpu', 'CPU%'],
-          ['mem', 'MEM%'],
-        ].map(([key, label]) => (
-          <Button
-            key={key}
-            onPress={() => setSortBy(key)}
-            style={{ paddingTop: 2, paddingBottom: 2 }}
+          ['pid', 'PID', s.pid],
+          ['name', 'process', s.nameCell],
+          [null, '', s.spark],
+          ['cpu', 'CPU%', s.num],
+          ['mem', 'MEM%', s.num],
+        ].map(([key, label, cell], i) => (
+          <box
+            key={key ?? `spacer${i}`}
+            style={[cell, key && s.headCell]}
+            role={key ? 'columnheader' : undefined}
+            aria-label={key ? label : undefined}
+            focusable={Boolean(key)}
+            onClick={key ? () => setSortBy(key) : undefined}
+            onKeyDown={
+              key
+                ? (ev) => {
+                    if (ev.codepoint === 32 || ev.keysym === 0xff0d) {
+                      ev.preventDefault();
+                      setSortBy(key);
+                    }
+                  }
+                : undefined
+            }
           >
-            <text style={s.colHead}>
-              {sortBy === key ? `▾ ${label}` : label}
+            <text
+              style={[
+                s.colHead,
+                // a numeric column's heading sits over its digits
+                (cell === s.num || cell === s.pid) && s.headNum,
+              ]}
+            >
+              {key && sortBy === key ? `▾ ${label}` : label}
             </text>
-          </Button>
+          </box>
         ))}
       </box>
 
