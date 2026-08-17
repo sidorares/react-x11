@@ -521,6 +521,16 @@ whichever of that top-level's windows it arrived at, and bubbles from there
 out through the JSX tree. Where more than one window holds a focused node,
 the one focused last is where the user is typing and the one that answers.
 
+"Unfocused" is likewise the **focus's** answer rather than any one window's.
+A `<popup>` shares its owner's focus, and a managed one — a `<Dialog>` — is a
+real window the window manager focuses in its own right, so opening one takes
+the X focus off the owner at the moment the field inside the dialog starts
+receiving keys. The caret follows the window that actually holds the
+keyboard, whichever of the ones sharing that focus it is; asking the owner
+alone is how a focused field ends up with a `:focus` ring and no caret. By
+the same token, `focus()` on a node inside an open dialog does not ask the
+server for the input focus — the dialog already has it.
+
 ### Focus and visibility
 
 **Focus follows visibility.** A subtree that goes off the screen gives up
