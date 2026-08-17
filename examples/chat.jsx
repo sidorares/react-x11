@@ -300,6 +300,13 @@ export function ircTransport({
   const handle = (raw) => {
     if (raw.startsWith('PING')) return line(`PONG ${raw.slice(5)}`);
 
+    // RPL_WELCOME: registered, and only now is anything we send listened to.
+    if (/^:\S+ 001 /.test(raw)) {
+      setStatus('online');
+      channels.forEach((c) => line(`JOIN ${c}`));
+      return;
+    }
+
     // RPL_LIST / RPL_LISTEND, while a list() is outstanding
     if (listSink) {
       const row = /^:\S+ 322 \S+ (#*\S+) (\d+) :?(.*)$/.exec(raw);
@@ -349,11 +356,15 @@ export function ircTransport({
     nick,
     connect() {
       setStatus('connecting');
+      // Announce, and then **wait for the welcome**. A TCP connection is not
+      // a registered session: anything sent before the server's 001 is
+      // dropped, and "online" meaning "the socket opened" is a lie the rest
+      // of the app then believes. JOIN happened to survive it — servers
+      // queue those — and LIST did not, so the join dialog came up empty
+      // against a server that has thousands of channels.
       socket = net.connect({ host, port }, () => {
         line(`NICK ${nick}`);
         line(`USER ${nick} 0 * :react-x11 chat example`);
-        channels.forEach((c) => line(`JOIN ${c}`));
-        setStatus('online');
       });
       socket.setEncoding('utf8');
       socket.on('data', (chunk) => {
@@ -578,8 +589,12 @@ const s = createStyles({
   // box is its capitals, so `$paddingY` twice plus the border is the same sum
   // a <Button> is, and the two line up. A hand-picked 6 made this composer
   // 24px tall next to a 36px Send. See docs/styling.md.
-  input: {
-    flexGrow: 1,
+  // The look, with no `flexGrow` in it. A style that carries a grow is not
+  // reusable across axes: this one is written for the composer, whose row
+  // grows it sideways, and the same object in the join dialog's column grew
+  // it downwards until the field was half the window. The grow belongs to
+  // the place, not to the look.
+  field: {
     paddingStart: 10,
     paddingEnd: 10,
     paddingTop: '$paddingY',
@@ -589,6 +604,7 @@ const s = createStyles({
     borderRadius: '$radius',
     ':focus': { borderColor: '$accent' },
   },
+  input: { flexGrow: 1 },
 
   directory: {
     flexGrow: 1,
@@ -789,7 +805,7 @@ function ChannelPane({ channel, transport, nick, messages, onDelivered }) {
       {failed ? <text style={s.failed}>{`not sent — ${failed}`}</text> : null}
       <box style={s.composer}>
         <textinput
-          style={s.input}
+          style={[s.field, s.input]}
           value={draft}
           placeholder={`message ${channel}`}
           aria-label={`message ${channel}`}
@@ -1077,7 +1093,7 @@ export function ChatPanel({ transport, nick = 'you' }) {
               aria-label="channel to join"
               onChange={(ev) => setDraftChannel(ev.value)}
               onSubmit={() => join(draftChannel)}
-              style={s.input}
+              style={s.field}
             />
             {/* The directory is the transport's: the fake answers from a
                 table, IRC answers over LIST. Bounded there rather than here,
