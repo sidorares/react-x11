@@ -501,6 +501,59 @@ Two things about the shape that are not obvious:
   value's contextual type, so a typo in a style key is caught the way the
   runtime validation catches it.
 
+## Writing an example
+
+`examples/` is being reworked from a changelog into a set of **applications**:
+each file arrived with a feature and demonstrates that feature's API surface,
+which is the right artifact when it lands and the wrong one a year later. The
+rules below are what that rework decided; the per-app plan lives outside this
+file, but these outlive it.
+
+**An example is a program, not a panel.** If a reader would not want to keep
+it running, it belongs in the labs — the harnesses for things CI cannot check
+(clipboard interop, XDND against a file manager, the desktop's appearance) and
+the perf instruments. Those are worth keeping and are not the tour.
+
+**Demonstrate core, and only core.** No example imports
+`@react-x11/components`. These files exist to show what this package can do,
+and one that reaches for the sibling package answers a different question —
+one that package's own examples are there to answer. It also means an example
+never breaks on someone else's release.
+
+**Do not build on what is leaving.** `Tree` has moved to
+`@react-x11/components`; `Table` is being reduced to a plain table with no
+sorting and no virtualisation; `Tabs`, `Canvas3D` and `PasswordInput`'s
+scribble mask are going the same way; `<markdown>`, `<html>` and `<tex>` are
+already gone (#315). An example that wants a sortable virtual list **builds
+one**, and that is the better lesson: core gives the primitives, the examples
+show the way up from there. `examples/monitor.jsx` hand-rolls exactly that
+over ~780 rows.
+
+**Every app carries its own tests.** Written with `react-x11/test`, which is
+otherwise undemonstrated — and it is what stops an example rotting silently
+when core changes underneath it. Nothing else forces one to keep working.
+
+**Put a seam where the world is.** A transport, a sampler, a spawn: the thing
+that talks to the outside goes behind an interface the tests can replace.
+`chat`'s transport and `monitor`'s sampler are the worked examples. Two traps
+found the hard way — a fake that answers a question the real one cannot yet
+answer hides the state the UI most needs to get right, and a fake that
+resolves instantly leaves nothing to assert about the state in between.
+
+**Say what does not work.** Where an example meets a real gap — no IME, no
+HiDPI scale model, no `text-overflow: ellipsis` — name it and link the issue
+rather than steering around it. That matches how `docs/` already handles
+compatibility ladders, and a reader who hits the same wall is better served by
+a sentence than by a silence.
+
+**Check it on a real display.** This is the one that keeps being relearned.
+The headless harness renders with the font a test hands it, never the one
+fontconfig picks, and it clicks where a user hovers. Every visual defect in
+the recent examples work — text three pixels low, a badge riding high, a
+sparkline reflowing every row once a second, a load graph drawn as a solid
+block, a header that never lined up with its table — passed a green suite and
+was obvious the moment somebody looked. Run it, capture it, look at it.
+
 ## Writing a window manager
 
 `examples/wm.jsx` is the other side of everything above: instead of being a

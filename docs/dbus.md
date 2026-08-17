@@ -253,9 +253,15 @@ directly and cast; it is the same object.
 
 ## Seeing it
 
-`npm run examples:dbus` is a bus explorer: session and system side by side, a
-tree of names → object paths → interfaces built from live introspection, and a
-right-hand pane showing an object's methods, signals and property values. It
-is also the worked example of the degradation rule — run it with
-`DBUS_SESSION_BUS_ADDRESS` pointed at nothing and it renders the
-`'unavailable'` state rather than failing to start.
+The bus explorer that used to live in `examples/` — session and system side
+by side, a tree of names → object paths → interfaces built from live
+introspection, a pane of an object's methods, signals and property values —
+has moved to
+[`@react-x11/components`](https://github.com/sidorares/react-x11-components).
+It was built on `Tree`, which is moving there too, and a browser of that shape
+is a component rather than a demonstration of this API.
+
+What it demonstrated of _this_ page still holds and is worth knowing: point
+`DBUS_SESSION_BUS_ADDRESS` at nothing and a well-built consumer renders the
+`'unavailable'` state rather than failing to start. That is the degradation
+rule above, and it is the thing to check in your own app.
