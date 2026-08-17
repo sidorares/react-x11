@@ -3,12 +3,18 @@
 // app runs here against a fake server with its timers turned down, on the
 // in-process X server, with no display.
 //
-// Three of the claims the example's header makes are the three tests: an
-// optimistic message reconciles, a failed one rolls back, and a channel
-// hidden behind <Activity> keeps its draft. All three were checked by
-// mutation — break the thing each names and that test, and only that test,
-// goes red. The fourth claim is not testable from here; see the note at the
-// bottom.
+// Each test was checked by mutation — break the thing it names and that test,
+// and only that test, goes red.
+//
+// One of them is here because this file was wrong about its own limits. It
+// used to carry a note saying the optimistic reducer's identity check could
+// not be observed from outside, since a duplicate would live for a single
+// render. A duplicate is exactly what a human then saw: a message posting,
+// then flickering into two for a moment. The lesson is not that the note was
+// mistaken about the window — it is that "too brief to test" was an
+// assumption, and the assertion that catches it does not race the window at
+// all. It asks whether the message kept its id, which is the property that
+// makes the duplicate impossible.
 //
 // Note what the queries have to work around: **every channel is mounted**,
 // which is the whole point of the example, so `getByRole('log')` would find
@@ -24,6 +30,7 @@ import {
   textOf,
   userEvent,
   waitFor,
+  within,
 } from '../src/testing/index.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
@@ -70,6 +77,23 @@ const composer = (channel) => screen.getByPlaceholder(`message ${channel}`);
 const log = (channel) => screen.getByTestName(`log-${channel}`);
 const channelRow = (channel) => screen.getByRole('listitem', { name: channel });
 
+/** The `msg-<id>` testname of the row carrying `text`, or undefined. */
+function rowIdFor(channel, text) {
+  const row = within(log(channel))
+    .getAllByText(text)
+    .map((n) => {
+      let up = n;
+      while (
+        up &&
+        !String(up.props?.['data-testname'] ?? '').startsWith('msg-')
+      )
+        up = up.parent;
+      return up?.props?.['data-testname'];
+    })
+    .filter(Boolean);
+  return row[0];
+}
+
 describe('examples/chat', () => {
   test('an optimistic message appears, then reconciles', async () => {
     const transport = testTransport();
@@ -91,12 +115,41 @@ describe('examples/chat', () => {
       assert.match(body, /✓/);
       assert.equal((body.match(/hello x11/g) ?? []).length, 1);
     });
+  });
 
-    // What this does NOT pin: the reducer's idempotency. A blind append
-    // duplicates the line only between `onDelivered` and the end of the
-    // transition — one render, often not even a painted frame — so it is
-    // invisible from out here. It is still a real trap; it is guarded by the
-    // comment at the reducer, not by this test.
+  test('a delivered message keeps the id it was sent with', async () => {
+    const transport = testTransport();
+    await mount(transport);
+
+    await userEvent.type(composer('#general'), 'keep my id\n');
+
+    // The row the optimistic entry is drawn in.
+    const optimisticId = rowIdFor('#general', 'keep my id');
+    assert.ok(optimisticId, 'no row for the optimistic message');
+
+    transport.flush();
+
+    await waitFor(() => {
+      assert.match(textOf(log('#general')), /✓/);
+    });
+
+    // Same row, same id. This is the whole of it: `useOptimistic`'s reducer
+    // recognises the delivered message as the one it is already showing by
+    // **id**, so it stops adding its own copy. Let the transport mint a fresh
+    // id — which is what it used to do — and the reducer sees a list that
+    // does not contain `local`, appends it again, and the message is on
+    // screen twice until the transition ends. That flicker is visible to a
+    // human and was not visible to this suite, which is why the id is on the
+    // row rather than the assertion being about text alone.
+    assert.equal(
+      rowIdFor('#general', 'keep my id'),
+      optimisticId,
+      'the delivered message replaced the optimistic one instead of joining it',
+    );
+    assert.equal(
+      (textOf(log('#general')).match(/keep my id/g) ?? []).length,
+      1,
+    );
   });
 
   test('a send that fails rolls the message back', async () => {

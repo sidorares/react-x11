@@ -501,7 +501,10 @@ function Scrollback({ channel, messages }) {
       }}
     >
       {messages.map((m) => (
-        <box key={m.id} style={s.line}>
+        // The id is on the row so a test can watch it: a message keeps the id
+        // it was given optimistically, and that is what stops it appearing
+        // twice while the send resolves.
+        <box key={m.id} data-testname={`msg-${m.id}`} style={s.line}>
           <text style={s.who}>{m.from}</text>
           <text style={[s.what, m.pending && s.whatPending]}>{m.text}</text>
           <text style={s.tick}>{m.pending ? '' : m.mine ? '✓' : ''}</text>
@@ -551,7 +554,17 @@ function ChannelPane({ channel, transport, nick, messages, onDelivered }) {
       addOptimistic(local);
       try {
         const delivered = await transport.send(channel, text, nick);
-        onDelivered({ ...delivered, mine: true });
+        // **Keep the local id.** The optimistic reducer recognises the
+        // delivered message as the one already on screen by id, and a
+        // transport is free to mint its own — so taking the server's id here
+        // means the reducer no longer sees `local` in the list, adds its copy
+        // back, and the message is on screen twice until the transition ends.
+        // Long enough to see, and gone before you can point at it.
+        //
+        // A message this app sent is identified by the id this app gave it.
+        // That is also what a real protocol does: a client-generated nonce
+        // the server echoes, precisely so the sender can match the two up.
+        onDelivered({ ...delivered, id: local.id, mine: true });
       } catch (err) {
         setFailed(err.message);
       }
