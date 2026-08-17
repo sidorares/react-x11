@@ -261,6 +261,46 @@ describe('examples/chat', () => {
     assert.equal(within(dialog()).queryAllByText('#x11').length, 0);
   });
 
+  test('typing in the join dialog filters the directory', async () => {
+    const { windowNode } = await mount(testTransport());
+    const panes = () => windowNodesOf(windowNode);
+    const somewhere = (find) => {
+      for (const w of panes()) {
+        const hit = find(within(w));
+        if (hit.length) return hit[0];
+      }
+      return null;
+    };
+
+    await userEvent.click(screen.getByText('⋮'));
+    await userEvent.click(
+      somewhere((q) => q.queryAllByText('Join a channel…')),
+    );
+    const field = () =>
+      somewhere((q) =>
+        q.queryAllByPlaceholder('#channel — or filter the list'),
+      );
+    await waitFor(() => assert.ok(field(), 'the dialog did not open'));
+    const dialog = () => {
+      let up = field();
+      while (up && !up.isWindow) up = up.parent;
+      return up;
+    };
+    await waitFor(() =>
+      assert.ok(within(dialog()).queryAllByText('#nodejs').length > 0),
+    );
+
+    // Only testable since #332: the field took focus and no keys before it,
+    // so the filter this drives could not be reached from a test at all.
+    await userEvent.type(field(), 'way');
+    assert.equal(field().value, 'way');
+
+    await waitFor(() => {
+      assert.ok(within(dialog()).queryAllByText('#wayland').length > 0);
+      assert.equal(within(dialog()).queryAllByText('#nodejs').length, 0);
+    });
+  });
+
   test('a channel keeps its draft across a switch', async () => {
     await mount(testTransport());
 
