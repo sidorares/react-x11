@@ -521,9 +521,9 @@ one that package's own examples are there to answer. It also means an example
 never breaks on someone else's release.
 
 **Do not build on what is leaving.** `Tree` has moved to
-`@react-x11/components`; `Table` is being reduced to a plain table with no
-sorting and no virtualisation; `Tabs`, `Canvas3D` and `PasswordInput`'s
-scribble mask are going the same way; `<markdown>`, `<html>` and `<tex>` are
+`@react-x11/components`, and `Calendar`/`DatePicker` with it; `Table` is being
+reduced to a plain table with no sorting and no virtualisation; `Tabs`,
+`Canvas3D` and `PasswordInput`'s scribble mask are going the same way; `<markdown>`, `<html>` and `<tex>` are
 already gone (#315). An example that wants a sortable virtual list **builds
 one**, and that is the better lesson: core gives the primitives, the examples
 show the way up from there. `examples/monitor.jsx` hand-rolls exactly that

@@ -36,7 +36,6 @@
     "examples:rules": "tsx examples/rules.jsx",
     "examples:selection": "tsx examples/selection.jsx",
     "examples:widgets": "tsx examples/widgets.jsx",
-    "examples:datepicker": "tsx examples/datepicker.jsx",
     "examples:password": "tsx examples/password.jsx",
     "examples:react-features": "tsx examples/react-features.jsx",
     "examples:icons": "tsx examples/icons.jsx",
