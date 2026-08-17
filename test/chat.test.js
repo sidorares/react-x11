@@ -301,6 +301,26 @@ describe('examples/chat', () => {
     });
   });
 
+  test('the directory waits to be connected instead of saying there is none', async () => {
+    // Asked before the connection is up, `list()` must not answer `[]`. The
+    // dialog can only read that as "the server offered no list" — a wrong
+    // answer, delivered instantly, that nothing retries. On a real server it
+    // showed every time the dialog was opened in the first second.
+    const transport = testTransport();
+    let settled = false;
+    const pending = transport.list().then((rows) => {
+      settled = true;
+      return rows;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.equal(settled, false, 'answered before it was connected');
+
+    transport.connect();
+    const rows = await pending;
+    assert.ok(rows.length > 0, 'no directory after connecting');
+  });
+
   test('a channel keeps its draft across a switch', async () => {
     await mount(testTransport());
 

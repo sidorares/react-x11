@@ -165,6 +165,18 @@ export function fixtureTransport({
   };
 
   const joined = [...CHANNELS];
+  /** Resolves once connected, mirroring the real transport's rule. */
+  const whenOnline = () =>
+    status === 'online'
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          const watch = (next) => {
+            if (next !== 'online') return;
+            statusListeners.delete(watch);
+            resolve();
+          };
+          statusListeners.add(watch);
+        });
 
   return {
     state,
@@ -203,10 +215,19 @@ export function fixtureTransport({
       }
       return { id: messageId(), channel, from, text, at: Date.now() };
     },
-    /** What there is to join. A directory, not the channels you are in. */
+    /** What there is to join. A directory, not the channels you are in.
+     *
+     *  Waits to be connected first, because the real one has to: a fake that
+     *  answers a question the real transport cannot yet answer hides the
+     *  state the UI most needs to get right. Asking too early used to
+     *  resolve `[]`, which reads as "there is nothing" rather than "not
+     *  yet". */
     list() {
-      return new Promise((resolve) =>
-        setTimeout(() => resolve(DIRECTORY), Math.min(latency, 400)),
+      return whenOnline().then(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(DIRECTORY), Math.min(latency, 400)),
+          ),
       );
     },
     join(channel) {
@@ -282,6 +303,23 @@ export function ircTransport({
   };
 
   const line = (text) => socket?.write(`${text}\r\n`);
+
+  /** Resolves once the session is registered, or after `ms` either way. */
+  const whenOnline = (ms) =>
+    status === 'online'
+      ? Promise.resolve()
+      : new Promise((resolve) => {
+          const stop = setTimeout(finish, ms);
+          function finish() {
+            clearTimeout(stop);
+            statusListeners.delete(watch);
+            resolve();
+          }
+          function watch(next) {
+            if (next === 'online') finish();
+          }
+          statusListeners.add(watch);
+        });
 
   // A join can be refused, and the refusal arrives as a numeric rather than
   // as anything resembling a message. Swallow it and the pane simply stays
@@ -391,19 +429,26 @@ export function ircTransport({
      *  channels and a long stall, so this asks only for the populated ones
      *  and gives up after a few seconds — a dialog that never fills is worse
      *  than a short list. `minUsers` is the knob. */
-    list({ minUsers = 200, limit = 200, timeoutMs = 6000 } = {}) {
-      if (!socket || status !== 'online') return Promise.resolve([]);
-      return new Promise((resolve) => {
-        const found = [];
-        const done = () => {
-          listSink = null;
-          clearTimeout(timer);
-          found.sort((a, b) => b.users - a.users);
-          resolve(found.slice(0, limit));
-        };
-        const timer = setTimeout(done, timeoutMs);
-        listSink = { found, done };
-        line(`LIST >${minUsers}`);
+    list({ minUsers = 200, limit = 200, timeoutMs = 12_000 } = {}) {
+      // **Wait to be registered rather than answering "nothing".** Asking
+      // before RPL_WELCOME used to resolve `[]` on the spot, which the dialog
+      // could only read as "the server offered no list" — a wrong answer,
+      // delivered instantly, that nothing then retried. Opening the dialog in
+      // the first second of a session showed it every time.
+      return whenOnline(timeoutMs).then(() => {
+        if (!socket || status !== 'online') return [];
+        return new Promise((resolve) => {
+          const found = [];
+          const done = () => {
+            listSink = null;
+            clearTimeout(timer);
+            found.sort((a, b) => b.users - a.users);
+            resolve(found.slice(0, limit));
+          };
+          const timer = setTimeout(done, timeoutMs);
+          listSink = { found, done };
+          line(`LIST >${minUsers}`);
+        });
       });
     },
     join(channel) {
