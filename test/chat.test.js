@@ -178,6 +178,23 @@ describe('examples/chat', () => {
   // worse than none. Verified on a real display instead; the styles carry the
   // reason in a comment.
 
+  test('joining and leaving move the transport, not just the sidebar', async () => {
+    const transport = testTransport();
+    await mount(transport);
+
+    // The sidebar's list mirrors the connection's. What must not happen is
+    // the two drifting: a pane for a channel the transport never joined shows
+    // an empty room that will never fill, which is the same class of lie as
+    // the fixture's history leaking into a real session.
+    assert.deepEqual(transport.channels, ['#general', '#x11', '#react']);
+
+    transport.join('#somewhere');
+    assert.ok(transport.channels.includes('#somewhere'));
+
+    transport.leave('#x11');
+    assert.ok(!transport.channels.includes('#x11'));
+  });
+
   test('a channel keeps its draft across a switch', async () => {
     await mount(testTransport());
 

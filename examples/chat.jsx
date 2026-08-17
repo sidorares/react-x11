@@ -75,7 +75,14 @@ import React, {
   useTransition,
 } from 'react';
 
-import { Button, Switch, createRoot, createStyles } from '../src/index.js';
+import {
+  Button,
+  Dialog,
+  MenuBar,
+  Switch,
+  createRoot,
+  createStyles,
+} from '../src/index.js';
 
 const CHANNELS = ['#general', '#x11', '#react'];
 
@@ -141,9 +148,13 @@ export function fixtureTransport({
     statusListeners.forEach((fn) => fn(next));
   };
 
+  const joined = [...CHANNELS];
+
   return {
     state,
-    channels: CHANNELS,
+    get channels() {
+      return joined;
+    },
     get status() {
       return status;
     },
@@ -152,7 +163,12 @@ export function fixtureTransport({
       setTimeout(() => setStatus('online'), Math.min(latency, 300));
       if (botEvery > 0 && timer === null) {
         timer = setInterval(() => {
-          const channel = CHANNELS[turn % CHANNELS.length];
+          // only chatter in channels with something to say — a channel
+          // joined at runtime is a real one here too: quiet until someone
+          // talks in it
+          const speaking = joined.filter((c) => BOT_LINES[c]);
+          if (!speaking.length) return;
+          const channel = speaking[turn % speaking.length];
           const lines = BOT_LINES[channel];
           const [from, text] = lines[turn % lines.length];
           turn += 1;
@@ -170,6 +186,13 @@ export function fixtureTransport({
         throw new Error('the server dropped it');
       }
       return { id: messageId(), channel, from, text, at: Date.now() };
+    },
+    join(channel) {
+      if (!joined.includes(channel)) joined.push(channel);
+    },
+    leave(channel) {
+      const at = joined.indexOf(channel);
+      if (at >= 0) joined.splice(at, 1);
     },
     /** The scrollback this fake pretends was already there. */
     history(channel) {
@@ -220,8 +243,9 @@ export function ircTransport({
   host,
   port = 6667,
   nick = `rx11${Math.floor(Math.random() * 900 + 100)}`,
-  channels = CHANNELS,
+  channels: joinList = CHANNELS,
 } = {}) {
+  const channels = [...joinList];
   const listeners = new Set();
   const statusListeners = new Set();
   let socket = null;
@@ -279,7 +303,9 @@ export function ircTransport({
 
   return {
     state: { failNext: false },
-    channels,
+    get channels() {
+      return channels;
+    },
     get status() {
       return status;
     },
@@ -310,6 +336,15 @@ export function ircTransport({
         ),
       );
       return { id: messageId(), channel, from, text, at: Date.now() };
+    },
+    join(channel) {
+      if (!channels.includes(channel)) channels.push(channel);
+      if (status === 'online') line(`JOIN ${channel}`);
+    },
+    leave(channel) {
+      const at = channels.indexOf(channel);
+      if (at >= 0) channels.splice(at, 1);
+      if (status === 'online') line(`PART ${channel}`);
     },
     /** IRC has no scrollback. A channel starts empty and fills as people
      *  talk; catching up on what was said before you joined is a bouncer's
@@ -379,6 +414,11 @@ const s = createStyles({
     backgroundColor: '$surfaceHover',
     borderRightWidth: 1,
     borderColor: '$border',
+  },
+  sidebarTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   sidebarHead: {
     fontSize: 11,
@@ -704,11 +744,18 @@ export function ChatPanel({ transport, nick = 'you' }) {
   // real server takes a channel list from the command line, and a window
   // listing three channels while the connection sits in a different three is
   // the kind of wrong that looks like a rendering bug.
-  const channels = transport.channels ?? CHANNELS;
+  // Channels are state, not a constant, because they can be joined and left
+  // while the app runs. `transport.channels` seeds it and stays the source of
+  // truth for what the connection is actually in — this list mirrors it.
+  const [channels, setChannels] = useState(() => [
+    ...(transport.channels ?? CHANNELS),
+  ]);
   const [current, setCurrent] = useState(channels[0]);
   const [byChannel, setByChannel] = useState(() =>
     Object.fromEntries(channels.map((c) => [c, []])),
   );
+  const [joining, setJoining] = useState(false);
+  const [draftChannel, setDraftChannel] = useState('');
   const [unread, setUnread] = useState({});
   const [status, setStatus] = useState(transport.status);
   const [broken, setBroken] = useState(null);
@@ -744,6 +791,31 @@ export function ChatPanel({ transport, nick = 'you' }) {
     setUnread((prev) => ({ ...prev, [channel]: 0 }));
   }, []);
 
+  const join = useCallback(
+    (raw) => {
+      const name = raw.trim().replace(/^#*/, '#');
+      if (name === '#') return;
+      setJoining(false);
+      setChannels((prev) => (prev.includes(name) ? prev : [...prev, name]));
+      setByChannel((prev) => (name in prev ? prev : { ...prev, [name]: [] }));
+      transport.join?.(name);
+      setCurrent(name);
+    },
+    [transport],
+  );
+
+  const leave = useCallback(
+    (name) => {
+      transport.leave?.(name);
+      setChannels((prev) => {
+        const next = prev.filter((c) => c !== name);
+        setCurrent((now) => (now === name ? (next[0] ?? '') : now));
+        return next;
+      });
+    },
+    [transport],
+  );
+
   const deliver = useCallback((msg) => {
     setByChannel((prev) => ({
       ...prev,
@@ -761,7 +833,36 @@ export function ChatPanel({ transport, nick = 'you' }) {
   return (
     <box style={s.root}>
       <box style={s.sidebar} role="list" aria-label="channels">
-        <text style={s.sidebarHead}>CHANNELS</text>
+        <box style={s.sidebarTop}>
+          <text style={s.sidebarHead}>CHANNELS</text>
+          {/* A menu bar of exactly one menu, which is what a "…" button is.
+              `globalMenu={false}` keeps it here: without it a desktop with a
+              panel would take the array and draw it up there, which is right
+              for an application menu and wrong for a widget in a sidebar. */}
+          <MenuBar
+            globalMenu={false}
+            fontSize={12}
+            menus={[
+              {
+                label: '⋯',
+                items: [
+                  {
+                    label: 'Join a channel…',
+                    onSelect: () => {
+                      setDraftChannel('');
+                      setJoining(true);
+                    },
+                  },
+                  {
+                    label: `Leave ${current}`,
+                    enabled: channels.length > 1,
+                    onSelect: () => leave(current),
+                  },
+                ],
+              },
+            ]}
+          />
+        </box>
         {channels.map((channel) => {
           const on = channel === current;
           return (
@@ -827,6 +928,42 @@ export function ChatPanel({ transport, nick = 'you' }) {
             </PaneBoundary>
           </Activity>
         ))}
+
+        <Dialog
+          open={joining}
+          title="Join a channel"
+          width={320}
+          height={168}
+          onClose={() => setJoining(false)}
+          actions={
+            <>
+              <Button label="Cancel" onPress={() => setJoining(false)} />
+              <Button
+                primary
+                label="Join"
+                disabled={!draftChannel.trim()}
+                onPress={() => join(draftChannel)}
+              />
+            </>
+          }
+        >
+          <box style={{ gap: 8 }}>
+            <text style={{ fontSize: 12, color: '$textMuted' }}>
+              {transport.channels === undefined
+                ? 'Name a channel to open a pane for it.'
+                : 'The connection joins it too — on a real server that means really joining.'}
+            </text>
+            <textinput
+              autoFocus
+              value={draftChannel}
+              placeholder="#channel"
+              aria-label="channel to join"
+              onChange={(ev) => setDraftChannel(ev.value)}
+              onSubmit={() => join(draftChannel)}
+              style={s.input}
+            />
+          </box>
+        </Dialog>
 
         <box style={s.footer}>
           <Switch
