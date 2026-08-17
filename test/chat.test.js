@@ -31,6 +31,7 @@ import {
   userEvent,
   waitFor,
   within,
+  windowNodesOf,
   XK_RETURN,
 } from '../src/testing/index.js';
 
@@ -209,6 +210,55 @@ describe('examples/chat', () => {
 
     await waitFor(() => screen.getByPlaceholder('message #x11'));
     assert.equal(channelRow('#x11').props['aria-selected'], true);
+  });
+
+  test('the ⋮ menu opens a join dialog listing what there is to join', async () => {
+    const { windowNode } = await mount(testTransport());
+    // Both popups are real X windows of their own, so the queries have to
+    // look past the toplevel — which is worth demonstrating here as much as
+    // the feature is.
+    const panes = () => windowNodesOf(windowNode);
+    const somewhere = (find) => {
+      for (const w of panes()) {
+        const hit = find(within(w));
+        if (hit.length) return hit[0];
+      }
+      return null;
+    };
+
+    await userEvent.click(screen.getByText('⋮'));
+    const item = somewhere((q) => q.queryAllByText('Join a channel…'));
+    assert.ok(item, 'the menu did not open');
+    await userEvent.click(item);
+
+    // Scope to the dialog's own window from here. "Any window" would find
+    // `#x11` in the sidebar and prove nothing — and **assert on counts, never
+    // on nodes**: a failed comparison stringifies the whole retained tree and
+    // the run dies with `RangeError: Invalid string length` instead of
+    // telling you what went wrong. This test did exactly that first.
+    // A popup is a *child* in the node tree, so the toplevel contains the
+    // dialog's contents too — `within` any ancestor finds the sidebar as
+    // well. Walk up from the field instead: its nearest window ancestor is
+    // the dialog, whatever the tree looks like above it.
+    const dialog = () => {
+      let up = somewhere((q) =>
+        q.queryAllByPlaceholder('#channel — or filter the list'),
+      );
+      while (up && !up.isWindow) up = up.parent;
+      return up;
+    };
+    await waitFor(() => assert.ok(dialog(), 'the dialog did not open'));
+
+    // The directory is asked for when the dialog opens, not at mount.
+    await waitFor(() =>
+      assert.ok(
+        within(dialog()).queryAllByText('#wayland').length > 0,
+        'the directory never arrived',
+      ),
+    );
+
+    // Channels already joined are not offered again.
+    assert.equal(within(dialog()).queryAllByText('#x11').length, 0);
   });
 
   test('a channel keeps its draft across a switch', async () => {

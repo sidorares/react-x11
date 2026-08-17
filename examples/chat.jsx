@@ -116,6 +116,21 @@ const BOT_LINES = {
   ],
 };
 
+/** What `list()` answers with on the fake. Enough of it, and varied enough,
+ *  that filtering the dialog is worth doing. */
+const DIRECTORY = [
+  { name: '#general', users: 214, topic: 'anything and everything' },
+  { name: '#x11', users: 96, topic: 'the protocol, the servers, the toolkits' },
+  { name: '#react', users: 180, topic: 'hooks, renderers, reconcilers' },
+  { name: '##chat', users: 143, topic: 'social, off-topic' },
+  { name: '#xorg-devel', users: 41, topic: 'server internals' },
+  { name: '#wayland', users: 88, topic: 'the other one' },
+  { name: '#fonts', users: 27, topic: 'shaping, hinting, fontconfig' },
+  { name: '#lobsters', users: 64, topic: 'link aggregator chat' },
+  { name: '#nodejs', users: 152, topic: 'the runtime' },
+  { name: '#typescript', users: 121, topic: 'types, mostly' },
+];
+
 /**
  * A fake server. Bots post on a timer, sends take `latency` ms, and
  * `state.failNext` makes the next one throw — which is the only way to see an
@@ -188,6 +203,12 @@ export function fixtureTransport({
       }
       return { id: messageId(), channel, from, text, at: Date.now() };
     },
+    /** What there is to join. A directory, not the channels you are in. */
+    list() {
+      return new Promise((resolve) =>
+        setTimeout(() => resolve(DIRECTORY), Math.min(latency, 400)),
+      );
+    },
     join(channel) {
       if (!joined.includes(channel)) joined.push(channel);
     },
@@ -252,6 +273,7 @@ export function ircTransport({
   let socket = null;
   let status = 'offline';
   let buffer = '';
+  let listSink = null;
 
   const emit = (msg) => listeners.forEach((fn) => fn(msg));
   const setStatus = (next) => {
@@ -277,6 +299,20 @@ export function ircTransport({
 
   const handle = (raw) => {
     if (raw.startsWith('PING')) return line(`PONG ${raw.slice(5)}`);
+
+    // RPL_LIST / RPL_LISTEND, while a list() is outstanding
+    if (listSink) {
+      const row = /^:\S+ 322 \S+ (#*\S+) (\d+) :?(.*)$/.exec(raw);
+      if (row) {
+        listSink.found.push({
+          name: row[1],
+          users: Number(row[2]),
+          topic: row[3],
+        });
+        return;
+      }
+      if (/^:\S+ 323 /.test(raw)) return listSink.done();
+    }
 
     // :server <code> <nick> #channel :text
     const numeric = /^:\S+ (\d{3}) \S+ (#\S+) :(.*)$/.exec(raw);
@@ -337,6 +373,27 @@ export function ircTransport({
         ),
       );
       return { id: messageId(), channel, from, text, at: Date.now() };
+    },
+    /** The server's own directory, over LIST.
+     *
+     *  Bounded on purpose. A full LIST on a public network is thousands of
+     *  channels and a long stall, so this asks only for the populated ones
+     *  and gives up after a few seconds — a dialog that never fills is worse
+     *  than a short list. `minUsers` is the knob. */
+    list({ minUsers = 200, limit = 200, timeoutMs = 6000 } = {}) {
+      if (!socket || status !== 'online') return Promise.resolve([]);
+      return new Promise((resolve) => {
+        const found = [];
+        const done = () => {
+          listSink = null;
+          clearTimeout(timer);
+          found.sort((a, b) => b.users - a.users);
+          resolve(found.slice(0, limit));
+        };
+        const timer = setTimeout(done, timeoutMs);
+        listSink = { found, done };
+        line(`LIST >${minUsers}`);
+      });
     },
     join(channel) {
       if (!channels.includes(channel)) channels.push(channel);
@@ -533,6 +590,30 @@ const s = createStyles({
     ':focus': { borderColor: '$accent' },
   },
 
+  directory: {
+    flexGrow: 1,
+    overflow: 'scroll',
+    borderWidth: '$borderWidth',
+    borderColor: '$border',
+    borderRadius: '$radius',
+    padding: 4,
+    gap: 1,
+  },
+  directoryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingStart: 8,
+    paddingEnd: 8,
+    paddingTop: 4,
+    paddingBottom: 4,
+    borderRadius: '$radius',
+    ':hover': { backgroundColor: '$surfaceHover' },
+    ':active': { backgroundColor: '$surfaceActive' },
+  },
+  directoryName: { flexGrow: 1, fontSize: 12, color: '$text' },
+  directoryUsers: { fontSize: 11, color: '$textMuted' },
+  hint: { fontSize: 11, color: '$textMuted', padding: 6 },
   fallback: { flexGrow: 1, padding: 12, gap: 6 },
   ghost: { height: 13, backgroundColor: '$surfaceHover', borderRadius: 3 },
   error: { flexGrow: 1, padding: 16, gap: 10, justifyContent: 'center' },
@@ -757,6 +838,9 @@ export function ChatPanel({ transport, nick = 'you' }) {
   );
   const [joining, setJoining] = useState(false);
   const [draftChannel, setDraftChannel] = useState('');
+  // null while the directory is on its way — the fake takes a moment and a
+  // real LIST takes seconds, so "empty" and "not yet" have to look different.
+  const [directory, setDirectory] = useState(null);
   const [unread, setUnread] = useState({});
   const [status, setStatus] = useState(transport.status);
   const [broken, setBroken] = useState(null);
@@ -786,6 +870,28 @@ export function ChatPanel({ transport, nick = 'you' }) {
       transport.close();
     };
   }, [transport]);
+
+  // Asked when the dialog opens rather than at mount: a LIST is expensive on
+  // a real server and nobody has asked for it until now.
+  useEffect(() => {
+    if (!joining) return undefined;
+    let live = true;
+    setDirectory(null);
+    Promise.resolve(transport.list?.() ?? []).then(
+      (rows) => live && setDirectory(rows),
+      () => live && setDirectory([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [joining, transport]);
+
+  const matches = useMemo(() => {
+    const rows = (directory ?? []).filter((c) => !channels.includes(c.name));
+    const q = draftChannel.trim().replace(/^#+/, '').toLowerCase();
+    if (!q) return rows.slice(0, 40);
+    return rows.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40);
+  }, [directory, draftChannel, channels]);
 
   const open = useCallback((channel) => {
     setCurrent(channel);
@@ -849,7 +955,7 @@ export function ChatPanel({ transport, nick = 'you' }) {
             fontSize={12}
             menus={[
               {
-                label: '⋯',
+                label: '⋮',
                 items: [
                   {
                     label: 'Join a channel…',
@@ -948,8 +1054,8 @@ export function ChatPanel({ transport, nick = 'you' }) {
         <Dialog
           open={joining}
           title="Join a channel"
-          width={320}
-          height={168}
+          width={380}
+          height={330}
           onClose={() => setJoining(false)}
           actions={
             <>
@@ -963,21 +1069,54 @@ export function ChatPanel({ transport, nick = 'you' }) {
             </>
           }
         >
-          <box style={{ gap: 8 }}>
-            <text style={{ fontSize: 12, color: '$textMuted' }}>
-              {transport.channels === undefined
-                ? 'Name a channel to open a pane for it.'
-                : 'The connection joins it too — on a real server that means really joining.'}
-            </text>
+          <box style={{ gap: 8, flexGrow: 1 }}>
             <textinput
               autoFocus
               value={draftChannel}
-              placeholder="#channel"
+              placeholder="#channel — or filter the list"
               aria-label="channel to join"
               onChange={(ev) => setDraftChannel(ev.value)}
               onSubmit={() => join(draftChannel)}
               style={s.input}
             />
+            {/* The directory is the transport's: the fake answers from a
+                table, IRC answers over LIST. Bounded there rather than here,
+                because "what is worth showing" is a property of the server. */}
+            <box
+              style={s.directory}
+              role="listbox"
+              aria-label="channels to join"
+            >
+              {directory === null ? (
+                <text style={s.hint}>asking the server…</text>
+              ) : matches.length === 0 ? (
+                <text style={s.hint}>
+                  {directory.length
+                    ? 'nothing matches — Join takes the name as typed'
+                    : 'the server offered no list; type a name'}
+                </text>
+              ) : (
+                matches.map((c) => (
+                  <box
+                    key={c.name}
+                    style={s.directoryRow}
+                    role="option"
+                    aria-label={c.name}
+                    focusable
+                    onClick={() => join(c.name)}
+                    onKeyDown={(ev) => {
+                      if (ev.codepoint === 32 || ev.keysym === XK_RETURN) {
+                        ev.preventDefault();
+                        join(c.name);
+                      }
+                    }}
+                  >
+                    <text style={s.directoryName}>{c.name}</text>
+                    <text style={s.directoryUsers}>{String(c.users)}</text>
+                  </box>
+                ))
+              )}
+            </box>
           </box>
         </Dialog>
 
