@@ -249,18 +249,44 @@ resize handle in a fixed corner.
 - **A `<window>`'s or `<popup>`'s explicit `x`/`y`** — screen coordinates.
 - **Vertical anything.** `top`/`bottom`, a column's order, a vertical
   scrollbar's travel, Up/Down on every control.
-- **`<textinput>` and `<textarea>`.** They shape and draw bidi text
-  correctly — that is ntk's doing — but the field's own origin, caret
-  scrolling and selection geometry are still written left-to-right. Wrapping
-  one in an RTL box mirrors the box around it and not the field inside it.
-  Tracked separately.
+- **The caret keys in a field.** Left and Right step through the _string_,
+  not across the screen, and so do Home and End — the editing model is
+  written in logical positions, and visual-order caret motion through bidi
+  text is its own question.
 
 What **does**, besides the box tree: a vertical scrollbar moves to the left;
 horizontal scrolling counts from the right-hand edge, so `scrollX: 0` still
 means "at the beginning"; `textAlign: 'start'`/`'end'` resolve against the
-box's direction rather than against the first strong character; and a popup
+box's direction rather than against the first strong character; a popup
 prefers the start side, so a submenu opens leftwards and still flips at the
-screen edge.
+screen edge; and the inside of a `<textinput>`/`<textarea>` — see below.
+
+### Inside an editable field
+
+A field is laid out at its box's direction, exactly as a `<text>` is, and the
+direction does two separate things there:
+
+- **It is the base level the value is shaped at.** UAX#9 resolves a run of
+  neutral characters — `"(1) 12:30"`, a filename, a lone bracket — against
+  the paragraph level, and "take it from the first strong character" is only
+  the rule for when nobody said. A field that never said reorders an Arabic
+  word typed into an English form as though the whole line were Arabic, in an
+  **LTR** window. So the field says.
+- **It is the edge the text is against.** The value, the placeholder and the
+  caret start at the direction's start edge — the right-hand one under
+  `direction: 'rtl'` — and an unscrolled field still shows the _beginning_ of
+  its value, so a value too long for its box overflows towards the left.
+  Clicking, the caret, the selection bands and the scroll are read from one
+  placement, so they mirror together.
+
+`textAlign` works on a field too: `'start'` (the default) is the base
+direction's start edge, and `'center'`/`'end'` do what they say while the
+value fits. A value that overflows its box is pinned to the start edge
+whatever the alignment says, because that is what it is scrolled from.
+
+The text's _own_ direction is not consulted: a Latin value in an RTL field is
+placed at the field's right edge, the way `<input dir="rtl">` places one, and
+there is no `dir="auto"` equivalent yet.
 
 ## Per-side borders
 

@@ -925,9 +925,14 @@ class AtspiBridge {
     return [x, y, rect.width, rect.height];
   }
 
-  /** Where the text control paints its characters: the content box, minus
-   * the horizontal scroll a long value has been dragged by. */
+  /** Where the text control paints its characters. An element that answers
+   * `_placedValue` — every field in core does — has already resolved this,
+   * scroll and reading direction included, and it is the same answer the
+   * caret and the highlight are drawn from; the box minus its scroll is the
+   * fallback for one that only answers the geometry accessors. */
   _textOrigin(node) {
+    const placed = node._placedValue?.();
+    if (placed) return { x: placed.x, y: placed.y };
     const content = node.contentBox?.() ?? node.abs;
     return {
       x: content.x - (node._scrollX ?? 0),
