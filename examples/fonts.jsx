@@ -67,22 +67,24 @@
 // ntk 8.1 it honours the context transform (ntk#271), so it is written in
 // the node's own coordinates like everything else.
 //
-// The shadow is the interesting one. ntk 8.1 added `ctx.shadowBlur` and its
-// three companions (ntk#272), and `fillText` casts one — but a paragraph
-// drawn through `TextLayout.draw` goes via `drawGlyphs`, which is still not
-// one of the operations that consults the shadow state, 8.1.1 included. A specimen that wraps has
-// to lay its text out, so this file still builds the shadow from the pieces
-// underneath: the text is drawn once into an **a8 surface** (a `Surface`
-// stores coverage rather than colour), that surface's `Picture` gets a
-// **RENDER convolution filter** — a gaussian, on the server — and the
-// blurred coverage is composited as a *mask* for whatever `fillStyle` is
-// set. The shadow is tinted at composite time, nothing but the composite
-// crosses the wire, and the blur happens where the pixels already are.
-// `paintShadowedLayout` below is the whole of it, and ntk#283 is what would
-// replace it: the day `drawGlyphs` consults the shadow state, this becomes
-// three assignments.
+// The shadow is `ctx.shadowBlur` and its three companions, added in ntk 8.1
+// (ntk#272) and extended to the glyph path in 8.2 (ntk#283) — so a specimen
+// that wraps, and therefore lays its text out rather than calling
+// `fillText`, casts one. This file used to build that by hand out of an a8
+// `Surface` and a RENDER convolution filter; it is now four assignments
+// inside a `save`/`restore`, because the guides and the hover box are drawn
+// after the text and must not cast shadows of their own.
+//
+// `shadowBlur` is a **diameter** in the canvas spec — σ = blur / 2 — which
+// is the same gaussian the hand-built version got from `setBlurFilter`, so
+// the numbers carried over unchanged.
 //
 // ## What does not work
+//
+// **A shadow does not paint on an in-process X server** (ntk#287), which is
+// what `react-x11/test` runs on — so `test/font-explorer.test.js` asserts
+// the shadow switch's `aria-checked` where it used to count pixels. It
+// paints correctly on a real server; run it and look.
 //
 // **A `.ttc` is a collection, so a path is not a face.** Helvetica and
 // Helvetica-Light are two entries in one file; anything keyed on the path
@@ -128,12 +130,6 @@ import {
   openFont,
   useApp,
 } from '../src/index.js';
-// Through `react-x11/ntk`, never a second `ntk` dependency: two copies mean
-// two font caches and two glyph atlases (see `src/ntk.js`). The fonts
-// themselves are not opened through here — `openFont` is the app's route to
-// one, and it opens through the connection's cache rather than beside it.
-import { Surface } from '../src/ntk.js';
-
 const SAMPLE = 'Sphinx of black quartz, judge my vow';
 
 // ---------------------------------------------------------------------------
@@ -166,41 +162,6 @@ const SPECIMEN_MIN = 150;
 const SPECIMEN_MAX = 480;
 const SPECIMEN_PAD = 40;
 const TEXT_X = 18;
-
-/**
- * A blurred copy of a laid-out paragraph, behind it.
- *
- * The blur is the server's: an `a8` surface holds the glyph coverage, a
- * RENDER convolution filter blurs that coverage in place, and compositing it
- * tints it with the current `fillStyle`. The alternative — blurring pixels
- * on the client and uploading them — is the thing this stack exists to avoid.
- *
- * Taking a *layout* rather than a string is what makes this work for wrapped
- * text, and it removes the baseline arithmetic entirely: the surface holds
- * the same box the layout draws into, so the two share an origin.
- */
-function paintShadowedLayout(ctx, app, layout, x, y, { blur, offset, colour }) {
-  if (!(layout.width > 0)) return;
-  // Room for the blur to spread into, or the kernel clips at the surface's
-  // edge and the shadow ends in a straight line.
-  const pad = blur * 2 + 4;
-  const surface = new Surface(app, {
-    width: Math.ceil(layout.width) + pad * 2,
-    height: Math.ceil(layout.height) + pad * 2,
-    format: 'a8',
-  });
-  try {
-    surface.render((c) => {
-      c.fillStyle = '#fff'; // full coverage; the colour arrives at composite
-      layout.draw(c, pad, pad);
-    });
-    if (blur > 0) surface.picture().setBlurFilter(blur);
-    ctx.fillStyle = colour;
-    ctx.drawImage(surface, x - pad + offset, y - pad + offset);
-  } finally {
-    surface.destroy();
-  }
-}
 
 const GUIDES = [
   ['ascender', (m) => -m.ascent, '#7fb2ff'],
@@ -353,17 +314,23 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
       : [];
   if (guides) paintGuideLines(ctx, width, rows, lines);
 
+  // ntk 8.2 casts a shadow from the glyph path (ntk#283), so this is the
+  // canvas API and nothing else. `shadowBlur` is a **diameter** in the spec
+  // — σ = blur / 2 — which is the same gaussian the hand-built version got
+  // from `setBlurFilter`, so the numbers carried over unchanged.
+  //
+  // Inside a save/restore because the guides and the hover box are drawn
+  // after the text and must not cast one of their own.
+  ctx.save();
   if (shadow > 0) {
-    paintShadowedLayout(ctx, app, layout, TEXT_X, top, {
-      blur: shadow,
-      // A soft shadow sits almost under its text: the offset grows far more
-      // slowly than the blur, or a wide blur throws a second copy across the
-      // specimen instead of shading it.
-      offset: Math.max(2, Math.round(shadow / 3)),
-      // Translucent, so the background reads through the penumbra. An opaque
-      // shadow with a big blur is a grey shape, not a shadow.
-      colour: 'rgba(0, 0, 0, 0.55)',
-    });
+    ctx.shadowBlur = shadow;
+    // A soft shadow sits almost under its text: the offset grows far more
+    // slowly than the blur, or a wide blur throws a second copy across the
+    // specimen instead of shading it. Translucent, so the background reads
+    // through the penumbra.
+    ctx.shadowOffsetX = Math.max(2, Math.round(shadow / 3));
+    ctx.shadowOffsetY = ctx.shadowOffsetX;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
   }
 
   if (ink.stops) {
@@ -378,6 +345,7 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
     ctx.fillStyle = inkFor(gradient);
   }
   layout.draw(ctx, TEXT_X, top);
+  ctx.restore();
 
   if (rows.length) paintGuideLabels(ctx, width, height, rows);
   if (hover) paintGlyphBox(ctx, hover);
@@ -531,7 +499,19 @@ const s = createStyles({
     ':hover': { backgroundColor: '$surfaceHover' },
   },
   chipText: { fontSize: 11, color: '$textMuted' },
-  list: { flexGrow: 1, overflow: 'scroll', gap: 1 },
+  list: {
+    flexGrow: 1,
+    overflow: 'scroll',
+    gap: 1,
+    // A focus ring is drawn *outside* the row's border box —
+    // `focusRingOffset` then `focusRingWidth`, 3px in this palette — and the
+    // scroller clips to its own bounds, so without this the ring on the
+    // first, last and every focused row is sliced down its sides.
+    paddingStart: 3,
+    paddingEnd: 3,
+    paddingTop: 3,
+    paddingBottom: 3,
+  },
   row: {
     flexDirection: 'column',
     gap: 1,
