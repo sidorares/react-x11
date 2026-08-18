@@ -48,6 +48,7 @@
     "examples:foreign": "tsx examples/foreign.jsx",
     "labs:text-baseline": "tsx examples/labs/text-baseline.jsx",
     "examples:gl": "tsx examples/gl.jsx",
+    "examples:viewer3d": "tsx examples/viewer3d.jsx",
     "examples:three": "tsx examples/three.jsx",
     "examples:shader": "tsx examples/shader.jsx",
     "examples:shader-lab": "tsx examples/shader-lab.jsx",
