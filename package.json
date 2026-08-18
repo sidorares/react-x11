@@ -32,6 +32,7 @@
     "a11y:probe": "node scripts/a11y-probe.mjs",
     "globalmenu:host": "node scripts/globalmenu-host.mjs",
     "devtools:proxy": "node scripts/devtools-proxy.mjs",
+    "examples:fonts": "tsx examples/fonts.jsx",
     "examples:form": "tsx examples/form.jsx",
     "examples:rules": "tsx examples/rules.jsx",
     "examples:selection": "tsx examples/selection.jsx",
