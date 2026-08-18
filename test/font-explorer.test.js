@@ -22,8 +22,7 @@ import {
   userEvent,
   within,
   textOf,
-  pixelAt,
-  isNear,
+  countPixels,
 } from '../src/testing/index.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
@@ -37,6 +36,7 @@ const FONTS = path.join(
   'fonts',
 );
 const face = (name) => path.join(FONTS, `${name}.ttf`);
+const SAMPLE_LONG = 'Sphinx of black quartz judge my vow and more besides';
 const CATALOGUE = [
   face('KaTeX_Main-Regular'),
   face('KaTeX_Fraktur-Regular'),
@@ -251,7 +251,8 @@ describe('examples/fonts', () => {
     await waitFor(() => heading('KaTeX_Main'));
 
     const readout = () => within(screen.getByTestName('glyph'));
-    readout().getByText(/Point at a glyph/);
+    // Before anything is pointed at, the strip reports the paragraph.
+    readout().getByText(/^1 line {2}· {2}line box/);
 
     // The specimen draws its text at x = 18, and `hover` takes an offset from
     // the node's centre.
@@ -284,72 +285,218 @@ describe('examples/fonts', () => {
     });
   });
 
-  test('the guides are lines on the canvas, and the switch turns them off', async () => {
-    // A drawing claim, so a pixel is the assertion. The sample is at x = 5,
-    // left of the text's own x = 18, so nothing but a guide can be there.
+  test('the guides are lines, and the switch turns them back on', async () => {
+    // A drawing claim, so pixels are the assertion — counted over the whole
+    // specimen rather than sampled at a computed baseline, so this says "the
+    // baseline guide is drawn" without re-deriving where it goes.
+    //
+    // And it toggles *twice*. The first version clicked once, which passed
+    // while both switches read `ev.checked` — a property the change event
+    // does not carry — so every click after the first set the same falsy
+    // value and did nothing.
     const { ctx } = await mount({ initialText: 'A' });
     await waitFor(() => heading('KaTeX_Main'));
 
     const canvas = screen.getByTestName('specimen');
-    const baseline = Math.round(canvas.abs.height / 2 + 30 * 0.34);
-    const at = { x: canvas.abs.x + 5, y: canvas.abs.y + baseline };
+    const region = {
+      x: canvas.abs.x,
+      y: canvas.abs.y,
+      width: canvas.abs.width,
+      height: canvas.abs.height,
+    };
+    const baselines = () => countPixels(ctx, region, '#ff9d7a', 20);
 
-    await waitFor(async () =>
-      assert.ok(
-        isNear(await pixelAt(ctx, at.x, at.y), '#ff9d7a', 24),
-        'the baseline guide should be drawn at the baseline',
-      ),
-    );
-
-    // A Switch has no text of its own, so its role name cannot find it —
-    // hence the test name on the control.
+    await waitFor(async () => assert.ok((await baselines()) > 100, 'drawn'));
     await userEvent.click(screen.getByTestName('guides'));
-    await waitFor(async () =>
-      assert.ok(
-        !isNear(await pixelAt(ctx, at.x, at.y), '#ff9d7a', 24),
-        'turning guides off should leave the background',
-      ),
-    );
+    await waitFor(async () => assert.equal(await baselines(), 0, 'off'));
+    await userEvent.click(screen.getByTestName('guides'));
+    await waitFor(async () => assert.ok((await baselines()) > 100, 'back on'));
   });
 
-  test('gradient ink paints the top of a glyph differently from the bottom', async () => {
-    // The point of filling the glyphs rather than the background: one glyph
-    // is two colours down its height. `M` at 64px gives a thick vertical
-    // stem to sample, and the *plain* ink is the control — without it this
-    // would pass on any two pixels that happen to differ, the shadow
-    // included.
-    const stemOf = (canvas) => ({
-      x: canvas.abs.x + 66,
-      top: canvas.abs.y + Math.round(canvas.abs.height / 2 + 64 * 0.34) - 40,
-      bottom: canvas.abs.y + Math.round(canvas.abs.height / 2 + 64 * 0.34) - 8,
-    });
+  test('the shadow switch turns the shadow off and back on', async () => {
+    // The other half of the same bug: the first click appeared to work
+    // because it set a falsy value, and every click after it set that value
+    // again.
+    const { ctx } = await mount({ initialText: 'MMM', initialSize: 96 });
+    await waitFor(() => heading('KaTeX_Main'));
 
-    const spread = async (ink) => {
+    const canvas = screen.getByTestName('specimen');
+    const region = {
+      x: canvas.abs.x,
+      y: canvas.abs.y,
+      width: canvas.abs.width,
+      height: canvas.abs.height,
+    };
+    const shadowed = () => countPixels(ctx, region, '#05070a', 30);
+
+    await waitFor(async () => assert.ok((await shadowed()) > 50, 'drawn'));
+    await userEvent.click(screen.getByTestName('shadow'));
+    await waitFor(async () => assert.equal(await shadowed(), 0, 'off'));
+    await userEvent.click(screen.getByTestName('shadow'));
+    await waitFor(async () => assert.ok((await shadowed()) > 50, 'back on'));
+  });
+
+  test('gradient ink puts the dark end of the ramp inside the glyphs', async () => {
+    // The point of filling the glyphs rather than the background: one glyph
+    // carries the whole ramp. The *dark* end is what discriminates — plain
+    // ink is near-white and its antialiased edges land within tolerance of
+    // the ramp's light end, so counting that end would prove nothing.
+    const darkGold = async (ink) => {
       const { ctx } = await mount({
-        initialText: 'M',
+        initialText: 'MMM',
         initialInk: ink,
-        initialSize: 64,
+        initialSize: 96,
       });
       await waitFor(() => heading('KaTeX_Main'));
-      const at = stemOf(screen.getByTestName('specimen'));
-      let out = null;
+      const canvas = screen.getByTestName('specimen');
+      let out = 0;
       await waitFor(async () => {
-        const top = await pixelAt(ctx, at.x, at.top);
-        const bottom = await pixelAt(ctx, at.x, at.bottom);
-        // Both samples must be *on* the glyph, or this measures background.
-        assert.ok(
-          top[0] > 120 && bottom[0] > 120,
-          `off the stem: ${top} ${bottom}`,
+        out = await countPixels(
+          ctx,
+          {
+            x: canvas.abs.x,
+            y: canvas.abs.y,
+            width: canvas.abs.width,
+            height: canvas.abs.height,
+          },
+          '#b8860b',
+          40,
         );
-        out = Math.abs(top[2] - bottom[2]);
+        assert.ok(out >= 0);
       });
       cleanup();
       return out;
     };
 
-    const gold = await spread('gold');
-    const plain = await spread('plain');
-    assert.ok(gold > 30, `a gold ramp should vary down the stem, got ${gold}`);
-    assert.ok(plain < 10, `plain ink should not vary, got ${plain}`);
+    assert.ok((await darkGold('gold')) > 20, 'no dark end to the gold ramp');
+    assert.equal(await darkGold('plain'), 0, 'plain ink should carry no gold');
+  });
+
+  test('the specimen starts at its own left margin', async () => {
+    // `layout.draw` applies the context's clip but **not** its transform
+    // (ntk#280), so an origin in node coordinates puts the text at the
+    // window's left edge, where the clip cuts nearly all of it away — 390
+    // ink pixels inside the canvas instead of 4915. What survives lands
+    // against the canvas's own left edge, so the margin being empty is the
+    // assertion that tells the two apart. Every other pixel test in this
+    // file passed with the text 264px out of place: they counted colours
+    // over the whole canvas and never asked *where*.
+    const { ctx } = await mount({
+      initialText: 'MMM',
+      initialInk: 'plain',
+      initialSize: 96,
+    });
+    await waitFor(() => heading('KaTeX_Main'));
+
+    const canvas = screen.getByTestName('specimen');
+    const column = (dx, width) =>
+      countPixels(
+        ctx,
+        {
+          x: canvas.abs.x + dx,
+          y: canvas.abs.y,
+          width,
+          height: canvas.abs.height,
+        },
+        '#f4f7ff',
+        20,
+      );
+
+    await waitFor(async () =>
+      assert.ok((await column(20, 24)) > 100, 'text should start at x = 18'),
+    );
+    assert.equal(await column(1, 12), 0, 'the left margin should be empty');
+  });
+
+  test('the hit test follows a line built from more than one slice', async () => {
+    // A line's `runs` are slices, each with its own `x` and its own glyphs,
+    // so a cursor that runs straight across the line lands on the wrong
+    // glyph from the second slice onward. A space is enough to split one.
+    await mount({ initialText: 'A B' });
+    await waitFor(() => heading('KaTeX_Main'));
+
+    const canvas = screen.getByTestName('specimen');
+    // `A` is 22.50px from x = 18 and the space carries the rest, so 52 is
+    // inside `B` and nowhere near `A`.
+    await userEvent.hover(canvas, {
+      dx: Math.round(52 - canvas.abs.width / 2),
+      dy: 0,
+    });
+
+    await waitFor(() =>
+      within(screen.getByTestName('glyph')).getByText(/U\+0042/),
+    );
+  });
+
+  test('the size slider reaches 120, and the specimen draws there', async () => {
+    // Driven through the control rather than the prop, because the request
+    // was about the *range*: End jumps a Slider to its maximum, so this
+    // fails if the cap goes back to 96. 120px is also a big shadow surface
+    // and a layout that has to fit its box, which is the other half.
+    const END = 0xff57;
+    const { ctx } = await mount({ initialText: 'MMM', initialInk: 'plain' });
+    await waitFor(() => heading('KaTeX_Main'));
+
+    await userEvent.click(screen.getByTestName('size'));
+    await userEvent.key(END);
+    // `120px` also turns up in the metrics pane at this size, so the size
+    // readout is found by its own exact text.
+    await waitFor(() =>
+      assert.ok(screen.queryAllByText(/^120px$/).length >= 1, 'size reads 120'),
+    );
+
+    const canvas = screen.getByTestName('specimen');
+    await waitFor(async () =>
+      assert.ok(
+        (await countPixels(
+          ctx,
+          {
+            x: canvas.abs.x,
+            y: canvas.abs.y,
+            width: canvas.abs.width,
+            height: canvas.abs.height,
+          },
+          '#f4f7ff',
+          20,
+        )) > 200,
+        'glyphs should be drawn at 120px',
+      ),
+    );
+  });
+
+  test('wrapping makes more lines, and the face keeps its line box', async () => {
+    await mount({ initialText: SAMPLE_LONG, initialSize: 34 });
+    await waitFor(() => heading('KaTeX_Main'));
+
+    const summary = () =>
+      textOf(within(screen.getByTestName('glyph')).getByText(/line box/));
+    const lines = () => Number(summary().match(/^(\d+) line/)[1]);
+    const box = () => Number(summary().match(/line box ([\d.]+)px/)[1]);
+
+    assert.equal(lines(), 1);
+    const single = box();
+
+    await userEvent.click(screen.getByTestName('wrap'));
+    await waitFor(() => assert.ok(lines() > 1, `wrapped, got ${lines()}`));
+    // Wrapping changes the count, not the box.
+    assert.ok(Math.abs(box() - single) < 0.01);
+  });
+
+  test('the line height multiplies the face, not the size', async () => {
+    // Not CSS's `line-height`. `×2` doubles the face's **natural** line
+    // height, which for KaTeX_Main is 1.265em — so at 34px the box is
+    // 86.02px (2.53em) rather than 68px. Both ntk and `docs/styling.md` say
+    // so, and getting it backwards is the easiest misreading of the control.
+    await mount({
+      initialText: SAMPLE_LONG,
+      initialSize: 34,
+      initialLineHeight: 2,
+    });
+    await waitFor(() => heading('KaTeX_Main'));
+
+    assert.match(
+      textOf(within(screen.getByTestName('glyph')).getByText(/line box/)),
+      /line box 86\.02px \(2\.53em\)/,
+    );
   });
 });

@@ -42,6 +42,18 @@
 //   Background / Ink  two gradients: one behind the specimen and one *in* the
 //                     glyphs. The second is the interesting one — a vertical
 //                     ramp over the text's own ascender-to-descender band.
+//   Wrap              the specimen becomes a paragraph, laid out through the
+//                     same `app.fonts.layout()` the renderer uses, and every
+//                     line gets its **box** drawn. The gap between the box
+//                     and the glyphs is the leading, split half above and
+//                     half below — the thing that makes a single line sit
+//                     off-centre in a control.
+//   Line height       a multiplier over the face's **natural** line height,
+//                     not over the font size: `×2` on a face whose natural
+//                     line is 1.27em gives 2.53em, not 2em. That is CSS's
+//                     `line-height` with a different base, deliberately —
+//                     `docs/styling.md` says so — and the strip under the
+//                     specimen reports what it came to in px.
 //   Shadow            a server-side blur (see below).
 //
 // ## The two decorations, and why they are canvas
@@ -78,6 +90,16 @@
 // the query field responsive while the list catches up, the same shape
 // `examples/monitor.jsx` uses for its filter. ntk#274 is the async version.
 //
+// **Two ntk drawing calls ignore the context transform.** `<canvas>`
+// translates the context to the node's origin before `onDraw`, and neither
+// `CanvasGradient` (ntk#271) nor `TextLayout.draw` (ntk#280) goes through
+// that transform — while `fillText`, `fillRect` and `drawImage` all do. So
+// the gradients and the `layout.draw` call here add `node.abs` and nothing
+// else does, which is the one thing in this file that cannot be guessed
+// from reading it. The text case is the nastier: the *clip* is applied, so
+// the paragraph is drawn at the window's edge and then cut, which reads as
+// truncation rather than as displacement.
+//
 // **The glyph inspector walks logical order.** Advances are accumulated in
 // the order the runs come back, which is visual order for everything shaped
 // here; a right-to-left specimen would need the runs reordered the way the
@@ -96,6 +118,7 @@ import React, {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -143,60 +166,44 @@ const INKS = [
 const inkFor = (gradient) => (gradient.id === 'paper' ? '#1c1b19' : '#f4f7ff');
 
 const SPECIMEN_H = 150;
+const WRAPPED_H = 300;
 const TEXT_X = 18;
-/** One definition, because the hit test and the painter must agree exactly. */
-const baselineFor = (height, size) => Math.round(height / 2 + size * 0.34);
 
 /**
- * Text with a blurred copy of itself behind it.
+ * A blurred copy of a laid-out paragraph, behind it.
  *
  * The blur is the server's: an `a8` surface holds the glyph coverage, a
  * RENDER convolution filter blurs that coverage in place, and compositing it
  * tints it with the current `fillStyle`. The alternative — blurring pixels
  * on the client and uploading them — is the thing this stack exists to avoid.
+ *
+ * Taking a *layout* rather than a string is what makes this work for wrapped
+ * text, and it removes the baseline arithmetic entirely: the surface holds
+ * the same box the layout draws into, so the two share an origin.
  */
-function paintShadowedText(
-  ctx,
-  app,
-  text,
-  x,
-  baseline,
-  { blur, offset, colour },
-) {
-  const m = ctx.measureText(text);
-  if (!(m.width > 0)) return;
-  const ascent = Math.ceil(m.fontBoundingBoxAscent);
-  const descent = Math.ceil(m.fontBoundingBoxDescent);
+function paintShadowedLayout(ctx, app, layout, x, y, { blur, offset, colour }) {
+  if (!(layout.width > 0)) return;
   // Room for the blur to spread into, or the kernel clips at the surface's
   // edge and the shadow ends in a straight line.
   const pad = blur * 2 + 4;
   const surface = new Surface(app, {
-    width: Math.ceil(m.width) + pad * 2,
-    height: ascent + descent + pad * 2,
+    width: Math.ceil(layout.width) + pad * 2,
+    height: Math.ceil(layout.height) + pad * 2,
     format: 'a8',
   });
   try {
     surface.render((c) => {
-      c.font = ctx.font;
       c.fillStyle = '#fff'; // full coverage; the colour arrives at composite
-      c.fillText(text, pad, pad + ascent);
+      layout.draw(c, pad, pad);
     });
     if (blur > 0) surface.picture().setBlurFilter(blur);
     ctx.fillStyle = colour;
-    // The surface's baseline is `pad + ascent` from its top, so this lands
-    // the two baselines together and `offset` is the only thing that moves it.
-    ctx.drawImage(surface, x - pad + offset, baseline - ascent - pad + offset);
+    ctx.drawImage(surface, x - pad + offset, y - pad + offset);
   } finally {
     surface.destroy();
   }
 }
 
-/**
- * The lines a type specimen is really about. Each one is a number from
- * `metrics()` — the same numbers the metrics pane lists and the same ones
- * `_lineMetrics` lays out with, so a face whose cap band looks wrong here is
- * a face that will look wrong in a `<Button>`.
- */
 const GUIDES = [
   ['ascender', (m) => -m.ascent, '#7fb2ff'],
   ['cap height', (m) => -m.capHeight, '#7ee0a1'],
@@ -217,7 +224,19 @@ const guideRows = (baseline, metrics) =>
 const GUTTER = 84;
 
 /** The lines. Drawn under the glyphs, which is where a specimen wants them. */
-function paintGuideLines(ctx, width, rows) {
+function paintGuideLines(ctx, width, rows, lines) {
+  for (const line of lines) {
+    ctx.fillStyle = '#ffffff1c';
+    ctx.fillRect(0, Math.round(line.top), Math.max(0, width - GUTTER), 1);
+    ctx.fillRect(
+      0,
+      Math.round(line.bottom) - 1,
+      Math.max(0, width - GUTTER),
+      1,
+    );
+    ctx.fillStyle = '#ff9d7a55';
+    ctx.fillRect(0, Math.round(line.baseline), Math.max(0, width - GUTTER), 1);
+  }
   for (const { y, colour } of rows) {
     ctx.fillStyle = colour;
     ctx.fillRect(0, y, Math.max(0, width - GUTTER), 1);
@@ -246,8 +265,8 @@ function paintGuideLabels(ctx, width, height, rows) {
 }
 
 /** A thin box round one glyph's ink, plus the advance it claims. */
-function paintGlyphBox(ctx, hover, baseline) {
-  const { x, advance, extents } = hover;
+function paintGlyphBox(ctx, hover) {
+  const { x, baseline, advance, extents } = hover;
   // The advance — what the next glyph is placed by — as a filled band, and
   // the ink box on top of it. They are different rectangles, which is the
   // whole point of showing them: side bearings are the difference.
@@ -279,7 +298,10 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
     shadow,
     metrics,
     guides,
+    wrap,
+    lineHeight,
     hover,
+    report,
   } = opts;
   const app = node.app;
   // **Window coordinates, not the node's.** `<canvas>` translates the context
@@ -301,17 +323,44 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
   }
   ctx.fillRect(0, 0, width, height);
 
-  if (!family || !text) return;
+  if (!family || !text) {
+    report(null);
+    return;
+  }
 
-  const baseline = baselineFor(height, size);
-  const rows = guides && metrics ? guideRows(baseline, metrics) : [];
-  paintGuideLines(ctx, width, rows);
+  // Laid out through `app.fonts.layout()` — the same call `<text>` makes —
+  // rather than `fillText`, so one code path serves a single line and a
+  // wrapped paragraph, and the line boxes become available to draw.
+  const style = { family, size, variations: variations ?? undefined };
+  style.font = app.fonts.match(style.family, style);
+  const layout = app.fonts.layout([{ text, ...style }], style, {
+    maxWidth: wrap ? Math.max(32, width - TEXT_X - GUTTER) : undefined,
+    lineHeight: lineHeight || undefined,
+  });
 
-  ctx.font = `${size}px "${family}"`;
-  if (variations) ctx.fontVariationSettings = variations;
+  // Wrapped text starts at the top; one line stays vertically centred, which
+  // is what a specimen wants when there is only one of it.
+  const top = wrap ? 14 : Math.round(height / 2 - layout.height / 2);
+  // `line.baseline` and `line.y` are both absolute inside the layout box.
+  const lines = layout.lines.map((ln) => ({
+    top: top + ln.y,
+    bottom: top + ln.y + ln.height,
+    baseline: top + ln.baseline,
+    ascent: ln.ascent,
+    descent: ln.descent,
+    x: TEXT_X + ln.x,
+    runs: ln.runs,
+  }));
+  report(layout, lines);
+
+  const rows =
+    guides && metrics && lines.length
+      ? guideRows(lines[0].baseline, metrics)
+      : [];
+  if (guides) paintGuideLines(ctx, width, rows, lines);
 
   if (shadow > 0) {
-    paintShadowedText(ctx, app, text, TEXT_X, baseline, {
+    paintShadowedLayout(ctx, app, layout, TEXT_X, top, {
       blur: shadow,
       offset: Math.round(shadow / 2),
       colour: '#05070a',
@@ -320,22 +369,32 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
 
   if (ink.stops) {
     // Down the glyphs rather than across them: a vertical ramp over the
-    // ascender-to-descender band is what a metallic or sunset fill means,
-    // and it needs the *text's* box, not the canvas's.
-    const m = ctx.measureText(text);
-    const top = oy + baseline - m.fontBoundingBoxAscent;
-    const bottom = oy + baseline + m.fontBoundingBoxDescent;
-    const fill = ctx.createLinearGradient(ox, top, ox, bottom);
+    // text's own band is what a metallic or sunset fill means, and it needs
+    // the *layout's* box, not the canvas's.
+    const fill = ctx.createLinearGradient(
+      ox,
+      oy + top,
+      ox,
+      oy + top + layout.height,
+    );
     fill.addColorStop(0, ink.stops[0]);
     fill.addColorStop(1, ink.stops[1]);
     ctx.fillStyle = fill;
   } else {
     ctx.fillStyle = inkFor(gradient);
   }
-  ctx.fillText(text, TEXT_X, baseline);
+  // **Absolute coordinates, unlike everything else here.** `layout.draw`
+  // composites its glyphs straight onto the picture at the positions it is
+  // given: it applies the context's *clip* but not its *transform*, so a
+  // node-local origin puts the text at the window's left edge — where the
+  // clip then cuts it, which looks like a layout bug rather than a transform
+  // one. `fillText`, `fillRect` and `drawImage` all honour the transform, so
+  // only this call is offset (ntk#280; ntk#271 is the same fault in
+  // CanvasGradient).
+  layout.draw(ctx, ox + TEXT_X, oy + top);
 
   if (rows.length) paintGuideLabels(ctx, width, height, rows);
-  if (hover) paintGlyphBox(ctx, hover, baseline);
+  if (hover) paintGlyphBox(ctx, hover);
 }
 
 // ---------------------------------------------------------------------------
@@ -489,6 +548,7 @@ const s = createStyles({
 
   main: { flexGrow: 1, flexDirection: 'column' },
   specimen: { height: SPECIMEN_H },
+  specimenTall: { height: WRAPPED_H },
   glyphBar: {
     paddingStart: 14,
     paddingEnd: 14,
@@ -682,6 +742,7 @@ export function FontsPanel({
   initialText = SAMPLE,
   initialInk = 'plain',
   initialSize = 30,
+  initialLineHeight = 0,
 }) {
   const app = useApp();
   const catalogue = useMemo(
@@ -697,7 +758,10 @@ export function FontsPanel({
   const [inkId, setInkId] = useState(initialInk);
   const [shadow, setShadow] = useState(7);
   const [guides, setGuides] = useState(true);
+  const [wrap, setWrap] = useState(false);
+  const [lineHeight, setLineHeight] = useState(initialLineHeight); // 0 = the face's own
   const [hover, setHover] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [axisValues, setAxisValues] = useState({});
 
   // `matchSorted` is a synchronous subprocess — 109ms the first time a
@@ -765,50 +829,70 @@ export function FontsPanel({
     [axisValues],
   );
 
-  // The shaped run, which is what the renderer itself lays out with: one
-  // glyph per entry with its id, its advance, and the code points it came
-  // from — and `run.font`, which is how a fallback becomes visible per glyph
-  // rather than per string.
-  const shaped = useMemo(() => {
-    if (!app || !registered || !text) return null;
-    try {
-      const style = { family: registered, size, variations };
-      style.font = app.fonts.match(style.family, style);
-      return app.fonts.shape(text, style);
-    } catch {
-      return null;
-    }
-  }, [app, registered, text, size, variations]);
+  // The painter hands back the layout it built, because it is the only place
+  // that knows the canvas's real width — and a second layout computed here
+  // could disagree with the one on screen. This runs from a paint pass
+  // rather than a render, so the state update is legal; it is guarded to the
+  // values that actually show, or every frame would re-render.
+  const linesRef = useRef([]);
+  const report = useCallback((layout, lines = []) => {
+    linesRef.current = lines;
+    const first = lines[0];
+    const next = layout
+      ? {
+          lines: layout.lines.length,
+          box: first ? first.bottom - first.top : 0,
+          leading: first
+            ? first.bottom - first.top - (first.ascent + first.descent)
+            : 0,
+        }
+      : null;
+    setSummary((prev) =>
+      prev?.lines === next?.lines &&
+      prev?.box === next?.box &&
+      prev?.leading === next?.leading
+        ? prev
+        : next,
+    );
+  }, []);
 
-  /** Which glyph is under a canvas-local x, by walking the advances. */
-  const glyphAt = useCallback(
-    (localX) => {
-      if (!shaped) return null;
-      let cursor = 0;
-      // Logical order, which is visual order for everything this app can
-      // currently shape; a bidi specimen would need the runs reordered the
-      // way the painter reorders them.
-      for (const run of shaped.runs) {
+  /**
+   * Which glyph is under a point. The lines come from the layout, so this
+   * works the same for one line and for a wrapped paragraph, and the facts
+   * come off `run.font` — which is per glyph, so a fallback shows up where a
+   * per-string answer would hide it.
+   */
+  const glyphAt = useCallback((localX, localY) => {
+    for (const line of linesRef.current) {
+      if (localY < line.top || localY >= line.bottom) continue;
+      // A line's `runs` are **slices**, not shaped runs: each carries its own
+      // `x` within the line and its own `run`, whose `glyphs` are exactly
+      // that slice's. So the cursor restarts per slice rather than running
+      // across the line — which is also what makes a wrapped line whose
+      // words come from different faces come out right.
+      for (const slice of line.runs ?? []) {
+        const run = slice.run;
+        if (!run?.glyphs) continue;
+        let cursor = line.x + slice.x;
         for (const g of run.glyphs) {
-          const x = TEXT_X + cursor + g.dx;
+          const x = cursor + g.dx;
           if (localX >= x && localX < x + g.ax) {
             return {
               x,
+              baseline: line.baseline,
               id: g.id,
               advance: g.ax,
               codePoints: g.codePoints ?? [],
               family: run.font.familyName,
-              size: run.size,
               extents: run.font.glyphExtents(g.id, run.size),
             };
           }
           cursor += g.ax;
         }
       }
-      return null;
-    },
-    [shaped],
-  );
+    }
+    return null;
+  }, []);
 
   const draw = useCallback(
     (ctx, box) =>
@@ -822,7 +906,10 @@ export function FontsPanel({
         shadow,
         metrics: info?.metrics ?? null,
         guides,
+        wrap,
+        lineHeight,
         hover,
+        report,
       }),
     [
       gradient,
@@ -834,7 +921,10 @@ export function FontsPanel({
       shadow,
       info,
       guides,
+      wrap,
+      lineHeight,
       hover,
+      report,
     ],
   );
 
@@ -879,7 +969,7 @@ export function FontsPanel({
       </box>
 
       <box style={s.main}>
-        <box style={s.specimen}>
+        <box style={[s.specimen, wrap && s.specimenTall]}>
           <canvas
             style={{ flexGrow: 1 }}
             onDraw={draw}
@@ -888,7 +978,10 @@ export function FontsPanel({
               // Pointer events carry **window** coordinates, so the node's
               // own origin comes off before the hit test.
               const node = ev.currentTarget ?? ev.target;
-              const found = glyphAt(ev.x - (node?.abs?.x ?? 0));
+              const found = glyphAt(
+                ev.x - (node?.abs?.x ?? 0),
+                ev.y - (node?.abs?.y ?? 0),
+              );
               setHover((prev) =>
                 prev?.x === found?.x && prev?.id === found?.id ? prev : found,
               );
@@ -914,6 +1007,10 @@ export function FontsPanel({
                     ).toFixed(2)}px, bearing ${hover.extents.minX.toFixed(2)}px`
               }  ·  drawn from ${hover.family}`}
             </text>
+          ) : summary ? (
+            <text style={s.glyphHint}>
+              {`${summary.lines} line${summary.lines === 1 ? '' : 's'}  ·  line box ${summary.box.toFixed(2)}px (${(summary.box / size).toFixed(2)}em)  ·  leading ${summary.leading.toFixed(2)}px, half of it above the ascender  ·  point at a glyph for its own measurements`}
+            </text>
           ) : (
             <text style={s.glyphHint}>
               Point at a glyph for its id, its advance and the face that drew it
@@ -934,9 +1031,10 @@ export function FontsPanel({
           <Slider
             style={{ width: 110 }}
             min={10}
-            max={96}
+            max={120}
             value={size}
             aria-label="Size"
+            data-testname="size"
             onChange={(ev) => setSize(Math.round(ev.value))}
           />
           <text style={s.label}>{`${size}px`}</text>
@@ -959,13 +1057,34 @@ export function FontsPanel({
             checked={guides}
             aria-label="Guides"
             data-testname="guides"
-            onChange={(ev) => setGuides(ev.checked)}
+            onChange={(ev) => setGuides(ev.value)}
           />
+          <text style={s.label}>Wrap</text>
+          <Switch
+            checked={wrap}
+            aria-label="Wrap"
+            data-testname="wrap"
+            onChange={(ev) => setWrap(ev.value)}
+          />
+          <text style={s.label}>Line height</text>
+          <Slider
+            style={{ width: 96 }}
+            min={0}
+            max={3}
+            step={0.05}
+            value={lineHeight}
+            aria-label="Line height"
+            onChange={(ev) => setLineHeight(ev.value)}
+          />
+          <text style={s.label}>
+            {lineHeight ? `×${lineHeight.toFixed(2)}` : 'from the face'}
+          </text>
           <text style={s.label}>Shadow</text>
           <Switch
             checked={shadow > 0}
             aria-label="Shadow"
-            onChange={(ev) => setShadow(ev.checked ? 7 : 0)}
+            data-testname="shadow"
+            onChange={(ev) => setShadow(ev.value ? 7 : 0)}
           />
           <Slider
             style={{ width: 90 }}
