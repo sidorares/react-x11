@@ -46,9 +46,12 @@
 //
 // ## The two decorations, and why they are canvas
 //
-// react-x11's styles have no `linear-gradient` and no `box-shadow`, so both
-// of these live in one `<canvas>` — which is the honest shape for them
-// anyway: a specimen is a drawing.
+// A `<box>` has both of these now — `backgroundImage: 'linear-gradient(…)'`
+// and `boxShadow` are paint properties (#345). Neither reaches a *glyph*,
+// which is what these two are: a ramp that runs down the letterforms over
+// the text's own ascender-to-descender band, and a blur of the text's own
+// coverage rather than of a rectangle. So both still live in one `<canvas>`,
+// which is the honest shape for them anyway: a specimen is a drawing.
 //
 // The gradient is `ctx.createLinearGradient`, ordinary canvas.
 //
@@ -81,18 +84,18 @@
 // painter reorders them, and the box would land on the wrong glyph without
 // it (#341 is the neighbouring gap).
 //
-// **A registered family cannot be replaced.** `FontManager.load` appends,
-// and `match` keeps the first entry that scores best — so loading a second
-// file under a family name already used leaves the first one winning, and
-// there is no unregister. Each face therefore gets a family of its own
-// (`x11-specimen-0`, `-1`, …). Registering under the face's *own* family
-// would fight fontconfig for the name, which is the other half of the trap.
+// **A registered family cannot be replaced.** `FontManager.load` appends and
+// `match` keeps the first entry that scores best, so a second file under a
+// name already taken never draws, and there is no unregister. `loadFont`
+// (#346) is what this app registers through, and it takes the naming half of
+// that off the caller — but the name it derives is the file's *family*, and
+// a specimen has to distinguish two faces *within* one, so each face is
+// registered under its PostScript name. See the effect that does it.
 import React, {
   useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 
@@ -102,11 +105,15 @@ import {
   Switch,
   createRoot,
   createStyles,
+  loadFont,
+  openFont,
   useApp,
 } from '../src/index.js';
 // Through `react-x11/ntk`, never a second `ntk` dependency: two copies mean
-// two font caches and two glyph atlases (see `src/ntk.js`).
-import { Font, Surface } from '../src/ntk.js';
+// two font caches and two glyph atlases (see `src/ntk.js`). The fonts
+// themselves are not opened through here — `openFont` is the app's route to
+// one, and it opens through the connection's cache rather than beside it.
+import { Surface } from '../src/ntk.js';
 
 const SAMPLE = 'Sphinx of black quartz, judge my vow';
 
@@ -337,6 +344,11 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
 // fontconfig answers differently on every machine — that is the whole point
 // of the app and the reason its tests cannot use it. `fixedCatalogue` is a
 // list of files, which is what the tests hand it.
+//
+// `open` takes the connection as its second argument rather than closing
+// over one, so a catalogue can be built before there is an app — which is
+// what the tests do. Both real ones open through `openFont`, so a file
+// fontconfig already matched is not parsed a second time.
 // ---------------------------------------------------------------------------
 
 export function fontconfigCatalogue(app) {
@@ -349,7 +361,7 @@ export function fontconfigCatalogue(app) {
       // thing rather than a family picker.
       return app.fonts.source.matchSorted({ family: query || 'sans-serif' });
     },
-    open: (path) => Font.loadSync(path),
+    open: (path, into) => openFont(into, path),
   };
 }
 
@@ -369,7 +381,7 @@ export function fixedCatalogue(paths) {
       if (!q || q === 'sans-serif') return all;
       return all.filter((m) => m.postscriptName.toLowerCase().includes(q));
     },
-    open: (path) => Font.loadSync(path),
+    open: (path, into) => openFont(into, path),
   };
 }
 
@@ -386,9 +398,9 @@ const AXIS_NAMES = {
 };
 
 /** Everything the detail pane shows, or `{ error }` if the file will not open. */
-function describe(catalogue, path, size) {
+function describe(catalogue, path, size, app) {
   try {
-    const font = catalogue.open(path);
+    const font = catalogue.open(path, app);
     return {
       font,
       familyName: font.familyName,
@@ -713,38 +725,38 @@ export function FontsPanel({
     : (matches[0]?.path ?? null);
 
   const info = useMemo(
-    () => (catalogue && current ? describe(catalogue, current, size) : null),
-    [catalogue, current, size],
+    () =>
+      catalogue && current ? describe(catalogue, current, size, app) : null,
+    [catalogue, current, size, app],
   );
 
   useEffect(() => setAxisValues({}), [current]);
 
   // The specimen draws through `ctx.font`, which resolves through
   // `app.fonts` — so the chosen file has to be registered before it can be
-  // named. **A distinct family per file, and registered once.**
-  // `FontManager.load` *appends* to its registration list and `match` keeps
-  // the first entry that scores best, so loading a second file under a name
-  // already taken leaves the first one winning: the specimen would keep
-  // drawing whichever face was picked first, for the rest of the session.
-  // Registering under the face's own family would fight fontconfig for the
-  // name, which is the other half of the same trap.
-  const families = useRef(new Map());
+  // named. `loadFont` (#346) registers it and hands the name back, opening
+  // through the same cache `describe` above already read the file with, and
+  // it is idempotent per file: picking a face a second time costs nothing.
+  //
+  // **Under its PostScript name, not the family name `loadFont` would
+  // derive.** That default is right for an app that ships a font and wrong
+  // for this one: `KaTeX_Main-Regular` and `KaTeX_Main-Bold` are one family,
+  // `ctx.font` names a family without a weight, and the specimen would go on
+  // drawing the regular face while the list says bold. A PostScript name is
+  // one face by definition, which is what a specimen has to show.
   const [registered, setRegistered] = useState(null);
+  const face = info?.postscriptName ?? null;
   useEffect(() => {
-    if (!app || !current) return;
-    let family = families.current.get(current);
-    if (!family) {
-      family = `x11-specimen-${families.current.size}`;
-      try {
-        app.fonts.load(current, { family });
-        families.current.set(current, family);
-      } catch {
-        setRegistered(null);
-        return;
-      }
+    if (!app || !current || !face) {
+      setRegistered(null);
+      return;
     }
-    setRegistered(family);
-  }, [app, current]);
+    try {
+      setRegistered(loadFont(app, current, { family: face }).family);
+    } catch {
+      setRegistered(null);
+    }
+  }, [app, current, face]);
 
   const gradient = GRADIENTS.find((g) => g.id === gradientId) ?? GRADIENTS[0];
   const ink = INKS.find((g) => g.id === inkId) ?? INKS[0];

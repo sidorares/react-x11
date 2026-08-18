@@ -120,6 +120,39 @@ describe('examples/fonts', () => {
     assert.equal(factValue('Cap height'), '21.87px');
   });
 
+  test('two faces of one family are told apart', async () => {
+    // The specimen is registered through `loadFont` (#346), whose derived
+    // name is the file's *family* — and a family is a set of faces. Register
+    // Regular and Bold under the "KaTeX_Main" they share and `ctx.font`,
+    // which names a family and no weight, resolves both to the regular one:
+    // the list would say Bold while the specimen went on drawing Regular.
+    // Registering by PostScript name is what keeps them separable.
+    const { app } = await mount({
+      catalogue: fixedCatalogue([
+        face('KaTeX_Main-Regular'),
+        face('KaTeX_Main-Bold'),
+      ]),
+    });
+    await waitFor(() => heading('KaTeX_Main'));
+
+    await userEvent.click(
+      screen.getByRole('option', { name: 'KaTeX_Main-Bold' }),
+    );
+
+    await waitFor(() => {
+      assert.equal(
+        app.fonts.match('KaTeX_Main-Bold').postscriptName,
+        'KaTeX_Main-Bold',
+      );
+    });
+    // …and the face picked first is still reachable, rather than shadowed by
+    // the one picked second under a name they both wanted.
+    assert.equal(
+      app.fonts.match('KaTeX_Main-Regular').postscriptName,
+      'KaTeX_Main-Regular',
+    );
+  });
+
   test('a metric the face does not declare says so, rather than NaN', async () => {
     // `metrics()` answers `null` for a cap height a face never stated — Comic
     // Sans MS is one, but it is macOS-only, so the seam supplies the case
