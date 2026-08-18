@@ -2,7 +2,7 @@
 // axis the file actually has — read off the font, not configured here.
 //
 //   Select font…  ->  useFileDialog()      the desktop's own dialog
-//   app.fonts.load(path)                   register it at runtime
+//   loadFont(app, path)                    read it, register it, name it
 //   font.variationAxes                     { wght: {name, min, default, max} }
 //   font.fk.namedVariations                the designer's chosen points
 //
@@ -24,7 +24,6 @@
 //
 // Run with: npm run examples:variable-fonts  (needs an X server / DISPLAY)
 import React, { useCallback, useMemo, useState } from 'react';
-import { Font } from 'ntk';
 
 import {
   Button,
@@ -33,6 +32,7 @@ import {
   Switch,
   createRoot,
   createStyles,
+  loadFont,
   useApp,
   useFileDialog,
 } from '../src/index.js';
@@ -127,8 +127,7 @@ const s = createStyles({
  * font — this is the whole of "what can I move?", and a static face answers
  * with `{}` rather than with an error.
  */
-function inspect(path, family) {
-  const font = Font.loadSync(path);
+function inspect(font, path, family) {
   const axes = font.variationAxes;
   const named = font.fk.namedVariations ?? {};
   let instancing = null; // an error message, when the axes cannot be cut
@@ -146,15 +145,12 @@ function inspect(path, family) {
     path,
     family,
     file: path.split('/').pop(),
-    name: font.familyName ?? '(unnamed)',
     axes,
     named: Object.keys(named).length ? named : null,
     namedCoords: named,
     instancing,
   };
 }
-
-let loaded = 0; // unique family counter, so picks never collide
 
 const defaults = (axes) =>
   Object.fromEntries(Object.entries(axes).map(([tag, a]) => [tag, a.default]));
@@ -174,17 +170,16 @@ const num = (v) =>
  * and one weight prop needs nothing else.
  */
 function snippetFor({ font, size, values, sample }) {
-  // The family printed is the font's own, not the private alias this app
-  // registers it under — the snippet is meant to be read and copied, and a
-  // `picked-3` in it would be a lie about how the font got there. The line
-  // above it is how it got there.
-  const family = font.label;
+  // The family in the snippet is the one `loadFont` handed back and the one
+  // the specimen above is actually drawn with — the font's own name, unless
+  // a second file had already claimed it. There is nothing here for the app
+  // to have invented, which is what the line above the element says.
   const lines = [
-    `// app.fonts.load('${font.file}', { family: '${family}' })`,
+    `// const { family } = loadFont(app, '${font.file}'); // '${font.family}'`,
     '<text',
     '  style={{',
   ];
-  lines.push(`    fontFamily: '${family}',`);
+  lines.push('    fontFamily: family,');
   lines.push(`    fontSize: ${num(size)},`);
   if (font.axes.wght) lines.push(`    fontWeight: ${num(values.wght)},`);
   const others = Object.keys(font.axes)
@@ -255,14 +250,17 @@ function Lab({ initialFont = null }) {
   const load = useCallback(
     (path) => {
       try {
-        // a fresh family per pick, so a second font never resolves to the
-        // first: `fonts.load` registers by family, and two files claiming
-        // "Ubuntu" would otherwise be one family with two faces
-        const family = `picked-${++loaded}`;
-        const info = inspect(path, family);
-        app.fonts.load(path, { family });
-        setFont({ ...info, name: family, label: info.name });
-        setValues(defaults(info.axes));
+        // One call: the file is read, registered, and handed back with the
+        // name to draw it with — its own, or `Ubuntu 2` where a previous
+        // pick already claimed it, since two files claiming "Ubuntu" would
+        // otherwise be one family whose second face never draws.
+        //
+        // `loadFont` rather than `useFont` because the path came from a
+        // dialog: a file that will not parse is this app's error message,
+        // not an error boundary's.
+        const { font, family } = loadFont(app, path);
+        setFont(inspect(font, path, family));
+        setValues(defaults(font.variationAxes));
         setPicked(null);
         setError(null);
       } catch (err) {
@@ -331,7 +329,7 @@ function Lab({ initialFont = null }) {
             <box style={s.spacer} />
             {font && (
               <text style={s.dim}>
-                {font.label} · {font.file}
+                {font.family} · {font.file}
               </text>
             )}
             <Button label="Select font…" primary onPress={pick} />
@@ -357,7 +355,7 @@ function Lab({ initialFont = null }) {
               <box style={[s.card, s.sample]}>
                 <text
                   style={{
-                    fontFamily: font.name,
+                    fontFamily: font.family,
                     fontSize: size,
                     fontWeight: font.axes.wght ? values.wght : undefined,
                     fontVariationSettings: variations,

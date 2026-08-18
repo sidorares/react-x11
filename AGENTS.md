@@ -187,6 +187,19 @@ no override-redirect staging (issue #4).
   user action caused. The failure they exist to prevent is silent —
   `CurrentTime` is accepted by the server and leaves two clients racing for a
   selection unorderable — so neither should ever be `?? 0`-ed at a call site.
+- `src/fonts.js` + `src/fonthooks.js` — a font file an application opens
+  for itself (#346): `openFont(app, source)` reads one, `loadFont` reads it
+  **and** registers it, `useFont` is the hook. The line between the two is
+  the whole design and is easy to erase by accident — registering a face
+  does not only make a `fontFamily` resolve to it, it puts the face ahead of
+  the system chain for **every codepoint the current font is missing**, so a
+  font browser that registered what it previewed would change the glyphs its
+  own UI borrows. The family name is derived from the file rather than
+  invented by the caller, and scoped (`Inter 2`) only where a second file
+  would otherwise be unreachable — a family is a _set_ of faces, so bold
+  beside regular is not a collision. Both verbs go through `app.fonts`,
+  including its `_open`, because a second `Font` for one file is a second
+  glyph atlas.
 - `src/compose.js` — dead keys and the Compose key (#272): the sequence
   table and the state machine `EventManager` runs between an application's
   `onKeyDown` and the element's `defaultKeyDown`. The dead-key half is

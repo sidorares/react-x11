@@ -480,6 +480,86 @@ descendant has. `<Icon>`'s `size` does not inherit either — a glyph is a
 drawing rather than a letter, so it takes its default from the palette's
 `fontSize` and stays put when a label around it shrinks.
 
+## A font file of your own
+
+An app that ships a face, or that shows one — a picker, a specimen, a
+preferences page with a family name in it — asks for the file by path (or by
+bytes) and gets back what to draw it with:
+
+```jsx
+import { loadFont } from 'react-x11';
+
+// `app` is the ntk connection — the one `createRoot({ app })` took, or
+// `useApp()`'s inside a tree
+const { font, family } = loadFont(app, '/path/to/Inter.ttf');
+
+<text style={{ fontFamily: family, fontSize: 20 }}>Handgloves</text>;
+```
+
+`family` comes **off the file** rather than out of the caller's head: it is
+the font's own name, so an app that ships `Inter.ttf` goes on writing
+`fontFamily: 'Inter'` in the styles it already has, and a registered face
+beats fontconfig for that name — which is the point of shipping one. Several
+faces of one family — regular, bold, italic — all keep the name and
+`fontWeight` picks between them. Only a second file that would be
+_unreachable_ under it, the same family at the same weight and slant, is
+scoped: that one comes back as `Inter 2`. Draw with the name that comes back
+and the question never arises.
+
+`loadFont(app, path, { family: 'preview' })` names it yourself instead —
+worth doing for a file the _user_ picked, to keep it out of the way of the
+app's own type. `weight` and `style` override what the file claims about
+itself, and `postscriptName` picks one face out of a `.ttc`.
+
+From a component, `useFont` is the same thing with the connection already in
+hand, and it returns null before anything is picked:
+
+```jsx
+function Specimen({ path }) {
+  const picked = useFont(path); // path may be null
+  return <text style={{ fontFamily: picked?.family }}>Handgloves</text>;
+}
+```
+
+A file that will not parse throws, which an error boundary is the right home
+for when the app ships the font and the wrong one when a user just chose it
+in a dialog — reach for `loadFont` in that handler and catch there.
+
+### Reading a font without installing it
+
+`openFont(app, source)` reads the file and changes nothing else:
+
+```js
+const font = openFont(app, path);
+font.metrics(30); // what the renderer lays out with
+font.variationAxes; // { wght: { name, min, default, max } }
+font.hasGlyph(0x20b8); // is the tenge sign in this face?
+```
+
+The difference from `loadFont` is worth knowing before a font browser picks
+one over the other. Registering a face does not only make a `fontFamily`
+resolve to it: every registered font is consulted, ahead of the system
+fonts, for **any codepoint the current face is missing**. That is exactly
+what an app shipping a symbol or icon face wants, and exactly what an app
+that is merely _previewing_ files does not — it would quietly change which
+face draws the bullets and the curly quotes in its own UI.
+
+Both verbs read a given file once per connection, however often they are
+called: the face is cached in the app's font manager, so `useFont` in a
+component that re-renders sixty times a second parses nothing, and
+`loadFont` after `openFont` on the same path registers the face already
+open. This matters more than it looks — a second copy of a font is a second
+glyph cache and a second server-side glyphset, and a node built against one
+copy cannot be painted by the other.
+
+`font` is ntk's `Font`, which has more on it than the four members above
+([ntk's docs/fonts.md](https://github.com/sidorares/ntk/blob/master/docs/fonts.md)). If you need
+anything else of ntk's — `Path2D`, `Image`, `Surface` — **import it from
+`react-x11/ntk`, never from `ntk`**, and never declare `ntk` as a dependency
+of your own. Two copies in one process are two font caches and two glyph
+atlases, with the same consequence as above and a great deal further from
+its cause.
+
 ## `createStyles`
 
 Identity is the point — a hoisted style object lets `applyProps` skip the
