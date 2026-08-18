@@ -69,8 +69,8 @@
 //
 // The shadow is the interesting one. ntk 8.1 added `ctx.shadowBlur` and its
 // three companions (ntk#272), and `fillText` casts one — but a paragraph
-// drawn through `TextLayout.draw` goes via `drawGlyphs`, which is not one of
-// the operations that consults the shadow state. A specimen that wraps has
+// drawn through `TextLayout.draw` goes via `drawGlyphs`, which is still not
+// one of the operations that consults the shadow state, 8.1.1 included. A specimen that wraps has
 // to lay its text out, so this file still builds the shadow from the pieces
 // underneath: the text is drawn once into an **a8 surface** (a `Surface`
 // stores coverage rather than colour), that surface's `Picture` gets a
@@ -95,16 +95,6 @@
 // 120px line or a wrapped paragraph pushes the panes below it down instead
 // of being cut off. Past 480 it does clip — the alternative is a specimen
 // that squeezes the rest of the window out of the way.
-//
-// **`TextLayout.draw` ignores the context transform** (ntk#280, still open;
-// the `CanvasGradient` half of it was fixed in 8.1). `<canvas>` translates
-// the context to the node's origin before `onDraw`, and this one call does
-// not go through that — while `fillText`, `fillRect`, `drawImage` and now
-// gradients all do. So `layout.draw` here adds `node.abs` and nothing else
-// does, which is the one thing in this file that cannot be guessed from
-// reading it. The *clip* is applied, so without the offset the paragraph is
-// drawn at the window's edge and then cut, which reads as truncation rather
-// than as displacement.
 //
 // **The glyph inspector walks logical order.** Advances are accumulated in
 // the order the runs come back, which is visual order for everything shaped
@@ -312,11 +302,10 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
     report,
   } = opts;
   const app = node.app;
-  // The node's own coordinates, which is what a canvas API should take —
-  // ntk 8.1 made `CanvasGradient` apply the context transform (ntk#271), so
-  // the `node.abs` arithmetic this used to need is gone. `layout.draw` below
-  // still needs it, and the comment there says why.
-  const { x: ox, y: oy } = node.abs;
+  // Everything below is in the node's own coordinates, which is what a
+  // canvas API should take. Both of the calls that used to need `node.abs`
+  // added by hand — `createLinearGradient` (ntk#271) and `layout.draw`
+  // (ntk#280) — go through the context transform as of ntk 8.1.1.
 
   if (gradient.stops) {
     const fill = ctx.createLinearGradient(0, 0, width, 0);
@@ -367,8 +356,13 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
   if (shadow > 0) {
     paintShadowedLayout(ctx, app, layout, TEXT_X, top, {
       blur: shadow,
-      offset: Math.round(shadow / 2),
-      colour: '#05070a',
+      // A soft shadow sits almost under its text: the offset grows far more
+      // slowly than the blur, or a wide blur throws a second copy across the
+      // specimen instead of shading it.
+      offset: Math.max(2, Math.round(shadow / 3)),
+      // Translucent, so the background reads through the penumbra. An opaque
+      // shadow with a big blur is a grey shape, not a shadow.
+      colour: 'rgba(0, 0, 0, 0.55)',
     });
   }
 
@@ -383,15 +377,7 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
   } else {
     ctx.fillStyle = inkFor(gradient);
   }
-  // **Absolute coordinates, unlike everything else here.** `layout.draw`
-  // composites its glyphs straight onto the picture at the positions it is
-  // given: it applies the context's *clip* but not its *transform*, so a
-  // node-local origin puts the text at the window's left edge — where the
-  // clip then cuts it, which looks like a layout bug rather than a transform
-  // one. `fillText`, `fillRect` and `drawImage` all honour the transform, so
-  // only this call is offset (ntk#280; ntk#271 is the same fault in
-  // CanvasGradient).
-  layout.draw(ctx, ox + TEXT_X, oy + top);
+  layout.draw(ctx, TEXT_X, top);
 
   if (rows.length) paintGuideLabels(ctx, width, height, rows);
   if (hover) paintGlyphBox(ctx, hover);
@@ -779,7 +765,7 @@ export function FontsPanel({
   const [size, setSize] = useState(initialSize);
   const [gradientId, setGradientId] = useState('dusk');
   const [inkId, setInkId] = useState(initialInk);
-  const [shadow, setShadow] = useState(7);
+  const [shadow, setShadow] = useState(14);
   const [guides, setGuides] = useState(true);
   const [wrap, setWrap] = useState(false);
   const [lineHeight, setLineHeight] = useState(initialLineHeight); // 0 = the face's own
@@ -1144,12 +1130,12 @@ export function FontsPanel({
               checked={shadow > 0}
               aria-label="Shadow"
               data-testname="shadow"
-              onChange={(ev) => setShadow(ev.value ? 7 : 0)}
+              onChange={(ev) => setShadow(ev.value ? 14 : 0)}
             />
             <Slider
               style={{ width: 90 }}
               min={0}
-              max={20}
+              max={40}
               value={shadow}
               aria-label="Shadow blur"
               onChange={(ev) => setShadow(Math.round(ev.value))}
