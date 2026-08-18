@@ -52,12 +52,13 @@
 //
 // ## What does not work yet
 //
-// **A field's text does not mirror.** Pick Arabic and the window flips, but
-// a `<textinput>` still draws its value, its placeholder and its caret from
-// the *left* edge: `TextInputNode.paintContent` takes its origin from
-// `content.x` without consulting `direction`. The glyphs themselves shape
-// and order correctly, so this is alignment, not bidi — the search box at
-// the top of the sidebar is where you see it.
+// **A field's text does not mirror (#341).** Pick Arabic and the window
+// flips, but a `<textinput>` still draws its value, its placeholder and its
+// caret from the *left* edge — it lays its text out without a base
+// direction and without an alignment, which `<text>` passes and it does
+// not. The search box at the top of the sidebar is where you see it. The
+// same omission reorders a mixed Latin/Arabic value wrongly in an LTR
+// window too, so it is not only an RTL problem.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
