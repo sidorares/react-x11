@@ -5,6 +5,7 @@
 // module scope, which is what that module's synchronous half is for.
 import { cssColorStraight } from 'ntk';
 
+import { parseBoxShadow, parseLinearGradient } from './decorations.js';
 import { Yoga } from './yoga.js';
 
 const FLEX_DIRECTION = {
@@ -198,6 +199,14 @@ const LAYOUT_APPLIERS = {
 // under it reflows.
 const PAINT_PROPS = new Set([
   'backgroundColor',
+  // The two decorations that are not a colour (issue #345, src/decorations.js).
+  // Paint props like the rest of this set, which is what makes them legal in
+  // a state block — a card that lifts on `:hover` is the case they exist for
+  // — and what keeps them out of layout: a gradient is painted in the box the
+  // layout already decided on, and a shadow is drawn outside it and moves
+  // nothing.
+  'backgroundImage',
+  'boxShadow',
   'borderColor',
   'borderTopColor',
   'borderRightColor',
@@ -539,6 +548,30 @@ export function resolveQueries(style, { size = null, supports = null } = {}) {
   return out;
 }
 
+/**
+ * The two style values that are a small language rather than a number, and
+ * therefore the two that can be *wrong* rather than merely absent. Parsed in
+ * development wherever they are written — including inside a state block,
+ * which is the half of the surface a `continue` used to skip — so the error
+ * naming the property and the expected spelling arrives at the call site
+ * instead of as a blank panel three commits later.
+ *
+ * Tokens are still unresolved here (`$accent` is a colour as far as the
+ * grammar is concerned), so this checks the shape and never the colours.
+ */
+function validateValue(key, value, where) {
+  if (key !== 'backgroundImage' && key !== 'boxShadow') return;
+  try {
+    if (key === 'backgroundImage') parseLinearGradient(value);
+    else parseBoxShadow(value);
+  } catch (err) {
+    // the parser names the property and the grammar; only the call site is
+    // missing, and it is what turns the message into a place to look
+    err.message += `\n  in ${where}`;
+    throw err;
+  }
+}
+
 function validateStyle(style, where) {
   for (const key of Object.keys(style)) {
     if (isQuery(key)) {
@@ -560,7 +593,10 @@ function validateStyle(style, where) {
         );
       }
       for (const inner of Object.keys(style[key] ?? {})) {
-        if (STATE_PROPS.has(inner)) continue;
+        if (STATE_PROPS.has(inner)) {
+          validateValue(inner, style[key][inner], `${where} ${key}`);
+          continue;
+        }
         throw new Error(
           `react-x11: "${inner}" is not allowed inside "${key}" in ${where}. ` +
             'State blocks may only change paint properties ' +
@@ -573,6 +609,7 @@ function validateStyle(style, where) {
     if (!STYLE_PROPS.has(key)) {
       throw new Error(`react-x11: unknown style property "${key}" in ${where}`);
     }
+    validateValue(key, style[key], where);
     if (key === 'flex' && !isFlexShorthand(style[key])) {
       throw new Error(
         `react-x11: invalid flex ${JSON.stringify(style[key])} in ${where} ` +
@@ -657,6 +694,12 @@ export function hasStateStyles(style) {
  */
 const NOT_ANIMATABLE = new Set([
   'transition',
+  // Both are strings that describe several numbers and a colour at once, and
+  // `interpolate` works on one value. They snap, which for a state change is
+  // what the shorter durations look like anyway; a card that wants to *rise*
+  // on hover transitions its `borderColor` or its background beside them.
+  'backgroundImage',
+  'boxShadow',
   'zIndex',
   'direction',
   'flexDirection',
@@ -834,13 +877,28 @@ export const ease = (t) => 1 - (1 - t) ** 3;
  * outside render, with no access to React context — and still follow the
  * theme. The sigil is what keeps it unambiguous: `'red'` is a CSS colour,
  * `'$red'` is a token.
+ *
+ * A token also resolves **inside** a value that is a small language of its
+ * own — `linear-gradient($accent, $accentActive)`, `boxShadow: '0 2px 8px
+ * $shadow'`. Those two are the whole reason: the point of the palette is
+ * that a colour is named once, and a decoration that could not name one
+ * would push every gradient in an app back into `useTheme()` and out of a
+ * hoisted style. It is the same substitution either way, so the value that
+ * *is* a token keeps its fast path and the value that *mentions* one goes
+ * through the regexp.
  */
 const isToken = (v) => typeof v === 'string' && v.charCodeAt(0) === 36; /* $ */
+/** `$name`, anywhere in a string. Deliberately the same grammar as a whole
+ * token, so `'$accent'` and `'linear-gradient($accent, #000)'` cannot
+ * disagree about what a name is. */
+const TOKEN_IN_VALUE = /\$[A-Za-z_][A-Za-z0-9_-]*/g;
+const mentionsToken = (v) =>
+  typeof v === 'string' && v.charCodeAt(0) !== 36 && v.includes('$');
 
 export function styleUsesTokens(style) {
   for (const key of Object.keys(style)) {
     const v = style[key];
-    if (isToken(v)) return true;
+    if (isToken(v) || mentionsToken(v)) return true;
     if (key.charCodeAt(0) === 58 && v && styleUsesTokens(v)) return true;
   }
   return false;
@@ -853,6 +911,8 @@ export function tokenNames(style, out = new Set()) {
   for (const key of Object.keys(style)) {
     const v = style[key];
     if (isToken(v)) out.add(v);
+    else if (mentionsToken(v))
+      for (const m of v.match(TOKEN_IN_VALUE) ?? []) out.add(m);
     else if (key.charCodeAt(0) === 58 && v) tokenNames(v, out);
   }
   return out;
@@ -873,7 +933,9 @@ export function stripTokens(style) {
   const out = {};
   for (const key of Object.keys(style)) {
     const v = style[key];
-    if (isToken(v)) continue;
+    // a value that *mentions* a token goes too, and whole: half a gradient
+    // is not a gradient, and the node restyles on attach either way
+    if (isToken(v) || mentionsToken(v)) continue;
     out[key] = key.charCodeAt(0) === 58 && v ? stripTokens(v) : v;
   }
   return out;
@@ -907,6 +969,26 @@ export function resolveTokens(style, theme, where = 'style', strict = true) {
         `react-x11: unknown theme token "${v}" in ${where} ` +
           `(theme has ${Object.keys(theme).join(', ') || 'nothing'})`,
       );
+    } else if (mentionsToken(v)) {
+      let unknown = null;
+      const substituted = v.replace(TOKEN_IN_VALUE, (token) => {
+        const name = token.slice(1);
+        if (name in theme) return theme[name];
+        unknown ??= token;
+        return token;
+      });
+      // Same rule as a whole-value token, one level down: unknown is a
+      // mistake once the ancestry is complete, and provisional before that —
+      // and a half-substituted gradient is dropped rather than painted,
+      // since `$accent` is not a colour and the parse would fail at the
+      // frame instead of at the style.
+      if (!unknown) out[key] = substituted;
+      else if (strict) {
+        throw new Error(
+          `react-x11: unknown theme token "${unknown}" in ${where} ${key} ` +
+            `(theme has ${Object.keys(theme).join(', ') || 'nothing'})`,
+        );
+      }
     } else if (key.charCodeAt(0) === 58 && v) {
       out[key] = resolveTokens(v, theme, `${where} ${key}`, strict);
     } else {

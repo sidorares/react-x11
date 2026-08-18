@@ -57,6 +57,59 @@ test('createStyles rejects unknown properties and layout in state blocks', async
   );
 });
 
+test('a decoration is checked where it is written, not where it paints', async () => {
+  // `backgroundImage` and `boxShadow` are the two style values with a
+  // grammar of their own, so a typo in one has to fail at the style rather
+  // than as a blank header at the next frame (issue #345).
+  assert.throws(
+    () => createStyles({ a: { backgroundImage: 'linear-gradient(#333)' } }),
+    /at least two colour stops[\s\S]*in styles\.a/,
+  );
+  assert.throws(
+    () => createStyles({ a: { boxShadow: '2px' } }),
+    /needs an x and a y offset[\s\S]*in styles\.a/,
+  );
+  assert.throws(
+    () =>
+      createStyles({ a: { ':hover': { boxShadow: 'inset 0 0 4px #000' } } }),
+    /inset shadow[\s\S]*in styles\.a :hover/,
+    'a state block is validated as the block it is',
+  );
+  // both are paint, so both are legal in a state block
+  createStyles({
+    a: {
+      backgroundImage: 'linear-gradient(to top right, $accent, #000 80%)',
+      ':hover': { boxShadow: '0 2px 8px rgba(0, 0, 0, .4)' },
+    },
+  });
+});
+
+test('a $token resolves inside a decoration, not only as the whole value', async () => {
+  const theme = { accent: '#2980b9', shadow: 'rgba(0, 0, 0, .4)' };
+  assert.deepEqual(
+    resolveTokens(
+      {
+        backgroundImage: 'linear-gradient($accent, #000)',
+        boxShadow: '0 2px 8px $shadow',
+      },
+      theme,
+    ),
+    {
+      backgroundImage: 'linear-gradient(#2980b9, #000)',
+      boxShadow: '0 2px 8px rgba(0, 0, 0, .4)',
+    },
+  );
+  assert.throws(
+    () =>
+      resolveTokens(
+        { backgroundImage: 'linear-gradient($nope, #000)' },
+        theme,
+        '<box style>',
+      ),
+    /unknown theme token "\$nope" in <box style> backgroundImage/,
+  );
+});
+
 test('style drives layout and paint; props stay semantic', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });

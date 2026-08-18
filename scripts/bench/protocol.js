@@ -719,6 +719,92 @@ const SCENARIOS = [
     })(),
   ],
   [
+    // What the two decorations cost per frame (issue #345): 24 cards, each
+    // with a gradient background and a blurred shadow, repainted in full
+    // five times. The gradient is a source picture the fill samples, so it
+    // is one composite like a colour; the shadow is a blurred a8 coverage
+    // surface, and every card's is the same size, so the paint cache should
+    // render **one** and composite it 24 times a frame.
+    //
+    // Baselined with the cache live, like the scroll-blit scenario above and
+    // for the same reason: --check only fails on an increase, so a change
+    // that quietly stopped the shadow surface being shared would land here
+    // rather than sail past a fallback number.
+    //
+    // The bytes are the interesting number and they are **not** ours: of the
+    // 475KB, 471KB is the rounded-rect coverage mask that ntk rasterizes
+    // client-side and uploads per fill, because its rounded-rect fast path
+    // (cached corner glyphs plus FillRectangles) only takes a solid colour.
+    // Measured by parts, same 5 frames over the same 24 cards:
+    //
+    //   solid colour, radius 6                    251 reqs   14.6 KB
+    //   + shadow                                  381 reqs   19.1 KB
+    //   gradient, radius 0                        135 reqs    4.6 KB
+    //   gradient, radius 6                        257 reqs  471.2 KB
+    //
+    // So a *square* gradient is a source picture and costs nothing on the
+    // wire, and the shadow — the expensive-looking half — is one cached
+    // surface composited 24 times. Teaching ntk's fast path to composite a
+    // non-solid source through the coverage it already builds would take
+    // this scenario back under 25KB; until then it is worth knowing that a
+    // rounded gradient is the priciest box in this vocabulary.
+    'shapes: 24 gradient+shadow cards, 5 full repaints',
+    (() => {
+      let ctl;
+      const cards = React.createElement(
+        'window',
+        { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+        React.createElement(
+          'box',
+          {
+            style: {
+              flexGrow: 1,
+              padding: 10,
+              gap: 10,
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+            },
+          },
+          Array.from({ length: 24 }, (_, i) =>
+            React.createElement('box', {
+              key: i,
+              style: {
+                width: 80,
+                height: 44,
+                borderRadius: 6,
+                backgroundImage:
+                  'linear-gradient(160deg, #2b5876 20%, #4e4376)',
+                boxShadow: '0 2px 6px rgba(0, 0, 0, .45)',
+              },
+            }),
+          ),
+        ),
+      );
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, cards);
+          // the cache admits a key on its second sighting, so one warm-up
+          // frame is what makes this measure the steady state rather than
+          // the first two
+          for (let i = 0; i < 2; i++) {
+            ctl.root.needsPaint = true;
+            ctl.root._damage = null;
+            ctl.frame();
+            await settle(app);
+          }
+        },
+        run: async (app) => {
+          for (let i = 0; i < 5; i++) {
+            ctl.root.needsPaint = true;
+            ctl.root._damage = null;
+            ctl.frame();
+            await settle(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
     // A paint-only change: the box flips color in place. The damage tracker
     // bounds this to the box, so compositePixels stays near the box's own
     // area — this is the partial-repaint contract the Damage panel of

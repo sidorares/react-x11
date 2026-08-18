@@ -37,7 +37,19 @@ import {
   resolveBorderColors,
   tint,
 } from './styles.js';
+import {
+  blurKernel,
+  gradientSpec,
+  linearGradientGeometry,
+  shadowExtent,
+  shadowSpecs,
+} from './decorations.js';
 import { Yoga } from './yoga.js';
+// Namespace import for `Surface`, the same shape and the same reason as
+// `paintcache.js`: a named import of something an older ntk does not export
+// is a *load-time* SyntaxError, which would take the renderer down rather
+// than the one feature that needs it.
+import * as ntk from 'ntk';
 import { cssColorStraight } from 'ntk';
 import {
   EventManager,
@@ -226,6 +238,7 @@ let layoutDiffSink = null;
 const INVALIDATE_REASONS = new Set([
   'props', // a React commit changed what a node draws
   'style-state', // :hover/:focus/:active/:disabled restyle
+  'shadow', // a boxShadow got smaller: where it *was* still owes a repaint
   'theme', // a theme/token change restyled a subtree
   'direction', // the reading direction moved: sides, glyph order, bar edge
   'animation', // a transition frame
@@ -577,10 +590,55 @@ function isPaintedColor(color) {
   return Boolean(color) && color !== 'transparent';
 }
 
+/**
+ * `rect`, rounded, as a path — the one shape the drawn layer is made of.
+ * `roundRect` needs ntk >= 3.2.0 and the square fallback is what an older
+ * one gets, which is the same degradation `_paintBorder` has always made.
+ */
+function roundedPath(ctx, rect, radius) {
+  ctx.beginPath();
+  if (radius > 0 && typeof ctx.roundRect === 'function') {
+    ctx.roundRect(rect.x, rect.y, rect.width, rect.height, radius);
+  } else {
+    ctx.rect(rect.x, rect.y, rect.width, rect.height);
+  }
+}
+
+/** A style's shadow reach, for the two callers that have a style rather than
+ *  a node (`_retarget`'s before/after pair). */
+function shadowExtentOf(style) {
+  const value = style?.boxShadow;
+  if (!value || value === 'none') return 0;
+  return shadowExtent(shadowSpecs(value));
+}
+
 const DEV = process.env.NODE_ENV !== 'production';
 
 // Connections already told they have no 32-bit visual (`_argbAttributes`).
 const warnedNoArgb = new WeakSet();
+
+/**
+ * `boxShadow` on a `<window>`/`<popup>`, warned about once.
+ *
+ * A shadow falls *outside* the box, and outside a toplevel there is nothing
+ * of ours to paint on — the pixels belong to the desktop. Doing it properly
+ * means the window asking for a translucent margin it does not otherwise
+ * want (an ARGB visual, a bigger X window, and hit testing that knows the
+ * difference), which is a feature of its own rather than a line in the
+ * painter. Said out loud because the alternative is a style that reads as
+ * ignored for no reason.
+ */
+let warnedWindowShadow = false;
+function devWarnWindowShadow(kind) {
+  if (warnedWindowShadow) return;
+  warnedWindowShadow = true;
+  console.warn(
+    `react-x11: boxShadow on <${kind}> is ignored — a shadow is painted ` +
+      'outside the box, and a toplevel window owns no pixels there. Put the ' +
+      'shadow on a <box> inside it, or draw the window with a translucent ' +
+      'margin of its own (docs/styling.md).',
+  );
+}
 
 // `borderRadius` on a non-uniform border warned about once (`_paintBorderSides`).
 let warnedSideRadius = false;
@@ -1490,6 +1548,21 @@ export class Node {
     // so focus leaves it by the same rule (`_visibilityChanged`).
     if (displayed.display !== this.style.display) {
       this._visibilityChanged(this.style.display !== 'none');
+    }
+    // A shadow that just got smaller — or went away — has to claim where it
+    // *was*. Every claim downstream of here is bounded by `paintBounds()`,
+    // which is computed from the style now in force, so a node that drops a
+    // `:hover` shadow would repaint its own box and leave the shadow printed
+    // around it. This is the only place both extents exist at once.
+    if (displayed.boxShadow !== this.style.boxShadow) {
+      const shrank = shadowExtentOf(displayed) - shadowExtentOf(this.style);
+      if (shrank > 0) {
+        this.root?.invalidate(
+          false,
+          insetRect(this.paintBounds(), -shrank),
+          'shadow',
+        );
+      }
     }
     return this.style;
   }
@@ -2853,15 +2926,21 @@ export class Node {
   }
 
   /**
-   * This node's own rect, grown by anything it draws outside it — which is
-   * the outline and nothing else. Per node rather than once at the top,
-   * because the ring belongs to whichever node has focus and the bound has
-   * to cover it wherever that is; and grown even when the ring is currently
-   * *off*, because the frame that erases it is claimed after the state has
-   * already flipped back.
+   * This node's own rect, grown by anything it draws outside it — the
+   * outline and the shadow, the only two. Per node rather than once at the
+   * top, because either can belong to any node and the bound has to cover it
+   * wherever it is; and the outline is counted even when the ring is
+   * currently *off*, because the frame that erases it is claimed after the
+   * state has already flipped back.
+   *
+   * A shadow cannot afford that trick — its extent is whatever the style
+   * says rather than a theme constant, so inflating for one that is not
+   * there would widen the claim of every node that has ever hovered. The
+   * frame that *removes* a shadow claims the old extent from `_retarget`
+   * instead, where both the old style and the new one are in hand.
    */
   _ownPaintBounds() {
-    const extent = this._outlineExtent();
+    const extent = Math.max(this._outlineExtent(), this._shadowExtent());
     if (extent <= 0) return this.abs;
     return {
       x: this.abs.x - extent,
@@ -2913,6 +2992,14 @@ export class Node {
       return 0;
     const outline = this._outline();
     return outline ? outline.width + Math.max(0, outline.offset) : 0;
+  }
+
+  /**
+   * How far outside `abs` this node's `boxShadow` reaches — the offset, the
+   * spread and the blur's tail, symmetrically (see `shadowExtent`).
+   */
+  _shadowExtent() {
+    return shadowExtentOf(this.style);
   }
 
   /** Would a keyboard focus land here? The one rule lives in a11y.js —
@@ -3196,6 +3283,11 @@ export class Node {
 
   paint(ctx) {
     if (this.hidden) return;
+    // Outside the box and under everything, which is the whole of what makes
+    // a shadow different from a colour: it is drawn before this node's own
+    // background so a translucent background does not sit on top of it, and
+    // it inks pixels this node does not own — see `_ownPaintBounds`.
+    this._paintShadow(ctx);
     this._paintBackground(ctx);
     // The paint cache covers a node's *content* — the expensive part — and
     // not its box: background and border are one composite each, and keeping
@@ -3247,29 +3339,187 @@ export class Node {
   }
 
   _roundedPath(ctx, radius) {
-    ctx.beginPath();
-    if (radius > 0 && typeof ctx.roundRect === 'function') {
-      ctx.roundRect(
-        this.abs.x,
-        this.abs.y,
-        this.abs.width,
-        this.abs.height,
-        radius,
-      );
-    } else {
-      ctx.rect(this.abs.x, this.abs.y, this.abs.width, this.abs.height);
-    }
+    roundedPath(ctx, this.abs, radius);
   }
 
   _paintBackground(ctx) {
     const { backgroundColor, borderRadius = 0 } = this.style;
-    if (!isPaintedColor(backgroundColor)) return;
-    ctx.fillStyle = backgroundColor;
-    if (borderRadius > 0) {
-      this._roundedPath(ctx, borderRadius);
-      ctx.fill();
-    } else {
-      ctx.fillRect(this.abs.x, this.abs.y, this.abs.width, this.abs.height);
+    const fill = (style) => {
+      ctx.fillStyle = style;
+      if (borderRadius > 0) {
+        this._roundedPath(ctx, borderRadius);
+        ctx.fill();
+      } else {
+        ctx.fillRect(this.abs.x, this.abs.y, this.abs.width, this.abs.height);
+      }
+    };
+    if (isPaintedColor(backgroundColor)) fill(backgroundColor);
+    // …and the gradient over it, which is CSS's order and not a detail: a
+    // translucent gradient over a solid colour is how a tint is written, and
+    // a node that sets only the gradient pays one composite either way.
+    const gradient = this._backgroundGradient(ctx);
+    if (gradient) fill(gradient);
+  }
+
+  /**
+   * The `backgroundImage` gradient for this node's current box, as the ntk
+   * `CanvasGradient` a fill style takes — or null when there is none, when
+   * the box has no area, or when the context cannot make one (the headless
+   * mock).
+   *
+   * Cached on the node and keyed by the value *and the rect*, because the
+   * coordinates are absolute. They have to be: a gradient created after a
+   * `translate()` ignores the transform (sidorares/ntk#271), and the drawn
+   * layer paints in window coordinates anyway, so there is no translation to
+   * be wrong about — the cost is that a node which moves rebuilds its
+   * gradient, which is one small request and a picture the GC reclaims
+   * through ntk's finalizer. Headers, cards and rows are the customers here
+   * and they move on layout, not on input.
+   */
+  _backgroundGradient(ctx, rect = this.abs) {
+    const value = this.style.backgroundImage;
+    if (!value || value === 'none') return null;
+    if (typeof ctx.createLinearGradient !== 'function') return null;
+    const spec = gradientSpec(value);
+    if (!spec) return null;
+    const { x, y, width, height } = rect;
+    const key = `${value}|${x},${y},${width},${height}`;
+    if (this._gradient?.key === key) return this._gradient.value;
+    const line = linearGradientGeometry(spec, rect);
+    if (!line) return null;
+    const gradient = ctx.createLinearGradient(
+      line.x0,
+      line.y0,
+      line.x1,
+      line.y1,
+    );
+    for (const [offset, color] of line.stops)
+      gradient.addColorStop(offset, color);
+    this._gradient = { key, value: gradient };
+    return gradient;
+  }
+
+  /**
+   * `boxShadow`. Back to front, like CSS: the first shadow in the list is
+   * the nearest the viewer, so the list is walked in reverse.
+   *
+   * A shadow with no blur is a rounded rectangle and costs one composite. A
+   * blurred one is coverage — an a8 surface holding the rectangle, blurred
+   * server-side by RENDER's convolution filter and then painted *through*
+   * the shadow colour, which is the same trick the glyph cache and `<canvas
+   * mono>` run on. That is what keeps the colour out of the cache key, so a
+   * `:hover` that only darkens the shadow reuses the surface it already
+   * rendered.
+   */
+  _paintShadow(ctx) {
+    const value = this.style.boxShadow;
+    if (!value || value === 'none') return;
+    const shadows = shadowSpecs(value);
+    if (!shadows?.length) return;
+    const radius = this.style.borderRadius ?? 0;
+    for (let i = shadows.length - 1; i >= 0; i--) {
+      const shadow = shadows[i];
+      // CSS's `currentColor`: this node's *resolved* ink, its own `color`
+      // over what it inherits — so a shadow written without a colour follows
+      // the text it sits under, including down a `:hover` that dims both
+      const color = shadow.color ?? this.resolvedTextStyle().color;
+      if (!isPaintedColor(color)) continue;
+      const rect = {
+        x: this.abs.x + shadow.dx - shadow.spread,
+        y: this.abs.y + shadow.dy - shadow.spread,
+        width: this.abs.width + shadow.spread * 2,
+        height: this.abs.height + shadow.spread * 2,
+      };
+      if (!(rect.width > 0) || !(rect.height > 0)) continue;
+      // the spread grows the corner with the box, the way CSS's does
+      const r = Math.max(0, radius + shadow.spread);
+      if (!(shadow.blur > 0)) {
+        ctx.fillStyle = color;
+        roundedPath(ctx, rect, r);
+        ctx.fill();
+        continue;
+      }
+      this._paintBlurredShadow(ctx, rect, r, shadow.blur, color);
+    }
+  }
+
+  /**
+   * One blurred shadow, through the paint cache when there is one.
+   *
+   * The surface is the shadow's rectangle plus `pad` on every side, and the
+   * padding is load-bearing: the convolution reads outside the picture as
+   * transparent, so a kernel that runs off the edge ends the shadow in a
+   * straight line. The blur is set on the *picture* rather than baked into
+   * the pixels, which is why it survives in a cached entry and why the
+   * surface itself is a plain white rectangle.
+   *
+   * `maxPixels` is raised well above the cache's default: a card's shadow is
+   * as big as the card, an entry for one is a8 (a byte a pixel), and the
+   * thing being avoided — a convolution per frame over the whole box — is
+   * exactly the cost the default cap exists to bound elsewhere.
+   */
+  _paintBlurredShadow(ctx, rect, radius, blur, color) {
+    const { sigma, size, pad } = blurKernel(blur);
+    // integral, because the surface is pixels; the blur is far wider than
+    // the rounding, so nothing about the result is visibly quantized
+    const width = Math.round(rect.width);
+    const height = Math.round(rect.height);
+    const plan = {
+      key: `shadow|${width}x${height}|r${radius}|b${blur}`,
+      x: Math.round(rect.x) - pad,
+      y: Math.round(rect.y) - pad,
+      width: width + pad * 2,
+      height: height + pad * 2,
+      format: 'a8',
+      tint: color,
+      maxPixels: 1024 * 1024,
+      draw: (sctx, box) => {
+        // full coverage: the colour arrives at composite time
+        sctx.fillStyle = '#ffffff';
+        roundedPath(
+          sctx,
+          { x: box.x + pad, y: box.y + pad, width, height },
+          radius,
+        );
+        sctx.fill();
+      },
+      after: (surface) => surface.picture().setBlurFilter(size, sigma),
+      live: () => this._paintShadowLive(ctx, plan),
+    };
+    const cache = this.root?._paintCache;
+    if (cache) cache.drawing(ctx, plan);
+    else this._paintShadowLive(ctx, plan);
+  }
+
+  /**
+   * The same drawing with no cache behind it — the paint-cache-disabled
+   * build, an entry too big for the budget, and the first frame of a shadow
+   * the cache has only seen once. A surface per frame is what a shadow costs
+   * without a cache; it is still one composite on the wire, and the
+   * alternative is not painting it.
+   */
+  _paintShadowLive(ctx, plan) {
+    if (typeof ntk.Surface !== 'function' || !this.app?.display?.Render) return;
+    let surface = null;
+    try {
+      surface = new ntk.Surface(this.app, {
+        width: plan.width,
+        height: plan.height,
+        format: 'a8',
+      });
+      surface.render((sctx) =>
+        plan.draw(sctx, { x: 0, y: 0, width: plan.width, height: plan.height }),
+      );
+      plan.after(surface);
+      const before = ctx.fillStyle;
+      ctx.fillStyle = plan.tint;
+      ctx.drawImage(surface, plan.x, plan.y);
+      ctx.fillStyle = before;
+    } catch {
+      // A server that will not give us a pixmap: the frame is still owed
+      // everything else in it, and a missing shadow is a cosmetic loss.
+    } finally {
+      surface?.destroy();
     }
   }
 
@@ -9243,44 +9493,57 @@ export class WindowNode extends Scrollable(Node) {
    */
   _paintWindowBackground(ctx, damage, width, height) {
     const { backgroundColor, borderRadius = 0 } = this.style;
-    if (this.transparencyEffective) {
-      if (!isPaintedColor(backgroundColor)) return;
-      ctx.fillStyle = backgroundColor;
-      if (borderRadius > 0 && typeof ctx.roundRect === 'function') {
+    if (DEV && this.style.boxShadow) devWarnWindowShadow(this.kind);
+    // A `backgroundImage` works wherever a `backgroundColor` does, which is
+    // the rule worth having — over the whole window, in window coordinates,
+    // and still filling only the damage rect: the gradient is a source
+    // picture in device space, so a slice of it is the slice that belongs
+    // there.
+    const gradient = this._backgroundGradient(ctx, {
+      x: 0,
+      y: 0,
+      width,
+      height,
+    });
+    const fill = (style, rounded) => {
+      ctx.fillStyle = style;
+      if (rounded) {
         // The path is the whole window however small the damage rect is —
         // the clip bounds it — so repainting one corner still draws that
         // corner's curve rather than a square patch of background.
         ctx.beginPath();
         ctx.roundRect(0, 0, width, height, borderRadius);
         ctx.fill();
-        return;
+      } else if (damage) {
+        ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
+      } else {
+        ctx.fillRect(0, 0, width, height);
       }
-    } else {
-      // An ARGB window that nothing is compositing has an alpha channel it
-      // must not use. It gets filled edge to edge and square — `borderRadius`
-      // is ignored, because giving up the corners here would expose the
-      // black those pixels really are. A translucent colour is flattened
-      // over white rather than composited onto the last frame, which on a
-      // window with alpha would otherwise creep towards opaque a frame at a
-      // time and never settle anywhere predictable.
-      if (this._transparent) {
-        ctx.fillStyle = 'white';
-        if (damage) {
-          ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
-        } else {
-          ctx.fillRect(0, 0, width, height);
-        }
-      }
-      // No `backgroundColor` means the desktop's, not white: a window whose
-      // widgets went dark on a dark desktop must not leave a white rectangle
-      // behind them. An app that named a colour gets the colour it named.
-      ctx.fillStyle = backgroundColor || this.theme.background;
+    };
+    if (this.transparencyEffective) {
+      if (!isPaintedColor(backgroundColor) && !gradient) return;
+      const rounded = borderRadius > 0 && typeof ctx.roundRect === 'function';
+      if (isPaintedColor(backgroundColor)) fill(backgroundColor, rounded);
+      if (gradient) fill(gradient, rounded);
+      return;
     }
+    // An ARGB window that nothing is compositing has an alpha channel it
+    // must not use. It gets filled edge to edge and square — `borderRadius`
+    // is ignored, because giving up the corners here would expose the
+    // black those pixels really are. A translucent colour is flattened
+    // over white rather than composited onto the last frame, which on a
+    // window with alpha would otherwise creep towards opaque a frame at a
+    // time and never settle anywhere predictable.
+    if (this._transparent) fill('white', false);
+    // No `backgroundColor` means the desktop's, not white: a window whose
+    // widgets went dark on a dark desktop must not leave a white rectangle
+    // behind them. An app that named a colour gets the colour it named.
+    //
     // repainting the background only where it is about to be drawn over is
     // the other half of the win: a full-window fill is a full-window
     // composite however little changed
-    if (damage) ctx.fillRect(damage.x, damage.y, damage.width, damage.height);
-    else ctx.fillRect(0, 0, width, height);
+    fill(backgroundColor || this.theme.background, false);
+    if (gradient) fill(gradient, false);
   }
 
   /**

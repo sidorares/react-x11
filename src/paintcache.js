@@ -189,11 +189,35 @@ export class PaintCache {
    */
   paint(node, ctx) {
     const plan = node.paintCachePlan(ctx);
-    if (!plan || !isDeviceSpace(ctx)) return node.paintContent(ctx);
+    if (!plan) return node.paintContent(ctx);
+    return this.drawing(ctx, {
+      ...plan,
+      label: `<${node.kind}>`,
+      draw: (sctx, box) => node.paintCached(sctx, box),
+      live: () => node.paintContent(ctx),
+    });
+  }
 
-    if (plan.width * plan.height > MAX_ITEM_PIXELS) {
+  /**
+   * Paint a cacheable **drawing**, which a node's content is one kind of.
+   *
+   * `plan` is the node protocol's plan (`key`, `x`/`y`, `width`/`height`,
+   * `format`, `tint`) plus the three things a node supplies implicitly:
+   * `draw(sctx, box)` renders into the surface, `live()` paints the same
+   * thing straight to the target for every path that declines to cache, and
+   * the optional `after(surface)` runs once on a freshly rendered one — for
+   * a filter that belongs to the picture rather than to the pixels, which is
+   * how a blurred `boxShadow` is a cache entry at all (issue #345).
+   *
+   * `maxPixels` overrides the per-item cap for a caller whose drawing is
+   * legitimately box-sized rather than icon-sized.
+   */
+  drawing(ctx, plan) {
+    if (!isDeviceSpace(ctx)) return plan.live(ctx);
+
+    if (plan.width * plan.height > (plan.maxPixels ?? MAX_ITEM_PIXELS)) {
       this.stats.tooBig++;
-      return node.paintContent(ctx);
+      return plan.live(ctx);
     }
 
     const hit = this.entries.get(plan.key);
@@ -203,7 +227,7 @@ export class PaintCache {
       this.entries.set(plan.key, hit);
       this.inUse.add(hit);
       this.stats.hits++;
-      if (this.verify) this._verify(node, hit, plan);
+      if (this.verify) this._verify(hit, plan);
       return this._blit(ctx, hit, plan);
     }
 
@@ -212,19 +236,19 @@ export class PaintCache {
     if (seen < 2) {
       if (this.pending.size >= MAX_PENDING) this.pending.clear();
       this.pending.set(plan.key, seen);
-      return node.paintContent(ctx);
+      return plan.live(ctx);
     }
     this.pending.delete(plan.key);
 
-    const entry = this._render(node, plan);
-    if (!entry) return node.paintContent(ctx);
+    const entry = this._render(plan);
+    if (!entry) return plan.live(ctx);
     this.entries.set(plan.key, entry);
     this.bytes += entry.bytes;
     this.inUse.add(entry);
     return this._blit(ctx, entry, plan);
   }
 
-  _render(node, plan) {
+  _render(plan) {
     try {
       const surface = new ntk.Surface(this.app, {
         width: plan.width,
@@ -234,11 +258,9 @@ export class PaintCache {
       const box = { x: 0, y: 0, width: plan.width, height: plan.height };
       const state = { digest: 0x811c9dc5 };
       surface.render((sctx) =>
-        node.paintCached(
-          this.verify ? recordingContext(sctx, state) : sctx,
-          box,
-        ),
+        plan.draw(this.verify ? recordingContext(sctx, state) : sctx, box),
       );
+      plan.after?.(surface);
       this.stats.renders++;
       return {
         key: plan.key,
@@ -273,7 +295,7 @@ export class PaintCache {
    * name everything the paint reads, which is the one way this design
    * produces a wrong pixel rather than a slow frame.
    */
-  _verify(node, entry, plan) {
+  _verify(entry, plan) {
     const state = { digest: 0x811c9dc5 };
     let scratch = null;
     try {
@@ -283,7 +305,7 @@ export class PaintCache {
         format: plan.format,
       });
       scratch.render((sctx) =>
-        node.paintCached(recordingContext(sctx, state), {
+        plan.draw(recordingContext(sctx, state), {
           x: 0,
           y: 0,
           width: plan.width,
@@ -297,7 +319,7 @@ export class PaintCache {
     }
     if (state.digest === entry.digest) return;
     console.error(
-      `react-x11: paint cache key does not cover the paint of <${node.kind}>.\n` +
+      `react-x11: paint cache key does not cover the paint of ${plan.label ?? plan.key}.\n` +
         `  key: ${plan.key}\n` +
         '  The drawing changed while the key did not, so a cached frame would ' +
         'show stale pixels. Add whatever changed to the key.',

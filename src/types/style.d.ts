@@ -163,6 +163,30 @@ export interface LayoutStyle {
  */
 export interface PaintStyle {
   backgroundColor?: Color;
+  /**
+   * A gradient behind the node, in the box the layout gave it:
+   * `'linear-gradient(#2b5876, #4e4376)'`, `'linear-gradient(135deg, $accent,
+   * $accentActive)'`, or `'none'`.
+   *
+   * CSS's grammar and CSS's geometry — an angle in degrees clockwise from
+   * "up", the `to bottom right` keywords, `%`/`px` stop positions — with two
+   * differences: only `linear-gradient` exists (a radial or conic one is a
+   * `<canvas onDraw>`), and a colour stop may be a `$token`. It paints over
+   * `backgroundColor`, which is the CSS order, so a translucent gradient
+   * tints the colour underneath it.
+   */
+  backgroundImage?: string;
+  /**
+   * A shadow cast outside the box:
+   * `'0 2px 8px rgba(0, 0, 0, .4)'`, `'0 1px 2px #0003, 0 8px 24px $shadow'`
+   * (any `$token` the theme names), or `'none'`.
+   *
+   * `<x> <y> [blur] [spread] [colour]` per shadow, comma-separated, painted
+   * first-on-top like CSS's. The colour may be left out, which means the
+   * node's own `color`. Outer shadows only — `inset` throws — and ignored on
+   * `<window>`/`<popup>`, which own no pixels outside themselves.
+   */
+  boxShadow?: string;
   borderColor?: Color;
   /** Per-side colours fall back to `borderColor`. Paint properties, legal in
    *  state blocks like it. */
