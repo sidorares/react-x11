@@ -22,6 +22,8 @@ import {
   userEvent,
   within,
   textOf,
+  pixelAt,
+  isNear,
 } from '../src/testing/index.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
@@ -204,5 +206,117 @@ describe('examples/fonts', () => {
       assert.equal(rows.length, 1);
     });
     await waitFor(() => heading('KaTeX_Fraktur'));
+  });
+
+  test('hovering a glyph reports that glyph, not the whole string', async () => {
+    // Everything here comes off `app.fonts.shape()` — the same shaped run the
+    // renderer draws from — so the numbers are the glyph's own. The exact
+    // advance is the assertion that matters: `A` at 30px in KaTeX_Main is
+    // 22.50px and the whole of `AV` is 45.00px, so a readout that reported
+    // the string would be caught rather than merely look plausible.
+    await mount({ initialText: 'AV' });
+    await waitFor(() => heading('KaTeX_Main'));
+
+    const readout = () => within(screen.getByTestName('glyph'));
+    readout().getByText(/Point at a glyph/);
+
+    // The specimen draws its text at x = 18, and `hover` takes an offset from
+    // the node's centre.
+    const overFirstGlyph = async () => {
+      const canvas = screen.getByTestName('specimen');
+      await userEvent.hover(canvas, {
+        dx: Math.round(24 - canvas.abs.width / 2),
+        dy: 0,
+      });
+    };
+
+    await overFirstGlyph();
+    await waitFor(() => readout().getByText(/U\+0041/));
+    const line = textOf(readout().getByText(/U\+0041/));
+    assert.match(line, /advance 22\.50px/);
+    assert.match(line, /drawn from KaTeX_Main/);
+
+    // …and the face it names is the one the run was drawn with, not the one
+    // the pane happens to be showing: a different file gives both a different
+    // advance and a different name.
+    await userEvent.click(
+      screen.getByRole('option', { name: 'KaTeX_Fraktur-Regular' }),
+    );
+    await waitFor(() => heading('KaTeX_Fraktur'));
+    await overFirstGlyph();
+    await waitFor(() => {
+      const next = textOf(readout().getByText(/U\+0041/));
+      assert.match(next, /advance 21\.54px/);
+      assert.match(next, /drawn from KaTeX_Fraktur/);
+    });
+  });
+
+  test('the guides are lines on the canvas, and the switch turns them off', async () => {
+    // A drawing claim, so a pixel is the assertion. The sample is at x = 5,
+    // left of the text's own x = 18, so nothing but a guide can be there.
+    const { ctx } = await mount({ initialText: 'A' });
+    await waitFor(() => heading('KaTeX_Main'));
+
+    const canvas = screen.getByTestName('specimen');
+    const baseline = Math.round(canvas.abs.height / 2 + 30 * 0.34);
+    const at = { x: canvas.abs.x + 5, y: canvas.abs.y + baseline };
+
+    await waitFor(async () =>
+      assert.ok(
+        isNear(await pixelAt(ctx, at.x, at.y), '#ff9d7a', 24),
+        'the baseline guide should be drawn at the baseline',
+      ),
+    );
+
+    // A Switch has no text of its own, so its role name cannot find it —
+    // hence the test name on the control.
+    await userEvent.click(screen.getByTestName('guides'));
+    await waitFor(async () =>
+      assert.ok(
+        !isNear(await pixelAt(ctx, at.x, at.y), '#ff9d7a', 24),
+        'turning guides off should leave the background',
+      ),
+    );
+  });
+
+  test('gradient ink paints the top of a glyph differently from the bottom', async () => {
+    // The point of filling the glyphs rather than the background: one glyph
+    // is two colours down its height. `M` at 64px gives a thick vertical
+    // stem to sample, and the *plain* ink is the control — without it this
+    // would pass on any two pixels that happen to differ, the shadow
+    // included.
+    const stemOf = (canvas) => ({
+      x: canvas.abs.x + 66,
+      top: canvas.abs.y + Math.round(canvas.abs.height / 2 + 64 * 0.34) - 40,
+      bottom: canvas.abs.y + Math.round(canvas.abs.height / 2 + 64 * 0.34) - 8,
+    });
+
+    const spread = async (ink) => {
+      const { ctx } = await mount({
+        initialText: 'M',
+        initialInk: ink,
+        initialSize: 64,
+      });
+      await waitFor(() => heading('KaTeX_Main'));
+      const at = stemOf(screen.getByTestName('specimen'));
+      let out = null;
+      await waitFor(async () => {
+        const top = await pixelAt(ctx, at.x, at.top);
+        const bottom = await pixelAt(ctx, at.x, at.bottom);
+        // Both samples must be *on* the glyph, or this measures background.
+        assert.ok(
+          top[0] > 120 && bottom[0] > 120,
+          `off the stem: ${top} ${bottom}`,
+        );
+        out = Math.abs(top[2] - bottom[2]);
+      });
+      cleanup();
+      return out;
+    };
+
+    const gold = await spread('gold');
+    const plain = await spread('plain');
+    assert.ok(gold > 30, `a gold ramp should vary down the stem, got ${gold}`);
+    assert.ok(plain < 10, `plain ink should not vary, got ${plain}`);
   });
 });

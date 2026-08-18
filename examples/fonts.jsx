@@ -28,8 +28,21 @@
 //                     somebody else's, and this says whose.
 //   Axes              a variable font grows a control per axis it declares —
 //                     read off the file, not configured here.
-//   Gradient/Shadow   the two decorations are drawn rather than styled, and
-//                     the shadow is a server-side blur (see below).
+//   Guides            the ascender, cap height, x-height, baseline and
+//                     descender, drawn where `metrics()` says they are. These
+//                     are the same numbers `_lineMetrics` lays out with, so a
+//                     face whose cap band looks wrong here looks wrong in a
+//                     `<Button>` too. A line is missing when the face never
+//                     declared it.
+//   Point at a glyph  its id, the code points it came from, its advance, its
+//                     ink box and side bearing — and **which face drew it**,
+//                     which is per glyph rather than per string. All of it
+//                     off `app.fonts.shape()`, the same shaped run the
+//                     renderer draws from.
+//   Background / Ink  two gradients: one behind the specimen and one *in* the
+//                     glyphs. The second is the interesting one — a vertical
+//                     ramp over the text's own ascender-to-descender band.
+//   Shadow            a server-side blur (see below).
 //
 // ## The two decorations, and why they are canvas
 //
@@ -60,12 +73,26 @@
 // **Matching blocks.** `matchSorted` shells out to `fc-match` synchronously
 // — 109ms cold on this machine, free once memoized. `useDeferredValue` keeps
 // the query field responsive while the list catches up, the same shape
-// `examples/monitor.jsx` uses for its filter.
+// `examples/monitor.jsx` uses for its filter. ntk#274 is the async version.
+//
+// **The glyph inspector walks logical order.** Advances are accumulated in
+// the order the runs come back, which is visual order for everything shaped
+// here; a right-to-left specimen would need the runs reordered the way the
+// painter reorders them, and the box would land on the wrong glyph without
+// it (#341 is the neighbouring gap).
+//
+// **A registered family cannot be replaced.** `FontManager.load` appends,
+// and `match` keeps the first entry that scores best — so loading a second
+// file under a family name already used leaves the first one winning, and
+// there is no unregister. Each face therefore gets a family of its own
+// (`x11-specimen-0`, `-1`, …). Registering under the face's *own* family
+// would fight fontconfig for the name, which is the other half of the trap.
 import React, {
   useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -96,8 +123,22 @@ const GRADIENTS = [
   { id: 'none', label: 'None', stops: null },
 ];
 
+/** Gradients for the glyphs themselves, which is the harder of the two. */
+const INKS = [
+  { id: 'plain', label: 'Plain', stops: null },
+  { id: 'gold', label: 'Gold', stops: ['#ffe29a', '#b8860b'] },
+  { id: 'chrome', label: 'Chrome', stops: ['#ffffff', '#7d8794'] },
+  { id: 'sunrise', label: 'Sunrise', stops: ['#ffd86f', '#fc6262'] },
+  { id: 'neon', label: 'Neon', stops: ['#5ee7df', '#b490ca'] },
+];
+
 /** Light gradients want dark ink. Nothing else in the app cares. */
 const inkFor = (gradient) => (gradient.id === 'paper' ? '#1c1b19' : '#f4f7ff');
+
+const SPECIMEN_H = 150;
+const TEXT_X = 18;
+/** One definition, because the hit test and the painter must agree exactly. */
+const baselineFor = (height, size) => Math.round(height / 2 + size * 0.34);
 
 /**
  * Text with a blurred copy of itself behind it.
@@ -143,20 +184,107 @@ function paintShadowedText(
   }
 }
 
-/** The specimen: a gradient, a shadow, and the face itself. */
+/**
+ * The lines a type specimen is really about. Each one is a number from
+ * `metrics()` — the same numbers the metrics pane lists and the same ones
+ * `_lineMetrics` lays out with, so a face whose cap band looks wrong here is
+ * a face that will look wrong in a `<Button>`.
+ */
+const GUIDES = [
+  ['ascender', (m) => -m.ascent, '#7fb2ff'],
+  ['cap height', (m) => -m.capHeight, '#7ee0a1'],
+  ['x-height', (m) => -m.xHeight, '#e0d47e'],
+  ['baseline', () => 0, '#ff9d7a'],
+  ['descender', (m) => m.descent, '#c79dff'],
+];
+
+const guideRows = (baseline, metrics) =>
+  GUIDES.map(([label, offsetOf, colour], i) => {
+    const offset = offsetOf(metrics);
+    return offset == null || Number.isNaN(offset)
+      ? null // the face never declared it
+      : { label, colour, i, y: Math.round(baseline + offset) };
+  }).filter(Boolean);
+
+/** Width kept clear on the right so the labels never sit on the glyphs. */
+const GUTTER = 84;
+
+/** The lines. Drawn under the glyphs, which is where a specimen wants them. */
+function paintGuideLines(ctx, width, rows) {
+  for (const { y, colour } of rows) {
+    ctx.fillStyle = colour;
+    ctx.fillRect(0, y, Math.max(0, width - GUTTER), 1);
+  }
+}
+
+/**
+ * The labels, in the gutter, and pushed apart where they would collide.
+ *
+ * At any normal size the ascender, cap height and x-height lines are a few
+ * pixels apart, so labels placed at their own y overlap into mush — which
+ * they did, until a screenshot said so. Each one may move down to clear the
+ * one above; the line it belongs to has not moved, and the colour is what
+ * ties the two together.
+ */
+function paintGuideLabels(ctx, width, height, rows) {
+  ctx.font = '9px sans-serif';
+  const gap = 11;
+  let lowest = -Infinity;
+  for (const { label, colour, y } of rows) {
+    const at = Math.min(height - 2, Math.max(y, lowest + gap));
+    lowest = at;
+    ctx.fillStyle = colour;
+    ctx.fillText(label, width - GUTTER + 6, at - 2);
+  }
+}
+
+/** A thin box round one glyph's ink, plus the advance it claims. */
+function paintGlyphBox(ctx, hover, baseline) {
+  const { x, advance, extents } = hover;
+  // The advance — what the next glyph is placed by — as a filled band, and
+  // the ink box on top of it. They are different rectangles, which is the
+  // whole point of showing them: side bearings are the difference.
+  ctx.fillStyle = '#00e5ff44';
+  ctx.fillRect(x, baseline - 2, advance, 4);
+  if (extents.minX == null) return; // a space has no ink
+  const x0 = x + extents.minX;
+  const y0 = baseline + extents.minY;
+  const w = extents.maxX - extents.minX;
+  const h = extents.maxY - extents.minY;
+  // A cyan overlay rather than a white one: at `#ffffff88` over gradient ink
+  // the box was there and unreadable, which is the same as not being there.
+  ctx.fillStyle = '#00e5ffcc';
+  ctx.fillRect(x0, y0, w, 1);
+  ctx.fillRect(x0, y0 + h - 1, w, 1);
+  ctx.fillRect(x0, y0, 1, h);
+  ctx.fillRect(x0 + w - 1, y0, 1, h);
+}
+
+/** The specimen: a background, guides, a shadow, the face, and a hover box. */
 function paintSpecimen(ctx, { width, height, node }, opts) {
-  const { gradient, text, size, family, variations, shadow } = opts;
+  const {
+    gradient,
+    ink,
+    text,
+    size,
+    family,
+    variations,
+    shadow,
+    metrics,
+    guides,
+    hover,
+  } = opts;
   const app = node.app;
+  // **Window coordinates, not the node's.** `<canvas>` translates the context
+  // to the node's origin before `onDraw`, and a CanvasGradient's points do
+  // not go through that transform, so a gradient built in node coordinates
+  // starts at the *window's* edge (ntk#271). Every gradient here is therefore
+  // built with `node.abs` added, and that is the only reason it is.
+  const { x: ox, y: oy } = node.abs;
 
   if (gradient.stops) {
-    // **Window coordinates, not the node's.** `<canvas>` translates the
-    // context to the node's origin before `onDraw`, and a CanvasGradient's
-    // points do not go through that transform — so a gradient built at
-    // (0,0)-(width,0) starts painting at the *window's* left edge and has run
-    // out by the time it reaches the far side of a canvas that is not at
-    // x=0. Horizontal, too: past its last stop a RENDER gradient is
-    // transparent, and a diagonal one runs out before the far corners.
-    const { x: ox, y: oy } = node.abs;
+    // Horizontal: past its last stop a RENDER gradient is transparent, and a
+    // diagonal one runs out before the far corners of the rect.
     const fill = ctx.createLinearGradient(ox, oy, ox + width, oy);
     fill.addColorStop(0, gradient.stops[0]);
     fill.addColorStop(1, gradient.stops[1]);
@@ -168,19 +296,39 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
 
   if (!family || !text) return;
 
+  const baseline = baselineFor(height, size);
+  const rows = guides && metrics ? guideRows(baseline, metrics) : [];
+  paintGuideLines(ctx, width, rows);
+
   ctx.font = `${size}px "${family}"`;
   if (variations) ctx.fontVariationSettings = variations;
 
-  const baseline = Math.round(height / 2 + size * 0.34);
   if (shadow > 0) {
-    paintShadowedText(ctx, app, text, 18, baseline, {
+    paintShadowedText(ctx, app, text, TEXT_X, baseline, {
       blur: shadow,
       offset: Math.round(shadow / 2),
       colour: '#05070a',
     });
   }
-  ctx.fillStyle = inkFor(gradient);
-  ctx.fillText(text, 18, baseline);
+
+  if (ink.stops) {
+    // Down the glyphs rather than across them: a vertical ramp over the
+    // ascender-to-descender band is what a metallic or sunset fill means,
+    // and it needs the *text's* box, not the canvas's.
+    const m = ctx.measureText(text);
+    const top = oy + baseline - m.fontBoundingBoxAscent;
+    const bottom = oy + baseline + m.fontBoundingBoxDescent;
+    const fill = ctx.createLinearGradient(ox, top, ox, bottom);
+    fill.addColorStop(0, ink.stops[0]);
+    fill.addColorStop(1, ink.stops[1]);
+    ctx.fillStyle = fill;
+  } else {
+    ctx.fillStyle = inkFor(gradient);
+  }
+  ctx.fillText(text, TEXT_X, baseline);
+
+  if (rows.length) paintGuideLabels(ctx, width, height, rows);
+  if (hover) paintGlyphBox(ctx, hover, baseline);
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +476,16 @@ const s = createStyles({
   winner: { fontSize: 10, color: '$success' },
 
   main: { flexGrow: 1, flexDirection: 'column' },
-  specimen: { height: 150 },
+  specimen: { height: SPECIMEN_H },
+  glyphBar: {
+    paddingStart: 14,
+    paddingEnd: 14,
+    paddingTop: 5,
+    paddingBottom: 5,
+    backgroundColor: '$surface',
+  },
+  glyphText: { fontSize: 11, color: '$text' },
+  glyphHint: { fontSize: 11, color: '$textMuted' },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -511,6 +668,8 @@ export function FontsPanel({
   catalogue: given = null,
   initialQuery = 'sans-serif',
   initialText = SAMPLE,
+  initialInk = 'plain',
+  initialSize = 30,
 }) {
   const app = useApp();
   const catalogue = useMemo(
@@ -521,9 +680,12 @@ export function FontsPanel({
   const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState(null);
   const [text, setText] = useState(initialText);
-  const [size, setSize] = useState(30);
+  const [size, setSize] = useState(initialSize);
   const [gradientId, setGradientId] = useState('dusk');
+  const [inkId, setInkId] = useState(initialInk);
   const [shadow, setShadow] = useState(7);
+  const [guides, setGuides] = useState(true);
+  const [hover, setHover] = useState(null);
   const [axisValues, setAxisValues] = useState({});
 
   // `matchSorted` is a synchronous subprocess — 109ms the first time a
@@ -558,37 +720,110 @@ export function FontsPanel({
   useEffect(() => setAxisValues({}), [current]);
 
   // The specimen draws through `ctx.font`, which resolves through
-  // `app.fonts` — so the chosen file is registered under a private family
-  // name. Registering under its own family would fight fontconfig for it.
-  const SPECIMEN_FAMILY = 'x11-fonts-specimen';
+  // `app.fonts` — so the chosen file has to be registered before it can be
+  // named. **A distinct family per file, and registered once.**
+  // `FontManager.load` *appends* to its registration list and `match` keeps
+  // the first entry that scores best, so loading a second file under a name
+  // already taken leaves the first one winning: the specimen would keep
+  // drawing whichever face was picked first, for the rest of the session.
+  // Registering under the face's own family would fight fontconfig for the
+  // name, which is the other half of the same trap.
+  const families = useRef(new Map());
   const [registered, setRegistered] = useState(null);
   useEffect(() => {
     if (!app || !current) return;
-    try {
-      app.fonts.load(current, { family: SPECIMEN_FAMILY });
-      setRegistered(current);
-    } catch {
-      setRegistered(null);
+    let family = families.current.get(current);
+    if (!family) {
+      family = `x11-specimen-${families.current.size}`;
+      try {
+        app.fonts.load(current, { family });
+        families.current.set(current, family);
+      } catch {
+        setRegistered(null);
+        return;
+      }
     }
+    setRegistered(family);
   }, [app, current]);
 
   const gradient = GRADIENTS.find((g) => g.id === gradientId) ?? GRADIENTS[0];
+  const ink = INKS.find((g) => g.id === inkId) ?? INKS[0];
   const variations = useMemo(
     () => (Object.keys(axisValues).length ? axisValues : null),
     [axisValues],
+  );
+
+  // The shaped run, which is what the renderer itself lays out with: one
+  // glyph per entry with its id, its advance, and the code points it came
+  // from — and `run.font`, which is how a fallback becomes visible per glyph
+  // rather than per string.
+  const shaped = useMemo(() => {
+    if (!app || !registered || !text) return null;
+    try {
+      const style = { family: registered, size, variations };
+      style.font = app.fonts.match(style.family, style);
+      return app.fonts.shape(text, style);
+    } catch {
+      return null;
+    }
+  }, [app, registered, text, size, variations]);
+
+  /** Which glyph is under a canvas-local x, by walking the advances. */
+  const glyphAt = useCallback(
+    (localX) => {
+      if (!shaped) return null;
+      let cursor = 0;
+      // Logical order, which is visual order for everything this app can
+      // currently shape; a bidi specimen would need the runs reordered the
+      // way the painter reorders them.
+      for (const run of shaped.runs) {
+        for (const g of run.glyphs) {
+          const x = TEXT_X + cursor + g.dx;
+          if (localX >= x && localX < x + g.ax) {
+            return {
+              x,
+              id: g.id,
+              advance: g.ax,
+              codePoints: g.codePoints ?? [],
+              family: run.font.familyName,
+              size: run.size,
+              extents: run.font.glyphExtents(g.id, run.size),
+            };
+          }
+          cursor += g.ax;
+        }
+      }
+      return null;
+    },
+    [shaped],
   );
 
   const draw = useCallback(
     (ctx, box) =>
       paintSpecimen(ctx, box, {
         gradient,
+        ink,
         text,
         size,
-        family: registered ? SPECIMEN_FAMILY : null,
+        family: registered,
         variations,
         shadow,
+        metrics: info?.metrics ?? null,
+        guides,
+        hover,
       }),
-    [gradient, text, size, registered, variations, shadow],
+    [
+      gradient,
+      ink,
+      text,
+      size,
+      registered,
+      variations,
+      shadow,
+      info,
+      guides,
+      hover,
+    ],
   );
 
   const setAxis = useCallback(
@@ -633,7 +868,46 @@ export function FontsPanel({
 
       <box style={s.main}>
         <box style={s.specimen}>
-          <canvas style={{ flexGrow: 1 }} onDraw={draw} />
+          <canvas
+            style={{ flexGrow: 1 }}
+            onDraw={draw}
+            data-testname="specimen"
+            onMouseMove={(ev) => {
+              // Pointer events carry **window** coordinates, so the node's
+              // own origin comes off before the hit test.
+              const node = ev.currentTarget ?? ev.target;
+              const found = glyphAt(ev.x - (node?.abs?.x ?? 0));
+              setHover((prev) =>
+                prev?.x === found?.x && prev?.id === found?.id ? prev : found,
+              );
+            }}
+            onMouseLeave={() => setHover(null)}
+          />
+        </box>
+
+        <box style={s.glyphBar} data-testname="glyph">
+          {hover ? (
+            <text style={s.glyphText}>
+              {`${[...(hover.codePoints ?? [])]
+                .map(
+                  (c) => `U+${c.toString(16).toUpperCase().padStart(4, '0')}`,
+                )
+                .join(
+                  ' ',
+                )}  ·  glyph ${hover.id}  ·  advance ${hover.advance.toFixed(2)}px  ·  ${
+                hover.extents.minX == null
+                  ? 'no ink'
+                  : `ink ${(hover.extents.maxX - hover.extents.minX).toFixed(2)}×${(
+                      hover.extents.maxY - hover.extents.minY
+                    ).toFixed(2)}px, bearing ${hover.extents.minX.toFixed(2)}px`
+              }  ·  drawn from ${hover.family}`}
+            </text>
+          ) : (
+            <text style={s.glyphHint}>
+              Point at a glyph for its id, its advance and the face that drew it
+              — which is not always the face above.
+            </text>
+          )}
         </box>
 
         <box style={s.controls}>
@@ -655,11 +929,25 @@ export function FontsPanel({
           />
           <text style={s.label}>{`${size}px`}</text>
           <Select
-            style={{ width: 120 }}
+            style={{ width: 104 }}
             value={gradientId}
             aria-label="Background"
             options={GRADIENTS.map((g) => ({ value: g.id, label: g.label }))}
             onChange={(ev) => setGradientId(ev.value)}
+          />
+          <Select
+            style={{ width: 104 }}
+            value={inkId}
+            aria-label="Ink"
+            options={INKS.map((g) => ({ value: g.id, label: g.label }))}
+            onChange={(ev) => setInkId(ev.value)}
+          />
+          <text style={s.label}>Guides</text>
+          <Switch
+            checked={guides}
+            aria-label="Guides"
+            data-testname="guides"
+            onChange={(ev) => setGuides(ev.checked)}
           />
           <text style={s.label}>Shadow</text>
           <Switch
