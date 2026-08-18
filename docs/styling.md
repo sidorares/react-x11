@@ -324,6 +324,90 @@ Two edges of the v1 shape:
   run between them. CSS mitres that corner diagonally; nothing built from
   bars and rules can tell the difference.
 
+## Gradients and shadows
+
+The two decorations a UI asks for after colour and radius, and the two that
+used to mean giving up on `<box>` and drawing the panel by hand:
+
+```jsx
+<box
+  style={{
+    padding: 16,
+    borderRadius: 10,
+    backgroundImage: 'linear-gradient(135deg, $accent, $accentActive)',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, .4)',
+    ':hover': { boxShadow: '0 6px 20px rgba(0, 0, 0, .5)' },
+  }}
+>
+  <text style={{ color: '$accentText' }}>Header</text>
+</box>
+```
+
+Both are **paint** properties: legal in a state block, and outside layout
+entirely — a gradient fills the box the layout already decided on, and a
+shadow is drawn beyond it and moves nothing. Both are written in CSS's
+spelling, because both are values people already know by heart, and a
+`$token` resolves **inside** them as well as as a whole value, which is what
+keeps a themed decoration in a hoisted style.
+
+### `backgroundImage`
+
+`linear-gradient(<direction>?, <stop>, <stop>, …)` or `'none'`, resolved
+against the node's own box so it works wherever the node lands.
+
+- The direction is an angle in degrees clockwise from "up" (`135deg`), a side
+  (`to right`), or a corner (`to bottom right`). Left out, it is `to bottom`.
+- A stop is a colour, optionally followed by a `%` or a pixel position.
+  Positions left out are spread evenly; one that goes backwards is pulled up
+  to the one before it, so two stops at the same offset are a hard break.
+- It paints **over** `backgroundColor`, which is CSS's order — a translucent
+  gradient tints the colour underneath it rather than replacing it.
+
+Only linear gradients exist. A radial or conic one is a `<canvas onDraw>`
+away (ntk's context has `createRadialGradient` and `createConicalGradient`),
+and CSS's sizing keywords for them are most of the work for very little of
+the demand.
+
+One cost worth knowing, because it is not where anyone would look for it: a
+gradient is a server-side source picture, so a **square** one is as cheap as
+a colour — but a **rounded** one is not. ntk's rounded-rect fast path (cached
+corner glyphs plus `FillRectangles`) only takes a solid colour, so a rounded
+gradient falls back to a coverage mask rasterized on the client and uploaded
+per fill: about 4 KB per box per repaint. Damage bounding means that is only
+paid where something changed, but a list of rounded gradient rows is the one
+shape to think twice about — see the `shapes: 24 gradient+shadow cards`
+scenario in `npm run bench`, which prices it.
+
+### `boxShadow`
+
+`<x> <y> [blur] [spread] [colour]`, comma-separated for several, painted
+first-on-top like CSS's. The colour may be left out, which means the node's
+own `color`. A blurred shadow is a real gaussian — RENDER's convolution over
+a coverage surface — cached by size, radius and blur, so a list of identical
+cards renders one and composites it many times.
+
+What it does not do, and why:
+
+- **`inset` throws.** An inner shadow is a different drawing and a different
+  damage story, and painting an outer one where an inner was asked for is a
+  bug with no visible cause. An inset border or a `<canvas>` says it today.
+- **Ignored on `<window>` and `<popup>`** (with a warning in development). A
+  shadow is painted outside the box, and a toplevel owns no pixels there —
+  a real one needs the window to carry a translucent margin of its own,
+  which is a feature rather than a line in the painter. Put the shadow on a
+  `<box>` inside the window; for a floating menu, the popup's own
+  `borderRadius` plus a border is what reads as raised today.
+- **Neither transitions.** Both are several numbers and a colour in one
+  string, and `interpolate` moves one value; they snap. A card that wants to
+  rise on hover animates the `backgroundColor` or the border beside them.
+
+A shadow is the first thing in this vocabulary that inks pixels the node
+does not own, so it also widens what the node repaints — its offset, its
+spread and the blur's tail — and the frame that _removes_ one claims where
+it was. That is the renderer's business, not the application's, but it is
+the reason a shadow is not free the way a colour is: prefer one shadow on
+the card to one on every row inside it.
+
 ## Measuring text to its letters
 
 ```jsx
@@ -834,5 +918,7 @@ way it does not apply to an `<input type>` in the DOM. They report
 
 ## Next
 
-`opacity` (needs offscreen composition — see NEXT_STEPS §3), and per-node
-container queries if the window-level ones prove too coarse.
+`opacity` (needs offscreen composition — see NEXT_STEPS §3), a `boxShadow`
+that a `<popup>` can cast (the window needs a translucent margin around
+itself first — see [elements.md](elements.md) on `transparent` popups), and
+per-node container queries if the window-level ones prove too coarse.

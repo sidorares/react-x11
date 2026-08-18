@@ -87,6 +87,14 @@
     "composites": 0,
     "compositePixels": 0
   },
+  "shapes: 24 gradient+shadow cards, 5 full repaints": {
+    "requests": 381,
+    "bytesOut": 475564,
+    "bytesIn": 352,
+    "replies": 11,
+    "composites": 245,
+    "compositePixels": 2020640
+  },
   "update: 5 color flips, no layout": {
     "requests": 48,
     "bytesOut": 968,

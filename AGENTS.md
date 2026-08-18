@@ -131,6 +131,19 @@ no override-redirect staging (issue #4).
   than it says: `resolveComputedStyle` (the `flex` shorthand, and the
   defaults `overflow: 'scroll'` implies) and `applyLayoutDefaults` (the yoga
   defaults that are not CSS's — `flexShrink`, see the gotcha below).
+- `src/decorations.js` — the two style values that are a small language
+  rather than a number: `backgroundImage`'s `linear-gradient(...)` and
+  `boxShadow` (#345). Pure — strings in, geometry out — so the renderer half
+  in `nodes.js` is only compositing, and the grammar is testable without a
+  server. Two things there are not obvious and are commented at length. The
+  gradient line carries **padding at both ends with the end colours pinned to
+  it**, because past its last stop an XRender gradient is transparent rather
+  than clamped (`RepeatPad` is unset, sidorares/ntk#271) — and that cannot be
+  caught by a pixel test, since node-x11's in-process RENDER clamps by
+  construction where a real server does not. And a CSS blur radius is _twice_
+  the gaussian's sigma while ntk's `setBlurFilter` takes the kernel's edge
+  length, so the two numbers that look interchangeable are the two that must
+  not be. `inset` shadows and colour hints are refused rather than ignored.
 - `src/events.js` — `EventManager`: ntk window events → synthetic events
   (click synthesis, hover enter/leave diffing, the wheel — ntk's `wheel`
   event, XI2 valuators where the server has them and buttons 4-7 where it

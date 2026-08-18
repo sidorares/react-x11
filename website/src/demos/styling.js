@@ -6,8 +6,9 @@ export default {
     'renderer — a pointer move repaints one node and never renders React. ' +
     'Plus inherited type (color and the font properties travel down the ' +
     'tree, so a :hover on a row reaches its labels), theme tokens ($name, ' +
-    'resolved against the nearest theme above the node) and transitions, ' +
-    'which lerp on the window frame clock.',
+    'resolved against the nearest theme above the node), transitions, ' +
+    'which lerp on the window frame clock, and the two decorations that are ' +
+    'not a colour: a linear-gradient background and a blurred box shadow.',
   code: `import React, { useState } from 'react';
 import { createRoot, createStyles } from 'react-x11';
 
@@ -62,6 +63,16 @@ const s = createStyles({
     transition: 140,
     ':hover': { color: '$accent', backgroundColor: '$panel' },
   },
+  // the two decorations that are not a colour. Paint properties like any
+  // other, so the shadow can be lifted from a ':hover' block — it snaps
+  // rather than lerping, being several numbers and a colour in one string
+  banner: {
+    padding: 12,
+    borderRadius: 8,
+    backgroundImage: 'linear-gradient(120deg, $accent, $text)',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, .35)',
+    ':hover': { boxShadow: '0 10px 22px rgba(0, 0, 0, .45)' },
+  },
 });
 
 function App() {
@@ -69,7 +80,7 @@ function App() {
   const theme = isDark ? dark : light;
 
   return (
-    <window x={50} y={40} width={520} height={340} title="styling"
+    <window x={50} y={40} width={520} height={400} title="styling"
             theme={theme} style={s.root}>
 
       <box style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -109,6 +120,12 @@ function App() {
         <box style={[s.swatch, { backgroundColor: '$muted' }]} />
         <text style={s.body}>
           transition: 200 — colours lerp per channel when the theme flips
+        </text>
+      </box>
+
+      <box style={s.banner}>
+        <text style={{ color: '$accentText', fontSize: 13 }}>
+          backgroundImage and boxShadow — hover to lift this one
         </text>
       </box>
     </window>

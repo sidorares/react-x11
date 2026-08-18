@@ -149,6 +149,17 @@ const s = createStyles({
     transition: { outlineWidth: 80 },
     ':focus-visible': { outlineWidth: 3, outlineColor: '$accent' },
   },
+  // issue #345: the two decorations that are not a colour. Paint properties,
+  // so a state block may set either — which is what a card that lifts on
+  // hover is written as.
+  header: {
+    backgroundImage: 'linear-gradient(135deg, $accent, $accentActive)',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, .4)',
+    ':hover': {
+      boxShadow: '0 4px 16px rgba(0, 0, 0, .4), 0 1px 2px #0003',
+      backgroundImage: 'none',
+    },
+  },
   target: { hitSlop: 4 },
   perSide: { hitSlop: { top: 4, bottom: 4 } },
   // issue #262: per-side borders — a side width overrides the shorthand the
