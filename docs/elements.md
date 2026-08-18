@@ -959,6 +959,11 @@ around the labels in it
 `textAlign` and `lineHeight` do not: they shape the box the lines flow in,
 which belongs to the `<text>` that owns it.
 
+A face the app supplies itself — one it ships, or one the user picked in a
+dialog — is opened with `loadFont`/`useFont`, which hand back the family
+name to put in `fontFamily`
+([styling.md](styling.md#a-font-file-of-your-own)).
+
 `start` and `end` are resolved against the box's own **direction**, not
 against the first strong character in the string — the box says which way it
 reads and the paragraph is laid out at that base level, so `"(12) files"` in

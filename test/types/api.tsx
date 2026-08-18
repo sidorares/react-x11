@@ -21,7 +21,9 @@ import type {
   BusStatus,
   DesktopSettings,
   FileDialogBackend,
+  Font,
   KeyboardState,
+  LoadedFont,
   MessageBus,
   Screen,
   Screens,
@@ -42,6 +44,9 @@ import {
   iconNames,
   iconSize,
   fileDialogBackend,
+  loadFont,
+  openFont,
+  useFont,
   onAppOpen,
   registerApplication,
   useAppActivate,
@@ -1261,6 +1266,38 @@ function _System() {
   void [locale, weekStartsOn, timeZone, rtl];
 
   return <window ref={win} width={400} height={300} />;
+}
+
+/** Fonts an app opens for itself (#346). */
+function _Fonts({ path }: { path: string | null }) {
+  const app = useApp();
+
+  // reading one: nothing about the app changes
+  const face: Font = openFont(app, '/usr/share/fonts/Inter.ttf');
+  const cap: number | null = face.metrics(30).capHeight;
+  const variable: boolean = Object.keys(face.variationAxes).length > 0;
+  const covered: boolean = face.hasGlyph(0x20b8);
+  void [cap, variable, covered, face.familyName, face.fk.namedVariations];
+
+  // loading one: the family comes back rather than being invented
+  const { family }: LoadedFont = loadFont(app, '/usr/share/fonts/Inter.ttf');
+  const aliased = loadFont(app, new Uint8Array(), {
+    family: 'preview',
+    weight: 700,
+    style: 'italic',
+    postscriptName: 'Inter-Bold',
+  });
+  void aliased.font.postscriptName;
+
+  // and from a component, where a null source is an answer
+  const picked: LoadedFont | null = useFont(path);
+  // @ts-expect-error — null when nothing is picked, so it has to be checked
+  const bad: string = picked.family;
+  void bad;
+
+  return (
+    <text style={{ fontFamily: picked?.family ?? family }}>Handgloves</text>
+  );
 }
 
 /** The imperative twins, for host-side code with no component to hang off. */

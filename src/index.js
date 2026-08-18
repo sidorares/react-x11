@@ -43,6 +43,8 @@ export { keepAwake } from './idle.js';
 export { useIdle, useKeepAwake } from './idlehooks.js';
 export { useKeyboardState } from './keyboardstatehooks.js';
 export { useDesktopSettings } from './desktopsettingshooks.js';
+export { loadFont, openFont } from './fonts.js';
+export { useFont } from './fonthooks.js';
 export { systemLocale } from './locale.js';
 export { useLocale } from './localehooks.js';
 export {

@@ -6,7 +6,9 @@
   [selecting read-only text](elements.md#selecting-text) with `selectable`.
 - [styling.md](styling.md) — the `style` prop: layout and paint properties,
   `:hover`/`:focus`/`:active`/`:disabled` blocks, transitions, theme tokens,
-  window size queries, `createStyles`.
+  window size queries, `createStyles`, and
+  [a font file of your own](styling.md#a-font-file-of-your-own) —
+  `openFont`/`loadFont`/`useFont`.
 - [components.md](components.md) — widget components built on the
   primitives: theming, the basic controls (`Button`, `Checkbox`,
   `Radio`/`RadioGroup`, `Switch`, `ProgressBar`), `Select`, `Slider`,
