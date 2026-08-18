@@ -499,4 +499,82 @@ describe('examples/fonts', () => {
       /line box 86\.02px \(2\.53em\)/,
     );
   });
+
+  test('two faces of one collection are two rows, not one', async () => {
+    // A `.ttc` is a collection: Helvetica and Helvetica-Light live in one
+    // file. Keying selection on the path highlights both at once *and* opens
+    // whichever the collection lists first, so the pane describes a face the
+    // reader did not pick. Real collections are macOS-only, so the seam
+    // supplies the shape.
+    const asked = [];
+    const collection = {
+      kind: 'stub',
+      match: () => [
+        { path: '/stub/Duo.ttc', postscriptName: 'Duo-Regular' },
+        { path: '/stub/Duo.ttc', postscriptName: 'Duo-Light' },
+      ],
+      open: (path, app, opts) => {
+        asked.push(opts?.postscriptName ?? null);
+        return {
+          familyName: 'Duo',
+          postscriptName: opts?.postscriptName ?? 'Duo-Regular',
+          unitsPerEm: 1000,
+          variationAxes: {},
+          hasGlyph: () => true,
+          metrics: () => ({
+            ascent: 24,
+            descent: 6,
+            lineGap: 0,
+            lineHeight: 30,
+            capHeight: 20,
+            xHeight: 13,
+          }),
+        };
+      },
+    };
+
+    await mount({ catalogue: collection });
+    await waitFor(() => heading('Duo'));
+
+    const rows = () =>
+      within(screen.getByTestName('matches')).getAllByRole('option');
+    assert.equal(rows().length, 2);
+
+    await userEvent.click(screen.getByRole('option', { name: 'Duo-Light' }));
+
+    // The pane describes the face that was clicked…
+    await waitFor(() => assert.equal(factValue('PostScript'), 'Duo-Light'));
+    // …which means the catalogue was asked for it by name, not by path.
+    assert.ok(
+      asked.includes('Duo-Light'),
+      `open() never asked for the face: ${JSON.stringify(asked)}`,
+    );
+  });
+
+  test('the specimen grows with its text instead of clipping it', async () => {
+    // A 120px line does not fit a 150px box, and the panes below should move
+    // down rather than the text being cut.
+    await mount({ initialText: 'Handgloves', initialSize: 30 });
+    await waitFor(() => heading('KaTeX_Main'));
+    const small = screen.getByTestName('specimen').abs.height;
+
+    const END = 0xff57;
+    await userEvent.click(screen.getByTestName('size'));
+    await userEvent.key(END);
+
+    await waitFor(() => {
+      const grown = screen.getByTestName('specimen').abs.height;
+      assert.ok(
+        grown > small + 20,
+        `the specimen should grow for 120px text: ${small} -> ${grown}`,
+      );
+      // …and the line still fits inside it.
+      const box = Number(
+        textOf(
+          within(screen.getByTestName('glyph')).getByText(/line box/),
+        ).match(/line box ([\d.]+)px/)[1],
+      );
+      assert.ok(grown >= box, `${grown} should hold a ${box}px line`);
+    });
+  });
 });

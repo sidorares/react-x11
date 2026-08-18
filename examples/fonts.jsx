@@ -56,49 +56,55 @@
 //                     specimen reports what it came to in px.
 //   Shadow            a server-side blur (see below).
 //
-// ## The two decorations, and why they are canvas
+// ## The two decorations, and why they are still canvas
 //
-// A `<box>` has both of these now — `backgroundImage: 'linear-gradient(…)'`
-// and `boxShadow` are paint properties (#345). Neither reaches a *glyph*,
-// which is what these two are: a ramp that runs down the letterforms over
-// the text's own ascender-to-descender band, and a blur of the text's own
-// coverage rather than of a rectangle. So both still live in one `<canvas>`,
-// which is the honest shape for them anyway: a specimen is a drawing.
+// `<box>` grew `backgroundImage` gradients and `boxShadow` in #348, so a
+// *panel* no longer has to become a drawing for either. Neither reaches a
+// **glyph**, which is what these two are: a ramp inside the letterforms and
+// a blurred copy of the letterforms. So the specimen stays a `<canvas>`.
 //
-// The gradient is `ctx.createLinearGradient`, ordinary canvas.
+// The gradient is `ctx.createLinearGradient`, ordinary canvas — and since
+// ntk 8.1 it honours the context transform (ntk#271), so it is written in
+// the node's own coordinates like everything else.
 //
-// The shadow is the interesting one. There is no `ctx.shadowBlur` here, so
-// it is built from the pieces underneath: the text is drawn once into an
-// **a8 surface** (a `Surface` stores coverage rather than colour), that
-// surface's `Picture` gets a **RENDER convolution filter** — a gaussian, on
-// the server — and the blurred coverage is then composited as a *mask* for
-// whatever `fillStyle` is set. So the shadow is tinted at composite time,
-// nothing but the composite crosses the wire, and the blur happens where the
-// pixels already are. `paintShadowedText` below is the whole of it.
+// The shadow is the interesting one. ntk 8.1 added `ctx.shadowBlur` and its
+// three companions (ntk#272), and `fillText` casts one — but a paragraph
+// drawn through `TextLayout.draw` goes via `drawGlyphs`, which is not one of
+// the operations that consults the shadow state. A specimen that wraps has
+// to lay its text out, so this file still builds the shadow from the pieces
+// underneath: the text is drawn once into an **a8 surface** (a `Surface`
+// stores coverage rather than colour), that surface's `Picture` gets a
+// **RENDER convolution filter** — a gaussian, on the server — and the
+// blurred coverage is composited as a *mask* for whatever `fillStyle` is
+// set. The shadow is tinted at composite time, nothing but the composite
+// crosses the wire, and the blur happens where the pixels already are.
+// `paintShadowedLayout` below is the whole of it, and ntk#283 is what would
+// replace it: the day `drawGlyphs` consults the shadow state, this becomes
+// three assignments.
 //
 // ## What does not work
 //
-// **The list shows PostScript names, not families.** `matchSorted` answers
-// `{path, postscriptName, charset}` — fc-match is asked for exactly those —
-// so a family name means opening the file, at about 1.2ms each. For 139
-// candidates that is 170ms of blocking on every keystroke, which is a worse
-// trade than reading `HiraginoSans-W4` instead of `Hiragino Sans W4`. Only
-// the selected face is opened.
+// **A `.ttc` is a collection, so a path is not a face.** Helvetica and
+// Helvetica-Light are two entries in one file; anything keyed on the path
+// alone selects both at once and opens whichever the collection lists
+// first, which shows the reader a face they did not pick. Identity here is
+// the path *and* the PostScript name, and that name is what `openFont` and
+// `loadFont` are asked for.
 //
-// **Matching blocks.** `matchSorted` shells out to `fc-match` synchronously
-// — 109ms cold on this machine, free once memoized. `useDeferredValue` keeps
-// the query field responsive while the list catches up, the same shape
-// `examples/monitor.jsx` uses for its filter. ntk#274 is the async version.
+// **The specimen sizes itself to its text**, between 150 and 480px, so a
+// 120px line or a wrapped paragraph pushes the panes below it down instead
+// of being cut off. Past 480 it does clip — the alternative is a specimen
+// that squeezes the rest of the window out of the way.
 //
-// **Two ntk drawing calls ignore the context transform.** `<canvas>`
-// translates the context to the node's origin before `onDraw`, and neither
-// `CanvasGradient` (ntk#271) nor `TextLayout.draw` (ntk#280) goes through
-// that transform — while `fillText`, `fillRect` and `drawImage` all do. So
-// the gradients and the `layout.draw` call here add `node.abs` and nothing
-// else does, which is the one thing in this file that cannot be guessed
-// from reading it. The text case is the nastier: the *clip* is applied, so
-// the paragraph is drawn at the window's edge and then cut, which reads as
-// truncation rather than as displacement.
+// **`TextLayout.draw` ignores the context transform** (ntk#280, still open;
+// the `CanvasGradient` half of it was fixed in 8.1). `<canvas>` translates
+// the context to the node's origin before `onDraw`, and this one call does
+// not go through that — while `fillText`, `fillRect`, `drawImage` and now
+// gradients all do. So `layout.draw` here adds `node.abs` and nothing else
+// does, which is the one thing in this file that cannot be guessed from
+// reading it. The *clip* is applied, so without the offset the paragraph is
+// drawn at the window's edge and then cut, which reads as truncation rather
+// than as displacement.
 //
 // **The glyph inspector walks logical order.** Advances are accumulated in
 // the order the runs come back, which is visual order for everything shaped
@@ -165,8 +171,10 @@ const INKS = [
 /** Light gradients want dark ink. Nothing else in the app cares. */
 const inkFor = (gradient) => (gradient.id === 'paper' ? '#1c1b19' : '#f4f7ff');
 
-const SPECIMEN_H = 150;
-const WRAPPED_H = 300;
+/** The specimen is never shorter than this, and never taller. */
+const SPECIMEN_MIN = 150;
+const SPECIMEN_MAX = 480;
+const SPECIMEN_PAD = 40;
 const TEXT_X = 18;
 
 /**
@@ -304,17 +312,14 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
     report,
   } = opts;
   const app = node.app;
-  // **Window coordinates, not the node's.** `<canvas>` translates the context
-  // to the node's origin before `onDraw`, and a CanvasGradient's points do
-  // not go through that transform, so a gradient built in node coordinates
-  // starts at the *window's* edge (ntk#271). Every gradient here is therefore
-  // built with `node.abs` added, and that is the only reason it is.
+  // The node's own coordinates, which is what a canvas API should take —
+  // ntk 8.1 made `CanvasGradient` apply the context transform (ntk#271), so
+  // the `node.abs` arithmetic this used to need is gone. `layout.draw` below
+  // still needs it, and the comment there says why.
   const { x: ox, y: oy } = node.abs;
 
   if (gradient.stops) {
-    // Horizontal: past its last stop a RENDER gradient is transparent, and a
-    // diagonal one runs out before the far corners of the rect.
-    const fill = ctx.createLinearGradient(ox, oy, ox + width, oy);
+    const fill = ctx.createLinearGradient(0, 0, width, 0);
     fill.addColorStop(0, gradient.stops[0]);
     fill.addColorStop(1, gradient.stops[1]);
     ctx.fillStyle = fill;
@@ -371,12 +376,7 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
     // Down the glyphs rather than across them: a vertical ramp over the
     // text's own band is what a metallic or sunset fill means, and it needs
     // the *layout's* box, not the canvas's.
-    const fill = ctx.createLinearGradient(
-      ox,
-      oy + top,
-      ox,
-      oy + top + layout.height,
-    );
+    const fill = ctx.createLinearGradient(0, top, 0, top + layout.height);
     fill.addColorStop(0, ink.stops[0]);
     fill.addColorStop(1, ink.stops[1]);
     ctx.fillStyle = fill;
@@ -413,14 +413,23 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
 export function fontconfigCatalogue(app) {
   return {
     kind: 'fontconfig',
-    /** A raw fontconfig pattern: `sans-serif`, `:lang=ru`, `Menlo:bold`. */
+    /**
+     * A raw fontconfig pattern: `sans-serif`, `:lang=ru`, `Menlo:bold`.
+     *
+     * Async since ntk 8.1 (ntk#274). The sync call spawns `fc-match` and
+     * blocks for ~109ms on a pattern it has not seen, which is a stall the
+     * app has no way to hide; this one waits off the event loop and answers
+     * from the same cache afterwards.
+     */
     match(query) {
       // `patternFor` concatenates, so a whole pattern passed as the family
       // reaches fc-match intact — which is why the query box can be the real
       // thing rather than a family picker.
-      return app.fonts.source.matchSorted({ family: query || 'sans-serif' });
+      return app.fonts.source.matchSortedAsync({
+        family: query || 'sans-serif',
+      });
     },
-    open: (path, into) => openFont(into, path),
+    open: (path, into, opts) => openFont(into, path, opts),
   };
 }
 
@@ -440,7 +449,7 @@ export function fixedCatalogue(paths) {
       if (!q || q === 'sans-serif') return all;
       return all.filter((m) => m.postscriptName.toLowerCase().includes(q));
     },
-    open: (path, into) => openFont(into, path),
+    open: (path, into, opts) => openFont(into, path, opts),
   };
 }
 
@@ -457,9 +466,20 @@ const AXIS_NAMES = {
 };
 
 /** Everything the detail pane shows, or `{ error }` if the file will not open. */
-function describe(catalogue, path, size, app) {
+/**
+ * A face's identity. **Not the path**: a `.ttc` is a *collection*, so
+ * Helvetica and Helvetica-Light are two faces in one file. Keying anything
+ * on the path alone selects both at once and opens whichever the collection
+ * happens to list first — which is a wrong specimen, not just a wrong
+ * highlight.
+ */
+const idOf = (m) => `${m.path}\u0000${m.postscriptName ?? ''}`;
+
+function describe(catalogue, match, size, app) {
   try {
-    const font = catalogue.open(path, app);
+    const font = catalogue.open(match.path, app, {
+      postscriptName: match.postscriptName,
+    });
     return {
       font,
       familyName: font.familyName,
@@ -547,8 +567,7 @@ const s = createStyles({
   winner: { fontSize: 10, color: '$success' },
 
   main: { flexGrow: 1, flexDirection: 'column' },
-  specimen: { height: SPECIMEN_H },
-  specimenTall: { height: WRAPPED_H },
+  specimen: { height: SPECIMEN_MIN },
   glyphBar: {
     paddingStart: 14,
     paddingEnd: 14,
@@ -558,6 +577,10 @@ const s = createStyles({
   },
   glyphText: { fontSize: 11, color: '$text' },
   glyphHint: { fontSize: 11, color: '$textMuted' },
+  /** A label and its control. Wrapping must never separate the two — and a
+      box with no style of its own lays out as a **column**, which is what
+      made these stack the first time. */
+  ctl: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -603,7 +626,7 @@ function MatchList({ matches, selected, onSelect }) {
   return (
     <box style={s.list} data-testname="matches">
       {matches.map((m, i) => {
-        const on = m.path === selected;
+        const on = idOf(m) === selected;
         return (
           <box
             key={`${m.path}#${m.postscriptName}#${i}`}
@@ -611,10 +634,10 @@ function MatchList({ matches, selected, onSelect }) {
             role="option"
             aria-label={m.postscriptName}
             focusable
-            onClick={() => onSelect(m.path)}
+            onClick={() => onSelect(idOf(m))}
           >
             <text style={[s.rowName, on && s.rowNameOn]}>
-              {m.postscriptName || '(unnamed)'}
+              {m.family || m.postscriptName || '(unnamed)'}
             </text>
             {i === 0 ? (
               <text style={on ? s.rowFileOn : s.winner}>
@@ -622,7 +645,7 @@ function MatchList({ matches, selected, onSelect }) {
               </text>
             ) : (
               <text style={[s.rowFile, on && s.rowFileOn]}>
-                {m.path.split('/').pop()}
+                {m.family ? m.postscriptName : m.path.split('/').pop()}
               </text>
             )}
           </box>
@@ -764,35 +787,47 @@ export function FontsPanel({
   const [summary, setSummary] = useState(null);
   const [axisValues, setAxisValues] = useState({});
 
-  // `matchSorted` is a synchronous subprocess — 109ms the first time a
-  // pattern is seen. Deferring it keeps the field's caret moving while the
-  // list is a keystroke behind, which is the honest trade: the field is the
-  // thing being typed into, the list is the thing being read.
+  // Deferred even though matching no longer blocks: it coalesces a burst of
+  // keystrokes into one `fc-match` rather than one per character. The field
+  // is the thing being typed into, the list is the thing being read.
   const settled = useDeferredValue(query);
 
-  // A failure is part of the result, not a state update: `matchSorted` throws
-  // where fontconfig is missing or has no usable font, and setting state from
-  // inside a memo would be a write during render.
-  const { matches, failed } = useMemo(() => {
-    if (!catalogue) return { matches: [], failed: null };
-    try {
-      return { matches: catalogue.match(settled).slice(0, 200), failed: null };
-    } catch (err) {
-      return { matches: [], failed: String(err?.message ?? err) };
-    }
+  // The match is a promise now, so the result is state rather than a memo —
+  // and a stale answer must not overwrite a fresh one, which is what `live`
+  // is for. A seam that answers synchronously (the tests do) still works:
+  // `Promise.resolve` takes either.
+  const [{ matches, failed }, setResult] = useState({
+    matches: [],
+    failed: null,
+  });
+  useEffect(() => {
+    if (!catalogue) return undefined;
+    let live = true;
+    Promise.resolve()
+      .then(() => catalogue.match(settled))
+      .then((found) => {
+        if (live) setResult({ matches: found.slice(0, 200), failed: null });
+      })
+      .catch((err) => {
+        if (live)
+          setResult({ matches: [], failed: String(err?.message ?? err) });
+      });
+    return () => {
+      live = false;
+    };
   }, [catalogue, settled]);
 
   // The selection follows the query unless the reader has picked something
   // that is still in the new list.
-  const current = matches.some((m) => m.path === selected)
-    ? selected
-    : (matches[0]?.path ?? null);
+  const current =
+    matches.find((m) => idOf(m) === selected) ?? matches[0] ?? null;
 
   const info = useMemo(
     () =>
       catalogue && current ? describe(catalogue, current, size, app) : null,
     [catalogue, current, size, app],
   );
+  const currentPath = current?.path ?? null;
 
   useEffect(() => setAxisValues({}), [current]);
 
@@ -809,18 +844,34 @@ export function FontsPanel({
   // drawing the regular face while the list says bold. A PostScript name is
   // one face by definition, which is what a specimen has to show.
   const [registered, setRegistered] = useState(null);
-  const face = info?.postscriptName ?? null;
+  // The face the *list* named, not the one an open-by-path happened to
+  // return — they differ for every entry of a collection but the first.
+  const face = current?.postscriptName ?? null;
   useEffect(() => {
-    if (!app || !current || !face) {
+    if (!app || !currentPath || !face) {
       setRegistered(null);
       return;
     }
     try {
-      setRegistered(loadFont(app, current, { family: face }).family);
+      setRegistered(
+        loadFont(app, currentPath, { family: face, postscriptName: face })
+          .family,
+      );
     } catch {
       setRegistered(null);
     }
-  }, [app, current, face]);
+  }, [app, currentPath, face]);
+
+  // The specimen grows with what is in it, so a 120px line or a wrapped
+  // paragraph pushes the panes below it down instead of being cut off. The
+  // face's own line height covers the first frame; `summary` refines it once
+  // the painter has laid the text out, and the two agree from then on.
+  const lineBox = summary?.box || info?.metrics?.lineHeight || size * 1.3;
+  const lineCount = wrap ? (summary?.lines ?? 1) : 1;
+  const specimenH = Math.min(
+    SPECIMEN_MAX,
+    Math.max(SPECIMEN_MIN, Math.ceil(lineBox * lineCount) + SPECIMEN_PAD),
+  );
 
   const gradient = GRADIENTS.find((g) => g.id === gradientId) ?? GRADIENTS[0];
   const ink = INKS.find((g) => g.id === inkId) ?? INKS[0];
@@ -963,13 +1014,13 @@ export function FontsPanel({
         {failed ? <text style={s.error}>{failed}</text> : null}
         <MatchList
           matches={matches}
-          selected={current}
+          selected={current ? idOf(current) : null}
           onSelect={setSelected}
         />
       </box>
 
       <box style={s.main}>
-        <box style={[s.specimen, wrap && s.specimenTall]}>
+        <box style={[s.specimen, { height: specimenH }]}>
           <canvas
             style={{ flexGrow: 1 }}
             onDraw={draw}
@@ -1027,17 +1078,19 @@ export function FontsPanel({
             aria-label="Specimen text"
             onChange={(ev) => setText(ev.value)}
           />
-          <text style={s.label}>Size</text>
-          <Slider
-            style={{ width: 110 }}
-            min={10}
-            max={120}
-            value={size}
-            aria-label="Size"
-            data-testname="size"
-            onChange={(ev) => setSize(Math.round(ev.value))}
-          />
-          <text style={s.label}>{`${size}px`}</text>
+          <box style={s.ctl}>
+            <text style={s.label}>Size</text>
+            <Slider
+              style={{ width: 110 }}
+              min={10}
+              max={120}
+              value={size}
+              aria-label="Size"
+              data-testname="size"
+              onChange={(ev) => setSize(Math.round(ev.value))}
+            />
+            <text style={s.label}>{`${size}px`}</text>
+          </box>
           <Select
             style={{ width: 104 }}
             value={gradientId}
@@ -1052,48 +1105,56 @@ export function FontsPanel({
             options={INKS.map((g) => ({ value: g.id, label: g.label }))}
             onChange={(ev) => setInkId(ev.value)}
           />
-          <text style={s.label}>Guides</text>
-          <Switch
-            checked={guides}
-            aria-label="Guides"
-            data-testname="guides"
-            onChange={(ev) => setGuides(ev.value)}
-          />
-          <text style={s.label}>Wrap</text>
-          <Switch
-            checked={wrap}
-            aria-label="Wrap"
-            data-testname="wrap"
-            onChange={(ev) => setWrap(ev.value)}
-          />
-          <text style={s.label}>Line height</text>
-          <Slider
-            style={{ width: 96 }}
-            min={0}
-            max={3}
-            step={0.05}
-            value={lineHeight}
-            aria-label="Line height"
-            onChange={(ev) => setLineHeight(ev.value)}
-          />
-          <text style={s.label}>
-            {lineHeight ? `×${lineHeight.toFixed(2)}` : 'from the face'}
-          </text>
-          <text style={s.label}>Shadow</text>
-          <Switch
-            checked={shadow > 0}
-            aria-label="Shadow"
-            data-testname="shadow"
-            onChange={(ev) => setShadow(ev.value ? 7 : 0)}
-          />
-          <Slider
-            style={{ width: 90 }}
-            min={0}
-            max={20}
-            value={shadow}
-            aria-label="Shadow blur"
-            onChange={(ev) => setShadow(Math.round(ev.value))}
-          />
+          <box style={s.ctl}>
+            <text style={s.label}>Guides</text>
+            <Switch
+              checked={guides}
+              aria-label="Guides"
+              data-testname="guides"
+              onChange={(ev) => setGuides(ev.value)}
+            />
+          </box>
+          <box style={s.ctl}>
+            <text style={s.label}>Wrap</text>
+            <Switch
+              checked={wrap}
+              aria-label="Wrap"
+              data-testname="wrap"
+              onChange={(ev) => setWrap(ev.value)}
+            />
+          </box>
+          <box style={s.ctl}>
+            <text style={s.label}>Line height</text>
+            <Slider
+              style={{ width: 96 }}
+              min={0}
+              max={3}
+              step={0.05}
+              value={lineHeight}
+              aria-label="Line height"
+              onChange={(ev) => setLineHeight(ev.value)}
+            />
+            <text style={s.label}>
+              {lineHeight ? `×${lineHeight.toFixed(2)}` : 'from the face'}
+            </text>
+          </box>
+          <box style={s.ctl}>
+            <text style={s.label}>Shadow</text>
+            <Switch
+              checked={shadow > 0}
+              aria-label="Shadow"
+              data-testname="shadow"
+              onChange={(ev) => setShadow(ev.value ? 7 : 0)}
+            />
+            <Slider
+              style={{ width: 90 }}
+              min={0}
+              max={20}
+              value={shadow}
+              aria-label="Shadow blur"
+              onChange={(ev) => setShadow(Math.round(ev.value))}
+            />
+          </box>
         </box>
 
         <box style={s.detail} data-testname="detail">
@@ -1105,7 +1166,7 @@ export function FontsPanel({
             <>
               <box style={{ flexDirection: 'column', gap: 2 }}>
                 <text style={s.family}>{info.familyName}</text>
-                <text style={s.path}>{current}</text>
+                <text style={s.path}>{currentPath}</text>
               </box>
               <Facts info={info} size={size} />
               <Coverage font={info.font} text={text} />
