@@ -32,6 +32,7 @@
     "a11y:probe": "node scripts/a11y-probe.mjs",
     "globalmenu:host": "node scripts/globalmenu-host.mjs",
     "devtools:proxy": "node scripts/devtools-proxy.mjs",
+    "examples:fonts": "tsx examples/fonts.jsx",
     "examples:form": "tsx examples/form.jsx",
     "examples:rules": "tsx examples/rules.jsx",
     "examples:selection": "tsx examples/selection.jsx",
@@ -81,7 +82,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^8.0.0",
+    "ntk": "^8.2.0",
     "react-reconciler": "^0.33.0",
     "yoga-layout": "^3.2.1"
   },
