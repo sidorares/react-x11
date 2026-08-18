@@ -1188,6 +1188,16 @@ across kerning, shaping boundaries and trailing whitespace.
 | `selectionColor`, `caretColor`    | selection/caret paint                      |
 | text style props                  | as `<text>`                                |
 
+The text style props include `textAlign`, and the field is laid out at its
+box's **direction** the way a `<text>` is: the value, the placeholder and the
+caret sit at the base direction's start edge — the right-hand one under
+`direction: 'rtl'` — and the value is shaped at that base level rather than
+at its own first strong character, which is what makes `"(1) 12:30 — نص"`
+punctuate the same way in a field and in the paragraph beside it. Clicking,
+the caret, the selection bands and the horizontal scroll are read from one
+placement, so they mirror together. See
+[styling.md](styling.md#inside-an-editable-field).
+
 ### The change event
 
 `onChange` and `onSubmit` get a synthetic event, the same shape every other

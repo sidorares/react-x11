@@ -50,15 +50,11 @@
 // **CJK.** No input method yet (#272), so the language list stops at scripts
 // you can type with a keyboard layout.
 //
-// ## What does not work yet
-//
-// **A field's text does not mirror (#341).** Pick Arabic and the window
-// flips, but a `<textinput>` still draws its value, its placeholder and its
-// caret from the *left* edge — it lays its text out without a base
-// direction and without an alignment, which `<text>` passes and it does
-// not. The search box at the top of the sidebar is where you see it. The
-// same omission reorders a mixed Latin/Arabic value wrongly in an LTR
-// window too, so it is not only an RTL problem.
+// **Visual-order caret keys.** Left and Right step through the string rather
+// than across the screen, in either direction — see `docs/styling.md`. The
+// fields themselves mirror (#341): pick Arabic and the search box at the top
+// of the sidebar draws its placeholder, its value and its caret from the
+// right, like everything around it.
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';

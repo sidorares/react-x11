@@ -5,8 +5,16 @@
 // side reads as a bug in a way that no support at all does not. So the two
 // halves are tested together: the direction that reaches yoga, and the
 // logical edges a stylesheet written for both directions is spelled in.
-import { test } from 'node:test';
+//
+// The last section is the same claim for the inside of an editable field
+// (issue #341), where the base direction is not only about which edge the
+// text is against: it is the level UAX#9 resolves brackets, digits and
+// dashes at, so a field that never states one reorders mixed content
+// wrongly in an *LTR* window too.
+import { test, afterEach } from 'node:test';
 import assert from 'node:assert';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import React from 'react';
 import {
   createRoot,
@@ -18,6 +26,13 @@ import {
 import { anchorRect } from '../src/components/anchor.js';
 import { localeDirection } from '../src/palette.js';
 import { createMockApp } from './helpers/mock-app.js';
+import {
+  act,
+  cleanup,
+  countPixels,
+  renderX11,
+  userEvent,
+} from '../src/testing/index.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -572,4 +587,282 @@ test('a text node hands its base direction to the shaper', async () => {
     'UAX#9 resolves neutrals against the paragraph level, so the box has to ' +
       'say what it is — and `textAlign: start` is resolved from it too',
   );
+});
+
+// --- inside a field (issue #341) ---------------------------------------------
+//
+// `<text>` above proves the base direction reaches the shaper. These prove the
+// same for `<textinput>`/`<textarea>`, and then the half a paragraph does not
+// have: a field is a viewport over its value, so where the value is placed,
+// where a click lands in it and which way it scrolls all have to mirror
+// together — `_placedValue()` is the one function they are all read from, and
+// a test per reader is what stops them drifting apart.
+
+const require = createRequire(import.meta.url);
+const FONT = join(
+  dirname(require.resolve('katex/package.json')),
+  'dist',
+  'fonts',
+  'KaTeX_Main-Regular.ttf',
+);
+// Pixel assertions need a font that is the same file on every machine —
+// `fc-match` is a different answer per box and no answer in a container. The
+// Arabic below has no glyphs in it and draws as notdef boxes, which is fine
+// and is the point: bidi is decided by the *characters*, so the ordering
+// under test is the same ordering a font with Arabic in it would shape.
+const fonts = { 'sans-serif': FONT };
+// A run of neutrals — brackets, digits, a colon, a dash — in front of a
+// strong RTL word. Exactly the string the first-strong-character rule gets
+// wrong: it resolves the paragraph as RTL and mirrors the brackets.
+const MIXED = '(1) 12:30 — نص';
+
+afterEach(cleanup);
+
+/** The visual run order, as logical ranges: `[[start, end], …]` left to
+ * right. What "the same glyph order" means when the glyphs are notdef. */
+const runOrder = (layout) => layout.lines[0].runs.map((r) => [r.start, r.end]);
+
+/** How much of a region is *not* the background — the ink, counted rather
+ * than sampled, since the question is which half of the box it is in. */
+const inkIn = async (ctx, region, background = '#ffffff') =>
+  region.width * region.height - (await countPixels(ctx, region, background));
+
+/** A window at `direction` with one field in it, over a white background. */
+async function fieldWindow(direction, props, kind = 'textinput') {
+  const view = await renderX11(
+    h(
+      'window',
+      {
+        width: 300,
+        height: 90,
+        style: { direction, padding: 10, backgroundColor: '#ffffff' },
+      },
+      h('text', { 'data-testname': 'para', style: { fontSize: 14 } }, MIXED),
+      h(kind, {
+        role: 'textbox',
+        'data-testname': 'field',
+        style: { width: 240, fontSize: 14, color: '#000000' },
+        ...props,
+      }),
+    ),
+    { fonts, width: 300, height: 90 },
+  );
+  return { ...view, field: view.getByTestName('field') };
+}
+
+test('a field lays its value out at the box direction, not at the first strong character', async () => {
+  // The LTR half of #341, and the half that is wrong in the direction almost
+  // everyone runs in: an Arabic word in an English form makes the *first
+  // strong character* Arabic, so a paragraph with no stated base level comes
+  // out RTL and `(1) 12:30` renders as `)1( 12:30`.
+  for (const direction of ['ltr', 'rtl']) {
+    const { field, getByTestName } = await fieldWindow(direction, {
+      value: MIXED,
+    });
+    const paragraph = getByTestName('para');
+    assert.deepStrictEqual(
+      runOrder(field._valueLayout()),
+      runOrder(paragraph._layoutFor(Infinity)),
+      `the field and the <text> reorder ${direction} identically`,
+    );
+    await cleanup();
+  }
+
+  // …and what that ordering *is*, so the two agreeing on the wrong answer
+  // would still fail: under `ltr` the leading neutrals stay leading.
+  const { field } = await fieldWindow('ltr', { value: MIXED });
+  assert.deepStrictEqual(
+    runOrder(field._valueLayout())[0],
+    [0, 4],
+    'the brackets and the digit are the leftmost thing on the line',
+  );
+});
+
+test('an RTL field puts its value, and its placeholder, against the right edge', async () => {
+  for (const [direction, half] of [
+    ['ltr', 'left'],
+    ['rtl', 'right'],
+  ]) {
+    for (const props of [{ value: 'Latin' }, { placeholder: 'Latin' }]) {
+      const { field, ctx } = await fieldWindow(direction, props);
+      const content = field.contentBox();
+      const width = Math.floor(content.width / 2);
+      const band = { y: field.abs.y, width, height: field.abs.height };
+      const left = await inkIn(ctx, { ...band, x: content.x });
+      const right = await inkIn(ctx, { ...band, x: content.x + width });
+      const what = Object.keys(props)[0];
+      if (half === 'left') {
+        assert.ok(left > 0 && right === 0, `${direction}: ${what} on the left`);
+      } else {
+        assert.ok(
+          right > 0 && left === 0,
+          `${direction}: ${what} on the right`,
+        );
+      }
+      await cleanup();
+    }
+  }
+});
+
+test('an empty RTL field blinks its caret at the right edge of the content box', async () => {
+  for (const direction of ['ltr', 'rtl']) {
+    const { field, ctx } = await fieldWindow(direction, { defaultValue: '' });
+    const content = field.contentBox();
+    // The caret is a rectangle drawn *rightwards* from the boundary it marks,
+    // so an RTL field has to keep its own width free at the flush edge or the
+    // one thing an empty field draws lands outside the clip.
+    const right = content.x + content.width;
+    const caret = field.textCaretRect(0);
+    if (direction === 'ltr') {
+      assert.strictEqual(caret.x, content.x, 'ltr: at the left edge');
+    } else {
+      assert.ok(
+        caret.x < right && caret.x >= right - 3,
+        `rtl: within a caret of the right edge, got ${caret.x} against ${right}`,
+      );
+    }
+
+    // and it is painted where the accessor says, which is the assertion the
+    // geometry alone cannot make
+    await userEvent.click(field);
+    field._repaint();
+    await act();
+    const band = {
+      y: field.abs.y,
+      width: Math.floor(content.width / 2),
+      height: field.abs.height,
+    };
+    const near = await inkIn(ctx, {
+      ...band,
+      x: direction === 'rtl' ? content.x + band.width : content.x,
+    });
+    const far = await inkIn(ctx, {
+      ...band,
+      x: direction === 'rtl' ? content.x : content.x + band.width,
+    });
+    assert.ok(near > 0, `${direction}: the caret is drawn on the start side`);
+    assert.strictEqual(far, 0, `${direction}: and nothing is on the other`);
+    await cleanup();
+  }
+});
+
+test('a click in an RTL field lands where the text is, not where it would be in LTR', async () => {
+  // The hit test and the paint are the pair that silently drift: a value
+  // placed on the right and hit-tested from the left puts the caret in a
+  // different character from the one under the pointer, and nothing about
+  // the screen says so until someone types.
+  for (const [direction, expected] of [
+    ['ltr', 5],
+    ['rtl', 0],
+  ]) {
+    const { field } = await fieldWindow(direction, { value: 'Latin' });
+    const content = field.contentBox();
+    const middle = content.x + content.width / 2;
+    assert.strictEqual(
+      field.textIndexAt(middle, content.y + 2),
+      expected,
+      `${direction}: the middle of the box is ${expected === 0 ? 'before' : 'after'} a short value`,
+    );
+    // …and the caret the click asks for is drawn back at the click's own end
+    // of the box, which is what proves the two read one geometry
+    const caret = field.textCaretRect(expected);
+    const side = direction === 'rtl' ? caret.x > middle : caret.x < middle;
+    assert.ok(side, `${direction}: the caret is on the value's own side`);
+    await cleanup();
+  }
+});
+
+test('an overflowing RTL field scrolls from the right, and _scrollX still counts from the start', async () => {
+  // `_scrollX: 0` means "showing the beginning of the value" in both
+  // directions — the rule a scroll box already follows — so in RTL it is the
+  // *right-hand* end that is showing and the text overflows to the left.
+  //
+  // The value is Arabic rather than Latin because that is what makes the
+  // sentence above one sentence: the paragraph's start edge is the right,
+  // and the *string's* start is only there too when the string reads that
+  // way. Latin in an RTL field is one LTR run placed against that same right
+  // edge, so what overflows is its beginning — which is what a browser shows
+  // for `<input dir="rtl">` too, and is the placement working rather than
+  // failing.
+  const long =
+    'نص طويل جدا لا يتسع داخل هذا الحقل الصغير أبدا وهو كذلك ولا يزال طويلا جدا';
+  const { field } = await fieldWindow('rtl', { value: long });
+  const content = field.contentBox();
+  const layout = field._valueLayout();
+  assert.ok(layout.width > content.width, 'the premise: it overflows');
+  assert.strictEqual(field._scrollX, 0, 'an unfocused field shows the start');
+  assert.ok(
+    field._placedValue().x + layout.width > content.x + content.width - 4,
+    'the start of the value is against the right edge, the rest runs left',
+  );
+
+  // typing at the end pulls the far end of the value into view, which in RTL
+  // means the text moves *right* rather than left
+  const before = field._placedValue().x;
+  await userEvent.click(field);
+  field._caret = Array.from(long).length;
+  field._repaint();
+  await act();
+  assert.ok(field._scrollX > 0, 'the caret chase scrolled to the end');
+  assert.ok(
+    field._placedValue().x > before,
+    'and it displaced the text to the right, not to the left',
+  );
+  assert.ok(
+    field.textCaretRect(field._caret).x >= content.x - 1,
+    'the caret it chased is inside the box',
+  );
+});
+
+test('the arrow keys and Home/End stay logical under either direction', async () => {
+  // Deliberately *not* mirrored. Left/Right step through the string rather
+  // than across the screen, which is what Home/End already do and what the
+  // editing model is written in; visual-order caret motion through bidi text
+  // is a separate question from where the field draws (issue #272's half).
+  for (const direction of ['ltr', 'rtl']) {
+    const { field } = await fieldWindow(direction, { value: 'Latin' });
+    await userEvent.click(field);
+    await userEvent.key(0xff50); // Home
+    assert.strictEqual(field._caret, 0, `${direction}: Home is the start`);
+    await userEvent.key(XK.RIGHT);
+    assert.strictEqual(field._caret, 1, `${direction}: Right steps forward`);
+    await userEvent.key(XK.LEFT);
+    assert.strictEqual(field._caret, 0, `${direction}: Left steps back`);
+    await userEvent.key(0xff57); // End
+    assert.strictEqual(field._caret, 5, `${direction}: End is the end`);
+    await cleanup();
+  }
+});
+
+test('a <textarea> aligns its wrapped lines at the base direction', async () => {
+  // The field with a container of its own: it wraps, so the alignment is
+  // ntk's to apply inside the layout rather than the placement's, and the
+  // two elements have to arrive at the same screen.
+  for (const direction of ['ltr', 'rtl']) {
+    const { field } = await fieldWindow(
+      direction,
+      { value: 'one two three four five six seven eight nine ten', rows: 3 },
+      'textarea',
+    );
+    const layout = field._valueLayout();
+    const content = field.contentBox();
+    assert.ok(layout.lines.length > 1, 'the premise: it wrapped');
+    const shortest = layout.lines.reduce((a, l) => (l.width < a.width ? l : a));
+    if (direction === 'ltr') {
+      assert.strictEqual(shortest.x, 0, 'ltr: every line starts at the left');
+    } else {
+      assert.ok(
+        shortest.x > 0,
+        `rtl: a short line is pushed right, got x ${shortest.x}`,
+      );
+      // and the caret at the start of a line is inside the box rather than
+      // on the far side of the clip — the reserve the container leaves
+      const caret = field.textCaretRect(0);
+      assert.ok(
+        caret.x <= content.x + content.width - 1,
+        `rtl: the line-start caret is inside the content box, got ${caret.x}`,
+      );
+    }
+    await cleanup();
+  }
 });

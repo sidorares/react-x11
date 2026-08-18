@@ -168,9 +168,12 @@ The rest each have one thing yoga could not answer:
 | `Calendar` / `DatePicker` | a week runs the other way, and so do Left/Right     |
 | `Select`, `PasswordInput` | the field's own insets follow the text              |
 
-`<textinput>` and `<textarea>` are the gap: they shape and draw bidi text
-correctly, but the field's own origin and caret scrolling are still
-left-to-right.
+`<textinput>` and `<textarea>` mirror on the inside too — the value, the
+placeholder and the caret are against the direction's start edge, and the
+value is shaped at the box's base level rather than at its own first strong
+character ([styling.md](styling.md#inside-an-editable-field)). What stays
+put: Left/Right and Home/End step through the string rather than across the
+screen.
 
 See [styling.md](styling.md#direction-and-the-logical-edges) for the style
 property and the logical edges.

@@ -5149,6 +5149,15 @@ export function closeEditMenu(node) {
   events.focus(events._canRestoreTo(restore) ? restore : null, 'pointer');
 }
 
+/** The caret's own width, in pixels — it is a rectangle rather than a line
+ * because a hairline disappears on a scaled-up display. */
+const CARET_WIDTH = 1.5;
+
+/** The room a line of a field's text leaves for the caret that follows it,
+ * at the right-hand edge of the content box in both directions — see
+ * `TextInputNode._lineOriginX`, which is where the asymmetry is explained. */
+const CARET_RESERVE = 2;
+
 /**
  * <textinput>: single-line editable text. Caret/selection via ntk TextLayout
  * prefix measurement, editing via the EventManager default-action hooks
@@ -5460,19 +5469,26 @@ export class TextInputNode extends Node {
     return cap ? Math.round(cap) : this._lineHeight();
   }
 
-  /** Shaped layout of the current value, cached per (value, style).
+  /** Shaped layout of the current value, cached per (value, style,
+   * direction).
    * Caret math rides ntk >= 3.3.0's TextLayout caret API, which is exact
    * across kerning/shaping boundaries, bidi runs and trailing whitespace
-   * (replaces the prefix-width measurement this used before). */
+   * (replaces the prefix-width measurement this used before).
+   *
+   * Laid out at its **natural width**, with no `maxWidth` and no `align`:
+   * a single-line field never wraps, and a `maxWidth` is what makes ntk
+   * break lines. So the alignment ntk would have applied inside the layout
+   * box is applied to the box instead, by `_lineOriginX` — see there. */
   _valueLayout() {
     const fonts = this.app?.fonts;
     if (!fonts) return null;
     const text = this._displayValue();
     const s = this.resolvedTextStyle();
-    const key = `${text}|${s.family}|${s.size}|${s.weight}|${s.style}`;
+    const direction = this.direction;
+    const key = `${text}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}`;
     if (this._valueLayoutKey !== key) {
       this._valueLayoutKey = key;
-      this._valueLayoutCache = fonts.layout(text, s);
+      this._valueLayoutCache = fonts.layout(text, s, { direction });
     }
     return this._valueLayoutCache;
   }
@@ -5928,6 +5944,59 @@ export class TextInputNode extends Node {
     };
   }
 
+  /**
+   * Where a line of the field's text starts, in window coordinates, before
+   * the scroll offset — the whole of the field's horizontal placement, and
+   * the only place that knows which edge the text is against.
+   *
+   * The line is laid out at its natural width (`_valueLayout`), so ntk had
+   * no container to align it in and `line.x` is 0. This is that alignment:
+   * `textAlign` resolved against the base direction, which is what puts an
+   * RTL field's value, placeholder and caret on the right-hand side without
+   * anybody asking for it.
+   *
+   * **The caret is why the reserve is at the right in both directions.** A
+   * caret is a rectangle drawn *rightwards* from the boundary it marks, so
+   * the one position that can fall outside the content box is the rightmost
+   * one: the end of the text in LTR — which is what the `+ 2` in the scroll
+   * clamp has always been keeping room for — and the *start* of it in RTL,
+   * where the text is flush against the right edge and index 0 sits on it.
+   * Without the reserve an empty RTL field has no visible caret at all.
+   *
+   * Alignment only has a say while the text fits. An overflowing field
+   * scrolls, and `_scrollX: 0` means "showing the start of the value", so
+   * the start edge is where an overflowing line is pinned whatever the
+   * alignment says.
+   */
+  _lineOriginX(layout, content) {
+    const rtl = this.direction === 'rtl';
+    const free = content.width - CARET_RESERVE - layout.width;
+    let align = this.style.textAlign ?? 'start';
+    if (align === 'start') align = rtl ? 'right' : 'left';
+    else if (align === 'end') align = rtl ? 'left' : 'right';
+    const offset = align === 'right' ? free : align === 'center' ? free / 2 : 0;
+    return content.x + (rtl ? Math.min(free, offset) : Math.max(0, offset));
+  }
+
+  /**
+   * How far the text is displaced by the scroll, signed. `_scrollX` counts
+   * from the start of the value in both directions — the rule
+   * `ScrollableNode` follows for a scroll box — and the start is the
+   * right-hand edge when the field reads right to left, so the text it
+   * uncovers is to the *left* and the displacement is the other way.
+   */
+  _scrollShift() {
+    return this.direction === 'rtl' ? this._scrollX : -this._scrollX;
+  }
+
+  /** How far a value wider than its box can be scrolled. The reserve is the
+   * caret's, the same one `_lineOriginX` keeps: at full scroll the far end
+   * of the text stops short of the edge by exactly the width of the caret
+   * that sits there. */
+  _maxScrollX(layout, content) {
+    return Math.max(0, layout.width - (content.width - CARET_RESERVE));
+  }
+
   /** The value's layout and where it is drawn, in window coordinates. The
    * placeholder is not in it: the accessors answer about the text the field
    * holds, and an empty field holds none. */
@@ -5940,7 +6009,11 @@ export class TextInputNode extends Node {
       content,
       this.resolvedTextStyle(),
     );
-    return { layout, x: content.x - this._scrollX, y: metrics.textY };
+    return {
+      layout,
+      x: this._lineOriginX(layout, content) + this._scrollShift(),
+      y: metrics.textY,
+    };
   }
 
   /** The value. The indices below are into this string, in code points — an
@@ -6225,7 +6298,13 @@ export class TextInputNode extends Node {
     const color = isEmpty
       ? (this.props.placeholderColor ?? this.theme.textMuted)
       : style.color;
-    const layout = fonts.layout([{ text: shown, ...style, color }], style);
+    // The placeholder is the *field's* chrome rather than the user's
+    // content, so it is laid out and placed at the field's own direction —
+    // an English hint in an Arabic form starts at the right-hand edge with
+    // everything else in the window.
+    const layout = fonts.layout([{ text: shown, ...style, color }], style, {
+      direction: this.direction,
+    });
     const { textY, markY, markHeight } = this._lineMetrics(
       layout,
       content,
@@ -6239,20 +6318,35 @@ export class TextInputNode extends Node {
     // were simply missing, which reads as a rendering bug rather than as a
     // scroll position. An unfocused field shows the beginning of its value,
     // the way a DOM input does.
+    //
+    // The chase is in *visual* coordinates — how far the caret is from the
+    // left of the content box once the value has been placed and scrolled —
+    // because that is the question the viewport asks, and it is the same
+    // question in both directions. Which way the scroll displaces the text
+    // is `_scrollShift`'s business.
+    const valueLayout = this._valueLayout();
     const caretX = this._prefixWidth(this._caret);
-    const textWidth = isEmpty ? 0 : layout.width;
+    // where the caret sits before the scroll, relative to the content box
+    const caretAt = valueLayout
+      ? this._lineOriginX(valueLayout, content) + caretX - content.x
+      : caretX;
+    const limit = content.width - CARET_RESERVE;
     if (!this._focused) this._scrollX = 0;
     else {
-      if (caretX - this._scrollX > content.width - 2) {
-        this._scrollX = caretX - content.width + 2;
-      }
-      if (caretX - this._scrollX < 0) {
-        this._scrollX = caretX;
-      }
+      let shift = this._scrollShift();
+      if (caretAt + shift > limit) shift = limit - caretAt;
+      if (caretAt + shift < 0) shift = -caretAt;
+      this._scrollX = this.direction === 'rtl' ? shift : -shift;
     }
-    this._scrollX = Math.min(
-      this._scrollX,
-      Math.max(0, textWidth - content.width + 2),
+    // The extent is the *value*'s, never the placeholder's: a hint longer
+    // than the box is clipped, not scrolled, since nothing can move the caret
+    // through it.
+    this._scrollX = Math.max(
+      0,
+      Math.min(
+        this._scrollX,
+        valueLayout ? this._maxScrollX(valueLayout, content) : 0,
+      ),
     );
 
     ctx.save();
@@ -6264,12 +6358,19 @@ export class TextInputNode extends Node {
     const clip = this._inkClip(content);
     ctx.rect(clip.x, clip.y, clip.width, clip.height);
     ctx.clip();
-    const originX = content.x - this._scrollX;
+    const shift = this._scrollShift();
+    // Where the ink goes, and where the marks over the value go. They are
+    // the same origin whenever there is a value to mark: the two differ only
+    // for an empty field, where the ink is the placeholder — as wide as the
+    // hint and placed for it — and the caret still belongs to the value,
+    // which is empty and sits at the start edge.
+    const originX = this._lineOriginX(layout, content) + shift;
+    const valueX = valueLayout
+      ? this._lineOriginX(valueLayout, content) + shift
+      : originX;
 
     const [a, b] = this._selection();
-    if (this._showsSelection() && a !== b && !isEmpty) {
-      const selStart = this._prefixWidth(a);
-      const selEnd = this._prefixWidth(b);
+    if (this._showsSelection() && a !== b && !isEmpty && valueLayout) {
       // A **translucent** accent rather than an opaque light blue. The ink
       // on top is `style.color`, which this fill does not control, so an
       // opaque highlight has to be picked to contrast with it — and no one
@@ -6278,15 +6379,30 @@ export class TextInputNode extends Node {
       // Tinting the surface instead leaves the ink's own contrast intact.
       ctx.fillStyle =
         this.props.selectionColor ?? tint(this.theme.accent, 0.35);
-      ctx.fillRect(originX + selStart, markY, selEnd - selStart, markHeight);
+      // One band per direction run, not one rectangle between the two caret
+      // positions: a range is contiguous in logical order and a line is laid
+      // out in visual order, so a selection that crosses into an Arabic word
+      // covers two disjoint stretches of pixels and the single rect this
+      // used to draw painted over text nobody had selected. The bands are
+      // `textRangeRects`'s, so the highlight is the geometry the accessors
+      // report; only the vertical extent is the field's own — a field
+      // highlights the cap band with breathing room rather than the line box.
+      for (const band of rangeBands(
+        valueLayout,
+        this._displayValue(),
+        this._displayIndex(a),
+        this._displayIndex(b),
+      )) {
+        ctx.fillRect(valueX + band.x, markY, band.width, markHeight);
+      }
     }
 
     layout.draw(ctx, originX, textY);
-    this._paintPreedit(ctx, originX, textY, style);
+    this._paintPreedit(ctx, valueX, textY, style);
 
     if (this._focused && this._caretOn && a === b) {
       ctx.fillStyle = this.props.caretColor ?? style.color;
-      ctx.fillRect(originX + caretX, markY, 1.5, markHeight);
+      ctx.fillRect(valueX + caretX, markY, CARET_WIDTH, markHeight);
     }
     ctx.restore();
   }
@@ -6416,12 +6532,33 @@ export class TextAreaNode extends TextInputNode {
     const color = isEmpty
       ? (this.props.placeholderColor ?? this.theme.textMuted)
       : s.color;
+    const direction = this.direction;
+    const align = this.style.textAlign ?? 'start';
+    // A wrapped field *has* a container, so — unlike `<textinput>` — the
+    // alignment is ntk's to apply: every line is placed inside the box it
+    // wrapped to, and `start` is resolved against the base direction, which
+    // puts an RTL value against the right-hand edge.
+    //
+    // The container is the content box less the caret's own width, because
+    // in RTL every line *starts* flush against that right edge — line 0,
+    // column 0 of an empty field included — and a caret is drawn rightwards
+    // from the boundary it marks, so with no reserve it lands entirely
+    // outside the clip and an RTL textarea shows no caret at all. In LTR the
+    // flush edge is the left one, where the caret has the whole box in front
+    // of it, and only a line that fills its width exactly could reach the
+    // other end — so nothing is taken off a direction that does not need it.
     const width = this.contentBox().width || undefined;
-    const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}`;
+    const container =
+      width === undefined || direction !== 'rtl'
+        ? width
+        : Math.max(0, width - CARET_RESERVE);
+    const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${align}`;
     if (this._valueLayoutKey !== key) {
       this._valueLayoutKey = key;
       this._valueLayoutCache = fonts.layout([{ text: shown, ...s, color }], s, {
-        maxWidth: width,
+        maxWidth: container,
+        align,
+        direction,
       });
     }
     return this._valueLayoutCache;
@@ -6609,8 +6746,6 @@ export class TextAreaNode extends TextInputNode {
 
     const [a, b] = this._selection();
     if (this._showsSelection() && a !== b && !isEmpty) {
-      const posA = layout.caretPosition(this._displayIndex(a));
-      const posB = layout.caretPosition(this._displayIndex(b));
       // A **translucent** accent rather than an opaque light blue. The ink
       // on top is `style.color`, which this fill does not control, so an
       // opaque highlight has to be picked to contrast with it — and no one
@@ -6619,32 +6754,27 @@ export class TextAreaNode extends TextInputNode {
       // Tinting the surface instead leaves the ink's own contrast intact.
       ctx.fillStyle =
         this.props.selectionColor ?? tint(this.theme.accent, 0.35);
-      // Only the lines on screen, and all of them in one request. Ctrl+A in
-      // a 5000-line value selects 5000 lines and shows twenty: the clip
-      // throws the rest away *after* they have been sent, which is the one
-      // cost a clip cannot save. `indexAt` finds the first visible line
-      // without walking the list to it — conservatively, since an index on a
-      // wrap boundary answers with the line before, and one rect outside the
-      // clip is free where a scan of every line above the viewport is not.
+      // The bands `textRangeRects` reports — one per line and one per
+      // direction run inside a line, which is what a selection crossing into
+      // an Arabic word actually covers. Two caret positions and a rectangle
+      // between them, which is what this was, paints over text nobody
+      // selected on a line that has runs going both ways.
+      //
+      // Only the lines on screen are *sent*, and all of them in one request.
+      // Ctrl+A in a 5000-line value selects 5000 lines and shows twenty: the
+      // clip throws the rest away *after* they have been sent, which is the
+      // one cost a clip cannot save.
       const bottom = this._scrollY + content.height;
-      const first = Math.max(
-        posA.line,
-        layout.caretPosition(layout.indexAt(-1e6, this._scrollY)).line,
-      );
       const rects = [];
-      for (let li = first; li <= posB.line; li++) {
-        const line = layout.lines[li];
-        if (!line || line.y > bottom) break;
-        const x0 = li === posA.line ? posA.x : line.x;
-        const x1 = li === posB.line ? posB.x : line.x + line.width;
-        // a selected bare newline still shows as a sliver
-        const w = Math.max(x1 - x0, 4);
-        rects.push(
-          originX + x0,
-          originY + line.y,
-          w,
-          line.ascent + line.descent,
-        );
+      for (const band of rangeBands(
+        layout,
+        this._displayValue(),
+        this._displayIndex(a),
+        this._displayIndex(b),
+      )) {
+        if (band.y > bottom) break;
+        if (band.y + band.height < this._scrollY) continue;
+        rects.push(originX + band.x, originY + band.y, band.width, band.height);
       }
       // one `Render.FillRectangles` for the whole highlight, where a fill per
       // line is a full-surface-masked composite per line (ntk >= 7.6)
@@ -6656,7 +6786,7 @@ export class TextAreaNode extends TextInputNode {
 
     if (this._focused && this._caretOn && a === b) {
       ctx.fillStyle = this.props.caretColor ?? this.resolvedTextStyle().color;
-      ctx.fillRect(originX + pos.x, originY + pos.y, 1.5, pos.height);
+      ctx.fillRect(originX + pos.x, originY + pos.y, CARET_WIDTH, pos.height);
     }
     // inside the clip, so the thumb is bounded by the content box
     this._paintScrollbar(ctx, layout);
