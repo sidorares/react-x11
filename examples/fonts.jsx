@@ -1006,56 +1006,6 @@ export function FontsPanel({
       </box>
 
       <box style={s.main}>
-        <box style={[s.specimen, { height: specimenH }]}>
-          <canvas
-            style={{ flexGrow: 1 }}
-            onDraw={draw}
-            data-testname="specimen"
-            onMouseMove={(ev) => {
-              // Pointer events carry **window** coordinates, so the node's
-              // own origin comes off before the hit test.
-              const node = ev.currentTarget ?? ev.target;
-              const found = glyphAt(
-                ev.x - (node?.abs?.x ?? 0),
-                ev.y - (node?.abs?.y ?? 0),
-              );
-              setHover((prev) =>
-                prev?.x === found?.x && prev?.id === found?.id ? prev : found,
-              );
-            }}
-            onMouseLeave={() => setHover(null)}
-          />
-        </box>
-
-        <box style={s.glyphBar} data-testname="glyph">
-          {hover ? (
-            <text style={s.glyphText}>
-              {`${[...(hover.codePoints ?? [])]
-                .map(
-                  (c) => `U+${c.toString(16).toUpperCase().padStart(4, '0')}`,
-                )
-                .join(
-                  ' ',
-                )}  ·  glyph ${hover.id}  ·  advance ${hover.advance.toFixed(2)}px  ·  ${
-                hover.extents.minX == null
-                  ? 'no ink'
-                  : `ink ${(hover.extents.maxX - hover.extents.minX).toFixed(2)}×${(
-                      hover.extents.maxY - hover.extents.minY
-                    ).toFixed(2)}px, bearing ${hover.extents.minX.toFixed(2)}px`
-              }  ·  drawn from ${hover.family}`}
-            </text>
-          ) : summary ? (
-            <text style={s.glyphHint}>
-              {`${summary.lines} line${summary.lines === 1 ? '' : 's'}  ·  line box ${summary.box.toFixed(2)}px (${(summary.box / size).toFixed(2)}em)  ·  leading ${summary.leading.toFixed(2)}px, half of it above the ascender  ·  point at a glyph for its own measurements`}
-            </text>
-          ) : (
-            <text style={s.glyphHint}>
-              Point at a glyph for its id, its advance and the face that drew it
-              — which is not always the face above.
-            </text>
-          )}
-        </box>
-
         <box style={s.controls}>
           <textinput
             style={[s.field, { flexGrow: 1 }]}
@@ -1141,6 +1091,56 @@ export function FontsPanel({
               onChange={(ev) => setShadow(Math.round(ev.value))}
             />
           </box>
+        </box>
+
+        <box style={[s.specimen, { height: specimenH }]}>
+          <canvas
+            style={{ flexGrow: 1 }}
+            onDraw={draw}
+            data-testname="specimen"
+            onMouseMove={(ev) => {
+              // Pointer events carry **window** coordinates, so the node's
+              // own origin comes off before the hit test.
+              const node = ev.currentTarget ?? ev.target;
+              const found = glyphAt(
+                ev.x - (node?.abs?.x ?? 0),
+                ev.y - (node?.abs?.y ?? 0),
+              );
+              setHover((prev) =>
+                prev?.x === found?.x && prev?.id === found?.id ? prev : found,
+              );
+            }}
+            onMouseLeave={() => setHover(null)}
+          />
+        </box>
+
+        <box style={s.glyphBar} data-testname="glyph">
+          {hover ? (
+            <text style={s.glyphText}>
+              {`${[...(hover.codePoints ?? [])]
+                .map(
+                  (c) => `U+${c.toString(16).toUpperCase().padStart(4, '0')}`,
+                )
+                .join(
+                  ' ',
+                )}  ·  glyph ${hover.id}  ·  advance ${hover.advance.toFixed(2)}px  ·  ${
+                hover.extents.minX == null
+                  ? 'no ink'
+                  : `ink ${(hover.extents.maxX - hover.extents.minX).toFixed(2)}×${(
+                      hover.extents.maxY - hover.extents.minY
+                    ).toFixed(2)}px, bearing ${hover.extents.minX.toFixed(2)}px`
+              }  ·  drawn from ${hover.family}`}
+            </text>
+          ) : summary ? (
+            <text style={s.glyphHint}>
+              {`${summary.lines} line${summary.lines === 1 ? '' : 's'}  ·  line box ${summary.box.toFixed(2)}px (${(summary.box / size).toFixed(2)}em)  ·  leading ${summary.leading.toFixed(2)}px, half of it above the ascender  ·  point at a glyph for its own measurements`}
+            </text>
+          ) : (
+            <text style={s.glyphHint}>
+              Point at a glyph for its id, its advance and the face that drew it
+              — which is not always the face above.
+            </text>
+          )}
         </box>
 
         <box style={s.detail} data-testname="detail">
