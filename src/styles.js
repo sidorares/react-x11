@@ -427,6 +427,8 @@ const STYLE_PROPS = new Set([
   'color',
   'borderStyle',
   'transition',
+  // a loop rather than a change with an end — see `animationsOf`
+  'animation',
   // CSS concepts even though they read as behaviour; React Native has been
   // moving pointerEvents into style for the same reason
   'cursor',
@@ -617,6 +619,10 @@ function validateStyle(style, where) {
     if (!STYLE_PROPS.has(key)) {
       throw new Error(`react-x11: unknown style property "${key}" in ${where}`);
     }
+    // The one style value that describes motion rather than a state, so the
+    // one whose mistakes are invisible: a loop with a bad `to` does not draw
+    // anything wrong, it simply never moves.
+    if (key === 'animation') animationsOf(style, where);
     validateValue(key, style[key], where);
     if (key === 'flex' && !isFlexShorthand(style[key])) {
       throw new Error(
@@ -702,6 +708,9 @@ export function hasStateStyles(style) {
  */
 const NOT_ANIMATABLE = new Set([
   'transition',
+  // the loop declaration itself: it is an object, and what it describes is
+  // already a value changing over time
+  'animation',
   // Both are strings that describe several numbers and a colour at once, and
   // `interpolate` works on one value. They snap, which for a state change is
   // what the shorter durations look like anyway; a card that wants to *rise*
@@ -746,15 +755,205 @@ export function transitionFor(style, prop) {
   return t[prop] ?? 0;
 }
 
+/**
+ * The easing curves an `animation` can name. `transition` has one fixed
+ * ease-out and keeps it — a change that ends looks right slowing into its
+ * new value — but a loop is a different shape: ease-out on a cycle that
+ * restarts reads as a stutter at the wrap, so the default here is `linear`
+ * and the curve is the author's to pick.
+ */
+const EASINGS = {
+  linear: (t) => t,
+  'ease-in': (t) => t ** 3,
+  'ease-out': (t) => 1 - (1 - t) ** 3,
+  'ease-in-out': (t) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2),
+};
+
+export const EASING_NAMES = Object.freeze(Object.keys(EASINGS));
+
+/** A value that is still a `$token` reference, or mentions one. */
+const unresolvedValue = (v) => isToken(v) || mentionsToken(v);
+
+// Parsed `animation` objects, keyed by the object itself: a hoisted style
+// parses once for the process, an inline one once per render. What is cached
+// is the *declaration* — `from` may still be defaulting to the property's
+// declared value, which belongs to the style rather than to this object.
+const parsedAnimations = new WeakMap();
+
+/**
+ * `animation` — a property that travels between two values and keeps doing
+ * it, as against `transition`, which is how long it takes to arrive
+ * somewhere and is over when it gets there.
+ *
+ * ```js
+ * animation: { left: { from: '-40%', to: '100%', duration: 1100 } }
+ * ```
+ *
+ * Per property rather than one config for the object, because the two things
+ * a loop needs — where it goes from and where it goes to — are per property
+ * already, and a shared `duration` would only be a shorthand for writing it
+ * twice.
+ *
+ * `from` defaults to what the style declares for that property, so a pulse
+ * reads as the resting value plus where it goes:
+ *
+ * ```js
+ * { backgroundColor: theme.track,
+ *   animation: { backgroundColor: { to: theme.accent, duration: 900,
+ *                                   alternate: true } } }
+ * ```
+ *
+ * Everything wrong with a declaration throws here rather than showing up as
+ * a thing that does not move: a loop nobody wrote a stop for is exactly the
+ * feature where silence is unreadable.
+ */
+function parseAnimation(spec, where) {
+  if (typeof spec !== 'object' || spec === null || Array.isArray(spec)) {
+    throw new Error(
+      `react-x11: invalid animation ${JSON.stringify(spec)} in ${where} ` +
+        "(expected { property: { to, duration } }, e.g. { left: { from: '0%', " +
+        "to: '100%', duration: 900 } })",
+    );
+  }
+  const entries = [];
+  for (const prop of Object.keys(spec)) {
+    const at = `"${prop}" in ${where}`;
+    if (!isAnimatableProp(prop)) {
+      throw new Error(
+        `react-x11: ${at} cannot be animated — a loop interpolates, and ` +
+          'this property has no midpoint between two values.',
+      );
+    }
+    const entry = spec[prop];
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error(
+        `react-x11: invalid animation for ${at} — expected ` +
+          '{ from?, to, duration, easing?, alternate? }, got ' +
+          JSON.stringify(entry),
+      );
+    }
+    for (const key of Object.keys(entry)) {
+      if (!['from', 'to', 'duration', 'easing', 'alternate'].includes(key)) {
+        throw new Error(
+          `react-x11: unknown animation option "${key}" for ${at} ` +
+            '(expected from, to, duration, easing, alternate)',
+        );
+      }
+    }
+    if (entry.to === undefined) {
+      throw new Error(`react-x11: animation for ${at} has no "to" value`);
+    }
+    if (
+      typeof entry.duration !== 'number' ||
+      !Number.isFinite(entry.duration) ||
+      entry.duration <= 0
+    ) {
+      throw new Error(
+        `react-x11: animation for ${at} needs a positive "duration" in ms, ` +
+          `got ${JSON.stringify(entry.duration)}`,
+      );
+    }
+    const easing = entry.easing ?? 'linear';
+    if (!Object.hasOwn(EASINGS, easing)) {
+      throw new Error(
+        `react-x11: unknown animation easing ${JSON.stringify(easing)} for ` +
+          `${at} (expected one of ${EASING_NAMES.join(', ')})`,
+      );
+    }
+    entries.push({
+      prop,
+      from: entry.from,
+      to: entry.to,
+      duration: entry.duration,
+      easing,
+      ease: EASINGS[easing],
+      alternate: Boolean(entry.alternate),
+    });
+  }
+  return entries;
+}
+
+/**
+ * The loops a style declares, with `from` resolved against the style itself
+ * and both ends checked for a midpoint. Null when there are none, so the
+ * common case allocates nothing.
+ */
+export function animationsOf(style, where = 'a style') {
+  const spec = style.animation;
+  if (spec == null) return null;
+  let parsed = parsedAnimations.get(spec);
+  if (!parsed) {
+    parsed = parseAnimation(spec, where);
+    parsedAnimations.set(spec, parsed);
+  }
+  if (parsed.length === 0) return null;
+  return parsed.map((entry) => {
+    const from = entry.from === undefined ? style[entry.prop] : entry.from;
+    if (from === undefined) {
+      throw new Error(
+        `react-x11: animation for "${entry.prop}" in ${where} has no "from" ` +
+          'value and the style does not declare one to start from',
+      );
+    }
+    // A `$token` is not a colour yet — `validateStyle` runs where the style
+    // is written, which is before the node has an ancestry to resolve
+    // against. The check is not skipped, only deferred: `_syncStyle`
+    // resolves the tokens and comes back through here with real values.
+    const resolved = from === entry.from ? entry : { ...entry, from };
+    if (unresolvedValue(from) || unresolvedValue(entry.to)) return resolved;
+    if (interpolate(from, entry.to, 0.5) === null) {
+      throw new Error(
+        `react-x11: animation for "${entry.prop}" in ${where} has no ` +
+          `midpoint between ${JSON.stringify(from)} and ` +
+          `${JSON.stringify(entry.to)} — a loop interpolates, so both ends ` +
+          'have to be numbers, colours, or percentages of the same unit.',
+      );
+    }
+    return resolved;
+  });
+}
+
+/** Whether two resolved loop declarations describe the same motion — what
+ *  decides between letting a running loop keep its phase and starting it
+ *  again from the top. A re-render that produces an equal declaration must
+ *  not make the animation jump. */
+export function sameAnimation(a, b) {
+  return (
+    a.from === b.from &&
+    a.to === b.to &&
+    a.duration === b.duration &&
+    a.easing === b.easing &&
+    a.alternate === b.alternate
+  );
+}
+
+/**
+ * Where a loop is at `elapsed` ms after it started. Pure, and the whole of
+ * the looping: the phase comes from a modulo of the elapsed time rather than
+ * from a per-cycle restart, so a bar that has been spinning for an hour is
+ * exactly where the clock says and no rounding has accumulated.
+ */
+export function animationValueAt(spec, elapsed) {
+  const cycles = Math.max(0, elapsed) / spec.duration;
+  let t = cycles % 1;
+  if (spec.alternate && Math.floor(cycles) % 2 === 1) t = 1 - t;
+  return interpolate(spec.from, spec.to, spec.ease(t)) ?? spec.from;
+}
+
+const PERCENT = /^\s*(-?\d+(?:\.\d+)?)%\s*$/;
+
 const rgba = (c) =>
   c &&
   `rgba(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)}, ${c[3]})`;
 
 /**
- * Interpolate one style value. Numbers lerp; colours lerp per channel
- * through ntk's own CSS colour parser, so anything the paint path accepts
- * animates. Anything else — a percentage string, `auto`, an enum — has no
- * meaningful midpoint and returns null, which the caller treats as a snap.
+ * Interpolate one style value. Numbers lerp; two percentages of the same
+ * unit lerp as numbers and come back as a percentage, so a value expressed
+ * against its container animates without anyone having to measure the
+ * container; colours lerp per channel through ntk's own CSS colour parser,
+ * so anything the paint path accepts animates. Anything else — `auto`, an
+ * enum, a percentage against a pixel value — has no meaningful midpoint and
+ * returns null, which the caller treats as a snap.
  *
  * The colours are parsed **straight**, not premultiplied. The result is
  * formatted back into an `rgba()` string, and that round trip only closes on
@@ -767,6 +966,19 @@ export function interpolate(from, to, t) {
     return from + (to - from) * t;
   }
   if (typeof from === 'string' && typeof to === 'string') {
+    // Percentages first, and only percentage against percentage: `'-40%'` to
+    // `'100%'` is a number moving in the container's units, which is the one
+    // way a loop can travel the width of something it never measured. Mixing
+    // one with a pixel value is still a snap — the midpoint of `10` and
+    // `'50%'` depends on a layout that has not run yet.
+    const pa = PERCENT.exec(from);
+    if (pa) {
+      const pb = PERCENT.exec(to);
+      if (!pb) return null;
+      const value = Number(pa[1]) + (Number(pb[1]) - Number(pa[1])) * t;
+      return `${Math.round(value * 1000) / 1000}%`;
+    }
+    if (PERCENT.test(to)) return null;
     const a = cssColorStraight(from);
     const b = cssColorStraight(to);
     if (!a || !b) return null;
@@ -903,13 +1115,23 @@ const TOKEN_IN_VALUE = /\$[A-Za-z_][A-Za-z0-9_-]*/g;
 const mentionsToken = (v) =>
   typeof v === 'string' && v.charCodeAt(0) !== 36 && v.includes('$');
 
+/** The nested blocks a token can hide in, one level down: a state block,
+ *  whose values are style values, and `animation`, whose values are the
+ *  per-property declarations *whose* values are style values. Both are
+ *  walked by everything that looks for a `$name`, so a themed loop resolves
+ *  by the same rules as a themed hover. */
+const animationBlocks = (style) =>
+  style.animation && typeof style.animation === 'object'
+    ? Object.values(style.animation).filter((e) => e && typeof e === 'object')
+    : [];
+
 export function styleUsesTokens(style) {
   for (const key of Object.keys(style)) {
     const v = style[key];
     if (isToken(v) || mentionsToken(v)) return true;
     if (key.charCodeAt(0) === 58 && v && styleUsesTokens(v)) return true;
   }
-  return false;
+  return animationBlocks(style).some(styleUsesTokens);
 }
 
 /** Every `$name` a style mentions. Not used internally any more — a token
@@ -923,6 +1145,7 @@ export function tokenNames(style, out = new Set()) {
       for (const m of v.match(TOKEN_IN_VALUE) ?? []) out.add(m);
     else if (key.charCodeAt(0) === 58 && v) tokenNames(v, out);
   }
+  for (const block of animationBlocks(style)) tokenNames(block, out);
   return out;
 }
 
@@ -944,6 +1167,12 @@ export function stripTokens(style) {
     // a value that *mentions* a token goes too, and whole: half a gradient
     // is not a gradient, and the node restyles on attach either way
     if (isToken(v) || mentionsToken(v)) continue;
+    // …and so does a loop with a token at either end, whole: a declaration
+    // missing one of its two values is not a shorter animation, it is one
+    // that would throw for having no midpoint.
+    if (key === 'animation' && animationBlocks(style).some(styleUsesTokens)) {
+      continue;
+    }
     out[key] = key.charCodeAt(0) === 58 && v ? stripTokens(v) : v;
   }
   return out;
@@ -999,6 +1228,31 @@ export function resolveTokens(style, theme, where = 'style', strict = true) {
       }
     } else if (key.charCodeAt(0) === 58 && v) {
       out[key] = resolveTokens(v, theme, `${where} ${key}`, strict);
+    } else if (key === 'animation' && v && typeof v === 'object') {
+      const loops = {};
+      let incomplete = false;
+      for (const prop of Object.keys(v)) {
+        const entry = v[prop];
+        if (!entry || typeof entry !== 'object') {
+          loops[prop] = entry;
+          continue;
+        }
+        const resolved = resolveTokens(
+          entry,
+          theme,
+          `${where} animation ${prop}`,
+          strict,
+        );
+        // A provisional resolution drops what it cannot resolve, which for
+        // an ordinary property means "not styled yet". A loop with one end
+        // missing is not a shorter loop, so the whole declaration waits for
+        // the ancestry to complete rather than throwing at a half of one.
+        if (Object.keys(resolved).length !== Object.keys(entry).length) {
+          incomplete = true;
+        }
+        loops[prop] = resolved;
+      }
+      if (!incomplete) out[key] = loops;
     } else {
       out[key] = v;
     }
@@ -1035,7 +1289,8 @@ export { validateStyle };
  */
 export function resolveComputedStyle(style) {
   const scrolls = style.overflow === 'scroll';
-  if (style.flex === undefined && !scrolls) return style;
+  const loops = style.animation == null ? null : animationsOf(style);
+  if (style.flex === undefined && !scrolls && !loops) return style;
   const out = {};
   if (style.flex !== undefined) {
     const expansion =
@@ -1065,6 +1320,14 @@ export function resolveComputedStyle(style) {
     ) {
       out.flexBasis = 0;
     }
+  }
+  // A loop owns the property it animates, so `from` is what the property
+  // *is* when nothing is running it — before the first frame, while the
+  // window is off screen, and on a desktop that asked for less motion. Doing
+  // it here rather than at the first tick is what makes the resting frame
+  // and the animated one the same layout: yoga is set up from this style.
+  if (loops) {
+    for (const loop of loops) out[loop.prop] = loop.from;
   }
   return out;
 }

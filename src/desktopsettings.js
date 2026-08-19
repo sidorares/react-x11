@@ -1,5 +1,6 @@
 // The desktop's interaction settings: how fast a caret blinks, how long a
-// double click has, how far a press has to move before it is a drag.
+// double click has, how far a press has to move before it is a drag, and
+// whether it wants animation at all.
 //
 // These were four constants in this codebase — `CARET_BLINK_MS` in nodes.js,
 // `DRAG_THRESHOLD` in dnd.js, and the 400ms/4px pair inside
@@ -53,6 +54,10 @@ export const DEFAULTS = Object.freeze({
   // A press is a click until it moves this far. GTK's is 8; this is the
   // DOM's, which is what the drag machinery here was built against.
   dragThreshold: 4,
+  // Whether the desktop wants things to move. On by default because that is
+  // what the desktops that never say anything mean, and because the setting
+  // exists to be turned *off* — nobody enables animation, they disable it.
+  animations: true,
   source: null,
 });
 
@@ -99,6 +104,12 @@ export function fromXSettings(map) {
       positive(map, 'Net/DoubleClickDistance') ?? DEFAULTS.doubleClickDistance,
     dragThreshold:
       positive(map, 'Net/DndDragThreshold') ?? DEFAULTS.dragThreshold,
+    // `Gtk/EnableAnimations` is GTK's `gtk-enable-animations`, which every
+    // GNOME and Xfce session writes and which "reduce motion" in the
+    // accessibility panel turns off. Like the blink above, only an explicit
+    // 0 is an answer: a desktop that never exported the key has not asked
+    // for stillness, it has said nothing.
+    animations: map.get('Gtk/EnableAnimations') !== 0,
     source: 'xsettings',
   });
 }

@@ -4,9 +4,15 @@
  * style, resolving `$token` references against a theme, or flattening the
  * array/object `style` shape the built-ins accept.
  */
-import type { Style, StyleProperties } from './types/style.js';
+import type {
+  Animation,
+  AnimationSpec,
+  Easing,
+  Style,
+  StyleProperties,
+} from './types/style.js';
 
-export type { Style, StyleProperties };
+export type { Animation, AnimationSpec, Easing, Style, StyleProperties };
 
 /** Freeze a stylesheet object, the `StyleSheet.create` of this renderer. */
 export function createStyles<T extends Record<string, Style>>(sheet: T): T;
@@ -86,6 +92,35 @@ export function transitionFor(
   prop: string,
 ): { duration: number; delay?: number } | null;
 export function ease(t: number): number;
+
+/** A resolved loop declaration: `from` filled in from the style, both ends
+ *  checked for a midpoint, the easing looked up. */
+export interface ResolvedAnimation extends Required<
+  Omit<AnimationSpec, 'easing' | 'alternate'>
+> {
+  prop: keyof StyleProperties;
+  easing: Easing;
+  alternate: boolean;
+  ease(t: number): number;
+}
+/** The loops a style declares, or null. Throws on a declaration that could
+ *  never run — see `style.animation` in docs/styling.md. */
+export function animationsOf(
+  style: StyleProperties,
+  where?: string,
+): ResolvedAnimation[] | null;
+/** Whether two resolved loops describe the same motion — what decides
+ *  between keeping a running loop's phase and starting it over. */
+export function sameAnimation(
+  a: ResolvedAnimation,
+  b: ResolvedAnimation,
+): boolean;
+/** Where a loop is `elapsed` ms after it started. */
+export function animationValueAt(
+  spec: ResolvedAnimation,
+  elapsed: number,
+): unknown;
+export const EASING_NAMES: readonly Easing[];
 
 export const EMPTY_STYLE: Readonly<StyleProperties>;
 export const STATE_KEYS: readonly string[];

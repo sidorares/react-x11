@@ -154,6 +154,13 @@ export function WidgetsPanel() {
         >{`${Math.round(progress * 100)}%`}</text>
       </Row>
 
+      <Row label="Busy">
+        <box style={{ flexGrow: 1 }}>
+          <ProgressBar aria-label="Reticulating splines" indeterminate />
+        </box>
+        <text style={{ color: '$textMuted' }}>no idea how long</text>
+      </Row>
+
       <Row label="Select">
         <Select
           options={['fast', 'faster', 'ludicrous']}

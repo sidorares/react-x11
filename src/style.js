@@ -23,7 +23,11 @@ export {
   tint,
   readableInk,
   transitionFor,
+  animationsOf,
+  sameAnimation,
+  animationValueAt,
   ease,
+  EASING_NAMES,
   EMPTY_STYLE,
   STATE_KEYS,
 } from './styles.js';

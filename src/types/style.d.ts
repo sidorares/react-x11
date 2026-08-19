@@ -319,6 +319,41 @@ export interface StyleProperties extends LayoutStyle, PaintStyle, TextStyle {
  */
 export type Transition = number | { [K in keyof StyleProperties]?: number };
 
+/** The easing curves a loop can name. A `transition` has one fixed ease-out
+ *  and does not take this: a change that ends looks right slowing into its
+ *  new value, where a cycle that restarts would stutter at the wrap. */
+export type Easing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+
+/** One property's loop. `from` defaults to what the style declares for the
+ *  property, which is also where it rests when nothing is running it. */
+export interface AnimationSpec {
+  from?: unknown;
+  to: unknown;
+  /** One crossing, in ms. */
+  duration: number;
+  /** Default `'linear'`. */
+  easing?: Easing;
+  /** Turn around at each end instead of wrapping back to `from`. */
+  alternate?: boolean;
+}
+
+/**
+ * A property that travels between two values and keeps doing it — the
+ * looping sibling of {@link Transition}, which is how long it takes to
+ * arrive somewhere and is over when it gets there.
+ *
+ * ```jsx
+ * <box style={{ position: 'absolute', start: '-40%', width: '40%',
+ *               animation: { start: { to: '100%', duration: 1100 } } }} />
+ * ```
+ *
+ * Loops run on the window's frame clock, claim the moving node's region as
+ * their damage, and stop themselves when the window is unmapped, minimized
+ * or fully obscured, when anything above the node hides it, and on a
+ * desktop that asked for reduced motion. See docs/styling.md#loops.
+ */
+export type Animation = { [K in keyof StyleProperties]?: AnimationSpec };
+
 /**
  * A window size query — the X11 analogue of `@media`, asking about the
  * window a style is laid out in: `'@width >= 600'`, `'@height < 400'`.
@@ -329,6 +364,7 @@ export type SizeQuery = `@${'width' | 'height'} ${string}`;
 /** The named blocks a style may carry, beside its own properties. */
 export interface StyleBlocks {
   transition?: Transition;
+  animation?: Animation;
   ':hover'?: StateStyle;
   /** Set while focus is on this node **or inside it** — CSS's
    * `:focus-within`, and the way a row highlights while the field in it is
