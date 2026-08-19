@@ -466,8 +466,14 @@ export interface SwitchProps extends WidgetProps, NamedWidget {
 export const Switch: ComponentType<SwitchProps>;
 
 export interface ProgressBarProps extends WidgetProps {
-  /** 0 to 1. */
+  /** 0 to 1. Ignored when {@link ProgressBarProps.indeterminate} is set. */
   value?: number;
+  /**
+   * Working, with no idea how far along: a block slides across the track
+   * forever and the bar says `aria-busy` with no value. Honours the
+   * desktop's reduced-motion setting — see docs/components.md.
+   */
+  indeterminate?: boolean;
   color?: Color;
   trackColor?: Color;
   height?: number;

@@ -6,6 +6,7 @@
 //   npm run bench:frames -- text            # a re-laid-out label
 //   npm run bench:frames -- move 8 --square # same box, no borderRadius
 //   npm run bench:frames -- cards           # a wall of rounded bordered cards
+//   npm run bench:frames -- spinner         # <ProgressBar indeterminate>
 //
 // The protocol bench (protocol.js) counts requests against an in-process
 // server, so it is deterministic — and blind to how long a real server
@@ -44,6 +45,21 @@
 //   npm run bench:frames -- cards 8 --border=2        # fast path
 //   npm run bench:frames -- cards 8 --border=2 --no-glyphs   # forced fallback
 //
+// `spinner` is issue #352's question: what does an indeterminate progress bar
+// cost? It renders once and never again — the block moves on a style loop
+// (`animation`, docs/styling.md#loops), so there is no React work per frame
+// at all — and the number to read is the damage line, which must stay
+// bounded at about the bar's own area with no FULL WINDOW frames. The A/B is
+// the thing an app would otherwise have written:
+//
+//   npm run bench:frames -- spinner
+//   npm run bench:frames -- spinner 8 --interval   # setInterval + setState
+//
+// The `--interval` arm moves an identical bar from React state at the same
+// cadence. It re-renders the tree per frame and its damage goes unbounded —
+// a layout change claims the whole window — which is the difference the
+// primitive exists for.
+//
 // `--border=N` matters more than it looks: an odd border width makes the
 // stroke's centre-line radius half-integer, which the fast path declines
 // (see docs/debugging.md).
@@ -55,6 +71,7 @@ import React from 'react';
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../../src/index.js');
 const { startTrace, formatShapes } = await import('../../src/debug.js');
+const { ProgressBar } = await import('../../src/components/index.js');
 
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const MODE = args[0] ?? 'move';
@@ -67,9 +84,10 @@ const flag = (name, fallback) => {
 const CARDS = flag('cards', 48);
 const BORDER = flag('border', 1);
 const NO_GLYPHS = process.argv.includes('--no-glyphs');
-if (!['move', 'color', 'text', 'cards'].includes(MODE)) {
+const INTERVAL = process.argv.includes('--interval');
+if (!['move', 'color', 'text', 'cards', 'spinner'].includes(MODE)) {
   console.error(
-    `unknown mode ${JSON.stringify(MODE)} — move | color | text | cards`,
+    `unknown mode ${JSON.stringify(MODE)} — move | color | text | cards | spinner`,
   );
   process.exit(1);
 }
@@ -127,8 +145,77 @@ function CardWall({ tick }) {
   );
 }
 
+const BAR_W = 400;
+const BAR_H = 8;
+const BLOCK = '40%';
+
+/**
+ * An indeterminate bar, both ways round. The loop arm is the shipped
+ * `<ProgressBar indeterminate>`; the `--interval` arm is the same drawing
+ * with its position coming from a React state change per frame instead, so
+ * the two lines of the comparison differ in nothing but who moves the block.
+ */
+function Spinner({ tick }) {
+  // 68 ticks of 16ms is the widget's own 1100ms crossing, so the two arms
+  // move at the same speed and the numbers compare
+  const at = -40 + ((tick % 68) / 68) * 140;
+  return e(
+    'window',
+    {
+      width: W,
+      height: H,
+      title: `bench:frames spinner${INTERVAL ? ' (setInterval)' : ''}`,
+      style: { backgroundColor: '#f4f4f4' },
+    },
+    e(
+      'box',
+      { style: { flexGrow: 1, padding: 16, gap: 12, alignItems: 'center' } },
+      e(
+        'text',
+        { style: { color: '#7f8c8d' } },
+        'static text above the bar to give the frame some weight',
+      ),
+      INTERVAL
+        ? e(
+            'box',
+            {
+              style: {
+                width: BAR_W,
+                height: BAR_H,
+                borderRadius: BAR_H / 2,
+                backgroundColor: '#dfe6ee',
+                overflow: 'hidden',
+              },
+            },
+            e('box', {
+              style: {
+                position: 'absolute',
+                top: 0,
+                height: BAR_H,
+                width: BLOCK,
+                left: `${at}%`,
+                borderRadius: BAR_H / 2,
+                backgroundColor: '#3498db',
+              },
+            }),
+          )
+        : e(ProgressBar, {
+            indeterminate: true,
+            height: BAR_H,
+            style: { width: BAR_W },
+          }),
+      e(
+        'text',
+        { style: { color: '#7f8c8d', marginTop: 200 } },
+        'static text below the animation to give the frame some weight',
+      ),
+    ),
+  );
+}
+
 function App({ tick }) {
   if (MODE === 'cards') return e(CardWall, { tick });
+  if (MODE === 'spinner') return e(Spinner, { tick });
   const left =
     MODE === 'move' ? Math.round(340 + 300 * Math.sin(tick / 20)) : 340;
   const color =
@@ -180,12 +267,17 @@ root.render(e(App, { tick }));
 await new Promise((r) => setTimeout(r, 500)); // mount and settle
 
 const t0 = performance.now();
-const timer = setInterval(() => {
-  tick += 1;
-  root.render(e(App, { tick }));
-}, 16);
+// The loop arm renders once and is never touched again — that *is* the
+// measurement, so there is no timer to start.
+const timer =
+  MODE === 'spinner' && !INTERVAL
+    ? null
+    : setInterval(() => {
+        tick += 1;
+        root.render(e(App, { tick }));
+      }, 16);
 await new Promise((r) => setTimeout(r, SECONDS * 1000));
-clearInterval(timer);
+if (timer) clearInterval(timer);
 const elapsed = (performance.now() - t0) / 1000;
 
 const stats = trace.stop();
@@ -213,7 +305,9 @@ const scene =
   MODE === 'cards'
     ? `cards x${CARDS}${SQUARE ? ' square' : ' r8'} bw=${BORDER}` +
       (NO_GLYPHS ? ' (glyphs off)' : '')
-    : `${MODE}${SQUARE ? ' (square)' : ''}`;
+    : MODE === 'spinner'
+      ? `spinner (${INTERVAL ? 'setInterval + setState' : 'style loop'})`
+      : `${MODE}${SQUARE ? ' (square)' : ''}`;
 console.log(
   `${scene}: ${frames.length} frames in ${elapsed.toFixed(1)}s` +
     ` = ${(frames.length / elapsed).toFixed(1)} fps (${tick} ticks issued)`,

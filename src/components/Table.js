@@ -62,7 +62,7 @@ const s = createStyles({
     cursor: 'pointer',
     transition: { backgroundColor: 80 },
   },
-  headerLabel: { fontSize: 12, textWrap: 'nowrap' },
+  headerLabel: { fontSize: 12, textWrap: 'nowrap', textOverflow: 'ellipsis' },
   grip: {
     flexShrink: 0,
     cursor: 'col-resize',
@@ -90,8 +90,11 @@ const s = createStyles({
     overflow: 'hidden',
   },
   // one line, always: a row is a fixed height, so a cell that wrapped
-  // would be sliced rather than shown — `textWrap` in styling.md
-  cellText: { fontSize: 12, textWrap: 'nowrap' },
+  // would be sliced rather than shown — `textWrap` in styling.md. And it
+  // ends in a `…` when the column is too narrow for it, because a column is
+  // resizable: the reader is the one who decided how much of a name fits,
+  // and a clip gives them no way to tell a cut name from a short one.
+  cellText: { fontSize: 12, textWrap: 'nowrap', textOverflow: 'ellipsis' },
   spacer: { flexShrink: 0 },
   // The mark is pushed to the far end of the header by a spacer, so this is
   // the floor on the gap rather than the gap: it only does anything once a

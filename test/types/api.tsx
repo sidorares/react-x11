@@ -130,6 +130,10 @@ const s = createStyles({
   title: { fontSize: 20, color: '$text', fontWeight: 'bold' },
   // the box is the capitals down to the baseline, so this padding is even
   trimmed: { fontSize: 20, textBoxTrim: 'cap-alphabetic', padding: 8 },
+  // one line, ending in a `…` rather than mid-glyph (#350)
+  cell: { textWrap: 'nowrap', textOverflow: 'ellipsis' },
+  // and the clamp, which is a count rather than a keyword
+  blurb: { maxLines: 3, textOverflow: 'ellipsis' },
   card: {
     borderRadius: 8,
     borderWidth: 1,
@@ -144,6 +148,27 @@ const s = createStyles({
     '@width >= 600': { flexDirection: 'row', gap: 24 },
   },
   perProperty: { transition: { backgroundColor: 200, left: 120 } },
+  // issue #352: the looping sibling of `transition`. `from` is optional —
+  // it defaults to what the style declares, which is also where the
+  // property rests when nothing is running the loop.
+  indeterminate: {
+    position: 'absolute',
+    width: '40%',
+    start: '-40%',
+    animation: { start: { to: '100%', duration: 1100 } },
+  },
+  pulse: {
+    backgroundColor: '$track',
+    animation: {
+      backgroundColor: {
+        from: '$track',
+        to: '$accent',
+        duration: 900,
+        easing: 'ease-in-out',
+        alternate: true,
+      },
+    },
+  },
   // issue #117: the focus ring is paint, so it is legal in a state block and
   // animatable; hit slop is neither paint nor layout
   ring: {
@@ -766,6 +791,7 @@ function Widgets() {
           onChange={(ev) => setChecked(ev.value)}
         />
         <ProgressBar value={0.4} color="#2980b9" />
+        <ProgressBar indeterminate height={6} />
         <Slider
           value={20}
           min={0}

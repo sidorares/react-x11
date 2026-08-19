@@ -586,7 +586,7 @@ answer hides the state the UI most needs to get right, and a fake that
 resolves instantly leaves nothing to assert about the state in between.
 
 **Say what does not work.** Where an example meets a real gap — no IME, no
-HiDPI scale model, no `text-overflow: ellipsis` — name it and link the issue
+HiDPI scale model, no per-node container query — name it and link the issue
 rather than steering around it. That matches how `docs/` already handles
 compatibility ladders, and a reader who hits the same wall is better served by
 a sentence than by a silence.

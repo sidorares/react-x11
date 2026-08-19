@@ -229,6 +229,10 @@ export interface PaintStyle {
 export type TextBoxTrim = 'none' | 'cap-alphabetic';
 export type TextWrap = 'wrap' | 'nowrap';
 
+/** CSS's `text-overflow`: what the end of a `<text>` that did not fit looks
+ *  like. `'clip'` slices it mid-glyph, `'ellipsis'` ends it in a `…`. */
+export type TextOverflow = 'clip' | 'ellipsis';
+
 export type TextRendering =
   'auto' | 'optimizeSpeed' | 'optimizeLegibility' | 'geometricPrecision';
 
@@ -256,8 +260,30 @@ export interface TextStyle {
   /** CSS's `text-wrap`. `'nowrap'` measures the text at unbounded width, so
    *  it stays on one line and overflows its box horizontally rather than
    *  wrapping to fit — what a fixed-height row wants, since a wrapped line in
-   *  one is sliced rather than shown. Default `'wrap'`. */
+   *  one is sliced rather than shown. Default `'wrap'`.
+   *
+   *  With `textOverflow: 'ellipsis'` it measures against the box instead:
+   *  there is nothing to elide off an unbounded line. See `textOverflow`. */
   textWrap?: TextWrap;
+  /**
+   * CSS's `text-overflow`, on text that was cut short by `maxLines`. Default
+   * `'clip'`, which slices mid-glyph; `'ellipsis'` ends the last kept line in
+   * a `…` — set in that line's own font, cut on a grapheme boundary with the
+   * tail re-shaped, and on the visually last run, so an RTL line ends on the
+   * left. What a truncated `<text>` reports to a screen reader, and what its
+   * caret indices index into, is the whole string either way.
+   *
+   * **On its own it means one line**, since there is nothing to elide without
+   * a cap: `maxLines` is how to say two or three instead.
+   */
+  textOverflow?: TextOverflow;
+  /**
+   * How many lines are kept — CSS's `-webkit-line-clamp`, under the name the
+   * platforms that got a clean shot at it chose. Unlimited by default, and
+   * `1` when `textOverflow: 'ellipsis'` is set without it. Lines past the cap
+   * are dropped before the box is measured, so the height is the kept lines'.
+   */
+  maxLines?: number;
   /** Default `'none'`. Applies to `<text>`; the editable controls keep their
    *  full line box, which their caret and selection geometry are measured
    *  against. */
@@ -293,6 +319,41 @@ export interface StyleProperties extends LayoutStyle, PaintStyle, TextStyle {
  */
 export type Transition = number | { [K in keyof StyleProperties]?: number };
 
+/** The easing curves a loop can name. A `transition` has one fixed ease-out
+ *  and does not take this: a change that ends looks right slowing into its
+ *  new value, where a cycle that restarts would stutter at the wrap. */
+export type Easing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+
+/** One property's loop. `from` defaults to what the style declares for the
+ *  property, which is also where it rests when nothing is running it. */
+export interface AnimationSpec {
+  from?: unknown;
+  to: unknown;
+  /** One crossing, in ms. */
+  duration: number;
+  /** Default `'linear'`. */
+  easing?: Easing;
+  /** Turn around at each end instead of wrapping back to `from`. */
+  alternate?: boolean;
+}
+
+/**
+ * A property that travels between two values and keeps doing it — the
+ * looping sibling of {@link Transition}, which is how long it takes to
+ * arrive somewhere and is over when it gets there.
+ *
+ * ```jsx
+ * <box style={{ position: 'absolute', start: '-40%', width: '40%',
+ *               animation: { start: { to: '100%', duration: 1100 } } }} />
+ * ```
+ *
+ * Loops run on the window's frame clock, claim the moving node's region as
+ * their damage, and stop themselves when the window is unmapped, minimized
+ * or fully obscured, when anything above the node hides it, and on a
+ * desktop that asked for reduced motion. See docs/styling.md#loops.
+ */
+export type Animation = { [K in keyof StyleProperties]?: AnimationSpec };
+
 /**
  * A window size query — the X11 analogue of `@media`, asking about the
  * window a style is laid out in: `'@width >= 600'`, `'@height < 400'`.
@@ -303,6 +364,7 @@ export type SizeQuery = `@${'width' | 'height'} ${string}`;
 /** The named blocks a style may carry, beside its own properties. */
 export interface StyleBlocks {
   transition?: Transition;
+  animation?: Animation;
   ':hover'?: StateStyle;
   /** Set while focus is on this node **or inside it** — CSS's
    * `:focus-within`, and the way a row highlights while the field in it is

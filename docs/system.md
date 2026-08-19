@@ -271,6 +271,7 @@ const { doubleClickMs, dragThreshold } = useDesktopSettings();
 | `doubleClickMs`       | how long a second click has to arrive in (400)           |
 | `doubleClickDistance` | and how far it may land from the first (4px)             |
 | `dragThreshold`       | how far a press moves before it is a drag (4px)          |
+| `animations`          | **false means reduce motion** — see below                |
 | `source`              | `'xsettings'`, or null where no settings daemon answered |
 
 **The built-in controls already follow these.** `<textinput>`'s caret, the click
@@ -279,6 +280,16 @@ an app that uses the widget set gets this for nothing. The hook is for an app
 drawing its own: a `<canvas>` with a text cursor in it, a custom gesture, a
 diagram editor with its own drag. Reach for it so that one widget on the screen
 does not feel unlike every other.
+
+`animations` is the desktop's "reduce motion", from GTK's
+`gtk-enable-animations`. **Looping animations already honour it** — a
+[`style.animation`](styling.md#loops) never starts while it is false, so
+`<ProgressBar indeterminate>` and anything else built on the loop primitive
+comes to rest with nothing to do. Transitions are left alone: a 120ms fade
+that ends is not the unbounded motion the setting exists for. Read the field
+where the _resting_ look is a design decision your app has to make — a
+spinner that does not spin should still say it is working, which is what
+`<ProgressBar indeterminate>` does by filling its track instead.
 
 `caretBlink` deserves the callout. A caret that ignores it is not a cosmetic
 miss: a moving thing on screen is what some people cannot read past, which is

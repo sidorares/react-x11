@@ -483,7 +483,7 @@ that padding twice, plus the border:
 `<textarea>` keeps its full line boxes, box and clip both: it is line spacing
 that a paragraph is made of, and nothing hangs out of a stack of them.
 
-## Keeping text on one line
+## Keeping text on one line, and saying when it did not fit
 
 ```jsx
 <text style={{ textWrap: 'nowrap' }}>{row.modified}</text>
@@ -498,7 +498,69 @@ side on the way. `'nowrap'` measures at unbounded width, so the overflow is
 horizontal, which `overflow: 'hidden'` on the box around it already knows what
 to do with. Default `'wrap'`.
 
-`<Table>` sets it on every cell and header for that reason.
+A date is the case that wants exactly that: it is a fixed width, it always
+fits, and clipping it would be a bug rather than a design. A **name** is not.
+Clipped, a truncated file name and a short one look equally complete, and the
+reader has no way to tell which they are looking at:
+
+```jsx
+<text style={{ textWrap: 'nowrap', textOverflow: 'ellipsis' }}>
+  {file.name}
+</text>
+```
+
+`textOverflow` is CSS's `text-overflow`: `'clip'` (the default) slices
+mid-glyph, `'ellipsis'` ends the line in a `…`. It is the careful version, not
+a substring —
+
+- the `…` is set in the font of the run it cut into, so an elided line ending
+  in a large or bold word gets a matching mark rather than one in the
+  paragraph's base style, and it falls back to `...` where neither that font
+  nor any fallback covers U+2026;
+- the cut is at a grapheme boundary and the tail is **re-shaped**, because
+  kerning and ligatures across the cut change widths;
+- it cuts the **visually** last run rather than the logically last one, so a
+  right-to-left line ends on its left.
+
+`maxLines` is the other half — CSS has no single-property spelling for it
+(`-webkit-line-clamp` is what everyone actually writes), so this is the name
+the platforms that got a clean shot at it chose. A three-line blurb that ends
+in a `…` is `{ maxLines: 3, textOverflow: 'ellipsis' }`; the lines past the
+cap are dropped before the box is measured, so the height is the kept lines'
+and not the whole paragraph's.
+
+**`textOverflow: 'ellipsis'` on its own means one line.** Eliding happens off
+a line count — the mark stands for the lines that were dropped — so an
+ellipsis with no cap would have nothing to say and would silently do nothing.
+One line is what a name, a path or a status line wants; `maxLines` is how to
+ask for two or three.
+
+### What `nowrap` and `ellipsis` do together
+
+They are not in tension, but they change what the `<text>` reports to layout,
+which is worth knowing before a row moves under you.
+
+A clipping `nowrap` label is measured at unbounded width, so it tells its
+container it needs the **whole string** — and CSS's automatic minimum size
+turns that into a floor. It cannot be squeezed, so a long name pushes the
+column next to it out of the row and the overflow is dealt with somewhere
+above.
+
+An eliding one is measured against the width on offer, because at unbounded
+width there is one line, one line is never over the cap, and nothing would
+ever be cut. So its floor is small and it **gives way**: it takes the room
+that is left, shows `Applicati…`, and the column beside it keeps its width.
+That is the behaviour a table wants — a column that cannot show a file name
+should say so rather than making every other column narrower to avoid it.
+
+`<Table>` sets `nowrap` and `ellipsis` on every cell and header for that
+reason.
+
+What is truncated is a fact about the pixels and nothing else. A `<text>` that
+was elided still reports the **whole** string as its accessible name, and the
+caret and selection indices still index into the whole string — a screen
+reader that read `Application Sup…` would be reading the layout instead of the
+content.
 
 ## Inheritance: the ink, the face and the size
 
@@ -557,10 +619,10 @@ and repaints, with no re-measuring and no reflow. A `fontSize` change
 _does_ re-measure, and it can only come from a React commit, a size query or
 a theme.
 
-What does **not** inherit: `textAlign`, `lineHeight`, `textWrap` and
-`textBoxTrim`. CSS inherits the first two; here they are read by the node
-that owns the **box** the text flows in, and a box is not something a
-descendant has. `<Icon>`'s `size` does not inherit either — a glyph is a
+What does **not** inherit: `textAlign`, `lineHeight`, `textWrap`,
+`textOverflow`, `maxLines` and `textBoxTrim`. CSS inherits the first two;
+here they are read by the node that owns the **box** the text flows in, and a
+box is not something a descendant has. `<Icon>`'s `size` does not inherit either — a glyph is a
 drawing rather than a letter, so it takes its default from the palette's
 `fontSize` and stays put when a label around it shrinks.
 
@@ -787,10 +849,12 @@ property; an object picks them individually.
 ```
 
 Numbers lerp and colours lerp per channel through ntk's own CSS colour
-parser, so anything the paint path accepts animates. A value with no
-meaningful midpoint — an enum like `flexDirection`, a percentage, `auto` —
-snaps instead, and `zIndex` is excluded on purpose: restacking every frame is
-not an animation.
+parser, so anything the paint path accepts animates. Two percentages of the
+same unit lerp as numbers — `'-40%'` to `'100%'` is a value travelling across
+whatever contains it, with nothing measuring the container. A value with no
+meaningful midpoint — an enum like `flexDirection`, `auto`, a percentage
+against a pixel value — snaps instead, and `zIndex` is excluded on purpose:
+restacking every frame is not an animation.
 
 The easing is a fixed ease-out cubic. A transition starts from **what is on
 screen**, not from the declared value, so interrupting one reverses from
@@ -807,6 +871,96 @@ who writes `transition: { left: 200 }` has asked for animated layout and
 pays a layout pass per frame for it. `Switch` is the worked example — the
 thumb is absolutely positioned and slides on `left`, because
 `justifyContent` would flip between the ends with nothing in between.
+
+### Loops
+
+A transition is over when it arrives. `animation` is the other shape: a
+property that travels between two values and **keeps doing it**, for the
+spinner, the pulse, and everything else that means "working, no idea how
+long".
+
+```jsx
+<box
+  style={{
+    position: 'absolute',
+    start: '-40%',
+    width: '40%',
+    animation: { start: { to: '100%', duration: 1100 } },
+  }}
+/>
+```
+
+Per property, and each one names where it goes and how long a crossing
+takes:
+
+| key         |                                                                  |
+| ----------- | ---------------------------------------------------------------- |
+| `to`        | the far end                                                      |
+| `from`      | the near end; **defaults to what the style declares**            |
+| `duration`  | one crossing, in ms                                              |
+| `easing`    | `'linear'` (default), `'ease-in'`, `'ease-out'`, `'ease-in-out'` |
+| `alternate` | turn around at each end instead of wrapping back to `from`       |
+
+`from` defaulting to the declared value is what makes a pulse read as a
+resting colour plus somewhere to go:
+
+```jsx
+style={{
+  backgroundColor: theme.track,
+  animation: {
+    backgroundColor: { to: theme.accent, duration: 900, alternate: true },
+  },
+}}
+```
+
+That value is also **where the property rests whenever the loop is not
+running** — before the first frame, off screen, or under reduced motion — so
+a loop never leaves a node with no value for the thing it animates.
+
+Why this and not a repeating `transition`: a transition is defined by a
+_change_, from what is on screen to a new target, and it has no cycle to
+repeat. A loop has no target — it has two ends and a period. They are
+different declarations because they are different things, and one of them
+would otherwise have to be spelled as the other with a flag.
+
+The easing default differs from a transition's for the same reason. A change
+that ends looks right slowing into its new value; a cycle that restarts
+would stutter at the wrap, so a loop is `linear` unless you say otherwise.
+
+**A loop costs a repaint of what moves.** It is the same machinery
+transitions run on — the window's own frame clock, a damage region claimed
+per frame — so an indeterminate progress bar repaints the bar, not the
+window. The alternative an app would otherwise write, `setInterval` →
+`setState`, is a re-render of the component and a repaint of whatever the
+damage heuristics decide, at a cadence unrelated to when the window can
+present.
+
+**And it stops itself**, which is the whole reason this is core's job. A
+forever-loop keeping a frame clock alive is invisible when it is wrong, so
+every way of going off the screen is wired to it:
+
+|                                                                                                                            |     |
+| -------------------------------------------------------------------------------------------------------------------------- | --- |
+| the window is unmapped, minimized, or fully obscured under a bare WM                                                       |     |
+| anything above the node hides it — `display: 'none'`, `<Suspense>`, `<Activity>`                                           |     |
+| the node unmounts, or the style stops declaring the loop                                                                   |     |
+| the desktop asked for **reduced motion** ([system.md](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel)) |     |
+
+Each one leaves the frame clock idle, and every one of them runs the loop
+again when it goes away — with its phase reset, since a loop that resumes
+mid-cycle would have been drawing where nobody could see it.
+
+Reduced motion is honoured in core, once, for every loop in every
+application: `Gtk/EnableAnimations` off means loops do not start. What core
+cannot decide is what the _still_ frame should look like, which is the
+author's — `<ProgressBar indeterminate>` parks its block inside the track
+rather than at its off-screen starting point, so a bar that cannot move
+still shows something in progress.
+
+Nothing about this is a per-frame callback: `animation` describes the motion
+and the renderer runs it. For a `<canvas>` drawing its own frames, `useFrame`
+inside a [`<Canvas3D>`](gl.md#useframe) is the per-frame seam, and a 2D one is not
+built yet.
 
 ## Window size queries
 

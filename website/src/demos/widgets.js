@@ -2,7 +2,9 @@ export default {
   id: 'widgets',
   title: 'The widget set',
   description:
-    'Button, Checkbox, Switch, Slider, ProgressBar, Select and Tabs. These ' +
+    'Button, Checkbox, Switch, Slider, ProgressBar — determinate and the ' +
+    'indeterminate one, whose block slides on a style loop rather than a ' +
+    'timer — Select and Tabs. These ' +
     'are plain React over the host elements — no reconciler support — and a ' +
     'ThemeProvider carries shape as well as colour: radius, border weight, ' +
     'control padding and text size.',
@@ -49,6 +51,7 @@ function Controls() {
         <Slider value={volume} min={0} max={100} step={5}
                 onChange={(ev) => setVolume(ev.value)} style={{ width: 260 }} />
         <ProgressBar value={volume / 100} style={{ width: 260 }} />
+        <ProgressBar indeterminate style={{ width: 260 }} />
       </box>
 
       <box style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>

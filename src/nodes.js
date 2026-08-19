@@ -3,6 +3,9 @@
 // ntk's frame clock. Only <window> owns a real X11 window (see NEXT_STEPS.md
 // §4 for the rationale).
 import {
+  animationValueAt,
+  animationsOf,
+  sameAnimation,
   applyLayoutStyle,
   applyLayoutDefaults,
   createLayoutNode,
@@ -77,8 +80,13 @@ import { availableArea } from './screens.js';
 import {
   DEFAULTS as DESKTOP_DEFAULTS,
   desktopSettings,
+  watchDesktopSettings,
 } from './desktopsettings.js';
-import { endWindowState } from './windowstate.js';
+import {
+  endWindowState,
+  watchWindowState,
+  windowStateSnapshot,
+} from './windowstate.js';
 import {
   anchorArea,
   anchorOffscreen,
@@ -1372,8 +1380,12 @@ export class Node {
       ':drag-over': false,
       ':dragging': false,
     };
-    // in-flight transitions: prop -> {from, to, start, duration}
+    // in-flight animations: prop -> {from, to, start, duration}. Transitions
+    // delete themselves as they land; a loop entry (`loop: true`) is removed
+    // by `_updateLoops` and by nothing else
     this._anim = null;
+    // the loops this node's style declares, whether or not they are running
+    this._loops = null;
     // `resolvedTextStyle()`'s cache: this node's own text style over what it
     // inherits. Undefined means "never asked", which is load-bearing — see
     // `_retext`
@@ -1490,6 +1502,10 @@ export class Node {
     this._targetStyle = target;
     if (displayed === undefined || this.destroyed) {
       this.style = target;
+      this._syncLoops(target);
+      if (this._anim?.size) {
+        this.style = { ...target, ...this._animatedValues() };
+      }
       return this.style;
     }
     for (const prop of Object.keys(target)) {
@@ -1511,6 +1527,11 @@ export class Node {
       });
       this.root?._startAnimating(this);
     }
+    // After the transitions, before the style is assembled: a loop that just
+    // arrived contributes a value to this very swap, so the first frame the
+    // bar is on screen already has it where the animation says rather than
+    // where the resting style does.
+    this._syncLoops(target);
     this.style = this._anim?.size
       ? { ...target, ...this._animatedValues() }
       : target;
@@ -1574,6 +1595,117 @@ export class Node {
   }
 
   /**
+   * The style declared a set of loops (`animation`, styles.js): remember
+   * them and reconcile what is running against them.
+   *
+   * Called from `_retarget`, so from every route a style arrives by — and
+   * only from there, because a loop is a property of the *style*. Whether it
+   * is allowed to run is a property of everything else, which is
+   * `_updateLoops`.
+   */
+  _syncLoops(target) {
+    const specs = target.animation == null ? null : animationsOf(target);
+    if (!specs && !this._loops) return false;
+    this._loops = specs;
+    if (!specs) this.root?._forgetLoopNode(this);
+    return this._updateLoops(false);
+  }
+
+  /**
+   * Start, keep or stop this node's loops, and answer whether anything
+   * changed. The one funnel: a style swap comes here, and so does every
+   * reason a loop must *stop* that has nothing to do with the style — the
+   * window unmapping, the desktop asking for less motion, a `display: none`
+   * three levels up.
+   *
+   * `write` is false when `_retarget` is going to assemble the style itself
+   * a line later; every other caller owns the repaint.
+   */
+  _updateLoops(write = true) {
+    const specs = this._loops;
+    if (specs) this.root?._registerLoopNode(this);
+    const running = Boolean(specs) && this._loopsAllowed();
+    const anim = this._anim;
+    let changed = false;
+    let layoutTouched = false;
+    if (anim) {
+      for (const [prop, a] of anim) {
+        if (!a.loop) continue;
+        if (running && specs.some((spec) => spec.prop === prop)) continue;
+        anim.delete(prop);
+        changed = true;
+        if (isLayoutProp(prop)) layoutTouched = true;
+      }
+    }
+    if (running) {
+      for (const spec of specs) {
+        const current = this._anim?.get(spec.prop);
+        // An equal declaration keeps its phase. React hands a fresh object
+        // down on every render, so restarting on identity would mean a
+        // spinner that jumps back to the start whenever anything above it
+        // re-rendered — which is the frame after every state change in the
+        // app.
+        if (current?.loop && sameAnimation(current, spec)) continue;
+        (this._anim ??= new Map()).set(spec.prop, {
+          ...spec,
+          loop: true,
+          start: now(),
+          value: animationValueAt(spec, 0),
+        });
+        changed = true;
+        if (isLayoutProp(spec.prop)) layoutTouched = true;
+      }
+    }
+    if (!changed) return false;
+    const before = this.style;
+    this.style = this._anim?.size
+      ? { ...this._targetStyle, ...this._animatedValues() }
+      : this._targetStyle;
+    // Out of the window's animating set here rather than on the next tick:
+    // a stop has to leave the frame clock idle, and a tick is exactly what
+    // there may never be another of.
+    if (!this._anim?.size) this.root?._animating.delete(this);
+    if (running) this.root?._startAnimating(this);
+    if (!write) return true;
+    if (layoutTouched && this.yoga) {
+      applyLayoutStyle(this.yoga, this.style, before);
+      this._invalidateLayout('animation');
+    } else {
+      this.root?.invalidate(false, this, 'animation');
+    }
+    return true;
+  }
+
+  /**
+   * Whether this node's loops may run at all.
+   *
+   * A transition stops because it arrives; a loop never does, so every one
+   * of these is load-bearing rather than an optimisation. A window keeping
+   * its frame clock alive for a spinner nobody can see is a laptop battery
+   * going down for nothing, and it is invisible by construction — the only
+   * way to notice is to look for it.
+   */
+  _loopsAllowed() {
+    const root = this.root;
+    if (this.destroyed || !root || root.destroyed || root._loopsPaused) {
+      return false;
+    }
+    if (desktopSettings(root.app).animations === false) return false;
+    return !this._hiddenInTree();
+  }
+
+  /** Whether anything between this node and its window has taken it off the
+   *  screen — React's own `hidden` flag for `<Suspense>`/`<Activity>`, or a
+   *  `display: 'none'` from a style, a state block or a size query. */
+  _hiddenInTree() {
+    for (let n = this; n; n = n.parent) {
+      if (n.hidden || n.style?.display === 'none') return true;
+      if (n.isWindow) break;
+    }
+    return false;
+  }
+
+  /**
    * Advance every in-flight transition to `now`. Returns true while any is
    * still running, so the window keeps asking for frames.
    */
@@ -1582,6 +1714,14 @@ export class Node {
     let layoutChanged = false;
     const before = this.style;
     for (const [prop, a] of this._anim) {
+      if (a.loop) {
+        // No end to test for and no rounding to accumulate: the phase is a
+        // modulo of the elapsed time, so a bar that has been going for an
+        // hour is exactly where the clock says.
+        a.value = animationValueAt(a, now - a.start);
+        if (isLayoutProp(prop)) layoutChanged = true;
+        continue;
+      }
       const t = a.duration > 0 ? Math.min(1, (now - a.start) / a.duration) : 1;
       a.value = t >= 1 ? a.to : (interpolate(a.from, a.to, ease(t)) ?? a.to);
       if (t >= 1) this._anim.delete(prop);
@@ -2179,6 +2319,13 @@ export class Node {
    * freed by the caller via freeRecursive on the subtree top. */
   destroySubtree() {
     this.destroyed = true;
+    // a loop outlives nothing: the window drops it from the set that keeps
+    // its frame clock alive, and stops watching visibility with the last one
+    this.root?._forgetLoopNode(this);
+    // …and out of the animating set in the same breath rather than on the
+    // next tick, so a spinner that unmounts leaves the clock idle even if
+    // nothing else ever asks for a frame
+    this.root?._animating.delete(this);
     // a surface that goes away takes its selection with it, and the app-wide
     // claim on being the one showing one goes with it too
     this._textSelection?.destroy();
@@ -2189,6 +2336,10 @@ export class Node {
   _setRoot(root) {
     if (this.root === root) return;
     this.root = root;
+    // A node is styled in its constructor, before it has a window — so this
+    // is where a loop declared by the very first style finds a frame clock
+    // to run on.
+    if (this._loops) this._updateLoops();
     for (const child of this.children) {
       if (!child.isWindow) child._setRoot(root);
     }
@@ -2327,6 +2478,12 @@ export class Node {
    * style, a state block or a size query (`_retarget`).
    */
   _visibilityChanged(visible) {
+    // Same rule, and the reason it shares this funnel: a loop inside a
+    // subtree that just went off the screen is drawing frames for nobody,
+    // whichever of the three routes hid it. Re-evaluated for the whole
+    // window rather than for this subtree — the set is the handful of nodes
+    // that declare an `animation`, and each one answers for itself.
+    if (this.root?._loopNodes?.size) this.root._refreshLoops();
     const events = this._focusManager();
     if (!events) return;
     if (visible) events.subtreeRevealed(this);
@@ -4067,6 +4224,41 @@ export class TextNode extends Node {
   }
 
   /**
+   * `textOverflow: 'ellipsis'` — is this paragraph one that ends in a `…`
+   * when it does not fit, rather than one that is sliced?
+   *
+   * Read in four places, because eliding is not only a drawing decision: it
+   * changes how many lines there are, which width the paragraph is shaped
+   * against, and therefore what the node reports to layout.
+   */
+  _elides() {
+    return this.style.textOverflow === 'ellipsis';
+  }
+
+  /**
+   * How many lines are kept — CSS's `-webkit-line-clamp` under the name the
+   * platforms that got a clean shot at it chose. Unlimited by default.
+   *
+   * **`textOverflow: 'ellipsis'` on its own means one line.** ntk elides off
+   * a line *count* (`truncated = lineTokens.length > maxLines`), so an
+   * ellipsis with no cap can never fire: there is nothing over the cap to
+   * stand for. Leaving it inert would make `textOverflow: 'ellipsis'` a
+   * property that silently does nothing in the case it is most often
+   * written for — a name, a path, a status line — so the cap an author
+   * almost certainly meant is the default, and `maxLines` is how they say
+   * two or three instead.
+   *
+   * A cap below one keeps one: a `<text>` that renders nothing at all is
+   * conditional rendering, not a truncation setting, and it would look like
+   * a missing label rather than like a number.
+   */
+  _maxLines() {
+    const { maxLines } = this.style;
+    if (Number.isFinite(maxLines)) return Math.max(1, Math.floor(maxLines));
+    return this._elides() ? 1 : Infinity;
+  }
+
+  /**
    * `textWrap: 'nowrap'` — CSS's, and the reason a table cell is a table cell
    * rather than a paragraph.
    *
@@ -4077,15 +4269,39 @@ export class TextNode extends Node {
    * and the same is true of any name longer than its column. Measuring at
    * unbounded width makes the overflow horizontal instead, which is what
    * `overflow: 'hidden'` on the cell already knows how to deal with.
+   *
+   * **Unless it elides.** Then the unbounded measurement is exactly what has
+   * to go: at `maxWidth: Infinity` there is one line, one line is never over
+   * the cap, and nothing is ever cut — the single-line ellipsis, which is by
+   * a distance the common case, could not be spelled at all. So an eliding
+   * `nowrap` is shaped against the width on offer, and the two properties
+   * divide up cleanly: `textWrap` says the text does not wrap, `maxLines`
+   * says how much of it is kept, and the width is the box's either way.
+   *
+   * The visible consequence is in what the node reports back to layout. A
+   * clipping `nowrap` `<text>` measures its whole string at any offer, so
+   * its min-content floor is the full width and the box around it is pushed
+   * out to fit (and then clips). An eliding one measures inside the offer,
+   * so its floor is small and it gives way instead — which is the point: a
+   * column that cannot show a file name should show `Applicati…`, not force
+   * every other column narrower to avoid saying so.
    */
   _wrapWidth(maxWidth) {
-    return this.style.textWrap === 'nowrap' ? Infinity : maxWidth;
+    if (this.style.textWrap !== 'nowrap') return maxWidth;
+    return this._elides() ? maxWidth : Infinity;
   }
 
   _layoutFor(maxWidth) {
     const fonts = this.app?.fonts;
     if (!fonts) return null; // mock container in tests: no text metrics
-    const key = String(maxWidth);
+    const maxLines = this._maxLines();
+    const overflow = this.style.textOverflow;
+    // Both truncation options are inputs to the shaping, so both belong in
+    // the key. They can only change with the style, which clears the whole
+    // map on its way past — but a cache keyed on less than it depends on is
+    // one refactor away from answering with the wrong paragraph, and the
+    // wrong paragraph here is glyphs on screen that no error mentions.
+    const key = `${maxWidth}|${maxLines}|${overflow ?? ''}`;
     let layout = this._layouts.get(key);
     if (!layout) {
       const spans = this.collectSpans([]);
@@ -4094,6 +4310,10 @@ export class TextNode extends Node {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
         align: this.style.textAlign,
         lineHeight: this.style.lineHeight,
+        maxLines: Number.isFinite(maxLines) ? maxLines : undefined,
+        // 'clip' is ntk's default, so an unset property and the CSS default
+        // are the same request rather than two paths through the layout.
+        overflow,
         // The paragraph's **base** direction, which is not the same question
         // as which script the characters are in. UAX#9 resolves a run of
         // neutrals — `"(1) 12:30"`, a filename, a lone bracket — against the
@@ -7098,6 +7318,12 @@ export class WindowNode extends Scrollable(Node) {
     this._xStack = [];
     // nodes with a transition in flight
     this._animating = new Set();
+    // …and the nodes whose style declares a *loop*, running or not: the set
+    // every stop condition is applied over, and what decides whether this
+    // window is watching its own visibility at all
+    this._loopNodes = new Set();
+    this._loopsPaused = false;
+    this._loopWatch = null;
     // nodes with `@width`/`@height` blocks, and the size they last matched
     // against
     this._sizeQueryNodes = new Set();
@@ -8509,6 +8735,10 @@ export class WindowNode extends Scrollable(Node) {
     clearPendingFrame(this);
     this._unwatchCompositing?.();
     this._unwatchCompositing = null;
+    // before endWindowState below, which is the session this is subscribed to
+    this._unwatchLoops();
+    this._loopNodes.clear();
+    this._animating.clear();
     // `useWindowState()`'s listeners, and the raw VisibilityNotify handler
     // it put on the shared connection, which nothing else would take off
     endWindowState(this);
@@ -8702,6 +8932,67 @@ export class WindowNode extends Scrollable(Node) {
     return true;
   }
 
+  /**
+   * A node in this window has a loop declared on it. Registration is what
+   * makes the window watch its own visibility — and only then: a
+   * VisibilityNotify mask bit and a `_NET_WM_STATE` selection are a real
+   * cost, and an app with no looping animation must not pay it (the same
+   * rule `useWindowState()` follows, for the same reason).
+   */
+  _registerLoopNode(node) {
+    if (this._loopNodes.has(node)) return;
+    this._loopNodes.add(node);
+    this._watchLoops();
+  }
+
+  _forgetLoopNode(node) {
+    if (!this._loopNodes.delete(node)) return;
+    if (this._loopNodes.size === 0) this._unwatchLoops();
+  }
+
+  _watchLoops() {
+    // Before realize() there is no window to select events on, and
+    // `watchWindowState` would arm a session against nothing. `flush()`
+    // retries, which costs one boolean per frame of an animation that is
+    // running anyway.
+    if (this._loopWatch || !this.window || this.destroyed) return;
+    this._loopWatch = [
+      watchWindowState(this.app, this, () => this._loopVisibilityChanged()),
+      // Reduce motion is a live setting, not a startup one: turning it on in
+      // the accessibility panel has to stop the spinner that is already
+      // going round.
+      watchDesktopSettings(this.app, () => this._refreshLoops()),
+    ];
+    this._loopVisibilityChanged();
+  }
+
+  _unwatchLoops() {
+    for (const off of this._loopWatch ?? []) {
+      try {
+        off();
+      } catch {
+        // a window already destroyed takes its subscriptions with it
+      }
+    }
+    this._loopWatch = null;
+  }
+
+  /** Minimized, fully obscured under a bare window manager, or unmapped —
+   *  see the compositor caveat at the top of windowstate.js for why
+   *  `visible` is the field to branch on rather than `obscured`. */
+  _loopVisibilityChanged() {
+    const { visible } = windowStateSnapshot(this.app, this);
+    const paused = this.hidden || !visible;
+    if (this._loopsPaused === paused) return;
+    this._loopsPaused = paused;
+    this._refreshLoops();
+  }
+
+  /** Re-ask every loop in this window whether it may run. */
+  _refreshLoops() {
+    for (const node of [...this._loopNodes]) node._updateLoops();
+  }
+
   /** A node in this window started a transition. */
   _startAnimating(node) {
     this._animating.add(node);
@@ -8754,6 +9045,11 @@ export class WindowNode extends Scrollable(Node) {
    */
   setHidden(hidden) {
     this.hidden = hidden;
+    // An unmapped window draws nothing, so a loop inside one is frames
+    // nobody sees — the same stop the WM's own minimize gets, by the same
+    // route, and the flag is kept true so a later VisibilityNotify agrees
+    // with it.
+    if (this._loopNodes.size) this._loopVisibilityChanged();
     // An unmapped window is off screen however focused the server thinks it
     // is, and a `<popup>` is worse than that: it shares the owner window's
     // keyboard, so a node inside one that is no longer on screen would go on
@@ -8935,6 +9231,8 @@ export class WindowNode extends Scrollable(Node) {
     if (this._pendingTransientFor !== undefined) {
       this._applyTransientFor(this._pendingTransientFor);
     }
+    // A window that realized after a loop registered has one now
+    if (this._loopNodes.size && !this._loopWatch) this._watchLoops();
     this._advanceAnimations(now());
     if (this.needsLayout) this._refit();
     const width = this.window.width ?? this._requestedSize?.width ?? 0;

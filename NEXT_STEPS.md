@@ -68,8 +68,8 @@ the mousedown default action (`onLink` prop), and a scrolling `<box>` wrapping
 works via the normal measured-height path. Async content (HTML images)
 reflows through the widgets' `onInvalidate` hook — implemented upstream as
 sidorares/ntk#75, released in **ntk 3.4.0** (the dependency is bumped).
-`<paragraph>` stays out (see below — maxLines/ellipsis would be a
-TextLayout feature first).
+`<paragraph>` stays out: what it would have been for — `maxLines` and an
+ellipsis — is on `<text>` itself now (#350), where it belongs.
 
 Left for later: per-link pointer cursor (cursor is per-node today),
 `<tex>` baseline alignment with surrounding `<text>`.

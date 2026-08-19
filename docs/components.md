@@ -532,19 +532,39 @@ example in [styling.md](styling.md#transitions).
 
 ### `ProgressBar`
 
-Determinate progress only.
+Determinate with a `value`, indeterminate without one.
 
-| prop         |                                                        |
-| ------------ | ------------------------------------------------------ |
-| `value`      | 0 to 1, clamped                                        |
-| `color`      | fill colour (defaults to the theme accent)             |
-| `trackColor` | the groove (defaults to the theme track)               |
-| `height`     | bar thickness, default 8; the corner radius follows it |
+| prop            |                                                         |
+| --------------- | ------------------------------------------------------- |
+| `value`         | 0 to 1, clamped                                         |
+| `indeterminate` | working, extent unknown — a block slides across forever |
+| `color`         | fill colour (defaults to the theme accent)              |
+| `trackColor`    | the groove (defaults to the theme track)                |
+| `height`        | bar thickness, default 8; the corner radius follows it  |
 
-The fill is expressed as flex ratios rather than a percentage width. A
-percentage child resolves against space that is still being measured, which
-fed back into the track's intrinsic width — a card with a fuller bar came
-out wider than one with an empty bar.
+```jsx
+<ProgressBar value={0.4} style={{ width: 200 }} />
+<ProgressBar indeterminate style={{ width: 200 }} />
+```
+
+The determinate fill is expressed as flex ratios rather than a percentage
+width. A percentage child resolves against space that is still being
+measured, which fed back into the track's intrinsic width — a card with a
+fuller bar came out wider than one with an empty bar.
+
+`indeterminate` is the worked example of a
+[style loop](styling.md#loops): the block is absolutely positioned and
+travels on the logical `start` edge from `-40%` to `100%` of the track, so it
+mirrors with the text direction, is right at any width without measuring
+anything, and repaints the bar rather than the window. It reports
+`aria-busy` **with no value at all**, which is what tells a screen reader
+that a percentage is not coming.
+
+Under [reduced motion](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel)
+the loop never starts — that part is core's, and every loop in every app gets
+it — and the block parks in the middle of the track instead of at its
+off-screen starting point. A still bar that shows nothing would say the app
+had stopped; a full one would say it had finished.
 
 ## `Select`
 
