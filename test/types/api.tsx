@@ -128,6 +128,10 @@ const s = createStyles({
   title: { fontSize: 20, color: '$text', fontWeight: 'bold' },
   // the box is the capitals down to the baseline, so this padding is even
   trimmed: { fontSize: 20, textBoxTrim: 'cap-alphabetic', padding: 8 },
+  // one line, ending in a `…` rather than mid-glyph (#350)
+  cell: { textWrap: 'nowrap', textOverflow: 'ellipsis' },
+  // and the clamp, which is a count rather than a keyword
+  blurb: { maxLines: 3, textOverflow: 'ellipsis' },
   card: {
     borderRadius: 8,
     borderWidth: 1,

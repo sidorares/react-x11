@@ -32,9 +32,11 @@ const h = React.createElement;
 
 const ALL_FILES = '__all__';
 
-// A row is one line high, so a name longer than its column is clipped at the
-// column's edge rather than wrapped into a line and a half of name.
-const NOWRAP = Object.freeze({ textWrap: 'nowrap' });
+// A row is one line high, so a name longer than its column ends at the
+// column's edge rather than wrapping into a line and a half of name — and
+// ends in a `…`, the same as the cells `<Table>` renders itself, so a cut
+// name and a short one do not read alike.
+const NOWRAP = Object.freeze({ textWrap: 'nowrap', textOverflow: 'ellipsis' });
 
 // Stat-ing every entry is one syscall each, which is nothing on a local
 // filesystem and very much something on a network mount with ten thousand

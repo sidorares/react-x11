@@ -4067,6 +4067,41 @@ export class TextNode extends Node {
   }
 
   /**
+   * `textOverflow: 'ellipsis'` — is this paragraph one that ends in a `…`
+   * when it does not fit, rather than one that is sliced?
+   *
+   * Read in four places, because eliding is not only a drawing decision: it
+   * changes how many lines there are, which width the paragraph is shaped
+   * against, and therefore what the node reports to layout.
+   */
+  _elides() {
+    return this.style.textOverflow === 'ellipsis';
+  }
+
+  /**
+   * How many lines are kept — CSS's `-webkit-line-clamp` under the name the
+   * platforms that got a clean shot at it chose. Unlimited by default.
+   *
+   * **`textOverflow: 'ellipsis'` on its own means one line.** ntk elides off
+   * a line *count* (`truncated = lineTokens.length > maxLines`), so an
+   * ellipsis with no cap can never fire: there is nothing over the cap to
+   * stand for. Leaving it inert would make `textOverflow: 'ellipsis'` a
+   * property that silently does nothing in the case it is most often
+   * written for — a name, a path, a status line — so the cap an author
+   * almost certainly meant is the default, and `maxLines` is how they say
+   * two or three instead.
+   *
+   * A cap below one keeps one: a `<text>` that renders nothing at all is
+   * conditional rendering, not a truncation setting, and it would look like
+   * a missing label rather than like a number.
+   */
+  _maxLines() {
+    const { maxLines } = this.style;
+    if (Number.isFinite(maxLines)) return Math.max(1, Math.floor(maxLines));
+    return this._elides() ? 1 : Infinity;
+  }
+
+  /**
    * `textWrap: 'nowrap'` — CSS's, and the reason a table cell is a table cell
    * rather than a paragraph.
    *
@@ -4077,15 +4112,39 @@ export class TextNode extends Node {
    * and the same is true of any name longer than its column. Measuring at
    * unbounded width makes the overflow horizontal instead, which is what
    * `overflow: 'hidden'` on the cell already knows how to deal with.
+   *
+   * **Unless it elides.** Then the unbounded measurement is exactly what has
+   * to go: at `maxWidth: Infinity` there is one line, one line is never over
+   * the cap, and nothing is ever cut — the single-line ellipsis, which is by
+   * a distance the common case, could not be spelled at all. So an eliding
+   * `nowrap` is shaped against the width on offer, and the two properties
+   * divide up cleanly: `textWrap` says the text does not wrap, `maxLines`
+   * says how much of it is kept, and the width is the box's either way.
+   *
+   * The visible consequence is in what the node reports back to layout. A
+   * clipping `nowrap` `<text>` measures its whole string at any offer, so
+   * its min-content floor is the full width and the box around it is pushed
+   * out to fit (and then clips). An eliding one measures inside the offer,
+   * so its floor is small and it gives way instead — which is the point: a
+   * column that cannot show a file name should show `Applicati…`, not force
+   * every other column narrower to avoid saying so.
    */
   _wrapWidth(maxWidth) {
-    return this.style.textWrap === 'nowrap' ? Infinity : maxWidth;
+    if (this.style.textWrap !== 'nowrap') return maxWidth;
+    return this._elides() ? maxWidth : Infinity;
   }
 
   _layoutFor(maxWidth) {
     const fonts = this.app?.fonts;
     if (!fonts) return null; // mock container in tests: no text metrics
-    const key = String(maxWidth);
+    const maxLines = this._maxLines();
+    const overflow = this.style.textOverflow;
+    // Both truncation options are inputs to the shaping, so both belong in
+    // the key. They can only change with the style, which clears the whole
+    // map on its way past — but a cache keyed on less than it depends on is
+    // one refactor away from answering with the wrong paragraph, and the
+    // wrong paragraph here is glyphs on screen that no error mentions.
+    const key = `${maxWidth}|${maxLines}|${overflow ?? ''}`;
     let layout = this._layouts.get(key);
     if (!layout) {
       const spans = this.collectSpans([]);
@@ -4094,6 +4153,10 @@ export class TextNode extends Node {
         maxWidth: Number.isFinite(maxWidth) ? maxWidth : undefined,
         align: this.style.textAlign,
         lineHeight: this.style.lineHeight,
+        maxLines: Number.isFinite(maxLines) ? maxLines : undefined,
+        // 'clip' is ntk's default, so an unset property and the CSS default
+        // are the same request rather than two paths through the layout.
+        overflow,
         // The paragraph's **base** direction, which is not the same question
         // as which script the characters are in. UAX#9 resolves a run of
         // neutrals — `"(1) 12:30"`, a filename, a lone bracket — against the

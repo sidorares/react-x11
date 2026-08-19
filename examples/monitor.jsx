@@ -376,11 +376,16 @@ const s = createStyles({
   },
   pid: { width: COL.pid, fontSize: 11, color: '$textMuted', textAlign: 'end' },
   // `overflow: 'hidden'` is what keeps a long name inside its column instead
-  // of running under the graph beside it. There is no `text-overflow:
-  // ellipsis` here, so the name is trimmed with one in JS as well — the clip
-  // is the backstop for the case the trim misjudges.
+  // of running under the graph beside it, and `textOverflow` is what makes it
+  // *say* it did: cut at the pixel the column ends at, in the font the name
+  // is set in, rather than at a character count guessed in JS.
   nameCell: { flexGrow: 1, overflow: 'hidden' },
-  name: { fontSize: 12, color: '$text', textWrap: 'nowrap' },
+  name: {
+    fontSize: 12,
+    color: '$text',
+    textWrap: 'nowrap',
+    textOverflow: 'ellipsis',
+  },
   spark: { width: COL.spark },
   num: { width: COL.num, fontSize: 11, color: '$text', textAlign: 'end' },
   onAccent: { color: '$accentText' },
@@ -403,13 +408,6 @@ const s = createStyles({
     borderColor: '$border',
   },
 });
-
-/** No `text-overflow: ellipsis` in react-x11, so the trim is here. Generous
- *  on purpose: the column clips whatever this misjudges, and a name cut two
- *  characters early reads worse than one cut exactly. */
-function clip(name, max = 44) {
-  return name.length > max ? `${name.slice(0, max - 1)}…` : name;
-}
 
 const SORTS = {
   cpu: (a, b) => b.cpu - a.cpu,
@@ -436,7 +434,7 @@ function ProcessRow({ row, selected, onSelect }) {
     >
       <text style={[s.pid, selected && s.onAccent]}>{String(row.pid)}</text>
       <box style={s.nameCell}>
-        <text style={[s.name, selected && s.onAccent]}>{clip(row.name)}</text>
+        <text style={[s.name, selected && s.onAccent]}>{row.name}</text>
       </box>
       <sparkline
         data={row.history ?? []}

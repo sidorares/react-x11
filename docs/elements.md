@@ -950,14 +950,24 @@ run list so wrapping spans the whole content.
 | `textRendering`                                     | which glyph path to draw with — see below              |
 | `textAlign`                                         | `left`, `right`, `center`, `start`, `end` (bidi-aware) |
 | `lineHeight`                                        | multiplier over the natural font line height           |
+| `textWrap`                                          | `wrap` (default) or `nowrap`                           |
+| `maxLines`                                          | how many lines are kept — unlimited by default         |
+| `textOverflow`                                      | `clip` (default) or `ellipsis`, for what was cut       |
 
 The first four rows and `fontVariationSettings` and `textRendering`
 **inherit** — from a nested span's point of view that has always been true,
 and it is equally true across a `<box>`, so a caption block is written once
 around the labels in it
 ([styling.md](styling.md#inheritance-the-ink-the-face-and-the-size)).
-`textAlign` and `lineHeight` do not: they shape the box the lines flow in,
-which belongs to the `<text>` that owns it.
+The rest do not: they shape the box the lines flow in, which belongs to the
+`<text>` that owns it.
+
+`maxLines` and `textOverflow` are how a label says it did not fit —
+`{ textWrap: 'nowrap', textOverflow: 'ellipsis' }` is one line ending in a
+`…` at the pixel the box ends at, and an ellipsis with no `maxLines` means
+one line. The cut is a fact about the pixels only: the accessible name, the
+caret indices and `textContent()` are all still the whole string. See
+[styling.md](styling.md#keeping-text-on-one-line-and-saying-when-it-did-not-fit).
 
 A face the app supplies itself — one it ships, or one the user picked in a
 dialog — is opened with `loadFont`/`useFont`, which hand back the family
