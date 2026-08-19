@@ -483,7 +483,7 @@ that padding twice, plus the border:
 `<textarea>` keeps its full line boxes, box and clip both: it is line spacing
 that a paragraph is made of, and nothing hangs out of a stack of them.
 
-## Keeping text on one line
+## Keeping text on one line, and saying when it did not fit
 
 ```jsx
 <text style={{ textWrap: 'nowrap' }}>{row.modified}</text>
@@ -498,7 +498,69 @@ side on the way. `'nowrap'` measures at unbounded width, so the overflow is
 horizontal, which `overflow: 'hidden'` on the box around it already knows what
 to do with. Default `'wrap'`.
 
-`<Table>` sets it on every cell and header for that reason.
+A date is the case that wants exactly that: it is a fixed width, it always
+fits, and clipping it would be a bug rather than a design. A **name** is not.
+Clipped, a truncated file name and a short one look equally complete, and the
+reader has no way to tell which they are looking at:
+
+```jsx
+<text style={{ textWrap: 'nowrap', textOverflow: 'ellipsis' }}>
+  {file.name}
+</text>
+```
+
+`textOverflow` is CSS's `text-overflow`: `'clip'` (the default) slices
+mid-glyph, `'ellipsis'` ends the line in a `…`. It is the careful version, not
+a substring —
+
+- the `…` is set in the font of the run it cut into, so an elided line ending
+  in a large or bold word gets a matching mark rather than one in the
+  paragraph's base style, and it falls back to `...` where neither that font
+  nor any fallback covers U+2026;
+- the cut is at a grapheme boundary and the tail is **re-shaped**, because
+  kerning and ligatures across the cut change widths;
+- it cuts the **visually** last run rather than the logically last one, so a
+  right-to-left line ends on its left.
+
+`maxLines` is the other half — CSS has no single-property spelling for it
+(`-webkit-line-clamp` is what everyone actually writes), so this is the name
+the platforms that got a clean shot at it chose. A three-line blurb that ends
+in a `…` is `{ maxLines: 3, textOverflow: 'ellipsis' }`; the lines past the
+cap are dropped before the box is measured, so the height is the kept lines'
+and not the whole paragraph's.
+
+**`textOverflow: 'ellipsis'` on its own means one line.** Eliding happens off
+a line count — the mark stands for the lines that were dropped — so an
+ellipsis with no cap would have nothing to say and would silently do nothing.
+One line is what a name, a path or a status line wants; `maxLines` is how to
+ask for two or three.
+
+### What `nowrap` and `ellipsis` do together
+
+They are not in tension, but they change what the `<text>` reports to layout,
+which is worth knowing before a row moves under you.
+
+A clipping `nowrap` label is measured at unbounded width, so it tells its
+container it needs the **whole string** — and CSS's automatic minimum size
+turns that into a floor. It cannot be squeezed, so a long name pushes the
+column next to it out of the row and the overflow is dealt with somewhere
+above.
+
+An eliding one is measured against the width on offer, because at unbounded
+width there is one line, one line is never over the cap, and nothing would
+ever be cut. So its floor is small and it **gives way**: it takes the room
+that is left, shows `Applicati…`, and the column beside it keeps its width.
+That is the behaviour a table wants — a column that cannot show a file name
+should say so rather than making every other column narrower to avoid it.
+
+`<Table>` sets `nowrap` and `ellipsis` on every cell and header for that
+reason.
+
+What is truncated is a fact about the pixels and nothing else. A `<text>` that
+was elided still reports the **whole** string as its accessible name, and the
+caret and selection indices still index into the whole string — a screen
+reader that read `Application Sup…` would be reading the layout instead of the
+content.
 
 ## Inheritance: the ink, the face and the size
 
@@ -557,10 +619,10 @@ and repaints, with no re-measuring and no reflow. A `fontSize` change
 _does_ re-measure, and it can only come from a React commit, a size query or
 a theme.
 
-What does **not** inherit: `textAlign`, `lineHeight`, `textWrap` and
-`textBoxTrim`. CSS inherits the first two; here they are read by the node
-that owns the **box** the text flows in, and a box is not something a
-descendant has. `<Icon>`'s `size` does not inherit either — a glyph is a
+What does **not** inherit: `textAlign`, `lineHeight`, `textWrap`,
+`textOverflow`, `maxLines` and `textBoxTrim`. CSS inherits the first two;
+here they are read by the node that owns the **box** the text flows in, and a
+box is not something a descendant has. `<Icon>`'s `size` does not inherit either — a glyph is a
 drawing rather than a letter, so it takes its default from the palette's
 `fontSize` and stays put when a label around it shrinks.
 

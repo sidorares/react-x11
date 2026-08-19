@@ -240,6 +240,13 @@ export const TEXT_LAYOUT_PROPS = new Set([
   // unbounded width, so the text is one line and whatever contains it decides
   // what to do about the overflow
   'textWrap',
+  // The truncation pair. Both are handed straight to ntk's TextLayout, which
+  // does the careful version — the ellipsis in the cut run's own font, the
+  // cut on a grapheme boundary with the tail re-shaped, and on the visually
+  // last run rather than the logically last one. `textOverflow` changes what
+  // fits on a line, so it is a measurement input like the rest of this set.
+  'textOverflow',
+  'maxLines',
 ]);
 
 /**
@@ -264,10 +271,11 @@ export const TEXT_PAINT_PROPS = new Set(['textRendering']);
  *
  * This is CSS's inherited set narrowed to what a *descendant* can act on: the
  * face, the size, the ink and the glyph rounding. `textAlign`, `lineHeight`,
- * `textWrap` and `textBoxTrim` stay out even though CSS inherits the first
- * two — here they are read by the node that owns the **box** the text flows
- * in, and a box is not something a descendant has. A `<box>` that wants its
- * children aligned says so in the styles it gives them.
+ * `textWrap`, `textOverflow`, `maxLines` and `textBoxTrim` stay out even
+ * though CSS inherits the first two — here they are read by the node that
+ * owns the **box** the text flows in, and a box is not something a descendant
+ * has. A `<box>` that wants its children aligned says so in the styles it
+ * gives them.
  */
 export const INHERITED_TEXT_PROPS = new Set([
   'fontFamily',

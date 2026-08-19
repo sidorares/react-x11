@@ -246,7 +246,13 @@ const s = createStyles({
     ':hover': { backgroundColor: '$accentHover' },
   },
   glyph: { width: 16, fontSize: 12, color: '$textMuted' },
-  entry: { flexGrow: 1, fontSize: 12, color: '$text', textWrap: 'nowrap' },
+  entry: {
+    flexGrow: 1,
+    fontSize: 12,
+    color: '$text',
+    textWrap: 'nowrap',
+    textOverflow: 'ellipsis',
+  },
   entryCell: { flexGrow: 1, overflow: 'hidden' },
 
   message: { padding: 16, gap: 6 },
