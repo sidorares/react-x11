@@ -59,6 +59,7 @@ import {
   systemBus,
   useApp,
   useClipboard,
+  useSupports,
   useDesktopSettings,
   useFileDialog,
   useGlobalMenu,
@@ -1068,6 +1069,18 @@ async function main() {
   // @ts-expect-error — not a sink
   startTrace({ sink: 'xml' });
   void [n, perOpcode, one.stats.errors, one.stop()];
+}
+
+// the two things a display can be asked about, both plain booleans — one is
+// about the machine and the compositor, the other about the backend this
+// connection got
+function _Supports() {
+  const canBlend: boolean = useSupports('transparency');
+  const shaders: boolean = useSupports('shaders');
+  // @ts-expect-error — not a feature useSupports knows
+  useSupports('webgpu');
+  void [canBlend, shaders];
+  return null;
 }
 
 // the clipboard facade: groups, options, and the two read contracts

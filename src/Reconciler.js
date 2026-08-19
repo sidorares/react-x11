@@ -197,21 +197,22 @@ const HostConfig = {
     }
     if (hostContext.isInside3d) {
       // A shader material needs a pipeline that has shaders. Whether this
-      // connection has one is already known — ntk settles it during connect —
-      // so the answer arrives here rather than as a blank surface later.
+      // connection draws through one is already known — the policy chose and
+      // ntk settled the probe during connect — so the answer arrives here
+      // rather than as a blank surface later.
       if (DIRECT_ONLY_KINDS[type] && !hasDirectGL(rootContainer)) {
-        // Say which of the several reasons it is. ntk worked it out during
-        // the connection handshake, and they call for different fixes — an
-        // addon to install, a display that cannot carry descriptors, a server
-        // without DRI3, or simply a policy left at its default.
+        // Say which of the several reasons it is. They call for different
+        // fixes — a policy that never asked for direct, an addon to install,
+        // a display that cannot carry descriptors, a server without DRI3 —
+        // and only the first is about this program rather than the machine.
         const reason = directGLFailure(rootContainer);
         const why = reason
           ? `\n\n${reason.code}: ${reason.message}` +
             (reason.hint ? `\n\n${reason.hint}` : '')
-          : '\n\nThe direct-rendering probe has not run on this connection. It runs ' +
-            'during createRoot() when glPolicy could select the direct backend, and ' +
-            'the default policy is "indirect":\n\n' +
-            "  const root = await createRoot({ glPolicy: 'auto' });";
+          : '\n\nThe direct-rendering probe has not answered yet on this connection. ' +
+            'createRoot() waits for it under a policy that could select the direct ' +
+            'backend, so a policy raised after connecting needs one settle first:\n\n' +
+            '  await app.glCapabilities();';
         const err = new Error(
           `react-x11: <${type}> needs direct rendering — ${DIRECT_ONLY_KINDS[type]} — ` +
             `and this connection does not have it.${why}\n\n` +

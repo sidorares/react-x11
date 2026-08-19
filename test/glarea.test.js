@@ -525,6 +525,63 @@ for (const [what, scene] of [
   });
 }
 
+// What the guard was blurring: ntk's probe answers what the *machine* could
+// do and consults glPolicy only for 'off', so a DRI3-capable box resolves
+// `direct: true` under the default 'indirect' policy too — while the context
+// that draws is still indirect GLX. The element has to refuse there, and the
+// reason has to be the policy rather than one of the hardware ones, because
+// that is the only one the reader can do anything about (issue #357).
+test('a capable machine the policy never asked is not direct rendering', async () => {
+  const { app } = await createGlApp();
+  // the capabilities such a box caches: addon loaded, DRI3 and Present there
+  app._glCapsResolved = {
+    direct: true,
+    indirect: true,
+    device: '/dev/dri/renderD128',
+    reason: null,
+  };
+  const x11Root = await createRoot({ app });
+  const realError = console.error;
+  console.error = () => {};
+  try {
+    await assert.rejects(
+      () =>
+        flush(() =>
+          x11Root.render(
+            h(
+              'window',
+              { width: 320, height: 240 },
+              h(
+                Canvas3D,
+                { style: { flexGrow: 1 } },
+                h(
+                  'mesh',
+                  null,
+                  h('boxGeometry', { args: [1, 1, 1] }),
+                  h('shaderMaterial', {
+                    vertexShader: 'void main() {}',
+                    fragmentShader: 'void main() {}',
+                  }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      (err) => {
+        assert.equal(err.code, 'GL_POLICY_INDIRECT');
+        assert.match(err.message, /<shaderMaterial> needs direct rendering/);
+        // the policy, named, and the change that would answer differently
+        assert.match(err.message, /glPolicy is 'indirect'/);
+        assert.match(err.message, /glPolicy: 'auto'/);
+        return true;
+      },
+    );
+  } finally {
+    console.error = realError;
+    await app.close();
+  }
+});
+
 // The fallback means "this machine has no 3D". A render target that came
 // back incomplete, or an addon too old to have framebuffer objects, is one
 // broken effect on a surface that is otherwise drawing — swapping the whole

@@ -140,9 +140,13 @@ export function useClipboard(): Clipboard;
 /**
  * Features `useSupports()` can be asked about.
  *
- * `'shaders'` is whether 3D can run your own GLSL — the direct rendering
- * backend. Ask it before rendering a `<shaderMaterial>`, which throws where
- * there is no pipeline to compile it. Needs `createRoot({ glPolicy: 'auto' })`.
+ * `'shaders'` is whether 3D can run your own GLSL — that is, whether this
+ * connection draws through the direct rendering backend. Ask it before
+ * rendering a `<shaderMaterial>`, which throws where there is no pipeline to
+ * compile it. It needs `createRoot({ glPolicy: 'auto' })`: under the default
+ * policy it is false whatever the machine could do, because the indirect
+ * backend is what draws. `app.glCapabilities()` is the machine's answer, and
+ * says why.
  */
 export type SupportsFeature = 'transparency' | 'shaders';
 
