@@ -42,6 +42,10 @@ export { useWindowState } from './windowstate.js';
 export { keepAwake } from './idle.js';
 export { useIdle, useKeepAwake } from './idlehooks.js';
 export { useKeyboardState } from './keyboardstatehooks.js';
+// menu accelerators, and the same chord vocabulary for a shortcut that is
+// not in a menu (#351)
+export { matchesShortcut } from './accelerators.js';
+export { useAccelerator } from './acceleratorhooks.js';
 export { useDesktopSettings } from './desktopsettingshooks.js';
 export { loadFont, openFont } from './fonts.js';
 export { useFont } from './fonthooks.js';

@@ -5,7 +5,9 @@ export default {
     'MenuBar and ContextMenu render into <popup> — override-redirect X ' +
     'windows at screen coordinates, so a menu escapes its owner window and ' +
     'flips at screen edges instead of being clipped. Submenus, keyboard ' +
-    'navigation and type-ahead come with them.',
+    'navigation, type-ahead and the accelerators come with them: the ' +
+    'shortcut a row draws is the shortcut it answers, so Ctrl+N picks New ' +
+    'without the menu being opened.',
   code: `import React, { useState } from 'react';
 import { createRoot, MenuBar, ContextMenu } from 'react-x11';
 
@@ -69,6 +71,9 @@ function App() {
           </text>
           <text style={{ fontSize: 13, color: '#7b8794' }}>
             or use the menu bar — arrows, Home/End and type-ahead all work
+          </text>
+          <text style={{ fontSize: 13, color: '#7b8794' }}>
+            or press Ctrl+N: a shortcut a row draws is one it answers
           </text>
           <box style={{
             marginTop: 8,

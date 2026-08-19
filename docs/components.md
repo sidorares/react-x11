@@ -1109,6 +1109,17 @@ toggleType, toggleState, icon, iconName, disposition, key }`. Both take an
 `onSelect(item)` prop as well, fired after the item's own. A bar menu opens on
 the **press**, for the reason `Select` does.
 
+**`shortcut` is a binding, not a label.** It is a list of alternatives, each a
+list of modifier tokens ending in the key — `[['Control', 'S']]` — and a
+mounted menu answers it: Ctrl+S fires that item's `onSelect` without the menu
+being opened, gated by the item's own `enabled` and `visible`, and it keeps
+working when the desktop's panel has taken the menu over. One array is then
+the drawn menu, the exported dbusmenu payload, the `aria-keyshortcuts`
+announcement and the binding, so there is nothing to keep in step by hand. The
+chord rules, the vocabulary the key tokens come from, `useAccelerator` for a
+shortcut that is not in a menu, and `accelerators={false}` for an app with its
+own dispatcher are all in [events.md](events.md#accelerators).
+
 **The vocabulary is `com.canonical.dbusmenu`'s**, and that is not incidental.
 On a desktop whose panel shows application menus, `MenuBar` hands this array
 straight over and stops drawing — no configuration, no second authoring model,

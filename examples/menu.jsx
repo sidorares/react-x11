@@ -9,6 +9,12 @@
 // Right opens a submenu and Left leaves it, Enter picks, Escape closes one
 // level at a time.
 //
+// **The shortcuts a row draws are the shortcuts it answers.** Ctrl+S with no
+// menu open says "Save", Ctrl+Shift+S does not, and Ctrl+Y — drawn on a
+// disabled Redo — does nothing at all: one array is the drawn menu, the
+// exported one and the binding. Ctrl+K is the other half, `useAccelerator`,
+// for a shortcut that is in no menu. See docs/events.md#accelerators.
+//
 // **Extremes → Large menu items** is the stress switch: ticking it puts
 // twenty pull-downs on a 520px bar and thirty rows in the File menu, which is
 // how the bar behaves when it is wider than its window and how a menu behaves
@@ -36,6 +42,7 @@ import {
   ContextMenu,
   fileDialogBackend,
   MenuBar,
+  useAccelerator,
   useFileDialog,
 } from '../src/index.js';
 
@@ -219,7 +226,14 @@ function App() {
           shortcut: [['Control', 'S']],
           onSelect: note('Save'),
         },
-        { label: 'Save As…', icon: ICONS.save, onSelect: save() },
+        {
+          // a second alternative on the same command, which is what `aas`
+          // being a list of *alternatives* is for — only the first is drawn
+          label: 'Save As…',
+          icon: ICONS.save,
+          shortcut: [['Control', 'Shift', 'S'], ['F12']],
+          onSelect: save(),
+        },
         {
           label: 'Export',
           items: [
@@ -371,6 +385,11 @@ function App() {
         ),
       ];
 
+  // A shortcut that is in no menu, which every application has some of. Same
+  // chord vocabulary as the rows above, so moving it into the Edit menu later
+  // is a cut and a paste rather than a rewrite.
+  useAccelerator([['Control', 'K']], () => setLast('—'));
+
   const contextItems = [
     {
       label: 'Cut',
@@ -415,6 +434,12 @@ function App() {
         <MenuBar menus={bar} onGlobalMenuChange={setInPanel} />
         <ContextMenu
           items={contextItems}
+          // Its rows are the Edit menu's commands under another name, and
+          // two menus claiming Ctrl+C would be a coin flip over which one
+          // ran. The bar owns the chords; this menu draws them because a
+          // context menu that hid the shortcut its own row has would be
+          // teaching the wrong thing.
+          accelerators={false}
           style={{
             flexGrow: 1,
             justifyContent: 'center',
@@ -428,7 +453,8 @@ function App() {
               : 'Right-click anywhere below the bar'}
           </text>
           <text style={{ color: '$textMuted' }}>
-            last choice: <text style={{ color: '$accent' }}>{last}</text>
+            last choice: <text style={{ color: '$accent' }}>{last}</text> — try
+            Ctrl+S, then Ctrl+Shift+S, then Ctrl+K to clear
           </text>
           <text style={{ color: '$textMuted' }}>
             wrap lines: {wrap ? 'on' : 'off'}

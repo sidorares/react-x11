@@ -49,9 +49,33 @@ export const visibleItems = (items) => (items ?? []).filter(isVisible);
 // Shortcuts
 // --------------------------------------------------------------------------
 
-// How dbusmenu spells the modifiers. The key token is whatever is left over
-// after them, and it comes last.
-const MODIFIERS = new Set(['Control', 'Alt', 'Shift', 'Super']);
+/**
+ * How dbusmenu spells the modifiers. The key token is whatever is left over
+ * after them, and it comes last.
+ *
+ * Exported because a chord is now matched as well as drawn (`accelerators.js`,
+ * issue #351), and a second copy of this set in the matcher would be a second
+ * answer to "is `Super` a modifier or a key called Super".
+ */
+export const MODIFIER_TOKENS = new Set(['Control', 'Alt', 'Shift', 'Super']);
+
+/**
+ * One `aas` alternative split into what it means: the modifiers held down,
+ * in the order they were written, and the key it ends on (`null` for a chord
+ * that is nothing but modifiers, which is not a chord).
+ *
+ * The single reader of the token list — the row draws from it, the panel's
+ * announcement spells it, and the key path matches against it.
+ */
+export function splitChord(chord) {
+  const modifiers = new Set();
+  let key = null;
+  for (const token of chord ?? []) {
+    if (MODIFIER_TOKENS.has(token)) modifiers.add(token);
+    else key = token;
+  }
+  return { modifiers, key };
+}
 
 // What a person reads. `Control` is the wire spelling and `Ctrl` is the one
 // every desktop puts in front of a user, which is the entire reason this map
@@ -98,12 +122,8 @@ const KEY_LABELS = {
  * must not render differently.
  */
 function formatChord(chord) {
-  const parts = [];
-  let key = null;
-  for (const token of chord) {
-    if (MODIFIERS.has(token)) parts.push(MODIFIER_LABELS[token]);
-    else key = token;
-  }
+  const { modifiers, key } = splitChord(chord);
+  const parts = [...modifiers].map((token) => MODIFIER_LABELS[token]);
   if (key != null) {
     parts.push(KEY_LABELS[key] ?? (key.length === 1 ? key.toUpperCase() : key));
   }
@@ -147,7 +167,7 @@ export function ariaKeyShortcuts(shortcut) {
     .map((chord) =>
       chord
         .map((token) =>
-          MODIFIERS.has(token)
+          MODIFIER_TOKENS.has(token)
             ? ARIA_MODIFIERS[token]
             : (KEY_LABELS[token] ?? token),
         )

@@ -8,7 +8,7 @@
  */
 import React, { useRef, useState } from 'react';
 import { startTrace } from 'react-x11/debug';
-import { XK_MULTI_KEY, isDeadKeysym } from 'react-x11/keysyms';
+import { XK_MULTI_KEY, isDeadKeysym, keysymFromName } from 'react-x11/keysyms';
 import { onReload, performReactRefresh } from 'react-x11/refresh';
 import { registerRefresh, createTransformer } from 'react-x11/refresh/loader';
 import type { ReloadEvent } from 'react-x11/refresh';
@@ -64,6 +64,8 @@ import {
   useGlobalMenu,
   useIdle,
   useKeepAwake,
+  useAccelerator,
+  matchesShortcut,
   useKeyboardState,
   useLocale,
   useScreens,
@@ -922,9 +924,13 @@ function Widgets() {
       <MenuBar
         menus={[]}
         globalMenu={false}
+        accelerators={false}
         onGlobalMenuChange={(exported: boolean) => void exported}
       />
-      <ContextMenu items={[{ label: 'Copy', shortcut: [['Control', 'C']] }]}>
+      <ContextMenu
+        items={[{ label: 'Copy', shortcut: [['Control', 'C']] }]}
+        accelerators
+      >
         <box />
       </ContextMenu>
       <Dialog
@@ -1256,6 +1262,19 @@ function _System() {
   useKeepAwake(false);
   // @ts-expect-error — a timeout is required, and is a number
   useIdle();
+
+  // an accelerator that is not in a menu, on the menus' chord vocabulary
+  useAccelerator([['Control', 'K']], (ev) => void ev.keysym);
+  useAccelerator([['F2'], ['Control', 'Shift', 'P']], () => {}, {
+    enabled: false,
+  });
+  const paletteScope = useRef<DrawnNode | null>(null);
+  useAccelerator([['Control', 'K']], () => {}, { scope: paletteScope });
+  const chord: boolean = matchesShortcut(
+    { keysym: keysymFromName('s'), ctrlKey: true },
+    [['Control', 'S']],
+  );
+  void chord;
 
   const keys: KeyboardState = useKeyboardState();
   const layout: string | null = keys.layout;

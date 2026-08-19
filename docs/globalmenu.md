@@ -44,7 +44,7 @@ an exported one that drift apart.
 | `items`                    | a submenu                                                   |
 | `enabled`                  | defaults to `true`; `false` dims the row and makes it inert |
 | `visible`                  | defaults to `true`; `false` removes it                      |
-| `shortcut`                 | `[['Control', 'S']]` — see below                            |
+| `shortcut`                 | `[['Control', 'S']]` — drawn, exported **and bound**        |
 | `toggleType`/`toggleState` | `'checkmark'` or `'radio'`, and `0` / `1` / `-1`            |
 | `iconName`                 | an icon-theme name, for the panel's menu                    |
 | `iconData`                 | raw PNG bytes, for an icon that is not in a theme           |
@@ -75,8 +75,16 @@ The key is named the way GDK names it, so `plus` rather than `+` and `Prior`
 rather than `PgUp`, because that is what a panel's importer parses. Menus print
 the friendly form: `[['Control', 'plus']]` draws as `Ctrl++`.
 
-**It is still not a binding**, in either menu. Nothing here installs an
-accelerator; the string is what the row displays and what the panel is told.
+**It is a binding**, and the app writes it once. A mounted `MenuBar` answers
+its own items' chords: Ctrl+S fires the item's `onSelect` without the menu
+being opened, gated by that item's own `enabled` and `visible`
+([events.md](events.md#accelerators)).
+
+That matters most in exactly this case. When the panel draws the menu, the
+**panel is not going to deliver the key** — it has no idea the window's
+keyboard is where the user is — so the app's own window still has to, and
+`MenuBar` keeps its bindings when it stops drawing. `accelerators={false}`
+turns them off for an application with a dispatcher of its own.
 
 ## What happens on the wire
 

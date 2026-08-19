@@ -6020,17 +6020,27 @@ export class TextInputNode extends Node {
    * Only keystrokes get this far. A paste resolves a promise, an undo is not
    * an input event at all, and a value pushed from a parent has no X event
    * behind it — those report `nativeEvent: null`, which is the truth.
+   *
+   * `_editKeyDown` answers **whether it took the key**, and a key it took is
+   * consumed the way every default action says so: `preventDefault()`, whose
+   * meaning one layer down is "the default action after this one does not
+   * run". That is what keeps Ctrl+C in a focused field rather than in the
+   * menu's accelerator for it, on the same rule Tab and Space/Enter already
+   * follow (#351) — and it is why the ctrl chord below returns false for the
+   * letters it does *not* answer, instead of swallowing every chord in the
+   * alphabet.
    */
   defaultKeyDown(ev) {
     const previous = this._keyNative;
     this._keyNative = ev.nativeEvent ?? null;
     try {
-      this._editKeyDown(ev);
+      if (this._editKeyDown(ev)) ev.preventDefault();
     } finally {
       this._keyNative = previous;
     }
   }
 
+  /** @returns {boolean} whether the field answered this key. */
   _editKeyDown(ev) {
     const [a, b] = this._selection();
     const hasSelection = a !== b;
@@ -6038,13 +6048,13 @@ export class TextInputNode extends Node {
 
     if (k === XK_RETURN || k === XK_KP_ENTER) {
       this._fireValueEvent('onSubmit', this.value, ev.nativeEvent);
-      return;
+      return true;
     }
     if (k === XK_BACKSPACE) {
       if (hasSelection) this._deleteRange(a, b);
       else if (ev.ctrlKey) this._deleteRange(this._wordBoundary(a, -1), a);
       else if (a > 0) this._deleteRange(a - 1, a, 'delete-back');
-      return;
+      return true;
     }
     if (k === XK_DELETE) {
       if (hasSelection) this._deleteRange(a, b);
@@ -6056,7 +6066,7 @@ export class TextInputNode extends Node {
           'delete-forward',
         );
       }
-      return;
+      return true;
     }
     if (k === XK_LEFT) {
       if (ev.ctrlKey) {
@@ -6067,7 +6077,7 @@ export class TextInputNode extends Node {
         this._moveCaret(this._caret - 1, ev.shiftKey);
       }
       if (ev.shiftKey) this._copySelection('PRIMARY');
-      return;
+      return true;
     }
     if (k === XK_RIGHT) {
       if (ev.ctrlKey) {
@@ -6078,15 +6088,15 @@ export class TextInputNode extends Node {
         this._moveCaret(this._caret + 1, ev.shiftKey);
       }
       if (ev.shiftKey) this._copySelection('PRIMARY');
-      return;
+      return true;
     }
     if (k === XK_HOME) {
       this._moveCaret(0, ev.shiftKey);
-      return;
+      return true;
     }
     if (k === XK_END) {
       this._moveCaret(this._chars().length, ev.shiftKey);
-      return;
+      return true;
     }
     if (ev.ctrlKey) {
       const letter = ctrlChordLetter(ev);
@@ -6105,8 +6115,14 @@ export class TextInputNode extends Node {
         else this.undo();
       } else if (letter === 0x79 /* y */) {
         this.redo();
+      } else {
+        // A chord this field has no answer for is not the field's: Ctrl+S
+        // belongs to whatever bound it, and a text control that swallowed
+        // every chord would be a text control no application can put a
+        // shortcut behind.
+        return false;
       }
-      return;
+      return true;
     }
     if (ev.codepoint != null && ev.codepoint >= 0x20 && ev.codepoint !== 0x7f) {
       const ch = String.fromCodePoint(ev.codepoint);
@@ -6114,7 +6130,9 @@ export class TextInputNode extends Node {
       // undo a word at a time: the space that ends a word joins the run it
       // ends, and the next word starts a fresh one
       if (/\s/.test(ch)) this._breakUndoRun();
+      return true;
     }
+    return false;
   }
 
   /** Click-to-caret for a mouse event. Both kinds answer it the same way —
@@ -6896,17 +6914,17 @@ export class TextAreaNode extends TextInputNode {
     if (k === XK_RETURN || k === XK_KP_ENTER) {
       if (ev.ctrlKey) {
         this._fireValueEvent('onSubmit', this.value, ev.nativeEvent);
-        return;
+        return true;
       }
       this._goalX = null;
       this._insert('\n');
-      return;
+      return true;
     }
     if ((k === XK_UP || k === XK_DOWN) && layout && this.value.length > 0) {
       const i = this._verticalMove(layout, k === XK_UP ? -1 : 1);
       this._moveCaret(i, ev.shiftKey);
       if (ev.shiftKey) this._copySelection('PRIMARY');
-      return;
+      return true;
     }
     if (
       (k === XK_PAGE_UP || k === XK_PAGE_DOWN) &&
@@ -6919,7 +6937,7 @@ export class TextAreaNode extends TextInputNode {
       );
       this._moveCaret(i, ev.shiftKey);
       if (ev.shiftKey) this._copySelection('PRIMARY');
-      return;
+      return true;
     }
     if ((k === XK_HOME || k === XK_END) && layout && this.value.length > 0) {
       const pos = layout.caretPosition(this._caret);
@@ -6933,10 +6951,10 @@ export class TextAreaNode extends TextInputNode {
           : layout.indexAt(line.x + line.width + 0.01, y);
       this._goalX = null;
       this._moveCaret(i, ev.shiftKey);
-      return;
+      return true;
     }
     this._goalX = null;
-    super._editKeyDown(ev);
+    return super._editKeyDown(ev);
   }
 
   /** Thumb for the vertical overflow, same look as a scroll box's. */

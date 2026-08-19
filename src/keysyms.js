@@ -167,3 +167,104 @@ export const MOD = {
   Super: 64,
   Mod5: 128,
 };
+
+// --- keysym names ----------------------------------------------------------
+//
+// X11 names the *key* rather than the character it types — `plus` and not
+// `+`, `Return` and not `Enter` — and that is the vocabulary a menu
+// `shortcut` speaks, because dbusmenu carries `gdk_keyval_name()` strings
+// (`src/menuitem.js`). `keysymFromName` is the other direction from
+// `charOf`: a name in, the keysym out, so a chord written for the panel is
+// the same chord the key path matches against.
+
+// The printable ASCII whose X11 name is a word. Everything else in that
+// range is its own name — `a`, `7` — and goes through `keysymOf`.
+// `quoteright` and `quoteleft` are the deprecated spellings of `apostrophe`
+// and `grave`, still emitted by older importers.
+const PUNCTUATION_NAMES = {
+  exclam: '!',
+  quotedbl: '"',
+  numbersign: '#',
+  dollar: '$',
+  percent: '%',
+  ampersand: '&',
+  apostrophe: "'",
+  quoteright: "'",
+  parenleft: '(',
+  parenright: ')',
+  asterisk: '*',
+  plus: '+',
+  comma: ',',
+  minus: '-',
+  period: '.',
+  slash: '/',
+  colon: ':',
+  semicolon: ';',
+  less: '<',
+  equal: '=',
+  greater: '>',
+  question: '?',
+  at: '@',
+  bracketleft: '[',
+  backslash: '\\',
+  bracketright: ']',
+  asciicircum: '^',
+  underscore: '_',
+  grave: '`',
+  quoteleft: '`',
+  braceleft: '{',
+  bar: '|',
+  braceright: '}',
+  asciitilde: '~',
+  space: ' ',
+};
+
+// The keys that are not characters at all. `Prior`/`Next` are the core
+// protocol's names for the page keys and `Page_Up`/`Page_Down` the ones
+// everything since has used; both arrive, so both resolve.
+const NAMED_KEYSYMS = {
+  BackSpace: XK_BACKSPACE,
+  Tab: XK_TAB,
+  Return: XK_RETURN,
+  Escape: XK_ESCAPE,
+  Delete: XK_DELETE,
+  Insert: XK_INSERT,
+  Home: XK_HOME,
+  Left: XK_LEFT,
+  Up: XK_UP,
+  Right: XK_RIGHT,
+  Down: XK_DOWN,
+  Prior: XK_PAGE_UP,
+  Page_Up: XK_PAGE_UP,
+  Next: XK_PAGE_DOWN,
+  Page_Down: XK_PAGE_DOWN,
+  End: XK_END,
+  KP_Enter: XK_KP_ENTER,
+  Menu: XK_MENU,
+  Multi_key: XK_MULTI_KEY,
+};
+
+// `XK_F1` through `XK_F35` are one contiguous run, so the whole function row
+// is arithmetic rather than 35 more table entries.
+const FUNCTION_KEY = /^F([1-9]|[12]\d|3[0-5])$/;
+
+/**
+ * The keysym an X11 key *name* stands for — `'Return'`, `'plus'`, `'F5'`,
+ * `'s'` — or `undefined` for a name nothing here knows.
+ *
+ * This is the vocabulary menu `shortcut` chords are written in, and the
+ * reason it is public: a shortcut can be moved into or out of a menu
+ * without being respelled. A one-character name is the character itself, by
+ * `keysymOf`'s two rules, which covers the letters, the digits and anyone
+ * who wrote `'+'` where X would have said `plus`.
+ */
+export function keysymFromName(name) {
+  if (typeof name !== 'string' || name === '') return undefined;
+  if ([...name].length === 1) return keysymOf(name);
+  const named = NAMED_KEYSYMS[name];
+  if (named !== undefined) return named;
+  const punctuation = PUNCTUATION_NAMES[name];
+  if (punctuation !== undefined) return keysymOf(punctuation);
+  const fn = FUNCTION_KEY.exec(name);
+  return fn ? XK_F1 + Number(fn[1]) - 1 : undefined;
+}
