@@ -787,10 +787,12 @@ property; an object picks them individually.
 ```
 
 Numbers lerp and colours lerp per channel through ntk's own CSS colour
-parser, so anything the paint path accepts animates. A value with no
-meaningful midpoint — an enum like `flexDirection`, a percentage, `auto` —
-snaps instead, and `zIndex` is excluded on purpose: restacking every frame is
-not an animation.
+parser, so anything the paint path accepts animates. Two percentages of the
+same unit lerp as numbers — `'-40%'` to `'100%'` is a value travelling across
+whatever contains it, with nothing measuring the container. A value with no
+meaningful midpoint — an enum like `flexDirection`, `auto`, a percentage
+against a pixel value — snaps instead, and `zIndex` is excluded on purpose:
+restacking every frame is not an animation.
 
 The easing is a fixed ease-out cubic. A transition starts from **what is on
 screen**, not from the declared value, so interrupting one reverses from
@@ -807,6 +809,96 @@ who writes `transition: { left: 200 }` has asked for animated layout and
 pays a layout pass per frame for it. `Switch` is the worked example — the
 thumb is absolutely positioned and slides on `left`, because
 `justifyContent` would flip between the ends with nothing in between.
+
+### Loops
+
+A transition is over when it arrives. `animation` is the other shape: a
+property that travels between two values and **keeps doing it**, for the
+spinner, the pulse, and everything else that means "working, no idea how
+long".
+
+```jsx
+<box
+  style={{
+    position: 'absolute',
+    start: '-40%',
+    width: '40%',
+    animation: { start: { to: '100%', duration: 1100 } },
+  }}
+/>
+```
+
+Per property, and each one names where it goes and how long a crossing
+takes:
+
+| key         |                                                                  |
+| ----------- | ---------------------------------------------------------------- |
+| `to`        | the far end                                                      |
+| `from`      | the near end; **defaults to what the style declares**            |
+| `duration`  | one crossing, in ms                                              |
+| `easing`    | `'linear'` (default), `'ease-in'`, `'ease-out'`, `'ease-in-out'` |
+| `alternate` | turn around at each end instead of wrapping back to `from`       |
+
+`from` defaulting to the declared value is what makes a pulse read as a
+resting colour plus somewhere to go:
+
+```jsx
+style={{
+  backgroundColor: theme.track,
+  animation: {
+    backgroundColor: { to: theme.accent, duration: 900, alternate: true },
+  },
+}}
+```
+
+That value is also **where the property rests whenever the loop is not
+running** — before the first frame, off screen, or under reduced motion — so
+a loop never leaves a node with no value for the thing it animates.
+
+Why this and not a repeating `transition`: a transition is defined by a
+_change_, from what is on screen to a new target, and it has no cycle to
+repeat. A loop has no target — it has two ends and a period. They are
+different declarations because they are different things, and one of them
+would otherwise have to be spelled as the other with a flag.
+
+The easing default differs from a transition's for the same reason. A change
+that ends looks right slowing into its new value; a cycle that restarts
+would stutter at the wrap, so a loop is `linear` unless you say otherwise.
+
+**A loop costs a repaint of what moves.** It is the same machinery
+transitions run on — the window's own frame clock, a damage region claimed
+per frame — so an indeterminate progress bar repaints the bar, not the
+window. The alternative an app would otherwise write, `setInterval` →
+`setState`, is a re-render of the component and a repaint of whatever the
+damage heuristics decide, at a cadence unrelated to when the window can
+present.
+
+**And it stops itself**, which is the whole reason this is core's job. A
+forever-loop keeping a frame clock alive is invisible when it is wrong, so
+every way of going off the screen is wired to it:
+
+|                                                                                                                            |     |
+| -------------------------------------------------------------------------------------------------------------------------- | --- |
+| the window is unmapped, minimized, or fully obscured under a bare WM                                                       |     |
+| anything above the node hides it — `display: 'none'`, `<Suspense>`, `<Activity>`                                           |     |
+| the node unmounts, or the style stops declaring the loop                                                                   |     |
+| the desktop asked for **reduced motion** ([system.md](system.md#usedesktopsettings--how-the-desktop-wants-an-app-to-feel)) |     |
+
+Each one leaves the frame clock idle, and every one of them runs the loop
+again when it goes away — with its phase reset, since a loop that resumes
+mid-cycle would have been drawing where nobody could see it.
+
+Reduced motion is honoured in core, once, for every loop in every
+application: `Gtk/EnableAnimations` off means loops do not start. What core
+cannot decide is what the _still_ frame should look like, which is the
+author's — `<ProgressBar indeterminate>` parks its block inside the track
+rather than at its off-screen starting point, so a bar that cannot move
+still shows something in progress.
+
+Nothing about this is a per-frame callback: `animation` describes the motion
+and the renderer runs it. For a `<canvas>` drawing its own frames, `useFrame`
+inside a [`<Canvas3D>`](gl.md#useframe) is the per-frame seam, and a 2D one is not
+built yet.
 
 ## Window size queries
 
