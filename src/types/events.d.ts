@@ -4,7 +4,9 @@
  * DOM. See docs/events.md.
  */
 
+import type { RefObject } from 'react';
 import type { DrawnNode, NtkWindow, TextInputNode } from './nodes.js';
+import type { MenuShortcut } from './components.js';
 
 /** The raw ntk/X11 event a synthetic one was made from. */
 export interface NativeEvent {
@@ -449,3 +451,57 @@ export interface ClientMessageEvent {
    */
   preventDefault(): void;
 }
+
+// --------------------------------------------------------------------------
+// Accelerators
+// --------------------------------------------------------------------------
+
+export interface AcceleratorOptions {
+  /** `false` unbinds the chord without unmounting anything. Defaults true. */
+  enabled?: boolean;
+  /**
+   * The node the binding hangs off, deciding what it is hidden with and what
+   * a modal `<popup>` takes it away from. Defaults to the window the
+   * component is in, which is what an application-wide shortcut wants; pass
+   * a node inside a modal `<Dialog>` to give the dialog a shortcut of its
+   * own.
+   */
+  scope?: RefObject<DrawnNode | null>;
+}
+
+/**
+ * A shortcut that is not in a menu, on the same chord vocabulary a menu
+ * item's `shortcut` uses — so one can be moved into or out of a menu
+ * without being rewritten.
+ *
+ * ```tsx
+ * useAccelerator([['Control', 'K']], () => openPalette());
+ * ```
+ *
+ * Exact on Control/Alt/Shift/Super, indifferent to Caps Lock and Num Lock,
+ * matched against the Latin keysym so a layout switch does not turn it off,
+ * and behind whatever a focused element consumed with `preventDefault()`.
+ * See docs/events.md.
+ */
+export function useAccelerator(
+  shortcut: MenuShortcut,
+  handler: (ev: KeyboardEvent) => void,
+  options?: AcceleratorOptions,
+): void;
+
+/**
+ * Whether a key event presses any alternative of a `shortcut` — the matcher
+ * the menus and {@link useAccelerator} both run on, for an application
+ * dispatching chords its own way.
+ */
+export function matchesShortcut(
+  ev: {
+    keysym?: number | null;
+    codepoint?: number | null;
+    ctrlKey?: boolean;
+    altKey?: boolean;
+    shiftKey?: boolean;
+    metaKey?: boolean;
+  },
+  shortcut: MenuShortcut | undefined,
+): boolean;

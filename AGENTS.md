@@ -223,6 +223,25 @@ no override-redirect staging (issue #4).
   the `Multi_key` symbols. `probe`/`apply` are separate on purpose, since
   the key event is dispatched to the application before the composer may
   eat it.
+- `src/accelerators.js` + `src/acceleratorhooks.js` — a menu `shortcut` that
+  is a binding and not a caption (#351). The matcher is pure and the registry
+  is in `EventManager`, next to the key path it is the last step of: after the
+  element's `defaultKeyDown` and before Tab's focus cycle, so `preventDefault()`
+  is what keeps Ctrl+C in a focused `<textinput>`. Four decisions are load
+  bearing and none of them is obvious from the call site. The chord's key is
+  resolved from **`ev.keysym`**, so a layout switch cannot turn a shortcut off,
+  and a chord naming a _symbol_ also matches the character the key typed —
+  `plus` is the shifted `=` and `Ctrl++` has to be pressable — with letters
+  kept out of that path because it is exactly what would fire Ctrl+S on
+  Ctrl+Shift+S. The four modifiers are compared exactly and the **locks are not
+  in the comparison at all**, which is the line hand-rolled bindings get wrong.
+  A binding is gated by the node it hangs off being on the screen and inside
+  the innermost focus scope, which is what makes a modal `<popup>` take the
+  application's shortcuts with the keyboard and still leave a menu declared
+  inside it working. And a `MenuBar` keeps its bindings when the desktop's
+  panel takes the menu over — the panel draws the rows, but the key is pressed
+  in our window and nothing else will deliver it, which is why the anchor falls
+  back from the bar to the window rather than unregistering.
 - `src/priority.js` — shared React update-priority state (discrete vs
   continuous events).
 - `src/DevToolsIntegration.js` — opt-in React DevTools bridge

@@ -601,7 +601,13 @@ export interface MenuItem {
   enabled?: boolean;
   /** Defaults to `true`; `false` removes the row from the menu entirely. */
   visible?: boolean;
-  /** Shown right-aligned, and sent to the panel. Not a binding either way. */
+  /**
+   * Drawn right-aligned, announced as `aria-keyshortcuts`, sent to the
+   * panel — **and bound**: pressing it fires this item's `onSelect` while
+   * the menu is mounted, without the menu being opened (#351). `enabled`
+   * and `visible` gate the binding with the row. `accelerators={false}` on
+   * the menu turns that off for an app with a dispatcher of its own.
+   */
   shortcut?: MenuShortcut;
   /** With `toggleState`, draws a check mark or a radio dot in the gutter. */
   toggleType?: MenuToggleType;
@@ -641,6 +647,11 @@ export interface ContextMenuProps extends WidgetProps {
   items?: readonly MenuItem[];
   children?: ReactNode;
   onSelect?: (item: MenuItem) => void;
+  /**
+   * Honour the items' own `shortcut`s while this menu is mounted. On by
+   * default; `false` leaves the chords to an app that dispatches its own.
+   */
+  accelerators?: boolean;
   fontSize?: number;
   style?: StyleProp;
 }
@@ -668,6 +679,13 @@ export interface MenuBarProps extends WidgetProps {
    * twice.
    */
   onGlobalMenuChange?: (exported: boolean) => void;
+  /**
+   * Honour the items' own `shortcut`s while this bar is mounted — including
+   * when the desktop's panel has taken the menu over, since the panel draws
+   * the rows but the key is pressed in this window. On by default; `false`
+   * leaves the chords to an app that dispatches its own.
+   */
+  accelerators?: boolean;
   fontSize?: number;
   style?: StyleProp;
 }

@@ -9,7 +9,7 @@ import {
   flushSyncWork,
 } from './priority.js';
 import { flushPendingFrames } from './frames.js';
-import { callHandler } from './errors.js';
+import { callHandler, reportHandlerError } from './errors.js';
 import { armDrag } from './dnd.js';
 import { desktopSettings } from './desktopsettings.js';
 import { noteInputTime } from './inputtime.js';
@@ -282,6 +282,10 @@ export class EventManager {
     this._wheelOwed = { x: 0, y: 0 };
     // the window's DragSession while a press has armed it (src/dnd.js)
     this._dragArmed = null;
+    // on a *top-level* window's manager: the chords bound anywhere in its
+    // tree, newest last (`registerAccelerator`). Null until one is bound,
+    // which is the common case and costs one null check per key.
+    this._accelerators = null;
   }
 
   /**
@@ -1161,10 +1165,89 @@ export class EventManager {
       // cycle. Nothing in core consumes Tab, so `<textinput>` and friends
       // still hand it straight to traversal.
       target.defaultKeyDown?.(ev);
+      // Then the accelerators — a menu item's `shortcut`, a `useAccelerator`
+      // — on that same rule, which is the whole of what keeps Ctrl+C in a
+      // focused field: the element answered it and said so, and an
+      // application-wide binding does not get to take it back (#351).
+      if (!ev.defaultPrevented) this._runAccelerators(ev);
       if (keysym === XK_TAB && !ev.defaultPrevented) {
         this._cycleFocus(Boolean(native.buttons & 1));
       }
     });
+  }
+
+  /**
+   * Bind a chord for as long as the caller is mounted. Returns the release.
+   *
+   * `entry.anchor()` is the node the binding belongs to, read at dispatch
+   * time rather than captured: a `MenuBar` that the desktop's panel takes
+   * over stops drawing a bar and still has to deliver the key, so what the
+   * binding hangs off changes under it.
+   *
+   * `entry.handle(ev)` answers whether it took the key.
+   *
+   * Registrations live on the **top-level** manager, which is the one thing
+   * a `<popup>`, a nested `<window>` and the window itself all share — the
+   * same grouping `_keyManager` resolves keys through. So a chord reaches
+   * the whole of one window's tree and none of another's.
+   */
+  registerAccelerator(entry) {
+    const owner = this.topLevelManager;
+    (owner._accelerators ??= new Set()).add(entry);
+    return () => {
+      owner._accelerators?.delete(entry);
+    };
+  }
+
+  /**
+   * Offer a key to the bindings, most recently mounted first, and stop at
+   * the first that takes it.
+   *
+   * Two things gate a binding, and both are questions the menu already knows
+   * the answer to and an `onKeyDown` does not:
+   *
+   * - **it is on the screen.** A binding whose node has unmounted or gone
+   *   behind a `display: 'none'`, a collapsed `<Suspense>` or an unmapped
+   *   `<popup>` is a menu the user cannot open, so it is not a chord they
+   *   can press either. Same question `focus` asks of a hidden subtree.
+   * - **it is inside the innermost focus scope.** A modal `<popup>`
+   *   (`trapFocus`) takes the keyboard from everything behind it, and that
+   *   has to include the application's shortcuts — Ctrl+S while a
+   *   confirmation is up saves nothing. A menu declared *inside* the modal
+   *   is inside the scope and still works, which is the same containment
+   *   rule Tab traversal follows. With no modal open the scope root is the
+   *   window itself and every binding in it qualifies.
+   *
+   * A menu that is *open* suppresses them by another route entirely: it
+   * `preventDefault()`s the keys it is being driven with, one layer above
+   * this (`components/Menu.js`).
+   */
+  _runAccelerators(ev) {
+    const owner = this.topLevelManager;
+    const entries = owner._accelerators;
+    if (!entries?.size) return;
+    const scopeRoot = owner._scopeRoot();
+    const trapped = scopeRoot !== owner.node;
+    for (const entry of [...entries].reverse()) {
+      const anchor = entry.anchor();
+      if (!anchor || anchor.destroyed || !effectivelyVisible(anchor)) continue;
+      if (trapped && !owner._within(anchor, scopeRoot)) continue;
+      // A handler that threw still *took* the key: the chord matched, and
+      // offering it to the next binding would run a second command because
+      // the first one failed. Reported and carried on, like every other
+      // throw out of an X event (`errors.js`).
+      let took = true;
+      try {
+        took = Boolean(entry.handle(ev));
+      } catch (error) {
+        reportHandlerError(anchor, 'an accelerator', error);
+      }
+      if (took) {
+        // consumed, said the way every default action says it
+        ev.preventDefault();
+        return;
+      }
+    }
   }
 
   /**

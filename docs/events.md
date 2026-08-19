@@ -131,7 +131,9 @@ onKeyDown={(ev) => {
 
 That keeps working under a Cyrillic or Greek layout too: `ev.keysym` is the
 Latin keysym for the key however the layout is switched — see
-[Layouts](#layouts).
+[Layouts](#layouts). For a chord an application would otherwise write out by
+hand, [Accelerators](#accelerators) is the shorter way: a menu item's
+`shortcut` already binds itself, and `useAccelerator` takes the same chord.
 
 ### Modifiers
 
@@ -161,19 +163,19 @@ field as it arrived, and `MOD` in `react-x11/keysyms` names its bits
 
 ## Handlers
 
-| handler                                                           | notes                                                                                                                    |
-| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks                                    |
-| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                                               |
-| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing                                                                      |
-| `onWheel`                                                         | pixels, from the device or from X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go  |
-| `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu                                     |
-| `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Space/Enter click an `onClick`, and Tab cycles focus, unless it took them |
-| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — a dead key, a Compose sequence; see below                                                       |
-| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                                                 |
-| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, the same shape as the hover pair above                                              |
-| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)                                           |
-| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                                                           |
+| handler                                                           | notes                                                                                                                                                       |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onClick`                                                         | fires on the nearest common ancestor of press & release; `detail` counts multi-clicks                                                                       |
+| `onMouseDown` / `onMouseUp` / `onMouseMove`                       | move is coalesced to once per frame by ntk                                                                                                                  |
+| `onMouseEnter` / `onMouseLeave`                                   | do not propagate; synthesized by hover-path diffing                                                                                                         |
+| `onWheel`                                                         | pixels, from the device or from X buttons 4–7; default action scrolls the nearest scroll container with somewhere to go                                     |
+| `onContextMenu`                                                   | right-click (button 3), after `onMouseDown`; default action opens the element's menu                                                                        |
+| `onKeyDown` / `onKeyUp`                                           | delivered to the focused node (or the window); Space/Enter click an `onClick`, [accelerators](#accelerators) fire and Tab cycles focus, unless it took them |
+| `onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd` | text still being typed — a dead key, a Compose sequence; see below                                                                                          |
+| `onFocus` / `onBlur`                                              | focus follows mousedown (nearest `focusable` ancestor) and Tab traversal                                                                                    |
+| `onDragEnter` / `onDragLeave`                                     | do not propagate; drag-path diffing, the same shape as the hover pair above                                                                                 |
+| `onDragOver` / `onDrop`                                           | on a drop target; `onDrop` may be async — [drag-and-drop.md](drag-and-drop.md)                                                                              |
+| `onDragStart` / `onDrag` / `onDragEnd`                            | on a `draggable` node; the press is a click until it moves 4px                                                                                              |
 
 ## Space and Enter are a click {#space-and-enter-are-a-click}
 
@@ -214,6 +216,115 @@ It is the same function an assistive technology's activation goes through, on
 purpose — one definition of "activate" for the pointer, the keyboard and
 Orca, which cannot then disagree about a control
 ([accessibility.md](accessibility.md#at-driven-controls)).
+
+## Accelerators {#accelerators}
+
+**A menu's `shortcut` is a binding.** `MenuBar` and `ContextMenu` answer their
+own items' chords while they are mounted, so the array that draws the menu is
+the array that binds it:
+
+```jsx
+<MenuBar
+  menus={[
+    {
+      label: 'File',
+      items: [
+        { label: 'Save', shortcut: [['Control', 'S']], onSelect: save },
+        {
+          label: 'Save As…',
+          shortcut: [['Control', 'Shift', 'S']],
+          onSelect: saveAs,
+        },
+      ],
+    },
+  ]}
+/>
+```
+
+Ctrl+S calls `save()` without the menu being opened. The same array is what
+`aria-keyshortcuts` announces and what crosses the bus when the desktop's
+panel draws the menu ([globalmenu.md](globalmenu.md)) — and it stays bound in
+that case, because the panel draws the rows but the key is pressed in your
+window and nothing else is going to deliver it.
+
+For a shortcut that is not in a menu — there are always some —
+`useAccelerator` takes the same chords, so one can be moved into or out of a
+menu without being rewritten:
+
+```jsx
+import { useAccelerator } from 'react-x11';
+
+useAccelerator([['Control', 'K']], () => openPalette());
+```
+
+### The chord
+
+`[['Control', 'S'], ['F2']]` is dbusmenu's `aas`: a list of **alternatives**,
+each a list of modifier tokens — `Control`, `Alt`, `Shift`, `Super` — ending
+in the key. Any alternative fires; only the first is drawn, since a row has
+one shortcut column.
+
+The key is named the way X names it, which is what `gdk_keyval_name()` emits
+and what a panel's importer parses: `plus` rather than `+`, `Prior` rather
+than `PgUp`, `Return` rather than `Enter`. A one-character name is that
+character. `keysymFromName()` in `react-x11/keysyms` is the resolver, and
+`matchesShortcut(ev, shortcut)` the matcher, for an application dispatching
+chords its own way.
+
+Four rules, all of which a hand-rolled `onKeyDown` gets subtly differently:
+
+- **exact on the four modifiers.** Ctrl+S does not fire on Ctrl+Shift+S.
+- **indifferent to the locks.** Caps Lock and Num Lock are not modifiers here
+  — `ctrlKey`/`altKey`/`shiftKey`/`metaKey` are the four named bits and
+  nothing else, so a chord keeps working with either light on.
+- **the key, not the character.** Matching is against `ev.keysym`, the Latin
+  keysym for the physical key, so a chord survives a layout switch
+  ([Layouts](#layouts)) — and `['Control', 's']` and `['Control', 'S']` are
+  one binding rather than two. A chord that names a **symbol** also matches
+  the character the key produced, because `+` is the shifted `=` and
+  `[['Control', 'plus']]` has to be pressable; letters stay out of that path,
+  since it is exactly what would make Ctrl+Shift+S fire a Ctrl+S binding.
+- **`enabled` and `visible` gate it.** A dimmed item's chord fires nothing,
+  and neither does an item inside a submenu whose parent is disabled — a
+  command you cannot reach by opening the menu is not one a key should reach.
+
+### Who gets the key first
+
+Accelerators sit at the end of the same default-action chain Tab and
+Space/Enter are in, and `preventDefault()` is the word at every step:
+
+1. the application's own `onKeyDown`, capture then bubble;
+2. composition — a dead key, a Compose sequence;
+3. the focused element's own behaviour (`<textinput>` editing, a scroll pane's
+   page keys);
+4. **accelerators**;
+5. focus traversal, for Tab.
+
+So **a focused text field keeps the chords it answers**: Ctrl+C copies the
+selection and never reaches a menu item that also says Ctrl+C. Ctrl+S is not
+one of the field's, so it falls through to the menu — a control that swallowed
+every chord would be a control no application could put a shortcut behind.
+
+Two things suppress them entirely, both because something else has the
+keyboard:
+
+- **an open menu.** It is holding a pointer grab, and a chord firing a second
+  command out from under the one being pointed at is a bug nobody reproduces.
+- **a modal `<popup>`** (`trapFocus`, which is what `Dialog` sets). Ctrl+S
+  while a confirmation is up saves nothing. A menu declared _inside_ the modal
+  still works — the containment rule is the one Tab traversal already follows
+  — and `useAccelerator`'s `scope` option is how a hook-registered shortcut
+  joins it:
+
+  ```jsx
+  const inDialog = useRef(null);
+  useAccelerator([['Control', 'Return']], confirm, { scope: inDialog });
+  ```
+
+A chord belongs to the window whose menu declared it, so a second top-level
+window does not answer it, and `enabled: false` unbinds one without unmounting
+anything. `accelerators={false}` on a `MenuBar` or `ContextMenu` turns the
+whole of this off for an application that already has a dispatcher.
 
 ## The wheel {#wheel}
 

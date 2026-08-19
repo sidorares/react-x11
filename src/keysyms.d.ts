@@ -32,6 +32,17 @@ export function ctrlChordLetter(ev: {
   codepoint?: number | null;
 }): number | null;
 
+/**
+ * The keysym an X11 key *name* stands for — `'Return'`, `'plus'`, `'F5'`,
+ * `'s'` — or `undefined` for a name nothing here knows.
+ *
+ * This is the vocabulary a menu item's `shortcut` chords are written in
+ * (X11's names, which is what `gdk_keyval_name()` emits and what a panel's
+ * dbusmenu importer parses), so a chord can be matched, drawn and exported
+ * from one spelling. A one-character name is the character itself.
+ */
+export function keysymFromName(name: string): number | undefined;
+
 export const XK_BACKSPACE: 0xff08;
 export const XK_TAB: 0xff09;
 export const XK_RETURN: 0xff0d;

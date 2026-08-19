@@ -49,8 +49,18 @@ export function useTypeAhead(timeout = TYPE_AHEAD_TIMEOUT) {
   );
 }
 
-/** A printable character usable for type-ahead. Space is excluded: it
- *  activates the focused entry everywhere in this widget set. */
+/**
+ * A printable character usable for type-ahead. Space is excluded: it
+ * activates the focused entry everywhere in this widget set.
+ *
+ * So is anything held down with Control, Alt or Super. A chord is a command
+ * rather than a letter — the key still *types* an `s` under Ctrl+S — and a
+ * menu that answered Ctrl+S by jumping its selection to "Save As…" was both
+ * doing the wrong thing and consuming the key on its way to the accelerator
+ * that meant to answer it (#351). Shift is not in the list: Shift+A is a
+ * letter.
+ */
 export function typeAheadChar(ev) {
+  if (ev.ctrlKey || ev.altKey || ev.metaKey) return null;
   return ev.key && ev.key.length === 1 && ev.codepoint > 32 ? ev.key : null;
 }

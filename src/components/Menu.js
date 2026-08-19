@@ -24,6 +24,9 @@ import {
 } from './anchor.js';
 import { typeAheadChar, useTypeAhead } from './typeahead.js';
 import { useGlobalMenu } from '../globalmenu.js';
+import { acceleratedItem } from '../accelerators.js';
+import { useAcceleratorEntry } from '../acceleratorhooks.js';
+import { useTopLevelWindow } from '../windowid.js';
 import {
   ariaKeyShortcuts,
   checkShortcut,
@@ -728,6 +731,36 @@ function handleMenuKey(
 }
 
 /**
+ * A mounted menu honours its own descriptor: the `shortcut` drawn on a row
+ * fires that row's `onSelect`, without the app writing the binding a second
+ * time in an `onKeyDown` (#351).
+ *
+ * One array is then the drawn menu, the exported dbusmenu payload, the
+ * `aria-keyshortcuts` announcement *and* the binding, so a renamed handler
+ * or a newly disabled item cannot make the promise and the behaviour drift.
+ *
+ * It stays bound when the desktop's panel takes the menu over, and that is
+ * not an oversight: the panel draws the rows, but the key is pressed in
+ * *this* window and no panel is going to deliver it.
+ *
+ * `anchorRef` is what the binding hangs off — the bar, or the window when
+ * there is no bar to hang off — and decides what a modal `<popup>` takes it
+ * away from (`EventManager._runAccelerators`).
+ */
+function useMenuAccelerators(items, select, anchorRef, enabled) {
+  useAcceleratorEntry(
+    anchorRef,
+    (ev) => {
+      const item = acceleratedItem(items, ev);
+      if (!item) return false;
+      select(item);
+      return true;
+    },
+    enabled,
+  );
+}
+
+/**
  * <ContextMenu items>…</ContextMenu> — right-click anywhere in the children
  * to open a menu at the pointer.
  *
@@ -739,6 +772,7 @@ export function ContextMenu({
   items = [],
   children,
   onSelect,
+  accelerators = true,
   fontSize = DEFAULT_LABEL_SIZE,
   style,
   ...boxProps
@@ -758,6 +792,8 @@ export function ContextMenu({
     item.onSelect?.(item);
     onSelect?.(item);
   };
+
+  useMenuAccelerators(items, select, ref, accelerators);
 
   // the wrapper keeps the focus the right-click gave it, so `onBlur` below
   // never fires when the *window* loses focus — and the menu is holding a
@@ -815,6 +851,11 @@ export function ContextMenu({
           typeAhead,
           rtl,
         });
+        // An open menu owns the keyboard, whether or not it had anything to
+        // do with this particular key: it is holding a pointer grab, and a
+        // shortcut that fired a *second* command out from under the one
+        // being pointed at is the shape of bug nobody reproduces.
+        ev.preventDefault();
       },
       onBlur: close,
       ...boxProps,
@@ -852,6 +893,7 @@ export function MenuBar({
   onSelect,
   globalMenu = true,
   onGlobalMenuChange,
+  accelerators = true,
   fontSize = DEFAULT_LABEL_SIZE,
   style,
   ...boxProps
@@ -888,6 +930,7 @@ export function MenuBar({
   // that fits. The window narrower than its titles is one frame late, not
   // wrong.
   const barRef = useRef(null);
+  const owner = useTopLevelWindow();
   const [barWidth, setBarWidth] = useState(0);
   const [fits, setFits] = useState(-1);
   useEffect(() => {
@@ -1024,6 +1067,20 @@ export function MenuBar({
     onSelect?.(item);
   };
 
+  // The bar when there is one, the window when the panel has taken it: a
+  // delegated `MenuBar` draws nothing at all, and a binding anchored to a
+  // node that no longer exists is a binding that stopped working exactly
+  // when it became the only way to reach the command.
+  const acceleratorAnchor = useMemo(
+    () => ({
+      get current() {
+        return barRef.current ?? owner.current;
+      },
+    }),
+    [owner],
+  );
+  useMenuAccelerators(menus, select, acceleratorAnchor, accelerators);
+
   const moveMenu = (dir) => {
     if (!entries.length) return;
     const n = entries.length;
@@ -1124,6 +1181,13 @@ export function MenuBar({
             if (openRef.current === index) close();
           },
           onKeyDown: (ev) => {
+            // An open menu owns the keyboard for as long as it is up,
+            // whether or not it had anything to do with this key: it is
+            // holding a pointer grab, and an accelerator that fired a
+            // *second* command out from under the one being pointed at is
+            // the shape of bug nobody reproduces. Said here rather than in
+            // `handleMenuKey`, which answers for a closed bar too.
+            if (openIndex >= 0) ev.preventDefault();
             if (openIndex !== index) {
               // Escape shuts an open menu from any item on the bar, not
               // only the one it belongs to. A menu holds a pointer grab, so

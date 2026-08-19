@@ -165,6 +165,14 @@ ordering, that lets a `<textinput>` keep Tab as an indent key:
 </window>
 ```
 
+**A menu accelerator is not a handler**, and this is the one place that shows.
+[Accelerators](events.md#accelerators) run _after_ the focused element's own
+default action, and `<foreign>`'s is to forward the key and consume it — so
+while an embedded terminal has focus its Ctrl+C is the terminal's, not the
+Edit menu's, which is what a user of that terminal expects. An application
+chord that must win everywhere goes in an `onKeyDown` like the one above,
+which is checked before either.
+
 Everything else about focus is the ordinary focus manager:
 
 | what happens                                 | what the client is told                                                                                                                      |
