@@ -46,6 +46,7 @@
     "examples:stress": "tsx examples/stress/index.jsx",
     "examples:finder": "tsx examples/finder.jsx",
     "examples:foreign": "tsx examples/foreign.jsx",
+    "examples:frame": "tsx examples/frame.jsx",
     "labs:text-baseline": "tsx examples/labs/text-baseline.jsx",
     "examples:gl": "tsx examples/gl.jsx",
     "examples:three": "tsx examples/three.jsx",

@@ -50,6 +50,23 @@ no override-redirect staging (issue #4).
   React tree before any handler saw it. The X focus stays on our window and
   forwarding happens in `defaultKeyDown`/`defaultKeyUp`, which is what makes
   the rule "app chords first, everything else forwards" mechanical.
+- `src/frame/` — `<Frame>`: a pane of the application in its own process,
+  its window embedded over `<foreign>` (docs/frame.md). Four small files
+  along the seams: `protocol.js` (pure — the six messages, the callback
+  table with its one-update grace window, argument sanitizing), `env.js`
+  (the context bridge: `createFrameContext`, the `FrameEnv` accumulator the
+  theme publishes into), `index.js` (the host: fork, supervision,
+  coalesced updates, fallback), `childmain.js` + `child.js` (the pane
+  bootstrap behind an injectable transport, which is what lets the tests
+  run a real pane in-process over a loopback — `test/frame.test.js` forks
+  for real exactly once, over a TCP bridge onto the in-process server).
+  Two things are deliberate and easy to undo: the **update listener goes up
+  before the pane module import starts** (a store the tree subscribes to
+  later — a listener scoped to the mounted tree would drop every update
+  that landed during the import), and the host's transport listeners
+  **outlive the effect cleanup until the exit**, because a `useFrameClose`
+  handler flushing through a callback prop sends its `invoke` after the
+  unmount message.
 - `src/scene3d.js` — the 3D scene tree inside a `<glarea>`: `<mesh>`,
   `<group>`, geometry/material nodes and the renderer that compiles each
   geometry into a server-side **display list** (a frame is matrices +

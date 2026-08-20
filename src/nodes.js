@@ -8004,6 +8004,13 @@ export class WindowNode extends Scrollable(Node) {
    */
   _mapNow() {
     if (this.destroyed || !this.window || this.hidden) return;
+    // An `embeddable` window never maps itself: a window waiting to be
+    // embedded is unmapped — that is what waiting looks like — and from the
+    // reparent on, mapping is the embedder's decision (ntk's XEmbedSocket
+    // maps a plain client the moment it takes it). Self-mapping here would
+    // put a frame pane on the desktop as a top-level for the beat before
+    // its <Frame> embeds it, long enough for a window manager to frame it.
+    if (this.props.embeddable) return;
     // An anchor that is not on screen is a popup that has nowhere to be
     // (`_followAnchor`); it maps from there, when the anchor comes back.
     if (this._anchorLost) return;

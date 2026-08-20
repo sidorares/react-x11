@@ -1423,3 +1423,53 @@ const _engine: Promise<unknown> = loadLayout().then(() => {
 });
 // the flat enum constants are numbers
 const _edge: number = LayoutYoga.EDGE_LEFT;
+
+// `<Frame>` — a pane in its own process (docs/frame.md), and the context
+// that follows the app into it.
+import { Frame, createFrameContext, isFramed, useFrameClose } from 'react-x11';
+import type { FrameError, FrameHandle, FrameTransport } from 'react-x11';
+
+const Session = createFrameContext('session', { user: null as string | null });
+const _sessionValue: { user: string | null } = Session.use();
+
+function _Panes() {
+  const handle = useRef<FrameHandle>(null);
+  useFrameClose(async () => {});
+  const framed: boolean = isFramed();
+  return (
+    <Session.Provider value={{ user: 'me' }}>
+      <window>
+        <Frame
+          ref={handle}
+          src="/abs/path/to/pane.js"
+          props={{ rows: [1, 2, 3], onPick: (row: number) => void row }}
+          style={{ flexGrow: 1 }}
+          bridge={['react-x11:theme', 'session']}
+          fallback={({ error, restart }) => (
+            <text onMouseDown={restart}>
+              {error?.message ?? String(framed)}
+            </text>
+          )}
+          onStarted={({ pid, windowId }) => void [pid, windowId]}
+          onExit={({ code, signal, expected }) => void [code, signal, expected]}
+        />
+        {/* an embeddable window never maps itself */}
+        <window embeddable width={200} height={100} />
+      </window>
+    </Session.Provider>
+  );
+}
+// a custom transport is the test seam; the shape is public
+const _loopback: FrameTransport = {
+  send: () => {},
+  onMessage: () => () => {},
+  onExit: () => () => {},
+};
+const _err: FrameError = Object.assign(new Error('x'), { phase: 'load' });
+// @ts-expect-error — src is required
+const _badFrame = <Frame props={{}} />;
+void _Panes;
+void _loopback;
+void _err;
+void _badFrame;
+void _sessionValue;
