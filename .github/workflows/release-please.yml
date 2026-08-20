@@ -3,6 +3,16 @@ name: release-please
 on:
   push:
     branches: [master]
+  # Manual dispatch publishes the chosen ref as a canary. It lives in this
+  # file (not its own) because npm allows exactly one trusted publisher per
+  # package, keyed to a single workflow filename — a separate canary.yml
+  # could never authenticate.
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base version the canary is a pre-release of
+        required: false
+        default: 2.0.0
 
 permissions:
   contents: write
@@ -11,6 +21,7 @@ permissions:
 
 jobs:
   release-please:
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v5
@@ -36,3 +47,29 @@ jobs:
         if: ${{ steps.release.outputs.release_created }}
       - run: npm publish --access public
         if: ${{ steps.release.outputs.release_created }}
+
+  canary:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1
+      - run: npm install -g npm@latest
+      - run: npm ci
+      # The "g" prefix keeps the sha identifier from being parsed as a number
+      # (a numeric identifier with a leading zero is invalid semver).
+      - name: Set canary version
+        env:
+          BASE: ${{ inputs.base }}
+        run: |
+          VERSION="$BASE-canary.$(date -u +%Y%m%d%H%M%S).g$(git rev-parse --short HEAD)"
+          npm version --no-git-tag-version "$VERSION"
+          echo "Publishing react-x11@$VERSION from $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+      - run: npm publish --access public --tag canary
