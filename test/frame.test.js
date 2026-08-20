@@ -21,6 +21,7 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
+import { captureDrawable, rgbAt } from '../scripts/capture.js';
 import { createRoot } from '../src/index.js';
 import { Frame } from '../src/frame/index.js';
 import {
@@ -160,13 +161,13 @@ test('a pane runs behind the seam: props, callbacks, theme, context, close', asy
   const onReport = (data, extras) => reports.push({ data, extras });
   const onClosed = (word, extras) => closed.push({ word, extras });
 
-  const tree = ({ label, accent, mounted = true }) =>
+  const tree = ({ label, accent, background, mounted = true }) =>
     h(
       'window',
       { width: 320, height: 240 },
       h(
         ThemeProvider,
-        { value: { accent } },
+        { value: { accent, background } },
         h(
           Session.Provider,
           { value: { user: 'ada' } },
@@ -186,7 +187,7 @@ test('a pane runs behind the seam: props, callbacks, theme, context, close', asy
 
   try {
     const instance = await render(
-      tree({ label: 'one', accent: '#123456' }),
+      tree({ label: 'one', accent: '#123456', background: '#204060' }),
       x11Root,
     );
 
@@ -222,18 +223,59 @@ test('a pane runs behind the seam: props, callbacks, theme, context, close', asy
     );
     assert.equal(paneWid, started[0].windowId);
 
+    // Three routes, three pixels/values: useTheme() (the report above),
+    // `$accent` on a box (the node route, read mid-pane), and the pane
+    // *window's* own background (read in the band the box's margin bares —
+    // it follows the palette only if the bridge planted the palette on the
+    // window itself, which is the bug this pins). The first frame must
+    // already be in the bridged palette on all three.
+    const paneRgb = async (x, y) => {
+      const shot = await captureDrawable(app, paneWid);
+      return rgbAt(shot, x, y ?? Math.floor(shot.height / 2));
+    };
+    await until(
+      app,
+      async () => String(await paneRgb(30)) === '18,52,86', // box: #123456
+      'the $accent background in the bridged palette',
+    );
+    await until(
+      app,
+      async () => String(await paneRgb(1, 1)) === '32,64,96', // window: #204060
+      'the pane window background in the bridged palette',
+    );
+
     // a props change is one update; so is a theme change, through the env
-    await render(tree({ label: 'two', accent: '#123456' }), x11Root);
+    await render(
+      tree({ label: 'two', accent: '#123456', background: '#204060' }),
+      x11Root,
+    );
     await until(
       app,
       () => reports.some((r) => r.data.label === 'two'),
       'the props update',
     );
-    await render(tree({ label: 'two', accent: '#654321' }), x11Root);
+    await render(
+      tree({ label: 'two', accent: '#654321', background: '#402010' }),
+      x11Root,
+    );
     await until(
       app,
       () => reports.some((r) => r.data.accent === '#654321'),
       'the theme update',
+    );
+    // …and the same update must move the $token paint and the window's own
+    // background, not only useTheme(): the planted-theme route is what a
+    // pane's static styles resolve through (the bug: a framed pane whose
+    // Button re-coloured while its background and static text stayed)
+    await until(
+      app,
+      async () => String(await paneRgb(30)) === '101,67,33', // #654321
+      'the $accent background following the theme update',
+    );
+    await until(
+      app,
+      async () => String(await paneRgb(1, 1)) === '64,32,16', // #402010
+      'the pane window background following the theme update',
     );
 
     // unmount: close handlers flush through callbacks, then a clean exit

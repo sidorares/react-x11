@@ -50,22 +50,34 @@ const h = React.createElement;
  *   closed — there is nobody left to talk to
  */
 
-/** Recreate the bridged providers, outermost first — the parent's own
- * nesting order, which the env Map records and structured clone preserves.
- * A key the pane never registered wraps nothing: no module in this process
- * reads it. */
+/** Recreate the bridged providers around the pane's window, outermost
+ * first — the parent's own nesting order, which the env Map records and
+ * structured clone preserves. A key the pane never registered wraps
+ * nothing: no module in this process reads it. Providers registered
+ * `innermost` (the theme) wrap directly around the window, inside the
+ * rest — see registerFrameProvider (src/frame/env.js) for why the
+ * adjacency matters. */
 function wrapEnv(env, inner) {
-  let tree = inner;
-  for (const [key, value] of [...env].reverse()) {
+  const wrap = (tree, [key, value]) => {
     const registered = registeredFrameContext(key);
-    if (!registered) continue;
-    tree = registered.render
+    if (!registered) return tree;
+    return registered.render
       ? registered.render(value, tree)
       : h(
           registered.Context.Provider,
           { value: registered.revive ? registered.revive(value) : value },
           tree,
         );
+  };
+  const entries = [...env];
+  const isInnermost = ([key]) =>
+    registeredFrameContext(key)?.innermost === true;
+  let tree = inner;
+  for (const entry of entries.filter(isInnermost).reverse()) {
+    tree = wrap(tree, entry);
+  }
+  for (const entry of entries.filter((e) => !isInnermost(e)).reverse()) {
+    tree = wrap(tree, entry);
   }
   return tree;
 }
@@ -105,15 +117,26 @@ function Bridge({ Component, store, rect, invoke, onReady }) {
     };
   }, [onReady]);
 
-  return h(
-    'window',
-    {
-      ref,
-      embeddable: true,
-      width: Math.max(1, rect?.width ?? 400),
-      height: Math.max(1, rect?.height ?? 300),
-    },
-    wrapEnv(snapshot.env, h(Component, snapshot.props)),
+  // The bridged providers wrap the *window*, not the pane component — the
+  // same position they held in the host. ThemeProvider plants the palette
+  // on a window it finds among its children (theme.js, `planted`), and the
+  // window is where it has to land: the window's own background follows the
+  // palette, and it is the top of the node tree every `$token` beneath
+  // resolves through. Mounted inside the window, the palette reached a box
+  // and the window kept resolving against the pane process's own desktop —
+  // a dark-desktop pane in a light-themed app, wrong in both directions.
+  return wrapEnv(
+    snapshot.env,
+    h(
+      'window',
+      {
+        ref,
+        embeddable: true,
+        width: Math.max(1, rect?.width ?? 400),
+        height: Math.max(1, rect?.height ?? 300),
+      },
+      h(Component, snapshot.props),
+    ),
   );
 }
 

@@ -30,7 +30,14 @@ export default function Pane({ label, crash, onReport, onClosed }) {
       },
     );
   }, [label, accent, user, onReport]);
+  // `$accent` on purpose: the *node* route. The report above carries the
+  // context route's answer; the pixels this paints carry the planted-theme
+  // route's, and a theme update has to move both (issue: a framed pane
+  // whose Button re-coloured while its $token background stayed). The
+  // margin bares a band of the pane's *window*, whose background follows
+  // the palette on its own — the third route, and the one that only works
+  // when the bridge plants the palette on the window itself.
   return h('box', {
-    style: { flexGrow: 1, backgroundColor: accent },
+    style: { flexGrow: 1, margin: 6, backgroundColor: '$accent' },
   });
 }

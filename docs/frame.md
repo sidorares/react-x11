@@ -118,10 +118,15 @@ The theme is the one ambient thing the app authors, so it crosses **by
 default**: a `<ThemeProvider>` above a `<Frame>` reaches the pane as a real
 `ThemeProvider` around it — both routes, `useTheme()` and `$token` styles —
 and it is in the pane's very first commit, so there is no frame of default
-palette first. With no provider above the frame, nothing is bridged and the
-pane follows the desktop by itself: same answer, no bridge. A pane that
-wants its own look mounts its own provider, which wins below the bridged
-one the way an inner provider always wins.
+palette first. The bridged provider wraps the pane's **window** itself, the
+position it held in the host: the window's own background follows the app's
+palette rather than the pane process's desktop, and the window is the top
+of the node tree every `$token` beneath it resolves through — so a theme
+toggle in the host moves the pane's background and its static text, not
+only what re-renders through `useTheme()`. With no provider above the
+frame, nothing is bridged and the pane follows the desktop by itself: same
+answer, no bridge. A pane that wants its own look mounts its own provider,
+which wins below the bridged one the way an inner provider always wins.
 
 For a context of your own, create it with `createFrameContext` in a module
 **both sides import** — which the pane already does, since its components

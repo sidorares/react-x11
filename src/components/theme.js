@@ -142,8 +142,12 @@ export const THEME_ENV_KEY = 'react-x11:theme';
 // the complete merged palette, so it wins every token; a pane's own inner
 // ThemeProvider still overrides below it, which is the opt-out a pane that
 // wants its own look already has.
-registerFrameProvider(THEME_ENV_KEY, (value, children) =>
-  h(ThemeProvider, { value }, children),
+registerFrameProvider(
+  THEME_ENV_KEY,
+  (value, children) => h(ThemeProvider, { value }, children),
+  // directly around the pane's window: `planted` puts the palette on a
+  // window among its direct children, and the window is where it must land
+  { innermost: true },
 );
 
 /**

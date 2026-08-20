@@ -69,9 +69,17 @@ export function registeredFrameContext(key) {
  * than `Context.Provider`, like `ThemeProvider`, which also plants the
  * palette on a node so `$token` styles resolve. `render(value, children)`
  * returns the wrapped element.
+ *
+ * `innermost: true` puts the provider directly around the pane's window,
+ * inside every other bridged provider. ThemeProvider needs the adjacency:
+ * it plants the palette on a window it finds among its *direct* children,
+ * and the window is where the palette must land — the window's own
+ * background follows it, and the node tree under it is what every `$token`
+ * resolves through. Plain context providers have no such constraint and
+ * keep the host's nesting order outside.
  */
-export function registerFrameProvider(key, render) {
-  registry.set(key, { render });
+export function registerFrameProvider(key, render, { innermost = false } = {}) {
+  registry.set(key, { render, innermost });
 }
 
 /**
