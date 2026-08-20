@@ -48,7 +48,14 @@ import { CallbackTable, PROTOCOL } from './protocol.js';
 
 const h = React.createElement;
 
-const CHILD = fileURLToPath(new URL('./child.js', import.meta.url));
+/** The forked entry's path — resolved at first spawn, not at import. The
+ * website playground bundles this module with throw-on-call stubs for the
+ * node builtins, and a top-level `fileURLToPath` would throw on *load*;
+ * lazily, `<Frame>` imports everywhere and says "needs a desktop" only
+ * when something actually spawns. */
+let childEntry = null;
+const childPath = () =>
+  (childEntry ??= fileURLToPath(new URL('./child.js', import.meta.url)));
 
 /**
  * @typedef {object} FrameTransport The parent's end of the wire to a pane.
@@ -64,7 +71,7 @@ const CHILD = fileURLToPath(new URL('./child.js', import.meta.url));
  * inherited, which is what carries a dev loader (tsx, the refresh loader)
  * into the pane; a bundled app forks plain JS and needs none. */
 function forkTransport({ src, display }) {
-  const child = fork(CHILD, [], {
+  const child = fork(childPath(), [], {
     serialization: 'advanced',
     // dev loaders (tsx, the refresh loader) follow into the pane; the test
     // runner's own flags must not — `--test` in execArgv would run the pane
