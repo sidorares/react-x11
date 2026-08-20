@@ -27,7 +27,14 @@
 //                     line: a character the face does not have is drawn from
 //                     somebody else's, and this says whose.
 //   Axes              a variable font grows a control per axis it declares —
-//                     read off the file, not configured here.
+//                     read off the file, not configured here — and a picker
+//                     for the designer's **named instances**, which are the
+//                     points on those axes somebody signed off.
+//   Open a file…      fontconfig cannot see a font that is not installed, so
+//                     a face you just downloaded is unreachable by any
+//                     query. An opened file is pinned above the results and
+//                     opened through `openFont`, the same call the query
+//                     results go through.
 //   Guides            the ascender, cap height, x-height, baseline and
 //                     descender, drawn where `metrics()` says they are. These
 //                     are the same numbers `_lineMetrics` lays out with, so a
@@ -121,6 +128,7 @@ import React, {
 } from 'react';
 
 import {
+  Button,
   Select,
   Slider,
   Switch,
@@ -129,6 +137,7 @@ import {
   loadFont,
   openFont,
   useApp,
+  useFileDialog,
 } from '../src/index.js';
 const SAMPLE = 'Sphinx of black quartz, judge my vow';
 
@@ -441,6 +450,8 @@ function describe(catalogue, match, size, app) {
       unitsPerEm: font.unitsPerEm,
       metrics: font.metrics(size),
       axes: font.variationAxes ?? {},
+      // the designer's chosen points, which fontkit keeps beside the axes
+      named: font.fk?.namedVariations ?? {},
     };
   } catch (err) {
     return { error: String(err?.message ?? err) };
@@ -588,7 +599,7 @@ const s = createStyles({
 
 const QUICK = ['sans-serif', 'serif', 'monospace', ':lang=ru', ':lang=ja'];
 
-function MatchList({ matches, selected, onSelect }) {
+function MatchList({ matches, selected, winner, onSelect }) {
   return (
     <box style={s.list} data-testname="matches">
       {matches.map((m, i) => {
@@ -605,7 +616,7 @@ function MatchList({ matches, selected, onSelect }) {
             <text style={[s.rowName, on && s.rowNameOn]}>
               {m.family || m.postscriptName || '(unnamed)'}
             </text>
-            {i === 0 ? (
+            {idOf(m) === winner ? (
               <text style={on ? s.rowFileOn : s.winner}>
                 what this query gives you
               </text>
@@ -680,8 +691,9 @@ function Coverage({ font, text }) {
   );
 }
 
-function Axes({ axes, values, onChange }) {
+function Axes({ axes, named, values, onChange, onInstance }) {
   const ids = Object.keys(axes);
+  const instances = Object.keys(named ?? {});
   if (!ids.length) {
     return (
       <box style={{ flexDirection: 'column', gap: 4 }} data-testname="axes">
@@ -695,6 +707,24 @@ function Axes({ axes, values, onChange }) {
   return (
     <box style={{ flexDirection: 'column', gap: 8 }} data-testname="axes">
       <text style={s.h}>Variable axes</text>
+      {instances.length ? (
+        <box style={s.axis}>
+          <text style={s.axisName}>Named instance</text>
+          <Select
+            style={{ flexGrow: 1 }}
+            value=""
+            aria-label="Named instance"
+            options={[
+              { value: '', label: 'custom' },
+              ...instances.map((n) => ({ value: n, label: n })),
+            ]}
+            // The designer's own chosen points on the axes — `Regular`,
+            // `Condensed Bold` — which is what a user of the face thinks in,
+            // where the sliders below are what the file is made of.
+            onChange={(ev) => named[ev.value] && onInstance(named[ev.value])}
+          />
+        </box>
+      ) : null}
       {ids.map((id) => {
         const axis = axes[id];
         const value = values[id] ?? axis.default;
@@ -752,6 +782,12 @@ export function FontsPanel({
   const [hover, setHover] = useState(null);
   const [summary, setSummary] = useState(null);
   const [axisValues, setAxisValues] = useState({});
+  // Files the reader opened by hand. fontconfig cannot see a font that is
+  // not installed, so a downloaded face is unreachable by any query — these
+  // are pinned above the results rather than mixed into them.
+  const [opened, setOpened] = useState([]);
+  const [openError, setOpenError] = useState(null);
+  const { openFile } = useFileDialog();
 
   // Deferred even though matching no longer blocks: it coalesces a burst of
   // keystrokes into one `fc-match` rather than one per character. The field
@@ -785,8 +821,11 @@ export function FontsPanel({
 
   // The selection follows the query unless the reader has picked something
   // that is still in the new list.
-  const current =
-    matches.find((m) => idOf(m) === selected) ?? matches[0] ?? null;
+  const shown = useMemo(() => [...opened, ...matches], [opened, matches]);
+  // The marker belongs to the *query's* best answer, which is no longer row
+  // zero once an opened file sits above it.
+  const winner = matches[0] ? idOf(matches[0]) : null;
+  const current = shown.find((m) => idOf(m) === selected) ?? shown[0] ?? null;
 
   const info = useMemo(
     () =>
@@ -974,12 +1013,53 @@ export function FontsPanel({
             </box>
           ))}
         </box>
-        <text style={s.label}>
-          {failed ? '' : `${matches.length} candidates, best first`}
-        </text>
+        <box style={s.row}>
+          <Button
+            aria-label="Open a font file"
+            onPress={async () => {
+              try {
+                setOpenError(null);
+                const picked = await openFile({
+                  title: 'Open a font file',
+                  filters: [
+                    { name: 'Fonts', patterns: ['*.ttf', '*.otf', '*.ttc'] },
+                  ],
+                });
+                const path = picked?.[0]?.path ?? picked?.[0] ?? null;
+                if (!path) return;
+                const font = openFont(app, path);
+                setOpened((prev) =>
+                  prev.some((m) => m.path === path)
+                    ? prev
+                    : [
+                        {
+                          path,
+                          postscriptName: font.postscriptName,
+                          family: font.familyName,
+                        },
+                        ...prev,
+                      ],
+                );
+                setSelected(
+                  idOf({ path, postscriptName: font.postscriptName }),
+                );
+              } catch (err) {
+                // No portal, no dialog, a cancelled pick, or a file fontkit
+                // will not parse — all the same to the reader: say it and
+                // carry on with the query.
+                setOpenError(String(err?.message ?? err));
+              }
+            }}
+          >
+            Open a file…
+          </Button>
+          <text style={s.label}>{failed ? '' : `${matches.length} found`}</text>
+        </box>
+        {openError ? <text style={s.error}>{openError}</text> : null}
         {failed ? <text style={s.error}>{failed}</text> : null}
         <MatchList
-          matches={matches}
+          matches={shown}
+          winner={winner}
           selected={current ? idOf(current) : null}
           onSelect={setSelected}
         />
@@ -1136,7 +1216,13 @@ export function FontsPanel({
               </box>
               <Facts info={info} size={size} />
               <Coverage font={info.font} text={text} />
-              <Axes axes={info.axes} values={axisValues} onChange={setAxis} />
+              <Axes
+                axes={info.axes}
+                named={info.named}
+                values={axisValues}
+                onChange={setAxis}
+                onInstance={setAxisValues}
+              />
             </>
           )}
         </box>

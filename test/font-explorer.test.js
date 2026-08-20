@@ -582,4 +582,62 @@ describe('examples/fonts', () => {
       assert.ok(grown >= box, `${grown} should hold a ${box}px line`);
     });
   });
+
+  test('a named instance is offered for every point the designer chose', async () => {
+    // The two halves of a variable font: the axes are what the file is made
+    // of, and the named instances are the points on them the designer signed
+    // off. A picker that offers only the sliders makes the reader guess at
+    // what `Condensed Bold` meant.
+    const withInstances = {
+      kind: 'stub',
+      match: () => [{ path: '/stub/Var.ttf', postscriptName: 'Var-Regular' }],
+      open: () => ({
+        familyName: 'Var',
+        postscriptName: 'Var-Regular',
+        unitsPerEm: 1000,
+        variationAxes: {
+          wght: { name: 'Weight', min: 100, default: 400, max: 900 },
+          wdth: { name: 'Width', min: 50, default: 100, max: 200 },
+        },
+        fk: { namedVariations: { 'Condensed Bold': { wght: 700, wdth: 75 } } },
+        hasGlyph: () => true,
+        metrics: () => ({
+          ascent: 24,
+          descent: 6,
+          lineGap: 0,
+          lineHeight: 30,
+          capHeight: 20,
+          xHeight: 13,
+        }),
+      }),
+    };
+    await mount({ catalogue: withInstances });
+    await waitFor(() => heading('Var'));
+
+    const axes = () => within(screen.getByTestName('axes'));
+    axes().getByText('Named instance');
+    // a control per axis the file declares, *and* the picker beside them
+    axes().getByRole('group', { name: 'wght' });
+    axes().getByRole('group', { name: 'wdth' });
+    assert.ok(
+      axes().queryAllByRole('combobox').length === 1,
+      'one instance picker',
+    );
+
+    // …and a variable face that declares *no* instances does not grow an
+    // empty picker. It has to have axes, or the pane never gets that far.
+    cleanup();
+    const noInstances = {
+      ...withInstances,
+      open: () => ({ ...withInstances.open(), fk: { namedVariations: {} } }),
+    };
+    await mount({ catalogue: noInstances });
+    await waitFor(() => heading('Var'));
+    within(screen.getByTestName('axes')).getByRole('group', { name: 'wght' });
+    assert.equal(
+      within(screen.getByTestName('axes')).queryAllByRole('combobox').length,
+      0,
+      'no instances, no picker',
+    );
+  });
 });

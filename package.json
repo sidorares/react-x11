@@ -23,7 +23,6 @@
     "examples:tasks:hot": "node --enable-source-maps --import react-x11/refresh/register examples/tasks-hot.jsx",
     "examples:menu": "tsx examples/menu.jsx",
     "examples:monitor": "tsx examples/monitor.jsx",
-    "examples:variable-fonts": "tsx examples/variable-fonts.jsx",
     "examples:tooltips": "tsx examples/tooltips.jsx",
     "examples:chat": "tsx examples/chat.jsx",
     "examples:clipboard": "tsx examples/clipboard.jsx",
