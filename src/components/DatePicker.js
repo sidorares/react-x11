@@ -246,6 +246,8 @@ export function DatePicker({
           y: anchor.y,
           width,
           height,
+          // a sheet dropping from a control, same as `Select`'s
+          windowType: 'dropdown_menu',
           grab: true,
           onDismiss: close,
           // ARGB where the display has it, so the corners the sheet gives up

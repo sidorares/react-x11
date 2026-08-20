@@ -759,7 +759,7 @@ test('popup mounts as an override-redirect window and unmounts cleanly', async (
   // the EWMH type hint is additive — override-redirect still keeps the WM
   // from moving or decorating the menu; the hint only lets compositing
   // managers style it consistently (wm-spec asks for it on o-r windows)
-  assert.strictEqual(popup.attributes.windowType, 'dropdown_menu');
+  assert.strictEqual(popup.attributes.windowType, 'popup_menu');
   assert.deepStrictEqual([popup.attributes.x, popup.attributes.y], [300, 150]);
   assert.strictEqual(popup.mapped, true);
 
@@ -1313,6 +1313,8 @@ test('Select opens a popup menu, picks an option, closes on Escape', async () =>
   assert.strictEqual(app.windows.length, 2, 'menu popup window created');
   const popup = app.windows[1];
   assert.strictEqual(popup.attributes.overrideRedirect, true);
+  // a menu dropping from a control, and it says so (issue #298)
+  assert.strictEqual(popup.attributes.windowType, 'dropdown_menu');
   assert.strictEqual(popup.attributes.width, trigger.abs.width);
   await tick();
 
@@ -2578,7 +2580,7 @@ test('a <popup> can opt out of override-redirect and be WM-managed', async () =>
     true,
     'menus keep the default that makes them menus',
   );
-  assert.strictEqual(menu.attributes.windowType, 'dropdown_menu');
+  assert.strictEqual(menu.attributes.windowType, 'popup_menu');
   assert.strictEqual(dialog.attributes.overrideRedirect, false);
   assert.strictEqual(dialog.attributes.windowType, 'dialog');
 

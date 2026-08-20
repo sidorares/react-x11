@@ -395,6 +395,9 @@ export function Select({
           y: anchor.y,
           width: anchor.width,
           height: menuHeight + 2,
+          // what this sheet *is* to the compositor: a menu dropping from a
+          // control, not the bare `<popup>` default of `popup_menu`
+          windowType: 'dropdown_menu',
           grab: true,
           onDismiss: close,
           // ARGB where the display has it, so the corners the sheet gives up

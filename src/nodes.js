@@ -10030,13 +10030,16 @@ export class PopupNode extends WindowNode {
     // The EWMH type hint is additive — the spec asks for it on
     // override-redirect windows too, so compositing managers can give menus
     // and tooltips consistent shadows/animations. `windowType` overrides the
-    // default (e.g. "tooltip", "popup_menu").
+    // default (e.g. "tooltip", "dropdown_menu"); `popup_menu` is the
+    // least-wrong answer for a popup that declares nothing, and the widgets
+    // that know better say so themselves — `Select`'s sheet is a
+    // `dropdown_menu`, a `Tooltip` a `tooltip` (issue #298).
     super(
       app,
       {
         ...attributes,
         overrideRedirect: attributes.overrideRedirect ?? true,
-        windowType: attributes.windowType ?? 'dropdown_menu',
+        windowType: attributes.windowType ?? 'popup_menu',
       },
       props,
     );
