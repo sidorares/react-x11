@@ -36,7 +36,7 @@ off the event, and a bare `onChange={field.handleChange}` stores the _event
 object_ as the field value with no error. See below.
 
 **Where the line falls.** A control that takes a `name` is a form field and
-reports an event. `Tabs`, `Tree`, `Table` and the menus are not form fields
+reports an event. `Tabs`, `Table` and the menus are not form fields
 and keep their plain callbacks
 ([components](../components.md#the-change-event-and-name)).
 

@@ -194,7 +194,7 @@ The keys are a **default action**, which is the whole of the contract:
 
 - `preventDefault()` in the node's own `onKeyDown` takes the key back — that
   is how a widget that answers Enter with something other than its click
-  (`Tree` opens a branch; the click only moves the selection) keeps it;
+  (a disclosure opens a branch; the click only moves the selection) keeps it;
 - a node with no `onClick` is untouched, whatever its `role` says. A role
   advertises an action to an assistive technology, which has no other way to
   ask; a key press is already at the node, so there is nothing to advertise

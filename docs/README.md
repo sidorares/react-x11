@@ -12,7 +12,7 @@
 - [components.md](components.md) — widget components built on the
   primitives: theming, the basic controls (`Button`, `Checkbox`,
   `Radio`/`RadioGroup`, `Switch`, `ProgressBar`), `Select`, `Slider`,
-  `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `Tree`,
+  `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`,
   `SplitPane`, `Canvas3D`, and the `useAnchor` popup placement hook.
 - [globalmenu.md](globalmenu.md) — handing a window's menu bar to the
   desktop's panel where there is one, with no configuration: the dbusmenu

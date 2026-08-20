@@ -15,7 +15,7 @@
 // ## One shape per idea
 //
 // Before this existed, core drew a chevron four ways: a filled triangle in
-// Select, Tree and Table, a stroked chevron in Calendar, and a `▸` text
+// Select and Table, and a `▸` text
 // glyph in Menu — which is tofu on a machine without it, the very thing
 // docs/components.md warns applications about. There is now one chevron and
 // the filled caret is gone: a stroked chevron is what a modern control uses
@@ -38,7 +38,7 @@
 // binary artifact and a generation toolchain in a package that is otherwise
 // pure JS, baseline rather than box alignment, unhinted mush at 12px, and an
 // icon name routed through text layout and the accessibility tree. Revisit
-// only if a profile of a large Tree shows composite count dominating.
+// only if a profile of a large tree view shows composite count dominating.
 //
 // The drawings are also deliberately *not* themable. Colour and size are —
 // see `Icon` — but the geometry is core's vocabulary, and an application
@@ -55,7 +55,7 @@ const h = React.createElement;
  *
  * `size / 12` is the 2-on-a-24-grid weight every modern outline set uses,
  * with a floor: below about 1.25 a stroke stops reading as a line at all,
- * and the twisty in a Tree is 10px.
+ * and a disclosure twisty is 10px.
  */
 const weight = (size) => Math.max(1.25, size / 12);
 
