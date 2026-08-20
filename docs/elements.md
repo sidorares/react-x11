@@ -166,7 +166,7 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `backgroundColor`           | full-window clear color (default white)                                                                                                                                                                 |
 | `onResize(ev)`              | ConfigureNotify — the tree reflows automatically. Fires for **moves** too (see below)                                                                                                                   |
 | `onExpose(ev)`              | after a repaint was required                                                                                                                                                                            |
-| `onCloseRequest(ev)`        | WM close button (opts into `WM_DELETE_WINDOW`)                                                                                                                                                          |
+| `onCloseRequest(ev)`        | WM close button — replaces the default answer (see below); `WM_DELETE_WINDOW` is advertised either way                                                                                                  |
 | `states`                    | EWMH `_NET_WM_STATE` — controlled, see below                                                                                                                                                            |
 | `fullscreen`, `alwaysOnTop` | boolean sugar for two of those states                                                                                                                                                                   |
 | `decorations`               | `false` asks the WM for no titlebar or border                                                                                                                                                           |
@@ -456,6 +456,50 @@ and returns a getter, like `useAnchor`.
 Xfwm, Openbox and i3. A window manager that ignores it simply decorates the
 window; there is no way to force the matter.
 
+### Closing a window
+
+Every window the window manager manages advertises `WM_DELETE_WINDOW` in
+`WM_PROTOCOLS`, whether or not you pass `onCloseRequest`. That property is
+what lets the WM _ask_ a window to close; a client without it can only be
+shot, so the close button becomes `XKillClient` — the connection dies
+mid-frame, effects never clean up, and IceWM asks the user to confirm the
+kill first. Advertising it is not an opt-in feature, it is the difference
+between closing and crashing, so react-x11 does it for you.
+
+Windows the WM does not frame never advertise it, because nothing would read
+it: a child `<window>` (a region inside another window) and an
+override-redirect `<popup>`. A [managed `<popup>`](#a-managed-popup-is-a-dialog)
+is a real dialog and does.
+
+What a close request _does_ is the part you can change:
+
+|                     |                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| no `onCloseRequest` | the **primary window** unmounts the tree and closes the connection — effects clean up and the process ends on a drained loop. Any other window refuses, and warns in dev. |
+| `onCloseRequest`    | nothing happens except your handler: `setOpen(false)` for a dialog, a "save your work?" prompt, `root.unmount()` for a quit of your own.                                  |
+
+The primary window is inferred, not declared: the first top-level `<window>`
+that is not `transientFor` another and has no `windowType` of its own. A
+one-window app — nearly every app — is unambiguous, and a lone window is the
+app whatever type it declares.
+
+The refusal for secondary windows is deliberate. A `{open && <window/>}` was
+opened by a `setOpen(true)` somewhere, and closing it behind React's back
+would leave a window the app still believes is open and can never reopen. So
+a dialog wants a handler:
+
+```jsx
+{
+  showSettings && (
+    <window
+      title="Settings"
+      transientFor={main}
+      onCloseRequest={() => setShowSettings(false)}
+    />
+  );
+}
+```
+
 ### Window state
 
 `states` is EWMH `_NET_WM_STATE`: `modal`, `sticky`, `maximized` (or
@@ -534,7 +578,7 @@ Three things worth knowing:
 - **`preventDefault()` stops react-x11 acting on the message itself**, which
   today means XDND — for a window answering the drag protocol on its own
   terms. It does not cover the WM close button; `onCloseRequest` is that
-  seam, and it opts into `WM_DELETE_WINDOW` as well as handling it.
+  seam.
 
 Sending is `useApp().X.SendClientMessage(destination, aboutWindow, atom,
 format, data, eventMask)`, or ntk's `window.sendClientMessage(name, data)`

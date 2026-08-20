@@ -757,7 +757,7 @@ export async function createRoot(options = {}) {
   // is seeded from disk and the ladder runs when something asks.
   const stopAppearance = watchAppearance(() => appearanceChanged(app));
 
-  return {
+  const root = {
     app,
     render(element, callback) {
       // The provider wraps rather than replaces: it renders no host node, so
@@ -801,6 +801,15 @@ export async function createRoot(options = {}) {
         unregisterApp(app);
         await app.close();
       }
+      if (app._reactX11Root === root) app._reactX11Root = null;
     },
   };
+
+  // What a WM close request with no onCloseRequest unmounts (see
+  // WindowNode#_defaultCloseRequest). The first root wins, because it is the
+  // one whose window the request will be arriving on; a second root sharing a
+  // borrowed connection owns its own teardown either way.
+  app._reactX11Root ??= root;
+
+  return root;
 }
