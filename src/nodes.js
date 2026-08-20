@@ -101,7 +101,7 @@ import {
   devCheckA11yProps,
   hasClickHandler,
 } from './a11y.js';
-import { windowIdOf } from './windowid.js';
+import { topLevelWindows, windowIdOf } from './windowid.js';
 import { paintCacheFor } from './paintcache.js';
 import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
@@ -7940,7 +7940,7 @@ export class WindowNode extends Scrollable(Node) {
     ];
     wnd.measure ??= (callback) => callback?.(0, 0, wnd.width, wnd.height, 0, 0);
     wnd.ownerDocument ??= DEVTOOLS_FAKE_DOCUMENT;
-    this._attachWindowListeners();
+    this._attachWindowListeners(parentWindow);
     for (const child of this.children) {
       if (child.isWindow && !child.isPopup) {
         child.realize(wnd);
@@ -8508,7 +8508,12 @@ export class WindowNode extends Scrollable(Node) {
     return WINDOW_SEMANTIC_NAMES;
   }
 
-  _attachWindowListeners() {
+  /**
+   * `parentWindow` is realize()'s, and only the close handshake reads it:
+   * whether the window manager frames this window decides whether
+   * WM_DELETE_WINDOW means anything on it.
+   */
+  _attachWindowListeners(parentWindow) {
     const wnd = this.window;
     if (typeof wnd.on !== 'function') return;
     wnd.on('resize', (ev) => {
@@ -8617,19 +8622,28 @@ export class WindowNode extends Scrollable(Node) {
         });
       });
     }
-    // WM close button: with an onCloseRequest prop the window opts into the
-    // WM_DELETE_WINDOW protocol and the handler decides what happens
-    // (unmount, hide, quit). Without it the WM default stands (the server
-    // kills the connection). Opt-in is decided at realize time.
+    // WM close button. Armed for every window the window manager actually
+    // manages, prop or no prop, because the alternative is not "no close
+    // handling" but a killed connection: a client with no WM_DELETE_WINDOW
+    // in WM_PROTOCOLS cannot be *asked* to close, so XKillClient is the only
+    // move the WM has left. Effects never clean up, and IceWM puts a "do you
+    // want to kill this client?" dialog in front of the user first. Every
+    // other toolkit arms this unconditionally for the same reason; making it
+    // the prop's side effect only moved that trap one level up.
+    //
+    // Not armed where the property is dead weight, which is every window the
+    // WM does not frame: a child <window> (a region inside another window)
+    // and an override-redirect <popup>. A `<popup overrideRedirect={false}>`
+    // is a real dialog and does get it.
     //
     // ntk >= 5.3 owns the protocol: listening for 'close' self-arms
     // WM_PROTOCOLS and decodes the ClientMessage (#160). Its default action
     // — destroy the window — is always prevented, because what happens next
-    // is this handler's decision, and usually a React unmount: ntk tearing
-    // the window down underneath the reconciler is exactly what the prop
-    // exists to avoid. This also leaves the raw 'message' stream free for
-    // protocols react-x11 speaks itself (XDND, src/dnd.js).
-    if (this.props.onCloseRequest) {
+    // is React's decision: ntk tearing the window down underneath the
+    // reconciler is exactly what this handler exists to avoid. This also
+    // leaves the raw 'message' stream free for protocols react-x11 speaks
+    // itself (XDND, src/dnd.js).
+    if (!parentWindow && this.attributes?.overrideRedirect !== true) {
       wnd.on(
         'close',
         // a WM close is a user action: discrete priority and a discrete
@@ -8642,11 +8656,82 @@ export class WindowNode extends Scrollable(Node) {
           runWithPriority(DiscreteEventPriority, () => {
             const handler = this.props.onCloseRequest;
             if (handler) callHandler(this, 'onCloseRequest', handler, ev);
+            else this._defaultCloseRequest();
           });
         }),
       );
     }
     this.events.attach();
+  }
+
+  /**
+   * A close request nobody handled — `onCloseRequest` is the override, this
+   * is what happens without one.
+   *
+   * Closing the app's primary window closes the app, which is what the
+   * button means everywhere else on the desktop. The tree unmounts and the
+   * connection closes, so effects clean up and the process ends on a drained
+   * loop rather than on a dead socket.
+   *
+   * Any other top-level window is a dialog or a satellite, and whether it
+   * goes away is app state this renderer cannot write: a `{open && <window/>}`
+   * was opened by a `setOpen(true)` somewhere, and unmapping it behind
+   * React's back would leave a window the app still believes is open and can
+   * never reopen. So the request is refused, and in dev it is said out loud —
+   * an inert close button is a bug, but a recoverable one, where guessing at
+   * the app's state is not.
+   */
+  _defaultCloseRequest() {
+    if (this._isPrimaryWindow()) {
+      // fire and forget: unmount() is async (it awaits the connection
+      // closing) and a WM close request is answered synchronously or not at
+      // all. Errors reach the app's own handler, never an unhandled rejection.
+      Promise.resolve(this.app?._reactX11Root?.unmount?.()).catch((err) => {
+        this.app?.options?.onXError?.(err);
+      });
+      return;
+    }
+    if (DEV && !this._warnedNoCloseHandler) {
+      this._warnedNoCloseHandler = true;
+      console.warn(
+        'react-x11: the window manager asked <window%s> to close, and it has ' +
+          "no onCloseRequest — so nothing happened. Only the app's primary " +
+          'window closes the app by default; a second window is opened by ' +
+          'app state and only app state can close it.',
+        this.props.title ? ` title=${JSON.stringify(this.props.title)}` : '',
+      );
+    }
+  }
+
+  /**
+   * Whether this is the window whose close button means "quit".
+   *
+   * Inferred, not declared, because the tree already says it. A window that
+   * is somebody's `transientFor` is a dialog *of* that window, and one with
+   * an EWMH type of its own (`dialog`, `utility`, `splash`, …) has already
+   * announced it is not the main window; what is left, in creation order, is
+   * the app. That is the same rule startup.js uses to decide which window
+   * carries the launch id, and for one-window apps — nearly all of them — it
+   * is not a heuristic at all.
+   *
+   * A lone window is the app whatever it calls itself: an app whose only
+   * window is a `utility` still has to be closable. An app that disagrees
+   * with any of this passes `onCloseRequest`, which never reaches here.
+   */
+  _isPrimaryWindow() {
+    const tops = topLevelWindows(this.app);
+    if (!tops.includes(this)) return false;
+    const candidates = tops.filter((node) => node._isPrimaryCandidate());
+    if (candidates.length === 0) return tops.length === 1;
+    return candidates[0] === this;
+  }
+
+  /** Top-level, nobody's dialog, and of no special type: a main-window shape. */
+  _isPrimaryCandidate() {
+    if (this.props.transientFor != null) return false;
+    const type = this.props.windowType;
+    const plain = (t) => t == null || t === 'normal';
+    return Array.isArray(type) ? plain(type[0]) : plain(type);
   }
 
   /** Child <window>s in the order they should stack, bottom to top: the same

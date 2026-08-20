@@ -398,7 +398,25 @@ export interface WindowProps
    * costs nothing.
    */
   onStatesChange?: (states: WindowStateName[]) => void;
-  /** The WM close button; opts the window into `WM_DELETE_WINDOW`. */
+  /**
+   * The window manager's close button, and anything else that asks a window
+   * to close (Alt+F4, a taskbar's "Close", `wmctrl -c`).
+   *
+   * Every WM-managed window speaks `WM_DELETE_WINDOW` whether or not this
+   * prop is passed — without it the window manager cannot ask at all and
+   * kills the connection instead. This prop replaces the default answer:
+   *
+   * - **without it** the app's primary window unmounts the tree and closes
+   *   the connection, and any other window refuses (a dialog is opened by
+   *   app state, so only app state can close it — dev warns).
+   * - **with it** nothing happens except this handler, which decides:
+   *   `setOpen(false)` for a dialog, a "save your work?" prompt, or
+   *   `root.unmount()` for a quit of your own.
+   *
+   * The primary window is the first top-level `<window>` that is not
+   * `transientFor` another and has no `windowType` of its own — a lone
+   * window always qualifies.
+   */
   onCloseRequest?: (ev: SyntheticEvent<NtkWindow>) => void;
   /**
    * Every ClientMessage addressed to this window — the carrier of EWMH,
