@@ -795,8 +795,11 @@ real dialog does not close because you clicked elsewhere.
 The [`Dialog`](components.md#dialog) component does exactly this, and takes
 `managed={false}` to go back to the override-redirect shape.
 
-Defaults to `windowType="dropdown_menu"`; pass `windowType` to override
-(`"tooltip"`, `"popup_menu"`, …). The hint is **additive** — override-
+Defaults to `windowType="popup_menu"` — the least-wrong answer for a popup
+that declares nothing; pass `windowType` to say what yours is
+(`"tooltip"`, `"dropdown_menu"`, …). The built-in widgets do:
+`Select`'s and `DatePicker`'s sheets are `dropdown_menu`, `Tooltip` is
+`tooltip`. The hint is **additive** — override-
 redirect is what keeps the WM from moving or decorating the popup, and
 stays on. The EWMH spec asks for the type hint on override-redirect
 windows too, so compositing managers can give menus and tooltips

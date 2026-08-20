@@ -343,6 +343,9 @@ test('a DatePicker opens its calendar on the press and closes on the pick', asyn
   });
   await settle();
   assert.strictEqual(cells(app).length, 42, 'the press alone opened it');
+  // the sheet names its EWMH type: a menu dropping from a control, same as
+  // Select's (issue #298)
+  assert.strictEqual(app.windows[1].attributes.windowType, 'dropdown_menu');
 
   click(app, cells(app)[cellOf(12)]);
   await settle();
