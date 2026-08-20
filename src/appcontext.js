@@ -26,7 +26,7 @@ import {
   compositingActive,
   watchCompositing,
 } from './compositing.js';
-import { hasDirectGL } from './glbackend.js';
+import { hasDirectGL, watchDirectGL } from './glbackend.js';
 
 const AppContext = createContext(null);
 
@@ -84,8 +84,8 @@ const SUPPORTS_FEATURES = new Set(['transparency', 'shaders']);
  * told which it is. Reach for the style block first; this is for decisions
  * that are not styling.
  *
- * `'shaders'` is true when 3D can run your own GLSL — that is, when ntk
- * resolved the **direct** rendering backend for this connection. It is the
+ * `'shaders'` is true when 3D can run your own GLSL — that is, when this
+ * connection draws through the **direct** rendering backend. It is the
  * question to ask before rendering a `<shaderMaterial>`, which throws where
  * there is no pipeline to compile it:
  *
@@ -97,11 +97,20 @@ const SUPPORTS_FEATURES = new Set(['transparency', 'shaders']);
  * </mesh>
  * ```
  *
- * It needs `createRoot({ glPolicy: 'auto' })` — the default policy is the
- * indirect backend, which has no shaders at all. Unlike `'transparency'` it
- * cannot change while the app runs, since the backend is settled during the
- * connection handshake. `app.glCapabilities()` says *why* it is false; see
- * docs/gl.md.
+ * It needs `createRoot({ glPolicy: 'auto' })`: the default policy is the
+ * indirect backend, which has no shaders at all, so this is false under it
+ * whatever the machine could do. That is the line between this and
+ * `app.glCapabilities()` — the hook answers which backend *this connection*
+ * got, the capabilities answer what the machine could offer, and they
+ * disagree exactly when the policy did not ask. The capabilities also say
+ * *why* this is false; see docs/gl.md.
+ *
+ * Unlike `'transparency'`, which comes and goes with the compositor, this
+ * settles once and then holds still: under a policy that could pick direct,
+ * `createRoot()` waits for ntk's probe before handing the app back, so the
+ * first render already reads the final answer. A policy raised after
+ * connecting has missed that probe, and re-renders its readers when it
+ * settles rather than leaving them with two different answers.
  */
 export function useSupports(feature) {
   const app = useApp();
@@ -112,13 +121,15 @@ export function useSupports(feature) {
     );
   }
   // Both features go through the same store, so the hooks below run in the
-  // same order whatever is being asked about. 'shaders' has nothing to watch:
-  // ntk settles the backend during the connection handshake and it cannot
-  // change after that, so its subscribe is a no-op rather than a compositing
-  // watch this caller never asked for.
+  // same order whatever is being asked about. Where compositing comes and
+  // goes for as long as the app runs, the backend settles at most once — and
+  // watching that one moment is what keeps two components rendered either
+  // side of it from disagreeing (see watchDirectGL).
   const subscribe = useCallback(
     (onChange) =>
-      feature === 'shaders' ? () => {} : watchCompositing(app, onChange),
+      feature === 'shaders'
+        ? watchDirectGL(app, onChange)
+        : watchCompositing(app, onChange),
     [app, feature],
   );
   // a boolean, so the snapshot is stable for a given state — returning the

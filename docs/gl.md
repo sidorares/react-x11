@@ -40,6 +40,19 @@ Everything about how the backend is chosen and why it might be unavailable —
 the `GLError` codes, `app.glCapabilities()`, the addon — is ntk's, and is
 documented in [ntk's context-gles.md](https://github.com/sidorares/ntk/blob/master/docs/context-gles.md).
 
+### The policy decides, not the machine
+
+`app.glCapabilities()` answers what the _machine_ could do, and it says
+`direct: true` on a DRI3-capable box whatever the policy is — a capability is
+not a decision. What draws is the backend the policy asked for, so that is
+what `useSupports('shaders')` and the direct-only elements answer: under the
+default `'indirect'`, both say no shaders on a machine that has a GPU, an
+addon and DRI3, because none of that is being used.
+
+The two questions are worth keeping apart. A scene branches on the backend it
+got; a diagnostic — "why did this desktop not get the fast path" — asks the
+capabilities, which is also where the reason lives.
+
 ## Shader materials
 
 ![A torus whose surface is banded and rim-lit by a fragment shader](img/shader-material.png)
@@ -129,6 +142,13 @@ const shaders = useSupports('shaders');
 `<Canvas3D fallback>` does not cover this: it is for a surface with no GL
 context at all, and a connection can have perfectly good indirect GL and no
 shaders.
+
+The answer settles once. Under a policy that could pick direct, `createRoot()`
+waits for ntk's probe before it hands the root back, so the first render
+already reads the final answer; a policy raised on the app after connecting
+has missed that probe, and the hook re-renders when it settles rather than
+leaving one component branching on `false` while its neighbour branches on
+`true`.
 
 ### Runtimes
 
