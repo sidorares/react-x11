@@ -94,27 +94,45 @@ function Picker() {
 
 ## `@tanstack/react-table` {#tanstack-table}
 
-**Out of the box.** @tanstack/react-table@8.21.3 (table-core 8.21.3).
+**Out of the box.** @tanstack/react-table@9.1.2 (table-core 9.1.2,
+react-store 0.11.1).
 
 A headless table engine: column defs, row models, sorting, filtering,
 grouping, pagination, column sizing, visibility and pinning — as pure state
 plus derived row models. It renders nothing; you map `getHeaderGroups()` and
 `getRowModel().rows` to whatever the host renderer draws.
 
-No adapter at all. It imports only `react` — no `react-dom`, no `document` —
-and `flexRender` just resolves a column def to a string or element, which
-lands in `<text>` fine. `column.getToggleSortingHandler()` goes straight onto
-a header `onClick`.
+v9 talks about "adapters", and the word means the framework, not the
+renderer: `@tanstack/react-table` _is_ the React adapter, wiring the
+framework-agnostic core's store to React's subscription model. react-x11 is
+React, so that adapter is already ours and there is nothing renderer-shaped
+to write. It still never touches `react-dom` or `document` at runtime —
+though v9 moves two of this page's checks, see the react-dom and `flexRender`
+bullets below. `column.getToggleSortingHandler()` still goes straight onto a
+header `onClick`.
+
+v9's API is modular where v8's was monolithic: features and row models are
+registered up front through `tableFeatures`, and the hook is `useTable`.
 
 ```jsx
 import React from 'react';
 import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
+  useTable,
+  tableFeatures,
+  rowSortingFeature,
+  createCoreRowModel,
+  createSortedRowModel,
   createColumnHelper,
   flexRender,
 } from '@tanstack/react-table';
+
+// Registered once, outside the component. A feature that is not listed here
+// does not exist: its state slice, its column methods, its row model.
+const features = tableFeatures({
+  rowSortingFeature,
+  coreRowModel: createCoreRowModel(),
+  sortedRowModel: createSortedRowModel(),
+});
 
 const col = createColumnHelper();
 const columns = [
@@ -123,15 +141,7 @@ const columns = [
 ];
 
 function Servers({ data }) {
-  const [sorting, setSorting] = React.useState([]);
-  const table = useReactTable({
-    data,
-    columns,
-    state: { sorting },
-    onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-  });
+  const table = useTable({ features, columns, data });
   return (
     <box style={{ flexDirection: 'column' }}>
       {table.getHeaderGroups().map((hg) => (
@@ -151,7 +161,7 @@ function Servers({ data }) {
       ))}
       {table.getRowModel().rows.map((row) => (
         <box key={row.id} style={{ flexDirection: 'row', height: 20 }}>
-          {row.getVisibleCells().map((cell) => (
+          {row.getAllCells().map((cell) => (
             <text key={cell.id} style={{ width: 120 }}>
               {flexRender(cell.column.columnDef.cell, cell.getContext())}
             </text>
@@ -163,16 +173,45 @@ function Servers({ data }) {
 }
 ```
 
+Sorting is uncontrolled here — the table's own store holds it, and the
+header click re-renders through the adapter's subscription. Pass
+`state`/`onSortingChange` as before to control it, or a selector as
+`useTable`'s second argument to subscribe a component to only some slices.
+
 The natural pairing is inside the existing `Table` component, or raw
 `<box style={{ flexDirection: 'row' }}>` rows: TanStack owns the data logic,
 react-x11 owns painting.
 
-- Column _resizing_ helpers (`header.getResizeHandler`) expect DOM mouse or
-  touch events with `clientX`. Write your own drag handling off
-  `onMouseDown`/`onMouseMove` — react-x11 events carry `x`/`y`.
-- `flexRender` output goes into `<text>`. A column def whose `cell` returns
-  DOM elements will throw the renderer's unknown-element error; return
+- **`coreRowModel` is opt-in, and forgetting it fails silently.** Without
+  `coreRowModel: createCoreRowModel()` in `tableFeatures`, the table
+  constructs, headers render, and `getRowModel().rows` is `[]` — no error.
+  The official examples lean on framework presets that include it; register
+  it yourself.
+- **npm installs a `react-dom` you must not keep.** `@tanstack/react-store`
+  declares a `react-dom` _peer_ dependency, which npm 7+ auto-installs. The
+  shipped code never imports it — grep test 2 on all four `@tanstack`
+  packages finds one `"button"` in a doc comment, and this section was
+  verified with `node_modules/react-dom` deleted — but a resident react-dom
+  is exactly the [silent-failures](../ecosystem.md#silent-failures) hazard.
+  Install with `--legacy-peer-deps`, or delete it and let `npm ls react-dom`
+  stay empty.
+- **`flexRender` now returns a React element even for a plain string cell**
+  (v8 returned the string itself). Inside `<text>` that is fine — the string
+  arrives as a text chunk and paints identically — but a test or a11y walk
+  that reads a `<text>` node's `children` prop now sees an element object.
+  Read the rendered chunks, not the prop. A column def whose `cell` returns
+  DOM elements still throws the renderer's unknown-element error; return
   strings or react-x11 elements.
+- Column _resizing_ helpers (`header.getResizeHandler`) still expect DOM
+  mouse or touch events with `clientX`, and now fall back to a
+  `document`-listener drag loop (injectable as `_contextDocument`). Simpler
+  to ignore the helper: write your own drag handling off
+  `onMouseDown`/`onMouseMove` — react-x11 events carry `x`/`y` — and call
+  `table.setColumnSizing` (needs `columnSizingFeature` registered).
+- `useTable` probes `typeof window` to pick `useLayoutEffect`; under Node it
+  gets the `useEffect` branch. That is a grep-test-3 hit of the harmless
+  kind — timing, not a feature gate — and the sorted re-render above runs
+  through it.
 - For thousands of rows, pair it with a virtualizer — see
   [layout](layout.md#tanstack-virtual). TanStack Table will happily hand you
   10,000 row objects and let the renderer drown.
