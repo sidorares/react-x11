@@ -1536,8 +1536,8 @@ sibling `<popup>`. Pointer events over the surface go to its own window;
 `<glarea>` does not take part in the parent's hit testing yet.
 
 `onDraw` is the raw escape hatch; for a scene, put 3D elements inside
-(below) and let the renderer drive the GL. See `examples/gl.jsx` for the
-raw form, `examples/three.jsx` for the declarative one.
+(below) and let the renderer drive the GL. See `examples/viewer3d.jsx` for
+the raw form, `examples/three.jsx` for the declarative one.
 
 ---
 
