@@ -25,10 +25,8 @@ import {
   RadioGroup,
   Select,
   Slider,
-  SplitPane,
   Switch,
   Tooltip,
-  Tree,
 } from '../../src/index.js';
 
 const s = createStyles({
@@ -79,26 +77,6 @@ const FRUIT = [
   { value: 'damson', label: 'Damson' },
 ];
 
-const OUTLINE = [
-  {
-    id: 'a',
-    label: 'Chapter one',
-    children: [
-      { id: 'a1', label: 'Section 1.1' },
-      {
-        id: 'a2',
-        label: 'Section 1.2',
-        children: [
-          { id: 'a2a', label: 'Deeply nested' },
-          { id: 'a2b', label: 'Also nested' },
-        ],
-      },
-    ],
-  },
-  { id: 'b', label: 'Chapter two', children: [] },
-  { id: 'c', label: 'Appendix', disabled: true },
-];
-
 export function ControlsPanel() {
   const [checks, setChecks] = useState({ one: true, two: false, three: false });
   const [radio, setRadio] = useState('b');
@@ -111,8 +89,6 @@ export function ControlsPanel() {
   const [longText, setLongText] = useState(
     'A textarea with several lines of content\nso the caret can be walked\nup and down between them.',
   );
-  const [picked, setPicked] = useState('a1');
-  const [split, setSplit] = useState(220);
   const [lastMenu, setLastMenu] = useState('—');
 
   const menuItems = [
@@ -197,149 +173,123 @@ export function ControlsPanel() {
 
       {/* A split pane inside a tab panel: the divider drag has to work while
           the panel itself is being sized by the tab strip's layout. */}
-      <SplitPane
-        direction="row"
-        size={split}
-        onResize={setSplit}
-        min={160}
-        minSecond={280}
-        style={{ flexGrow: 1, minHeight: 0 }}
-      >
-        <box style={{ ...s.body, gap: 8 }}>
-          <text style={s.head}>Outline</text>
-          <Tree
-            items={OUTLINE}
-            defaultExpanded={['a', 'a2']}
-            selected={picked}
-            onSelect={setPicked}
-            style={{ flexGrow: 1 }}
-          />
-          <text style={s.hint}>selected: {picked}</text>
-        </box>
+      <box style={[s.body, { overflow: 'scroll', flexGrow: 1, minHeight: 0 }]}>
+        <text style={s.head}>Controls</text>
+        <text style={s.hint}>
+          last menu action: {lastMenu} · presses: {String(presses)}
+        </text>
 
-        <box style={[s.body, { overflow: 'scroll' }]}>
-          <text style={s.head}>Controls</text>
-          <text style={s.hint}>
-            last menu action: {lastMenu} · presses: {String(presses)}
-          </text>
-
-          <box style={s.grid}>
-            <box style={{ ...s.card, width: 250 }}>
-              <text style={s.title}>Toggles</text>
-              {['one', 'two', 'three'].map((key) => (
-                <Checkbox
-                  key={key}
-                  checked={checks[key]}
-                  onChange={(ev) =>
-                    setChecks((c) => ({ ...c, [key]: ev.value }))
-                  }
-                  label={`Checkbox ${key}`}
-                />
-              ))}
-              <box style={s.row}>
-                <text style={s.label}>Switch</text>
-                <Switch
-                  checked={toggle}
-                  onChange={(ev) => setToggle(ev.value)}
-                />
-              </box>
-              <RadioGroup value={radio} onChange={(ev) => setRadio(ev.value)}>
-                <Radio value="a" label="Option A" />
-                <Radio value="b" label="Option B" />
-                <Radio value="c" label="Option C (disabled)" disabled />
-              </RadioGroup>
-            </box>
-
-            <box style={{ ...s.card, width: 250 }}>
-              <text style={s.title}>Values</text>
-              <box style={s.row}>
-                <text style={s.label}>Select</text>
-                <Select
-                  options={FRUIT}
-                  value={fruit}
-                  onChange={(ev) => setFruit(ev.value)}
-                  style={{ flexGrow: 1 }}
-                />
-              </box>
-              <box style={s.row}>
-                <text style={s.label}>Slider</text>
-                <Slider
-                  value={level}
-                  min={0}
-                  max={100}
-                  onChange={(ev) => setLevel(ev.value)}
-                  style={{ flexGrow: 1 }}
-                />
-                <text style={s.hint}>{String(level)}</text>
-              </box>
-              <box style={s.row}>
-                <text style={s.label}>Progress</text>
-                <ProgressBar value={level / 100} style={{ flexGrow: 1 }} />
-              </box>
-              <box style={s.buttonRow}>
-                <Tooltip label="Counts presses, nothing more">
-                  <Button primary onPress={() => setPresses((n) => n + 1)}>
-                    Press me
-                  </Button>
-                </Tooltip>
-                <Button onPress={() => setDialog(true)}>Dialog…</Button>
-                <Button disabled>Disabled</Button>
-              </box>
-            </box>
-
-            <box style={{ ...s.card, width: 250 }}>
-              <text style={s.title}>Text entry</text>
-              <textinput
-                value={note}
-                onChange={(ev) => setNote(ev.target.value)}
-                placeholder="single line"
-                style={{ width: '100%' }}
+        <box style={s.grid}>
+          <box style={{ ...s.card, width: 250 }}>
+            <text style={s.title}>Toggles</text>
+            {['one', 'two', 'three'].map((key) => (
+              <Checkbox
+                key={key}
+                checked={checks[key]}
+                onChange={(ev) => setChecks((c) => ({ ...c, [key]: ev.value }))}
+                label={`Checkbox ${key}`}
               />
-              <textarea
-                value={longText}
-                onChange={(ev) => setLongText(ev.target.value)}
-                rows={4}
-                style={{ width: '100%' }}
-              />
-              <text style={s.hint}>
-                {note.length} chars · {longText.split('\n').length} lines
-              </text>
+            ))}
+            <box style={s.row}>
+              <text style={s.label}>Switch</text>
+              <Switch checked={toggle} onChange={(ev) => setToggle(ev.value)} />
             </box>
-
-            {/* A scroll box inside a scroll box: the wheel should reach the
-                inner one first, and only fall through when it is at its end. */}
-            <box style={{ ...s.card, width: 250 }}>
-              <text style={s.title}>Nested scroll</text>
-              <box style={[s.inner, { overflow: 'scroll' }]}>
-                {Array.from({ length: 20 }, (_, i) => (
-                  <box key={i} style={s.row}>
-                    <text style={{ fontSize: 11, color: '$textMuted' }}>
-                      row {String(i).padStart(2, '0')}
-                    </text>
-                    <textinput
-                      value={`field ${i}`}
-                      style={{ flexGrow: 1, fontSize: 11 }}
-                    />
-                  </box>
-                ))}
-              </box>
-              <text style={s.hint}>wheel inside, then past the end</text>
-            </box>
-
-            <ContextMenu
-              items={menuItems}
-              onSelect={(item) => setLastMenu(item.label)}
-              style={{ ...s.card, width: 250, height: 110 }}
-            >
-              <text style={s.title}>Context menu</text>
-              <text style={s.hint}>
-                Right-click anywhere in this card. Submenus nest two deep;
-                Escape closes one level at a time.
-              </text>
-            </ContextMenu>
+            <RadioGroup value={radio} onChange={(ev) => setRadio(ev.value)}>
+              <Radio value="a" label="Option A" />
+              <Radio value="b" label="Option B" />
+              <Radio value="c" label="Option C (disabled)" disabled />
+            </RadioGroup>
           </box>
+
+          <box style={{ ...s.card, width: 250 }}>
+            <text style={s.title}>Values</text>
+            <box style={s.row}>
+              <text style={s.label}>Select</text>
+              <Select
+                options={FRUIT}
+                value={fruit}
+                onChange={(ev) => setFruit(ev.value)}
+                style={{ flexGrow: 1 }}
+              />
+            </box>
+            <box style={s.row}>
+              <text style={s.label}>Slider</text>
+              <Slider
+                value={level}
+                min={0}
+                max={100}
+                onChange={(ev) => setLevel(ev.value)}
+                style={{ flexGrow: 1 }}
+              />
+              <text style={s.hint}>{String(level)}</text>
+            </box>
+            <box style={s.row}>
+              <text style={s.label}>Progress</text>
+              <ProgressBar value={level / 100} style={{ flexGrow: 1 }} />
+            </box>
+            <box style={s.buttonRow}>
+              <Tooltip label="Counts presses, nothing more">
+                <Button primary onPress={() => setPresses((n) => n + 1)}>
+                  Press me
+                </Button>
+              </Tooltip>
+              <Button onPress={() => setDialog(true)}>Dialog…</Button>
+              <Button disabled>Disabled</Button>
+            </box>
+          </box>
+
+          <box style={{ ...s.card, width: 250 }}>
+            <text style={s.title}>Text entry</text>
+            <textinput
+              value={note}
+              onChange={(ev) => setNote(ev.target.value)}
+              placeholder="single line"
+              style={{ width: '100%' }}
+            />
+            <textarea
+              value={longText}
+              onChange={(ev) => setLongText(ev.target.value)}
+              rows={4}
+              style={{ width: '100%' }}
+            />
+            <text style={s.hint}>
+              {note.length} chars · {longText.split('\n').length} lines
+            </text>
+          </box>
+
+          {/* A scroll box inside a scroll box: the wheel should reach the
+                inner one first, and only fall through when it is at its end. */}
+          <box style={{ ...s.card, width: 250 }}>
+            <text style={s.title}>Nested scroll</text>
+            <box style={[s.inner, { overflow: 'scroll' }]}>
+              {Array.from({ length: 20 }, (_, i) => (
+                <box key={i} style={s.row}>
+                  <text style={{ fontSize: 11, color: '$textMuted' }}>
+                    row {String(i).padStart(2, '0')}
+                  </text>
+                  <textinput
+                    value={`field ${i}`}
+                    style={{ flexGrow: 1, fontSize: 11 }}
+                  />
+                </box>
+              ))}
+            </box>
+            <text style={s.hint}>wheel inside, then past the end</text>
+          </box>
+
+          <ContextMenu
+            items={menuItems}
+            onSelect={(item) => setLastMenu(item.label)}
+            style={{ ...s.card, width: 250, height: 110 }}
+          >
+            <text style={s.title}>Context menu</text>
+            <text style={s.hint}>
+              Right-click anywhere in this card. Submenus nest two deep; Escape
+              closes one level at a time.
+            </text>
+          </ContextMenu>
         </box>
-      </SplitPane>
+      </box>
 
       {/* A popup is a real X window and needs its size before layout, so the
           dialog is sized explicitly rather than to its content. */}

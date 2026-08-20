@@ -103,7 +103,7 @@ if there is one, else the element's own semantics — `textinput` and
 answer their kind. The widgets name themselves — `Button` is `button`,
 `Checkbox` `checkbox`, `Switch` `switch`, `Radio` `radio`, `Select`
 `combobox` (its options `option`), `Slider` `slider`, `Tabs` `tablist`/
-`tab`/`tabpanel`, `Tree` `tree`/`treeitem`, `Dialog` `dialog` — so what a
+`tab`/`tabpanel`, `Dialog` `dialog` — so what a
 test selects by is exactly what a screen reader hears.
 
 **And the bridge itself.** Importing `react-x11/test` sets `NO_AT_BRIDGE`,

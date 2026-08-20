@@ -484,7 +484,7 @@ test('the widgets draw from the set', async () => {
   // mark any more — `▸` and `✓` are tofu on a machine without them, which
   // is the warning docs/components.md gives applications.
   const app = await headlessApp();
-  const { Select, Tree, Checkbox } = await import('../src/index.js');
+  const { Select, Checkbox } = await import('../src/index.js');
   const ctl = await mount(
     app,
     h(
@@ -492,14 +492,13 @@ test('the widgets draw from the set', async () => {
       { width: W, height: H },
       h(Select, { options: ['Blue', 'Red'], value: 'Blue', onChange() {} }),
       h(Checkbox, { checked: true, onChange() {} }, 'on'),
-      h(Tree, {
-        items: [{ id: 'a', label: 'src', children: [{ id: 'b', label: 'x' }] }],
-      }),
     ),
   );
 
   const drawn = canvases(ctl.root);
-  assert.ok(drawn.length >= 3, `expected the widgets to draw glyphs`);
+  // Two widgets since `Tree` left for @react-x11/components; the claim is
+  // about where a widget's glyphs come from, not how many widgets there are.
+  assert.ok(drawn.length >= 2, `expected the widgets to draw glyphs`);
   for (const node of drawn) {
     assert.equal(node.props.mono, true, `a widget glyph that is not mono`);
     assert.ok(

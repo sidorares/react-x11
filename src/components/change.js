@@ -8,7 +8,7 @@
 // attached to.
 //
 // The line is `name`: a widget that takes one is a form field and reports an
-// event. `Tabs`, `Tree`, `Table` and the menus are not form fields and keep
+// event. `Tabs`, `Table` and the menus are not form fields and keep
 // their plain callbacks.
 //
 // `target` is a plain descriptor rather than a node, which is the one place
