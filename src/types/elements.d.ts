@@ -266,6 +266,13 @@ export interface WindowProps
   /** Window title (UTF-8, via `WM_NAME` + `_NET_WM_NAME`). */
   title?: string;
   /**
+   * Created but never self-mapped: this window is waiting to be embedded
+   * (XEmbed / `<foreign>` on the other side), and from the reparent on,
+   * mapping is the embedder's decision. What a `<Frame>` pane's root window
+   * sets; without an embedder the window simply never appears.
+   */
+  embeddable?: boolean;
+  /**
    * Window geometry — window state, not yoga style: the user may resize.
    *
    * `'auto'`, which is also what leaving the prop out means, sizes the

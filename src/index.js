@@ -89,6 +89,14 @@ export {
   Canvas3D,
 } from './components/index.js';
 
+// A pane of this application in its own process, and the context bridge
+// that follows the app into it (docs/frame.md). `useFrameClose`/`isFramed`
+// are the pane's side, exported here so a module can be a pane and an
+// application with one import.
+export { Frame } from './frame/index.js';
+export { createFrameContext } from './frame/env.js';
+export { isFramed, useFrameClose } from './frame/lifecycle.js';
+
 import { createRoot } from './Reconciler.js';
 
 export default { createRoot };

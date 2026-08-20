@@ -9,6 +9,7 @@
 
 import React, { useContext, useMemo, useState } from 'react';
 import { useAppearanceWhen } from '../appearancehooks.js';
+import { EnvValue, registerFrameProvider } from '../frame/env.js';
 import { DarkTheme, DefaultTheme, resolveTheme } from '../palette.js';
 
 const h = React.createElement;
@@ -118,9 +119,36 @@ export function ThemeProvider({
   return h(
     ThemeContext.Provider,
     { value: theme },
-    planted(children, theme, boxStyle),
+    // The palette also crosses into any <Frame> below here (THEME_ENV_KEY):
+    // it is the one ambient thing the *app* authors, so a pane that said
+    // nothing about colour comes up in the app's palette rather than one
+    // frame of default. With no provider at all nothing is published, and
+    // the pane follows the desktop by itself — same answer, no bridge.
+    h(
+      EnvValue,
+      { k: THEME_ENV_KEY, value: theme },
+      planted(children, theme, boxStyle),
+    ),
   );
 }
+
+/** What the theme is called on a frame's wire (docs/frame.md). */
+export const THEME_ENV_KEY = 'react-x11:theme';
+
+// The child half of the default theme bridge: recreate with the *real*
+// provider, because the palette travels two routes — the context widgets
+// read, and the `theme` prop planted on a node so `$token` styles resolve
+// (#119) — and only ThemeProvider itself feeds both. The bridged value is
+// the complete merged palette, so it wins every token; a pane's own inner
+// ThemeProvider still overrides below it, which is the opt-out a pane that
+// wants its own look already has.
+registerFrameProvider(
+  THEME_ENV_KEY,
+  (value, children) => h(ThemeProvider, { value }, children),
+  // directly around the pane's window: `planted` puts the palette on a
+  // window among its direct children, and the window is where it must land
+  { innermost: true },
+);
 
 /**
  * The node that carries the palette into the tree. Normally a box — but a

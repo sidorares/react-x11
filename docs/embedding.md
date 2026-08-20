@@ -17,6 +17,15 @@ That is a terminal pane, a video surface, a docked tray icon and a
 control-panel applet — four things an application cannot draw for itself and
 has no business reimplementing.
 
+When the other process is a module of **your own application**, don't wire
+this up by hand: [`<Frame>`](frame.md) is `<foreign>` plus the process — the
+fork, the props, the callbacks, the bridged theme, the crash fallback. This
+page is the window half, and everything below about stacking, focus and
+teardown holds for a `<Frame>` pane too. The pane's own root window opts in
+with `<window embeddable>`: created **unmapped** — a window waiting to be
+embedded is unmapped, that is what waiting looks like — and mapped by the
+embedder once reparented.
+
 The protocol underneath is [XEmbed](http://specifications.freedesktop.org/xembed/0.5/),
 implemented in ntk (`XEmbedSocket`, ntk ≥ 7.4.0). This page is the React half:
 what the element does, what it promises about a window it does not own, and
