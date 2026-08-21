@@ -10,15 +10,20 @@ Hooks, context, error boundaries, `<Suspense>`, `lazy`, `use`, transitions,
 renderer, and where React's behaviour does not depend on the DOM, it is the
 same behaviour.
 
-Everything on this page is also a panel you can drive by hand:
+Everything on this page is also something you can drive by hand — in the
+apps that depend on it rather than in a panel of its own:
 
 ```sh
-npm run examples:react-features
+npm run examples:monitor      # priority: a filter over ~780 live rows
+npm run examples:chat         # <Activity>, useOptimistic, <Suspense>
+npm run examples:timer        # error boundaries, and where a crash is logged
 ```
 
-[`examples/react-features.jsx`](../examples/react-features.jsx) is priority,
-`<Suspense>`, `useOptimistic`, `<Activity>` and the two error-boundary
-placements, with the counters that show which of them React threw away.
+Those replaced an `examples/react-features.jsx` that had a panel per feature.
+A panel proves the API exists; it cannot show you the choice, because nothing
+in it costs anything. `monitor`'s field is expensive because a process list
+is expensive, and that is the only condition under which deferring it is a
+decision rather than a demonstration.
 
 What differs is anything the DOM used to define for you:
 
@@ -182,12 +187,12 @@ focus changes, window close and drops are urgent; pointer motion and
 drag-over are not, which is what keeps a motion burst from flooding the
 renderer. You do not have to do anything to get this.
 
-The Priority panel of the [react-features
-example](../examples/react-features.jsx) is this paragraph with a slider on
-it: a thousand-cell field that takes ~25ms to rebuild, on a switch. Off, the
-thumb crawls; on, thirty slider updates produce one or two field rebuilds and
-the thumb stays under the pointer. Two things there are worth copying, and
-both are one-line mistakes in the other direction: the expensive subtree is
+[`examples/monitor.jsx`](../examples/monitor.jsx) is this paragraph with a
+keyboard on it: a filter over hundreds of live rows, where one keystroke
+changes every row on screen. Without the deferral the caret waits for the
+table; with it the field stays under the fingers and the rows arrive a beat
+later. Two things there are worth copying, and both are one-line mistakes in
+the other direction: the expensive subtree is
 `memo`ised (or the urgent render rebuilds it anyway, and deferring buys
 nothing), and no prop that changes on every update — not even a "stale"
 border — is passed into it.

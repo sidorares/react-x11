@@ -129,7 +129,7 @@ no override-redirect staging (issue #4).
   the queued activating call the instant the name is owned. `activate.js` is
   the raise, and it is the part users judge the feature by — `_NET_ACTIVE_WINDOW`
   with a wrong timestamp is refused by the WM while every layer reports success.
-  `npm run examples:urischeme` is the manual harness for the two dispatch paths
+  `npm run labs:urischeme` is the manual harness for the two dispatch paths
   a broker cannot fake.
 - `src/styles.js` — flat style props → yoga setters; paint prop
   classification; text style resolution. Also the **logical** edges
@@ -417,7 +417,7 @@ stop it, in one place — see docs/desktop.md for the worked example.
   Runs in CI beside lint. **A prop change is not done until the `.d.ts` and a
   line in the type test change with it** — hand-written declarations drift
   silently otherwise, and nothing else catches it.
-- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,selection,widgets,react-features,windows,wm}`
+- `npm run examples:{app,theming,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,selection,widgets,windows,wm}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). `examples:app` is the showcase: it hosts `form`, `widgets`
   and `tasks` as tabs by importing the panel each of them exports, so a new

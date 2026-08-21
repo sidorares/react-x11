@@ -1,6 +1,10 @@
 // Deep links: the manual harness for `com.example.myapp://…`.
 //
-//   npm run examples:urischeme      # needs an X server / DISPLAY
+// A lab rather than a tour example: it is not a program anybody would keep
+// running, it is the rig for the two launch paths a broker cannot fake
+// (AGENTS.md, "Writing an example").
+//
+//   npm run labs:urischeme           # needs an X server / DISPLAY
 //
 // The two branches that matter here are the two a broker cannot fake — a
 // launch that *starts* the process through D-Bus activation, and the
@@ -27,7 +31,7 @@ import {
   registerApplication,
   useAppActivate,
   useAppOpen,
-} from '../src/index.js';
+} from '../../src/index.js';
 
 const APP_ID = 'com.example.myapp';
 

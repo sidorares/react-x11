@@ -281,7 +281,7 @@ npm run examples:transparent   # rounded translucent <popup transparent>
 npm run examples:form          # <textinput> + Select dropdowns
 npm run examples:datepicker    # Calendar/DatePicker: ranges, blocked days, events
 npm run examples:password      # PasswordInput: the scribble mask, and a custom one
-npm run examples:gl            # raw GL in a <glarea> (display-list cube)
+npm run examples:viewer3d      # raw GL in a <glarea>: a model viewer over indirect GLX
 npm run examples:three         # <Canvas3D> scene: meshes, lights, textures
 npm run examples:wm            # a reparenting window manager (see below)
 ```

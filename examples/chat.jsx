@@ -487,9 +487,9 @@ export function ircTransport({
 //
 // `use(promise)` needs the *same* promise back on every render for a given
 // input, or the component suspends forever on a new one. A module-level cache
-// keyed by what identifies the request is the whole trick — the same shape
-// examples/react-features.jsx used, and the one thing about Suspense that has
-// to be got right before anything else works.
+// keyed by what identifies the request is the whole trick, and the one thing
+// about Suspense that has to be got right before anything else works
+// (docs/react-features.md).
 //
 // **The scrollback belongs to the transport**, which is not where this
 // started: history was a module-level function that returned the fixture's
