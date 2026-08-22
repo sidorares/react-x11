@@ -607,14 +607,111 @@ export interface TextAreaProps extends TextInputProps {
   rows?: number;
 }
 
+/**
+ * Raw, straight (non-premultiplied) RGBA pixels: the shape `getImageData`
+ * hands back, and what ntk's `new Image()` takes. `data` is
+ * `width * height * 4` bytes. Treated as immutable content — hand over a
+ * new object when the pixels change, or the renderer cannot tell.
+ */
+export interface RawImageSource {
+  width: number;
+  height: number;
+  data: Uint8Array | Uint8ClampedArray;
+}
+
+/**
+ * A client-side picture source the 2d context composites as-is: an ntk
+ * `Image` or `Surface`, or anything with a size and a `picture(app)`.
+ * Passing one puts identity in your hands — the object's server upload is
+ * cached per connection, so many `<image>`s showing one `Image` upload once.
+ */
+export interface DirectImageSource {
+  readonly width: number;
+  readonly height: number;
+  picture(app: unknown): unknown;
+}
+
+/**
+ * A WHATWG `URL`, matched structurally because these declarations use only
+ * ES lib types (no DOM, no node ambients). The useful case is a file URL
+ * from `new URL('./icon.png', import.meta.url)`, which finds an asset
+ * relative to the module however the app is launched.
+ */
+export interface FileUrl {
+  readonly href: string;
+  readonly protocol: string;
+}
+
+/**
+ * What `src` accepts: a file path or file URL (PNG/JPEG, decoded in JS),
+ * encoded PNG/JPEG bytes, raw RGBA pixels, or an ntk `Image`/`Surface`.
+ */
+export type ImageSource =
+  string | FileUrl | Uint8Array | RawImageSource | DirectImageSource;
+
+/**
+ * An existing server-side Picture, named by X id. The size is stated by the
+ * caller because asking the server for it would be a round trip — which
+ * this prop exists to avoid.
+ */
+export interface ImagePictureSource {
+  id: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * An existing server-side Pixmap or Window, named by X id. `depth` picks
+ * the picture format it is composited through: 24 (rgb, the default — what
+ * a window pixmap from Composite is), 32 (argb), or 8 (alpha only,
+ * composited as ink through its coverage).
+ */
+export interface ImageDrawableSource {
+  id: number;
+  width: number;
+  height: number;
+  depth?: 8 | 24 | 32;
+}
+
 export interface ImageProps extends DrawnProps<DrawnNode> {
-  /** File path; PNG or JPEG, decoded in JS. */
-  src: string;
+  /**
+   * Client-side pixels: a file path or file URL (PNG/JPEG, decoded in JS),
+   * encoded PNG/JPEG bytes (no temp file), raw RGBA
+   * (`{ width, height, data }`), or an ntk `Image`/`Surface` used as-is.
+   *
+   * One source per element: `src`, `picture` and `drawable` are mutually
+   * exclusive, and passing two throws.
+   */
+  src?: ImageSource;
+  /**
+   * Composite an existing server-side Picture into the element — one
+   * `RenderComposite`, no `PutImage`, no readback. The picture stays the
+   * caller's; drawing it scaled sets its transform/filter for the composite
+   * and resets them after.
+   */
+  picture?: ImagePictureSource;
+  /**
+   * Composite an existing server-side Pixmap or Window, through a Picture
+   * the element creates over it (and frees when done). The drawable stays
+   * the caller's.
+   */
+  drawable?: ImageDrawableSource;
+  /**
+   * The source's identity, when `src` is re-derived per render: an
+   * unchanged key means unchanged content, so a structurally new buffer is
+   * neither re-decoded nor re-uploaded — and two `<image>`s with one key
+   * share one decoded copy. The `<canvas cacheKey>` contract: the key must
+   * name the content. Not consulted for an ntk `Image` (the object is its
+   * own identity) and meaningless with `picture`/`drawable` (throws).
+   */
+  cacheKey?: string | number;
   /** The accessible name — what a screen reader says for this image. */
   alt?: string;
 }
 // Size is `style={{ width, height }}`, like every other element: `width`
-// and `height` are style names, so they are not declared here.
+// and `height` are style names, so they are not declared here. With no
+// style size, the source's own size (stated, for the server-side sources)
+// is the natural one, kept to its aspect ratio.
 
 /** What `onDraw` is told about the node it is painting. */
 export interface DrawInfo {

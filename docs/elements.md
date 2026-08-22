@@ -1407,19 +1407,106 @@ window behind it rather than swallowing it.
 
 ## `<image>`
 
-| prop  |                                                                                        |
-| ----- | -------------------------------------------------------------------------------------- |
-| `src` | file path (PNG/JPEG, decoded in JS)                                                    |
-| `alt` | the accessible name — what a screen reader says ([accessibility.md](accessibility.md)) |
+| prop       |                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------- |
+| `src`      | client-side pixels, in any of the four forms below                                     |
+| `picture`  | `{ id, width, height }` — an existing server-side Picture, composited as-is            |
+| `drawable` | `{ id, width, height, depth? }` — an existing Pixmap/Window, composited as-is          |
+| `cacheKey` | the source's identity, when `src` is re-derived per render                             |
+| `alt`      | the accessible name — what a screen reader says ([accessibility.md](accessibility.md)) |
+
+One source per element — `src`, `picture` and `drawable` are mutually
+exclusive, and passing two throws.
 
 Sized by style — `style={{ width, height }}`, never flat props, since both
 are style names. With only one of the two set the other follows the natural
 aspect ratio; with neither, the image measures at its natural size, shrunk
-to the width on offer.
+to the width on offer. For the server-side sources the "natural size" is the
+`width`/`height` stated in the descriptor.
 
 ```jsx
 <image src={photo} style={{ height: 64 }} /> // width follows the aspect ratio
 ```
+
+### `src` — pixels the client has
+
+```jsx
+<image src="./logo.png" />                     // file path or file URL
+<image src={pngBuffer} />                      // encoded PNG/JPEG bytes
+<image src={{ width, height, data }} />        // raw straight RGBA
+<image src={ntkImage} />                       // an ntk Image (or Surface)
+```
+
+A file path (or `new URL('./logo.png', import.meta.url)`) is read and
+decoded asynchronously; the element measures 0×0 until the decode lands,
+then reflows. The three in-memory forms are synchronous — pixels that
+arrived from a socket, a decoder, or a `getImageData` readback go on screen
+without touching the filesystem. Raw `data` is `width × height × 4` bytes of
+straight (non-premultiplied) RGBA — exactly what `getImageData` hands back —
+and the object is treated as immutable content: hand over a new object when
+the pixels change, or the renderer cannot tell.
+
+Decoded pixels are uploaded to the server once and composited from there on
+every repaint (ntk's `Image` caches its upload per connection), so the cost
+of an image is one `PutImage` at first paint, not one per frame.
+
+An ntk `Image` is used as-is and never destroyed by the element — identity
+is yours, which is also the sharing idiom: one `Image` shown by many
+`<image>`s is one decode and one upload, however many places composite it.
+
+### `cacheKey` — when the buffer is new but the picture is not
+
+A component that re-derives its bytes per render — decoding a protocol
+stream, slicing a capture — hands `<image>` a structurally new `src` every
+time, and without help that is a fresh decode and a fresh upload each
+render. `cacheKey` is the `<canvas cacheKey>` contract applied to sources:
+an unchanged key vouches that the new buffer is the same picture, so nothing
+is re-decoded or re-uploaded — and two `<image>`s with one key share one
+decoded copy, freed when the last of them unmounts.
+
+```jsx
+<image src={frame.rgba} cacheKey={`frame:${frame.serial}`} />
+```
+
+The key must name the content: a key that stays the same while the pixels
+change shows the old pixels. Development warns when two sizes collide under
+one key, which is the cheap symptom of that mistake. The key is not
+consulted for an ntk `Image` (the object is its own identity), and is
+refused with `picture`/`drawable` (there is nothing client-side to cache).
+
+### `picture` / `drawable` — pixels the server already has
+
+When the content is already a server-side Picture or Drawable — a pixmap the
+app rendered offscreen, `NameWindowPixmap` from Composite, a cached tile —
+showing it must not mean reading it back and uploading it again. These
+composite straight from the existing resource: one `RenderComposite` into
+the window, no `PutImage`, no round trip.
+
+```jsx
+<image picture={{ id: pic, width: 64, height: 64 }} />
+<image drawable={{ id: pixmap, width: 128, height: 96, depth: 32 }} />
+```
+
+The caller states the size because asking the server for it would be a round
+trip, which these props exist to avoid. The descriptor is compared by value,
+so an object literal rebuilt every render costs nothing. Scaling (a box
+styled to a different size than the source) is server-side, through the
+picture transform with bilinear filtering — note that drawing a `picture`
+scaled sets that picture's transform and filter for the composite and resets
+them to identity/nearest after, the same bracket ntk puts around its own
+uploads; a picture that must keep a transform of its own should be
+composited 1:1.
+
+`drawable` wraps the pixmap or window in a Picture the element creates and
+owns (freed on unmount; the drawable stays yours). `depth` picks the format
+it is composited through: 24 — the screen's default depth, what a window
+pixmap from Composite is — is the default, 32 is argb, and 8 composites as
+ink through its alpha, which is what previewing a mask looks like. A
+`picture` needs no depth: its format was fixed when it was created.
+
+Both descriptors also accept the richer objects that already carry these
+fields — an ntk `Pixmap` is `{ id, width, height, depth }` and goes straight
+in as `drawable`.
 
 ## `<canvas>`
 
