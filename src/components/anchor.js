@@ -158,6 +158,13 @@ export function measureLabel(node, text, style) {
   if (!fonts?.layout) {
     return { width: String(text).length * size * 0.55, height: size * 1.4 };
   }
+  // Measured at the size the glyphs are actually rasterized — the logical
+  // size times the display scale — then divided back, so the logical answer
+  // carries the true metrics. Measuring at the logical size and trusting
+  // linearity is off by the accumulated per-glyph rounding, which is
+  // exactly the kind of error that turns into an ellipsis on the longest
+  // label in the menu (src/scale.js).
+  const s = node?.scale ?? 1;
   const layout = fonts.layout(String(text), {
     // The face **this node inherits**, not the literal `sans-serif`: the
     // labels these popups are sized around name no family of their own, so
@@ -165,13 +172,13 @@ export function measureLabel(node, text, style) {
     // face is measuring the wrong label — a menu sized in sans-serif for a
     // row that paints in a wider mono is a menu whose own options wrap.
     family: style?.family ?? node?.inheritedTextStyle?.family ?? 'sans-serif',
-    size,
+    size: size * s,
     weight: style?.weight ?? 'normal',
     // dropping this would measure a different face from the one drawn, and
     // the popup sized here would be the wrong width for its own label
     variations: style?.variations,
   });
-  return { width: layout.width, height: layout.height };
+  return { width: layout.width / s, height: layout.height / s };
 }
 
 export const DEFAULT_LABEL_SIZE = 13;

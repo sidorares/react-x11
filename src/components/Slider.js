@@ -76,14 +76,18 @@ export function Slider({
    */
   const valueAt = (ev) => {
     const node = trackRef.current;
-    if (!node?.abs?.width) return value;
+    // getClientRects rather than raw `abs`: the event, the thumb constant
+    // and this rect must share a unit, and the public rect is logical like
+    // they are — `abs` is device (src/scale.js)
+    const rect = node?.getClientRects?.()[0];
+    if (!rect?.width) return value;
     // the thumb is centred on the value, so the usable travel is the track
     // minus one thumb width — otherwise min/max are unreachable at the ends
-    const travel = Math.max(1, node.abs.width - SLIDER_THUMB);
+    const travel = Math.max(1, rect.width - SLIDER_THUMB);
     const x =
       node.direction === 'rtl'
-        ? node.abs.x + node.abs.width - ev.x - SLIDER_THUMB / 2
-        : ev.x - node.abs.x - SLIDER_THUMB / 2;
+        ? rect.x + rect.width - ev.x - SLIDER_THUMB / 2
+        : ev.x - rect.x - SLIDER_THUMB / 2;
     return quantize(min + (Math.min(travel, Math.max(0, x)) / travel) * span);
   };
 

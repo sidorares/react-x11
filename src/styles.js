@@ -878,7 +878,7 @@ function parseAnimation(spec, where) {
  * and both ends checked for a midpoint. Null when there are none, so the
  * common case allocates nothing.
  */
-export function animationsOf(style, where = 'a style') {
+export function animationsOf(style, where = 'a style', scale = 1) {
   const spec = style.animation;
   if (spec == null) return null;
   let parsed = parsedAnimations.get(spec);
@@ -888,6 +888,18 @@ export function animationsOf(style, where = 'a style') {
   }
   if (parsed.length === 0) return null;
   return parsed.map((entry) => {
+    // The display scale, only where the caller says the style is already in
+    // device pixels (`_syncLoops` passes the node's). The declared ends are
+    // logical like everything an app writes; a `from` *defaulted* from the
+    // style is a device value already and is left alone — which is why the
+    // scaling happens here, where the two can still be told apart.
+    if (scale !== 1 && SCALED_LENGTHS.has(entry.prop)) {
+      entry = {
+        ...entry,
+        ...(typeof entry.from === 'number' && { from: entry.from * scale }),
+        ...(typeof entry.to === 'number' && { to: entry.to * scale }),
+      };
+    }
     const from = entry.from === undefined ? style[entry.prop] : entry.from;
     if (from === undefined) {
       throw new Error(
@@ -1328,6 +1340,103 @@ export function resolveComputedStyle(style) {
   // and the animated one the same layout: yoga is set up from this style.
   if (loops) {
     for (const loop of loops) out[loop.prop] = loop.from;
+  }
+  return out;
+}
+
+/**
+ * The style lengths that are *distances on the screen*, and therefore the
+ * complete set the display scale multiplies (src/scale.js). Everything a
+ * style can say that is not here is deliberately not here: `lineHeight` is
+ * a multiplier over the font's own height, `aspectRatio` and the flex
+ * factors are ratios, `opacity` and `zIndex` are not lengths, and
+ * `boxShadow` is a string whose lengths are scaled where it is parsed
+ * (src/decorations.js), because its parse is memoized on the raw string.
+ */
+export const SCALED_LENGTH_PROPS = [
+  'width',
+  'height',
+  'minWidth',
+  'minHeight',
+  'maxWidth',
+  'maxHeight',
+  'flexBasis',
+  'top',
+  'right',
+  'bottom',
+  'left',
+  'start',
+  'end',
+  'margin',
+  'marginTop',
+  'marginRight',
+  'marginBottom',
+  'marginLeft',
+  'marginStart',
+  'marginEnd',
+  'padding',
+  'paddingTop',
+  'paddingRight',
+  'paddingBottom',
+  'paddingLeft',
+  'paddingStart',
+  'paddingEnd',
+  'gap',
+  'rowGap',
+  'columnGap',
+  'borderWidth',
+  'borderTopWidth',
+  'borderRightWidth',
+  'borderBottomWidth',
+  'borderLeftWidth',
+  'borderStartWidth',
+  'borderEndWidth',
+  'borderRadius',
+  'outlineWidth',
+  'outlineOffset',
+  'fontSize',
+];
+
+const SCALED_LENGTHS = new Set(SCALED_LENGTH_PROPS);
+
+/**
+ * A resolved style in logical pixels → the same style in device pixels.
+ *
+ * This is the whole mechanism by which the display scale reaches layout,
+ * paint and text: it runs once, at the end of the style funnel
+ * (`_syncStyle` → `resolveComputedStyle` → here → `_retarget`), so yoga,
+ * every `this.style.borderRadius ?? 0` at a paint site, and the font size
+ * the text stack shapes at are all *already* device pixels and none of them
+ * ever multiplies again. Numbers scale; `'50%'`, `'auto'` and every other
+ * string mean the same thing at any density and pass through; `hitSlop`
+ * scales inside its number-or-per-side shape.
+ *
+ * Never mutates: `flattenStyle` hands back the app's own hoisted object
+ * when it can, and scaling it in place would corrupt the next render.
+ * Identity is preserved at scale 1 — the everyday case costs one compare.
+ */
+export function scaleResolvedStyle(style, scale) {
+  if (!style || !scale || scale === 1) return style;
+  let out = style;
+  for (const key of SCALED_LENGTH_PROPS) {
+    const value = style[key];
+    if (typeof value !== 'number' || value === 0) continue;
+    if (out === style) out = { ...style };
+    out[key] = value * scale;
+  }
+  const slop = style.hitSlop;
+  if (typeof slop === 'number') {
+    if (out === style) out = { ...style };
+    out.hitSlop = slop * scale;
+  } else if (slop && typeof slop === 'object') {
+    if (out === style) out = { ...style };
+    out.hitSlop = {
+      ...slop,
+      ...(typeof slop.top === 'number' && { top: slop.top * scale }),
+      ...(typeof slop.right === 'number' && { right: slop.right * scale }),
+      ...(typeof slop.bottom === 'number' && { bottom: slop.bottom * scale }),
+      ...(typeof slop.left === 'number' && { left: slop.left * scale }),
+    };
   }
   return out;
 }

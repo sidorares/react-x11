@@ -82,6 +82,11 @@
   for apps that only want to follow the desktop, why the answer is remembered
   on disk so the first frame is not a flash, and what each rung of the ladder
   can actually answer.
+- [scale.md](scale.md) — HiDPI: every length you write is a logical pixel,
+  `createRoot({ scale: 'auto' })` resolves how many device pixels one is
+  worth (environment → XSETTINGS/`Xft.dpi` → audited RandR millimetres →
+  the resolution class), `useScale()`, per-monitor answers on
+  `useScreens()`, and why a virtual machine's EDID needs the audit.
 - [system.md](system.md) — the machine around the app: `useScreens()` for the
   monitor layout, `useWindowState()` for what the window manager actually did,
   `useIdle()`/`useKeepAwake()`, `useKeyboardState()` for Caps Lock and the live

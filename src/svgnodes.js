@@ -120,13 +120,18 @@ export class SvgNode extends Node {
     this._paintedRevision = -1;
   }
 
-  /** The viewBox is the natural size; `<image>`'s rules do the rest. */
+  /** The viewBox is the natural size; `<image>`'s rules do the rest —
+   * including the unit: natural sizes are logical pixels, multiplied to
+   * device here so an unsized drawing keeps its size relative to
+   * everything else. Unlike a bitmap it costs nothing: the document
+   * rasterizes at whatever box layout settles on (src/scale.js). */
   measureContent(constraints) {
     const view = this._ensureView();
+    const s = this.scale;
     return intrinsicSize(
       {
-        width: view?.naturalWidth ?? 0,
-        height: view?.naturalHeight ?? 0,
+        width: (view?.naturalWidth ?? 0) * s,
+        height: (view?.naturalHeight ?? 0) * s,
       },
       constraints,
     );
