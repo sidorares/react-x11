@@ -102,12 +102,12 @@ three:
 | ---------------------------------------- | ---------------------------------------------- |
 | ![form](docs/img/form.png)               | ![select menu](docs/img/select-menu.png)       |
 
-`examples/three.jsx` — a react-three-fiber-shaped scene over **indirect
-GLX**: `<mesh>`, geometries, materials, lights and a texture, drawn by
-sending the GL protocol over the X connection. No native bindings, no GPU
+`examples/viewer3d.jsx` — a model viewer over **indirect GLX**: the GL
+protocol sent over the X connection, geometry compiled into a display list,
+a frame costing two matrices and one `CallList`. No native bindings, no GPU
 driver bindings — the same "JavaScript all the way down" story as the rest.
-
-![3D over indirect GLX](docs/img/three.png)
+(GL renders where `GetImage` cannot read it, so there is no screenshot of it
+here; see [docs/glx.md](docs/glx.md).)
 
 ## Quick start
 
@@ -225,29 +225,25 @@ See [docs/drag-and-drop.md](docs/drag-and-drop.md).
 
 ### 3D
 
-Inside a `<glarea>` (or the `Canvas3D` component) the children are scene
-elements with react-three-fiber's names:
+`<glarea>` is a GL surface in the layout, drawn over **indirect GLX**: the GL
+protocol encoded into the X connection, with no native bindings and no GPU
+driver bindings — the same "JavaScript all the way down" story as the rest.
+Geometry belongs in a server-side display list, so a frame costs matrices and
+one `CallList` whatever the triangle count.
 
 ```jsx
-<Canvas3D style={{ flexGrow: 1 }} camera={{ position: [0, 2, 6], fov: 45 }}>
-  <ambientLight intensity={0.35} />
-  <pointLight position={[5, 6, 6]} />
-  <mesh rotation={[0.5, 0.4, 0]} onClick={() => pick()}>
-    <boxGeometry args={[1.4, 1.4, 1.4]} />
-    <meshPhongMaterial color="#2980b9" shininess={60} />
-  </mesh>
-</Canvas3D>
+<glarea
+  style={{ flexGrow: 1 }}
+  frameLoop="always"
+  onCreated={(gl) => gl.Enable(gl.DEPTH_TEST)}
+  onDraw={(gl, { width, height }) => drawFrame(gl, width, height)}
+/>
 ```
 
-`<mesh>`, `<group>`, box/plane/sphere/cylinder/torus geometries,
-`<bufferGeometry>`, basic/Lambert/Phong materials with textures, four light
-types, and pointer events resolved by client-side raycasting. Each geometry
-is compiled into a **server-side display list** once, so a frame costs
-matrices plus one `CallList` per mesh whatever the triangle count. What the
-protocol cannot do — shaders, instancing, post-processing, shadows — throws
-with the reason rather than half-working. See
-[docs/elements.md](docs/elements.md#3d-scene-mesh-group-geometries-materials)
-and [docs/glx.md](docs/glx.md).
+A scene graph over it — `<mesh>`, geometries, materials, lights, and shaders
+or post-processing on the direct backend — is
+[`@react-x11/components/three`](https://github.com/sidorares/react-x11-components).
+See [docs/gl.md](docs/gl.md) and [docs/glx.md](docs/glx.md).
 
 Events are synthetic with capture/bubble phases and hit testing over the
 drawn tree: `onClick` (with DOM-style `detail` click counting),
@@ -282,7 +278,6 @@ npm run examples:form          # <textinput> + Select dropdowns
 npm run examples:datepicker    # Calendar/DatePicker: ranges, blocked days, events
 npm run examples:password      # PasswordInput: the scribble mask, and a custom one
 npm run examples:viewer3d      # raw GL in a <glarea>: a model viewer over indirect GLX
-npm run examples:three         # <Canvas3D> scene: meshes, lights, textures
 npm run examples:wm            # a reparenting window manager (see below)
 ```
 
@@ -420,8 +415,8 @@ npm run screenshots  # regenerate docs/img/*.png headlessly (no X server)
 npm run docs:dev     # the documentation site (npm install in website/ first)
 ```
 
-`docs/img/three.png` is the exception: the headless path has no GL, so the
-3D shot is captured by hand from `npm run examples:three` on a real server
+3D is the exception: the headless path has no GL, so a 3D shot has to be
+captured by hand from a real server
 with indirect GLX.
 
 See [AGENTS.md](AGENTS.md) for architecture notes and contributor/agent

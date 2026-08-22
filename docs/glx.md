@@ -64,7 +64,7 @@ same list is shared by meshes that differ in material.
 ## The shape of the tree
 
 ```
-<Canvas3D>  ->  <glarea> host element  ->  real X child window with a
+<glarea> host element  ->  real X child window with a
                                             GLX visual + its own colormap
                      |
                 GLContext (ntk)   MakeCurrent -> context tag
@@ -80,40 +80,18 @@ same list is shared by meshes that differ in material.
 window (NEXT_STEPS §4): GLX needs its own visual and cannot share the
 XRender pipeline the 2D elements draw through.
 
-The scene tree is **separate from the drawn-node tree** — no yoga, no hit
-testing against the 2D tree, no painting into the parent's 2d context. To
-layout, `Canvas3D` is a leaf sized by ordinary layout props.
+A scene tree over this surface is **separate from the drawn-node tree** — no
+yoga, no hit testing against the 2D tree, no painting into the parent's 2d
+context. To layout, `<glarea>` is a leaf sized by ordinary layout props.
 
-## Naming
+## The scene graph moved
 
-The top-level component is **`Canvas3D`**, not `Canvas`: react-x11 already
-has a `<canvas>` host element (the 2D `onDraw` escape hatch) that `<Canvas>`
-would shadow badly in a codebase using both. Everything inside reuses
-react-three-fiber names wherever the concept survives translation to
-fixed-function GL, so r3f knowledge transfers:
-
-| r3f name                                                                                        | maps to                                             |
-| ----------------------------------------------------------------------------------------------- | --------------------------------------------------- |
-| `<mesh>`, `<group>`                                                                             | matrix push/pop + `CallList`                        |
-| `<boxGeometry>`, `<planeGeometry>`, `<sphereGeometry>`, `<cylinderGeometry>`, `<torusGeometry>` | generated vertex/normal/uv arrays, `args` as in r3f |
-| `<bufferGeometry>`                                                                              | explicit `position`/`normal`/`uv`/`index` arrays    |
-| `<meshBasicMaterial>`                                                                           | lighting disabled, `Color3f`                        |
-| `<meshLambertMaterial>`                                                                         | `Materialfv` diffuse + ambient                      |
-| `<meshPhongMaterial>`                                                                           | + `GL_SPECULAR`, `GL_SHININESS`                     |
-| `<ambientLight>`                                                                                | `LightModelfv(GL_LIGHT_MODEL_AMBIENT)`              |
-| `<directionalLight>`                                                                            | `Lightfv` position with `w = 0`                     |
-| `<pointLight>`                                                                                  | `w = 1` + attenuation                               |
-| `<spotLight>`                                                                                   | + `SPOT_CUTOFF`, `SPOT_DIRECTION`, `SPOT_EXPONENT`  |
-
-Fixed-function GL has **8 light units**. More than eight non-ambient lights
-warns and uses the first eight; `<ambientLight>` costs no unit.
-
-**The camera is a prop, not an element.** There is no
-`<perspectiveCamera>`/`<orthographicCamera>` — `Canvas3D` and `<glarea>`
-take `camera={{ position, target, up, fov, near, far }}`, or
-`{ orthographic: true, zoom }`. Animate by changing props from a
-`requestAnimationFrame` loop on the window ref (`examples/three.jsx`), or set
-`frameLoop="always"`; there is no `useFrame` hook.
+The r3f-shaped names this page used to map — `<mesh>`, the geometries, the
+materials, the lights, the camera prop — belong to
+[`@react-x11/components/three`](ecosystem.md) now, together with the display-
+list cache described above: it keeps its own reconciler and its own indirect
+renderer, built on exactly the constraints this page documents. What stays
+here is the transport, which is what those constraints come from.
 
 ## Testing
 
@@ -126,8 +104,8 @@ actually matters, and checking it needs no GL at all —
 
 Pixels are the awkward part. On XQuartz, GL renders into a Metal surface the
 compositor owns rather than into the X drawable, so `GetImage` reads back
-white and `docs/img/three.png` has to be captured by hand from
-`npm run examples:three` on a real server with indirect GLX — which is why
+white and a 3D screenshot has to be captured by hand from
+a scene on a real server with indirect GLX — which is why
 `npm run screenshots` skips it. The documentation site's playground is the
 exception that renders GL headlessly: node-x11's browser GLX emulator
 replays the same protocol onto WebGL2.

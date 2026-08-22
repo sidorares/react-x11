@@ -33,7 +33,6 @@ import type {
 import {
   Button,
   BusUnavailableError,
-  Canvas3D,
   activateWindow,
   Checkbox,
   closeBus,
@@ -587,35 +586,6 @@ function TransientWindows() {
 // @ts-expect-error — a string is not a window, a node, an XID or 'root'
 const _badTransient = <window transientFor="mainWindow" />;
 
-// --- 3D --------------------------------------------------------------------
-
-function Scene() {
-  return (
-    <Canvas3D
-      style={{ flexGrow: 1 }}
-      camera={{ position: [0, 2, 6], fov: 45 }}
-      onPointerMissed={() => {}}
-    >
-      <ambientLight intensity={0.35} />
-      <pointLight position={[5, 6, 6]} distance={20} />
-      <group rotation={[0, 0.5, 0]}>
-        <mesh
-          position={[-1.6, 0, 0]}
-          scale={1.2}
-          onClick={(ev) => void ev.distance}
-        >
-          <boxGeometry args={[1.4, 1.4, 1.4]} />
-          <meshPhongMaterial color="#2980b9" shininess={60} side="double" />
-        </mesh>
-        <mesh>
-          <bufferGeometry position={[0, 0, 0, 1, 0, 0, 0, 1, 0]} />
-          <meshBasicMaterial wireframe opacity={0.5} transparent />
-        </mesh>
-      </group>
-    </Canvas3D>
-  );
-}
-
 function RawGl() {
   return (
     <glarea
@@ -1002,7 +972,6 @@ async function main() {
   // @ts-expect-error — it is on or off, not a moment
   await createRoot({ restoreFocusOnReveal: 'reveal' });
 
-  root.render(<Scene />);
   root.render(<RawGl />);
   root.render(<Popup />, () => {});
   root.render(<AnchoredPopup />);

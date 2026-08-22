@@ -54,14 +54,7 @@ import { endXSettings } from './xsettings.js';
 import { watchAppearance } from './appearance.js';
 import { ForeignNode } from './foreignnodes.js';
 import { GlAreaNode } from './glnodes.js';
-import { directGLFailure, hasDirectGL } from './glbackend.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
-import {
-  DIRECT_ONLY_KINDS,
-  SCENE_KINDS,
-  UNSUPPORTED_KINDS,
-  createSceneNode,
-} from './scene3d.js';
 import { SvgNode, SvgChildNode } from './svgnodes.js';
 import { loadLayout } from './yoga.js';
 
@@ -196,47 +189,14 @@ const HostConfig = {
       );
     }
     if (hostContext.isInside3d) {
-      // A shader material needs a pipeline that has shaders. Whether this
-      // connection draws through one is already known — the policy chose and
-      // ntk settled the probe during connect — so the answer arrives here
-      // rather than as a blank surface later.
-      if (DIRECT_ONLY_KINDS[type] && !hasDirectGL(rootContainer)) {
-        // Say which of the several reasons it is. They call for different
-        // fixes — a policy that never asked for direct, an addon to install,
-        // a display that cannot carry descriptors, a server without DRI3 —
-        // and only the first is about this program rather than the machine.
-        const reason = directGLFailure(rootContainer);
-        const why = reason
-          ? `\n\n${reason.code}: ${reason.message}` +
-            (reason.hint ? `\n\n${reason.hint}` : '')
-          : '\n\nThe direct-rendering probe has not answered yet on this connection. ' +
-            'createRoot() waits for it under a policy that could select the direct ' +
-            'backend, so a policy raised after connecting needs one settle first:\n\n' +
-            '  await app.glCapabilities();';
-        const err = new Error(
-          `react-x11: <${type}> needs direct rendering — ${DIRECT_ONLY_KINDS[type]} — ` +
-            `and this connection does not have it.${why}\n\n` +
-            "useSupports('shaders') is the check to branch on if this scene should " +
-            'degrade rather than fail. See docs/gl.md.',
-        );
-        err.code = reason?.code ?? 'GL_NO_DIRECT';
-        throw err;
-      }
-      const scene = createSceneNode(type, props, rootContainer);
-      if (scene) {
-        scene._reactFiber = internalHandle;
-        return scene;
-      }
-      if (UNSUPPORTED_KINDS[type]) {
-        throw new Error(
-          `react-x11: <${type}> is not supported — ` +
-            `${UNSUPPORTED_KINDS[type]}. See docs/gl.md.`,
-        );
-      }
+      // `<glarea>` is a leaf here: it owns the surface, the frame clock and
+      // the swap, and `onDraw` is the escape hatch. A *scene graph* over it
+      // — meshes, materials, lights, post-processing, on either backend —
+      // is `@react-x11/components/three`, which brings its own reconciler.
       throw new Error(
-        `react-x11: <${type}> is not a 3D element; inside <glarea> only ` +
-          [...SCENE_KINDS].map((t) => `<${t}>`).join(', ') +
-          ' are.',
+        `react-x11: <${type}> is not an element — <glarea> takes no ` +
+          'children. Draw through `onDraw`, or use ' +
+          '`@react-x11/components/three` for a scene graph. See docs/gl.md.',
       );
     }
     let node;
@@ -296,12 +256,6 @@ const HostConfig = {
         if (registered) {
           registered._reactFiber = internalHandle;
           return registered;
-        }
-        if (SCENE_KINDS.has(type) || UNSUPPORTED_KINDS[type]) {
-          throw new Error(
-            `react-x11: <${type}> is a 3D element and only works inside ` +
-              '<glarea> (or the <Canvas3D> component).',
-          );
         }
         const custom = registeredElements();
         throw new Error(
