@@ -35,6 +35,8 @@ function Controls() {
       <box style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
         <Button primary onPress={() => setVolume(0)}>Mute</Button>
         <Button onPress={() => setVolume(100)}>Max</Button>
+        <Button variant="outline" onPress={() => setVolume(45)}>Reset</Button>
+        <Button variant="ghost" size="small" onPress={() => setVolume(45)}>Ghost</Button>
         <Button disabled>Disabled</Button>
       </box>
 
