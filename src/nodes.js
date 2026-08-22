@@ -21,6 +21,7 @@ import {
   validateStyle,
   resolveStyleStates,
   resolveComputedStyle,
+  scaleResolvedStyle,
   hasStateStyles,
   isStyleProp,
   isEventProp,
@@ -61,6 +62,7 @@ import {
   validateImageProps,
 } from './imagesource.js';
 import { Yoga } from './yoga.js';
+import { scaleOf } from './scale.js';
 // Namespace import for `Surface`, the same shape and the same reason as
 // `paintcache.js`: a named import of something an older ntk does not export
 // is a *load-time* SyntaxError, which would take the renderer down rather
@@ -101,7 +103,7 @@ import {
   windowStateSnapshot,
 } from './windowstate.js';
 import {
-  anchorArea,
+  deviceAnchorArea,
   anchorOffscreen,
   anchorRect,
   windowOrigin,
@@ -360,18 +362,19 @@ function intersectRects(a, b) {
 /** The full track strip a scrollbar occupies (thumb travel included), with
  * a pixel of slop for the thumb's antialiased corners. */
 function scrollbarTrackRect(bar) {
+  const width = SCROLLBAR_WIDTH * (bar.scale ?? 1);
   const rect =
     bar.axis === 'x'
       ? {
           x: bar.trackStart,
           y: bar.crossStart,
           width: bar.trackLength,
-          height: SCROLLBAR_WIDTH,
+          height: width,
         }
       : {
           x: bar.crossStart,
           y: bar.trackStart,
-          width: SCROLLBAR_WIDTH,
+          width,
           height: bar.trackLength,
         };
   return insetRect(rect, -1);
@@ -625,12 +628,13 @@ function roundedPath(ctx, rect, radius) {
   }
 }
 
-/** A style's shadow reach, for the two callers that have a style rather than
- *  a node (`_retarget`'s before/after pair). */
-function shadowExtentOf(style) {
+/** A style's shadow reach, for the callers that have a style rather than
+ *  a node (`_retarget`'s before/after pair). `scale` because the value is a
+ *  string the style funnel could not convert (see decorations.js). */
+function shadowExtentOf(style, scale = 1) {
   const value = style?.boxShadow;
   if (!value || value === 'none') return 0;
-  return shadowExtent(shadowSpecs(value));
+  return shadowExtent(shadowSpecs(value, scale));
 }
 
 const DEV = process.env.NODE_ENV !== 'production';
@@ -1210,9 +1214,46 @@ function writeContentFloors(node, axis, mins, floored) {
  * `transparent` names a visual that has to be looked up on the connection
  * (WindowNode._argbAttributes) rather than a value ntk takes.
  */
-export function windowAttributes(props) {
+// The WM hints that are distances. The aspect pair are ratios — the same in
+// any unit — and `gravity` is an enum; scaling either would be wrong.
+const LENGTH_HINT_PROPS = new Set([
+  'minWidth',
+  'minHeight',
+  'maxWidth',
+  'maxHeight',
+  'widthInc',
+  'heightInc',
+  'baseWidth',
+  'baseHeight',
+]);
+
+/**
+ * A window's geometry props, converted to the device pixels every consumer
+ * — `_measure`'s yoga math, `setState`, the WM hints — works in. Numbers
+ * multiply; `'auto'` and the content bounds pass through; the identity
+ * fast path keeps the 1x world allocation-free.
+ */
+function scaleWindowGeometry(props, scale) {
+  if (scale === 1) return props;
+  const out = { ...props };
+  for (const key of ['width', 'height', 'x', 'y']) {
+    if (typeof out[key] === 'number') out[key] = Math.round(out[key] * scale);
+  }
+  for (const key of LENGTH_HINT_PROPS) {
+    if (typeof out[key] === 'number') out[key] = Math.round(out[key] * scale);
+  }
+  return out;
+}
+
+export function windowAttributes(props, scale = 1) {
   const attributes = {};
   const hints = {};
+  // Geometry props are logical pixels like everything an app writes, and
+  // this is their one door into device pixels: X windows are device-pixel
+  // rectangles, so the multiply happens where CreateWindow's numbers are
+  // assembled, and `abs`/`_requestedSize`/ConfigureNotify all stay in one
+  // unit downstream (src/scale.js). Rounded because the wire is integers.
+  const device = (v) => (typeof v === 'number' ? Math.round(v * scale) : v);
   for (const key of Object.keys(props)) {
     if (key === 'children' || key === 'style' || isEventProp(key)) continue;
     if (key === 'transientFor' || key === 'transparent') continue;
@@ -1223,10 +1264,17 @@ export function windowAttributes(props) {
     if (WINDOW_HINT_PROPS.includes(key)) {
       // An `'auto'` bound is not a number ntk can be given; `realize()`
       // measures it and merges the answer in before CreateWindow.
-      if (!isContentBound(props[key])) hints[key] = props[key];
+      if (!isContentBound(props[key])) {
+        hints[key] = LENGTH_HINT_PROPS.has(key)
+          ? device(props[key])
+          : props[key];
+      }
       continue;
     }
-    attributes[key] = props[key];
+    attributes[key] =
+      key === 'width' || key === 'height' || key === 'x' || key === 'y'
+        ? device(props[key])
+        : props[key];
   }
   if (Object.keys(hints).length > 0) attributes.sizeHints = hints;
   if (props.style !== undefined) {
@@ -1372,6 +1420,19 @@ export class Node {
     return DEVTOOLS_FAKE_DOCUMENT;
   }
 
+  /**
+   * Device pixels per logical pixel for this node's connection — resolved
+   * once by `createRoot` (src/scale.js) and constant for the node's life,
+   * which is what makes the instance cache below sound. `this.style` and
+   * `this.abs` are already device pixels; this is for the values that never
+   * pass through a style — a paint constant like the caret's width, or an
+   * event coordinate on its way back to logical. A registered element that
+   * draws with its own constants multiplies them by this.
+   */
+  get scale() {
+    return (this._scaleCache ??= scaleOf(this.app));
+  }
+
   constructor(kind, props, app, { yoga = true } = {}) {
     this.kind = kind;
     this.props = props;
@@ -1495,11 +1556,18 @@ export class Node {
       });
     }
     this._stateful = hasStateStyles(this._baseStyle);
+    // The scale multiplies *after* every merge — state blocks, queries,
+    // the flex shorthand — so each of those keeps thinking in the logical
+    // pixels the app wrote, and device pixels exist only downstream of
+    // this line (src/scale.js).
     return this._retarget(
-      resolveComputedStyle(
-        this._stateful
-          ? resolveStyleStates(this._baseStyle, this.states)
-          : this._baseStyle,
+      scaleResolvedStyle(
+        resolveComputedStyle(
+          this._stateful
+            ? resolveStyleStates(this._baseStyle, this.states)
+            : this._baseStyle,
+        ),
+        this.scale,
       ),
     );
   }
@@ -1589,7 +1657,9 @@ export class Node {
     // `:hover` shadow would repaint its own box and leave the shadow printed
     // around it. This is the only place both extents exist at once.
     if (displayed.boxShadow !== this.style.boxShadow) {
-      const shrank = shadowExtentOf(displayed) - shadowExtentOf(this.style);
+      const shrank =
+        shadowExtentOf(displayed, this.scale) -
+        shadowExtentOf(this.style, this.scale);
       if (shrank > 0) {
         this.root?.invalidate(
           false,
@@ -1617,7 +1687,14 @@ export class Node {
    * `_updateLoops`.
    */
   _syncLoops(target) {
-    const specs = target.animation == null ? null : animationsOf(target);
+    // `target` is device pixels by now, so the declared ends of a loop have
+    // to arrive in the same unit — the scale rides in rather than being
+    // applied after, because a `from` defaulted off the style is already
+    // device and must not double (see animationsOf).
+    const specs =
+      target.animation == null
+        ? null
+        : animationsOf(target, 'a style', this.scale);
     if (!specs && !this._loops) return false;
     this._loops = specs;
     if (!specs) this.root?._forgetLoopNode(this);
@@ -1772,8 +1849,9 @@ export class Node {
     if (this.states[name] === on) return;
     this.states[name] = on;
     if (!this._stateful || this.destroyed) return;
-    const next = resolveComputedStyle(
-      resolveStyleStates(this._baseStyle, this.states),
+    const next = scaleResolvedStyle(
+      resolveComputedStyle(resolveStyleStates(this._baseStyle, this.states)),
+      this.scale,
     );
     if (shallowEqual(next, this._targetStyle)) return;
     this._retarget(next);
@@ -1954,7 +2032,13 @@ export class Node {
     // resolved one — `<box theme={{ text: 'red' }}>` merges and derives
     // nothing (styling.md) — so neither of these is guaranteed to be there.
     const family = theme.fontFamily ?? DEFAULT_TEXT_STYLE.family;
-    const size = theme.fontSize ?? DEFAULT_TEXT_STYLE.size;
+    // The theme thinks in logical pixels like every style does, and this is
+    // the one door its font size enters the cascade by: a node's own
+    // `fontSize` was scaled at the style funnel, and every descendant
+    // inherits an already-resolved (device) size — so multiplying here,
+    // exactly once at the root of the cascade, is what keeps text and
+    // layout in the same unit without ever double-scaling (src/scale.js).
+    const size = (theme.fontSize ?? DEFAULT_TEXT_STYLE.size) * this.scale;
     const base = this._textBase;
     if (base?.color !== color || base.family !== family || base.size !== size) {
       this._textBase = { ...DEFAULT_TEXT_STYLE, color, family, size };
@@ -2702,16 +2786,19 @@ export class Node {
   getClientRects() {
     const r = this.abs;
     if (!(r.width > 0 || r.height > 0)) return [];
+    // `abs` is device pixels; this is public API, which is logical — the
+    // same conversion events make on the way out (src/scale.js)
+    const s = this.scale;
     return [
       {
-        x: r.x,
-        y: r.y,
-        left: r.x,
-        top: r.y,
-        width: r.width,
-        height: r.height,
-        right: r.x + r.width,
-        bottom: r.y + r.height,
+        x: r.x / s,
+        y: r.y / s,
+        left: r.x / s,
+        top: r.y / s,
+        width: r.width / s,
+        height: r.height / s,
+        right: (r.x + r.width) / s,
+        bottom: (r.y + r.height) / s,
       },
     ];
   }
@@ -2730,14 +2817,15 @@ export class Node {
       callback();
       return;
     }
+    const s = this.scale;
     const parent = this.parent?.abs;
     callback(
-      parent ? r.x - parent.x : r.x,
-      parent ? r.y - parent.y : r.y,
-      r.width,
-      r.height,
-      r.x,
-      r.y,
+      (parent ? r.x - parent.x : r.x) / s,
+      (parent ? r.y - parent.y : r.y) / s,
+      r.width / s,
+      r.height / s,
+      r.x / s,
+      r.y / s,
     );
   }
 
@@ -3169,7 +3257,7 @@ export class Node {
    * spread and the blur's tail, symmetrically (see `shadowExtent`).
    */
   _shadowExtent() {
-    return shadowExtentOf(this.style);
+    return shadowExtentOf(this.style, this.scale);
   }
 
   /** Would a keyboard focus land here? The one rule lives in a11y.js —
@@ -3550,7 +3638,7 @@ export class Node {
     const value = this.style.backgroundImage;
     if (!value || value === 'none') return null;
     if (typeof ctx.createLinearGradient !== 'function') return null;
-    const spec = gradientSpec(value);
+    const spec = gradientSpec(value, this.scale);
     if (!spec) return null;
     const { x, y, width, height } = rect;
     const key = `${value}|${x},${y},${width},${height}`;
@@ -3584,7 +3672,7 @@ export class Node {
   _paintShadow(ctx) {
     const value = this.style.boxShadow;
     if (!value || value === 'none') return;
-    const shadows = shadowSpecs(value);
+    const shadows = shadowSpecs(value, this.scale);
     if (!shadows?.length) return;
     const radius = this.style.borderRadius ?? 0;
     for (let i = shadows.length - 1; i >= 0; i--) {
@@ -4499,11 +4587,21 @@ export class ImageNode extends Node {
   }
 
   /** The source's size, kept to its aspect ratio. Read per measure rather
-   * than once, because a decode can arrive late. */
+   * than once, because a decode can arrive late.
+   *
+   * Source pixels are *logical* pixels, the browser's rule: a 100px-wide
+   * PNG occupies 100 logical px at any display scale (upscaled onto the
+   * device grid at 2x, the way an `<img>` without `srcset` is), rather
+   * than shrinking to half its neighbours' size. The constraints are
+   * already device, so only the natural size converts (src/scale.js). */
   measureContent(constraints) {
     this._ensureSource();
+    const s = this.scale;
     return intrinsicSize(
-      { width: this.image?.width ?? 0, height: this.image?.height ?? 0 },
+      {
+        width: (this.image?.width ?? 0) * s,
+        height: (this.image?.height ?? 0) * s,
+      },
       constraints,
     );
   }
@@ -4737,12 +4835,18 @@ function scrollbarGeometry({
   inset = 0,
   shorten = 0,
   direction = 'ltr',
+  scale = 1,
 }) {
   const length = viewport - shorten;
   if (length <= 0 || !(content > viewport)) return null;
+  // The strip's own dimensions are logical constants; everything the caller
+  // passed — rects, content extents, offsets — is already device. The bar
+  // carries `scale` so the track, the hit slop and the thumb's corner
+  // radius downstream draw from the same number.
+  const barWidth = SCROLLBAR_WIDTH * scale;
   const rtl = direction === 'rtl';
   const thumbLength = Math.max(
-    SCROLLBAR_MIN_THUMB,
+    SCROLLBAR_MIN_THUMB * scale,
     (length * length) / content,
   );
   const range = content - viewport;
@@ -4755,9 +4859,10 @@ function scrollbarGeometry({
   const crossStart =
     rtl && axis === 'y'
       ? crossStart0 + inset
-      : crossStart0 + crossSize - SCROLLBAR_WIDTH - inset;
+      : crossStart0 + crossSize - barWidth - inset;
   return {
     axis,
+    scale,
     trackStart: start,
     trackLength: length,
     thumbStart,
@@ -4772,8 +4877,8 @@ function scrollbarGeometry({
     // the thumb as a rect, for painting
     x: axis === 'x' ? thumbStart : crossStart,
     y: axis === 'x' ? crossStart : thumbStart,
-    width: axis === 'x' ? thumbLength : SCROLLBAR_WIDTH,
-    height: axis === 'x' ? SCROLLBAR_WIDTH : thumbLength,
+    width: axis === 'x' ? thumbLength : barWidth,
+    height: axis === 'x' ? barWidth : thumbLength,
   };
 }
 
@@ -4785,9 +4890,10 @@ const across = (bar, x, y) => (bar.axis === 'x' ? y : x);
 function scrollbarHit(bar, x, y) {
   if (!bar) return null;
   const c = across(bar, x, y);
+  const s = bar.scale ?? 1;
   if (
-    c < bar.crossStart - SCROLLBAR_SLOP ||
-    c > bar.crossStart + SCROLLBAR_WIDTH + SCROLLBAR_SLOP
+    c < bar.crossStart - SCROLLBAR_SLOP * s ||
+    c > bar.crossStart + (SCROLLBAR_WIDTH + SCROLLBAR_SLOP) * s
   ) {
     return null;
   }
@@ -4802,7 +4908,7 @@ function paintScrollbarThumb(ctx, bar, color) {
   ctx.fillStyle = color || 'rgba(0, 0, 0, 0.25)';
   ctx.beginPath();
   if (typeof ctx.roundRect === 'function') {
-    ctx.roundRect(bar.x, bar.y, bar.width, bar.height, 3);
+    ctx.roundRect(bar.x, bar.y, bar.width, bar.height, 3 * (bar.scale ?? 1));
   } else {
     ctx.rect(bar.x, bar.y, bar.width, bar.height);
   }
@@ -4968,11 +5074,14 @@ export const Scrollable = (Base) =>
      * it also arrives for a list nobody has scrolled yet.
      */
     _reportViewport() {
+      // logical, like onScroll's payload: finder.jsx divides this height by
+      // a row height it wrote in a style
+      const s = this.scale;
       const next = {
-        width: this.abs.width,
-        height: this.abs.height,
-        contentWidth: this.contentWidth,
-        contentHeight: this.contentHeight,
+        width: this.abs.width / s,
+        height: this.abs.height / s,
+        contentWidth: this.contentWidth / s,
+        contentHeight: this.contentHeight / s,
       };
       const last = this._lastViewport;
       if (
@@ -5065,8 +5174,22 @@ export const Scrollable = (Base) =>
      * `scrollTo(y)` scrolls vertically, as it always has; `scrollTo({x, y})`
      * moves either axis, leaving out whichever is omitted.
      */
+    /** Public entry, logical pixels — application code writes `scrollTo(120)`
+     * in the same unit as its styles. Internal callers hold device offsets
+     * and use `_scrollToDevice`/`_scrollByDevice` instead (src/scale.js). */
     scrollTo(to) {
-      const want = typeof to === 'number' ? { y: to } : { x: to?.x, y: to?.y };
+      const s = this.scale;
+      this._scrollToDevice(
+        typeof to === 'number'
+          ? { y: to * s }
+          : {
+              x: to?.x == null ? undefined : to.x * s,
+              y: to?.y == null ? undefined : to.y * s,
+            },
+      );
+    }
+
+    _scrollToDevice(want) {
       const next = {
         x:
           want.x == null
@@ -5114,13 +5237,17 @@ export const Scrollable = (Base) =>
       }
       this.scrollX = next.x;
       this.scrollY = next.y;
+      // the handler is application code: logical, like every payload —
+      // finder.jsx's row virtualisation divides scrollY by a row height it
+      // wrote in a style, and those must be the same unit
+      const s = this.scale;
       this.props.onScroll?.({
-        scrollX: next.x,
-        scrollY: next.y,
-        contentWidth: this.contentWidth,
-        contentHeight: this.contentHeight,
-        viewportWidth: this.abs.width,
-        viewportHeight: this.abs.height,
+        scrollX: next.x / s,
+        scrollY: next.y / s,
+        contentWidth: this.contentWidth / s,
+        contentHeight: this.contentHeight / s,
+        viewportWidth: this.abs.width / s,
+        viewportHeight: this.abs.height / s,
       });
       // A scroll reflows this viewport's contents and nothing else, and the
       // viewport clips them, so the damage is this node's own rect. It is a
@@ -5150,12 +5277,24 @@ export const Scrollable = (Base) =>
       return false;
     }
 
-    /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. */
+    /** `scrollBy(dy)`, or `scrollBy({x, y})` for either axis. Logical, like
+     * `scrollTo`. */
     scrollBy(by) {
-      if (typeof by === 'number') return this.scrollTo(this.scrollY + by);
-      this.scrollTo({
-        x: by?.x == null ? undefined : this.scrollX + by.x,
-        y: by?.y == null ? undefined : this.scrollY + by.y,
+      const s = this.scale;
+      if (typeof by === 'number')
+        return this._scrollToDevice({ y: this.scrollY + by * s });
+      this._scrollToDevice({
+        x: by?.x == null ? undefined : this.scrollX + by.x * s,
+        y: by?.y == null ? undefined : this.scrollY + by.y * s,
+      });
+    }
+
+    /** The wheel's and the key handler's entry: whole device pixels, which
+     * is what keeps the scroll blit on the pixel grid at any scale. */
+    _scrollByDevice(dx, dy) {
+      this._scrollToDevice({
+        x: dx ? this.scrollX + dx : undefined,
+        y: dy ? this.scrollY + dy : undefined,
       });
     }
 
@@ -5196,32 +5335,35 @@ export const Scrollable = (Base) =>
       // nothing to scroll, nothing to swallow: a plain box must leave the
       // arrows and Page keys to whatever else would answer them
       if (!this._scrollsWithKeys()) return super.defaultKeyDown(ev);
-      const page = Math.max(1, this.abs.height - SCROLL_KEY_PAGE_OVERLAP);
+      const step = SCROLL_KEY_STEP * this.scale;
+      const page = Math.max(
+        1,
+        this.abs.height - SCROLL_KEY_PAGE_OVERLAP * this.scale,
+      );
       // Left and Right are the directions on the *screen*, and `scrollX` runs
       // from the start of the content — so which of them moves it forward
       // depends on which way the content runs. Home/End and the Page keys
       // need no such rule: they already name the logical ends.
-      const forward =
-        this.direction === 'rtl' ? -SCROLL_KEY_STEP : SCROLL_KEY_STEP;
+      const forward = this.direction === 'rtl' ? -step : step;
       switch (ev.keysym) {
         case XK_DOWN:
-          return this.scrollBy({ y: SCROLL_KEY_STEP });
+          return this._scrollByDevice(0, step);
         case XK_UP:
-          return this.scrollBy({ y: -SCROLL_KEY_STEP });
+          return this._scrollByDevice(0, -step);
         case XK_RIGHT:
-          return this.scrollBy({ x: forward });
+          return this._scrollByDevice(forward, 0);
         case XK_LEFT:
-          return this.scrollBy({ x: -forward });
+          return this._scrollByDevice(-forward, 0);
         case XK_PAGE_DOWN:
-          return this.scrollBy({ y: page });
+          return this._scrollByDevice(0, page);
         case XK_PAGE_UP:
-          return this.scrollBy({ y: -page });
+          return this._scrollByDevice(0, -page);
         case XK_HOME:
-          return this.scrollTo({ y: 0 });
+          return this._scrollToDevice({ y: 0 });
         case XK_END:
-          return this.scrollTo({ y: this._maxScroll('y') });
+          return this._scrollToDevice({ y: this._maxScroll('y') });
         case XK_SPACE:
-          return this.scrollBy({ y: ev.shiftKey ? -page : page });
+          return this._scrollByDevice(0, ev.shiftKey ? -page : page);
         default:
           return super.defaultKeyDown(ev);
       }
@@ -5309,9 +5451,10 @@ export const Scrollable = (Base) =>
         across: horizontal ? this.abs.y : this.abs.x,
         crossSize: horizontal ? this.abs.height : this.abs.width,
         scroll: horizontal ? this.scrollX : this.scrollY,
-        inset: 2,
-        shorten: other ? SCROLLBAR_WIDTH + 2 : 0,
+        inset: 2 * this.scale,
+        shorten: other ? (SCROLLBAR_WIDTH + 2) * this.scale : 0,
         direction: this.direction,
+        scale: this.scale,
       });
     }
 
@@ -5335,10 +5478,14 @@ export const Scrollable = (Base) =>
     }
 
     defaultMouseDown(ev) {
+      // bar geometry is device pixels; the synthetic event is logical, so
+      // the hit tests here read the native coordinates
+      const nx = ev.nativeEvent?.x ?? ev.x * this.scale;
+      const ny = ev.nativeEvent?.y ?? ev.y * this.scale;
       for (const bar of this._scrollbars()) {
-        const hit = scrollbarHit(bar, ev.x, ev.y);
+        const hit = scrollbarHit(bar, nx, ny);
         if (!hit) continue;
-        const at = along(bar, ev.x, ev.y);
+        const at = along(bar, nx, ny);
         if (hit === 'thumb') {
           // remember where in the thumb it was grabbed, so it does not jump
           this._barGrab = { axis: bar.axis, offset: at - bar.thumbStart };
@@ -5350,7 +5497,8 @@ export const Scrollable = (Base) =>
         const page = bar.axis === 'x' ? this.abs.width : this.abs.height;
         const back = at < bar.thumbStart ? !bar.reversed : bar.reversed;
         const delta = back ? -page : page;
-        this.scrollBy(bar.axis === 'x' ? { x: delta } : { y: delta });
+        if (bar.axis === 'x') this._scrollByDevice(delta, 0);
+        else this._scrollByDevice(0, delta);
         return;
       }
       // no bar under the press: it belongs to whatever is behind the bars,
@@ -5362,10 +5510,12 @@ export const Scrollable = (Base) =>
       if (this._barGrab == null) return super.defaultMouseDrag(ev);
       const bar = this._scrollbar(this._barGrab.axis);
       if (!bar || bar.travel <= 0) return;
-      const at = along(bar, ev.x, ev.y) - this._barGrab.offset - bar.trackStart;
+      const nx = ev.nativeEvent?.x ?? ev.x * this.scale;
+      const ny = ev.nativeEvent?.y ?? ev.y * this.scale;
+      const at = along(bar, nx, ny) - this._barGrab.offset - bar.trackStart;
       const from = bar.reversed ? bar.travel - at : at;
       const to = (from / bar.travel) * bar.range;
-      this.scrollTo(bar.axis === 'x' ? { x: to } : { y: to });
+      this._scrollToDevice(bar.axis === 'x' ? { x: to } : { y: to });
     }
 
     defaultMouseUp(ev) {
@@ -5486,6 +5636,12 @@ export class CanvasNode extends Node {
     if (this.props.mono) this._presetMono(ctx, this._monoColor());
     const unwatch = DEV ? this._watchPutImageData(ctx) : null;
     try {
+      // Device pixels, the browser's own canvas contract: the backing
+      // store is the panel's grid and `scale` says how many of its pixels
+      // one logical pixel is worth. Deliberately NOT a ctx.scale() — ntk
+      // positions glyphs through the transform but sizes them from the
+      // font, so a scaled transform would move an app's fillText without
+      // growing it (src/scale.js).
       onDraw(ctx, {
         width: this.abs.width,
         height: this.abs.height,
@@ -5493,6 +5649,7 @@ export class CanvasNode extends Node {
         // drawable itself, so they are written at `info.x + x` (#366)
         x: this.abs.x,
         y: this.abs.y,
+        scale: this.scale,
         node: this,
       });
     } finally {
@@ -5720,7 +5877,7 @@ function editMenuOrigin(node, at, size) {
   // near a seam flips back onto the screen it was opened on — the same
   // answer `<ContextMenu>` clamps a pointer-anchored menu into. Clamped, not
   // flipped: there is no anchor rect to flip around.
-  const area = anchorArea(node);
+  const area = deviceAnchorArea(node);
   if (area) {
     x = Math.max(area.x, Math.min(x, area.x + area.width - size.width));
     y = Math.max(area.y, Math.min(y, area.y + area.height - size.height));
@@ -5791,7 +5948,15 @@ export function openEditMenu(node, at, actions = {}) {
     items,
     (text) => app?.fonts?.layout(text, style)?.width,
   );
-  const { x, y } = editMenuOrigin(node, at, geometry);
+  // `at` is `{x: ev.x, y: ev.y}` per the doc above — logical, like every
+  // coordinate a handler reads — and the origin math below is device.
+  const s = node.scale;
+  const deviceAt = at && {
+    ...at,
+    ...(Number.isFinite(at.x) && { x: at.x * s }),
+    ...(Number.isFinite(at.y) && { y: at.y * s }),
+  };
+  const { x, y } = editMenuOrigin(node, deviceAt, geometry);
   const colors = editMenuColors(node.theme);
   const state = { active: -1 };
   const choose = (id) => {
@@ -5815,13 +5980,13 @@ export function openEditMenu(node, at, actions = {}) {
             app?.fonts?.layout([{ text, ...style, color }], style),
         }),
       onMouseMove: (mv) => {
-        const next = editMenuIndexAt(geometry, mv.y);
+        const next = editMenuIndexAt(geometry, mv.nativeEvent?.y ?? mv.y * s);
         if (next === state.active) return;
         state.active = next;
         popup.invalidate(false, null, 'style-state');
       },
       onMouseUp: (mv) => {
-        const i = editMenuIndexAt(geometry, mv.y);
+        const i = editMenuIndexAt(geometry, mv.nativeEvent?.y ?? mv.y * s);
         if (i !== -1) choose(geometry.rows[i].id);
         else closeEditMenu(node);
       },
@@ -5862,8 +6027,10 @@ export function openEditMenu(node, at, actions = {}) {
       // `flexGrow`s is nothing at all, so this popup opened 1x1 and the menu
       // was invisible. Every other popup in the tree comes from React, where
       // one props object is both, so nothing else could reach it.
-      width: geometry.width,
-      height: geometry.height,
+      // Props are the logical contract (`_measure` multiplies them back);
+      // the attributes above carry the same size already in device pixels.
+      width: geometry.width / s,
+      height: geometry.height / s,
       grab: true,
       // a press outside the menu closes it and goes no further, which is
       // what the grab is for
@@ -5917,13 +6084,16 @@ export function closeEditMenu(node) {
   events.focus(events._canRestoreTo(restore) ? restore : null, 'pointer');
 }
 
-/** The caret's own width, in pixels — it is a rectangle rather than a line
- * because a hairline disappears on a scaled-up display. */
+/** The caret's own width, in *logical* pixels — it is a rectangle rather
+ * than a line because a hairline disappears in a sea of dense pixels.
+ * Multiplied by the node's scale where it is drawn and reserved for, like
+ * every paint constant that never passes through a style (src/scale.js). */
 const CARET_WIDTH = 1.5;
 
 /** The room a line of a field's text leaves for the caret that follows it,
  * at the right-hand edge of the content box in both directions — see
- * `TextInputNode._lineOriginX`, which is where the asymmetry is explained. */
+ * `TextInputNode._lineOriginX`, which is where the asymmetry is explained.
+ * Logical, like CARET_WIDTH. */
 const CARET_RESERVE = 2;
 
 /**
@@ -6657,7 +6827,14 @@ export class TextInputNode extends Node {
    * through the field's own geometry accessor, which is the one the caret
    * and the highlight are drawn from. */
   _indexAtPoint(ev) {
-    return this.textIndexAt(ev.x, ev.y);
+    // `textIndexAt` is the device-pixel geometry contract (it is also what
+    // the a11y bridge calls with screen points); the synthetic event is
+    // logical, so the click goes back through its native coordinates.
+    const native = ev.nativeEvent;
+    return this.textIndexAt(
+      native?.x ?? ev.x * this.scale,
+      native?.y ?? ev.y * this.scale,
+    );
   }
 
   /** Word range around a code-point index (whitespace-delimited). */
@@ -6756,7 +6933,7 @@ export class TextInputNode extends Node {
    */
   _lineOriginX(layout, content) {
     const rtl = this.direction === 'rtl';
-    const free = content.width - CARET_RESERVE - layout.width;
+    const free = content.width - CARET_RESERVE * this.scale - layout.width;
     let align = this.style.textAlign ?? 'start';
     if (align === 'start') align = rtl ? 'right' : 'left';
     else if (align === 'end') align = rtl ? 'left' : 'right';
@@ -6780,7 +6957,10 @@ export class TextInputNode extends Node {
    * of the text stops short of the edge by exactly the width of the caret
    * that sits there. */
   _maxScrollX(layout, content) {
-    return Math.max(0, layout.width - (content.width - CARET_RESERVE));
+    return Math.max(
+      0,
+      layout.width - (content.width - CARET_RESERVE * this.scale),
+    );
   }
 
   /** The value's layout and where it is drawn, in window coordinates. The
@@ -7116,7 +7296,7 @@ export class TextInputNode extends Node {
     const caretAt = valueLayout
       ? this._lineOriginX(valueLayout, content) + caretX - content.x
       : caretX;
-    const limit = content.width - CARET_RESERVE;
+    const limit = content.width - CARET_RESERVE * this.scale;
     if (!this._focused) this._scrollX = 0;
     else {
       let shift = this._scrollShift();
@@ -7188,7 +7368,12 @@ export class TextInputNode extends Node {
 
     if (this._focused && this._caretOn && a === b) {
       ctx.fillStyle = this.props.caretColor ?? style.color;
-      ctx.fillRect(valueX + caretX, markY, CARET_WIDTH, markHeight);
+      ctx.fillRect(
+        valueX + caretX,
+        markY,
+        CARET_WIDTH * this.scale,
+        markHeight,
+      );
     }
     ctx.restore();
   }
@@ -7240,23 +7425,27 @@ export class TextAreaNode extends TextInputNode {
    */
   defaultMouseDown(ev) {
     const bar = this._scrollbar();
-    const hit = scrollbarHit(bar, ev.x, ev.y);
+    // device coordinates against device bar geometry, as in Scrollable
+    const nx = ev.nativeEvent?.x ?? ev.x * this.scale;
+    const ny = ev.nativeEvent?.y ?? ev.y * this.scale;
+    const hit = scrollbarHit(bar, nx, ny);
     if (!hit) return super.defaultMouseDown(ev);
     if (hit === 'thumb') {
-      this._barGrab = ev.y - bar.thumbStart;
+      this._barGrab = ny - bar.thumbStart;
       ev.capturePointer();
       return;
     }
     const page = this.contentBox().height;
-    this._scrollTo(this._scrollY + (ev.y < bar.thumbStart ? -page : page), bar);
+    this._scrollTo(this._scrollY + (ny < bar.thumbStart ? -page : page), bar);
   }
 
   defaultMouseDrag(ev) {
     if (this._barGrab == null) return super.defaultMouseDrag(ev);
     const bar = this._scrollbar();
     if (!bar || bar.travel <= 0) return;
+    const ny = ev.nativeEvent?.y ?? ev.y * this.scale;
     this._scrollTo(
-      ((ev.y - this._barGrab - bar.trackStart) / bar.travel) * bar.range,
+      ((ny - this._barGrab - bar.trackStart) / bar.travel) * bar.range,
       bar,
     );
   }
@@ -7337,7 +7526,7 @@ export class TextAreaNode extends TextInputNode {
     const container =
       width === undefined || direction !== 'rtl'
         ? width
-        : Math.max(0, width - CARET_RESERVE);
+        : Math.max(0, width - CARET_RESERVE * this.scale);
     const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${align}`;
     if (this._valueLayoutKey !== key) {
       this._valueLayoutKey = key;
@@ -7391,7 +7580,13 @@ export class TextAreaNode extends TextInputNode {
    * so the wheel's default action calls every scroller the same way. `x` is
    * accepted and ignored: wrapped text has no horizontal extent. */
   scrollBy(by) {
+    // logical, like Scrollable's — the public unit
     const dy = typeof by === 'number' ? by : (by?.y ?? 0);
+    this._scrollByDevice(0, dy * this.scale);
+  }
+
+  /** Device-pixel core, the wheel's entry (see Scrollable). */
+  _scrollByDevice(dx, dy) {
     if (!dy) return;
     const next = Math.min(Math.max(0, this._scrollY + dy), this._maxScrollY());
     if (next === this._scrollY) return;
@@ -7492,6 +7687,7 @@ export class TextAreaNode extends TextInputNode {
       across: box.x,
       crossSize: box.width,
       scroll: this._scrollY,
+      scale: this.scale,
     });
   }
 
@@ -7572,7 +7768,12 @@ export class TextAreaNode extends TextInputNode {
 
     if (this._focused && this._caretOn && a === b) {
       ctx.fillStyle = this.props.caretColor ?? this.resolvedTextStyle().color;
-      ctx.fillRect(originX + pos.x, originY + pos.y, CARET_WIDTH, pos.height);
+      ctx.fillRect(
+        originX + pos.x,
+        originY + pos.y,
+        CARET_WIDTH * this.scale,
+        pos.height,
+      );
     }
     // inside the clip, so the thumb is bounded by the content box
     this._paintScrollbar(ctx, layout);
@@ -7832,7 +8033,10 @@ export class WindowNode extends Scrollable(Node) {
    * owes a layout pass anyway.
    */
   _measure() {
-    const props = this.props;
+    // Every number below — yoga's answers, the monitor rects, the window's
+    // live size — is device pixels, so the geometry props convert on entry
+    // and the rest of the function never thinks about units again.
+    const props = scaleWindowGeometry(this.props, this.scale);
     const autoW = isAutoSize(props.width);
     const autoH = isAutoSize(props.height);
     const yoga = this.yoga;
@@ -8071,12 +8275,24 @@ export class WindowNode extends Scrollable(Node) {
     const anchor = this.props.anchor;
     const node = this._anchorTarget(anchor?.to);
     if (!node) return null;
-    return anchorRect(node, {
+    // `anchorRect` is public API and speaks logical pixels on both sides;
+    // this caller's `size` came from `_measure` (device) and its result is
+    // headed for CreateWindow (device), so both convert here.
+    const s = this.scale;
+    const rect = anchorRect(node, {
       ...anchor,
       alignTo: this._anchorTarget(anchor.alignTo) ?? undefined,
-      width: size.width,
-      height: size.height,
+      width: size.width / s,
+      height: size.height / s,
     });
+    if (!rect || s === 1) return rect;
+    return {
+      ...rect,
+      x: Math.round(rect.x * s),
+      y: Math.round(rect.y * s),
+      width: Math.round(rect.width * s),
+      height: Math.round(rect.height * s),
+    };
   }
 
   /**
@@ -8233,10 +8449,19 @@ export class WindowNode extends Scrollable(Node) {
     wnd._reactX11Node = this;
     wnd._reactFiber = this._reactFiber;
     // windows are DevTools public instances too — see Node.getClientRects
+    const s = this.scale;
     wnd.getClientRects ??= () => [
-      { x: 0, y: 0, left: 0, top: 0, width: wnd.width, height: wnd.height },
+      {
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        width: wnd.width / s,
+        height: wnd.height / s,
+      },
     ];
-    wnd.measure ??= (callback) => callback?.(0, 0, wnd.width, wnd.height, 0, 0);
+    wnd.measure ??= (callback) =>
+      callback?.(0, 0, wnd.width / s, wnd.height / s, 0, 0);
     wnd.ownerDocument ??= DEVTOOLS_FAKE_DOCUMENT;
     this._attachWindowListeners(parentWindow);
     for (const child of this.children) {
@@ -8744,9 +8969,12 @@ export class WindowNode extends Scrollable(Node) {
 
   /** The WM size hints among these props, as the author wrote them. */
   _sizeHints(props) {
+    // WM_NORMAL_HINTS reach the window manager, which measures the real
+    // window — device pixels, like every geometry prop's destination.
+    const scaled = scaleWindowGeometry(props, this.scale);
     const hints = {};
     for (const key of WINDOW_HINT_PROPS) {
-      if (props[key] !== undefined) hints[key] = props[key];
+      if (scaled[key] !== undefined) hints[key] = scaled[key];
     }
     return hints;
   }
@@ -8853,7 +9081,23 @@ export class WindowNode extends Scrollable(Node) {
       // window or a deduped older copy, which then keep the unconditional
       // refresh rather than losing the anchor.
       if (ev.moved ?? true) this._refreshScreenOrigin();
-      this.props.onResize?.(ev);
+      if (this.props.onResize) {
+        // the payload is application-facing: an app that stores this size
+        // and writes it back as `width`/`height` props must round-trip
+        // through one unit, and props are logical
+        const s = this.scale;
+        this.props.onResize(
+          s === 1
+            ? ev
+            : {
+                ...ev,
+                width: ev.width / s,
+                height: ev.height / s,
+                x: ev.x / s,
+                y: ev.y / s,
+              },
+        );
+      }
     });
     // A reparent is the other way the origin moves: the window manager puts
     // the window inside its frame, and ConfigureNotify coordinates become
@@ -9176,7 +9420,10 @@ export class WindowNode extends Scrollable(Node) {
       // `ev.preventDefault is not a function` in a <popup>'s onKeyDown: ntk
       // registers any `onFoo` in its creation args as a raw listener, so the
       // handler was called a second time with the native X event.
-      this.attributes = { ...this.attributes, ...windowAttributes(newProps) };
+      this.attributes = {
+        ...this.attributes,
+        ...windowAttributes(newProps, this.scale),
+      };
       return;
     }
 
@@ -9225,34 +9472,36 @@ export class WindowNode extends Scrollable(Node) {
     // about to change. Without that the echo of a one-axis configure would
     // disagree with the record on the other axis and read as somebody else
     // setting the size — locking the window on the app's own update.
+    // The comparisons above ran on the raw props — logical against logical
+    // — and everything below talks to the server, so it is device from here
+    // (`wnd.width`, `_requestedSize` and the ConfigureNotify echo are all
+    // device pixels; a logical number among them would misread every user
+    // resize as `_userSized`).
+    const geo = scaleWindowGeometry(newProps, this.scale);
     if (sizeChanged) {
       this._userSized = false;
       this._requestedSize = {
-        width: isAutoSize(newProps.width) ? wnd.width : newProps.width,
-        height: isAutoSize(newProps.height) ? wnd.height : newProps.height,
+        width: isAutoSize(geo.width) ? wnd.width : geo.width,
+        height: isAutoSize(geo.height) ? wnd.height : geo.height,
       };
     }
     if (geometryChanged) {
       if (typeof wnd.setState === 'function') {
         wnd.setState({
-          x: anchored ? undefined : newProps.x,
-          y: anchored ? undefined : newProps.y,
+          x: anchored ? undefined : geo.x,
+          y: anchored ? undefined : geo.y,
           // `'auto'` is not a geometry ntk can be given: an axis the app has
           // handed back is left alone here and resolved by `_refit()` on the
           // layout this same commit is about to schedule.
-          width: isAutoSize(newProps.width) ? undefined : newProps.width,
-          height: isAutoSize(newProps.height) ? undefined : newProps.height,
+          width: isAutoSize(geo.width) ? undefined : geo.width,
+          height: isAutoSize(geo.height) ? undefined : geo.height,
         });
       } else {
-        if (
-          sizeChanged &&
-          !isAutoSize(newProps.width) &&
-          !isAutoSize(newProps.height)
-        ) {
-          wnd.resize?.(newProps.width, newProps.height);
+        if (sizeChanged && !isAutoSize(geo.width) && !isAutoSize(geo.height)) {
+          wnd.resize?.(geo.width, geo.height);
         }
         if (movedByProps) {
-          wnd.move?.(newProps.x, newProps.y);
+          wnd.move?.(geo.x, geo.y);
         }
       }
     }

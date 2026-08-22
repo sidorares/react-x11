@@ -229,6 +229,25 @@ export interface RootOptions {
         maxInFlight?: number;
         linearFallback?: boolean;
       };
+  /**
+   * Device pixels per logical pixel — the display scale (docs/scale.md).
+   *
+   * `'auto'` (the default) resolves it from the connection: environment
+   * overrides (`REACT_X11_SCALE`, `GDK_SCALE`, `QT_SCALE_FACTOR`), then the
+   * desktop's own configuration (XSETTINGS `Gdk/WindowScalingFactor` and
+   * `Xft/DPI`, `Xft.dpi` from `RESOURCE_MANAGER`), then the panel's RandR
+   * millimetres under mutter's viewing-distance model — with EDIDs that lie
+   * (every virtual machine's does) audited out — and finally the resolution
+   * class of the pixel grid itself. A number pins it; `REACT_X11_SCALE` in
+   * the environment outranks even that, as the user's accessibility escape
+   * hatch.
+   *
+   * Every length the app writes stays logical — styles, `fontSize`, window
+   * geometry, event coordinates, `getClientRects`, `useScreens` — and the
+   * renderer multiplies exactly once on the way to the server. Resolved
+   * before the first window realizes and static for the life of the root.
+   */
+  scale?: 'auto' | number;
   /** X protocol errors no request callback claimed. Default warns. */
   onXError?: (err: Error) => void;
   onUncaughtError?: (error: unknown, errorInfo: ErrorInfo) => void;

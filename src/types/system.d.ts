@@ -48,6 +48,14 @@ export interface Screen {
   /** Hz to two decimals (`59.99`), or null. */
   readonly refreshRate: number | null;
   readonly rotation: 0 | 90 | 180 | 270;
+  /**
+   * This monitor's own device-pixels-per-logical-pixel (docs/scale.md).
+   * Where the desktop configured one factor it is the root's on every
+   * entry; where the hardware answered, a retina lid and an office monitor
+   * really do differ, and an app that places windows can honour that.
+   * Geometry above is logical, like every rect the renderer hands out.
+   */
+  readonly scale: number;
 }
 
 export interface Screens {
@@ -70,6 +78,20 @@ export interface Screens {
  * ```
  */
 export function useScreens(): Screens;
+
+/**
+ * Device pixels per logical pixel for this root — `1` on an ordinary
+ * display, `2` on a retina panel, fractional on desktops configured to
+ * 1.25/1.5. Resolved once by `createRoot` (see `RootOptions.scale`,
+ * docs/scale.md) and static for the life of the root, so there is nothing
+ * to subscribe to.
+ *
+ * Everything the renderer hands an app is already logical; reach for this
+ * only to talk about device pixels deliberately — sizing detail in a
+ * `<canvas onDraw>` (whose payload carries the same number), or showing
+ * the factor in a settings pane.
+ */
+export function useScale(): number;
 
 // --------------------------------------------------------------------------
 // Window state

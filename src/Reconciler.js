@@ -47,6 +47,7 @@ import { beginFocus } from './events.js';
 import { beginKeyboard } from './keyboard.js';
 import { beginCompositing, endCompositing } from './compositing.js';
 import { beginScreens, endScreens } from './screens.js';
+import { beginScale, scaleOf } from './scale.js';
 import { beginDesktopSettings, endDesktopSettings } from './desktopsettings.js';
 import { endIdle } from './idle.js';
 import { endKeyboardState } from './keyboardstate.js';
@@ -244,10 +245,18 @@ const HostConfig = {
       case 'window':
         // No X11 calls here: the render phase may be discarded. The real
         // window is created top-down in the commit phase (realize).
-        node = new WindowNode(rootContainer, windowAttributes(props), props);
+        node = new WindowNode(
+          rootContainer,
+          windowAttributes(props, scaleOf(rootContainer)),
+          props,
+        );
         break;
       case 'popup':
-        node = new PopupNode(rootContainer, windowAttributes(props), props);
+        node = new PopupNode(
+          rootContainer,
+          windowAttributes(props, scaleOf(rootContainer)),
+          props,
+        );
         break;
       case 'box':
         node = new BoxNode(props, rootContainer);
@@ -731,6 +740,16 @@ export async function createRoot(options = {}) {
   // realized before the answer landed would paint the wrong thing once and
   // correct itself visibly. One round trip, on a path that is already async.
   await beginCompositing(app);
+
+  // Awaited for the strongest version of the same reason: the display scale
+  // multiplies every style length, every font size and every CreateWindow
+  // rectangle, so it must be settled before the first node resolves a style
+  // — there is no "correct it a frame later" for a tree that laid out at
+  // half size. Normally free or one round trip (the environment answers, or
+  // XSETTINGS does — a read this startup path already performs); the RandR
+  // hardware walk behind those is only paid on desktops where nothing
+  // cheaper answered (src/scale.js).
+  await beginScale(app, rest.scale);
 
   // Awaited for the same reason, and it is the same shape of question: a
   // `<window>` with no size given is sized from its content and capped at the

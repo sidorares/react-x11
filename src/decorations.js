@@ -434,9 +434,53 @@ function memoize(cache, key, parse) {
   return parsed;
 }
 
-/** `parseLinearGradient`, memoized and non-throwing: the paint path's door. */
-export const gradientSpec = (value) =>
-  memoize(gradients, value, parseLinearGradient);
+/**
+ * The display scale's route into these two values, which is unlike every
+ * other style length's: `boxShadow` and `backgroundImage` are *strings*,
+ * so the multiply at the style funnel (styles.js, scaleResolvedStyle)
+ * cannot reach the numbers inside them — and the parses are memoized on
+ * the raw string, so the scaled result has to be memoized beside it
+ * rather than patched after. The scale rides into the memo key.
+ */
+function scaleShadows(specs, scale) {
+  if (!specs || scale === 1) return specs;
+  return specs.map((s) => ({
+    ...s,
+    dx: s.dx * scale,
+    dy: s.dy * scale,
+    blur: s.blur * scale,
+    spread: s.spread * scale,
+  }));
+}
 
-/** `parseBoxShadow`, memoized and non-throwing. */
-export const shadowSpecs = (value) => memoize(shadows, value, parseBoxShadow);
+function scaleGradient(spec, scale) {
+  if (!spec || scale === 1) return spec;
+  let stops = spec.stops;
+  if (stops?.some((stop) => stop.position?.unit === 'px')) {
+    stops = stops.map((stop) =>
+      stop.position?.unit === 'px'
+        ? {
+            ...stop,
+            position: { ...stop.position, value: stop.position.value * scale },
+          }
+        : stop,
+    );
+    return { ...spec, stops };
+  }
+  return spec;
+}
+
+/** `parseLinearGradient`, memoized and non-throwing: the paint path's door.
+ *  `scale` converts any `px` stop positions to device pixels — percentages
+ *  and angles mean the same thing at any density. */
+export const gradientSpec = (value, scale = 1) =>
+  memoize(gradients, scale === 1 ? value : `${scale}\u0000${value}`, () =>
+    scaleGradient(parseLinearGradient(value), scale),
+  );
+
+/** `parseBoxShadow`, memoized and non-throwing. `scale` converts the
+ *  offsets, the blur and the spread to device pixels. */
+export const shadowSpecs = (value, scale = 1) =>
+  memoize(shadows, scale === 1 ? value : `${scale}\u0000${value}`, () =>
+    scaleShadows(parseBoxShadow(value), scale),
+  );

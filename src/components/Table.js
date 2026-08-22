@@ -218,9 +218,13 @@ export function Table({
     const top = index * rowHeight;
     const node = body.current;
     if (!node) return;
-    if (top < node.scrollY) node.scrollTo({ y: top });
-    else if (top + rowHeight > node.scrollY + node.abs.height) {
-      node.scrollTo({ y: top + rowHeight - node.abs.height });
+    // `top` is logical (rows are style heights); the node's offset and
+    // viewport are device fields, divided here so all three share a unit
+    const scrollY = node.scrollY / node.scale;
+    const viewH = node.abs.height / node.scale;
+    if (top < scrollY) node.scrollTo({ y: top });
+    else if (top + rowHeight > scrollY + viewH) {
+      node.scrollTo({ y: top + rowHeight - viewH });
     }
   };
 
