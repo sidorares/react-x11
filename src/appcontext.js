@@ -34,7 +34,7 @@ const AppContext = createContext(null);
 export const AppProvider = AppContext.Provider;
 
 /** `useApp()` without the throw, for components that can still render
- * something useful outside a tree (see `<Canvas3D>`). Not public. */
+ * something useful outside a tree. Not public. */
 export function useAppOrNull() {
   return useContext(AppContext);
 }

@@ -32,7 +32,7 @@ export const Pixmap: new (...args: unknown[]) => unknown;
  * See [extending.md](../docs/extending.md).
  */
 export const Surface: new (...args: unknown[]) => unknown;
-/** `code` values on a failed GL setup — see `<Canvas3D fallback>`. */
+/** `code` values on a failed GL setup — see `<glarea onError>`. */
 export const GLXError: {
   NO_EXTENSION: 'GLX_NO_EXTENSION';
   INDIRECT_DISABLED: 'GLX_INDIRECT_DISABLED';

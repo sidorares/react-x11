@@ -11,7 +11,6 @@ import type {
   CanvasProps,
   DrawInfo,
   GlAreaProps,
-  Vec3,
 } from './elements.js';
 import type { DrawnNode, Rect } from './nodes.js';
 import type {
@@ -652,36 +651,6 @@ export interface SplitPaneProps extends WidgetProps {
   style?: StyleProp;
 }
 export const SplitPane: ComponentType<SplitPaneProps>;
-
-export interface Canvas3DProps extends Omit<GlAreaProps, 'onDraw'> {
-  camera?: {
-    position?: Vec3;
-    /** Vertical field of view in degrees. */
-    fov?: number;
-    near?: number;
-    far?: number;
-    target?: Vec3;
-  };
-  children?: ReactNode;
-  /**
-   * What to render when this X server cannot give us a GL context — an
-   * element, or a function of the error. `err.code` is one of ntk's
-   * `GLXError` values; `GLX_INDIRECT_DISABLED` is the usual one. Rendered
-   * inside a `<box>` with this component's `style`, so it keeps the
-   * surface's place in the layout.
-   */
-  fallback?: ReactNode | ((error: GlxSetupError) => ReactNode);
-}
-
-/** The error a failed GL setup reports (ntk classifies it). */
-export interface GlxSetupError extends Error {
-  /** `GLX_INDIRECT_DISABLED` | `GLX_NO_EXTENSION` | `GLX_NO_CONFIG` |
-   * `GLX_CONTEXT_FAILED` — branch on this, not on the message. */
-  code?: string;
-  /** Multi-line remedy, suitable for printing as-is. */
-  hint?: string;
-}
-export const Canvas3D: ComponentType<Canvas3DProps>;
 
 // --- anchoring helpers -----------------------------------------------------
 
