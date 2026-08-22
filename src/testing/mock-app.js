@@ -220,6 +220,14 @@ export function createMockApp() {
         drawImage(...args) {
           ops.push(['drawImage']);
         },
+        // the raw-pixel write, recorded with its destination — where these
+        // pixels land is the thing to assert about an `onDraw` that uses it,
+        // since putImageData ignores the transform (docs/elements.md,
+        // "<canvas>") and an un-offset call is a real bug this mock should
+        // not hide by crashing first
+        putImageData(data, x, y) {
+          ops.push(['putImageData', data?.width, data?.height, x, y]);
+        },
         // enough of the canvas surface for SvgView.draw to run headlessly
         scale(sx, sy) {
           ops.push(['scale', sx, sy]);

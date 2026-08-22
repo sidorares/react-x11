@@ -115,6 +115,11 @@ test('<glarea> gets a GL child window and draws a frame', async () => {
     assert.deepEqual(drawn[0], {
       width: 280,
       height: 200,
+      // the node's origin in the drawable being drawn into — a <glarea>
+      // draws into its own X window, so zero even though yoga put the
+      // node at 20,20 in the parent
+      x: 0,
+      y: 0,
       node: area,
     });
 
