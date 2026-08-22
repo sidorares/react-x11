@@ -5,6 +5,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -41,11 +42,10 @@ const ARROW_DEPTH = 6;
 // the edge leaves a hairline of half-covered pixels between them.
 const ARROW_OVERLAP = 1;
 
-// What a `label` that is not text gets when the caller sizes nothing. A
-// popup is a real X window: it needs its size before anything inside it can
-// be laid out, so there is no measuring our way out of this one.
-const RICH_WIDTH = 220;
-const RICH_HEIGHT = 80;
+// There is no default size for a `label` that is not text: the popup is
+// rendered once **hidden** at its natural size — a real layout of the real
+// content, never on screen — and placed from what that measured. See
+// `surface()` for the two lives, and the measuring effect for the order.
 
 const isText = (label) =>
   typeof label === 'string' || typeof label === 'number';
@@ -247,14 +247,23 @@ function paintArrow(ctx, { width, height }, side, color) {
  * is given, so that nothing that named a side has to change.)
  *
  * `label` is usually a string, and then the popup is sized from the
- * **measured** text — not because a `<popup>` cannot size itself (it can,
- * see "Natural size" in docs/elements.md) but because `anchorRect` needs the
- * size to decide which side of the trigger the hint fits on, and that is
- * decided during the render that opens it. It can equally be an element — a
- * swatch and a hex code, a shortcut in its own type, a whole card — and then
- * the caller says how big with `width`/`height`, for the same reason. The
- * element fills the bubble and draws its own padding; a string gets the
- * bubble's.
+ * **measured** text — synchronously, because `anchorRect` needs the size to
+ * decide which side of the trigger the hint fits on, and that is decided
+ * during the render that opens it. It can equally be an element — a swatch
+ * and a hex code, a shortcut in its own type, a whole card — and then the
+ * content is **measured too**: the popup is rendered once `hidden` at its
+ * natural size (a real layout of the real content, capped at the screen and
+ * at `maxWidth`/`maxHeight`), the size is read back, and the same placement
+ * math runs before anything is mapped — so a card whose height depends on
+ * what is in it gets the bubble it needs, not a guess (issue #368). Both
+ * commits land in the same task and the popup maps last, so it is only ever
+ * on screen placed and at its final size. `width`/`height` still pin an
+ * axis exactly — give both and the measuring pass is skipped entirely; give
+ * one and the other is measured for it, so `width={340}` is a fixed column
+ * whose height fits the message. The element fills the bubble and draws its
+ * own padding; a string gets the bubble's. The size is settled at open —
+ * content that changes size while the hint is up is clipped or short until
+ * the next open, which is a hint's lifetime away.
  *
  * On a display that composites, the popup is a real ARGB window: a rounded
  * bubble with a small arrow pointing back at the trigger, and everything the
@@ -271,14 +280,22 @@ export function Tooltip({
   fontSize = DEFAULT_LABEL_SIZE,
   width,
   height,
+  maxWidth,
+  maxHeight,
   style,
   ...boxProps
 }) {
   const theme = useTheme();
   const app = useApp();
   const ref = useRef(null);
+  const popup = useRef(null);
   const measureAnchor = useAnchor(ref);
   const [rect, setRect] = useState(null);
+  // An element label's measured size — what the hidden pass below produced,
+  // and what placement reads for as long as the hint is up. Text is
+  // measured synchronously instead and never lands here.
+  const [bubble, setBubble] = useState(null);
+  const [measuring, setMeasuring] = useState(false);
   const timer = useRef(null);
   // Whether there is an arrow at all has to be settled *before* the popup
   // exists — it is part of how big the window is — so this is the display
@@ -302,6 +319,10 @@ export function Tooltip({
     cancel();
     if (showing.get(app) === hide) showing.delete(app);
     setRect(null);
+    // the measurement goes with the hint: the next open re-measures, so a
+    // label that changed while nothing showed opens at its new size
+    setBubble(null);
+    setMeasuring(false);
   }, [app, cancel]);
 
   // safe-polygon hover (docs/components.md): leaving the trigger *toward*
@@ -332,45 +353,55 @@ export function Tooltip({
     };
   }, [app, cancel, hide]);
 
-  // The bubble, which is the popup minus whatever the arrow takes.
+  // `!label` would have thrown away `0`, which is a hint like any other;
+  // an empty string is not one
+  const hasLabel = !(label == null || label === false || label === '');
+
+  // The bubble, which is the popup minus whatever the arrow takes: measured
+  // text for a string, the caller's numbers where both were given, and the
+  // hidden pass's answer for an element — null until that pass has run.
   const bubbleSize = (node) => {
-    if (!isText(label)) {
-      return { width: width ?? RICH_WIDTH, height: height ?? RICH_HEIGHT };
+    if (isText(label)) {
+      const text = measureLabel(node, label, { size: fontSize });
+      return {
+        width: width ?? Math.ceil(text.width) + TOOLTIP_PADDING_X * 2,
+        height: height ?? Math.ceil(text.height) + TOOLTIP_PADDING_Y * 2,
+      };
     }
-    const text = measureLabel(node, label, { size: fontSize });
-    return {
-      width: width ?? Math.ceil(text.width) + TOOLTIP_PADDING_X * 2,
-      height: height ?? Math.ceil(text.height) + TOOLTIP_PADDING_Y * 2,
-    };
+    if (width != null && height != null) return { width, height };
+    return bubble;
   };
 
-  const tooltipAnchorOptions = () => {
-    const node = ref.current;
-    // `!label` would have thrown away `0`, which is a hint like any other;
-    // an empty string is not one
-    if (!node || label == null || label === false || label === '') return null;
-    const bubble = bubbleSize(node);
+  // The anchor options for a bubble of this size: which side of the trigger,
+  // and the popup grown by the arrow along the axis that faces it.
+  const optionsFor = (node, size) => {
     const grow = composited ? ARROW_DEPTH : 0;
     const want = placement ?? direction;
     const side =
       want === 'auto'
         ? autoDirection(node, {
-            width: bubble.width + grow,
-            height: bubble.height + grow,
+            width: size.width + grow,
+            height: size.height + grow,
           })
         : want;
     const vertical = side === 'top' || side === 'bottom';
     return {
       placement: side,
       align: 'center',
-      width: bubble.width + (vertical ? 0 : grow),
-      height: bubble.height + (vertical ? grow : 0),
+      width: size.width + (vertical ? 0 : grow),
+      height: size.height + (vertical ? grow : 0),
     };
   };
 
-  const show = () => {
-    const options = tooltipAnchorOptions();
-    if (!options) return;
+  const tooltipAnchorOptions = () => {
+    const node = ref.current;
+    if (!node || !hasLabel) return null;
+    const size = bubbleSize(node);
+    if (!size) return null;
+    return optionsFor(node, size);
+  };
+
+  const place = (options) => {
     const next = measureAnchor(options);
     if (!next) return;
     // claim the slot at the moment there is something to see, so a hint
@@ -379,6 +410,33 @@ export function Tooltip({
     showing.set(app, hide);
     setRect(next);
   };
+
+  const show = () => {
+    if (!ref.current || !hasLabel) return;
+    const options = tooltipAnchorOptions();
+    // No options with a node and a label means an element label whose size
+    // is not known yet: render the popup hidden at its natural size, and
+    // the measuring effect below finishes the job.
+    if (options) place(options);
+    else setMeasuring(true);
+  };
+
+  // The second half of opening an element label: the commit that set
+  // `measuring` rendered the popup hidden — realized, laid out, never
+  // mapped — so its natural size is now a fact. Read it back, run the same
+  // placement `show()` runs, and re-render placed; a layout effect, so both
+  // commits land in the same task, nothing paints in between, and the popup
+  // maps only once it is the right size in the right place.
+  useLayoutEffect(() => {
+    if (!measuring) return;
+    setMeasuring(false);
+    const wnd = popup.current;
+    const node = ref.current;
+    if (!wnd || !node) return;
+    const size = { width: wnd.width, height: wnd.height };
+    setBubble(size);
+    place(optionsFor(node, size));
+  });
 
   // keeps the tooltip pinned to its trigger for as long as it is shown: a
   // scrolled ancestor, the trigger's own layout moving it, or the owner
@@ -407,23 +465,41 @@ export function Tooltip({
   };
 
   /**
-   * The popup, in two absolutely-positioned pieces: the bubble, and the
-   * arrow beside it. Absolute rather than a flex column, because the two are
+   * The popup, in its two lives.
+   *
+   * **Measuring** (no `rect` yet): `hidden` — realized and laid out, never
+   * mapped — with the bubble in flow and no arrow, so the popup's natural
+   * size *is* the bubble's. One commit later the effect above has read it
+   * back and placed it; nothing is ever on screen unplaced.
+   *
+   * **Placed**: two absolutely-positioned pieces, the bubble and the arrow
+   * beside it. Absolute rather than a flex column, because the two are
    * placed by the same arithmetic that decided how big the window is, and
-   * that arithmetic has to run before there is a window to lay anything out
-   * in. Whatever neither covers is the transparent margin the arrow needs to
-   * point through.
+   * that arithmetic has to run before the window is on screen. Whatever
+   * neither covers is the transparent margin the arrow needs to point
+   * through.
+   *
+   * One `<popup>` element for both, so the transition is a configure and a
+   * map on the same X window — never a second window — and the label's
+   * component instances (their state, their subscriptions) survive from the
+   * layout they were measured in to the one that shows them.
    */
   const surface = () => {
     // the side `anchorRect` settled on, which is the one it was asked for
     // unless a screen edge flipped it
-    const side = rect.placement ?? 'top';
+    const side = rect ? (rect.placement ?? 'top') : null;
     const vertical = side === 'top' || side === 'bottom';
-    const arrow = composited
-      ? arrowPlacement(side, rect, screenRect(ref.current), theme.radiusTooltip)
-      : null;
+    const arrow =
+      rect && composited
+        ? arrowPlacement(
+            side,
+            rect,
+            screenRect(ref.current),
+            theme.radiusTooltip,
+          )
+        : null;
     const inset = arrow ? ARROW_DEPTH : 0;
-    const bubble = {
+    const bubbleRect = rect && {
       // the arrow is always on the side facing the trigger, so the bubble is
       // pushed off that edge and fills the rest
       left: side === 'right' ? inset : 0,
@@ -435,13 +511,27 @@ export function Tooltip({
     return h(
       'popup',
       {
+        ref: popup,
         theme,
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
         windowType: 'tooltip',
         transparent: true,
+        ...(rect
+          ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
+          : {
+              // measuring: never mapped, so the position is nobody's; the
+              // axes the caller pinned stay pinned and the rest are
+              // measured, which is what makes `width` alone a fixed column
+              // whose height fits the content
+              hidden: true,
+              x: 0,
+              y: 0,
+              width: width ?? 'auto',
+              height: height ?? 'auto',
+            }),
+        // in both lives, so the props do not churn between them — inert on
+        // an exact axis, the measurement's cap on an auto one
+        ...(maxWidth != null ? { maxWidth } : null),
+        ...(maxHeight != null ? { maxHeight } : null),
         style: {
           backgroundColor: theme.text,
           '@supports transparency': { backgroundColor: 'transparent' },
@@ -453,25 +543,33 @@ export function Tooltip({
           role: 'tooltip',
           onMouseEnter: cancel,
           onMouseLeave: hide,
-          style: {
-            position: 'absolute',
-            left: bubble.left,
-            top: bubble.top,
-            width: bubble.width,
-            height: bubble.height,
-            justifyContent: 'center',
-            backgroundColor: theme.text,
-            // No border. On a hint this small a 1px outline in a colour
-            // close to the fill is a smudge on the corners and nothing
-            // anywhere else; the arrow is what tells you where it belongs.
-            ...(isText(label)
+          style: [
+            bubbleRect
               ? {
-                  paddingLeft: TOOLTIP_PADDING_X,
-                  paddingRight: TOOLTIP_PADDING_X,
+                  position: 'absolute',
+                  left: bubbleRect.left,
+                  top: bubbleRect.top,
+                  width: bubbleRect.width,
+                  height: bubbleRect.height,
                 }
-              : null),
-            '@supports transparency': { borderRadius: theme.radiusTooltip },
-          },
+              : // measuring: in flow, so the popup takes the bubble's
+                // natural size
+                null,
+            {
+              justifyContent: 'center',
+              backgroundColor: theme.text,
+              // No border. On a hint this small a 1px outline in a colour
+              // close to the fill is a smudge on the corners and nothing
+              // anywhere else; the arrow is what tells you where it belongs.
+              ...(isText(label)
+                ? {
+                    paddingLeft: TOOLTIP_PADDING_X,
+                    paddingRight: TOOLTIP_PADDING_X,
+                  }
+                : null),
+              '@supports transparency': { borderRadius: theme.radiusTooltip },
+            },
+          ],
         },
         // the content is on the inverted surface, and is given the palette
         // that says so — both routes at once, which is what `ThemeProvider`
@@ -515,7 +613,7 @@ export function Tooltip({
       style: [{ flexDirection: 'row', alignItems: 'center' }, style],
     },
     children,
-    rect && surface(),
+    (rect || measuring) && surface(),
   );
 }
 

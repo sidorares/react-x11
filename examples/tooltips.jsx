@@ -2,10 +2,13 @@
 //
 // A `label` that is a **string** is measured and the popup is sized around
 // it — the common case, and the one that needs nothing from the caller. A
-// `label` that is an **element** gets the bubble to fill and a `width`/
-// `height` to fill it at, because a <popup> is a real X window: it needs its
-// size before React can lay anything out inside it. Anything renders in
-// there, widgets included — the last card below has a real <ProgressBar>.
+// `label` that is an **element** is measured too: the popup is rendered
+// once hidden at its natural size, read back, and placed before it is ever
+// mapped — so the swatch cards below are each exactly as big as what is in
+// them, with no numbers from the caller. `width`/`height` still pin an axis
+// where one axis is a design decision: the last card pins `width` and lets
+// the height fit. Anything renders in there, widgets included — that same
+// card has a real <ProgressBar>.
 //
 // `direction` picks the side. The default, `"auto"`, takes the first side
 // the hint fits on measured against the *screen* (a popup is a real window,
@@ -38,9 +41,11 @@ const SWATCHES = [
  * A tooltip that is a component rather than a line of text: a chip of the
  * colour, its name and hex, and a note under them.
  *
- * `flexGrow: 1` because the bubble hands an element the whole rectangle and
- * imposes no padding of its own — the card draws its own, which is the
- * point of passing one.
+ * No size anywhere: the bubble is measured from this card, so each swatch's
+ * hint is exactly as big as its own note — the long one is not clipped and
+ * the short one is not swimming in a bubble sized for the long one. The
+ * bubble imposes no padding of its own; the card draws its own, which is
+ * the point of passing one.
  *
  * The tokens are the **bubble's**, not the window's: a hint is drawn in the
  * palette's ink, so inside it `$text` is the ink *on that surface* and
@@ -50,7 +55,7 @@ const SWATCHES = [
  */
 function SwatchCard({ swatch }) {
   return (
-    <box style={{ flexGrow: 1, padding: 10, gap: 8 }}>
+    <box style={{ padding: 10, gap: 8 }}>
       <box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <box
           style={{
@@ -73,7 +78,8 @@ function SwatchCard({ swatch }) {
 }
 
 /** And one with a live widget in it, to make the point that it is a real
- *  tree and not a rich-text label. */
+ *  tree and not a rich-text label. The tooltip pins `width` — a progress
+ *  bar has no natural width of its own — and the height is measured for it. */
 function UsageCard({ used }) {
   return (
     <box style={{ flexGrow: 1, padding: 10, gap: 7, justifyContent: 'center' }}>
@@ -130,14 +136,13 @@ function Panel() {
         </Tooltip>
       </Row>
 
-      {/* An element label: the caller says how big, and fills it. */}
+      {/* An element label: measured like everything else, so each card is
+          exactly the size of what is in it. */}
       <Row label="Component">
         {SWATCHES.map((swatch) => (
           <Tooltip
             key={swatch.hex}
             label={<SwatchCard swatch={swatch} />}
-            width={190}
-            height={78}
             delay={250}
           >
             <box
@@ -159,7 +164,6 @@ function Panel() {
         <Tooltip
           label={<UsageCard used={used} />}
           width={200}
-          height={82}
           direction="right"
           delay={250}
         >
