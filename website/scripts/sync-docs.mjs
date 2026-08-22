@@ -191,6 +191,7 @@ const ORDER = [
   'globalmenu.md',
   'uri-schemes.md',
   'filedialog.md',
+  'eyedropper.md',
   'appearance.md',
   'system.md',
   'remote.md',

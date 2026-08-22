@@ -14,6 +14,7 @@ import { registerRefresh, createTransformer } from 'react-x11/refresh/loader';
 import type { ReloadEvent } from 'react-x11/refresh';
 import type { RefreshOptions } from 'react-x11/refresh/loader';
 import type {
+  AbortSignalLike,
   BusHandle,
   CalendarHandle,
   BusKind,
@@ -26,6 +27,7 @@ import type {
   LoadedFont,
   MessageBus,
   Screen,
+  ScreenColorBackend,
   Screens,
   SystemLocale,
   WindowState,
@@ -52,9 +54,14 @@ import {
   useAppActivate,
   useAppOpen,
   NoFileDialogError,
+  NoScreenColorError,
   openFile,
+  pickScreenColor,
+  portalVersion,
   saveFile,
+  screenColorBackend,
   serverTime,
+  useEyedropper,
   sessionBus,
   systemBus,
   useApp,
@@ -1318,6 +1325,54 @@ function _Files() {
       }
     }
     void [target, dirs, bare, backend];
+  }
+  void go;
+  return null;
+}
+
+// the eyedropper: hex-or-null, the rung report, and the hook's render state
+function _Eyedropper() {
+  const win = useRef<NtkWindow | null>(null);
+  const { pick, supported, picking } = useEyedropper({
+    parentWindow: win,
+    backend: 'x11',
+  });
+
+  async function go() {
+    // Cancelling is `null`, not a throw — same contract as the file dialog.
+    const hex: string | null = await pick();
+    if (hex) hex.toUpperCase();
+
+    // The bare function for host-side code; `app` is how the X11 rung is
+    // reached without a tree.
+    const signal: AbortSignalLike = {
+      aborted: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    };
+    const bare: string | null = await pickScreenColor({
+      parentWindow: 0x1a00007,
+      signal,
+    });
+    const rung: ScreenColorBackend | null = await screenColorBackend();
+    // @ts-expect-error — not a rung: there is nothing to draw a third one with
+    await pickScreenColor({ backend: 'builtin' });
+    // @ts-expect-error — the hook binds the tree's connection itself
+    pick({ app: undefined });
+
+    const version: number = await portalVersion(
+      'org.freedesktop.portal.Screenshot',
+    );
+
+    try {
+      await pickScreenColor({ backend: 'portal' });
+    } catch (err) {
+      if (err instanceof NoScreenColorError) {
+        const why: unknown = err.cause;
+        void why;
+      }
+    }
+    void [bare, rung, supported, picking, version];
   }
   void go;
   return null;

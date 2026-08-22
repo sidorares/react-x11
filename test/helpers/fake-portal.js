@@ -16,13 +16,14 @@
 import { PORTAL_NAME, PORTAL_PATH, senderPath } from '../../src/portal.js';
 
 const FILE_CHOOSER = 'org.freedesktop.portal.FileChooser';
+const SCREENSHOT = 'org.freedesktop.portal.Screenshot';
 const REQUEST_IFACE = 'org.freedesktop.portal.Request';
 
 /**
  * Start a fake portal against `address`.
  *
- * `handlers` is `{ OpenFile, SaveFile }`, each `(call) => ({ response,
- * results })` or a promise of one, where `call` is
+ * `handlers` is `{ OpenFile, SaveFile, PickColor }`, each `(call) =>
+ * ({ response, results })` or a promise of one, where `call` is
  * `{ parentWindow, title, options, path }`. The default answers with one file.
  *
  * The returned object records every call in `calls`, so a test can assert on
@@ -35,11 +36,17 @@ const REQUEST_IFACE = 'org.freedesktop.portal.Request';
  * between "the portal has a dialog up" and "the client knows the handle"
  * wide enough to test deliberately, instead of waiting for a loaded CI runner
  * to land in it by accident.
+ *
+ * `screenshotVersion` exports the `Screenshot` interface — `PickColor`, whose
+ * argument list is `(s parent_window, a{sv} options)`, **not** FileChooser's —
+ * with its `version` property answering that number, the way the capability
+ * probe reads it. Unset, the interface is absent entirely, which is what
+ * XFCE's real portal looks like.
  */
 export async function fakePortal(
   address,
   handlers = {},
-  { holdReply = 0 } = {},
+  { holdReply = 0, screenshotVersion } = {},
 ) {
   const dbus = (await import('dbus-native')).default;
   const bus = dbus.createClient({ busAddress: address });
@@ -122,6 +129,28 @@ export async function fakePortal(
     },
   });
   await bus.export(PORTAL_PATH, iface);
+
+  if (screenshotVersion !== undefined) {
+    const screenshot = dbus.defineInterface({
+      name: SCREENSHOT,
+      methods: {
+        PickColor: {
+          in: { parent_window: 's', options: 'a{sv}' },
+          out: { handle: 'o' },
+          handler: (args, ctx) =>
+            answer(
+              'PickColor',
+              [args.parent_window, undefined, args.options],
+              ctx,
+            ),
+        },
+      },
+      properties: {
+        version: { type: 'u', access: 'read', value: screenshotVersion },
+      },
+    });
+    await bus.export(PORTAL_PATH, screenshot);
+  }
 
   return portal;
 }

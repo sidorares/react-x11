@@ -28,7 +28,7 @@ import {
   saveFile,
   selectFolder,
 } from '../src/filedialog.js';
-import { _resetBusState, closeBus, sessionBus } from '../src/bus.js';
+import { sessionBus } from '../src/bus.js';
 import { FileDialog } from '../src/components/FileDialog.js';
 import { useFileDialog } from '../src/filedialoghooks.js';
 import { useTopLevelWindow, windowIdOf } from '../src/windowid.js';
@@ -40,7 +40,12 @@ import {
   screen,
 } from '../src/testing/index.js';
 import { fakePortal } from './helpers/fake-portal.js';
-import { transportAvailable, until, withBus } from './helpers/with-bus.js';
+import {
+  transportAvailable,
+  until,
+  withBus,
+  withNoBus,
+} from './helpers/with-bus.js';
 
 const haveTransport = await transportAvailable();
 const needsBroker = haveTransport
@@ -717,43 +722,6 @@ describe('the ladder', () => {
     );
   });
 });
-
-/**
- * Run `fn` on a machine with no session bus and no macOS.
- *
- * **The `closeBus()` is load-bearing, not tidying.** The shared connection
- * stays up across acquisitions by design, so pointing the env var at nothing
- * changes what the *next* connect would dial and not what is already open —
- * and a test that skipped this on a developer's own desktop would reach the
- * real portal and put a file dialog on their screen, then wait for a human.
- * That is exactly what happened while writing these.
- */
-async function withNoBus(fn) {
-  const saved = {
-    address: process.env.DBUS_SESSION_BUS_ADDRESS,
-    runtime: process.env.XDG_RUNTIME_DIR,
-    platform: process.platform,
-  };
-  await closeBus('session').catch(() => {});
-  _resetBusState();
-  _resetServiceCache();
-  process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/nonexistent/no-bus-here';
-  delete process.env.XDG_RUNTIME_DIR;
-  Object.defineProperty(process, 'platform', { value: 'linux' });
-  try {
-    return await fn();
-  } finally {
-    Object.defineProperty(process, 'platform', { value: saved.platform });
-    if (saved.address === undefined)
-      delete process.env.DBUS_SESSION_BUS_ADDRESS;
-    else process.env.DBUS_SESSION_BUS_ADDRESS = saved.address;
-    if (saved.runtime !== undefined)
-      process.env.XDG_RUNTIME_DIR = saved.runtime;
-    await closeBus('session').catch(() => {});
-    _resetBusState();
-    _resetServiceCache();
-  }
-}
 
 /** Let effects, the frame clock and one directory read all land. */
 async function settle() {

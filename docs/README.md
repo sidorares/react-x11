@@ -77,6 +77,12 @@
   `useFileDialog()`, the three-rung ladder (the desktop's own portal,
   `osascript` on macOS, a browser react-x11 draws itself), why cancelling is
   `null` rather than a throw, and the places the backends genuinely differ.
+- [eyedropper.md](eyedropper.md) — sample a colour from the screen:
+  `useEyedropper()`/`pickScreenColor()`, the two-rung ladder (the portal's
+  own picker, a crosshair grab on plain X11), the interface `version`
+  property that gates the portal rung where `hasService()` cannot, and why
+  the grab's whole lifecycle — including the `<popup grab>` it displaces —
+  belongs to core.
 - [appearance.md](appearance.md) — light or dark, the accent colour,
   contrast and reduced motion: `useSystemAppearance()`, `<ThemeProvider dark>`
   for apps that only want to follow the desktop, why the answer is remembered
