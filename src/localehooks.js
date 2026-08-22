@@ -13,7 +13,7 @@ import { systemLocale } from './locale.js';
  * ```jsx
  * const { locale, weekStartsOn } = useLocale();
  *
- * <Calendar locale={locale} weekStartsOn={weekStartsOn} />
+ * <Calendar locale={locale} weekStartsOn={weekStartsOn} />   // components
  * <text>{new Intl.NumberFormat(locale).format(total)}</text>
  * ```
  *

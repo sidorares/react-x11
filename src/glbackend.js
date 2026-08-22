@@ -66,7 +66,7 @@ export function directGLFailure(app) {
     return glError(
       GLError.DISABLED,
       "glPolicy is 'off' on this connection, so no GL context is created at all",
-      "Nothing inside <Canvas3D> draws under this policy. Pass glPolicy: 'auto'\n" +
+      "No <glarea> draws under this policy. Pass glPolicy: 'auto'\n" +
         'to createRoot(), or drop the option, to get a context back.',
     );
   }

@@ -5,14 +5,12 @@ import sizeQueries from './size-queries.js';
 import rtl from './rtl.js';
 import widgets from './widgets.js';
 import events from './events.js';
-import dates from './dates.js';
 import password from './password.js';
 import selection from './selection.js';
 import tasks from './tasks.js';
 import canvas from './canvas.js';
 import menu from './menu.js';
 import anchored from './anchored.js';
-import three from './three.js';
 
 // Ordered list shown in the playground picker. Each entry:
 // { id, title, description, code } (+ optional height/screenWidth/screenHeight).
@@ -29,14 +27,12 @@ const demos = [
   rtl,
   widgets,
   events,
-  dates,
   password,
   selection,
   tasks,
   canvas,
   menu,
   anchored,
-  three,
 ];
 
 export default demos;

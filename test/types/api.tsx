@@ -16,7 +16,6 @@ import type { RefreshOptions } from 'react-x11/refresh/loader';
 import type {
   AbortSignalLike,
   BusHandle,
-  CalendarHandle,
   BusKind,
   BusRef,
   BusStatus,
@@ -36,8 +35,6 @@ import type {
 import {
   Button,
   BusUnavailableError,
-  Calendar,
-  Canvas3D,
   activateWindow,
   Checkbox,
   closeBus,
@@ -84,7 +81,6 @@ import {
   systemLocale,
   ContextMenu,
   createRoot,
-  DatePicker,
   PasswordInput,
   createStyles,
   Dialog,
@@ -104,7 +100,6 @@ import {
   Tabs,
   ThemeProvider,
   Tooltip,
-  Tree,
   useAnchor,
   useDirection,
   useTheme,
@@ -638,35 +633,6 @@ function TransientWindows() {
 // @ts-expect-error — a string is not a window, a node, an XID or 'root'
 const _badTransient = <window transientFor="mainWindow" />;
 
-// --- 3D --------------------------------------------------------------------
-
-function Scene() {
-  return (
-    <Canvas3D
-      style={{ flexGrow: 1 }}
-      camera={{ position: [0, 2, 6], fov: 45 }}
-      onPointerMissed={() => {}}
-    >
-      <ambientLight intensity={0.35} />
-      <pointLight position={[5, 6, 6]} distance={20} />
-      <group rotation={[0, 0.5, 0]}>
-        <mesh
-          position={[-1.6, 0, 0]}
-          scale={1.2}
-          onClick={(ev) => void ev.distance}
-        >
-          <boxGeometry args={[1.4, 1.4, 1.4]} />
-          <meshPhongMaterial color="#2980b9" shininess={60} side="double" />
-        </mesh>
-        <mesh>
-          <bufferGeometry position={[0, 0, 0, 1, 0, 0, 0, 1, 0]} />
-          <meshBasicMaterial wireframe opacity={0.5} transparent />
-        </mesh>
-      </group>
-    </Canvas3D>
-  );
-}
-
 function RawGl() {
   return (
     <glarea
@@ -776,7 +742,6 @@ const _statusPalette = (
 
 function Widgets() {
   const anchorRef = useRef<DrawnNode>(null);
-  const calendar = useRef<CalendarHandle>(null);
   const anchor = useAnchor(anchorRef);
   const [checked, setChecked] = useState(false);
 
@@ -881,44 +846,6 @@ function Widgets() {
         <Select options={['plain', 'values']} />
       </box>
 
-      <Calendar
-        value="2026-08-07"
-        min={new Date()}
-        max="2026-12-31"
-        isDateBlocked={(day, parts) =>
-          day > '2026-09-01' && parts.weekday === 0
-        }
-        dayContent={(day, state) => (
-          <text style={{ color: state.color }}>{day}</text>
-        )}
-        onChange={(ev) => void ev.value.slice(0, 4)}
-      />
-      <Calendar
-        mode="range"
-        defaultValue={{ start: '2026-08-01', end: null }}
-        spanBlocked
-        weekStartsOn={0}
-        locale="en-GB"
-        onMonthChange={(month) => void month.length}
-        onChange={(ev) => void (ev.value.start ?? '').length}
-      />
-      <Calendar ref={calendar} focusable={false} focusVisible />
-      <DatePicker
-        name="when"
-        value={null}
-        placeholder="When?"
-        onChange={(ev) => void ev.value}
-      />
-      <DatePicker
-        mode="range"
-        value={{ start: '2026-08-01', end: '2026-08-04' }}
-        format={(value) => String(value)}
-        disabled
-        onChange={(ev) => void ev.value.end}
-      />
-      {/* @ts-expect-error a range value needs mode="range" */}
-      <Calendar value={{ start: '2026-08-01', end: null }} />
-
       <PasswordInput
         name="password"
         value=""
@@ -942,13 +869,6 @@ function Widgets() {
         orientation="vertical"
         manual
         onChange={(id) => void id.length}
-      />
-      <Tree
-        items={[
-          { id: 'src', label: 'src', children: [{ id: 'a', label: 'a.js' }] },
-        ]}
-        defaultExpanded={['src']}
-        onActivate={(id) => void id}
       />
       <Table<{ id: string; size: number }>
         columns={[
@@ -1110,7 +1030,6 @@ async function main() {
   // @ts-expect-error — it is on or off, not a moment
   await createRoot({ restoreFocusOnReveal: 'reveal' });
 
-  root.render(<Scene />);
   root.render(<RawGl />);
   root.render(<Popup />, () => {});
   root.render(<AnchoredPopup />);

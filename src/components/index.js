@@ -14,8 +14,6 @@ export {
 export { useDropTarget, useDragSource } from './dnd.js';
 export { Icon, icons, iconNames, iconSize } from './Icon.js';
 export { Button } from './Button.js';
-export { Calendar } from './Calendar.js';
-export { DatePicker } from './DatePicker.js';
 export { PasswordInput } from './PasswordInput.js';
 export { Dialog } from './Dialog.js';
 export { FileDialog } from './FileDialog.js';
@@ -28,7 +26,5 @@ export { Tooltip } from './Tooltip.js';
 export { ContextMenu, MenuBar } from './Menu.js';
 export { Select } from './Select.js';
 export { Tabs } from './Tabs.js';
-export { Tree } from './Tree.js';
 export { Table } from './Table.js';
 export { SplitPane } from './SplitPane.js';
-export { Canvas3D } from './Canvas3D.js';

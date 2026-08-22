@@ -16,11 +16,9 @@ import {
   SplitPane,
   Table,
   Tabs,
-  Tree,
 } from '../src/index.js';
 import { FormPanel } from './form.jsx';
 import { WidgetsPanel } from './widgets.jsx';
-import { DatesPanel } from './datepicker.jsx';
 import { PasswordPanel } from './password.jsx';
 import { TasksPanel } from './tasks.jsx';
 import { ThemingPanel } from './theming.jsx';
@@ -64,8 +62,8 @@ const s = createStyles({
     backgroundColor: '$background',
   },
   statusText: { fontSize: 11, color: '$textMuted' },
-  treePanel: { flexGrow: 1, minHeight: 0, padding: 12, gap: 8 },
-  treeHint: { fontSize: 11, color: '$textMuted', flexShrink: 0 },
+  panelBox: { flexGrow: 1, minHeight: 0, padding: 12, gap: 8 },
+  panelHint: { fontSize: 11, color: '$textMuted', flexShrink: 0 },
 });
 
 // The strip lives in the sidebar and the panel on the other side of the
@@ -75,65 +73,14 @@ const s = createStyles({
 const SECTIONS = [
   { id: 'form', label: 'Form' },
   { id: 'widgets', label: 'Widgets' },
-  { id: 'dates', label: 'Dates' },
   { id: 'password', label: 'Password' },
   { id: 'tasks', label: 'Tasks' },
-  { id: 'tree', label: 'Tree' },
   { id: 'table', label: 'Table' },
   { id: 'theming', label: 'Theming' },
 ];
 
 // A stand-in project, enough to show nesting, a lazy-looking empty branch
 // and a row that cannot be opened.
-const FILES = [
-  {
-    id: 'src',
-    label: 'src',
-    children: [
-      { id: 'index', label: 'index.js' },
-      { id: 'nodes', label: 'nodes.js' },
-      {
-        id: 'components',
-        label: 'components',
-        children: [
-          { id: 'button', label: 'Button.js' },
-          { id: 'tabs', label: 'Tabs.js' },
-          { id: 'tree', label: 'Tree.js' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'docs',
-    label: 'docs',
-    children: [
-      { id: 'elements', label: 'elements.md' },
-      { id: 'styling', label: 'styling.md' },
-      { id: 'img', label: 'img', children: [] },
-    ],
-  },
-  { id: 'readme', label: 'README.md' },
-  { id: 'lock', label: 'package-lock.json', disabled: true },
-];
-
-function TreePanel() {
-  const [picked, setPicked] = useState('nodes');
-  return (
-    <box style={s.treePanel}>
-      <text style={s.treeHint}>
-        Arrows to walk, Right/Left to open and close, type a name
-      </text>
-      <Tree
-        items={FILES}
-        defaultExpanded={['src', 'docs']}
-        selected={picked}
-        onSelect={setPicked}
-        style={{ flexGrow: 1 }}
-      />
-      <text style={s.treeHint}>selected: {picked}</text>
-    </box>
-  );
-}
 
 // Enough rows that building them all would be silly — the table mounts the
 // twenty or so on screen and swaps them as you scroll.
@@ -155,8 +102,8 @@ const COLUMNS = [
 function TablePanel() {
   const [picked, setPicked] = useState(null);
   return (
-    <box style={s.treePanel}>
-      <text style={s.treeHint}>
+    <box style={s.panelBox}>
+      <text style={s.panelHint}>
         {ROWS.length.toLocaleString()} rows — drag a header edge to resize,
         click one to sort
       </text>
@@ -167,7 +114,7 @@ function TablePanel() {
         onSelect={setPicked}
         style={{ flexGrow: 1 }}
       />
-      <text style={s.treeHint}>
+      <text style={s.panelHint}>
         {picked == null ? 'nothing selected' : `selected: ${ROWS[picked].name}`}
       </text>
     </box>
@@ -177,10 +124,8 @@ function TablePanel() {
 const PANELS = {
   form: () => <FormPanel />,
   widgets: () => <WidgetsPanel />,
-  dates: () => <DatesPanel />,
   password: () => <PasswordPanel />,
   tasks: () => <TasksPanel />,
-  tree: () => <TreePanel />,
   table: () => <TablePanel />,
   theming: () => <ThemingPanel />,
 };

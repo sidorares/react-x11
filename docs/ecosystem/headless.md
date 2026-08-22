@@ -13,7 +13,7 @@ the first keystroke.
 
 For finished widgets, react-x11 ships its own: `Button`, `Checkbox`,
 `Radio`/`RadioGroup`, `Switch`, `ProgressBar`, `Select`, `Slider`, `Tooltip`,
-`Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `Tree`, `SplitPane`. See
+`Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`, `SplitPane`. See
 [components](../components.md).
 
 ## react-stately {#react-stately}

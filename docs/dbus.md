@@ -258,7 +258,7 @@ by side, a tree of names → object paths → interfaces built from live
 introspection, a pane of an object's methods, signals and property values —
 has moved to
 [`@react-x11/components`](https://github.com/sidorares/react-x11-components).
-It was built on `Tree`, which is moving there too, and a browser of that shape
+It was built on `Tree`, which now lives there too, and a browser of that shape
 is a component rather than a demonstration of this API.
 
 What it demonstrated of _this_ page still holds and is worth knowing: point

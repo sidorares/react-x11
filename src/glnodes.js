@@ -11,9 +11,6 @@ import { cssColorStraight } from 'ntk';
 export { directGLFailure, hasDirectGL } from './glbackend.js';
 
 import { Node } from './nodes.js';
-import { ScenePointer, sceneWantsPointer } from './pointer3d.js';
-import { SceneRenderer } from './scene3d.js';
-import { ShaderSceneRenderer } from './scene3d-shader.js';
 
 // One visual query per (app, spec): GetFBConfigs is a round trip and every
 // <glarea> in an app wants the same answer.
@@ -22,9 +19,9 @@ const configCache = new WeakMap();
 // Whether GL setup has already been found impossible on this connection.
 // Every reason it fails — no GLX extension, indirect GLX disabled, no
 // matching visual — is a property of the X server, not of one surface, so
-// the first <glarea> to find out saves the rest from asking. `<Canvas3D
-// fallback>` reads it to render the fallback on the first frame instead of
-// showing an empty box for the round trip it would otherwise take.
+// the first <glarea> to find out saves the rest from asking, so a second
+// surface can report `onError` on its first frame instead of showing an
+// empty box for the round trip it would otherwise take.
 const glxFailures = new WeakMap();
 
 /** The error that made GL unavailable on `app`, or null if all is well (or
@@ -116,8 +113,6 @@ export class GlAreaNode extends Node {
     this._realizing = false;
     this._frameScheduled = false;
     this._created = false;
-    this.scene = new SceneRenderer(this);
-    this.pointer = new ScenePointer(this);
     this._pointerDirty = true;
   }
 
@@ -205,13 +200,6 @@ export class GlAreaNode extends Node {
     this.config = config;
     wnd._reactX11Node = this;
     this.gl = wnd.getContext('opengl', config);
-    // Which renderer draws the scene follows the context, not the config:
-    // ntk decides the backend and the context says which one it is, so a
-    // policy that resolved differently than expected cannot leave a shader
-    // renderer driving a fixed-function pipeline.
-    if (this.gl?.backend === 'direct') {
-      this.scene = new ShaderSceneRenderer(this);
-    }
     // a buffer freed by the display is a frame that can be drawn again
     if (typeof this.gl?.onFrameAvailable !== 'undefined') {
       this.gl.onFrameAvailable = () => this.requestFrame();
@@ -300,17 +288,7 @@ export class GlAreaNode extends Node {
       this._created = true;
       this.props.onCreated?.(gl, info);
     }
-    this._syncPointerListeners();
-    // `useFrame` subscribers run before the scene is drawn, so a callback
-    // that sets state has its change land on the next frame rather than a
-    // frame later still.
-    const animating = this._runFrameCallbacks(info, gl);
     const [r, g, b, a] = clearColorOf(this.props);
-    // An <effectComposer> redirects the frame into a texture, and it has to
-    // happen before the clear: the clear colour is the composed image's
-    // background, and `onDraw` is part of what gets composed. The renderer
-    // says whether it took the frame — the indirect one has no such hook.
-    this.scene.beginFrame?.(gl, info);
     // The two backends spell GL differently — PascalCase OpenGL 1.x against
     // camelCase ES 2 — and neither pretends to be the other, so the handful
     // of calls this element makes itself are written both ways.
@@ -323,42 +301,9 @@ export class GlAreaNode extends Node {
       gl.ClearColor(r, g, b, a);
       gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     }
-    this.scene.render(gl, info);
     this.props.onDraw?.(gl, info);
-    // and the pass chain runs here, ending with a draw into the window
-    this.scene.endFrame?.(gl, info);
     gl.SwapBuffers();
-    // A surface with `useFrame` subscribers animates: a demand-driven clock
-    // would tick once and stop, which is never what subscribing meant.
-    if (this.props.frameLoop === 'always' || animating) this.requestFrame();
-  }
-
-  /**
-   * Run this surface's `useFrame` subscribers. Returns whether any ran, which
-   * is what keeps the frame loop going.
-   */
-  _runFrameCallbacks(info, gl) {
-    const frames = this.props.frames;
-    if (!frames || frames.size === 0) return false;
-    const now = performance.now();
-    if (this._firstFrameAt === undefined) this._firstFrameAt = now;
-    // seconds, and clamped: a surface that was occluded or paused for a
-    // second should not teleport everything that integrates against delta
-    const delta = Math.min((now - (this._lastFrameAt ?? now)) / 1000, 0.1);
-    this._lastFrameAt = now;
-    return frames.run(
-      {
-        gl,
-        backend: gl.backend ?? 'indirect',
-        width: info.width,
-        height: info.height,
-        elapsed: (now - this._firstFrameAt) / 1000,
-        frame: (this._frameCount = (this._frameCount ?? 0) + 1),
-        camera: this.scene.camera ?? null,
-        node: this,
-      },
-      delta,
-    );
+    if (this.props.frameLoop === 'always') this.requestFrame();
   }
 
   applyProps(newProps, oldProps) {
@@ -373,45 +318,6 @@ export class GlAreaNode extends Node {
     else this.window?.map?.();
   }
 
-  /**
-   * X pointer events are only worth selecting when something in the scene
-   * listens for them — the r3f rule that only handler-bearing objects take
-   * part in picking, applied one level up, to the wire.
-   */
-  _syncPointerListeners() {
-    if (!this._pointerDirty || !this.window || this.pointer.attached) return;
-    this._pointerDirty = false;
-    if (!sceneWantsPointer(this.children)) return;
-    this.pointer.attach(this.window);
-  }
-
-  /** A scene node was added, removed, or gained/lost pointer handlers. */
-  _sceneChanged() {
-    this._pointerDirty = true;
-    this.requestFrame();
-  }
-
-  /** scene children (<mesh>, <group>, …) attach to this surface. */
-  insertBefore(child, beforeChild) {
-    super.insertBefore(child, beforeChild);
-    child._setSurface?.(this);
-    this._sceneChanged();
-  }
-
-  removeChild(child) {
-    super.removeChild(child);
-    this.invalidateGeometry(child);
-    this.pointer.forget(child);
-    this._sceneChanged();
-  }
-
-  /** A removed geometry's display list is no longer needed server-side. */
-  invalidateGeometry(node) {
-    if (!node) return;
-    if (node.isGeometry) this.scene.forget(this.gl, node);
-    for (const child of node.children ?? []) this.invalidateGeometry(child);
-  }
-
   // the child window covers this rect: nothing to paint into the parent's
   // 2d context, and no drawn children are allowed under it
   paint() {}
@@ -419,7 +325,6 @@ export class GlAreaNode extends Node {
   destroySubtree() {
     if (this.destroyed) return;
     super.destroySubtree();
-    this.scene.dispose(this.gl);
     this.gl?.destroy?.();
     this.gl = null;
     this.window?.destroy?.();

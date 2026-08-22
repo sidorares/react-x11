@@ -958,8 +958,8 @@ rather than at its off-screen starting point, so a bar that cannot move
 still shows something in progress.
 
 Nothing about this is a per-frame callback: `animation` describes the motion
-and the renderer runs it. For a `<canvas>` drawing its own frames, `useFrame`
-inside a [`<Canvas3D>`](gl.md#useframe) is the per-frame seam, and a 2D one is not
+and the renderer runs it. For a `<glarea>` drawing its own frames,
+[`frameLoop`](gl.md) is the per-frame seam, and a 2D one is not
 built yet.
 
 ## Window size queries

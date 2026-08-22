@@ -21,7 +21,7 @@ That is the entire API for most code. `role` and `aria-*` are the web's
 names, accepted on every host element — the same vocabulary react-dom takes
 and React Native adopted — so a component library that sets them is
 accessible here with no react-x11-specific knowledge, and the built-in
-widgets (`Button`, `Checkbox`, `Select`, `Menu`, `Tabs`, `Tree`, …) already
+widgets (`Button`, `Checkbox`, `Select`, `Menu`, `Tabs`, …) already
 carry them.
 
 > This page is the reference. The design record — why there is no mirror
@@ -184,10 +184,8 @@ anything from you beyond their ordinary props. What a screen reader hears:
 | `Tooltip`                 | tooltip                                                                                                                                                                                                                                                                                             |
 | `Dialog`                  | modal dialog, named by its title                                                                                                                                                                                                                                                                    |
 | `Tabs`                    | tab list with orientation; each tab selected or not; the panel is a tab panel                                                                                                                                                                                                                       |
-| `Tree`                    | tree of tree items with level, expanded/collapsed and selection                                                                                                                                                                                                                                     |
 | `Table`                   | table with column headers and rows ("n of m", selected). Virtualization means only rendered rows exist in the tree — the same rows a sighted user can see                                                                                                                                           |
 | `SplitPane`               | the divider is a separator with orientation and position — the ARIA window-splitter pattern                                                                                                                                                                                                         |
-| `Calendar` / `DatePicker` | combo box opening a grid of date cells, each named by its date and marked selected; the month buttons are labelled                                                                                                                                                                                  |
 
 ## Text controls
 

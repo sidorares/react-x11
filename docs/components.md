@@ -684,131 +684,9 @@ highlight is `hoverBackground`/`hoverText`.
 
 ## `Calendar` / `DatePicker`
 
-A month grid — one date or a range, with any day blockable. `Calendar` is the
-grid on its own; `DatePicker` hangs the same grid off a field, on a real
-`<popup>` window, and every calendar prop passes straight through it.
-
-```jsx
-<DatePicker value={day} onChange={(ev) => setDay(ev.value)} />
-
-<Calendar
-  mode="range"
-  value={stay}
-  onChange={(ev) => setStay(ev.value)}
-  min="2026-08-01"
-  isDateBlocked={(day) => booked.has(day)}
-/>
-```
-
-| prop                                      |                                                         |
-| ----------------------------------------- | ------------------------------------------------------- |
-| `mode`                                    | `'single'` (default) or `'range'`                       |
-| `value` / `defaultValue`                  | a day, or `{ start, end }` in range mode                |
-| `onChange(ev)`                            | `ev.value` is the new selection                         |
-| `min` / `max`                             | the bounds; days outside them are blocked               |
-| `isDateBlocked(day, parts)`               | everything the bounds cannot say                        |
-| `spanBlocked`                             | let a range run **across** blocked days                 |
-| `dayContent(day, state)`                  | drawn under the number — the seam for per-day marks     |
-| `month` / `defaultMonth`                  | visible month, `'2026-08'`; reported by `onMonthChange` |
-| `locale` / `weekStartsOn`                 | month and weekday names; which day a week starts on     |
-| `format(value)` _(DatePicker)_            | the trigger's label                                     |
-| `placeholder` / `disabled` _(DatePicker)_ | an empty field, and one that does not open              |
-
-### A day is a string
-
-`'2026-08-07'`, in and out — not a `Date`. A square on a wall calendar is not
-an instant: it has no time, no zone and no length that survives a DST
-boundary, so two `Date`s for "the 7th" are only equal if both were built the
-same way (`new Date(2026, 7, 7)` and `new Date('2026-08-07')` are eleven hours
-apart in Sydney, and neither is wrong). As a string, `a === b` is "the same
-day", `a < b` is "earlier", it is a `Set` key with no codec, and it is already
-the shape a calendar API answers in.
-
-A `Date` is accepted anywhere a day is taken and read as its **local**
-calendar day — the day you were looking at when you built it. Anything else
-throws, and so does a date that does not exist: `'2026-02-30'` is a typo, and
-sliding it quietly to March 2nd the way `new Date()` does is how a booking
-ends up a day out.
-
-### Blocking days
-
-`min`/`max` for the bounds, `isDateBlocked(day, parts)` for the rest. `parts`
-is `{ year, month, day, weekday, date }`, so the common cases do not parse the
-string back apart:
-
-```jsx
-<Calendar
-  min={today}
-  isDateBlocked={(day, { weekday }) =>
-    weekday === 0 || weekday === 6 || holidays.has(day)
-  }
-/>
-```
-
-A blocked day is dimmed, is not clickable, and cannot be reached by Enter —
-but the keyboard still **moves through** it, so a blocked week is not a wall
-the arrows cannot cross.
-
-**A range may not contain a blocked day.** The preview stops at the first one
-and an end past it is refused, because an app that blocked a date did not mean
-"unless it is in the middle", and a selection that quietly included it would
-have to be validated all over again on the way out. `spanBlocked` is the other
-reading — only the two ends must be free — for the holidays a stay is allowed
-to run across.
-
-### Picking a range
-
-The first click sets the start and reports `{ start, end: null }`; the second
-completes it. Reporting the half-picked state is what lets a controlled
-picker drive the whole interaction from its own value — there is no hidden
-"pending" state to get out of step with — and it is what a form shows while it
-waits for the other end. Clicking **before** the start re-anchors rather than
-selecting backwards, and the pointer previews the end it would land on.
-
-### Marking days
-
-`dayContent(day, state)` renders inside the cell, under the number, in a strip
-the grid reserves only when the prop is there. `state` is
-`{ selected, inRange, blocked, outside, today, focused, color }`, and `color`
-is what the number itself is being drawn in — a marker that follows it stays
-legible on the filled ends of a range.
-
-```jsx
-<Calendar
-  dayContent={(day, state) =>
-    events.has(day) && (
-      <box
-        style={{
-          width: 4,
-          height: 4,
-          borderRadius: 2,
-          backgroundColor: state.color,
-        }}
-      />
-    )
-  }
-/>
-```
-
-### Keyboard
-
-The grid is a **single tab stop**. Arrows move by a day and by a week,
-Home/End go to the ends of the week, PageUp/PageDown change month — with
-Shift, year — and Enter or Space takes the day under the cursor. Moving off
-the edge of the month turns the page, and so does clicking one of the
-neighbouring days the grid's corners are filled with.
-
-A `DatePicker` opens on Down, Up, Enter or Space, and its **trigger keeps the
-keyboard** while the calendar is up: a `<popup>` is override-redirect and
-never takes focus, so the trigger feeds the grid its keys through the
-`handleKey` on its ref and keeps Escape and Tab for itself. That ref is
-public — `useRef<CalendarHandle>` — for anything else that has to drive a
-calendar it does not focus.
-
-The calendar opens on the **press**, as `Select`'s menu does: a control whose
-whole purpose is to be looked at gains nothing by waiting out the length of
-the click. It closes on the pick — on the _second_ end of a range — on Escape,
-on a second press of the trigger, and when the window loses focus.
+Moved to [`@react-x11/components`](ecosystem.md). A date picker is a locale
+problem before it is a widget, and the calendar systems, holiday sets and
+range semantics people need do not belong in a renderer.
 
 ## `PasswordInput`
 
@@ -1443,40 +1321,8 @@ just dragged. The handle takes focus on the press, so Left/Right resize by
 
 ## `Tree`
 
-A disclosure tree: file browsers, outline panes, property inspectors.
-
-```jsx
-<Tree
-  items={[{ id: 'src', label: 'src', children: [{ id: 'a', label: 'a.js' }] }]}
-  defaultExpanded={['src']}
-  onSelect={(id, item) => open(item)}
-/>
-```
-
-| prop                           |                                                          |
-| ------------------------------ | -------------------------------------------------------- |
-| `items`                        | `{ id, label, children, disabled }[]`                    |
-| `expanded` / `defaultExpanded` | ids of open branches; controlled with `onExpandedChange` |
-| `selected` / `defaultSelected` | selected id; controlled with `onSelect`                  |
-| `onSelect(id, item)`           | the selection moved                                      |
-| `onActivate(id, item)`         | Enter or Space on a row                                  |
-
-An item with a `children` **array** is a branch, even when the array is
-empty — that is how an unexpanded directory shows a twisty before its
-contents are known. Load lazily by handing back `children: []` and filling
-it in when `onExpandedChange` fires.
-
-The twisty is its own hit target: clicking it opens a branch **without**
-moving the selection, the way a file browser lets you peek inside a folder
-you have not chosen. Clicking the label selects.
-
-The tree is a single tab stop. Up/Down walk the rows that are currently
-visible, skipping disabled ones. Right expands a branch and, if it is
-already open, steps into it; Left collapses it and, if it is already closed,
-steps out to the parent. Home/End jump to the ends, Enter and Space
-activate, and typing letters jumps by prefix — the same type-ahead `Select`
-and the menus use, so a quick "bu" refines rather than jumping twice. The
-tree scrolls the focused row into view as you move.
+Moved to [`@react-x11/components`](ecosystem.md): a tree wants virtualisation,
+drag-to-reorder and lazy children, none of which core has a reason to carry.
 
 ## `SplitPane`
 
@@ -1508,102 +1354,9 @@ was taken rather than jumping to the pointer.
 
 ## `Canvas3D`
 
-The entry point to the [3D scene](elements.md#3d-scene-mesh-group-geometries-materials)
-— a thin wrapper over the `<glarea>` host element, named `Canvas3D` rather
-than r3f's `Canvas` because react-x11 already has a `<canvas>` element (the
-2D `onDraw` escape hatch).
-
-```jsx
-import { Canvas3D } from 'react-x11';
-
-<Canvas3D
-  style={{ flexGrow: 1 }}
-  clearColor="#12161f"
-  camera={{ position: [0, 2, 6], fov: 45 }}
->
-  <group rotation={[0, angle, 0]}>
-    <mesh position={[-1.6, 0, 0]}>
-      <boxGeometry args={[1.4, 1.4, 1.4]} />
-      <meshBasicMaterial color="#2980b9" />
-    </mesh>
-    <mesh position={[1.6, 0, 0]}>
-      <sphereGeometry args={[0.9, 24, 16]} />
-      <meshBasicMaterial color="#e67e22" wireframe />
-    </mesh>
-  </group>
-</Canvas3D>;
-```
-
-Takes every `<glarea>` prop (layout props, `clearColor`, `frameLoop`, `glx`,
-`onCreated`, `onDraw`, `onError`) plus:
-
-- `camera` — `{ position, target, up, fov, near, far }`, or
-  `{ orthographic: true, zoom }`. Defaults to a perspective camera at
-  `[0, 0, 5]` looking at the origin with a 50° vertical field of view.
-- `fallback` — what to show when this X server cannot give us a GL context.
-
-Animate by changing props from a `requestAnimationFrame` loop on the window
-ref (see `examples/three.jsx`) — a scene only redraws when something
-changes, unless `frameLoop="always"`.
-
-### When there is no GL
-
-Plan for it. Indirect GLX — the only kind that works over the wire, and so
-the only kind react-x11 can use — is **disabled by default** on Xorg ≥ 1.17
-and on Xwayland, which is most desktops. A `<Canvas3D>` there has nothing to
-draw with, and without a `fallback` it renders an empty box.
-
-```jsx
-<Canvas3D
-  style={{ flexGrow: 1 }}
-  fallback={(err) => <NoGL error={err} />}
->
-```
-
-`fallback` takes an element or a function of the error, and is rendered in a
-`<box>` carrying the component's `style` — so it holds the same place in the
-layout the surface would have. It cannot be `children`: those are the scene
-graph. (Same reason `<Suspense fallback>` is a prop.)
-
-The error is classified, so branch on `code` rather than matching the
-message:
-
-| `err.code`              |                                                               |
-| ----------------------- | ------------------------------------------------------------- |
-| `GLX_INDIRECT_DISABLED` | server has GLX but refuses indirect contexts — the common one |
-| `GLX_NO_EXTENSION`      | server has no GLX at all                                      |
-| `GLX_NO_CONFIG`         | no visual matches the `glx` spec you asked for                |
-| `GLX_CONTEXT_FAILED`    | anything else in setup                                        |
-
-`err.hint` is a multi-line explanation of how to get a server that works,
-written to be printed as-is. The codes come from ntk and are also available
-as `GLXError` from `react-x11/ntk` if you would rather not spell them out.
-
-Setup failure is a property of the connection, not of one surface, so it is
-remembered per app: a second `<Canvas3D>` mounting after the first has found
-out renders its fallback on the first frame, with no round trip and no
-flash of empty box.
-
-To develop against a server that does have it:
-
-```bash
-Xwayland :5 +iglx & DISPLAY=:5 npm run examples:three
-```
-
-Be warned that on current Linux distros the indirect GL engine behind those
-contexts is frequently missing even with `+iglx` — contexts are created and
-nothing rasterizes.
-
-**On a modern Linux desktop the better answer is the other backend.** Those
-same servers that refuse indirect GLX generally do have DRI3, which is what
-direct rendering needs, so a scene that shows the fallback here often just
-works with:
-
-```jsx
-const root = await createRoot({ glPolicy: 'auto' });
-```
-
-That also unlocks `<shaderMaterial>`. See [the two backends](gl.md).
+Moved to [`@react-x11/components/three`](ecosystem.md) as `<Canvas>`, with
+the scene graph it wrapped. Core keeps the `<glarea>` surface underneath it
+— see [gl.md](gl.md) and `examples/viewer3d.jsx`.
 
 ## `useAnchor(ref)` / `anchorRect(node, options)`
 

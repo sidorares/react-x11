@@ -12,8 +12,6 @@ export {
 export { useAppActivate, useAppOpen } from './apphooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
-// the per-surface frame clock; only usable inside a <Canvas3D>
-export { useFrame } from './frame3d.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
 export { announce } from './a11y.js';
 // the standard Undo/Cut/Copy/Paste menu, for an element that edits or
@@ -63,7 +61,6 @@ export {
   useDragSource,
   Select,
   Tabs,
-  Tree,
   Table,
   SplitPane,
   ThemeProvider,
@@ -74,8 +71,6 @@ export {
   iconNames,
   iconSize,
   Button,
-  Calendar,
-  DatePicker,
   PasswordInput,
   Checkbox,
   Radio,
@@ -93,7 +88,6 @@ export {
   anchorRect,
   centerRect,
   screenRect,
-  Canvas3D,
 } from './components/index.js';
 
 // A pane of this application in its own process, and the context bridge

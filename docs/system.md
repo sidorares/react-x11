@@ -316,6 +316,7 @@ desktop's cadence from its next focus onward.
 ```jsx
 const { locale, weekStartsOn } = useLocale();
 
+// a date grid — `@react-x11/components`' <Calendar> takes both
 <Calendar locale={locale} weekStartsOn={weekStartsOn} />;
 <text>{new Intl.NumberFormat(locale).format(total)}</text>;
 ```
