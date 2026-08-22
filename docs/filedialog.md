@@ -180,10 +180,11 @@ client subscribes _before_ it calls and cannot lose the answer:
 
 ```js
 const { response, results } = await portalRequest(busRef, {
-  iface: 'org.freedesktop.portal.Settings',
-  member: 'ReadAll',
+  iface: 'org.freedesktop.portal.FileChooser',
+  member: 'OpenFile',
   parentWindow: 'x11:1a00007',
-  options: {},
+  title: 'Open',
+  options: { multiple: true },
 });
 ```
 
@@ -192,11 +193,36 @@ first, `Request.Close()` on abort (which emits **no** `Response`, so the
 promise has to be settled locally), and no timeout on the answer — a dialog can
 legitimately be open for an hour, and only the initial call is deadlined.
 
+The default argument shape is FileChooser's, `(s parent_window, s title, a{sv}
+options)` — and that shape is FileChooser's alone. Every other Request-shaped
+portal has its own leading arguments, so a caller states them, as `signature`
+and `args` together; the [eyedropper](eyedropper.md)'s `PickColor`, which has
+no title, is the worked example:
+
+```js
+await portalRequest(busRef, {
+  iface: 'org.freedesktop.portal.Screenshot',
+  member: 'PickColor',
+  signature: 'sa{sv}',
+  args: [parentWindow],
+});
+```
+
+The signature must end in `a{sv}` — the options dict is where `handle_token`
+rides, so a method without one does not answer through a `Request` and wants a
+plain `bus.invoke` instead.
+
 `hasService(name)` answers whether a service is reachable — owned now **or
 activatable on demand**. `NameHasOwner` alone is the wrong question:
 `org.freedesktop.portal.Desktop` is D-Bus-activatable, so on a healthy desktop
 where no app has touched a portal yet it has no owner, and a feature gated on
 that takes the fallback path forever.
+
+`portalVersion(iface)` answers the question `hasService()` cannot: whether the
+portal's backends provide one _interface_, and at what version — `0` when it
+is not there at all. Capability lives in the interface's own `version`
+property, and gating on the service alone breaks exactly on the desktops that
+provide some portals and not others (XFCE has FileChooser and no Screenshot).
 
 See [dbus.md](dbus.md) for the connection these sit on.
 

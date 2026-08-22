@@ -134,6 +134,70 @@ export async function hasService(name, busRef) {
 /** Test seam, not public: forget what was learned about the bus. */
 export function _resetServiceCache() {
   reachable.clear();
+  versions.clear();
+}
+
+// --------------------------------------------------------------------------
+// portalVersion
+// --------------------------------------------------------------------------
+
+/**
+ * Positive answers only, like {@link hasService}'s cache and for the same
+ * reason: a version can only move by the portal restarting, which is rare
+ * enough to ignore, while a cached "not there" would disable a feature for
+ * the life of the process on a machine where the portal appears one call
+ * later.
+ */
+const versions = new Map();
+
+/**
+ * The version of one portal *interface*, or `0` when it is not there.
+ *
+ * `hasService()` answers a different question. The portal service being
+ * reachable says nothing about which interfaces its backends provide —
+ * XFCE's portal has no `Screenshot` interface at all, and a GNOME old enough
+ * has it at version 1, before `PickColor` existed. Capability lives in the
+ * interface's own `version` property, so gating a feature means reading it:
+ *
+ * ```js
+ * if ((await portalVersion('org.freedesktop.portal.Screenshot', ref)) >= 2) {
+ *   // PickColor is there
+ * }
+ * ```
+ *
+ * `0` collapses "no bus", "no portal", "no such interface" and "no version
+ * property" into one answer, because every caller would branch the same way
+ * on all four.
+ */
+export async function portalVersion(iface, busRef) {
+  const cached = versions.get(iface);
+  if (cached !== undefined) return cached;
+  const ref = busRef ?? (await sessionBus());
+  if (!ref) return 0;
+  try {
+    const value = await ref.bus.invoke(
+      {
+        destination: PORTAL_NAME,
+        path: PORTAL_PATH,
+        interface: 'org.freedesktop.DBus.Properties',
+        member: 'Get',
+        signature: 'ss',
+        body: [iface, 'version'],
+      },
+      { timeout: 10_000 },
+    );
+    // dbus-native unwraps the `v` reply to its value.
+    const version = typeof value === 'number' && value > 0 ? value : 0;
+    if (version > 0) versions.set(iface, version);
+    return version;
+  } catch {
+    // `org.freedesktop.DBus.Error.InvalidArgs` — the portal is there and the
+    // interface is not, which is XFCE today for Screenshot. Or no portal at
+    // all. The caller's branch is the same either way.
+    return 0;
+  } finally {
+    if (!busRef) await ref.release();
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -153,6 +217,26 @@ export function _resetServiceCache() {
  *   options: { multiple: true },
  * });
  * ```
+ *
+ * The default argument shape is FileChooser's, `(s parent_window, s title,
+ * a{sv} options)` — but that shape is FileChooser's alone. Every other portal
+ * that answers through a `Request` has its own leading arguments
+ * (`Screenshot.PickColor` has no title, `Print` carries a serial, …), so a
+ * caller states them, as `signature` and `args` together:
+ *
+ * ```js
+ * await portalRequest(ref, {
+ *   iface: 'org.freedesktop.portal.Screenshot',
+ *   member: 'PickColor',
+ *   signature: 'sa{sv}',
+ *   args: [parentWindow],
+ * });
+ * ```
+ *
+ * `signature` is the method's full argument signature and must end in
+ * `a{sv}` — the options dict is where `handle_token` rides, so a method
+ * without one cannot be Request-shaped. `args` is everything before it;
+ * the options dict itself stays in `options` and is appended here.
  *
  * Three things it owns, so that no caller reimplements them:
  *
@@ -177,8 +261,40 @@ export function _resetServiceCache() {
  */
 export async function portalRequest(
   busRef,
-  { iface, member, parentWindow = '', title = '', options = {}, signal },
+  {
+    iface,
+    member,
+    parentWindow = '',
+    title = '',
+    signature,
+    args,
+    options = {},
+    signal,
+  },
 ) {
+  // They travel as a pair: the signature says what the args are, and either
+  // half alone is a call that marshals wrong at the far end with no error
+  // anywhere near the mistake.
+  if ((signature === undefined) !== (args === undefined)) {
+    throw new Error(
+      `react-x11: portalRequest(${iface}.${member}) got ` +
+        `${signature === undefined ? '`args` without `signature`' : '`signature` without `args`'}` +
+        " — they describe each other, so pass both (e.g. signature: 'sa{sv}'," +
+        ' args: [parentWindow]), or neither for the FileChooser shape.',
+    );
+  }
+  if (signature === undefined) {
+    signature = 'ssa{sv}';
+    args = [parentWindow, title];
+  } else if (!signature.endsWith('a{sv}')) {
+    throw new Error(
+      `react-x11: portalRequest(${iface}.${member}) — the signature ` +
+        `'${signature}' does not end in the options dict (a{sv}). ` +
+        'handle_token rides in that dict, so a method without one does not ' +
+        'answer through a Request; call bus.invoke directly instead.',
+    );
+  }
+
   const { bus, uniqueName } = busRef;
   const token = await newToken();
   const path = `${PORTAL_PATH}/request/${senderPath(uniqueName)}/${token}`;
@@ -263,8 +379,8 @@ export async function portalRequest(
           path: PORTAL_PATH,
           interface: iface,
           member,
-          signature: 'ssa{sv}',
-          body: [parentWindow, title, { ...options, handle_token: token }],
+          signature,
+          body: [...args, { ...options, handle_token: token }],
         },
         { timeout: 10_000 },
       )

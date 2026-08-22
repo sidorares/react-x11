@@ -220,6 +220,14 @@ export interface PortalRequestOptions {
   /** `'x11:1a00007'`, or `''` for none. */
   parentWindow?: string;
   title?: string;
+  /**
+   * The method's full argument signature, ending in the options dict —
+   * `'sa{sv}'` for `Screenshot.PickColor`. Travels with `args`; omitting
+   * both means FileChooser's `'ssa{sv}'` with `[parentWindow, title]`.
+   */
+  signature?: string;
+  /** The leading arguments the signature describes, before the options dict. */
+  args?: unknown[];
   options?: Record<string, unknown>;
   signal?: AbortSignalLike;
 }
@@ -236,3 +244,17 @@ export declare function portalRequest(
   busRef: { bus: MessageBus; uniqueName: string },
   options: PortalRequestOptions,
 ): Promise<{ response: number; results: Record<string, unknown> }>;
+
+/**
+ * The version of one portal *interface*, or `0` when it is not there.
+ *
+ * {@link hasService} answers a different question: the portal service being
+ * reachable says nothing about which interfaces its backends provide.
+ * Capability lives in the interface's own `version` property — `PickColor`
+ * needs `org.freedesktop.portal.Screenshot` at 2, and XFCE's portal has no
+ * Screenshot interface at all.
+ */
+export declare function portalVersion(
+  iface: string,
+  busRef?: { bus: MessageBus; uniqueName: string },
+): Promise<number>;

@@ -16,6 +16,7 @@
 // closing what the harness caused, not a seam into production code.
 
 import { _resetBusState, closeBus } from '../../src/bus.js';
+import { _resetServiceCache } from '../../src/portal.js';
 
 /**
  * The transport, loaded on demand — this file is imported by a suite that has
@@ -71,6 +72,43 @@ export async function withBus(fn) {
 function restore(name, value) {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;
+}
+
+/**
+ * Run `fn` on a machine with no session bus and no macOS.
+ *
+ * **The `closeBus()` is load-bearing, not tidying.** The shared connection
+ * stays up across acquisitions by design, so pointing the env var at nothing
+ * changes what the *next* connect would dial and not what is already open —
+ * and a test that skipped this on a developer's own desktop would reach the
+ * real portal and put a dialog on their screen, then wait for a human. That
+ * is exactly what happened while writing the file-dialog tests.
+ */
+export async function withNoBus(fn) {
+  const saved = {
+    address: process.env.DBUS_SESSION_BUS_ADDRESS,
+    runtime: process.env.XDG_RUNTIME_DIR,
+    platform: process.platform,
+  };
+  await closeBus('session').catch(() => {});
+  _resetBusState();
+  _resetServiceCache();
+  process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/nonexistent/no-bus-here';
+  delete process.env.XDG_RUNTIME_DIR;
+  Object.defineProperty(process, 'platform', { value: 'linux' });
+  try {
+    return await fn();
+  } finally {
+    Object.defineProperty(process, 'platform', { value: saved.platform });
+    if (saved.address === undefined)
+      delete process.env.DBUS_SESSION_BUS_ADDRESS;
+    else process.env.DBUS_SESSION_BUS_ADDRESS = saved.address;
+    if (saved.runtime !== undefined)
+      process.env.XDG_RUNTIME_DIR = saved.runtime;
+    await closeBus('session').catch(() => {});
+    _resetBusState();
+    _resetServiceCache();
+  }
 }
 
 /** A listening broker, with a live client count attached. */
