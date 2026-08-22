@@ -273,6 +273,20 @@ export interface WindowProps
    */
   embeddable?: boolean;
   /**
+   * Realized and laid out, but not on screen: the X window exists at its
+   * size (auto sizes included — the content is really measured), the tree
+   * behind it is live, and the window is simply never mapped while this is
+   * true. Clearing it maps the window where it stands; unlike conditional
+   * rendering, nothing unmounts in between, so state, subscriptions and the
+   * X window itself survive a hide.
+   *
+   * What `Tooltip` measures an element label in before placing it, and the
+   * declarative form of "minimize by unmapping". A subtree hidden by React
+   * (`<Activity mode="hidden">`, a suspended `<Suspense>`) composes with it:
+   * the window is on screen only when neither says hidden.
+   */
+  hidden?: boolean;
+  /**
    * Window geometry — window state, not yoga style: the user may resize.
    *
    * `'auto'`, which is also what leaving the prop out means, sizes the

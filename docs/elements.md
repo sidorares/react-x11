@@ -176,6 +176,7 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `onClientMessage(ev)`       | a ClientMessage addressed to this window — EWMH, XEmbed, the tray (below)                                                                                                                               |
 | `theme`                     | palette that `$token` style values resolve against, for this subtree                                                                                                                                    |
 | `embeddable`                | created but never self-mapped: the window waits for an embedder ([`<foreign>`](embedding.md) on the other side), which maps it after the reparent. What a [`<Frame>`](frame.md) pane's root window sets |
+| `hidden`                    | realized and laid out, never mapped while true (below)                                                                                                                                                  |
 
 Windows may be nested inside other windows (real X11 child windows).
 **Ref**: the live ntk `Window` — `getContext('2d')`,
@@ -317,6 +318,32 @@ Three things worth knowing before reaching for it:
 - Measuring costs an extra layout pass per frame that lays out, for as long
   as the window is still tracking. A window with both sizes given pays
   nothing.
+
+### `hidden` — realized, laid out, not on screen
+
+```jsx
+<window hidden={minimized} title="scratch" />
+```
+
+The X window exists at its size — auto sizes included, the content is really
+measured — and the tree behind it is live; the window is simply never mapped
+while `hidden` is true. Clearing it maps the window where it stands. Unlike
+conditional rendering nothing unmounts in between, so component state,
+subscriptions and the X window itself all survive a hide: this is the
+declarative form of "minimize by unmapping", and what
+[`Tooltip`](components.md#tooltip) measures an element label in before
+placing it.
+
+A subtree hidden by React — `<Activity mode="hidden">`, a `<Suspense>` that
+suspended — composes rather than competes: the window is on screen only
+while **neither** says hidden. Hiding releases the keyboard focus of
+anything inside (the [focus-follows-visibility](events.md) rule), and the
+reveal hands it back unless something else took it meanwhile.
+
+On a `<popup>` the pair of unmap/map is the whole story. On a managed
+`<window>` an unmap is ICCCM's _withdraw_ — the window manager forgets the
+window, and the re-map is a fresh `MapRequest`, so a WM may frame or place
+it anew and `states` are re-declared rather than remembered.
 
 ### `onResize` fires for moves
 

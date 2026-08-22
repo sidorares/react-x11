@@ -498,9 +498,10 @@ export type Placement = 'top' | 'bottom' | 'left' | 'right';
 export interface TooltipProps extends WidgetProps {
   /**
    * The hint. A string is measured and the popup sized around it; an
-   * element is given the bubble to fill and sized by {@link TooltipProps.width}
-   * / {@link TooltipProps.height}, since a `<popup>` is a real X window and
-   * needs its size before anything in it can be laid out.
+   * element **self-sizes too** — the popup is rendered once hidden at its
+   * natural size, read back, and placed before it is ever mapped — so a card
+   * whose height depends on its content needs no numbers. It gets the
+   * bubble to fill and draws its own padding.
    */
   label: ReactNode;
   children?: ReactNode;
@@ -516,10 +517,21 @@ export interface TooltipProps extends WidgetProps {
   /** ms before it appears (default 500). */
   delay?: number;
   fontSize?: number;
-  /** The bubble's size. Required for an element `label` (defaults to
-   * 220×80); for text it overrides the measured size. */
+  /**
+   * Pin an axis of the bubble exactly. For text they override the measured
+   * size; for an element, a pinned axis stays pinned and the other is
+   * measured for it — `width={340}` is a fixed column whose height fits the
+   * message. Give both and nothing is measured at all.
+   */
   width?: number;
   height?: number;
+  /**
+   * Cap what an element label may measure out to, on top of the screen's
+   * own cap. Inert on an axis pinned by {@link TooltipProps.width} /
+   * {@link TooltipProps.height}, and on a text label, which stays one line.
+   */
+  maxWidth?: number;
+  maxHeight?: number;
   style?: StyleProp;
 }
 export const Tooltip: ComponentType<TooltipProps>;
