@@ -313,6 +313,31 @@ const NO_SCROLL_BLIT = process.env.REACT_X11_NO_SCROLL_BLIT === '1';
 // exposed strip is most of a repaint anyway.
 const SCROLL_BLIT_MIN_KEEP = 0.5;
 
+// The server-side event mask every realized window ends up with. The
+// subscriptions are a constant — the EventManager's pointer/key/focus
+// listeners, the window's own resize/draw/expose pair, the backing store's
+// Exposure — but ntk grows the mask lazily, one ChangeWindowAttributes per
+// first listener of each kind: nine requests per window for a value known
+// before the window exists. Declaring the union in CreateWindow makes every
+// one of those a detected no-op (ntk ORs `eventMask` into what it derives,
+// and `newListener` only issues the request for bits still missing).
+//
+// The values are core-protocol SETofEVENT bits, fixed since X11R1 — the
+// same numbers ntk's own table maps event names to, written out because ntk
+// does not export them. EnterWindow is deliberately absent: hover tracking
+// reads `mousemove`/`mouseout` only, and parity with the lazily-grown mask
+// is what keeps this a request-count change and nothing else.
+const WINDOW_EVENT_MASK =
+  (1 << 0) | // KeyPress        — keydown
+  (1 << 1) | // KeyRelease      — keyup
+  (1 << 2) | // ButtonPress     — mousedown, and the core half of wheel
+  (1 << 3) | // ButtonRelease   — mouseup
+  (1 << 5) | // LeaveWindow     — mouseout
+  (1 << 6) | // PointerMotion   — mousemove (hover, drag)
+  (1 << 15) | // Exposure       — draw/expose, and the backing store's redraws
+  (1 << 17) | // StructureNotify — resize/map/destroy (ntk's own baseline)
+  (1 << 21); // FocusChange    — focus/blur
+
 // A scroll that must not blit this frame: content inside the viewport
 // already changed (see the arming check in scrollTo, and the claim-time
 // cancel in WindowNode.invalidate — react-x11#295). Truthy on purpose, so
@@ -8440,6 +8465,8 @@ export class WindowNode extends Scrollable(Node) {
     // selected XI2 would be a menu the wheel could not reach while it was
     // grabbing. Notch-at-a-time inside an open menu, smooth everywhere else.
     attributes.xi2 ??= !this.isPopup;
+    // The full event mask, declared at creation — see WINDOW_EVENT_MASK.
+    attributes.eventMask = (attributes.eventMask ?? 0) | WINDOW_EVENT_MASK;
     const wnd = this.app.createWindow(attributes);
     this.window = wnd;
     // Now that the visual is known: settle the capabilities, re-resolve any

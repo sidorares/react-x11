@@ -11,15 +11,15 @@
     "churn": 0
   },
   "text: paragraph, inside a rect clip": {
-    "requests": 32,
-    "bytesOut": 5760,
+    "requests": 31,
+    "bytesOut": 5752,
     "bytesIn": 64,
     "replies": 2,
     "composites": 1,
     "compositePixels": 160000,
     "stalls": 0,
     "dupQueries": 0,
-    "churn": 1
+    "churn": 0
   },
   "clips: 40 nested rect clips with text": {
     "requests": 148,
@@ -65,9 +65,31 @@
     "dupQueries": 0,
     "churn": 0
   },
+  "fills: 20 fillRects each under a damage clip": {
+    "requests": 150,
+    "bytesOut": 3052,
+    "bytesIn": 64,
+    "replies": 2,
+    "composites": 21,
+    "compositePixels": 3360000,
+    "stalls": 0,
+    "dupQueries": 0,
+    "churn": 40
+  },
+  "hover: rounded box state flip, on and off": {
+    "requests": 41,
+    "bytesOut": 1096,
+    "bytesIn": 288,
+    "replies": 9,
+    "composites": 2,
+    "compositePixels": 800,
+    "stalls": 1,
+    "dupQueries": 1,
+    "churn": 4
+  },
   "mount: window with 40 boxes and labels": {
-    "requests": 110,
-    "bytesOut": 4116,
+    "requests": 102,
+    "bytesOut": 3988,
     "bytesIn": 1024,
     "replies": 30,
     "composites": 21,
@@ -77,13 +99,13 @@
     "churn": 0
   },
   "scroll: 10 notches over 500 rows": {
-    "requests": 341,
-    "bytesOut": 12264,
-    "bytesIn": 800,
-    "replies": 25,
+    "requests": 339,
+    "bytesOut": 12232,
+    "bytesIn": 736,
+    "replies": 23,
     "composites": 81,
     "compositePixels": 644480,
-    "stalls": 1,
+    "stalls": 2,
     "dupQueries": 1,
     "churn": 40
   },
@@ -143,46 +165,46 @@
     "churn": 0
   },
   "update: 5 color flips, no layout": {
-    "requests": 53,
-    "bytesOut": 1048,
-    "bytesIn": 384,
-    "replies": 12,
+    "requests": 51,
+    "bytesOut": 1016,
+    "bytesIn": 320,
+    "replies": 10,
     "composites": 10,
     "compositePixels": 25020,
-    "stalls": 2,
-    "dupQueries": 1,
-    "churn": 10
-  },
-  "update: 5 absolute box moves (layout)": {
-    "requests": 52,
-    "bytesOut": 1032,
-    "bytesIn": 384,
-    "replies": 12,
-    "composites": 10,
-    "compositePixels": 31320,
-    "stalls": 4,
-    "dupQueries": 1,
-    "churn": 10
-  },
-  "scene: 5 drag steps over 300 cells in one node": {
-    "requests": 242,
-    "bytesOut": 45124,
-    "bytesIn": 416,
-    "replies": 13,
-    "composites": 133,
-    "compositePixels": 75896,
     "stalls": 3,
     "dupQueries": 1,
     "churn": 10
   },
+  "update: 5 absolute box moves (layout)": {
+    "requests": 50,
+    "bytesOut": 1000,
+    "bytesIn": 352,
+    "replies": 11,
+    "composites": 10,
+    "compositePixels": 31320,
+    "stalls": 3,
+    "dupQueries": 1,
+    "churn": 10
+  },
+  "scene: 5 drag steps over 300 cells in one node": {
+    "requests": 240,
+    "bytesOut": 45092,
+    "bytesIn": 384,
+    "replies": 12,
+    "composites": 133,
+    "compositePixels": 75896,
+    "stalls": 4,
+    "dupQueries": 1,
+    "churn": 10
+  },
   "scene: 5 pan steps over 374 cells in one node": {
-    "requests": 987,
-    "bytesOut": 177520,
-    "bytesIn": 480,
-    "replies": 15,
+    "requests": 985,
+    "bytesOut": 177488,
+    "bytesIn": 448,
+    "replies": 14,
     "composites": 606,
     "compositePixels": 298517,
-    "stalls": 1,
+    "stalls": 2,
     "dupQueries": 1,
     "churn": 20
   },
