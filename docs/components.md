@@ -493,12 +493,45 @@ one. See [docs/ecosystem/forms.md](ecosystem/forms.md).
 
 ### `Button`
 
-| prop                 |                                           |
-| -------------------- | ----------------------------------------- |
-| `children` / `label` | the label                                 |
-| `onPress()`          | click, Space or Enter                     |
-| `primary`            | accent fill instead of the surface colour |
-| `disabled`           | inert, dimmed, not focusable              |
+| prop                 |                                                                         |
+| -------------------- | ----------------------------------------------------------------------- |
+| `children` / `label` | the label                                                               |
+| `onPress()`          | click, Space or Enter                                                   |
+| `variant`            | `'solid'` (default), `'outline'`, `'ghost'` — the chrome                |
+| `size`               | `'medium'` (default) or `'small'` — the compact metric                  |
+| `primary`            | speaks in the accent: the fill when solid, the ink and border otherwise |
+| `disabled`           | inert, dimmed, not focusable                                            |
+
+Chrome and colour are two axes, and they compose. `variant` is how much box
+the button carries — `solid` a fill, `outline` a border on nothing, `ghost`
+neither, for the affordance that sits inside other content (a `✕` on a chip,
+a delete on a form row) and must not add a box to the row it lives in.
+`primary` is whose colours it speaks in. So a dialog footer is an `outline`
+beside a `primary` solid, and a toolbar's loudest icon is
+`primary variant="ghost"` — every combination keeps the widget states, which
+is the point of not hand-drawing the chrome-less ones. All variants keep the
+border _width_, so a mixed row lines up to the pixel.
+
+`size="small"` halves the control padding — the toolbar and inline-row
+metric. It is derived from the palette, so a theme that moves `paddingY`
+moves both sizes together, which a hand-made `style={{ height: 22 }}` would
+not.
+
+An **element** child inherits the resolved label colour — the ink is set on
+the button's box and `color` inherits ([styling.md](styling.md)) — so an
+icon+label button is correct by construction in every state, disabled
+included, with nothing passed to the icon:
+
+```jsx
+<Button primary disabled={busy} onPress={run}>
+  <Icon name="chevronRight" />
+  Continue
+</Button>
+
+<Button variant="ghost" size="small" aria-label="Remove" onPress={remove}>
+  <Icon name="close" />
+</Button>
+```
 
 ### `Checkbox`
 

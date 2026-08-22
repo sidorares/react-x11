@@ -275,6 +275,10 @@ export interface ButtonProps extends WidgetProps {
   label?: string;
   onPress?: (ev: MouseEvent<DrawnNode>) => void;
   primary?: boolean;
+  /** How much chrome: a fill, a border on nothing, or neither. */
+  variant?: 'solid' | 'outline' | 'ghost';
+  /** `'small'` is the compact metric for toolbars and inline rows. */
+  size?: 'medium' | 'small';
   disabled?: boolean;
   style?: StyleProp;
 }

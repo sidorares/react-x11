@@ -794,6 +794,17 @@ function Widgets() {
           press
         </Button>
         <Button label="labelled" disabled />
+        {/* the two axes compose: chrome and colour are separate choices,
+            and an element child needs no colour of its own — it inherits
+            the resolved label ink from the button's box */}
+        <Button variant="ghost" size="small" aria-label="Close">
+          <Icon name="close" />
+        </Button>
+        <Button variant="outline" primary label="secondary" />
+        {/* @ts-expect-error - not a variant */}
+        <Button variant="filled" label="no" />
+        {/* @ts-expect-error - not a size */}
+        <Button size="tiny" label="no" />
         {/* the system icon set: a name from the union, and the drawings
             themselves for anything wanting the glyph without the component */}
         <Icon name="chevronDown" />
