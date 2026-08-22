@@ -620,6 +620,19 @@ export interface ImageProps extends DrawnProps<DrawnNode> {
 export interface DrawInfo {
   width: number;
   height: number;
+  /**
+   * The node's origin in the drawable being drawn into — the translation
+   * already applied to the context, said out loud. Everything on the
+   * context works in node coordinates and never needs it; the raw-pixel
+   * calls are the exception, because `putImageData`/`getImageData` ignore
+   * the transform (the HTML canvas rule) and address the drawable
+   * directly: `ctx.putImageData(data, info.x + x, info.y + y)`. Zero when
+   * the drawing goes into a surface of its own — under a `cacheKey`, or a
+   * `<glarea>`'s window — so offsetting by it is correct everywhere.
+   */
+  x: number;
+  /** See {@link DrawInfo.x}. */
+  y: number;
   node: DrawnNode;
 }
 
@@ -627,6 +640,14 @@ export interface CanvasProps extends DrawnProps<DrawnNode> {
   /**
    * Paint the node. `ctx` is ntk's canvas-like 2d context, translated to
    * the node's origin and clipped to its bounds. Runs on every repaint.
+   *
+   * One exception to "you are at the node's origin": `putImageData` (and
+   * `getImageData`) ignore the transform and the clip — the HTML canvas
+   * rule — and address the drawable itself. Offset by `info.x`/`info.y`,
+   * or better, draw raw pixels through an `Image` source and `drawImage`,
+   * which honours both and caches its upload server-side. In development,
+   * a write that lands outside the node warns, once. See
+   * docs/elements.md, "`<canvas>`".
    */
   onDraw?: (ctx: any, info: DrawInfo) => void;
   /**

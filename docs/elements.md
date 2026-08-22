@@ -1453,6 +1453,45 @@ ctx.fillRects(bars); // [[x, y, w, h], …] or one flat [x, y, w, h, x, …]
 composite op and clip — sent as a single `Render.FillRectangles` where the
 loop would have sent one composite each.
 
+### Raw pixels — the one call that is not translated
+
+Everything on the context honours "you are at the node's origin" — except
+the raw-pixel pair. `putImageData` and `getImageData` ignore the current
+transform _and_ the clip (the HTML canvas rule, kept by ntk), so their
+coordinates are the drawable's own: `ctx.putImageData(data, 0, 0)` lands at
+the **window** corner, not in the node, and nothing errors on the way.
+`onDraw`'s second argument carries the node's origin for exactly this case:
+
+```jsx
+<canvas
+  onDraw={(ctx, { width, height, x, y }) => {
+    ctx.putImageData({ width, height, data: rgba }, x, y); // in the node
+  }}
+  style={{ width, height }}
+/>
+```
+
+`x`/`y` are wherever the drawing is going — in a live paint the node's place
+in the window, under a [`cacheKey`](#cachekey--draw-it-once) the origin of
+the cache surface — so offsetting by them is correct in both. In
+development, a `putImageData` whose pixels land outside the node's box
+warns, once, naming this rule.
+
+Better, for pixels that survive more than one frame: upload through an
+`Image` source (ntk's, re-exported — see [the subpath
+exports](extending.md#the-subpath-exports)) and draw it.
+`drawImage` goes through the transform and the clip like everything else — a
+half-scrolled-out canvas stays cut at the viewport, which no raw write is —
+and the image caches its server-side pixmap instead of re-uploading the
+bytes on every repaint:
+
+```jsx
+import { Image } from 'react-x11/ntk';
+
+const img = new Image({ width, height, data: rgba }); // keep it memoized
+<canvas onDraw={(ctx) => ctx.drawImage(img, 0, 0, width, height)} />;
+```
+
 ### `cacheKey` — draw it once
 
 A drawing that does not change between frames does not have to be redrawn

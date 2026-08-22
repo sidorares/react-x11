@@ -373,9 +373,14 @@ function Elements() {
       <image src="./logo.png" style={{ width: 32, height: 32 }} />
       <canvas
         style={{ flexGrow: 1 }}
-        onDraw={(ctx, { width, height }) => {
+        onDraw={(ctx, { width, height, x, y }) => {
           ctx.fillStyle = 'tomato';
           ctx.fillRect(0, 0, width / 2, height);
+          // putImageData addresses the drawable, not the node — the origin
+          // in DrawInfo is what makes the offset expressible
+          const dx: number = x;
+          const dy: number = y;
+          ctx.putImageData({ width: 1, height: 1, data: [0, 0, 0, 0] }, dx, dy);
         }}
       />
       <svg source="<svg/>" />

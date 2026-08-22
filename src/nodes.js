@@ -94,7 +94,7 @@ import {
   windowOrigin,
 } from './anchor.js';
 import { baseTheme } from './palette.js';
-import { callHandler } from './errors.js';
+import { callHandler, ownerName } from './errors.js';
 import {
   hooks as a11yHooks,
   isFocusable as a11yFocusable,
@@ -5202,6 +5202,48 @@ export class BoxNode extends Scrollable(Node) {
   _textStyleMoved() {}
 }
 
+/**
+ * The one call `onDraw`'s translation cannot reach (#366).
+ *
+ * `putImageData` ignores the context's transform and clip — the HTML canvas
+ * rule, kept by ntk — so inside `onDraw`, whose whole contract is "you are at
+ * the node's origin", it is the one call whose coordinates are still the
+ * drawable's own. Nothing errors; the pixels simply land at the window
+ * origin instead of in the node. `DrawInfo.x`/`.y` is the way to say it
+ * right, and development watches for the write that says it wrong: a
+ * destination outside the node's box. Once per process — one thread to pull
+ * is enough, and `onDraw` runs on every repaint.
+ */
+let warnedPutImageData = false;
+export function resetPutImageDataWarningForTests() {
+  warnedPutImageData = false;
+}
+
+/** The rect `putImageData(data, x, y, …dirty)` actually writes — the spec's
+ *  dirty-rect normalisation, reproduced so the watch judges the write and
+ *  not the whole source image (a correct call may blit a window of a bigger
+ *  atlas). Null when the write is empty. */
+function putImageDataDest(data, x, y, dx = 0, dy = 0, dw, dh) {
+  const width = data?.width ?? 0;
+  const height = data?.height ?? 0;
+  dw ??= width;
+  dh ??= height;
+  if (dw < 0) {
+    dx += dw;
+    dw = -dw;
+  }
+  if (dh < 0) {
+    dy += dh;
+    dh = -dh;
+  }
+  const sx = Math.max(0, dx);
+  const sy = Math.max(0, dy);
+  const sw = Math.min(width, dx + dw) - sx;
+  const sh = Math.min(height, dy + dh) - sy;
+  if (!(sw > 0) || !(sh > 0)) return null;
+  return { x: x + sx, y: y + sy, width: sw, height: sh };
+}
+
 /** Escape hatch: a retained node whose content is painted by props.onDraw. */
 export class CanvasNode extends Node {
   constructor(props, app) {
@@ -5250,15 +5292,70 @@ export class CanvasNode extends Node {
     ctx.clip();
     ctx.translate(this.abs.x, this.abs.y);
     if (this.props.mono) this._presetMono(ctx, this._monoColor());
+    const unwatch = DEV ? this._watchPutImageData(ctx) : null;
     try {
       onDraw(ctx, {
         width: this.abs.width,
         height: this.abs.height,
+        // the translation above, said out loud: raw-pixel calls address the
+        // drawable itself, so they are written at `info.x + x` (#366)
+        x: this.abs.x,
+        y: this.abs.y,
         node: this,
       });
     } finally {
+      unwatch?.();
       ctx.restore();
     }
+  }
+
+  /**
+   * Shadow `ctx.putImageData` for the length of one `onDraw`, and warn on a
+   * write whose destination escapes the node's box — either coordinates
+   * that were never offset by `info.x`/`info.y`, which is the trap the
+   * watch exists for, or a drawing genuinely reaching outside bounds every
+   * other call is clipped to. The box test has a pixel of slack per edge:
+   * `abs` can sit on a fractional grid, and a rounded `info.x` must not
+   * read as an escape. Development only, and the shadow is not installed
+   * again once the warning has fired, so steady state costs nothing.
+   */
+  _watchPutImageData(ctx) {
+    const original = ctx.putImageData;
+    if (warnedPutImageData || typeof original !== 'function') return null;
+    const hadOwn = Object.hasOwn(ctx, 'putImageData');
+    const node = this;
+    ctx.putImageData = function (data, x, y, ...dirty) {
+      const dest = putImageDataDest(data, x, y, ...dirty);
+      const box = node.abs;
+      if (
+        !warnedPutImageData &&
+        dest &&
+        (dest.x < box.x - 1 ||
+          dest.y < box.y - 1 ||
+          dest.x + dest.width > box.x + box.width + 1 ||
+          dest.y + dest.height > box.y + box.height + 1)
+      ) {
+        warnedPutImageData = true;
+        const owner = ownerName(node);
+        console.warn(
+          `react-x11: putImageData in <canvas onDraw>${owner ? ` (in ${owner})` : ''} ` +
+            `wrote ${dest.width}x${dest.height} at ${dest.x},${dest.y} — outside the ` +
+            `node, which is ${box.width}x${box.height} at ${box.x},${box.y}. ` +
+            "putImageData ignores the context's transform (the HTML canvas rule), " +
+            "so unlike every other call in onDraw its coordinates are the drawable's, " +
+            "not the node's. Add the node's origin, which onDraw is handed: " +
+            'ctx.putImageData(data, info.x + x, info.y + y). Better, draw through an ' +
+            'image source — it honours the transform and the clip, and caches its ' +
+            'upload server-side: ctx.drawImage(new Image({ width, height, data }), x, y), ' +
+            'with Image from \'react-x11/ntk\'. See docs/elements.md, "<canvas>".',
+        );
+      }
+      return original.call(ctx, data, x, y, ...dirty);
+    };
+    return () => {
+      if (hadOwn) ctx.putImageData = original;
+      else delete ctx.putImageData;
+    };
   }
 
   /**
@@ -5343,7 +5440,16 @@ export class CanvasNode extends Node {
     // tint arrives at blit time, so any opaque colour renders the same mask.
     if (this.props.mono) this._presetMono(ctx, '#ffffff');
     try {
-      onDraw(ctx, { width: box.width, height: box.height, node: this });
+      onDraw(ctx, {
+        width: box.width,
+        height: box.height,
+        // the drawing goes into a surface of its own here, so the node's
+        // origin in it *is* the origin — and a raw-pixel write offset by
+        // `info.x`/`info.y` for the live path stays correct under a cacheKey
+        x: box.x,
+        y: box.y,
+        node: this,
+      });
     } finally {
       ctx.restore();
     }

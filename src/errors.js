@@ -16,7 +16,7 @@ export function setErrorHandler(container, fn) {
 
 /** The component that rendered this node, which is the name worth printing
  * — `<box>` alone never tells anyone whose box it was. */
-function ownerName(node) {
+export function ownerName(node) {
   const type = node?._reactFiber?._debugOwner?.type;
   if (!type) return null;
   return type.displayName || type.name || '(anonymous)';
