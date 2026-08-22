@@ -419,6 +419,93 @@ test('an element label fills a bubble the caller sized', async () => {
   await x11Root.unmount();
 });
 
+// --- element labels sizing themselves (issue #368) --------------------------
+
+test('an element label with no size is measured, placed, and only then mapped', async () => {
+  const { x11Root, wrapper, tip } = await showTip(
+    {
+      label: h('box', { style: { width: 140, height: 48 } }),
+    },
+    // enough padding that a 54px hint has room above the trigger
+    { screen: ROOMY, pad: 120 },
+  );
+
+  // sized from the content, not from a default
+  assert.equal(tip.width, 140);
+  assert.equal(tip.height, 48 + ARROW_DEPTH, 'the arrow rides on top');
+  const [bubble] = tip._reactX11Node.children;
+  assert.equal(bubble.abs.width, 140);
+  assert.equal(bubble.abs.height, 48);
+  assert.equal(bubble.style.paddingLeft, undefined, 'still no imposed padding');
+
+  // placed by the same math a sized label gets: centred above the trigger
+  assert.equal(tip.y + tip.height + 2, wrapper.abs.y, 'above, 2px gap');
+  const off = tip.x + tip.width / 2 - (wrapper.abs.x + wrapper.abs.width / 2);
+  assert.ok(Math.abs(off) <= 1, `centred on the trigger (off by ${off}px)`);
+
+  // measure-then-place, and the map goes out last: the window was born
+  // hidden at its natural size, configured to its final rect, and mapped
+  // only then — at no point was it on screen anywhere else
+  assert.equal(tip.mapped, true);
+  const maps = tip.calls.filter(([op]) => op === 'map');
+  assert.equal(maps.length, 1, 'mapped exactly once');
+  const mapAt = tip.calls.findIndex(([op]) => op === 'map');
+  const moveAt = tip.calls.findIndex(([op]) => op === 'move');
+  assert.ok(moveAt >= 0 && moveAt < mapAt, 'placed before it was mapped');
+
+  await x11Root.unmount();
+});
+
+test('one pinned axis stays pinned; the other is measured for it', async () => {
+  const { x11Root, tip } = await showTip(
+    {
+      label: h('box', { style: { width: 120, height: 40 } }),
+      width: 200,
+    },
+    { screen: ROOMY },
+  );
+
+  assert.equal(tip.width, 200, 'the caller’s column width');
+  assert.equal(tip.height, 40 + ARROW_DEPTH, 'the content’s height');
+
+  await x11Root.unmount();
+});
+
+test('maxWidth caps what an element label measures out to', async () => {
+  const { x11Root, tip } = await showTip(
+    {
+      label: h(
+        'box',
+        { style: { flexDirection: 'row' } },
+        h('box', { style: { width: 100, height: 20 } }),
+        h('box', { style: { width: 100, height: 20 } }),
+      ),
+      maxWidth: 150,
+    },
+    { screen: ROOMY },
+  );
+
+  assert.equal(tip.width, 150, 'capped, not the 200 the row wanted');
+  assert.equal(tip.height, 20 + ARROW_DEPTH);
+
+  await x11Root.unmount();
+});
+
+test('a measured hint hides on leave like any other', async () => {
+  const { x11Root, wnd, tip } = await showTip(
+    { label: h('box', { style: { width: 60, height: 22 } }) },
+    { screen: ROOMY },
+  );
+  assert.equal(tip.mapped, true);
+
+  moveMouse(wnd, 2, 2);
+  await tick();
+  await tick();
+  assert.equal(tip.destroyed, true);
+
+  await x11Root.unmount();
+});
+
 test('direction="auto" goes above where it fits, and below where it does not', async () => {
   const roomy = await showTip({}, { screen: ROOMY });
   const [above, aboveArrow] = roomy.tip._reactX11Node.children;

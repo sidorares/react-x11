@@ -856,13 +856,14 @@ import { Tooltip } from 'react-x11';
 </Tooltip>;
 ```
 
-| prop              |                                                              |
-| ----------------- | ------------------------------------------------------------ |
-| `label`           | the hint: a string, or an element (nothing shows without it) |
-| `direction`       | `'auto'` (default), `'top'`, `'bottom'`, `'left'`, `'right'` |
-| `delay`           | ms of hover before showing (default 500)                     |
-| `fontSize`        | label size, also used to size the popup                      |
-| `width`, `height` | the bubble's size — required for an element `label`          |
+| prop                    |                                                                        |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `label`                 | the hint: a string, or an element (nothing shows without it)           |
+| `direction`             | `'auto'` (default), `'top'`, `'bottom'`, `'left'`, `'right'`           |
+| `delay`                 | ms of hover before showing (default 500)                               |
+| `fontSize`              | label size, also used to size the popup                                |
+| `width`, `height`       | pin an axis of the bubble exactly; anything not pinned is measured     |
+| `maxWidth`, `maxHeight` | cap what an element label measures out to, inside the screen's own cap |
 
 Wraps its children in a row box carrying the hover handlers and the anchor
 ref, so it composes around any element. Hides immediately on leave and on
@@ -886,9 +887,14 @@ is the older name for the same prop and still wins where it is given.)
 
 A **string** `label` is measured and the popup sized around it, because a
 `<popup>` is a real X window and needs its size before layout. An
-**element** is the same problem without a way to measure, so the caller
-gives `width`/`height` — and then gets the bubble to fill, with no padding
-imposed on it:
+**element** label is measured too — nothing to size, nothing to guess: the
+popup is rendered once [`hidden`](elements.md#hidden--realized-laid-out-not-on-screen)
+at its natural size (a real layout of the real content, capped at the screen
+and at `maxWidth`/`maxHeight`), the size is read back, and the same
+placement math runs before anything is mapped. Both commits land in the same
+task and the popup maps last, so it is only ever on screen placed and at its
+final size. The element gets the bubble to fill, with no padding imposed on
+it:
 
 ```jsx
 <Tooltip
@@ -898,13 +904,19 @@ imposed on it:
       <ProgressBar value={used} />
     </box>
   }
-  width={200}
-  height={82}
+  maxWidth={260}
   direction="right"
 >
   <box>…</box>
 </Tooltip>
 ```
+
+`width`/`height` still pin an axis exactly: give both and the measuring pass
+is skipped entirely (the guaranteed-fit mode element labels used to
+require); give one and the other is measured for it, so `width={340}` is a
+fixed column whose height fits the message. The size is settled at open —
+content that changes size while the hint is up keeps the bubble it opened
+with until the next open, which is a hint's lifetime away.
 
 Anything renders in there, widgets included — it is a real tree in a real
 window, not a rich-text label. `examples/tooltips.jsx` has both kinds.
