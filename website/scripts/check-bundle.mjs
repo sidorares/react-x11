@@ -41,7 +41,6 @@ const rx = await import(pathToFileURL(bundle));
 assert.strictEqual(typeof rx.reactX11.createRoot, 'function', 'createRoot');
 assert.strictEqual(typeof rx.reactX11.createStyles, 'function', 'createStyles');
 assert.strictEqual(typeof rx.reactX11.Button, 'function', 'Button');
-assert.strictEqual(typeof rx.reactX11.Canvas3D, 'function', 'Canvas3D');
 assert.strictEqual(typeof rx.React.useState, 'function', 'React.useState');
 assert.strictEqual(typeof rx.ntk.createClient, 'function', 'ntk.createClient');
 assert.strictEqual(typeof rx.x11.registerDisplayProtocol, 'function', 'x11');

@@ -142,7 +142,7 @@ have opened windows on your screen.
   `overflow: 'scroll'`.
 - **[Widget components](/docs/reference/components)** — `Button`,
   `Checkbox`, `Radio`, `Switch`, `Slider`, `ProgressBar`, `Select`,
-  `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Tree`, `SplitPane`
+  `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `SplitPane`
   and a virtualized `Table`. Plain React over the primitives — no reconciler
   support, nothing you could not have written yourself.
 - **Flexbox layout** — the same yoga engine React Native lays out with, so

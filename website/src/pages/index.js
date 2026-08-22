@@ -70,9 +70,9 @@ const features = [
       <>
         <code>Button</code>, <code>Select</code>, <code>Slider</code>,{' '}
         <code>Switch</code>, <code>Dialog</code>, <code>MenuBar</code>,{' '}
-        <code>Tabs</code>, <code>Tree</code>, <code>SplitPane</code> and a
-        virtualized <code>Table</code> — plain React over the primitives,
-        themable, and nothing you could not have written yourself.
+        <code>Tabs</code>, <code>SplitPane</code> and a virtualized{' '}
+        <code>Table</code> — plain React over the primitives, themable, and
+        nothing you could not have written yourself.
       </>
     ),
   },
@@ -89,13 +89,14 @@ const features = [
     ),
   },
   {
-    title: 'Some react-three-fiber',
+    title: '3D over the X connection',
     body: (
       <>
-        <code>&lt;mesh&gt;</code>, <code>&lt;group&gt;</code>, geometries,
-        materials with textures, lights and raycast pointer events — drawn over{' '}
-        <strong>indirect GLX</strong>, so the GL protocol travels the same X
-        connection. Each geometry compiles to a server-side display list.
+        <code>&lt;glarea&gt;</code> is a GL surface in the layout, drawn over{' '}
+        <strong>indirect GLX</strong>: the GL protocol travels the same X
+        connection, with geometry compiled into server-side display lists. A
+        react-three-fiber-shaped scene graph over it lives in{' '}
+        <code>@react-x11/components</code>.
       </>
     ),
   },
@@ -135,10 +136,6 @@ const shots = [
   {
     src: '/img/docs/select-menu.png',
     caption: 'an open Select — a real override-redirect <popup> window',
-  },
-  {
-    src: '/img/docs/three.png',
-    caption: 'examples/three.jsx — a <Canvas3D> scene over indirect GLX',
   },
 ];
 
