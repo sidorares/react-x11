@@ -1041,15 +1041,15 @@ import { Button, Dialog } from 'react-x11';
 </Dialog>;
 ```
 
-| prop              |                                                              |
-| ----------------- | ------------------------------------------------------------ |
-| `open`            | renders nothing when false; the popup exists only while true |
-| `title`           | bold heading (optional)                                      |
-| `children`        | body content; strings become `<text>`                        |
-| `actions`         | elements for the right-aligned button row                    |
-| `onClose`         | Escape, or the window manager's close button                 |
-| `managed`         | `false` for the override-redirect popup 1.x shipped (below)  |
-| `width`, `height` | popup size (default 360×170)                                 |
+| prop              |                                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------- |
+| `open`            | renders nothing when false; the popup exists only while true                                       |
+| `title`           | names the dialog, drawn once: the frame's caption when managed, a bold in-content heading when not |
+| `children`        | body content; strings become `<text>`                                                              |
+| `actions`         | elements for the right-aligned button row                                                          |
+| `onClose`         | Escape, or the window manager's close button                                                       |
+| `managed`         | `false` for the override-redirect popup 1.x shipped (below)                                        |
+| `width`, `height` | popup size (default 360×170)                                                                       |
 
 The focus behaviour is the **renderer's**, not the component's: `trapFocus`
 keeps Tab inside the dialog, stops presses elsewhere from moving focus, and
@@ -1074,6 +1074,11 @@ first.)
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `true` (default) | a WM-managed window: frame, titlebar, movable, WM close button, transient for its owner, out of the taskbar. A press outside does **not** close it. |
 | `false`          | the override-redirect popup: no frame, not movable, a pointer grab, and a press anywhere outside calls `onClose`.                                   |
+
+The `title` follows the frame: managed, it is the frame's caption and the
+content starts with the body; unmanaged there is no frame, so the title is
+drawn as a bold heading at the top of the content instead. It is never drawn
+twice, and it names the dialog for accessibility either way.
 
 They are one choice, not two: a client-side pointer grab over a window the
 window manager is trying to let the user drag swallows the press that would

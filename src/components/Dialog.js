@@ -34,6 +34,12 @@ const DEFAULT_HEIGHT = 170;
  * with no window manager at all, and the wrong one for anything the user
  * might want to move.
  *
+ * `title` is drawn exactly once (issue #370). Managed, it is the frame's
+ * caption and the window manager draws it, so the content starts with the
+ * body; unmanaged there is no frame, so it is drawn as a bold heading at the
+ * top of the content instead. Either way it names the dialog surface for
+ * accessibility (`aria-label`).
+ *
  * The two differ in how a press outside behaves, and it is not a bug either
  * way: a managed dialog stays open, because a real dialog does. Escape and
  * the WM close button both call `onClose`; so does a press outside when
@@ -160,7 +166,11 @@ export function Dialog({
               style,
             ],
           },
-          title &&
+          // a managed dialog's title is already in the WM frame's caption;
+          // drawing it again here showed it twice (issue #370). Only the
+          // unmanaged popup, which has no frame, needs the in-content heading.
+          !managed &&
+            title &&
             h(
               'text',
               {
