@@ -371,6 +371,30 @@ function Elements() {
       />
       <textarea rows={4} defaultValue="multi" />
       <image src="./logo.png" style={{ width: 32, height: 32 }} />
+      {/* a WHATWG URL matches FileUrl structurally — these declarations use
+          only ES lib types, so the global URL cannot be named here */}
+      <image
+        src={{ href: 'file:///tmp/logo.png', protocol: 'file:' }}
+        alt="logo"
+      />
+      {/* in-memory sources (issue #367): encoded bytes, raw RGBA, an ntk
+          Image-like — no temp file, and identity is the caller's */}
+      <image src={new Uint8Array(8)} cacheKey="stream:42" />
+      <image
+        src={{ width: 2, height: 2, data: new Uint8Array(16) }}
+        cacheKey={7}
+      />
+      <image src={{ width: 2, height: 2, data: new Uint8ClampedArray(16) }} />
+      <image
+        src={{ width: 8, height: 8, picture: (app: unknown) => app }}
+        alt="an ntk Image or Surface satisfies DirectImageSource"
+      />
+      {/* pixels already on the server: composite, never re-upload */}
+      <image picture={{ id: 0x2c0001, width: 64, height: 64 }} />
+      <image
+        drawable={{ id: 0x2c0002, width: 128, height: 96, depth: 32 }}
+        style={{ width: 32 }}
+      />
       <canvas
         style={{ flexGrow: 1 }}
         onDraw={(ctx, { width, height, x, y }) => {
@@ -441,6 +465,17 @@ const _classy = <box className="nope" />;
 // themselves do not get to take it flat either (issue #118).
 // @ts-expect-error — <image> is sized by style, not by a width prop
 const _sized = <image src="./logo.png" width={40} />;
+// …including the server-side sources: the width in the descriptor is the
+// source's own geometry, and the box is still styled.
+const pictureDesc = { id: 1, width: 8, height: 8 };
+// @ts-expect-error — <image picture> is sized by style too
+const _sizedPicture = <image picture={pictureDesc} width={40} />;
+// @ts-expect-error — a picture descriptor states its size; id alone is not enough
+const _bareId = <image picture={{ id: 1 }} />;
+// @ts-expect-error — depth 16 has no RENDER standard format
+const _depth = <image drawable={{ id: 1, width: 8, height: 8, depth: 16 }} />;
+// @ts-expect-error — raw pixels state their size; bytes alone could be anything
+const _bareData = <image src={{ data: new Uint8Array(16) }} />;
 // @ts-expect-error — nor is <svg>
 const _svg = <svg source="<svg/>" height={40} />;
 // @ts-expect-error — and <svg>'s ink is style={{ color }}, not a prop
