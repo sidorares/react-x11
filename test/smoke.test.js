@@ -3484,6 +3484,86 @@ test('Dialog: with nothing to autoFocus, the surface takes focus', async () => {
   await x11Root.unmount();
 });
 
+// issue #370: a managed dialog's title is the frame's caption, so drawing it
+// again at the top of the content showed it twice. The unmanaged popup has no
+// frame, so there the in-content heading is the only place the title can be.
+test('Dialog: the title is drawn once — frame caption when managed, in-content heading when not', async () => {
+  const { Dialog } = await import('../src/index.js');
+  const TITLE = 'Break on…';
+
+  const findTitleText = (n) => {
+    if (
+      n.kind === 'text' &&
+      n.children.some((c) => c.kind === 'textchunk' && c.text === TITLE)
+    ) {
+      return n;
+    }
+    for (const c of n.children) {
+      const hit = findTitleText(c);
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  const open = async (managed) => {
+    const app = createMockApp();
+    const x11Root = await createRoot({ app });
+    x11Root.render(
+      React.createElement(
+        'window',
+        { width: 400, height: 300 },
+        React.createElement(
+          Dialog,
+          { open: true, title: TITLE, managed },
+          'body',
+        ),
+      ),
+    );
+    await tick();
+    return { app, x11Root, dialog: app.windows[1] };
+  };
+
+  {
+    const { x11Root, dialog } = await open(true);
+    assert.strictEqual(
+      dialog.attributes.title,
+      TITLE,
+      'the managed dialog captions its frame',
+    );
+    // assert.ok, not strictEqual against null: a node in a failing
+    // strictEqual diff drags the whole retained tree into the message
+    assert.ok(
+      !findTitleText(dialog._reactX11Node),
+      'and does not repeat the title in the content',
+    );
+    assert.strictEqual(
+      dialog._reactX11Node.children[0].props['aria-label'],
+      TITLE,
+      'the surface is still named by the title',
+    );
+    await x11Root.unmount();
+  }
+
+  {
+    const { x11Root, dialog } = await open(false);
+    assert.strictEqual(
+      dialog.attributes.title,
+      undefined,
+      'an override-redirect popup has no frame to caption',
+    );
+    assert.ok(
+      findTitleText(dialog._reactX11Node),
+      'so the title is the in-content heading',
+    );
+    assert.strictEqual(
+      dialog._reactX11Node.children[0].props['aria-label'],
+      TITLE,
+      'and the surface is named by it here too',
+    );
+    await x11Root.unmount();
+  }
+});
+
 test('context menu: a press outside — the window frame — dismisses it', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
