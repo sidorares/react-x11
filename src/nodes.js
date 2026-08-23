@@ -8451,20 +8451,44 @@ export class WindowNode extends Scrollable(Node) {
     // with 0 — transparent black — when the ARGB visual is really there.
     if (this.props.transparent)
       Object.assign(attributes, this._argbAttributes());
-    // **Smooth scrolling, where the server can.** XI2 carries a scroll as
-    // the device's own valuators, so a touchpad's two-finger scroll arrives
-    // as the fractions of a notch it was rather than as the whole clicks of
-    // button 4/5 the server emulates for clients that cannot read them. ntk
-    // translates the device events back into the core-shaped ones the rest
-    // of this file reads, and falls back to those buttons where there is no
-    // XI2, so this is the whole cost of it here (issue #273).
+    // **Smooth scrolling, where the server can — and where the window turns
+    // out to want it.** XI2 carries a scroll as the device's own valuators,
+    // so a touchpad's two-finger scroll arrives as the fractions of a notch
+    // it was rather than as the whole clicks of button 4/5 the server
+    // emulates for clients that cannot read them. ntk translates the device
+    // events back into the core-shaped ones the rest of this file reads, and
+    // falls back to those buttons where there is no XI2 (issue #273).
     //
-    // Not on a `<popup>`, which is the window that holds a pointer grab: a
+    // **It is not free, which is why it is no longer selected up front.** An
+    // XI2 selection *replaces* the core one for the same event type, and an
+    // XIMotion is 136 bytes on the wire against a core MotionNotify's 32
+    // (`npm run xi2:probe`, Xorg 21.1). Motion is the one event that keeps
+    // arriving at frame rate for as long as the pointer is over the window,
+    // so an eager selection bills every window ~8 KB/s of pointer traffic
+    // while the pointer crosses it — for a feature most windows never use. A
+    // dialog, a toolbar, a form, a splash screen never see a wheel at all.
+    //
+    // So `'auto'` — the default — creates the window on core events and takes
+    // the selection the first time the window is actually scrolled
+    // (`upgradeToXI2`, from `EventManager._onWheel`). What that costs is the
+    // opening event of the first gesture in a window's life, and it costs
+    // less than it sounds: a mouse wheel reports whole notches whichever way
+    // the scroll arrived, and ntk's `ScrollTracker` treats the first valuator
+    // event as a seed with no distance to report — so under an eager
+    // selection that same first event moves nothing at all. `xi2` selects at
+    // creation for an app whose whole interaction is the touchpad; `false`
+    // refuses the selection outright.
+    //
+    // Never on a `<popup>`, which is the window that holds a pointer grab: a
     // core grab delivers core events, and ntk drops the emulated wheel
     // buttons on a window whose valuators are flowing — a menu that had
     // selected XI2 would be a menu the wheel could not reach while it was
-    // grabbing. Notch-at-a-time inside an open menu, smooth everywhere else.
-    attributes.xi2 ??= !this.isPopup;
+    // grabbing. An explicit `xi2` still wins there, because an app that says
+    // so has said so.
+    const wantsXI2 = this.props.xi2 ?? 'auto';
+    // `'auto'` is ours and must not reach ntk, whose `args.xi2` is truthiness
+    attributes.xi2 = wantsXI2 === true;
+    this._xi2Pending = wantsXI2 === 'auto' && !this.isPopup;
     // The full event mask, declared at creation — see WINDOW_EVENT_MASK.
     attributes.eventMask = (attributes.eventMask ?? 0) | WINDOW_EVENT_MASK;
     const wnd = this.app.createWindow(attributes);
@@ -8566,6 +8590,37 @@ export class WindowNode extends Scrollable(Node) {
     if (this._anchorLost) return;
     this.window.map?.();
     if (this._topLevel) this.app._reactX11Startup?.mapped(this.window);
+  }
+
+  /**
+   * Take the XI2 selection this window was deliberately created without —
+   * see `realize()` for why `xi2: 'auto'` starts on core events. Called by
+   * `EventManager._onWheel`, so the window that is scrolled is the window
+   * that pays for smooth scrolling.
+   *
+   * **One-shot and one-way.** `_xi2Pending` is cleared before the request
+   * goes out, so a burst of wheel events in one frame asks once. Coming back
+   * down is not offered: the only signal that would justify it is "nothing in
+   * here scrolls any more", which cannot be read without a per-node registry,
+   * and getting it wrong drops a live gesture from valuators back to notches
+   * mid-scroll — a visible regression, to save bytes on a window the user is
+   * actively using.
+   *
+   * Silent where the server has no XInput2: `selectXI2()` resolves `false`
+   * and the window keeps the emulated wheel buttons it already had, which is
+   * exactly where an eager selection would have landed too. Feature-detected
+   * on the method, for an ntk older than 7.5.0.
+   */
+  upgradeToXI2() {
+    if (!this._xi2Pending || this.destroyed) return;
+    this._xi2Pending = false;
+    if (typeof this.window?.selectXI2 !== 'function') return;
+    // fire and forget, like the eager selection in ntk's own createWindow:
+    // until the extension answers the window is on core events, which is
+    // where it would have been anyway
+    this.window.selectXI2().catch((err) => {
+      this.app?.options?.onXError?.(err);
+    });
   }
 
   /**

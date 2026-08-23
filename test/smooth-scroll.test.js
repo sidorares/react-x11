@@ -236,7 +236,7 @@ test('Shift turns a one-axis wheel sideways, whatever measured it', async () => 
 
 // --- selecting it -----------------------------------------------------------
 
-test('a window asks for XI2; a popup, which grabs, does not', async () => {
+test('no window selects XI2 at creation; the first wheel is what asks', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
   x11Root.render(
@@ -251,23 +251,100 @@ test('a window asks for XI2; a popup, which grabs, does not', async () => {
   const [window, popup] = app.windows;
   assert.strictEqual(
     window.attributes.xi2,
-    true,
-    'the window scrolls smoothly',
-  );
-  assert.strictEqual(
-    popup.attributes.xi2,
     false,
+    'created on core events: an XIMotion is four times a MotionNotify, and ' +
+      'a window that is never scrolled must not pay it',
+  );
+  assert.strictEqual(popup.attributes.xi2, false);
+  assert.ok(!window.xi2Selected, 'and nothing has selected it yet');
+
+  spinWheel(window, 100, 100, { deltaY: 1 });
+  await tick();
+  assert.ok(window.xi2Selected, 'the first wheel takes the selection');
+
+  // …and a menu never does: it holds a pointer grab, and a core grab
+  // delivers core events, so valuators would cost it the wheel entirely
+  spinWheel(popup, 20, 20, { deltaY: 1 });
+  await tick();
+  assert.ok(
+    !popup.xi2Selected,
     'a grabbing menu stays on the wheel buttons the grab delivers',
   );
 
   await x11Root.unmount();
 });
 
-test('a window can turn it down', async () => {
+test('the upgrade is asked for once, however hard the window is scrolled', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });
-  x11Root.render(h('window', { width: 200, height: 200, xi2: false }));
+  x11Root.render(h('window', { width: 200, height: 200 }));
   await tick();
-  assert.strictEqual(app.windows[0].attributes.xi2, false);
+  const wnd = app.windows[0];
+
+  for (let i = 0; i < 8; i++) spinWheel(wnd, 100, 100, { deltaY: 1 });
+  await tick();
+
+  assert.strictEqual(
+    wnd.calls.filter(([name]) => name === 'selectXI2').length,
+    1,
+    'cleared before the request goes out, so a burst in one frame asks once',
+  );
+  await x11Root.unmount();
+});
+
+test('a window can ask for XI2 up front, or refuse it for good', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      React.Fragment,
+      null,
+      h('window', { width: 200, height: 200, xi2: true }),
+      h('window', { width: 200, height: 200, xi2: false }),
+    ),
+  );
+  await tick();
+  const [eager, never] = app.windows;
+
+  assert.strictEqual(eager.attributes.xi2, true, 'selected at creation');
+  assert.strictEqual(never.attributes.xi2, false);
+
+  spinWheel(never, 100, 100, { deltaY: 1 });
+  await tick();
+  assert.ok(
+    !never.xi2Selected,
+    'a refusal is for the window’s whole life, not just its creation',
+  );
+  assert.strictEqual(
+    never.calls.filter(([name]) => name === 'selectXI2').length,
+    0,
+    'and it does not even ask',
+  );
+
+  await x11Root.unmount();
+});
+
+test('the wheel still works where the server has no XInput2', async () => {
+  const app = createMockApp();
+  app.hasXI2 = false;
+  const x11Root = await createRoot({ app });
+  let scrolled = 0;
+  x11Root.render(
+    h('window', { width: 200, height: 200, onWheel: () => scrolled++ }),
+  );
+  await tick();
+  const wnd = app.windows[0];
+
+  spinWheel(wnd, 100, 100, { deltaY: 1 });
+  await tick();
+  spinWheel(wnd, 100, 100, { deltaY: 1 });
+  await tick();
+
+  assert.ok(!wnd.xi2Selected, 'the selection was refused by the server');
+  assert.strictEqual(
+    scrolled,
+    2,
+    'and the emulated wheel buttons carry the scroll, as they always did',
+  );
   await x11Root.unmount();
 });

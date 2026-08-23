@@ -357,12 +357,30 @@ which can only ever say one. It is the flag to branch on for anything that
 wants to animate a scroll — a whole notch is worth easing towards, a stream
 of measured pixels is not.
 
-**Nothing is opted into.** A `<window>` selects XI2 when it is created and
-falls back to the wheel buttons where the server has none, so a handler
-written against `deltaY` works on both and the difference is the value.
-`<window xi2={false}>` opts out. A `<popup>` is on the buttons deliberately —
-it holds a pointer grab, and a core grab delivers core events — so a scroll
-inside an open menu moves a notch at a time. Needs ntk >= 7.5.0.
+**Nothing is opted into.** A `<window>` selects XI2 the first time it is
+scrolled and falls back to the wheel buttons where the server has none, so a
+handler written against `deltaY` works on both and the difference is the
+value. A `<popup>` is on the buttons deliberately — it holds a pointer grab,
+and a core grab delivers core events — so a scroll inside an open menu moves
+a notch at a time. Needs ntk >= 7.5.0.
+
+The selection waits for the first wheel because it is not free. An XI2
+selection _replaces_ the core one for the same event type, and an `XIMotion`
+is around 136 bytes on the wire where a core `MotionNotify` is 32 — measured
+against Xorg 21.1. Motion is the one event that keeps arriving at frame rate
+for as long as the pointer is over the window, so selecting it up front bills
+every window about 8 KB/s of pointer traffic while the pointer crosses it,
+including the dialogs, toolbars and forms that never see a wheel at all.
+
+What waiting costs is the opening event of the first gesture in a window's
+life, and it costs less than it sounds: a mouse wheel reports whole notches
+either way, and ntk treats the first valuator event as a seed with no
+distance to report, so under an eager selection that same first event moves
+nothing at all.
+
+`<window xi2>` selects at creation anyway, for an app whose whole interaction
+is a touchpad and which wants the very first flick smooth. `<window
+xi2={false}>` refuses the selection for the window's whole life.
 
 Shift turns a vertical scroll sideways for a device with only one axis (the
 convention every toolkit follows); a device that reports its own horizontal

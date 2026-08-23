@@ -288,6 +288,17 @@ export function createMockApp() {
           wnd.grabbed = false;
           wnd.calls.push(['ungrabPointer']);
         },
+        // ntk >= 7.5.0. `xi2: 'auto'` creates a window on core events and
+        // calls this the first time it is scrolled, so the call is the
+        // observable half of the upgrade — `wnd.xi2Selected` is what a test
+        // asserts on. Resolves `true` the way a server with XInput2 answers;
+        // `app.hasXI2 = false` is the other kind of display.
+        selectXI2(types) {
+          wnd.calls.push(['selectXI2', types]);
+          if (app.hasXI2 === false) return Promise.resolve(false);
+          wnd.xi2Selected = types === undefined || types.length > 0;
+          return Promise.resolve(true);
+        },
         resize(width, height) {
           wnd.width = width;
           wnd.height = height;
