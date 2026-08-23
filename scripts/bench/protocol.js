@@ -112,6 +112,34 @@ async function connect() {
 const settle = (app) =>
   new Promise((resolve) => app.X.GetInputFocus(() => resolve()));
 
+/**
+ * Settle until the connection actually goes quiet.
+ *
+ * One fence proves the server consumed what has been sent, not that the
+ * client has stopped sending: `prepare` can leave asynchronous chains in
+ * flight that only issue their next request once a reply lands. ntk's
+ * shared-glyph directory is the case that forced this — a property-mailbox
+ * RPC per newly-seen glyph batch, several round trips deep, kicked off by
+ * the mount's first paint. Draining one fence deep left the tail of that
+ * warm-up inside the measured window, which priced a bounded one-time cost
+ * as part of every interaction (a window drag read 85 requests instead of
+ * 43, none of them caused by the drag).
+ *
+ * Quiet means a fence that provoked nothing but itself — and it has to hold
+ * for several fences running, because such a chain goes quiet between its
+ * steps: one idle turn is where it is waiting for the reply that starts the
+ * next request, not where it has finished.
+ */
+async function drain(app, stats) {
+  let quiet = 0;
+  for (let i = 0; i < 60 && quiet < 4; i++) {
+    const before = stats.requests;
+    await settle(app);
+    await new Promise((resolve) => setImmediate(resolve));
+    quiet = stats.requests - before <= 1 ? quiet + 1 : 0;
+  }
+}
+
 /** Run `fn`, measuring only what it causes (setup is drained first). A
  * scenario may be `{ prepare, run }`: `prepare` builds state — a mounted
  * tree, say — whose cost is drained and *not* measured, so `run` can time
@@ -122,7 +150,7 @@ async function measure(name, fn) {
   await settle(app);
   if (typeof fn !== 'function') {
     await fn.prepare(app, x11Root, server);
-    await settle(app);
+    await drain(app, stats);
     fn = fn.run;
   }
   const mark = {

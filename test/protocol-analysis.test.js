@@ -105,6 +105,25 @@ test('an identical answered query repeats; different bytes do not', () => {
   assert.strictEqual(stats.analysis.dupList[0].name, 'GetProperty');
 });
 
+test('a delete-on-read GetProperty repeat is a mailbox poll, not a duplicate', () => {
+  const { stream, stats } = started();
+  // delete=1: ntk's shared-glyph directory polls a property mailbox this
+  // way, so the same bytes legitimately answer differently every time
+  const consuming = req(GET_PROPERTY, 1, [7, 42, 0, 0, 0]);
+  for (const seq of [1, 2, 3]) {
+    stream.write(consuming);
+    stream.emit('data', reply(seq));
+  }
+  assert.strictEqual(stats.analysis.dupQueries, 0);
+  // the same property read *without* the delete flag still counts
+  const plain = req(GET_PROPERTY, 0, [7, 42, 0, 0, 0]);
+  stream.write(plain);
+  stream.emit('data', reply(4));
+  stream.write(plain);
+  stream.emit('data', reply(5));
+  assert.strictEqual(stats.analysis.dupQueries, 1);
+});
+
 test('GetInputFocus repeats are sync traffic, never duplicate queries', () => {
   const { stream, stats } = started();
   for (let seq = 1; seq <= 3; seq++) {
