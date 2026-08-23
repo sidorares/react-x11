@@ -22,6 +22,8 @@
  * paint-time decision, and paint-time decisions can change.
  */
 
+import { requireExtension } from './extensions.js';
+
 const sessions = new WeakMap();
 
 /**
@@ -92,8 +94,12 @@ export async function beginCompositing(app, screen = 0) {
     session._selection = atom;
     session._set(await selectionOwner(X, atom));
     // Live updates are a bonus, not a requirement: without XFixes the
-    // startup answer simply stands for the life of the connection.
-    await watchSelection(app, session, atom);
+    // startup answer simply stands for the life of the connection — which
+    // is also why the watch is not waited for. `supported` is settled by
+    // the line above, and nothing before the first realize reads the watch,
+    // so awaiting the XFixes probe here only lengthens the chain the first
+    // CreateWindow sits behind.
+    void watchSelection(app, session, atom).catch(() => {});
   } catch {
     if (session.supported === null) session._set(false);
   }
@@ -124,7 +130,7 @@ function selectionOwner(X, atom) {
  * the window or died.
  */
 async function watchSelection(app, session, atom) {
-  const fixes = await requireFixes(app);
+  const fixes = await requireExtension(app, 'fixes');
   if (!fixes || session.stopped) return;
   const X = app.X;
   // A 1x1 InputOnly window off-screen, never mapped: XFixes addresses the
@@ -147,18 +153,6 @@ async function watchSelection(app, session, atom) {
     session._set(Boolean(ev.owner));
   });
   fixes.SelectSelectionInput(id, atom, mask);
-}
-
-function requireFixes(app) {
-  return new Promise((resolve) => {
-    try {
-      app.X.require('fixes', (err, fixes) =>
-        resolve(err || !fixes ? null : fixes),
-      );
-    } catch {
-      resolve(null);
-    }
-  });
 }
 
 /** Is a compositor running on this connection? False while unknown. */

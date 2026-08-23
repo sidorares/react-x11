@@ -33,6 +33,8 @@
 // what it returns is a description like `English (US)` where an indicator in
 // a status bar wants `us`.
 
+import { requireExtension } from './extensions.js';
+
 const sessions = new WeakMap();
 
 /** `1 << xkbType` for the two events this needs. */
@@ -155,7 +157,7 @@ async function arm(session) {
   if (session.armed) return;
   session.armed = true;
   const app = session.app;
-  const xkb = await requireExt(app, 'xkb');
+  const xkb = await requireExtension(app, 'xkb');
   if (!xkb || session.stopped) return;
 
   // Subscribe before reading. A lock toggled between the two would otherwise
@@ -227,16 +229,6 @@ async function readLayouts(session) {
     // where the group index is all there is. `layouts` stays empty and
     // `layout` stays null, which is what those say.
   }
-}
-
-function requireExt(app, name) {
-  return new Promise((resolve) => {
-    try {
-      app.X.require(name, (err, ext) => resolve(err || !ext ? null : ext));
-    } catch {
-      resolve(null);
-    }
-  });
 }
 
 /** What is known right now. Not public — `useKeyboardState()` is. */
