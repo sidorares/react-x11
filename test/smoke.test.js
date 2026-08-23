@@ -5926,3 +5926,116 @@ test('decorations={false} writes _MOTIF_WM_HINTS with its own type atom', async 
 
   await x11Root.unmount();
 });
+
+test('hidden: a window renders realized and laid out, but never mapped', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const render = (hidden) =>
+    x11Root.render(
+      React.createElement(
+        'window',
+        { width: 200, height: 100, hidden },
+        React.createElement('box', {
+          style: { width: 80, height: 30 },
+        }),
+      ),
+    );
+  render(true);
+  await tick();
+
+  const wnd = app.windows[0];
+  assert.strictEqual(wnd.mapped, false, 'realized, not mapped');
+  assert.strictEqual(
+    wnd._reactX11Node.children[0].abs.width,
+    80,
+    'and the tree behind it is laid out',
+  );
+
+  // clearing the prop is what puts it on screen
+  render(false);
+  await tick();
+  assert.strictEqual(wnd.mapped, true);
+
+  // …and setting it back takes it off without unmounting anything
+  render(true);
+  await tick();
+  assert.strictEqual(wnd.mapped, false);
+  assert.strictEqual(wnd.destroyed, false);
+  assert.strictEqual(
+    wnd.calls.filter(([op]) => op === 'map').length,
+    1,
+    'one map, one unmap — never a second window',
+  );
+
+  await x11Root.unmount();
+});
+
+test('hidden: a popup with an auto size is born at its natural size, unmapped', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    React.createElement(
+      'window',
+      { width: 300, height: 200 },
+      React.createElement(
+        'popup',
+        { hidden: true, x: 0, y: 0 },
+        React.createElement('box', { style: { width: 130, height: 44 } }),
+      ),
+    ),
+  );
+  await tick();
+
+  const popup = app.windows[1];
+  assert.strictEqual(popup.attributes.overrideRedirect, true);
+  assert.strictEqual(popup.mapped, false);
+  assert.strictEqual(popup.width, 130, 'measured, so the size is readable');
+  assert.strictEqual(popup.height, 44);
+
+  await x11Root.unmount();
+});
+
+test('hidden: a grabbing popup takes the grab on reveal, not while hidden', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const render = (hidden) =>
+    x11Root.render(
+      React.createElement(
+        'window',
+        { width: 300, height: 200 },
+        React.createElement('popup', {
+          grab: true,
+          hidden,
+          x: 10,
+          y: 10,
+          width: 80,
+          height: 60,
+        }),
+      ),
+    );
+  render(true);
+  await tick();
+
+  const popup = app.windows[1];
+  // X refuses a grab on an unviewable window (GrabNotViewable), so taking
+  // it here would only look like it worked on the mock
+  assert.strictEqual(popup.mapped, false);
+  assert.strictEqual(popup.grabbed, undefined, 'no grab while hidden');
+
+  render(false);
+  await tick();
+  assert.strictEqual(popup.mapped, true);
+  assert.strictEqual(popup.grabbed, true, 'the grab rides the map');
+  const calls = popup.calls.map(([op]) => op);
+  assert.ok(
+    calls.indexOf('map') < calls.indexOf('grabPointer'),
+    'mapped first: a grab before the map is refused server-side',
+  );
+
+  render(true);
+  await tick();
+  assert.strictEqual(popup.mapped, false);
+  assert.strictEqual(popup.grabbed, false, 'released with the hide');
+
+  await x11Root.unmount();
+});

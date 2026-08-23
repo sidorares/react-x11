@@ -849,6 +849,14 @@ function Widgets() {
         <Tooltip label="hi" placement="bottom" delay={200}>
           <box />
         </Tooltip>
+        {/* an element label self-sizes; maxWidth/maxHeight cap what it
+            measures out to, and one pinned axis leaves the other measured */}
+        <Tooltip label={<box style={{ padding: 8 }} />} maxWidth={340}>
+          <box />
+        </Tooltip>
+        <Tooltip label={<box />} width={340} maxHeight={200}>
+          <box />
+        </Tooltip>
 
         <RadioGroup<string>
           value="a"
@@ -1515,6 +1523,9 @@ function _Panes() {
         />
         {/* an embeddable window never maps itself */}
         <window embeddable width={200} height={100} />
+        {/* hidden: realized and laid out, never mapped while true */}
+        <window hidden width={200} height={100} />
+        <popup hidden x={0} y={0} />
       </window>
     </Session.Provider>
   );

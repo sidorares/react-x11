@@ -1282,7 +1282,7 @@ export function windowAttributes(props, scale = 1) {
   for (const key of Object.keys(props)) {
     if (key === 'children' || key === 'style' || isEventProp(key)) continue;
     if (key === 'transientFor' || key === 'transparent') continue;
-    if (key === 'anchor') continue;
+    if (key === 'anchor' || key === 'hidden') continue;
     if ((key === 'width' || key === 'height') && isAutoSize(props[key])) {
       continue;
     }
@@ -7838,6 +7838,14 @@ export class WindowNode extends Scrollable(Node) {
     this.root = this;
     this.attributes = attributes;
     this.window = null;
+    // `hidden` has two writers — the reconciler (React hiding a subtree for
+    // `<Suspense>`/`<Activity>`) and the element's own `hidden` prop — and
+    // the window is off screen while *either* says so. The reconciler's half
+    // is remembered here so that a `<Suspense>` revealing its content does
+    // not map a window whose prop still hides it. `this.hidden` stays the
+    // one flag everything reads (`_mapNow`, painting, a11y, anchoring).
+    this._reactHidden = false;
+    this.hidden = Boolean(props.hidden);
     // whether this is the tree's own top-level window rather than a nested
     // one or a popup — decided by realize(), read when it maps
     this._topLevel = false;
@@ -8379,13 +8387,13 @@ export class WindowNode extends Scrollable(Node) {
       // grab whose window stops being viewable, so a menu that hid and
       // reappeared would be one no press outside could dismiss — the
       // `onDismiss` that reads as "click anywhere to close" would simply
-      // stop happening.
+      // stop happening. The re-take is `PopupNode._mapNow`'s, which is what
+      // keeps it beside the map on every route back to the screen.
       if (lost) {
         if (this.props.grab) this.window.ungrabPointer?.();
         this.window.unmap?.();
       } else {
         this._mapNow();
-        if (this.props.grab) this.window.grabPointer?.({}, () => {});
       }
     }
     if (lost || !size) return;
@@ -8601,19 +8609,21 @@ export class WindowNode extends Scrollable(Node) {
    * still ends the startup sequence on its real first map.
    */
   _mapNow() {
-    if (this.destroyed || !this.window || this.hidden) return;
+    if (this.destroyed || !this.window || this.hidden) return false;
     // An `embeddable` window never maps itself: a window waiting to be
     // embedded is unmapped — that is what waiting looks like — and from the
     // reparent on, mapping is the embedder's decision (ntk's XEmbedSocket
     // maps a plain client the moment it takes it). Self-mapping here would
     // put a frame pane on the desktop as a top-level for the beat before
     // its <Frame> embeds it, long enough for a window manager to frame it.
-    if (this.props.embeddable) return;
+    if (this.props.embeddable) return false;
     // An anchor that is not on screen is a popup that has nowhere to be
     // (`_followAnchor`); it maps from there, when the anchor comes back.
-    if (this._anchorLost) return;
+    if (this._anchorLost) return false;
     this.window.map?.();
     if (this._topLevel) this.app._reactX11Startup?.mapped(this.window);
+    // whether the map went out, so `PopupNode` can hang its grab off it
+    return true;
   }
 
   /**
@@ -9530,6 +9540,10 @@ export class WindowNode extends Scrollable(Node) {
         ...this.attributes,
         ...windowAttributes(newProps, this.scale),
       };
+      // The flag `realize()`'s map will read — set directly, since there is
+      // nothing on screen yet for the notification half of `_applyHidden`
+      // to be about.
+      this.hidden = this._reactHidden || Boolean(newProps.hidden);
       return;
     }
 
@@ -9627,6 +9641,13 @@ export class WindowNode extends Scrollable(Node) {
       const wasLost = this._anchorLost;
       this._anchorLost = false;
       if (wasLost) this._mapNow();
+    }
+
+    // After the geometry above on purpose: a window revealed and moved in
+    // the same commit is configured first and mapped second, so it is never
+    // on screen at the position it was hidden at.
+    if (Boolean(newProps.hidden) !== Boolean(before.hidden)) {
+      this._applyHidden();
     }
 
     const layoutChanged =
@@ -9789,6 +9810,20 @@ export class WindowNode extends Scrollable(Node) {
    * gone out yet not to bother.
    */
   setHidden(hidden) {
+    this._reactHidden = hidden;
+    this._applyHidden();
+  }
+
+  /**
+   * Re-derive `this.hidden` from its two writers — the reconciler's flag and
+   * the `hidden` prop — and make the window agree. Either saying "hidden"
+   * wins, so a `<Suspense>` revealing its content does not map a window the
+   * app is holding off screen, and clearing the prop does not map one React
+   * still hides.
+   */
+  _applyHidden() {
+    const hidden = this._reactHidden || Boolean(this.props.hidden);
+    if (hidden === this.hidden) return;
     this.hidden = hidden;
     // An unmapped window draws nothing, so a loop inside one is frames
     // nobody sees — the same stop the WM's own minimize gets, by the same
@@ -9805,8 +9840,21 @@ export class WindowNode extends Scrollable(Node) {
     // do nothing anyway, the server not having mapped the window yet
     // (issue #201).
     if (pendingMaps.has(this)) return;
-    if (hidden) this.window?.unmap?.();
-    else this._mapNow();
+    if (hidden) {
+      // release before the unmap, the order `_followAnchor` uses — X would
+      // drop the grab with the viewability anyway, but not on the mock, and
+      // an explicit release is one less state to reason about
+      if (this.props.grab) this.window?.ungrabPointer?.();
+      this.window?.unmap?.();
+    } else if (inCommit) {
+      // A reveal mid-commit waits for the end of it the way a fresh window's
+      // first map does, so anything later in the same commit that hides the
+      // window again (React hides a subtree only after mutating it) is
+      // known before the map goes out — the same WM race as issue #201.
+      pendingMaps.add(this);
+    } else {
+      this._mapNow();
+    }
   }
 
   /**
@@ -10744,12 +10792,19 @@ export class PopupNode extends WindowNode {
    * user clicked. With the grab, that press arrives here instead, outside
    * our bounds, and `onDismiss` fires. Needs ntk >= 3.7.0; without it the
    * popup simply behaves as before.
+   *
+   * The grab rides the map, not `realize()`: X refuses a grab on an
+   * unviewable window (`GrabNotViewable`) and silently drops one whose
+   * window unmaps, so a popup born `hidden` — or one whose anchor is off
+   * screen — takes the grab when it actually reaches the screen. Grabbing
+   * from realize looked equivalent until `hidden` existed, and would have
+   * left a revealed menu holding no grab: open forever behind the first
+   * outside click, with nothing saying why.
    */
-  realize(parentWindow) {
-    super.realize(parentWindow);
-    if (this.props.grab && !this.destroyed) {
-      this.window?.grabPointer?.({}, () => {});
-    }
+  _mapNow() {
+    if (!super._mapNow()) return false;
+    if (this.props.grab) this.window.grabPointer?.({}, () => {});
+    return true;
   }
 
   destroySubtree() {
