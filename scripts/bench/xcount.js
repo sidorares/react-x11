@@ -21,8 +21,11 @@
 //   dupQueries    — repeated identical queries: a reply-carrying request
 //                   whose exact bytes were already sent on this connection
 //                   (a cacheable InternAtom / GetProperty / QueryExtension).
-//                   GetInputFocus is exempt: it is the sync primitive, its
-//                   repeats are fences and void-syncs, priced under stalls.
+//                   Two exemptions, both because the repeat is not a cache
+//                   miss: GetInputFocus, the sync primitive, whose repeats
+//                   are fences and void-syncs (priced under stalls), and a
+//                   GetProperty with delete=1, which consumes what it reads
+//                   and so answers differently every time.
 //   churnPairs    — short-lived resources: an XID created *and* freed inside
 //                   the window (pixmap/picture/gc/region/…), with the
 //                   create's parameters kept so "same-sized pixmap rebuilt
@@ -154,6 +157,16 @@ const EXT_MINORS = {
 // The sync primitive. Its repeats are fences/void-syncs — flow control, not
 // cacheable data — so it is priced as stalls, never as duplicate queries.
 const SYNC_OPCODE = 43;
+
+// A GetProperty that deletes what it reads is a *consuming* read: the same
+// request bytes answer differently every time, because the reply is whatever
+// arrived since the last one. ntk's shared-glyph directory works exactly this
+// way — a property mailbox polled with delete=1 (lib/sharedglyphs.js) — so
+// counting those repeats as cacheable queries reports waste that does not
+// exist. `delete` is the byte after the opcode, which is what `minor` holds.
+const GET_PROPERTY_OPCODE = 20;
+const isConsumingRead = (entry) =>
+  entry.op === GET_PROPERTY_OPCODE && entry.minor === 1;
 
 /** FNV-1a over a request's bytes: identical request ⇒ identical hash. */
 function fnv1a(buf, len) {
@@ -341,7 +354,7 @@ export function countStream(inner, { record = false } = {}) {
       analysis.pendingQueryExt.delete(seq);
       if (buf[8]) analysis.extNames.set(buf[9], asked);
     }
-    if (entry && entry.op !== SYNC_OPCODE) {
+    if (entry && entry.op !== SYNC_OPCODE && !isConsumingRead(entry)) {
       const known = analysis.queryHashes.get(entry.hash);
       if (known) {
         known.count += 1;
