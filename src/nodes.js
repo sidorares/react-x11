@@ -1572,6 +1572,20 @@ export class Node {
       if (asks) this.root._supportsQueryNodes.add(this);
       else this.root._supportsQueryNodes.delete(this);
     }
+    // Attention candidates keep a registry for the same reason and are
+    // registered the same unconditional way — a `<window>`'s own style is
+    // resolved before `root` is assigned, so a "did it change" guard would
+    // leave it unregistered forever. Unlike hover, attention is *matched*
+    // against this set rather than hit-tested, so a node that is not in it
+    // is not a candidate at all.
+    const wantsAttention = Boolean(
+      props.unstable_onAttention || this._baseStyle[':attention'],
+    );
+    this._wantsAttention = wantsAttention;
+    if (this.root?._attentionNodes) {
+      if (wantsAttention) this.root._attentionNodes.add(this);
+      else this.root._attentionNodes.delete(this);
+    }
     if (queried || asks) {
       this._baseStyle = resolveQueries(this._baseStyle, {
         size: this.root?.querySize ?? null,
@@ -1902,6 +1916,9 @@ export class Node {
       // a node mounted into a window that already knows its capabilities
       // has to match against those, not against the startup default
       this._sizeQueriesChanged();
+    }
+    if (this._wantsAttention && this.root?._attentionNodes) {
+      this.root._attentionNodes.add(this);
     }
     for (const child of this.children) {
       if (!child.isWindow) child._registerSizeQueries();
@@ -7836,6 +7853,13 @@ export class WindowNode extends Scrollable(Node) {
     this.needsLayout = true;
     this.needsPaint = true;
     this._scheduled = false;
+    // Nodes that want the `attention` event (ntk#37) — an
+    // `unstable_onAttention` prop,
+    // an `:attention` block, or both. Built before the EventManager so the
+    // manager can hold the reference itself: the whole feature has to be
+    // behind one `size` read on the motion path, and a tree that never asked
+    // for attention must not pay a property walk to find that out.
+    this._attentionNodes = new Set();
     this.events = new EventManager(this);
     // ids of the child windows in the order the *server* stacks them,
     // bottom to top — see _restackWindowChildren

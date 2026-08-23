@@ -365,6 +365,19 @@ export type SizeQuery = `@${'width' | 'height'} ${string}`;
 export interface StyleBlocks {
   transition?: Transition;
   animation?: Animation;
+  /**
+   * **Provisional.** A prototype for ntk#37, kept out of `docs/` on purpose:
+   * the shape may change or be withdrawn, so do not build on it yet.
+   *
+   * The pointer is heading for this node but has not arrived — a
+   * prediction from its trajectory, not a fact about where it is. Lowest
+   * precedence of the state blocks for exactly that reason: once the pointer
+   * really lands, `:hover` is the truth and wins.
+   *
+   * Declaring it registers the node as an attention candidate; see
+   * `unstable_onAttention` for the handler half.
+   */
+  ':attention'?: StateStyle;
   ':hover'?: StateStyle;
   /** Set while focus is on this node **or inside it** — CSS's
    * `:focus-within`, and the way a row highlights while the field in it is

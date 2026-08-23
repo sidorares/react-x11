@@ -493,6 +493,20 @@ const _fitContent = <window width="fit-content" />;
 // @ts-expect-error — there is no containing block to be a percentage of
 const _percent = <window height="100%" />;
 
+// Attention: the handler takes an AttentionEvent with an `eta`, the style
+// block is a state block like any other, and neither propagates.
+const _attention = (
+  <box
+    unstable_onAttention={(ev) => {
+      const ms: number = ev.eta;
+      void ms;
+    }}
+    style={{ ':attention': { backgroundColor: '#333' } }}
+  />
+);
+// @ts-expect-error — a state block may only set paint properties
+const _attentionLayout = <box style={{ ':attention': { padding: 4 } }} />;
+
 // `xi2` is a three-way choice, not a boolean: 'auto' (the default) selects
 // XI2 on the first wheel, `true` at creation, `false` never.
 const _xi2Auto = <window xi2="auto" />;

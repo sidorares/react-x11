@@ -70,6 +70,28 @@ export interface MouseEvent<T = DrawnNode> extends SyntheticEvent<T> {
   detail: number;
 }
 
+/**
+ * The pointer looks like it is heading here (ntk#37) — said *before* it
+ * arrives, so there is time to do something about it.
+ *
+ * Not routed like the other pointer events. Nothing is hit tested and there
+ * is no capture or bubble phase: nodes that want attention register
+ * themselves, the pointer's trajectory is matched against their rectangles,
+ * and the one it would enter soonest is the one that hears about it. Only one
+ * node in a window holds attention at a time.
+ */
+export interface AttentionEvent<T = DrawnNode> extends SyntheticEvent<T> {
+  /**
+   * Roughly how many milliseconds until the pointer arrives, at the speed it
+   * is currently travelling — 0 when it is already inside.
+   *
+   * This is the number worth branching on. "The pointer is here in 30ms" and
+   * "in 220ms" justify very different amounts of speculative work, and the
+   * renderer is the only party that knows which one this is.
+   */
+  eta: number;
+}
+
 export interface WheelEvent<T = DrawnNode> extends SyntheticEvent<T> {
   /** Pixels, positive right — one notch of the wheel is 48 of them. */
   deltaX: number;
@@ -331,6 +353,26 @@ export interface PointerHandlers<T = DrawnNode> {
   /** Does not propagate — synthesized by hover-path diffing. */
   onMouseEnter?: (ev: MouseEvent<T>) => void;
   onMouseLeave?: (ev: MouseEvent<T>) => void;
+  /**
+   * **Provisional — the `unstable_` prefix is the contract.** A prototype for
+   * ntk#37, kept out of `docs/` on purpose: the shape may change or be
+   * withdrawn, and dropping the prefix is what would say it had settled.
+   *
+   * The pointer is heading for this node and has not arrived. For starting
+   * work early — warming a cache, decoding an image, sending the query whose
+   * answer the click will want.
+   *
+   * Fires on arrival of attention only. There is no matching "lost" event:
+   * work started on a hint does not want undoing because the pointer changed
+   * its mind, and anything *visual* belongs in an `:attention` style block,
+   * which is cleared automatically. Declaring either one registers the node
+   * as a candidate; a tree that declares neither costs nothing per motion
+   * event.
+   *
+   * Does not propagate, and unlike `onMouseEnter` it is not the hover path
+   * either — see `AttentionEvent`.
+   */
+  unstable_onAttention?: (ev: AttentionEvent<T>) => void;
   onWheel?: (ev: WheelEvent<T>) => void;
   onWheelCapture?: (ev: WheelEvent<T>) => void;
   /**

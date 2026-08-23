@@ -374,7 +374,14 @@ export function axesEqual(a, b) {
 export const isLayoutProp = (name) =>
   Object.prototype.hasOwnProperty.call(LAYOUT_APPLIERS, name);
 export const isPaintProp = (name) => PAINT_PROPS.has(name);
-export const isEventProp = (name) => /^on[A-Z]/.test(name);
+/**
+ * A handler prop. `unstable_`-prefixed ones count: the prefix marks an API as
+ * provisional (React's own idiom), it does not stop the prop being a handler.
+ * Both callers care — a handler must not reach `CreateWindow` as a window
+ * attribute, and `paintChanged` must not claim a repaint every time a render
+ * passes a fresh inline arrow.
+ */
+export const isEventProp = (name) => /^(?:unstable_)?on[A-Z]/.test(name);
 
 /**
  * State blocks, lowest precedence first. These are *node* states, not
@@ -393,6 +400,11 @@ export const isEventProp = (name) => /^on[A-Z]/.test(name);
  * labels inside, the way it does in CSS.
  */
 export const STATE_KEYS = [
+  // The pointer is heading here but has not arrived (ntk#37). Lowest
+  // precedence of the lot, because it is the only *prediction* in the list
+  // and every other state is a fact: once the pointer actually lands,
+  // `:hover` is the truth and has to win.
+  ':attention',
   ':hover',
   // Focus is on this node or inside it — CSS's `:focus-within`. Below
   // `:focus` on purpose: it is the broader fact, so a node that is itself
