@@ -30,6 +30,7 @@
     "filedialog:probe": "node scripts/filedialog-probe.mjs",
     "a11y:probe": "node scripts/a11y-probe.mjs",
     "scale:probe": "node scripts/scale-probe.mjs",
+    "xi2:probe": "node scripts/xi2-probe.mjs",
     "globalmenu:host": "node scripts/globalmenu-host.mjs",
     "devtools:proxy": "node scripts/devtools-proxy.mjs",
     "examples:fonts": "tsx examples/fonts.jsx",

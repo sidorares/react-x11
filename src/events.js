@@ -628,6 +628,13 @@ export class EventManager {
    * render it started for the notch before.
    */
   _onWheel(native) {
+    // The first wheel is what says this window wants smooth scrolling. It was
+    // created on core events — an XI2 selection costs four times as many
+    // bytes per *pointer move*, which a window that is never scrolled would
+    // pay for nothing — and takes the selection here, once (nodes.js,
+    // `upgradeToXI2`). Ahead of the dismiss check, because a scroll this
+    // window heard is a scroll this window heard whatever it does with it.
+    this.node.upgradeToXI2?.();
     // A scroll somewhere else is an interaction somewhere else: the pointer
     // grab an open menu holds brings it here, and the menu is anchored to
     // content that is about to move out from under it. Same answer the press

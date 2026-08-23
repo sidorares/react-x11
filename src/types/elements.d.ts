@@ -370,15 +370,28 @@ export interface WindowProps
    * Read the pointer through XI2, which is what makes scrolling smooth: the
    * device's own scroll valuators instead of the whole notches the server
    * emulates as button 4/5 presses, so a touchpad reports the fractions of a
-   * notch it measured. On by default, and ignored where the server has no
-   * XI2 — the wheel buttons answer as they always did. `false` opts out.
+   * notch it measured. Ignored where the server has no XI2 — the wheel
+   * buttons answer as they always did.
    *
-   * A `<popup>` is the exception and defaults to `false`: it holds a pointer
-   * grab, a core grab delivers core events, and a window whose valuators are
-   * flowing has its emulated wheel buttons dropped. Set at creation. Needs
-   * ntk >= 7.5.0.
+   * - `'auto'` (the default) selects XI2 the first time the window is
+   *   scrolled. An XI2 selection replaces the core one for the same event
+   *   type, and an XIMotion is ~136 bytes against a core MotionNotify's 32,
+   *   so an eager selection bills a window that never scrolls ~8 KB/s of
+   *   pointer traffic for nothing. The opening event of the first gesture is
+   *   a whole notch — which is all a mouse wheel ever reports anyway, and
+   *   all an eager selection would have delivered too, since the first
+   *   valuator event only seeds the accumulator.
+   * - `true` selects at creation, for an app whose whole interaction is a
+   *   touchpad and which wants the very first flick smooth.
+   * - `false` refuses the selection for the window's whole life.
+   *
+   * A `<popup>` never upgrades under `'auto'`: it holds a pointer grab, a
+   * core grab delivers core events, and a window whose valuators are flowing
+   * has its emulated wheel buttons dropped, so a menu that had selected XI2
+   * could not be wheeled while it was grabbing. An explicit `true` still
+   * wins there. Needs ntk >= 7.5.0.
    */
-  xi2?: boolean;
+  xi2?: boolean | 'auto';
   /**
    * Mark this window as a drag preview: the drag router never treats it as
    * the window under the pointer, so a `<popup dragPreview>` can follow the
