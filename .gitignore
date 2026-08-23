@@ -1,4 +1,7 @@
-node_modules/
+# No trailing slash: a slash matches a directory only, and this repo once
+# committed a `node_modules` *symlink* (a worktree pointing at the main
+# checkout) straight past the ignore rule.
+node_modules
 *.log
 .DS_Store
 
