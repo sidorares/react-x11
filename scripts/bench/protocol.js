@@ -281,6 +281,40 @@ function iconWall(count, size = 20) {
   );
 }
 
+/** The hover scenario's tree: one row shaped like examples/form.jsx's
+ * checkbox row — label, an 18x18 rounded bordered box whose `:hover` block
+ * changes its colours, label. The flip damages exactly the box. */
+function hoverRowWindow() {
+  return React.createElement(
+    'window',
+    { width: W, height: H, style: { backgroundColor: '#dfe4ea' } },
+    React.createElement(
+      'box',
+      {
+        style: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          padding: 16,
+        },
+      },
+      React.createElement('text', { style: { fontSize: 13 } }, 'size'),
+      React.createElement('box', {
+        style: {
+          width: 18,
+          height: 18,
+          borderRadius: 4,
+          borderWidth: 1,
+          borderColor: '#7f8c8d',
+          backgroundColor: '#ffffff',
+          ':hover': { backgroundColor: '#eaf2fb', borderColor: '#2980b9' },
+        },
+      }),
+      React.createElement('text', { style: { fontSize: 13 } }, 'Shout it'),
+    ),
+  );
+}
+
 /** The mount scenario's tree: `count` striped rows with a label each. */
 function rowsWindow(count) {
   return React.createElement(
@@ -619,6 +653,62 @@ const SCENARIOS = [
       }
     },
   ]),
+  [
+    // A rectangular clip plus fillRect is every window background under a
+    // damage rect — the first draw of every partial repaint. The polygon,
+    // glyph and image routes all take ntk's server-side rectangular-clip
+    // fast path; `fillRect` was the one that missed it, and each fill under
+    // any clip then materialized a window-sized a8 clip mask (CreatePixmap,
+    // CreatePicture, a full-surface clear, FreePicture, FreePixmap) and
+    // composited through it — ~8 requests and a full surface of server
+    // pixel work per fill, for fills the size of a checkbox. Priced here so
+    // it cannot come back.
+    'fills: 20 fillRects each under a damage clip',
+    async (app) => {
+      const ctx = pixmapCtx(app);
+      for (let i = 0; i < 20; i++) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(8 + i * 4, 8 + i * 9, 40, 24);
+        ctx.clip();
+        ctx.fillStyle = i % 2 ? '#dfe4ea' : '#2d3436';
+        // deliberately larger than the clip, the way a window background is
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+    },
+  ],
+  [
+    // The checkbox-hover frame from examples/form.jsx, reduced to the node
+    // path it takes: a hover flip marks one rounded, bordered box in a row
+    // of labelled widgets, the frame's damage is that box, and the repaint
+    // under the damage clip is the window background, the box's fill and
+    // its border ring. What this prices is the whole per-frame protocol
+    // tail of a pointer interaction: the background fill under the
+    // rectangular clip, the picture-clip set/reset churn around the corner
+    // glyph runs, and the blit — the frame the protocol trace of issue
+    // "hover over a checkbox" is made of.
+    'hover: rounded box state flip, on and off',
+    (() => {
+      let ctl;
+      let target;
+      return {
+        prepare: async (app, x11Root) => {
+          ctl = await mounted(x11Root, hoverRowWindow());
+          // window -> row box -> [label, hoverable box, label]
+          target = ctl.root.children[0].children[1];
+        },
+        run: async (app) => {
+          target.setStyleState(':hover', true);
+          ctl.frame();
+          await settle(app);
+          target.setStyleState(':hover', false);
+          ctl.frame();
+          await settle(app);
+        },
+      };
+    })(),
+  ],
   [
     'mount: window with 40 boxes and labels',
     async (app, x11Root) => {

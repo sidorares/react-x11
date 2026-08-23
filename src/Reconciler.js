@@ -692,26 +692,26 @@ export async function createRoot(options = {}) {
   // Awaited, and this is the only place it can be: whether a compositor is
   // running decides what a `transparent` window paints, and a window that
   // realized before the answer landed would paint the wrong thing once and
-  // correct itself visibly. One round trip, on a path that is already async.
-  await beginCompositing(app);
-
-  // Awaited for the strongest version of the same reason: the display scale
-  // multiplies every style length, every font size and every CreateWindow
-  // rectangle, so it must be settled before the first node resolves a style
-  // — there is no "correct it a frame later" for a tree that laid out at
-  // half size. Normally free or one round trip (the environment answers, or
-  // XSETTINGS does — a read this startup path already performs); the RandR
-  // hardware walk behind those is only paid on desktops where nothing
-  // cheaper answered (src/scale.js).
-  await beginScale(app, rest.scale);
-
-  // Awaited for the same reason, and it is the same shape of question: a
-  // `<window>` with no size given is sized from its content and capped at the
-  // screen, and the cap has to be a *synchronous* answer because the size is
-  // resolved before CreateWindow. One round trip for the monitor layout and
-  // one for the work area, on a path that is already async, and after this
-  // no window ever has to wait to know how big it is allowed to be.
-  await beginScreens(app);
+  // correct itself visibly — and the same shape of question twice more. The
+  // display scale multiplies every style length, every font size and every
+  // CreateWindow rectangle, so it must be settled before the first node
+  // resolves a style — there is no "correct it a frame later" for a tree
+  // that laid out at half size; normally free or one round trip (the
+  // environment answers, or XSETTINGS does), with the RandR hardware walk
+  // only paid on desktops where nothing cheaper answered (src/scale.js).
+  // And a `<window>` with no size given is sized from its content and
+  // capped at the screen, where the cap has to be a *synchronous* answer
+  // because the size is resolved before CreateWindow. The three probes are
+  // independent conversations with the server (a selection owner and an
+  // extension; the scale ladder; the monitor layout and the work-area
+  // property), so they run concurrently: each is internally a chain of one
+  // to three round trips, and awaiting them in sequence made every app pay
+  // the sum where the slowest chain is the true floor.
+  await Promise.all([
+    beginCompositing(app),
+    beginScale(app, rest.scale),
+    beginScreens(app),
+  ]);
 
   // How fast a caret blinks, how long a double click has, how far a press
   // moves before it is a drag. **Not** awaited, unlike the two above: the
