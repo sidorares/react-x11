@@ -807,9 +807,10 @@ export function ContextMenu({
     const height = menuListHeight(items, fontSize);
     const area = anchorArea(node);
     // anchored at the pointer rather than at a widget: clamp by hand, since
-    // there is no anchor rect to flip around
-    const x = ev.nativeEvent?.rootx ?? ev.x;
-    const y = ev.nativeEvent?.rooty ?? ev.y;
+    // there is no anchor rect to flip around. Root coordinates are device;
+    // the rect feeds popup props, which are logical like the area.
+    const x = (ev.nativeEvent?.rootx ?? ev.x * node.scale) / node.scale;
+    const y = (ev.nativeEvent?.rooty ?? ev.y * node.scale) / node.scale;
     setRect({
       x: area ? Math.max(area.x, Math.min(x, area.x + area.width - width)) : x,
       y: area

@@ -218,19 +218,18 @@ function scrollerIn(path) {
  * axis takes the nearer of its two edges, so a viewport shorter than two
  * bands still scrolls one way rather than fighting itself.
  */
-function edgeVelocity(rect, x, y) {
+function edgeVelocity(rect, x, y, scale = 1) {
   const inside =
     x >= rect.x &&
     x <= rect.x + rect.width &&
     y >= rect.y &&
     y <= rect.y + rect.height;
   if (!inside) return null;
+  const edge = AUTOSCROLL_EDGE * scale;
   const ramp = (distance) =>
-    distance >= AUTOSCROLL_EDGE
+    distance >= edge
       ? 0
-      : Math.ceil(
-          (1 - Math.max(0, distance) / AUTOSCROLL_EDGE) * AUTOSCROLL_STEP,
-        );
+      : Math.ceil((1 - Math.max(0, distance) / edge) * AUTOSCROLL_STEP * scale);
   const top = y - rect.y;
   const bottom = rect.y + rect.height - y;
   const left = x - rect.x;
@@ -700,8 +699,10 @@ export class DropSession {
       actions: this._askOffer?.actions ?? [],
       actionDescriptions: this._askOffer?.descriptions ?? [],
       source: this._source,
-      screenX: native.rootx,
-      screenY: native.rooty,
+      // root-window coordinates, divided to logical like every coordinate
+      // a handler reads (src/scale.js)
+      screenX: native.rootx / windowNode.events.scale,
+      screenY: native.rooty / windowNode.events.scale,
       accept: (action) => {
         if (!answer) return;
         answer.accept = true;
@@ -815,7 +816,9 @@ export class DropSession {
    */
   _updateAutoScroll(path, x, y) {
     const node = scrollerIn(path);
-    const velocity = node?.abs ? edgeVelocity(node.abs, x, y) : null;
+    const velocity = node?.abs
+      ? edgeVelocity(node.abs, x, y, node.scale)
+      : null;
     if (!velocity) return this._stopAutoScroll();
     this._autoScroll = { node, ...velocity };
     // already stepping: the line above is the whole update
@@ -854,7 +857,8 @@ export class DropSession {
     // is free to unmount whatever this was scrolling.
     try {
       const before = `${node.scrollX},${node.scrollY}`;
-      node.scrollBy({ x: dx, y: dy });
+      if (node._scrollByDevice) node._scrollByDevice(dx, dy);
+      else node.scrollBy({ x: dx / node.scale, y: dy / node.scale });
       // at the limit: no movement, so nothing under the pointer changed and
       // there is nothing to re-route. The timer stays armed — the content
       // can still grow, and the pointer is still in the band.
@@ -1218,7 +1222,9 @@ export class DragSession {
     if (this.phase === 'armed') {
       const moved =
         Math.abs(native.x - this.press.x) + Math.abs(native.y - this.press.y);
-      if (moved < desktopSettings(this.app).dragThreshold) return false;
+      // the desktop's threshold is logical pixels; the motion is device
+      if (moved < desktopSettings(this.app).dragThreshold * this.node.scale)
+        return false;
       if (!this._start(native)) return false;
     }
     if (this.phase !== 'dragging') return false;
@@ -1243,8 +1249,8 @@ export class DragSession {
       types: this.types,
       action: this.currentAction,
       source: 'internal',
-      screenX: native.rootx ?? native.x,
-      screenY: native.rooty ?? native.y,
+      screenX: (native.rootx ?? native.x) / this.node.events.scale,
+      screenY: (native.rooty ?? native.y) / this.node.events.scale,
     });
     if (ev.defaultPrevented) {
       this._reset();
@@ -1338,8 +1344,8 @@ export class DragSession {
           action: this.currentAction,
           source: this.localSession ? 'internal' : 'external',
           accepted: this.accepted,
-          screenX: rootX,
-          screenY: rootY,
+          screenX: rootX / this.node.events.scale,
+          screenY: rootY / this.node.events.scale,
         }),
       );
     }
@@ -1388,8 +1394,8 @@ export class DragSession {
         action,
         dropped,
         source: 'internal',
-        screenX: native.rootx ?? native.x ?? 0,
-        screenY: native.rooty ?? native.y ?? 0,
+        screenX: (native.rootx ?? native.x ?? 0) / this.node.events.scale,
+        screenY: (native.rooty ?? native.y ?? 0) / this.node.events.scale,
       });
     }
     this._reset();

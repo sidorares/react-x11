@@ -67,11 +67,18 @@ function eventType(name) {
  */
 class SyntheticEvent {
   constructor(manager, type, native, target, extra) {
+    // Native coordinates are device pixels off the wire; handlers are
+    // application code, which thinks in the logical pixels it wrote its
+    // styles in — so the divide happens here, at the one door events leave
+    // by, and `localX` below subtracts an `abs` divided the same way
+    // (src/scale.js). Everything *internal* — hit testing, drag
+    // thresholds, the scroll accumulator — keeps reading `native`.
+    const s = manager.scale;
     this._manager = manager;
     this._targetNode = target;
     this.type = type;
-    this.x = native?.x ?? 0;
-    this.y = native?.y ?? 0;
+    this.x = (native?.x ?? 0) / s;
+    this.y = (native?.y ?? 0) / s;
     this.target = manager._public(target);
     this.currentTarget = null;
     this.nativeEvent = native;
@@ -92,8 +99,8 @@ class SyntheticEvent {
     this.propagationStopped = false;
     if (extra) Object.assign(this, extra);
     if (target.abs) {
-      this.localX = this.x - target.abs.x;
-      this.localY = this.y - target.abs.y;
+      this.localX = this.x - target.abs.x / s;
+      this.localY = this.y - target.abs.y / s;
     }
   }
 
@@ -232,6 +239,8 @@ export function synthesizeClick(node, rect, source = null) {
 export class EventManager {
   constructor(windowNode) {
     this.node = windowNode;
+    // resolved before any window realizes, constant after (src/scale.js)
+    this.scale = windowNode?.scale ?? 1;
     this.hoverPath = [];
     this.downNode = null;
     // where a press landed, and how much of that chain still draws `:active`
@@ -421,10 +430,12 @@ export class EventManager {
     const { doubleClickMs, doubleClickDistance } = desktopSettings(
       this.node?.app,
     );
+    // the desktop's slop is logical pixels; the coordinates are device
+    const slop = doubleClickDistance * this.scale;
     const detail =
       now - last.time < doubleClickMs &&
-      Math.abs(native.x - last.x) <= doubleClickDistance &&
-      Math.abs(native.y - last.y) <= doubleClickDistance
+      Math.abs(native.x - last.x) <= slop &&
+      Math.abs(native.y - last.y) <= slop
         ? last.detail + 1
         : 1;
     this._lastClick = { time: now, x: native.x, y: native.y, detail };
@@ -666,8 +677,11 @@ export class EventManager {
       // renderer has into a full repaint, which is the opposite of the
       // trade. The fraction is not dropped, it is carried to the next event,
       // so a slow scroll still moves — it moves a pixel at a time.
-      const owedX = this._wheelOwed.x + ev.deltaX;
-      const owedY = this._wheelOwed.y + ev.deltaY;
+      // `ev.deltaX/Y` are logical (what handlers read); the scroll they
+      // become moves device pixels, and truncating *after* the multiply is
+      // what keeps the blit on whole device pixels at fractional scales.
+      const owedX = this._wheelOwed.x + ev.deltaX * this.scale;
+      const owedY = this._wheelOwed.y + ev.deltaY * this.scale;
       const dx = Math.trunc(owedX);
       const dy = Math.trunc(owedY);
       this._wheelOwed = { x: owedX - dx, y: owedY - dy };
@@ -685,7 +699,10 @@ export class EventManager {
       // have to be named here to be reachable (issue #253).
       for (let n = target; n; n = n.parent) {
         if (n.canScroll?.(dx, dy)) {
-          n.scrollBy({ x: dx, y: dy });
+          // built-in scrollers take the device delta whole; a registered
+          // element's own scrollBy speaks the public (logical) unit
+          if (n._scrollByDevice) n._scrollByDevice(dx, dy);
+          else n.scrollBy({ x: dx / this.scale, y: dy / this.scale });
           break;
         }
         if (n === this.node) break;

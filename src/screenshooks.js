@@ -9,6 +9,63 @@ import { useCallback, useSyncExternalStore } from 'react';
 
 import { useApp } from './appcontext.js';
 import { screensSnapshot, watchScreens } from './screens.js';
+import { scaleOf, monitorScalesOf } from './scale.js';
+
+/**
+ * The raw snapshot is device pixels — `screens.js` clamps CreateWindow
+ * geometry with it and must stay that way — and the hook's callers are
+ * application code, which thinks in logical pixels like every prop it
+ * writes. Divided here, per snapshot object so referential stability
+ * survives (useSyncExternalStore re-renders on identity).
+ *
+ * Each screen also carries its own `scale`: on a desktop where the ladder
+ * read the hardware (src/scale.js), a retina lid and an office monitor
+ * really do answer differently, and an app that places windows can honour
+ * that. Where the desktop configured one factor, every entry carries it.
+ */
+const logicalSnapshots = new WeakMap();
+
+function logicalScreens(app, raw) {
+  if (!raw) return raw;
+  const cached = logicalSnapshots.get(raw);
+  if (cached) return cached;
+  const s = scaleOf(app);
+  const perMonitor = monitorScalesOf(app);
+  const rect = (r) =>
+    r == null
+      ? r
+      : Object.freeze({
+          ...r,
+          x: r.x / s,
+          y: r.y / s,
+          width: r.width / s,
+          height: r.height / s,
+        });
+  const out = Object.freeze({
+    ...raw,
+    screens: Object.freeze(
+      raw.screens.map((screen) =>
+        Object.freeze({
+          ...rect(screen),
+          available: rect(screen.available),
+          scale:
+            (screen.name && perMonitor.get(screen.name)?.scale) ??
+            perMonitor.get(screen.outputs?.[0])?.scale ??
+            s,
+        }),
+      ),
+    ),
+    primary: null, // reattached below so it stays an identity into `screens`
+    workArea: rect(raw.workArea),
+    virtual: rect(raw.virtual),
+  });
+  const primary =
+    out.screens.find((screen) => screen.primary) ??
+    (out.screens.length === 1 ? out.screens[0] : null);
+  const finished = Object.freeze({ ...out, primary });
+  logicalSnapshots.set(raw, finished);
+  return finished;
+}
 
 /**
  * The monitors this display has, live.
@@ -72,6 +129,9 @@ export function useScreens() {
     (onChange) => watchScreens(app, onChange),
     [app],
   );
-  const snapshot = useCallback(() => screensSnapshot(app), [app]);
+  const snapshot = useCallback(
+    () => logicalScreens(app, screensSnapshot(app)),
+    [app],
+  );
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

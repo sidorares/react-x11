@@ -29,6 +29,7 @@
     "labs:urischeme": "tsx examples/labs/urischeme.jsx",
     "filedialog:probe": "node scripts/filedialog-probe.mjs",
     "a11y:probe": "node scripts/a11y-probe.mjs",
+    "scale:probe": "node scripts/scale-probe.mjs",
     "globalmenu:host": "node scripts/globalmenu-host.mjs",
     "devtools:proxy": "node scripts/devtools-proxy.mjs",
     "examples:fonts": "tsx examples/fonts.jsx",

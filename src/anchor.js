@@ -69,6 +69,19 @@ export function subRect(node, at) {
   };
 }
 
+/** `at` in logical pixels (it comes off an `anchor` prop) → the same rect in
+ *  the device pixels `node.abs` and everything downstream are in. */
+function deviceAt(at, s) {
+  if (!at || s === 1) return at;
+  return {
+    ...at,
+    ...(typeof at.x === 'number' && { x: at.x * s }),
+    ...(typeof at.y === 'number' && { y: at.y * s }),
+    ...(typeof at.width === 'number' && { width: at.width * s }),
+    ...(typeof at.height === 'number' && { height: at.height * s }),
+  };
+}
+
 /**
  * Has the thing this popup points at scrolled out of view? The check paint
  * culling uses (`Node._offscreen`), asked about the sub-rect rather than
@@ -80,7 +93,7 @@ export function subRect(node, at) {
  * having no area is not the same as being off screen.
  */
 export function anchorOffscreen(node, at) {
-  const rect = subRect(node, at);
+  const rect = subRect(node, deviceAt(at, node?.scale ?? 1));
   if (!rect || typeof node._offscreen !== 'function') return false;
   return node._offscreen({
     x: rect.x,
@@ -104,6 +117,22 @@ export function anchorOffscreen(node, at) {
  * placement then neither flips nor clamps.
  */
 export function anchorArea(node) {
+  const area = deviceAnchorArea(node);
+  const s = node?.scale ?? 1;
+  if (!area || s === 1) return area;
+  // Public callers size popups from this — `maxHeight` styles, widths —
+  // and those are logical like every style, so the answer is too.
+  return {
+    x: area.x / s,
+    y: area.y / s,
+    width: area.width / s,
+    height: area.height / s,
+  };
+}
+
+/** The same area in device pixels, for placement math that runs against
+ *  `abs` rects and window origins — here and in the edit menu's. */
+export function deviceAnchorArea(node) {
   const app = node?.app;
   if (!app) return null;
   const at = screenRect(node);
@@ -158,23 +187,31 @@ export function anchorArea(node) {
  */
 export function anchorRect(node, options = {}) {
   if (!node?.abs) return null;
+  // Options are logical pixels — they come from application code, like
+  // every length — and so is the returned rect, which is headed for a
+  // popup's `x`/`y` props. The math between runs in device pixels, because
+  // `abs`, the window origin and the monitor area are (src/scale.js).
+  const s = node.scale ?? 1;
   const {
     placement = 'bottom',
     align = 'start',
-    alignOffset = 0,
-    offset = 2,
+    alignOffset: logicalAlignOffset = 0,
+    offset: logicalOffset = 2,
     at,
     alignTo,
     direction = node.direction,
   } = options;
+  const alignOffset = logicalAlignOffset * s;
+  const offset = logicalOffset * s;
   const rtl = direction === 'rtl';
 
   // The anchor is the sub-rect where there is one, all the way through:
   // the side that flips, the edge that aligns, and — since a popup with no
   // size of its own is as wide as the thing it hangs off — the default
   // width.
-  const anchor = subRect(node, at);
-  const { width = anchor.width, height = 0 } = options;
+  const anchor = subRect(node, deviceAt(at, s));
+  const width = options.width !== undefined ? options.width * s : anchor.width;
+  const height = options.height !== undefined ? options.height * s : 0;
 
   const origin = windowOrigin(node);
   const ax = origin.x + anchor.x;
@@ -188,7 +225,7 @@ export function anchorRect(node, options = {}) {
   const cx = origin.x + cross.x;
   const cy = origin.y + cross.y;
 
-  const area = anchorArea(node);
+  const area = deviceAnchorArea(node);
   const left = area?.x ?? 0;
   const top = area?.y ?? 0;
   const right = area ? area.x + area.width : null;
@@ -270,7 +307,15 @@ export function anchorRect(node, options = {}) {
   if (right != null) x = Math.max(left, Math.min(x, right - width));
   if (bottom != null && height) y = Math.max(top, Math.min(y, bottom - height));
 
-  return { x: Math.round(x), y: Math.round(y), width, height, placement: side };
+  // Back to logical on the way out. Rounded in *device* pixels first, so
+  // the placement still lands on the device grid it was computed on.
+  return {
+    x: Math.round(x) / s,
+    y: Math.round(y) / s,
+    width: width / s,
+    height: height / s,
+    placement: side,
+  };
 }
 
 /**
@@ -279,8 +324,13 @@ export function anchorRect(node, options = {}) {
  * the window rather than to a widget, which is the one placement
  * `anchorRect` cannot express.
  */
-export function centerRect(node, { width, height }) {
+export function centerRect(node, { width: logicalW, height: logicalH }) {
   if (!node) return null;
+  // Logical in, logical out, device in between — anchorRect's contract,
+  // for the same caller: the result becomes a popup's `x`/`y` props.
+  const s = node.scale ?? 1;
+  const width = logicalW * s;
+  const height = logicalH * s;
   const win = node.root?.window;
   const ww = win?.width ?? width;
   const wh = win?.height ?? height;
@@ -296,10 +346,15 @@ export function centerRect(node, { width, height }) {
   let x = origin.x + (ww - width) / 2;
   let y = origin.y + (wh - height) / 2;
 
-  const area = anchorArea(node);
+  const area = deviceAnchorArea(node);
   if (area) {
     x = Math.max(area.x, Math.min(x, area.x + area.width - width));
     y = Math.max(area.y, Math.min(y, area.y + area.height - height));
   }
-  return { x: Math.round(x), y: Math.round(y), width, height };
+  return {
+    x: Math.round(x) / s,
+    y: Math.round(y) / s,
+    width: logicalW,
+    height: logicalH,
+  };
 }

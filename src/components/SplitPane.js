@@ -83,7 +83,9 @@ export function SplitPane({
 
   /** Clamp against the container as laid out right now. */
   const commit = (next) => {
-    const box = rootRef.current?.abs;
+    // logical throughout: `next` becomes a style width/height, and the
+    // container rect has to be in the same unit (`abs` is device)
+    const box = rootRef.current?.getClientRects?.()[0];
     const total = (vertical ? box?.height : box?.width) ?? 0;
     const room = Math.max(min, total - DIVIDER - minSecond);
     const clamped = Math.min(Math.max(min, next), total > 0 ? room : next);
@@ -108,7 +110,8 @@ export function SplitPane({
   const dividerProps = {
     focusable: true,
     onMouseDown: (ev) => {
-      const box = rootRef.current?.abs;
+      const box = rootRef.current?.getClientRects?.()[0];
+      if (!box) return;
       // where in the divider it was taken, so it does not jump on press
       grab.current = alongSplit(ev, box) - sizeRef.current;
       ev.capturePointer();
@@ -117,7 +120,7 @@ export function SplitPane({
     },
     onMouseMove: (ev) => {
       if (!draggingRef.current) return;
-      const box = rootRef.current?.abs;
+      const box = rootRef.current?.getClientRects?.()[0];
       if (!box) return;
       commit(alongSplit(ev, box) - grab.current);
     },

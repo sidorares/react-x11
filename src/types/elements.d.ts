@@ -715,6 +715,13 @@ export interface ImageProps extends DrawnProps<DrawnNode> {
 
 /** What `onDraw` is told about the node it is painting. */
 export interface DrawInfo {
+  /**
+   * The node's box in **device pixels** — the browser's own canvas
+   * contract: the backing store is the panel's grid, and `scale` says how
+   * many of its pixels one logical pixel is worth (docs/scale.md). A
+   * drawing that works in fractions of the box needs neither; one that
+   * draws N-logical-px strokes multiplies by `scale`.
+   */
   width: number;
   height: number;
   /**
@@ -730,6 +737,8 @@ export interface DrawInfo {
   x: number;
   /** See {@link DrawInfo.x}. */
   y: number;
+  /** Device pixels per logical pixel — `useScale()`'s number. */
+  scale: number;
   node: DrawnNode;
 }
 

@@ -43,6 +43,7 @@ export { useEyedropper } from './screencolorhooks.js';
 export { systemAppearance } from './appearance.js';
 export { useSystemAppearance } from './appearancehooks.js';
 export { useScreens } from './screenshooks.js';
+export { useScale } from './scalehooks.js';
 export { useWindowState } from './windowstate.js';
 export { keepAwake } from './idle.js';
 export { useIdle, useKeepAwake } from './idlehooks.js';

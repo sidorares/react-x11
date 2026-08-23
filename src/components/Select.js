@@ -94,7 +94,10 @@ function menuWidth(node, options, value, scrolls, fontSize) {
     ITEM_PAD_LEFT +
     ITEM_PAD_RIGHT +
     (scrolls ? SCROLLBAR_WIDTH : 0);
-  const width = Math.max(node.abs.width, Math.ceil(widest) + chrome);
+  // logical throughout: the trigger's rect divided out of device pixels,
+  // the measured labels already logical (measureLabel), the area logical
+  const trigger = node.abs.width / node.scale;
+  const width = Math.max(trigger, Math.ceil(widest) + chrome);
   const area = anchorArea(node);
   return area ? Math.min(width, area.width) : width;
 }
