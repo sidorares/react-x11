@@ -33,6 +33,29 @@ jobs:
       # for the one that never finished.
       - run: npm test -- --test-reporter=spec
 
+  # The protocol-efficiency gate: every scenario in scripts/bench/protocol.js
+  # runs against the in-process X server and its requests, bytes, composite
+  # pixels, blocking round trips (stalls), repeated identical queries and
+  # short-lived resource churn are compared to the committed baseline. A PR
+  # that makes the renderer chattier — or reintroduces a create/free cycle
+  # the baseline shows removed — fails here with the metric that moved.
+  # Improvements sail through (--check only fails on increases); re-save the
+  # baseline on the base branch first, then on the PR, so the diff is honest.
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # One retry: the counts carry a little event-loop/GC jitter (see the
+      # header of scripts/bench/protocol.js) and the tolerances absorb it,
+      # but a real regression fails twice; a rare unlucky run does not.
+      - run: npm run bench -- --check || npm run bench -- --check
+
   lint:
     runs-on: ubuntu-latest
     steps:

@@ -1,11 +1,24 @@
 // Protocol-traffic benchmark: how much X11 work does each scenario cost?
 //
-//   npm run bench            # print the current numbers
-//   npm run bench -- --save  # rewrite the committed baseline
-//   npm run bench -- --check # fail if a metric regressed past its tolerance
+//   npm run bench                        # print the current numbers
+//   npm run bench -- --save              # rewrite the committed baseline
+//   npm run bench -- --check             # fail if a metric regressed
+//   npm run bench -- --hotspots          # per-scenario efficiency detail:
+//                                        #   the request-name histogram, and
+//                                        #   which requests stalled, repeated
+//                                        #   or churned
+//   npm run bench -- --record-dir <dir>  # one .x11cap per scenario, openable
+//                                        #   and diffable with x11vis
 //
 // Runs against node-x11's in-process pure-JS X server, so the numbers are
-// deterministic and need no $DISPLAY.
+// stable and need no $DISPLAY. Stable, not perfectly deterministic: the
+// client runs on a live event loop, so wall-clock timers (ntk's frame
+// pacing, the 5ms output-buffer age limit) and GC (ntk frees X resources
+// from FinalizationRegistry callbacks) move a few requests between runs,
+// and `stalls` depends on whether a reply happened to land before the next
+// request went out. The --check tolerances below are sized to that noise —
+// they exist to catch step changes (a new per-frame resource cycle, a new
+// serialized round trip), not single-request jitter.
 //
 // Metrics, and why each is here:
 //
@@ -16,19 +29,57 @@
 //                        request is 36 bytes whether it touches ten pixels
 //                        or the whole surface), and it is where "correct
 //                        but does far too much pixel work" shows up
-import { readFileSync, writeFileSync } from 'node:fs';
+//   stalls               blocking round trips: replies that arrived while
+//                        their request was the last thing sent, so nothing
+//                        was pipelined behind it. The bench's own settle()
+//                        fences are a fixed floor per scenario; growth means
+//                        a new serialized wait crept into the path
+//   dupQueries           repeated identical queries — a reply-carrying
+//                        request whose exact bytes were already sent on the
+//                        connection (a cacheable InternAtom, GetProperty,
+//                        QueryExtension...)
+//   churn                short-lived server resources: created and freed
+//                        inside the measured window (the "full-window mask
+//                        pixmap rebuilt every frame" class). Steady-state
+//                        interactions should reuse, i.e. stay near 0
+//
+// The in-process server answers in microseconds, so `stalls` counts the
+// round trips but cannot price them — a fence that costs nothing here costs
+// a full RTT on a real display. Grading latency work needs the real-display
+// lane (x11vis --record / --diff); this lane keeps the counts honest.
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
-import { compositePixels, countStream } from './xcount.js';
+import {
+  analysisMark,
+  captureLines,
+  compositePixels,
+  countStream,
+  windowAnalysis,
+} from './xcount.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 const { createRoot } = await import('../../src/index.js');
 const { registerElement } = await import('../../src/host.js');
 const { Node } = await import('../../src/node.js');
+const { Checkbox } = await import('../../src/components/index.js');
+
+const args = process.argv.slice(2);
+const recordDir = args.includes('--record-dir')
+  ? args[args.indexOf('--record-dir') + 1]
+  : null;
+if (
+  args.includes('--record-dir') &&
+  (!recordDir || recordDir.startsWith('--'))
+) {
+  console.error('--record-dir needs a directory argument');
+  process.exit(1);
+}
+if (recordDir) mkdirSync(recordDir, { recursive: true });
 
 const require = createRequire(import.meta.url);
 const fontDir = join(
@@ -48,14 +99,14 @@ async function connect() {
   const server = xserver.createServer({ width: W, height: H });
   const [serverEnd, clientEnd] = xserver.createStreamPair();
   server.addClientStream(serverEnd);
-  const { stats } = countStream(clientEnd);
+  const { stats } = countStream(clientEnd, { record: Boolean(recordDir) });
   const source = new StaticFontSource();
   source.add(readFileSync(join(fontDir, 'KaTeX_Main-Regular.ttf')), {
     family: 'Bench',
   });
   source.alias('sans-serif', 'Bench');
   const app = await createClient({ stream: clientEnd, fontSource: source });
-  return { app, stats };
+  return { app, stats, server };
 }
 
 const settle = (app) =>
@@ -66,11 +117,11 @@ const settle = (app) =>
  * tree, say — whose cost is drained and *not* measured, so `run` can time
  * an interaction rather than a mount. */
 async function measure(name, fn) {
-  const { app, stats } = await connect();
+  const { app, stats, server } = await connect();
   const x11Root = await createRoot({ app });
   await settle(app);
   if (typeof fn !== 'function') {
-    await fn.prepare(app, x11Root);
+    await fn.prepare(app, x11Root, server);
     await settle(app);
     fn = fn.run;
   }
@@ -80,6 +131,7 @@ async function measure(name, fn) {
     bytesIn: stats.bytesIn,
     replies: stats.replies,
     composites: stats.composites.length,
+    analysis: analysisMark(stats),
   };
   // A scenario that throws used to be reported as a very fast scenario:
   // React swallows the render error, the renderer logs it, and what lands
@@ -91,7 +143,7 @@ async function measure(name, fn) {
   };
   process.on('uncaughtException', onUncaught);
   try {
-    await fn(app, x11Root);
+    await fn(app, x11Root, server);
   } catch (err) {
     failure ??= err;
   } finally {
@@ -109,6 +161,7 @@ async function measure(name, fn) {
     { composites: stats.composites.slice(0, mark.composites) },
     app.display.Render.majorOpcode,
   );
+  const analysis = windowAnalysis(stats, mark.analysis);
   const result = {
     requests: stats.requests - mark.requests,
     bytesOut: stats.bytesOut - mark.bytesOut,
@@ -116,10 +169,21 @@ async function measure(name, fn) {
     replies: stats.replies - mark.replies,
     composites: after.composites - beforePx.composites,
     compositePixels: after.pixels - beforePx.pixels,
+    stalls: analysis.stalls,
+    dupQueries: analysis.dupQueries,
+    churn: analysis.churn,
   };
+  hotspots[name] = analysis;
+  if (recordDir) {
+    const file = join(recordDir, `${name.replace(/[^a-z0-9]+/gi, '-')}.x11cap`);
+    writeFileSync(file, captureLines(stats, `bench: ${name}`));
+  }
   await app.close();
   return [name, result];
 }
+
+/** Per-scenario efficiency detail, filled by measure(), shown by --hotspots. */
+const hotspots = {};
 
 // --- scenarios ---------------------------------------------------------
 
@@ -719,6 +783,96 @@ const SCENARIOS = [
     })(),
   ],
   [
+    // The interaction from the protocol-efficiency audit: the
+    // pointer crosses onto a <Checkbox> row and off again, five times. Real
+    // injection through the server (EnterNotify/MotionNotify, hit testing,
+    // useControl's hover state, cursor updates), so this window carries
+    // everything a hover costs on the wire today: the hover commit's
+    // damage-clipped repaint of the well — including ntk's full-window A8
+    // clip-mask build/destroy cycle, which is what the `churn` column pins —
+    // plus the cursor write and its void-sync round trip, which is what
+    // `stalls` pins beyond the bench's own fences.
+    'hover: checkbox enter/leave x5',
+    (() => {
+      let ctl;
+      let over;
+      let away;
+      const findRole = (node, role) => {
+        if (node.props?.role === role) return node;
+        for (const child of node.children ?? []) {
+          const hit = findRole(child, role);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      // Let the injected events propagate (stream pair delivers on a
+      // setImmediate), let React commit the hover state (in Node the
+      // scheduler flushes on setImmediate too), then paint and fence. No
+      // wall-clock timers: a setTimeout lap would race the deliveries and
+      // make the interleaving — and with it the stall count — machine-speed
+      // dependent. One settle per pump, so the fence count is fixed.
+      const pump = async (app) => {
+        for (let i = 0; i < 4; i++) {
+          await new Promise((resolve) => setImmediate(resolve));
+          await new Promise((resolve) => setImmediate(resolve));
+          ctl.frame();
+        }
+        await settle(app);
+      };
+      return {
+        prepare: async (app, x11Root, server) => {
+          ctl = await mounted(
+            x11Root,
+            React.createElement(
+              'window',
+              { width: W, height: H, style: { backgroundColor: '#2f3640' } },
+              React.createElement(
+                'box',
+                { style: { flexGrow: 1, padding: 16, gap: 12 } },
+                React.createElement(
+                  'text',
+                  { style: { fontSize: 12, color: '#dcdde1' } },
+                  'size',
+                ),
+                React.createElement(
+                  Checkbox,
+                  { checked: false, onChange: () => {} },
+                  'Shout it',
+                ),
+              ),
+            ),
+          );
+          // pace on the fence alone, like the pure-moves scenario: the
+          // in-process server does not model Present completions
+          ctl.root.window.frameClock = 'fence';
+          ctl.root.window.frameInterval = 0;
+          const row = findRole(ctl.root, 'checkbox');
+          if (!row?.abs) throw new Error('checkbox row not laid out');
+          const origin = ctl.root.window._screenOrigin ?? {
+            x: ctl.root.window.x ?? 0,
+            y: ctl.root.window.y ?? 0,
+          };
+          over = {
+            x: Math.round(origin.x + row.abs.x + row.abs.width / 2),
+            y: Math.round(origin.y + row.abs.y + row.abs.height / 2),
+          };
+          away = { x: origin.x + 5, y: origin.y + 5 };
+          // start from a known spot so the first crossing is a crossing
+          server.injectPointerMove(away.x, away.y);
+          await pump(app);
+        },
+        run: async (app, x11Root, server) => {
+          for (let i = 0; i < 5; i++) {
+            server.injectPointerMove(over.x, over.y);
+            await pump(app);
+            server.injectPointerMove(away.x, away.y);
+            await pump(app);
+          }
+        },
+      };
+    })(),
+  ],
+  [
     // What the two decorations cost per frame (issue #345): 24 cards, each
     // with a gradient background and a blurred shadow, repainted in full
     // five times. The gradient is a source picture the fill samples, so it
@@ -958,11 +1112,12 @@ const SCENARIOS = [
 
 const results = {};
 for (const [name, fn] of SCENARIOS) {
+  // progress to stderr so a hung CI run says which scenario it was in
+  process.stderr.write(`· ${name}\n`);
   const [key, value] = await measure(name, fn);
   results[key] = value;
 }
 
-const args = process.argv.slice(2);
 if (args.includes('--save')) {
   writeFileSync(baselinePath, `${JSON.stringify(results, null, 2)}\n`);
   console.log(`wrote ${baselinePath}`);
@@ -970,12 +1125,27 @@ if (args.includes('--save')) {
 
 const pad = (v, n) => String(v).padStart(n);
 console.log(
-  `${'scenario'.padEnd(38)} ${pad('reqs', 6)} ${pad('bytesOut', 9)} ${pad('replies', 8)} ${pad('composites', 11)} ${pad('Mpx', 8)}`,
+  `${'scenario'.padEnd(38)} ${pad('reqs', 6)} ${pad('bytesOut', 9)} ${pad('replies', 8)} ${pad('composites', 11)} ${pad('Mpx', 8)} ${pad('stalls', 7)} ${pad('dupQ', 5)} ${pad('churn', 6)}`,
 );
 for (const [name, r] of Object.entries(results)) {
   console.log(
-    `${name.padEnd(38)} ${pad(r.requests, 6)} ${pad(r.bytesOut, 9)} ${pad(r.replies, 8)} ${pad(r.composites, 11)} ${pad((r.compositePixels / 1e6).toFixed(2), 8)}`,
+    `${name.padEnd(38)} ${pad(r.requests, 6)} ${pad(r.bytesOut, 9)} ${pad(r.replies, 8)} ${pad(r.composites, 11)} ${pad((r.compositePixels / 1e6).toFixed(2), 8)} ${pad(r.stalls, 7)} ${pad(r.dupQueries, 5)} ${pad(r.churn, 6)}`,
   );
+}
+
+if (args.includes('--hotspots')) {
+  const list = (entries, limit = 8) =>
+    entries
+      .slice(0, limit)
+      .map(([key, n]) => `${key} ×${n}`)
+      .join(', ');
+  for (const [name, a] of Object.entries(hotspots)) {
+    console.log(`\n${name}`);
+    console.log(`  requests   ${list(a.byName)}`);
+    if (a.stallsBy.length) console.log(`  stalled on ${list(a.stallsBy)}`);
+    if (a.dupsBy.length) console.log(`  repeated   ${list(a.dupsBy)}`);
+    if (a.churnBy.length) console.log(`  churned    ${list(a.churnBy)}`);
+  }
 }
 
 if (args.includes('--check')) {
@@ -986,19 +1156,38 @@ if (args.includes('--check')) {
     console.error('\nno baseline — run `npm run bench -- --save` first');
     process.exit(1);
   }
-  // generous, so this catches step changes rather than noise
-  const TOLERANCE = 1.15;
+  // A scenario in only one of the two sets means the baseline is stale —
+  // and a renamed scenario would otherwise silently lose its gate.
+  const missing = [
+    ...Object.keys(results).filter((name) => !baseline[name]),
+    ...Object.keys(baseline).filter((name) => !results[name]),
+  ];
+  if (missing.length) {
+    console.error('\nbaseline out of date — run `npm run bench -- --save`:');
+    for (const name of missing) console.error(`  ${name}`);
+    process.exit(1);
+  }
+  // Per-metric [factor, slack], sized to the noise documented in the file
+  // header so the gate catches step changes rather than jitter. The slack
+  // also means a zero baseline tolerates a few units before failing — the
+  // price of not flaking; a real regression class (a per-frame cycle, a
+  // per-step round trip) lands far past it.
+  const GATES = {
+    requests: [1.15, 8],
+    bytesOut: [1.15, 256],
+    composites: [1.15, 2],
+    compositePixels: [1.15, 2],
+    stalls: [1.25, 5],
+    dupQueries: [1.15, 2],
+    churn: [1.15, 4],
+  };
   const regressions = [];
   for (const [name, now] of Object.entries(results)) {
     const was = baseline[name];
-    if (!was) continue;
-    for (const metric of [
-      'requests',
-      'bytesOut',
-      'composites',
-      'compositePixels',
-    ]) {
-      const limit = was[metric] * TOLERANCE + 2;
+    for (const [metric, [factor, slack]] of Object.entries(GATES)) {
+      // a baseline from before a metric existed gates nothing for it
+      if (was[metric] === undefined) continue;
+      const limit = was[metric] * factor + slack;
       if (now[metric] > limit) {
         regressions.push(
           `${name} — ${metric}: ${was[metric]} -> ${now[metric]}`,
