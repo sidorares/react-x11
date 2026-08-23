@@ -614,19 +614,24 @@ export async function createRoot(options = {}) {
   // engine was still ntk's, which also covered `createRoot({ app })`; it is
   // ours now, so this is the one place that has to know. Concurrent with the
   // connection rather than before it — both are I/O, neither needs the other.
-  const layout = loadLayout();
-  const integrations = loadIntegrations(); // null when there is nothing to install
-  await Promise.all([layout, integrations]);
+  // Checked before anything starts, so a misuse cannot leave a load or a
+  // connection in flight with nothing waiting on it.
   if (isNtkApp(options)) {
     throw new Error(
       'react-x11: createRoot takes an options object — pass the connection ' +
         'as createRoot({ app }).',
     );
   }
+  const layout = loadLayout();
+  const integrations = loadIntegrations(); // null when there is nothing to install
   const { app: borrowed, onDisconnect, ...rest } = options;
   const owned = borrowed === undefined;
-  const app = owned
-    ? await connect(
+  // The connection starts before the engine is waited on, which is what
+  // "concurrent with the connection" above asks for: the instantiate and the
+  // X handshake are both cold-start I/O and neither reads the other. Joined
+  // together below, so a caller still gets an app whose engine is loaded.
+  const connecting = owned
+    ? connect(
         Object.fromEntries(
           CONNECT_OPTIONS.filter((k) => rest[k] !== undefined).map((k) => [
             k,
@@ -634,7 +639,8 @@ export async function createRoot(options = {}) {
           ]),
         ),
       )
-    : borrowed;
+    : Promise.resolve(borrowed);
+  const [, , app] = await Promise.all([layout, integrations, connecting]);
 
   const container = Renderer.createContainer(
     app,

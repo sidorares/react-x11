@@ -43,6 +43,8 @@
 import { sessionBus } from './bus.js';
 import { PORTAL_NAME, PORTAL_PATH } from './portal.js';
 
+import { requireExtension } from './extensions.js';
+
 const IDLETIME = 'IDLETIME';
 const SCREENSAVER_NAME = 'org.freedesktop.ScreenSaver';
 const SCREENSAVER_PATH = '/org/freedesktop/ScreenSaver';
@@ -89,14 +91,15 @@ class IdleSession {
 
   /** The SYNC extension, resolved once per connection. */
   sync() {
-    if (this._sync === undefined) this._sync = requireExt(this.app, 'sync');
+    if (this._sync === undefined)
+      this._sync = requireExtension(this.app, 'sync');
     return this._sync;
   }
 
   /** MIT-SCREEN-SAVER, likewise. */
   saver() {
     if (this._saver === undefined) {
-      this._saver = requireExt(this.app, 'screen-saver');
+      this._saver = requireExtension(this.app, 'screen-saver');
     }
     return this._saver;
   }
@@ -480,19 +483,8 @@ async function screenSaverInhibit(reason, app) {
  */
 async function xInhibit(reason, app) {
   void reason;
-  const saver = app ? await requireExt(app, 'screen-saver') : null;
+  const saver = app ? await requireExtension(app, 'screen-saver') : null;
   if (!saver?.Suspend) return null;
   saver.Suspend(true);
   return () => saver.Suspend(false);
-}
-
-/** An extension, or null where the server does not have it. */
-function requireExt(app, name) {
-  return new Promise((resolve) => {
-    try {
-      app.X.require(name, (err, ext) => resolve(err || !ext ? null : ext));
-    } catch {
-      resolve(null);
-    }
-  });
 }

@@ -58,6 +58,7 @@
     "screenshots": "tsx scripts/screenshots.jsx",
     "screenshots:framed": "tsx scripts/screenshots-framed.jsx",
     "bench": "tsx scripts/bench/protocol.js",
+    "bench:pixels": "tsx scripts/bench/pixels.js",
     "bench:frames": "tsx scripts/bench/frames.js",
     "docs:dev": "npm --prefix website start",
     "docs:build": "npm --prefix website run build",

@@ -86,6 +86,8 @@
 
 import { beginXSettings } from './xsettings.js';
 
+import { requireExtension } from './extensions.js';
+
 const sessions = new WeakMap();
 
 const debugScale = process.env.REACT_X11_DEBUG_SCALE === '1';
@@ -398,16 +400,6 @@ function call(fn, ...args) {
   });
 }
 
-function requireExt(app, name) {
-  return new Promise((resolve) => {
-    try {
-      app.X.require(name, (err, ext) => resolve(err || !ext ? null : ext));
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
 const RESOURCE_MANAGER_ATOM = 23; // predefined, like the STRING type it holds
 
 async function readResourceManager(X, root) {
@@ -431,7 +423,7 @@ async function readResourceManager(X, root) {
  * every configured rung came up empty.
  */
 async function readOutputs(app) {
-  const randr = await requireExt(app, 'randr');
+  const randr = await requireExtension(app, 'randr');
   const X = app.X;
   const root = X.display?.screen?.[0]?.root;
   if (!randr || root == null) return null;

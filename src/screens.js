@@ -80,11 +80,16 @@
  * approximation instead, and says so.
  */
 
+import { requireExtension } from './extensions.js';
+
 const sessions = new WeakMap();
 
 const PROPERTY_NOTIFY = 28;
 const PROPERTY_CHANGE_MASK = 4194304; // x11.eventMask.PropertyChange
 const WORKAREA_PROPERTY = '_NET_WORKAREA';
+// Which entry of the work-area list applies: a desktop can lay its struts
+// out differently per workspace.
+const DESKTOP_PROPERTY = '_NET_CURRENT_DESKTOP';
 
 /** RandR's `Connection` enum — an output with nothing plugged into it is
  *  reported as a resource that exists and is not connected. */
@@ -106,6 +111,7 @@ class ScreenSession {
     this.source = null;
     this.stopped = false;
     this._workAreaAtom = null;
+    this._desktopAtom = null;
     this._snapshot = null;
     this._listeners = new Set();
     /** Every `X.on('event')` handler installed here, so `stop()` can take
@@ -349,8 +355,18 @@ export async function beginScreens(app) {
   if (!X || typeof X.GetProperty !== 'function') return session; // mock app
 
   try {
-    const monitors = await queryMonitors(app);
-    session._workAreaAtom = await internAtom(X, WORKAREA_PROPERTY);
+    // This is the longest chain on the startup path, so it is the one that
+    // sets how long the first CreateWindow waits. Neither atom name depends
+    // on anything — not on the Xinerama probe, not on each other — so all
+    // three go out together and the chain is the probe plus the two property
+    // reads that genuinely need their atoms.
+    const [monitors, workAreaAtom, desktopAtom] = await Promise.all([
+      queryMonitors(app),
+      internAtom(X, WORKAREA_PROPERTY),
+      internAtom(X, DESKTOP_PROPERTY).catch(() => null),
+    ]);
+    session._workAreaAtom = workAreaAtom;
+    session._desktopAtom = desktopAtom;
     session.publish({
       monitors,
       workArea: await readWorkArea(session),
@@ -415,7 +431,7 @@ function relayout(session) {
 }
 
 async function watchRandR(session) {
-  const randr = await requireExt(session.app, 'randr');
+  const randr = await requireExtension(session.app, 'randr');
   if (!randr || session.stopped) return;
   const X = session.app.X;
   const root = X.display?.screen?.[0]?.root;
@@ -575,7 +591,7 @@ export function degreesOf(rotation) {
  */
 async function refreshOutputs(session) {
   const app = session.app;
-  const randr = await requireExt(app, 'randr');
+  const randr = await requireExtension(app, 'randr');
   if (!randr || session.stopped) return false;
   const X = app.X;
   const root = X.display?.screen?.[0]?.root;
@@ -632,17 +648,6 @@ async function refreshOutputs(session) {
   return true;
 }
 
-/** An extension, or null where the server does not have it. */
-function requireExt(app, name) {
-  return new Promise((resolve) => {
-    try {
-      app.X.require(name, (err, ext) => resolve(err || !ext ? null : ext));
-    } catch {
-      resolve(null);
-    }
-  });
-}
-
 /** A node-x11 request as a promise that resolves to null on error. */
 function call(fn, ...args) {
   return new Promise((resolve) => {
@@ -689,7 +694,11 @@ async function currentDesktop(session) {
   const X = session.app.X;
   const root = X.display?.screen?.[0]?.root;
   try {
-    const atom = await internAtom(X, '_NET_CURRENT_DESKTOP');
+    // Interned alongside the work-area atom in beginScreens, because this
+    // read is only reached once the work-area reply has landed and a name
+    // lookup discovered then is a round trip nothing was waiting to learn.
+    const atom =
+      session._desktopAtom ?? (await internAtom(X, DESKTOP_PROPERTY));
     const prop = await getProperty(X, root, atom);
     return prop?.data?.length >= 4 ? prop.data.readUInt32LE(0) : 0;
   } catch {

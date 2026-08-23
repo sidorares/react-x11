@@ -21,6 +21,8 @@
 // this module reads and publishes the whole map rather than the three keys
 // the appearance ladder happens to want (#86 is where the rest lands).
 
+import { requireExtension } from './extensions.js';
+
 /** Per-connection sessions, like `compositing.js`. */
 const sessions = new WeakMap();
 
@@ -171,12 +173,17 @@ export async function beginXSettings(app, screen = 0) {
   }
 
   try {
-    session._selectionAtom = await internAtom(X, `_XSETTINGS_S${screen}`);
-    session._propertyAtom = await internAtom(X, SETTINGS_PROPERTY);
+    // Two name lookups that know nothing about each other, so they go out
+    // together — the property atom is not read until the owner answers.
+    [session._selectionAtom, session._propertyAtom] = await Promise.all([
+      internAtom(X, `_XSETTINGS_S${screen}`),
+      internAtom(X, SETTINGS_PROPERTY),
+    ]);
     await latch(session);
     // Live updates are a bonus: without XFixes the startup answer stands for
-    // the life of the connection, which is what every pre-2005 client did.
-    await watchOwner(session);
+    // the life of the connection, which is what every pre-2005 client did —
+    // and a bonus does not belong on the chain the first window waits behind.
+    void watchOwner(session).catch(() => {});
   } catch {
     if (!session.answered) session._set(null);
   }
@@ -246,7 +253,7 @@ async function watchOwner(session) {
     }
   });
 
-  const fixes = await requireFixes(app);
+  const fixes = await requireExtension(app, 'fixes');
   if (!fixes || session.stopped) return;
   // A 1x1 InputOnly window, never mapped: XFixes addresses notifications to a
   // window and this one exists only to be that address.
@@ -291,18 +298,6 @@ function getProperty(X, wid, atom) {
       resolve(err ? null : prop),
     ),
   );
-}
-
-function requireFixes(app) {
-  return new Promise((resolve) => {
-    try {
-      app.X.require('fixes', (err, fixes) =>
-        resolve(err || !fixes ? null : fixes),
-      );
-    } catch {
-      resolve(null);
-    }
-  });
 }
 
 /** The settings this connection last read, or `null`. */

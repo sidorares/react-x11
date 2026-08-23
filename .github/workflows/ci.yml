@@ -55,6 +55,10 @@ jobs:
       # header of scripts/bench/protocol.js) and the tolerances absorb it,
       # but a real regression fails twice; a rare unlucky run does not.
       - run: npm run bench -- --check || npm run bench -- --check
+      # The other half of the gate, and the one that makes the first half
+      # safe: cheaper is only an optimization if the picture is the same.
+      # No retry here — a hash is exact, so a second run cannot disagree.
+      - run: npm run bench:pixels -- --check
 
   lint:
     runs-on: ubuntu-latest
