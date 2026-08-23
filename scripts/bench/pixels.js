@@ -190,10 +190,23 @@ const SCENARIOS = [
 ];
 
 /**
- * The damage path's own contract, as a scenario: paint a change through the
- * partial-repaint path, then hash. `dirty-rect.test.js` proves partial and
- * full agree for a set of changes; this pins the *result* across releases, so
- * a rasterizer or clip change that moved both equally still shows up here.
+ * The damage path's own contract — checked *within a run*, not against the
+ * committed baseline.
+ *
+ * The first version of this hashed the partial repaint like any other
+ * scenario, and it was the one scenario whose hash differed between macOS and
+ * Linux while the other four matched byte for byte. The difference is not the
+ * rasterizer: it is that this scenario is the only one whose result depends on
+ * *when* the capture happens relative to asynchronous work (a glyph handoff
+ * behind the label, a paint the damage path has not flushed yet). Pinning a
+ * timing-sensitive image in a committed file makes the file wrong on some
+ * machine somewhere.
+ *
+ * What is worth checking here is not the picture but the invariant: a partial
+ * repaint must leave the surface exactly as a full repaint of the same tree
+ * would. Both halves are painted in the same process, moments apart, so the
+ * comparison is immune to anything that shifts both equally — which is exactly
+ * what a platform difference does.
  */
 async function partialRepaint(app, x11Root) {
   const tree = (color) =>
@@ -230,7 +243,27 @@ async function partialRepaint(app, x11Root) {
   root._scheduled = false;
   root.flush();
   await settle(app);
-  return root;
+  const partial = await captureWindow(root.window);
+
+  // The same tree again with the damage discarded: everything repaints.
+  root.needsPaint = true;
+  root._damage = null;
+  root.flush();
+  await settle(app);
+  const full = await captureWindow(root.window);
+
+  let differing = 0;
+  for (let i = 0; i < full.data.length; i += 4) {
+    if (
+      partial.data[i] !== full.data[i] ||
+      partial.data[i + 1] !== full.data[i + 1] ||
+      partial.data[i + 2] !== full.data[i + 2] ||
+      partial.data[i + 3] !== full.data[i + 3]
+    ) {
+      differing += 1;
+    }
+  }
+  return differing;
 }
 
 const settle = (app) =>
@@ -269,11 +302,13 @@ for (const [name, build] of SCENARIOS) {
   const [key, digest] = await hashOf(name, build);
   results[key] = digest;
 }
-process.stderr.write('· partial repaint\n');
-{
-  const [key, digest] = await hashOf('partial repaint', partialRepaint);
-  results[key] = digest;
-}
+
+// Not hashed, and not in the baseline: an invariant checked inside this run.
+process.stderr.write('· partial repaint vs full\n');
+const damageApp = await connect();
+const damageRoot = await createRoot({ app: damageApp });
+const differingPixels = await partialRepaint(damageApp, damageRoot);
+await damageApp.close();
 
 const args = process.argv.slice(2);
 if (args.includes('--save')) {
@@ -284,6 +319,11 @@ if (args.includes('--save')) {
 for (const [name, digest] of Object.entries(results)) {
   console.log(`${name.padEnd(30)} ${digest}`);
 }
+console.log(
+  `${'partial repaint vs full'.padEnd(30)} ${
+    differingPixels === 0 ? 'identical' : `${differingPixels} pixels differ`
+  }`,
+);
 
 if (args.includes('--check')) {
   let baseline;
@@ -312,6 +352,13 @@ if (args.includes('--check')) {
     console.error(
       '\nIf that was the point, re-save the baseline in the commit that ' +
         'explains why. If it was not, this is the regression.',
+    );
+    process.exit(1);
+  }
+  if (differingPixels !== 0) {
+    console.error(
+      `\na partial repaint left ${differingPixels} pixels a full repaint ` +
+        'would not have — the damage path dropped something visible',
     );
     process.exit(1);
   }
