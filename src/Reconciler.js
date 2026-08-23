@@ -612,24 +612,33 @@ export async function createRoot(options = {}) {
   // imported (src/yoga.js — a top-level await here would cost every app the
   // single-executable build). ntk's createClient used to do this while the
   // engine was still ntk's, which also covered `createRoot({ app })`; it is
-  // ours now, so this is the one place that has to know. Concurrent with the
-  // connection rather than before it — both are I/O, neither needs the other.
-  // Checked before anything starts, so a misuse cannot leave a load or a
-  // connection in flight with nothing waiting on it.
+  // ours now, so this is the one place that has to know. It runs alongside the
+  // connection rather than before it — neither needs the other — though "I/O"
+  // flatters the engine: most of that load is the loop-blocking instantiate,
+  // which is why the order below is what it is.
+  //
+  // The misuse check comes before anything starts, so a bad call cannot leave
+  // a load or a connection in flight with nothing waiting on it.
   if (isNtkApp(options)) {
     throw new Error(
       'react-x11: createRoot takes an options object — pass the connection ' +
         'as createRoot({ app }).',
     );
   }
-  const layout = loadLayout();
-  const integrations = loadIntegrations(); // null when there is nothing to install
   const { app: borrowed, onDisconnect, ...rest } = options;
   const owned = borrowed === undefined;
-  // The connection starts before the engine is waited on, which is what
-  // "concurrent with the connection" above asks for: the instantiate and the
-  // X handshake are both cold-start I/O and neither reads the other. Joined
-  // together below, so a caller still gets an app whose engine is loaded.
+  // The connection is started first, and the order is the point rather than a
+  // detail. `loadLayout()` is only nominally asynchronous: instantiating the
+  // engine blocks the event loop for 15-50 ms before it returns its promise
+  // (measured), so calling it first delays the socket work by exactly that —
+  // the loop cannot run the connect callback that writes the hello while the
+  // instantiate is on it. Starting the connection first puts the handshake in
+  // flight, and the block then overlaps it instead of preceding it.
+  //
+  // Worth being honest about the size: the most this can save is the
+  // synchronous block, and only where the handshake takes longer than it. It
+  // is not measurable on a Unix socket, and it is lost in the noise on a link
+  // slow enough to matter. This is the right order, not a fast one.
   const connecting = owned
     ? connect(
         Object.fromEntries(
@@ -640,7 +649,9 @@ export async function createRoot(options = {}) {
         ),
       )
     : Promise.resolve(borrowed);
-  const [, , app] = await Promise.all([layout, integrations, connecting]);
+  const layout = loadLayout();
+  const integrations = loadIntegrations(); // null when there is nothing to install
+  const [app] = await Promise.all([connecting, layout, integrations]);
 
   const container = Renderer.createContainer(
     app,
