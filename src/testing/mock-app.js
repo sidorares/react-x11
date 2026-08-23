@@ -411,9 +411,17 @@ export function createMockApp() {
   return app;
 }
 
-/** Move the pointer inside a window, in window coordinates. */
-export function moveMouse(wnd, x, y) {
-  wnd.emit('mousemove', { x, y });
+/**
+ * Move the pointer inside a window, in window coordinates.
+ *
+ * `time` is the X server timestamp in milliseconds. Anything that reads the
+ * pointer's *speed* rather than its position needs it — the attention
+ * tracker estimates a trajectory from consecutive samples — and a test that
+ * leaves it out gets the wall clock, which makes the velocity depend on how
+ * fast the machine ran the loop.
+ */
+export function moveMouse(wnd, x, y, { time } = {}) {
+  wnd.emit('mousemove', time === undefined ? { x, y } : { x, y, time });
 }
 
 /** Press and release button 1 at a point; pass {release:false} to hold. */

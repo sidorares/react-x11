@@ -162,6 +162,95 @@ function restoresFocusOnReveal(app) {
   return app?._reactX11RestoreFocus ?? true;
 }
 
+/* --- attention (ntk#37) ------------------------------------------------- *
+ *
+ * Every other event here is *routed*: hit test the pointer, build the
+ * ancestor path, walk it. Attention cannot work that way, because the whole
+ * point is to reach a node the pointer has **not** arrived at. So it is
+ * *matched* instead: each motion event updates a velocity estimate, and every
+ * registered candidate is asked "does this trajectory enter you, and how
+ * soon". The nearest answer wins. There is no capture, no bubble and no
+ * ancestor chain — an ancestor is not on the way to its child in any sense
+ * the pointer knows about, and a handler that fired for a descendant it never
+ * named would be guessing.
+ *
+ * Cost is the reason the candidates are a registry rather than a tree walk.
+ * A window whose tree contains no `unstable_onAttention` and no
+ * `:attention` block
+ * runs one `Set.size` read per motion event and nothing else — see
+ * `_onMouseMove`.
+ *
+ * **Deliberately absent from `docs/`.** This is a prototype and the shape may
+ * not survive: nothing here has been calibrated against real pointer traces,
+ * and the case for the handler rests on there being work worth starting
+ * early, which the interaction paths measured so far mostly do not have. It
+ * stays out of the documentation so that nothing comes to depend on it before
+ * that is settled — `examples/attention.jsx` is the only prose, and it says
+ * the same. Removing the feature is a `git revert` of the commit that added
+ * it; keep it that way.
+ */
+
+/** How many pointer samples the velocity is averaged over. Two is a
+ *  difference and jitters; a handful smooths a hand without adding lag
+ *  anything at this timescale can feel. */
+const ATTENTION_SAMPLES = 5;
+
+/** Samples older than this are stale — a pointer that stopped and started
+ *  again must not inherit the direction it had before the pause. */
+const ATTENTION_SAMPLE_MS = 120;
+
+/** Below this the pointer is settling rather than travelling (device px per
+ *  ms; ~50 px/s). Extrapolating a direction from noise this small points
+ *  attention at whatever happens to be off to one side, so the slow case
+ *  falls back to "what is under the pointer" instead. */
+const ATTENTION_MIN_SPEED = 0.05;
+
+/** How far ahead to look, in milliseconds of travel at the current speed.
+ *  This is the honest unit for it: the question a warm-up wants answered is
+ *  "will the user be here soon enough for the work to have paid off", and
+ *  that is a time, not a distance. Long enough to be worth acting on, short
+ *  enough that a flick across the window does not nominate everything on the
+ *  line. */
+const ATTENTION_HORIZON_MS = 250;
+
+/**
+ * When the ray from `px,py` along `vx,vy` (device px per ms) first enters
+ * `rect`, in milliseconds — 0 if it starts inside, null if it never does.
+ *
+ * Slab method, the standard ray/AABB test. Because the velocity is per
+ * millisecond, the parameter that falls out *is* the time to arrival, which
+ * is what both the horizon test and `ev.eta` want.
+ */
+function attentionEta(px, py, vx, vy, rect) {
+  const x1 = rect.x;
+  const x2 = rect.x + rect.width;
+  const y1 = rect.y;
+  const y2 = rect.y + rect.height;
+  if (px >= x1 && px < x2 && py >= y1 && py < y2) return 0;
+  let tmin = 0;
+  let tmax = Infinity;
+  // x slab, then y slab; a zero component means the ray never crosses that
+  // axis, so it has to already be within the slab or it misses entirely
+  if (vx === 0) {
+    if (px < x1 || px >= x2) return null;
+  } else {
+    const a = (x1 - px) / vx;
+    const b = (x2 - px) / vx;
+    tmin = Math.max(tmin, Math.min(a, b));
+    tmax = Math.min(tmax, Math.max(a, b));
+  }
+  if (vy === 0) {
+    if (py < y1 || py >= y2) return null;
+  } else {
+    const a = (y1 - py) / vy;
+    const b = (y2 - py) / vy;
+    tmin = Math.max(tmin, Math.min(a, b));
+    tmax = Math.min(tmax, Math.max(a, b));
+  }
+  if (tmin > tmax) return null;
+  return tmin >= 0 ? tmin : null;
+}
+
 /**
  * Wrap an ntk event callback for a *discrete* event — one whose response is
  * a single visual state, so there is nothing a frame's wait could coalesce
@@ -251,6 +340,13 @@ export class EventManager {
     // release that continue the same gesture follow
     this._downDefaulted = false;
     this.capturedNode = null;
+    // Attention (ntk#37): the one node the pointer looks like it is heading
+    // for, the recent pointer samples the trajectory is estimated from, and
+    // the window's candidate registry held directly so the motion path costs
+    // one property read to find out there is nothing to do.
+    this.attentionNode = null;
+    this._attentionSamples = [];
+    this._attentionNodes = windowNode?._attentionNodes ?? new Set();
     this.focused = null;
     // the focused node and its ancestors, which is what draws `:focus-within`
     this.focusWithinPath = [];
@@ -865,6 +961,13 @@ export class EventManager {
       if (this._downDefaulted && this.downNode && !this.downNode.destroyed) {
         this.downNode.defaultMouseDrag?.(ev);
       }
+      // Attention, last (ntk#37). Two reasons for the position. It is
+      // speculative work, and "answer the input, not the outcome" says the
+      // real response to this motion — the hover repaint, the drag — goes out
+      // before anything done on a guess about the next one. And this line is
+      // the whole cost of the feature for a tree that never asked for it: one
+      // `size` read on a set the window built empty, no walk, no allocation.
+      if (this._attentionNodes.size !== 0) this._updateAttention(native);
     });
   }
 
@@ -905,6 +1008,12 @@ export class EventManager {
   _onMouseOut(native) {
     runWithPriority(ContinuousEventPriority, () => {
       this._updateHover([], native);
+      // the pointer is somewhere else entirely: whatever it was heading for
+      // in here, it is not heading for it now
+      if (this._attentionNodes.size !== 0) {
+        this._attentionSamples.length = 0;
+        this._setAttention(null, native);
+      }
       // the pointer left the window with a button still down: a release out
       // there synthesizes its click on the window, so that is as much of the
       // press chain as may still look pressed
@@ -987,6 +1096,110 @@ export class EventManager {
     }
     this.hoverPath = newPath;
     this._updateCursor(newPath);
+  }
+
+  /**
+   * Who is the pointer heading for? Runs only when the window has
+   * candidates — see the guard in `_onMouseMove`.
+   *
+   * Three steps, and the middle one is the whole idea. Sample the pointer to
+   * get a velocity; ask every candidate when this trajectory would enter it;
+   * give attention to the soonest answer inside the horizon. Nothing is hit
+   * tested and nothing is walked: a candidate wins by being *ahead*, which is
+   * exactly the thing a hit test cannot tell you.
+   *
+   * Below `ATTENTION_MIN_SPEED` there is no trajectory worth extrapolating —
+   * a resting hand jitters a pixel or two and its "direction" is noise — so
+   * the slow case degrades to the candidate under the pointer, which is both
+   * the honest answer and the one that keeps attention from flickering around
+   * the room while somebody reads.
+   */
+  _updateAttention(native) {
+    const now = native?.time ?? Date.now();
+    const samples = this._attentionSamples;
+    samples.push({ x: native.x, y: native.y, t: now });
+    // drop what is too old to describe the movement happening now, and cap
+    // the window: this array is touched at motion rate and must not grow
+    while (
+      samples.length > ATTENTION_SAMPLES ||
+      (samples.length > 1 && now - samples[0].t > ATTENTION_SAMPLE_MS)
+    ) {
+      samples.shift();
+    }
+
+    const first = samples[0];
+    const dt = now - first.t;
+    let vx = 0;
+    let vy = 0;
+    if (samples.length > 1 && dt > 0) {
+      vx = (native.x - first.x) / dt;
+      vy = (native.y - first.y) / dt;
+    }
+    const speed = Math.hypot(vx, vy);
+
+    let best = null;
+    let bestEta = Infinity;
+    for (const node of this._attentionNodes) {
+      // the registry is swept lazily, like `_sizeQueryNodes`: an unmount has
+      // more urgent things to do than reach into every window registry
+      if (node.destroyed || !node.root) {
+        this._attentionNodes.delete(node);
+        continue;
+      }
+      const rect = node.abs;
+      // a node that has never been laid out has no rectangle to aim at, and
+      // one that is hidden or untargetable is not somewhere the pointer can
+      // arrive
+      if (!rect?.width || !rect.height) continue;
+      if (node.hidden || node.style.display === 'none') continue;
+      if (node.style.pointerEvents === 'none') continue;
+      const eta =
+        speed < ATTENTION_MIN_SPEED
+          ? attentionEta(native.x, native.y, 0, 0, rect)
+          : attentionEta(native.x, native.y, vx, vy, rect);
+      if (eta === null || eta > ATTENTION_HORIZON_MS) continue;
+      if (eta < bestEta) {
+        bestEta = eta;
+        best = node;
+      }
+    }
+    this._setAttention(best, native, bestEta);
+  }
+
+  /**
+   * Move attention, which only one node in a window can hold.
+   *
+   * **The handler fires on arrival only.** Losing attention is deliberately
+   * not an event: the thing the handler is for is starting work early — a
+   * cache warmed, an image decoded, a query sent — and none of that wants
+   * undoing because the pointer changed its mind. What *is* visual is handled
+   * by `:attention`, which is cleared here like any other state, so the
+   * common case needs no handler at all. If a real use for the loss turns up,
+   * the seam is a second prop rather than a `null` argument every
+   * handler would have to null-check.
+   *
+   * No capture, no bubble: see the note at the top of this file. Attention is
+   * matched against a registry, so the node that matched is the only node
+   * that could meaningfully hear about it.
+   */
+  _setAttention(node, native, eta = 0) {
+    const previous = this.attentionNode;
+    if (previous === node) return;
+    if (previous && !previous.destroyed) {
+      previous.setStyleState(':attention', false);
+    }
+    this.attentionNode = node;
+    if (!node) return;
+    node.setStyleState(':attention', true);
+    const handler = node.props.unstable_onAttention;
+    if (!handler) return;
+    // `eta` is the point of the event rather than decoration: "the pointer
+    // arrives here in about 40ms" and "in about 200ms" justify very different
+    // amounts of speculative work, and only the renderer knows which it is.
+    const ev = this._makeEvent('attention', native, node, {
+      eta: Math.round(eta),
+    });
+    callHandler(node, 'unstable_onAttention', handler, ev);
   }
 
   /** Apply the deepest hovered node's `cursor` prop to the window.
