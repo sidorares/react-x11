@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.1.0](https://github.com/sidorares/react-x11/compare/v2.0.1...v2.1.0) (2026-08-24)
+
+
+### Features
+
+* **examples:** San Francisco via fontconfig — the macOS lookalike setup ([#395](https://github.com/sidorares/react-x11/issues/395)) ([80781de](https://github.com/sidorares/react-x11/commit/80781debf827d878ae8d14fc2158c42978e0cd39))
+* **gl:** ntk 8.4.0 — direct rendering on macOS via Apple-DRI ([#396](https://github.com/sidorares/react-x11/issues/396)) ([267fe30](https://github.com/sidorares/react-x11/commit/267fe30e7e0e3f24a2ecc9773e65cff11592db42))
+
+
+### Bug Fixes
+
+* **scale:** a server that is not describing hardware no longer answers the ladder ([#392](https://github.com/sidorares/react-x11/issues/392)) ([4bfc83c](https://github.com/sidorares/react-x11/commit/4bfc83ca697e1a65d26c8d7648e82d569ba681b9))
+
 ## [2.0.1](https://github.com/sidorares/react-x11/compare/v2.0.0...v2.0.1) (2026-08-24)
 
 
