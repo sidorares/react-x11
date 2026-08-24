@@ -54,6 +54,23 @@
 //      subtly wrong size everywhere.
 //   6. **1**, the answer X11 shipped with in 1987.
 //
+// Rungs 4 and 5 read hardware, so they are skipped where the connection is
+// not describing hardware, and both cases are servers people really run:
+//
+//   * **XQuartz** composes in macOS *points* and hands X the point space —
+//     the retina lid arrives as 1728x1080, already density-normalised, and
+//     the window server scales it onto the panel afterwards. Inferring a
+//     factor here doubles a size macOS is about to double again. Detected
+//     by the `Apple-WM` extension, exempted exactly like `XWAYLAND` in
+//     `VIRTUAL_OUTPUT_NAME`: the compositor owns scaling, so we do not.
+//   * **A single synthetic output** covering every monitor. XQuartz, Xvfb,
+//     VNC servers and Xephyr answer the RandR walk with one output named
+//     `default` whose CRTC is the *union* of the desktop; two 2560x1440
+//     monitors union to 5120x1440, which rung 5 would read as a retina
+//     panel. Xinerama reports those heads separately, so more heads than
+//     outputs retires rung 5 — see `isUnionOutput`. Rung 4 survives it:
+//     millimetres describe real glass however the pixels were split.
+//
 // A machine can defeat every rung above the last two — the one this was
 // written against does: UTM in retina mode hands the guest the MacBook's
 // full 3456x2168 grid, QEMU's EDID invents millimetres that read as 100dpi,
@@ -270,12 +287,47 @@ export function snapScale(value) {
 }
 
 /**
+ * Is this RandR output list describing panels, or one synthetic output
+ * covering the whole desktop?
+ *
+ * Servers that never grew a real output model — XQuartz, Xvfb, x11vnc and
+ * TigerVNC, Xephyr, old drivers under `xorg.conf` — answer the RandR walk
+ * with a single output (usually named `default`, always without
+ * millimetres) whose CRTC is the *union* of every monitor attached. On a
+ * desktop with two monitors side by side that union is twice as wide as any
+ * panel in it, and rung 5 reads pixel counts: a pair of 2560x1440 monitors
+ * unions to 5120x1440 and is judged retina-class, which is how a 1x desk
+ * ends up drawing everything at double size.
+ *
+ * Xinerama is the cross-check, and it is free of the same blind spot: the
+ * same servers report the heads individually there, because that is the
+ * only geometry protocol they implement. More heads than outputs means the
+ * output list is not per-panel data, whatever it claims.
+ */
+export function isUnionOutput(outputs, heads) {
+  return (
+    Array.isArray(outputs) &&
+    outputs.length > 0 &&
+    Number.isInteger(heads) &&
+    outputs.length < heads
+  );
+}
+
+/**
  * One monitor's metadata → `{ scale, source, reason }`, using only what the
  * connection reported: pixel geometry, claimed millimetres, EDID. This is
  * rungs 4 and 5 of the ladder for one output; the caller stacks the
  * desktop-configuration rungs above it.
+ *
+ * `perPanel: false` says this record's geometry spans more than one monitor
+ * (`isUnionOutput` above), which retires rung 5 alone: the resolution class
+ * is a statement about *a panel* and means nothing about a union of them.
+ * Rung 4 still answers when it can, because credible millimetres describe
+ * real glass however the pixels were divided up afterwards — a `--setmonitor`
+ * split of one ultrawide is the case that reaches this branch on a server
+ * whose RandR is otherwise perfectly honest.
  */
-export function monitorScaleFromMetadata(monitor) {
+export function monitorScaleFromMetadata(monitor, { perPanel = true } = {}) {
   const mm = classifyMm(monitor, monitor);
   const pxW = monitor.width ?? 0;
   const pxH = monitor.height ?? 0;
@@ -306,7 +358,7 @@ export function monitorScaleFromMetadata(monitor) {
   // grids stay at 1 on purpose — 2560x1440 is the commonest *1x* desk
   // monitor there is, and only millimetres could tell it from a 13" retina
   // lid, which is exactly the data this branch does not have.
-  if (Math.min(pxW, pxH) >= 1800 || Math.max(pxW, pxH) >= 3000) {
+  if (perPanel && (Math.min(pxW, pxH) >= 1800 || Math.max(pxW, pxH) >= 3000)) {
     return {
       scale: 2,
       source: 'resolution',
@@ -316,7 +368,10 @@ export function monitorScaleFromMetadata(monitor) {
   return {
     scale: 1,
     source: 'default',
-    reason: `no credible density data (mm ${mm}, ${pxW}x${pxH})`,
+    reason: perPanel
+      ? `no credible density data (mm ${mm}, ${pxW}x${pxH})`
+      : `${pxW}x${pxH} spans several monitors, so its pixel count says ` +
+        `nothing about any panel (mm ${mm})`,
   };
 }
 
@@ -468,6 +523,57 @@ async function readOutputs(app) {
   return connected.length ? connected : null;
 }
 
+/**
+ * How many monitors Xinerama says are attached, or null where the server
+ * does not answer. Read only to sanity-check the RandR walk against
+ * (`isUnionOutput`) — the geometry itself is `screens.js`'s business.
+ *
+ * A server with the extension present but inactive replies with one screen
+ * covering everything, which is the same answer as "one monitor" and is
+ * treated as such: the cross-check needs a *disagreement* to fire.
+ */
+async function countHeads(app) {
+  const xinerama = await requireExtension(app, 'xinerama');
+  if (!xinerama?.QueryScreens) return null;
+  const screens = await call(xinerama.QueryScreens.bind(xinerama));
+  return Array.isArray(screens) && screens.length ? screens.length : null;
+}
+
+/**
+ * Is this XQuartz?
+ *
+ * It matters because XQuartz is not handing us a framebuffer: macOS composes
+ * the desktop in *points* and hands X the point space, already normalised
+ * for density. A 16" retina lid arrives as 1728x1080 and a 1x desk monitor
+ * beside it as 2560x1403 — the same 14pt text is the same physical size on
+ * both, and the window server scales what it is given onto whichever panel
+ * the window lands on. Every hardware rung below is therefore answering a
+ * question that was already answered: inferring 2x from the pixels would
+ * double a size macOS is about to double again.
+ *
+ * This is the `XWAYLAND` exemption in `VIRTUAL_OUTPUT_NAME` for the same
+ * reason and by the same rule — the compositor owns scaling, so we do not —
+ * and it sits below the configured rungs, not above them, because a person
+ * who typed `REACT_X11_SCALE` or `GDK_SCALE` outranks the platform.
+ *
+ * `Apple-WM` is the extension quartz-wm drives; it is present on every
+ * XQuartz server and on no other X server, including when the client is
+ * remote and only the display is a Mac (which is exactly when the point
+ * space is still the truth).
+ */
+function isQuartzServer(X) {
+  if (typeof X?.QueryExtension !== 'function') return Promise.resolve(false);
+  return new Promise((resolve) => {
+    try {
+      X.QueryExtension('Apple-WM', (err, reply) =>
+        resolve(!err && !!reply?.present),
+      );
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 // --------------------------------------------------------------------------
 // The session
 // --------------------------------------------------------------------------
@@ -555,11 +661,35 @@ export async function beginScale(app, option) {
     return session;
   }
 
-  // Rungs 4-5: the hardware, one verdict per output.
-  const outputs = await readOutputs(app);
+  // Rungs 4-5: the hardware, one verdict per output — but only where the
+  // connection is describing hardware. The three reads go out together
+  // because none of them depends on another and this is the chain the first
+  // window waits behind.
+  const [quartz, outputs, heads] = await Promise.all([
+    isQuartzServer(X),
+    readOutputs(app),
+    countHeads(app),
+  ]);
+
+  if (quartz) {
+    // 1, and not because nothing answered: macOS already did the scaling.
+    session.source = 'xquartz';
+    trace(
+      '1x from Apple-WM — XQuartz hands X macOS point space, already scaled',
+    );
+    return session;
+  }
+
+  const perPanel = !isUnionOutput(outputs, heads);
   if (outputs) {
+    if (!perPanel) {
+      trace(
+        `${outputs.length} RandR output(s) against ${heads} Xinerama heads: ` +
+          'the output list is not per-panel, so the resolution class is out',
+      );
+    }
     for (const monitor of outputs) {
-      const verdict = monitorScaleFromMetadata(monitor);
+      const verdict = monitorScaleFromMetadata(monitor, { perPanel });
       session.monitors.set(monitor.name, {
         scale: verdict.scale,
         source: verdict.source,
