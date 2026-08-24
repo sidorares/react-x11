@@ -101,6 +101,34 @@ Monitor", VMware, VirtualBox, Parallels, Hyper-V) and by connector name
 the compositor owns scaling there and publishes its decision through rung
 2, in both of its Xwayland modes.
 
+### Servers that are not describing hardware
+
+Rungs 4–5 read a panel, so they are skipped where the connection has no
+panel to describe. Two cases, both of them servers people really run:
+
+- **XQuartz**, detected by the `Apple-WM` extension. macOS composes the
+  desktop in _points_ and hands X the point space, already normalised for
+  density: a 16″ retina lid arrives as 1728×1080, a 1x monitor beside it as
+  2560×1403, and the window server scales what it is given onto whichever
+  panel the window lands on. Inferring a factor here doubles a size macOS
+  is about to double again, so the ladder answers 1x with the source
+  `xquartz` — the same exemption `XWAYLAND` gets, for the same reason.
+- **A single synthetic output covering every monitor.** XQuartz, Xvfb,
+  x11vnc and TigerVNC, Xephyr and pre-RandR drivers answer the output walk
+  with one output — usually named `default`, always without millimetres —
+  whose CRTC is the _union_ of the desktop. Two 2560×1440 monitors union to
+  5120×1440, which rung 5 reads as a retina panel; the machine this was
+  found on unioned a retina lid and two 1x monitors into 5120×2520 and drew
+  every widget at double size. Xinerama reports those heads separately, so
+  more heads than outputs retires rung 5 (`isUnionOutput`). Rung 4 survives
+  it — credible millimetres describe real glass however the pixels were
+  divided up, which is what an `xrandr --setmonitor` split of one ultrawide
+  is.
+
+Both guards sit _below_ the configured rungs: `REACT_X11_SCALE`,
+`GDK_SCALE` and a desktop's own XSETTINGS still win, because a person who
+typed a factor outranks the platform.
+
 ### The machine this was built against
 
 A 16″ MacBook panel handed 1:1 to a UTM Linux guest (XFCE, X11) defeats

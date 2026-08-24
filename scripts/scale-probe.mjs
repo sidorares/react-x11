@@ -19,6 +19,11 @@
 //   4. RandR            per-output pixel and millimetre geometry + EDID
 //   5. resolution class the retina-panel guess, when the mm are not credible
 //
+// Between 3 and 4 it also prints what kind of *server* this is, because two
+// kinds retire the hardware rungs: XQuartz (macOS already composed in
+// points) and any server whose single RandR output is really the union of
+// several Xinerama heads.
+//
 // This is the probe that shaped the ladder: on the machine it was written
 // against (a 16" MacBook panel handed 1:1 to a UTM Linux guest), sources
 // 1-4 all answer "1x" — the VM's EDID invents 870x550mm to make the maths
@@ -32,6 +37,7 @@ import {
   parseResourceManager,
   monitorScaleFromMetadata,
   classifyMm,
+  isUnionOutput,
 } from '../src/scale.js';
 
 const out = (...args) => console.log(...args);
@@ -173,7 +179,33 @@ section('RESOURCE_MANAGER (xrdb)');
   }
 }
 
-// --------------------------------------------------------- 5. RandR
+// ------------------------------------------------- 5. the server itself
+// Two facts about the *server* decide whether the hardware rungs below get
+// to speak at all: XQuartz hands X macOS's point space (already scaled),
+// and a server with no real output model answers RandR with one output
+// covering every monitor, which Xinerama contradicts.
+section('server');
+const quartz = await new Promise((resolve) =>
+  X.QueryExtension('Apple-WM', (err, reply) =>
+    resolve(!err && !!reply?.present),
+  ),
+);
+const heads = await (async () => {
+  const xin = await requireExt(X, display, 'xinerama');
+  if (!xin?.QueryScreens) return null;
+  const screens = await call(xin.QueryScreens);
+  return screens?.length ? screens.length : null;
+})();
+out(`  Apple-WM extension: ${quartz ? 'present — this is XQuartz' : 'absent'}`);
+out(`  Xinerama heads: ${heads ?? '(no answer)'}`);
+if (quartz) {
+  out(
+    '  -> the hardware rungs are skipped: macOS composes in points and\n' +
+      '     scales onto the panel itself, so the ladder answers 1x',
+  );
+}
+
+// --------------------------------------------------------- 6. RandR
 section('RandR outputs');
 const randr = await requireExt(X, display, 'randr');
 if (!randr) {
@@ -184,12 +216,26 @@ if (!randr) {
   const edidAtom = await new Promise((resolve) =>
     X.InternAtom(true, 'EDID', (err, atom) => resolve(err ? null : atom)),
   );
+  // Collected before anything is judged: whether the resolution class gets
+  // a vote depends on how many outputs there turn out to be (isUnionOutput).
+  const connected = [];
   for (const id of res?.outputs ?? []) {
     const info = await call(randr.GetOutputInfo, id, res.config_timestamp);
     if (!info || info.connection !== 0) continue; // not connected
     const crtc = info.crtc
       ? await call(randr.GetCrtcInfo, info.crtc, res.config_timestamp)
       : null;
+    connected.push({ id, info, crtc });
+  }
+  const perPanel = !isUnionOutput(connected, heads);
+  if (!perPanel) {
+    out(
+      `  ${connected.length} connected output against ${heads} Xinerama heads —\n` +
+        '  this output is the union of the desktop, not a panel, so its pixel\n' +
+        '  count is not evidence of density (the resolution class is skipped)',
+    );
+  }
+  for (const { id, info, crtc } of connected) {
     out(`  ${info.name}${id === primary ? ' (primary)' : ''}`);
     out(`    reported physical ${info.mm_width} x ${info.mm_height} mm`);
     if (crtc)
@@ -218,19 +264,22 @@ if (!randr) {
           (edid.virtual ? '  ** virtual machine display **' : ''),
       );
     }
-    const verdict = monitorScaleFromMetadata({
-      name: info.name,
-      width: crtc?.width ?? 0,
-      height: crtc?.height ?? 0,
-      widthMM: info.mm_width,
-      heightMM: info.mm_height,
-      edid,
-    });
+    const verdict = monitorScaleFromMetadata(
+      {
+        name: info.name,
+        width: crtc?.width ?? 0,
+        height: crtc?.height ?? 0,
+        widthMM: info.mm_width,
+        heightMM: info.mm_height,
+        edid,
+      },
+      { perPanel },
+    );
     out(`    -> metadata verdict: ${verdict.scale}x (${verdict.reason})`);
   }
 }
 
-// ------------------------------------------------------ 6. Xinerama
+// ------------------------------------------------------ 7. Xinerama
 section('Xinerama');
 {
   const xin = await requireExt(X, display, 'xinerama');

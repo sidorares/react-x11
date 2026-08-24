@@ -14,12 +14,14 @@ import {
   parseResourceManager,
   parseEdid,
   classifyMm,
+  isUnionOutput,
   monitorScaleFromMetadata,
   snapScale,
   desktopScaleFromXSettings,
   desktopScaleFromResources,
   beginScale,
   scaleOf,
+  scaleSourceOf,
 } from '../src/scale.js';
 
 // -------------------------------------------------------------- fixtures
@@ -390,4 +392,152 @@ test('REACT_X11_SCALE outranks even the explicit option', async () => {
 
 test('scaleOf answers 1 for an app the ladder never ran on', () => {
   assert.strictEqual(scaleOf({}), 1);
+});
+
+// --------------------------------------- servers that are not describing hardware
+
+test('isUnionOutput: fewer outputs than heads means the list is not per-panel', () => {
+  const one = [{ name: 'default' }];
+  // XQuartz, Xvfb, VNC: one synthetic output, several real monitors
+  assert.strictEqual(isUnionOutput(one, 3), true);
+  assert.strictEqual(isUnionOutput(one, 2), true);
+  // an ordinary desktop: RandR names every panel it drives
+  assert.strictEqual(isUnionOutput([{}, {}], 2), false);
+  assert.strictEqual(isUnionOutput(one, 1), false);
+  // a mirrored pair is one head on two outputs — the disagreement that
+  // fires this check only ever runs the other way
+  assert.strictEqual(isUnionOutput([{}, {}], 1), false);
+  // no Xinerama answer is not evidence of anything
+  assert.strictEqual(isUnionOutput(one, null), false);
+  assert.strictEqual(isUnionOutput(null, 3), false);
+  assert.strictEqual(isUnionOutput([], 3), false);
+});
+
+test('a union output retires the resolution class but not the millimetres', () => {
+  // the desktop this was found on: XQuartz over a retina lid and two 1x
+  // monitors, unioned into 5120x2520 with no millimetres at all
+  const union = { name: 'default', width: 5120, height: 2520 };
+  assert.strictEqual(verdict(union).scale, 2); // what it used to answer
+  const guarded = monitorScaleFromMetadata(union, { perPanel: false });
+  assert.strictEqual(guarded.scale, 1);
+  assert.strictEqual(guarded.source, 'default');
+  assert.match(guarded.reason, /spans several monitors/);
+
+  // rung 4 is untouched: an ultrawide split by `xrandr --setmonitor` is one
+  // real panel with real millimetres, however its pixels were divided
+  const ultrawide = monitorScaleFromMetadata(
+    { name: 'DP-1', width: 5120, height: 2160, widthMM: 600, heightMM: 253 },
+    { perPanel: false },
+  );
+  assert.strictEqual(ultrawide.source, 'randr-mm');
+  assert.strictEqual(ultrawide.scale, 2);
+});
+
+/**
+ * Enough of a connection for the ladder to climb: no XSETTINGS daemon (no
+ * `GetSelectionOwner`, which is how `beginXSettings` says "nothing here"),
+ * an empty `RESOURCE_MANAGER`, and a RandR walk that answers with whatever
+ * outputs the test hands it. The methods are arrows because `readOutputs`
+ * calls them unbound.
+ */
+function fakeConnection({ appleWM = false, outputs = [], heads = null } = {}) {
+  const ids = outputs.map((_, i) => i + 1);
+  const byId = new Map(ids.map((id, i) => [id, outputs[i]]));
+  const randr = {
+    GetScreenResourcesCurrent: (root, cb) =>
+      cb(null, { outputs: ids, config_timestamp: 1 }),
+    GetOutputPrimary: (root, cb) => cb(null, ids[0] ?? 0),
+    GetOutputInfo: (id, ts, cb) => {
+      const o = byId.get(id);
+      cb(null, {
+        name: o.name,
+        connection: 0,
+        crtc: id, // non-zero: readOutputs drops an output with no CRTC
+        mm_width: o.widthMM ?? 0,
+        mm_height: o.heightMM ?? 0,
+      });
+    },
+    GetCrtcInfo: (crtc, ts, cb) => {
+      const o = byId.get(crtc);
+      cb(null, { x: 0, y: 0, width: o.width, height: o.height });
+    },
+    GetOutputProperty: (id, atom, a, b, c, d, e, cb) =>
+      cb(null, { data: null }),
+  };
+  const xinerama = {
+    QueryScreens: (cb) =>
+      heads === null
+        ? cb(new Error('no xinerama'))
+        : cb(
+            null,
+            Array.from({ length: heads }, () => ({
+              x: 0,
+              y: 0,
+              width: 1,
+              height: 1,
+            })),
+          ),
+  };
+  const X = {
+    display: { screen: [{ root: 1 }] },
+    GetProperty: (del, wid, atom, type, long0, longN, cb) =>
+      cb(null, { data: Buffer.alloc(0) }),
+    InternAtom: (onlyIfExists, name, cb) => cb(null, 7),
+    QueryExtension: (name, cb) =>
+      cb(null, { present: name === 'Apple-WM' ? appleWM : false }),
+    require: (name, cb) =>
+      name === 'randr'
+        ? cb(null, randr)
+        : name === 'xinerama'
+          ? cb(null, xinerama)
+          : cb(new Error(`no ${name}`)),
+  };
+  return { X };
+}
+
+test('the hardware rungs read a retina panel on an ordinary server', async () => {
+  // the control for the two guards below: same pixels, honest server
+  const app = fakeConnection({
+    outputs: [{ name: 'eDP-1', width: 3456, height: 2168 }],
+    heads: 1,
+  });
+  await beginScale(app, 'auto');
+  assert.strictEqual(scaleOf(app), 2);
+  assert.strictEqual(scaleSourceOf(app), 'resolution');
+});
+
+test('XQuartz answers 1x: macOS handed X a point space it already scaled', async () => {
+  const app = fakeConnection({
+    appleWM: true,
+    // the union XQuartz really reports for a retina lid + two 1x monitors
+    outputs: [{ name: 'default', width: 5120, height: 2520 }],
+    heads: 3,
+  });
+  await beginScale(app, 'auto');
+  assert.strictEqual(scaleOf(app), 1);
+  assert.strictEqual(scaleSourceOf(app), 'xquartz');
+});
+
+test('a single output covering several heads never reaches the resolution class', async () => {
+  // not a Mac: Xvfb, a VNC server, an old driver — one `default` output
+  // whose CRTC is two 2560x1440 monitors side by side
+  const app = fakeConnection({
+    outputs: [{ name: 'default', width: 5120, height: 1440 }],
+    heads: 2,
+  });
+  await beginScale(app, 'auto');
+  assert.strictEqual(scaleOf(app), 1);
+  assert.strictEqual(scaleSourceOf(app), 'default');
+});
+
+test('a configured desktop still outranks both guards', async () => {
+  process.env.GDK_SCALE = '2';
+  try {
+    const app = fakeConnection({ appleWM: true, heads: 3 });
+    await beginScale(app, 'auto');
+    assert.strictEqual(scaleOf(app), 2);
+    assert.strictEqual(scaleSourceOf(app), 'GDK_SCALE');
+  } finally {
+    delete process.env.GDK_SCALE;
+  }
 });
