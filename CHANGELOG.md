@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.0.1](https://github.com/sidorares/react-x11/compare/v2.0.0...v2.0.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **focus:** a click into a field lights its ring, and a clicked widget stops hiding its focus ([#390](https://github.com/sidorares/react-x11/issues/390)) ([cc7cef7](https://github.com/sidorares/react-x11/commit/cc7cef7ed2478a67115f12f0102bcab16153f5f8))
+* **screens:** select the work-area watch through ntk's root window ([#388](https://github.com/sidorares/react-x11/issues/388)) ([7892a70](https://github.com/sidorares/react-x11/commit/7892a707342801a780e4738232a3acb7ef8c05be))
+
+
+### Performance Improvements
+
+* **events:** stop asking for a cursor and a mask the window already has ([#389](https://github.com/sidorares/react-x11/issues/389)) ([1a0b480](https://github.com/sidorares/react-x11/commit/1a0b4801ac05d16f53ec844da70fb2d8a475658d))
+
 ## [2.0.0](https://github.com/sidorares/react-x11/compare/v1.2.0...v2.0.0) (2026-08-23)
 
 
