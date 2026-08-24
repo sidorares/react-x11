@@ -43,6 +43,7 @@ import { useTopLevelWindow, windowIdOf } from './windowid.js';
 
 const VISIBILITY_NOTIFY = 15;
 const VISIBILITY_CHANGE_MASK = 65536; // x11.eventMask.VisibilityChange
+const PROPERTY_CHANGE_MASK = 4194304; // x11.eventMask.PropertyChange
 const FULLY_OBSCURED = 2;
 const DESKTOP_PROPERTY = '_NET_WM_DESKTOP';
 
@@ -198,6 +199,23 @@ function arm(session) {
   if (!wnd) return;
   session.armed = true;
 
+  // **One selection for everything this session needs.** Two masks are at
+  // stake — PropertyChange for `_NET_WM_STATE`/`_NET_WM_DESKTOP`, and
+  // VisibilityChange for the obscured watch — and ntk grows a window's mask
+  // one request per first listener of each kind. Asking for both here, before
+  // either subscription, makes the `statechange` listener below a detected
+  // no-op and leaves `watchVisibility` nothing to select: one
+  // ChangeWindowAttributes for a session instead of two, on a window that is
+  // already mapped and on screen by the time any of this runs.
+  if (typeof wnd.selectInput === 'function') {
+    Promise.resolve(
+      wnd.selectInput(PROPERTY_CHANGE_MASK | VISIBILITY_CHANGE_MASK),
+    ).catch(() => {
+      // a window destroyed between the ref resolving and this call; the
+      // defaults stand and nothing further will arrive
+    });
+  }
+
   // Focus, from the event manager rather than from ntk directly: it already
   // dedups FocusIn/FocusOut and already knows the answer for a window that
   // has not seen either yet.
@@ -269,9 +287,9 @@ function readDesktop(session) {
 
 /**
  * VisibilityNotify, which ntk has no event name for — its mask table stops
- * at the events a widget toolkit needs — so the mask goes on through
- * `selectInput` (which ORs into ntk's own tracked mask, so nothing it adds
- * later drops this) and the event is read off the raw connection.
+ * at the events a widget toolkit needs — so the event is read off the raw
+ * connection. The mask it needs was selected by `arm()`, together with the
+ * one the state watch needs.
  */
 function watchVisibility(session) {
   const wnd = session.node.window;
@@ -285,11 +303,6 @@ function watchVisibility(session) {
   };
   X.on('event', onEvent);
   session._offs.push(() => X.off?.('event', onEvent));
-
-  Promise.resolve(wnd.selectInput(VISIBILITY_CHANGE_MASK)).catch(() => {
-    // a window destroyed between the ref resolving and this call; the
-    // defaults stand and nothing further will arrive
-  });
 }
 
 /** What is known about a window right now. Stable until it changes. */

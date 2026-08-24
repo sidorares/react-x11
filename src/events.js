@@ -340,6 +340,11 @@ export class EventManager {
     // release that continue the same gesture follow
     this._downDefaulted = false;
     this.capturedNode = null;
+    // The cursor the window is already wearing. `null` rather than
+    // undefined on purpose: `null` *is* a cursor — X None, "inherit the
+    // parent's" — and it is the one a window starts with, so the first
+    // hover over a subtree that names no cursor has nothing to change.
+    this._appliedCursor = null;
     // Attention (ntk#37): the one node the pointer looks like it is heading
     // for, the recent pointer samples the trajectory is estimated from, and
     // the window's candidate registry held directly so the motion path costs
