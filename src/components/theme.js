@@ -335,6 +335,35 @@ export const capTrim = Object.freeze({ textBoxTrim: 'cap-alphabetic' });
 export const capBand = (fontSize) => Math.round(fontSize * 0.72);
 
 /**
+ * The focus ring, as style, for the one part of a widget that has to draw
+ * its own — or `null`, to be spread away, when it does not.
+ *
+ * Every empty control says focus in its border (`borderFocus`), which is the
+ * `:focus` tier styling.md asks for: a colour change welcome however focus
+ * arrived. A **filled** one — a checked box, a selected radio — has spent
+ * that border on the fill and has no colour left to spend, so it says the
+ * same thing one ring further out instead.
+ *
+ * On the part, not the row. The row already draws core's ring, but that one
+ * is the *keyboard* tier — `:focus-visible`, so it arrives on Tab and not on
+ * a click — and it wraps the label with the well. This is the other tier,
+ * and the two stack the same way the border colour and that ring already do.
+ *
+ * `undefined` for the width when off, never `0`: a node with no
+ * `outlineWidth` of its own is one core can leave out of the widened damage
+ * rects entirely (`_outlineExtent`, src/nodes.js), and `0` is the documented
+ * way to opt *out* of a ring the node would otherwise get.
+ */
+export const focusRingStyle = (theme, on) =>
+  on
+    ? {
+        outlineWidth: theme.focusRingWidth,
+        outlineColor: theme.focusRing,
+        outlineOffset: theme.focusRingOffset,
+      }
+    : null;
+
+/**
  * The geometry of rows on a rounded sheet: how far a row sits inside the
  * sheet's edge, and how round its own corners are.
  *

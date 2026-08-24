@@ -120,6 +120,10 @@ function suspendable() {
               onBlur: () => state.blurs++,
               onFocus: () => state.focuses++,
             }),
+            // A press on a *field* lights a ring — it is about to take the
+            // keyboard, which is the one thing the click did not say — so the
+            // no-ring half of the restore needs something that is not one.
+            h('box', { name: 'plain', focusable: true, style: FIELD }),
           ),
         ),
         h(Suspender, { suspend }),
@@ -180,22 +184,44 @@ test('…and hands it back, ring and all, when the boundary resolves', async () 
   await root.unmount();
 });
 
-test('…and a field the user clicked comes back without one', async () => {
-  // The other half of "put the state back": a press lights no ring, so a
-  // reveal that lit one would be announcing focus the user never lost.
+test('…and a control the user clicked comes back without one', async () => {
+  // The other half of "put the state back": a press on something that is not
+  // a text field lights no ring, so a reveal that lit one would be announcing
+  // focus the user never lost.
   const { state, element } = suspendable();
   const { root, wnd, tree, events } = await mount(element);
   press(wnd, byName(tree, 'outside')); // off the autoFocus, ring and all
+  const plain = byName(tree, 'plain');
+  press(wnd, plain);
+  assert.equal(focusedName(events), 'plain', 'the press focused it');
+  assert.equal(plain.states[':focus-visible'], false, '…without a ring');
+
+  await flush(() => state.setSuspend(true));
+  await flush(() => state.setSuspend(false));
+
+  assert.equal(focusedName(events), 'plain');
+  assert.equal(plain.states[':focus-visible'], false, 'and still without one');
+
+  await root.unmount();
+});
+
+test('…and a field the user clicked comes back with the ring it had', async () => {
+  // A press on a field *does* light one (`_ringsOnPress`), so this is the
+  // same rule read the other way: what comes back is what was taken away,
+  // and the restore's ring is the field's own rather than a fresh decision.
+  const { state, element } = suspendable();
+  const { root, wnd, tree, events } = await mount(element);
+  press(wnd, byName(tree, 'outside'));
   const input = byName(tree, 'inside');
   press(wnd, input);
   assert.equal(focusedName(events), 'inside', 'the press focused it');
-  assert.equal(input.states[':focus-visible'], false, '…without a ring');
+  assert.equal(input.states[':focus-visible'], true, 'ring and all');
 
   await flush(() => state.setSuspend(true));
   await flush(() => state.setSuspend(false));
 
   assert.equal(focusedName(events), 'inside');
-  assert.equal(input.states[':focus-visible'], false, 'and still without one');
+  assert.equal(input.states[':focus-visible'], true, 'and still with one');
 
   await root.unmount();
 });

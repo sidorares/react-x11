@@ -579,7 +579,9 @@ back out of focus, whatever else it says.
 **A focused node shows a ring**, and how focus arrived decides whether it
 does. A press sets `:focus`; everything else — Tab, `autoFocus`,
 `node.focus()`, a modal handing focus back as it closes — also sets
-`:focus-visible`, and that is the state the ring is drawn on. It costs no
+`:focus-visible`, and that is the state the ring is drawn on. A press on a
+**text control** is the one press that sets both, because a field the
+keyboard is about to go to has to say so however focus got there. It costs no
 layout and needs no opt-in; see
 [styling.md](styling.md#the-focus-ring) for restyling it.
 

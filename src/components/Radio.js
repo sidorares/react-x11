@@ -4,7 +4,7 @@
 
 import React, { useContext, useEffect, useMemo, useRef } from 'react';
 import { changeEvent } from './change.js';
-import { labelContent, useControl, useTheme } from './theme.js';
+import { focusRingStyle, labelContent, useControl, useTheme } from './theme.js';
 import { XK_DOWN, XK_LEFT, XK_RIGHT, XK_UP } from './keys.js';
 
 const h = React.createElement;
@@ -109,16 +109,30 @@ export function Radio({ value, children, label, disabled = false }) {
           height: 16,
           borderRadius: 8,
           borderWidth: theme.borderWidth,
+          // Focus on the border, hover and press on the inside — the two
+          // channels Checkbox splits them into, and for the same reason: a
+          // click leaves the pointer on the control, so a focus colour hover
+          // can overwrite is one the pointer user never gets to see.
+          //
+          // A *selected* radio has spent its border on the fill, and the
+          // branch below it was unreachable — the one radio in a group that
+          // can be clicked without changing anything was also the only one
+          // with nothing to show for it. It gets the ring instead.
           borderColor: selected
             ? fill
-            : pressed || hover
-              ? theme.textMuted
-              : focused
-                ? theme.borderFocus
+            : focused
+              ? theme.borderFocus
+              : pressed || hover
+                ? theme.textMuted
                 : theme.border,
-          backgroundColor: pressed ? theme.surfaceActive : theme.surface,
+          backgroundColor: pressed
+            ? theme.surfaceActive
+            : hover
+              ? theme.surfaceHover
+              : theme.surface,
           alignItems: 'center',
           justifyContent: 'center',
+          ...focusRingStyle(theme, selected && focused),
         },
       },
       selected &&

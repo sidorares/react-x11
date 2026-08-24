@@ -262,6 +262,7 @@ const INVALIDATE_REASONS = new Set([
   'props', // a React commit changed what a node draws
   'style-state', // :hover/:focus/:active/:disabled restyle
   'shadow', // a boxShadow got smaller: where it *was* still owes a repaint
+  'outline', // …and the same for an outline a style swap took away
   'theme', // a theme/token change restyled a subtree
   'direction', // the reading direction moved: sides, glyph order, bar edge
   'animation', // a transition frame
@@ -1704,6 +1705,26 @@ export class Node {
           false,
           insetRect(this.paintBounds(), -shrank),
           'shadow',
+        );
+      }
+    }
+    // An outline that just got smaller — or went away — owes the same debt,
+    // and it is only ever owed here. Core's own ring rides `:focus-visible`,
+    // where `EventManager.focus` claims the region while the ring is still
+    // on; what arrives through a style swap is the `outlineWidth` escape
+    // hatch (see `_outline`) — an application outlining a node for a reason
+    // of its own, or a widget ringing one *part* of itself, the way
+    // `<Checkbox>` rings its checked well and drops the ring again on blur.
+    if (
+      displayed.outlineWidth !== this.style.outlineWidth ||
+      displayed.outlineOffset !== this.style.outlineOffset
+    ) {
+      const shrank = this._outlineExtent(displayed) - this._outlineExtent();
+      if (shrank > 0) {
+        this.root?.invalidate(
+          false,
+          insetRect(this.paintBounds(), -shrank),
+          'outline',
         );
       }
     }
@@ -3260,8 +3281,7 @@ export class Node {
    * costs nothing until it is asked for — which is once per focused node
    * per frame, not once per node per commit.
    */
-  _outline() {
-    const style = this.style;
+  _outline(style = this.style) {
     const explicit = style.outlineWidth !== undefined;
     if (!explicit && !this._focusableForRing()) return null;
     const theme = this.theme;
@@ -3287,10 +3307,10 @@ export class Node {
    * *erases* a ring is the one case where the state has already flipped
    * back, and `EventManager.focus` claims the region before it does.
    */
-  _outlineExtent() {
-    if (this.style.outlineWidth === undefined && !this.states[':focus-visible'])
+  _outlineExtent(style = this.style) {
+    if (style.outlineWidth === undefined && !this.states[':focus-visible'])
       return 0;
-    const outline = this._outline();
+    const outline = this._outline(style);
     return outline ? outline.width + Math.max(0, outline.offset) : 0;
   }
 

@@ -13,7 +13,12 @@ import { callHandler, reportHandlerError } from './errors.js';
 import { armDrag } from './dnd.js';
 import { desktopSettings } from './desktopsettings.js';
 import { noteInputTime } from './inputtime.js';
-import { hooks as a11yHooks, isFocusable, effectivelyVisible } from './a11y.js';
+import {
+  hooks as a11yHooks,
+  isFocusable,
+  isTextControl,
+  effectivelyVisible,
+} from './a11y.js';
 import { Composer, composeTableFor } from './compose.js';
 import { acceleratorKeysym } from './keyboard.js';
 import { MOD } from './keysyms.js';
@@ -1497,6 +1502,12 @@ export class EventManager {
    * handing focus back as it closes, `node.focus()` from an application —
    * lights one, because none of those tell the user where focus went.
    *
+   * With one exception, which is CSS's too: a **text control** clicked into
+   * lights a ring anyway (`_ringsOnPress`). What the pointer user knows is
+   * where they clicked, not that the next keystroke will land there, and a
+   * clicked field is about to swallow the keyboard — so the one thing the
+   * ring says that the click did not is exactly the thing worth saying.
+   *
    * `backwards` is only meaningful for `reason: 'key'`, and only one element
    * has ever needed it: XEmbed distinguishes a Tab arriving forwards from a
    * back-Tab, because that is what tells an embedded client whether to focus
@@ -1548,7 +1559,10 @@ export class EventManager {
       // and back onto the window that owns it.
       if (!this.keyboardFocused && !restoring) this.node.window?.focus?.();
       node.setStyleState(':focus', true);
-      node.setStyleState(':focus-visible', reason !== 'pointer');
+      node.setStyleState(
+        ':focus-visible',
+        reason !== 'pointer' || this._ringsOnPress(node),
+      );
       // …and nothing scrolls to meet it either: the node is coming back to
       // the arrangement it left, and this reveal's layout has not run, so a
       // scroll here would be computed from a rect that does not exist yet.
@@ -1562,6 +1576,26 @@ export class EventManager {
     }
     this._updateFocusWithin(node);
     a11yHooks.focus?.(old, node);
+  }
+
+  /**
+   * Whether a press lands `:focus-visible` on this node as well as `:focus`.
+   *
+   * The UA rule browsers settled on, and for the reason they settled on it:
+   * a control the keyboard is about to talk to has to show that it holds the
+   * keyboard, whichever way focus arrived. Clicking into a field puts the
+   * caret somewhere the user chose and then makes every keystroke go there —
+   * a state a button, a checkbox or a tab does not enter on a click, which
+   * is why those still stay dark until Tab.
+   *
+   * Asked as "does this element hold editable text", not as "is its kind
+   * `<textinput>`": `isTextControl` is the same predicate the AT-SPI
+   * EDITABLE state is built on (src/a11y.js), so `<textarea>` and a
+   * third-party editor reporting an editable text state answer yes on their
+   * own — the two routes that make a node take the keyboard cannot drift.
+   */
+  _ringsOnPress(node) {
+    return isTextControl(node);
   }
 
   /**

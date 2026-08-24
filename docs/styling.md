@@ -128,6 +128,12 @@ every click is noise, where a ring on Tab is the only cue a keyboard user
 has. Put focus rings in `:focus-visible` and colour changes that are welcome
 either way in `:focus`.
 
+The exception is CSS's too: a press on a **text control** — `<textinput>`,
+`<textarea>`, or a custom element reporting editable text — does set
+`:focus-visible`. What the click told the user is where the caret went, not
+that every keystroke from now on lands there, and that second fact is what
+the ring is for.
+
 `:focus-within` is focus on this node **or inside it** — CSS's, and the
 answer to "the row should light up while the field in it is being typed
 into", which is the one thing a node's own states cannot say. It is diffed
@@ -167,6 +173,8 @@ stays in React state.
 **Every focusable node draws one already**, on `:focus-visible`, with no
 styling at all — a bare `<box focusable>` included. It is not something an
 application opts into, because a keyboard user cannot opt into needing it.
+A text field gets it from a click as well as from Tab; everything else waits
+for the keyboard (see `:focus-visible` above).
 
 `outlineWidth`, `outlineColor` and `outlineOffset` override it, and they are
 paint properties like any other: animatable, legal in a state block, and
