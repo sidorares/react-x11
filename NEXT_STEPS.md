@@ -1130,40 +1130,44 @@ adapter" is exactly this change. Same treatment for `onSubmit`, whose
 declared signature is `(text: string, ev: unknown)` — the `unknown` is an
 admission.
 
-### 12.5 HiDPI — pick the mechanism before anything freezes
+### 12.5 HiDPI — DONE (#116, PR #378)
 
-There is no notion of a pixel scale anywhere in react-x11, ntk or the app
-(#116). `src/nodes.js` creates yoga nodes on the default Config
-(pointScaleFactor 1); `src/styles.js` passes `fontSize` straight through as
-a device-pixel size; nothing reads `Xft.dpi`, `GDK_SCALE`/`QT_SCALE_FACTOR`,
-or the RandR per-output mm/pixel ratio. **On a 4K panel at `Xft.dpi=192` —
-the default GNOME/KDE 2× setup — every widget and every glyph renders at
-exactly half the size of every GTK and Qt app on the same desktop.** That is
-not cosmetic; the app is unreadable, and it is the state on a large share of
-the machines people actually run.
+The problem, as it stood: there was no notion of a pixel scale anywhere in
+react-x11, ntk or the app. **On a 4K panel at 2× — the default GNOME/KDE
+setup — every widget and every glyph rendered at exactly half the size of
+every GTK and Qt app on the same desktop.** That is not cosmetic; the app is
+unreadable, and it was the state on a large share of the machines people
+actually run.
 
-Scale is a **root** concern, not a style concern, because it has to multiply
-layout, font sizes and the paint transform together. Three wiring points,
-all small: one `Yoga.Config` per root with `setPointScaleFactor(scale)`;
-multiply the resolved font pixel size in `src/styles.js`; and
-`ctx.scale(scale, scale)` once at the top of `WindowNode.flush`, with the
-`<window width/height>` props multiplied on the way to `createWindow`.
-`node.abs` and `getClientRects()` stay in **logical** units, so `anchorRect`
-and everything built on it need no change. Yoga's point scale is exactly the
-answer to the objection that a float scale breaks the integer dirty-rect
-math: layout stays logical, computed edges snap to physical pixels so
-borders stay crisp, and rounding damage rects outward at the paint boundary
-holds the invariant.
+Shipped, and [docs/scale.md](docs/scale.md) is the record: every length an
+app writes is a **logical pixel**, `createRoot({ scale: 'auto' })` is the
+default, and `useScale()` reports the factor. **The mechanism is not the one
+this section originally proposed**, and the difference is worth keeping:
 
-`'auto'` resolves the way GTK4 and Qt6 do: `GDK_SCALE`/`QT_SCALE_FACTOR` →
-`Xft.dpi` parsed out of the root window's `RESOURCE_MANAGER` property → the
-RandR primary output's `pixel_width / (mm_width / 25.4) / 96` rounded to the
-nearest 0.25 → 1. Plus `REACT_X11_SCALE` to override. Static at startup is
-an acceptable v1 — a mid-session DPI change is rare and we do not select
-root-window events today — but say so rather than leaving it to be
-discovered.
+- **Values are multiplied, not the context.** No `ctx.scale()` anywhere.
+  ntk's 2d context gates its server-side fast paths (`Render.FillRectangles`,
+  rounded rects, glyph runs) on an identity transform, and it sizes glyphs
+  from the font while only _positioning_ them through the transform — so a
+  frame-wide `ctx.scale(2,2)` would rasterize the whole UI as polygons and
+  move the text without growing it. Multiplying at the end of the style
+  funnel (`scaleResolvedStyle()` in `_syncStyle`) leaves paint code, damage
+  rects, the scroll blit and the paint cache working in integer device
+  pixels with the transforms they always had.
+- **No `pointScaleFactor` games.** Layout runs directly in device pixels;
+  yoga's ordinary whole-pixel rounding is what keeps a 1-logical-px border
+  crisp at 1.5×. Fractional scales work end to end.
+- **Logical/device is a boundary, not a coordinate system.** `node.abs` and
+  yoga's computed layout are device; the app-facing egresses divide
+  (`SyntheticEvent`, `getClientRects`, `onScroll`, `useScreens`…).
+- **The ladder is longer than proposed.** Environment → XSETTINGS →
+  `RESOURCE_MANAGER` → audited RandR millimetres → resolution class → 1,
+  because `Gdk/WindowScalingFactor: 1` and `Xft.dpi: 96` are what daemons
+  publish when nobody configured anything, and VM EDIDs invent millimetres
+  that land on 96dpi. See the header of `src/scale.js`.
+- **Per-monitor answers ride on `useScreens()`**; the root takes the primary
+  output's. Static at startup, as proposed, and said out loud in the docs.
 
-**Separately, and do not confuse the two:** the hardcoded component
+**Still open, and do not confuse the two:** the hardcoded component
 constants (`DefaultTheme.fontSize`, `paddingX`/`paddingY`, the Checkbox and
 Radio wells, `SLIDER_THUMB`, the Switch geometry) should move into the theme
 regardless, as `theme.controlSize`, `theme.thumbSize` and friends. That is a
