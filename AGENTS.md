@@ -603,11 +603,12 @@ found the hard way — a fake that answers a question the real one cannot yet
 answer hides the state the UI most needs to get right, and a fake that
 resolves instantly leaves nothing to assert about the state in between.
 
-**Say what does not work.** Where an example meets a real gap — no IME, no
-HiDPI scale model, no per-node container query — name it and link the issue
-rather than steering around it. That matches how `docs/` already handles
-compatibility ladders, and a reader who hits the same wall is better served by
-a sentence than by a silence.
+**Say what does not work.** Where an example meets a real gap — no IME
+([#272](https://github.com/sidorares/react-x11/issues/272)), no `opacity`, no
+per-node container query — name it and link the issue rather than steering
+around it. That matches how `docs/` already handles compatibility ladders, and
+a reader who hits the same wall is better served by a sentence than by a
+silence.
 
 **Check it on a real display.** This is the one that keeps being relearned.
 The headless harness renders with the font a test hands it, never the one

@@ -58,9 +58,15 @@ Each entry in `screens`:
 | `refreshRate`            | Hz to two decimals (`59.99`), or null                          |
 | `rotation`               | `0`, `90`, `180` or `270`                                      |
 | `outputs`                | every output on this monitor — two names means it is mirrored  |
+| `scale`                  | this monitor's device pixels per logical pixel                 |
 
 Re-renders when a monitor is plugged in or unplugged, when the arrangement
 changes, and when a panel appears, moves or auto-hides.
+
+The rects are in **logical pixels**, like every other length an app touches,
+and `scale` is the per-monitor answer the display-scale ladder arrived at —
+a retina lid and an office monitor genuinely differ. The root's own scale
+is the primary monitor's; see [scale.md](scale.md).
 
 ### The names arrive after the geometry
 
@@ -367,8 +373,3 @@ this renderer already speaks.
 do not log out yet". The X-native answer (XSMP) is effectively dead and the live
 one is logind. The shape worth having is probably not a system hook but a
 `useBeforeQuit()` that unifies it with `<window onCloseRequest>`.
-
-**Display scale.** On a HiDPI desktop every widget renders at half size, and
-fixing it means a scale that multiplies layout, font sizes and the paint
-transform together — a root concern rather than a hook. Tracked as
-[#116](https://github.com/sidorares/react-x11/issues/116).
