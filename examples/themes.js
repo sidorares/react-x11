@@ -59,9 +59,19 @@ const github = {
   },
 };
 
+// The macOS theme also names the platform's faces. On a Mac, fontconfig
+// resolves "System Font" to /System/Library/Fonts/SFNS.ttf — San Francisco,
+// the family fc-list shows as ".SF NS" — and the mono list to SF Mono.
+// Anywhere those are not installed the lists fall through to the generic,
+// so the theme stays runnable off-platform; it just stops being a lookalike.
+const sfText = '"System Font", "SF Pro Text", sans-serif';
+const sfMono = '".SF NS Mono", "SF Mono", monospace';
+
 /** macOS: softer greys, tighter type, the system blue. */
 const macos = {
   light: {
+    fontFamily: sfText,
+    monoFamily: sfMono,
     background: '#ececec',
     surface: '#ffffff',
     text: '#000000',
@@ -83,6 +93,8 @@ const macos = {
     paddingY: 9,
   },
   dark: {
+    fontFamily: sfText,
+    monoFamily: sfMono,
     background: '#1e1e1e',
     surface: '#3a3a3c',
     text: '#ffffff',
