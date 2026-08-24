@@ -25,15 +25,15 @@ and the display-list discipline the indirect backend demands.
 Which one a connection has decides what `onDraw` can do, because they are
 different APIs — not two spellings of one.
 
-|                | **direct**                                                                                 | **indirect**                                                       |
-| -------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| how it draws   | OpenGL ES 2 on the GPU; frames reach the server as dma-buf descriptors over DRI3 + Present | GL commands encoded into the X connection                          |
-| shaders        | **yes**, GLSL ES 1.00                                                                      | none; the protocol encodes no shader objects                       |
-| render targets | **yes** — framebuffer objects                                                              | none; the protocol encodes no framebuffer objects                  |
-| geometry       | vertex buffers on the GPU                                                                  | immediate mode compiled into display lists                         |
-| lighting       | per fragment                                                                               | per vertex                                                         |
-| cost per frame | one Present request                                                                        | matrices, material state and one `CallList` per mesh               |
-| where it runs  | a local connection to a Linux server with DRI3, plus ntk's optional `x11-dri` addon        | any server that allows indirect contexts, including over a network |
+|                | **direct**                                                                                                                                                                                                             | **indirect**                                                       |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| how it draws   | OpenGL ES 2 on the GPU, in two flavors: on Linux frames reach the server as dma-buf descriptors over DRI3 + Present, and on macOS/XQuartz the server exports the window's surface over Apple-DRI and CGL draws into it | GL commands encoded into the X connection                          |
+| shaders        | **yes**, GLSL ES 1.00                                                                                                                                                                                                  | none; the protocol encodes no shader objects                       |
+| render targets | **yes** — framebuffer objects                                                                                                                                                                                          | none; the protocol encodes no framebuffer objects                  |
+| geometry       | vertex buffers on the GPU                                                                                                                                                                                              | immediate mode compiled into display lists                         |
+| lighting       | per fragment                                                                                                                                                                                                           | per vertex                                                         |
+| cost per frame | one Present request                                                                                                                                                                                                    | matrices, material state and one `CallList` per mesh               |
+| where it runs  | a local connection, plus ntk's optional `x11-dri` addon: a Linux server with DRI3, or macOS/XQuartz with Apple-DRI (ntk 8.4.0)                                                                                         | any server that allows indirect contexts, including over a network |
 
 The default is indirect, because it is what react-x11 has always used. Turn
 the other on per app:
@@ -52,9 +52,17 @@ machines where direct works. `'direct'` and `'off'` are the strict forms, and
 NTK_GL_POLICY=direct npm start
 ```
 
+Which flavor a connection got is `app.glCapabilities().flavor` — `'dri3'` or
+`'appledri'`. Both spell the context the same way, so nothing above the
+policy has to branch on it; it is worth reading when a machine that should
+have direct does not.
+
 Everything about how the backend is chosen and why it might be unavailable —
 the `GLError` codes, `app.glCapabilities()`, the addon — is ntk's, and is
 documented in [ntk's context-gles.md](https://github.com/sidorares/ntk/blob/master/docs/context-gles.md).
+
+`npm run labs:direct-gl` is the shader path on a real display, and reports
+both the flavor and which backend actually drew.
 
 ## Raw GL through `onDraw`
 

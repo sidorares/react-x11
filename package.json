@@ -49,6 +49,7 @@
     "examples:foreign": "tsx examples/foreign.jsx",
     "examples:frame": "tsx examples/frame.jsx",
     "labs:text-baseline": "tsx examples/labs/text-baseline.jsx",
+    "labs:direct-gl": "tsx examples/labs/direct-gl.jsx",
     "examples:viewer3d": "tsx examples/viewer3d.jsx",
     "examples:transparent": "tsx examples/transparent.jsx",
     "examples:windows": "tsx examples/windows.jsx",
@@ -82,7 +83,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^8.3.1",
+    "ntk": "^8.4.0",
     "react-reconciler": "^0.33.0",
     "yoga-layout": "^3.2.1"
   },
@@ -90,10 +91,10 @@
     "dbus-native": "^0.15.1"
   },
   "peerDependencies": {
-    "react": "^19.0.0",
     "@babel/core": "^8.0.0",
     "@babel/plugin-transform-react-jsx": "^8.0.0",
     "hot-module-replacement": "^4.0.1",
+    "react": "^19.0.0",
     "react-refresh": "^0.18.0"
   },
   "peerDependenciesMeta": {
