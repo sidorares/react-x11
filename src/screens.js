@@ -401,9 +401,6 @@ function watchLayout(session) {
   const X = session.app.X;
   const root = X.display?.screen?.[0]?.root;
   if (root == null) return;
-  // PropertyChange on a window we do not own. Legal and shared — every
-  // panel-aware application on the desktop selects this same event.
-  X.ChangeWindowAttributes(root, { eventMask: PROPERTY_CHANGE_MASK }, () => {});
   session.onEvent((ev) => {
     if (session.stopped) return;
     if (ev.type !== PROPERTY_NOTIFY || ev.wid !== root) return;
@@ -411,6 +408,27 @@ function watchLayout(session) {
     relayout(session);
   });
   watchRandR(session);
+  // PropertyChange on a window we do not own. Legal and shared — every
+  // panel-aware application on the desktop selects this same event.
+  //
+  // Through ntk's root Window rather than as a raw ChangeWindowAttributes,
+  // because an X event mask is absolute per client: whoever writes last wins
+  // outright. ntk keeps selections additive by tracking the mask on a Window
+  // it caches per id, and adopting the root — which the shared-glyph
+  // directory does to hear MANAGER announcements — starts that tracked mask
+  // at zero and writes StructureNotify over whatever was there. A raw write
+  // is a value the next adopter silently overwrites, in either direction:
+  // reversed, it is a window manager's SubstructureRedirect that goes.
+  //
+  // Last in this function on purpose. `rootWindow()` constructs a Window,
+  // which can throw, and `beginScreens` calls this inside a bare catch — so
+  // ahead of the two registrations above, a throw here would take the
+  // work-area handler and the RandR watch with it rather than only the
+  // selection it belongs to.
+  session.app
+    .rootWindow()
+    .selectInput(PROPERTY_CHANGE_MASK)
+    .catch(() => {});
 }
 
 /** Re-read everything the layout is built from and publish once. */
