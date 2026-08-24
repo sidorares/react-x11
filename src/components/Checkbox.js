@@ -5,7 +5,7 @@
 import React from 'react';
 import { changeEvent } from './change.js';
 import { Icon } from './Icon.js';
-import { labelContent, useControl, useTheme } from './theme.js';
+import { focusRingStyle, labelContent, useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
 
@@ -52,18 +52,28 @@ export function Checkbox({
       : hover
         ? theme.accentHover
         : theme.accent;
-  // An empty well has no fill to step, so it shows the two states in two
-  // different places: hovering firms the ring up, and pressing greys the
-  // inside as well. Three looks, which is the point — a hover the press
-  // cannot be told apart from says nothing about the press.
+  // An empty well has no fill to step, so it shows its states in two
+  // different places: focus is a *colour* on the border, hover and press are
+  // a *step* of the inside. Three looks, which is the point — a hover the
+  // press cannot be told apart from says nothing about the press — and four
+  // with focus, because the two channels compose instead of overwriting.
+  //
+  // They used to share the border, where hover won, and that made the focus
+  // colour unreachable by the gesture that focuses by pointer: a click ends
+  // with the pointer sitting on the control it just focused, so the well was
+  // hover-grey for as long as the user was looking at it and only turned
+  // blue once they moved the mouse away.
   const empty = {
-    borderColor:
-      pressed || hover
+    borderColor: focused
+      ? theme.borderFocus
+      : pressed || hover
         ? theme.textMuted
-        : focused
-          ? theme.borderFocus
-          : theme.border,
-    backgroundColor: pressed ? theme.surfaceActive : theme.surface,
+        : theme.border,
+    backgroundColor: pressed
+      ? theme.surfaceActive
+      : hover
+        ? theme.surfaceHover
+        : theme.surface,
   };
   return h(
     'box',
@@ -91,6 +101,9 @@ export function Checkbox({
           backgroundColor: checked ? fill : empty.backgroundColor,
           alignItems: 'center',
           justifyContent: 'center',
+          // a checked well is filled with the accent, so the border tier
+          // above has nothing left to say — see {@link focusRingStyle}
+          ...focusRingStyle(theme, checked && focused),
         },
       },
       checked &&
