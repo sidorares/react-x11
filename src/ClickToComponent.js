@@ -11,14 +11,44 @@
 // original source — we only have to parse the stack text and skip the
 // frames inside React/the reconciler itself.
 import { spawn } from 'node:child_process';
+import { dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setClickToComponentHandler } from './events.js';
 import { selectInDevTools } from './DevToolsIntegration.js';
 
 const STACK_FRAME = /^\s*at\s+(?:(.+?)\s+\()?(.+?):(\d+):(\d+)\)?\s*$/;
 
+// The frames to walk past before the JSX call site itself: React captures
+// the Error inside `jsxDEV`/`createElement`, and an element created by this
+// renderer (or by node internals) is never what a click means. `SELF_DIR` is
+// whichever copy of react-x11 is running — the repo's own `src/` for the
+// examples and tests, an installed `node_modules/react-x11/src` for an app.
+//
+// Everything *else* in `node_modules` is deliberately not skipped here: a
+// frame inside an installed package is a real call site, it is just not one
+// in the application's source, and telling the two apart is what lets
+// `resolveOwnedLocation` climb to the owner that is. Skipping every
+// `node_modules` frame instead would walk straight past the library
+// component and land on whatever application frame happens to be deeper in
+// the render stack — usually the `render()` call at startup, which looks
+// like an answer and isn't.
+const REACT_RUNTIME =
+  /[\\/]node_modules[\\/](react|react-dom|react-reconciler|scheduler)[\\/]/;
+const SELF_DIR = dirname(fileURLToPath(import.meta.url)) + sep;
+
+function isInternalFrame(file) {
+  return (
+    file.startsWith('node:') ||
+    file === '<anonymous>' ||
+    file.startsWith(SELF_DIR) ||
+    REACT_RUNTIME.test(file)
+  );
+}
+
 /** The first stack frame outside React/the reconciler/node internals — the
- * user's own JSX call site for whatever element this Error was captured at.
+ * JSX call site for whatever element this Error was captured at, wherever it
+ * was written. `installed` marks a call site that lives inside an installed
+ * package rather than in the application's own source.
  * Exported because `react-x11/test`'s `sourceOf` answers the same question
  * for a test that a click answers for an editor. */
 export function resolveLocation(debugStack) {
@@ -28,24 +58,52 @@ export function resolveLocation(debugStack) {
     const match = line.match(STACK_FRAME);
     if (!match) continue;
     const [, functionName, rawFile, lineStr, columnStr] = match;
-    if (
-      rawFile.includes('/node_modules/') ||
-      rawFile.startsWith('node:') ||
-      rawFile === '<anonymous>'
-    ) {
-      continue;
-    }
     const file = rawFile.startsWith('file://')
       ? fileURLToPath(rawFile)
       : rawFile;
+    if (isInternalFrame(file)) continue;
     return {
       functionName,
       file,
       line: Number(lineStr),
       column: Number(columnStr),
+      installed: file.includes(`${sep}node_modules${sep}`),
     };
   }
   return null;
+}
+
+/** The nearest source location a click can mean: the clicked element's own
+ * JSX call site when the application wrote it, and otherwise the first owner
+ * up the chain that it did write. An element rendered by an installed
+ * component — a design system's `<Toolbar>`, a chart library's internals —
+ * has its call site inside that package; what the user meant by clicking it
+ * is the `<Toolbar ... />` line in their own file that put it on screen.
+ *
+ * Returns `{ fiber, location, depth }`, `depth` being how many owners up the
+ * location came from (0 = the clicked element's own). Falls back to the
+ * nearest installed call site when nothing in the chain is application
+ * source — opening a package's own file beats refusing to open anything —
+ * and null only when React has no debug info at all. */
+export function resolveOwnedLocation(fiber) {
+  let fallback = null;
+  let depth = 0;
+  for (let owner = fiber; owner; owner = owner._debugOwner, depth++) {
+    const location = resolveLocation(owner._debugStack);
+    if (!location) continue;
+    if (!location.installed) return { fiber: owner, location, depth };
+    fallback ??= { fiber: owner, location, depth };
+  }
+  return fallback;
+}
+
+/** What the clicked thing *is* — `<box>` for a host node, the component's
+ * name for a composite one. (`componentName` below answers a different
+ * question: who *wrote* it.) */
+function elementLabel(fiber) {
+  const type = fiber.type;
+  if (typeof type === 'string') return `<${type}>`;
+  return type?.displayName || type?.name || '(anonymous)';
 }
 
 function componentName(fiber) {
@@ -119,11 +177,37 @@ function openInEditor({ file, line, column }) {
     bin = OPEN_URI_COMMAND;
     args = [editorUri(scheme, file, line, column)];
   }
-  const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
+  // stderr is kept (rather than the whole stdio ignored) for one reason:
+  // `open`/`xdg-open` exit non-zero and print *there* when nothing claims
+  // the scheme — an editor that isn't installed, or one whose URL handler
+  // was never registered. Swallowing that is what makes click-to-component
+  // look like it only logs: the location resolves, the console line prints,
+  // and the editor silently never opens.
+  const child = spawn(bin, args, {
+    detached: true,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let stderr = '';
+  // ...and unref'd, so keeping it does not keep the process alive: a pipe is
+  // a ref'd handle, and an editor that outlives the app it was launched from
+  // is the normal case, not a reason to hold the event loop open.
+  child.stderr.unref();
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
   child.on('error', (err) => {
     console.warn(
       `react-x11: click-to-component could not launch "${bin}" (${err.code ?? err.message}). ` +
         'Set REACT_X11_EDITOR to your editor CLI (cursor, code, code-insiders, windsurf, vim, nvim).',
+    );
+  });
+  child.on('exit', (code) => {
+    if (!code) return;
+    console.warn(
+      `react-x11: click-to-component — \`${bin} ${args.join(' ')}\` exited ${code}. ` +
+        (stderr.trim() ? `${stderr.trim()} ` : '') +
+        `Set REACT_X11_EDITOR to the editor you actually use (currently "${name}"; ` +
+        'cursor, code, code-insiders, windsurf, vim, nvim, or any registered URI scheme).',
     );
   });
   child.unref();
@@ -146,17 +230,29 @@ function handleClick(node, native) {
     );
     return;
   }
-  const location = resolveLocation(fiber._debugStack);
-  if (!location) {
+  const resolved = resolveOwnedLocation(fiber);
+  if (!resolved) {
     console.warn(
-      'react-x11: click-to-component — no source location found. This needs ' +
-        'React running in development mode (fiber._debugStack).',
+      'react-x11: click-to-component — no source location found for this ' +
+        'element or any of its owners. This needs React running in ' +
+        'development mode (fiber._debugStack).',
     );
     return;
   }
+  const { fiber: sourceFiber, location, depth } = resolved;
+  // What was clicked is not always what has a source: say so rather than
+  // silently opening a file the click doesn't obviously correspond to.
+  const climbed =
+    depth > 0
+      ? ` (${depth} owner${depth > 1 ? 's' : ''} up from the clicked ` +
+        `${elementLabel(fiber)})`
+      : '';
+  const installed = location.installed ? ' — inside an installed package' : '';
   console.log(
-    `[click-to-component] ${componentName(fiber)} → ` +
-      `${location.file}:${location.line}:${location.column}`,
+    `[click-to-component] ${componentName(sourceFiber)} → ` +
+      `${location.file}:${location.line}:${location.column}` +
+      climbed +
+      installed,
   );
   if (native?.buttons & 1) {
     // Alt+Shift+Click

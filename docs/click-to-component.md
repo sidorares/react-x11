@@ -25,6 +25,24 @@ Alt+Shift+Click also logs the full ownership chain (who rendered who, up to
 the root) to the console — handy when the immediate owner is a shared
 wrapper rather than the component you actually meant.
 
+## Elements you didn't write
+
+An element rendered by an installed component — a design system's
+`<Toolbar>`, a chart library's internals — has its JSX call site inside that
+package, not in your code. Clicking one resolves to the nearest owner up the
+chain that _is_ your source: the `<Toolbar ... />` line in your file that put
+it on screen. The console line says how far it had to climb, so a location
+that doesn't match what you clicked is never a surprise:
+
+```
+[click-to-component] App → src/ui/App.tsx:432:7 (1 owner up from the clicked <box>)
+```
+
+When no owner in the chain is application source (a screen rendered entirely
+by a package), the package's own file is opened instead and the line is
+marked `— inside an installed package`. Only a tree with no React debug info
+at all resolves to nothing.
+
 With React DevTools attached as well (`REACT_X11_DEVTOOLS=1`, see
 [devtools.md](devtools.md)), the same click also selects that element in the
 DevTools tree — one click to the source _and_ to its props. Nothing changes
@@ -51,12 +69,22 @@ babel/jsx-source plugin, no build-time instrumentation:
 - Node's `--enable-source-maps` (already on for both the plain `tsx`
   examples and `examples:tasks:hot`'s loader) has rewritten that Error's
   stack to original source before we ever see it, so resolving a location
-  is just parsing stack-trace text and skipping frames inside
-  `node_modules` — no source-map library required (this is the one place
+  is just parsing stack-trace text and skipping the frames React and this
+  renderer add on top of the call site (`react`, `react-reconciler`,
+  `scheduler`, `react-x11`'s own `src/`) — no source-map library required
+  (this is the one place
   the design diverges from a browser DOM version of the same idea: a
   browser doesn't remap `Error.stack` for you, so a tool like
   [show-component](https://github.com/sidorares/show-component) has to
   resolve source maps itself at runtime).
+
+Frames from _other_ packages are deliberately kept rather than skipped: a
+call site inside an installed component is a real location, it just isn't
+one in your source, and telling those apart is what lets the resolver climb
+the `_debugOwner` chain to the line that is. Skipping every `node_modules`
+frame instead walks past the library component entirely and lands on
+whichever frame of yours happens to be deeper in the render stack — usually
+the `render()` call at startup, which looks like an answer and isn't.
 
 Alt+Click is recognized in `EventManager._onMouseDown`
 (`src/events.js`) — `native.buttons & MOD.Alt` is X11's `Mod1Mask` bit, the
@@ -79,6 +107,11 @@ no URI scheme to navigate, so those are still spawned directly with a
 
 - Needs React running in development mode (fiber debug fields are stripped
   in production builds).
+- The editor is launched detached, so a failure is only visible as a
+  warning: an editor whose URI scheme nothing claims (`REACT_X11_EDITOR`
+  naming an editor that isn't installed) prints
+  `click-to-component — \`open cursor://...\` exited 1` next to the
+  resolved location rather than silently doing nothing.
 - A node's `_reactFiber` is only refreshed on mount, not on every update —
   usually harmless (the JSX call site of a given element rarely moves
   between renders of the same tree shape), but a node that was
