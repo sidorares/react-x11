@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.3](https://github.com/sidorares/react-x11/compare/v2.1.2...v2.1.3) (2026-08-25)
+
+
+### Bug Fixes
+
+* **click-to-component:** climb to the owner that wrote the element ([#408](https://github.com/sidorares/react-x11/issues/408)) ([898df76](https://github.com/sidorares/react-x11/commit/898df7636d968e5219e33e92d756775408b02abb))
+
+
+### Performance Improvements
+
+* **scroll:** a pure scroll frame no longer re-walks the pane's content ([#406](https://github.com/sidorares/react-x11/issues/406)) ([3f14e53](https://github.com/sidorares/react-x11/commit/3f14e5318e2fd934c7a11d1de3d7ed2759c22c60)), closes [#405](https://github.com/sidorares/react-x11/issues/405)
+
 ## [2.1.2](https://github.com/sidorares/react-x11/compare/v2.1.1...v2.1.2) (2026-08-25)
 
 
