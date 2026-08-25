@@ -1441,6 +1441,13 @@ function shallowEqual(a, b) {
   return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
 }
 
+/** The half of `Node._joinsYoga` that is about the child alone — a real X
+ * window (`<window>`, `<popup>`) or a node built without a box at all (a text
+ * chunk) sits outside whatever parent it lands in. This is what
+ * `_nonYogaKids` counts, so the count stays right for a parent that has no
+ * box of its own either. */
+const outsideYoga = (child) => !child.yoga || child.isWindow;
+
 export class Node {
   get ownerDocument() {
     return DEVTOOLS_FAKE_DOCUMENT;
@@ -1465,6 +1472,20 @@ export class Node {
     this.app = app;
     this.parent = null;
     this.children = [];
+    // Where this node sits in `parent.children`, and how many of *this*
+    // node's children sit outside its yoga tree. Both are bookkeeping that
+    // turns the scans `insertBefore` used to do over the whole child list
+    // into constant work, which is what stops a commit that mounts a
+    // virtualized list's window from costing O(rows x pane) (issue #397).
+    // The index is a hint — `_indexOfChild` proves it before using it — and
+    // the count is exact, maintained by the three places `children` is
+    // spliced.
+    this._childIndex = -1;
+    this._nonYogaKids = 0;
+    // The pre-mutation bounds this frame already claimed for this node, so
+    // that a second mutation reuses the rect instead of walking the subtree
+    // again. Lives exactly as long as membership in `root._reflowed`.
+    this._reflowBefore = null;
     this.root = null; // owning WindowNode once attached
     this.hidden = false;
     this.destroyed = false;
@@ -2256,6 +2277,12 @@ export class Node {
   /** Number of yoga-bearing children before `index` (window children and
    * text spans/chunks do not join the parent's yoga tree). */
   _yogaIndexAt(index) {
+    // A list of ordinary boxes — a scroll pane's rows, which is the list
+    // this is asked about a hundred times in one commit — has every child in
+    // the yoga tree, and then the yoga index *is* the child index. Counting
+    // the exceptions as they arrive turns that answer into a read instead of
+    // a walk of every sibling in front of the new row (issue #397).
+    if (this._nonYogaKids === 0) return index;
     let n = 0;
     for (let i = 0; i < index; i++) {
       if (this._joinsYoga(this.children[i])) n++;
@@ -2265,6 +2292,24 @@ export class Node {
 
   _joinsYoga(child) {
     return Boolean(this.yoga && child.yoga && !child.isWindow);
+  }
+
+  /**
+   * Where `child` sits in `this.children`.
+   *
+   * The cached slot is checked rather than trusted: a node appears in the
+   * list once, so `children[i] === child` *is* the proof that `i` is its
+   * index, and a cache that has gone stale costs a scan rather than a wrong
+   * answer. `_spliceChild` refreshes the two slots it knows — the child it
+   * placed and the sibling it pushed along — which is what keeps a run of
+   * inserts in front of the same trailing sibling (every virtualized list's
+   * commit) off the scan entirely.
+   */
+  _indexOfChild(child) {
+    if (this.children[child._childIndex] === child) return child._childIndex;
+    const i = this.children.indexOf(child);
+    child._childIndex = i;
+    return i;
   }
 
   /**
@@ -2354,12 +2399,22 @@ export class Node {
    * by calling insertBefore with a child that is *already* mounted here, and
    * without the removal it would appear twice. Returns the new index. */
   _spliceChild(child, beforeChild) {
-    const from = this.children.indexOf(child);
+    // `parent === this` is the cheap form of "already in this list" — the
+    // two are set and cleared together — so a child arriving for the first
+    // time, which is every node of a freshly mounted subtree, pays no scan
+    // at all for the question.
+    const from = child.parent === this ? this._indexOfChild(child) : -1;
     if (from !== -1) this.children.splice(from, 1);
-    const before =
-      beforeChild == null ? -1 : this.children.indexOf(beforeChild);
+    else if (outsideYoga(child)) this._nonYogaKids++;
+    const before = beforeChild == null ? -1 : this._indexOfChild(beforeChild);
     const index = before === -1 ? this.children.length : before;
     this.children.splice(index, 0, child);
+    // The two slots this splice knows. Every other cached index at or after
+    // `index` has shifted by one and will be caught by the check in
+    // `_indexOfChild`; these two are the ones a run of inserts in front of
+    // the same sibling asks about again on the very next call.
+    child._childIndex = index;
+    if (beforeChild != null) beforeChild._childIndex = index + 1;
     return index;
   }
 
@@ -2408,10 +2463,10 @@ export class Node {
     }
     // captured before the child joins, so it covers the arrangement that is
     // about to be replaced (see _childListChanged)
-    const before = this.paintBounds();
+    const before = this._childListBefore();
     // a move has to leave the yoga tree too — yoga aborts on insertChild of
     // a node that still has a parent
-    if (this.children.includes(child) && this._joinsYoga(child)) {
+    if (child.parent === this && this._joinsYoga(child)) {
       this.yoga.removeChild(child.yoga);
     }
     const index = this._spliceChild(child, beforeChild);
@@ -2427,6 +2482,36 @@ export class Node {
     this._textContentChanged();
     this._childListChanged(before);
     a11yHooks.attached?.(this, child);
+  }
+
+  /**
+   * This node's paint bounds from before a child-list mutation — the `before`
+   * half of `_childListChanged`'s protocol, captured while a departing child
+   * is still attached.
+   *
+   * Walked once per node per frame rather than once per mutation. A commit
+   * that mounts a virtualized list's window inserts a hundred rows into one
+   * pane, one `insertBefore` at a time, and a walk of the whole pane per row
+   * is what made that commit O(rows x pane) (issue #397).
+   *
+   * Reusing the first walk's answer is not an approximation. Nothing is laid
+   * out or painted between two mutations in the same frame, so every child
+   * still carries the rect it was last painted at, and a child that leaves
+   * later in the frame was in the list — and so inside the rect — when the
+   * first walk ran. `root._reflowed` is the marker for "this frame already
+   * has one", which is exactly its lifetime: joined at the first claim,
+   * cleared by `flush()`.
+   */
+  _childListBefore() {
+    const root = this.root;
+    // A subtree still being built off-tree claims nothing — this is the
+    // `appendInitialChild` path, which is most of a mount, and where the
+    // walk used to be thrown away by `_childListChanged`'s `!root` return.
+    if (!root) return null;
+    if (root._reflowed.has(this) && this._reflowBefore) {
+      return this._reflowBefore;
+    }
+    return (this._reflowBefore = this.paintBounds());
   }
 
   /**
@@ -2453,15 +2538,16 @@ export class Node {
   }
 
   removeChild(child) {
-    const index = this.children.indexOf(child);
+    const index = this._indexOfChild(child);
     if (index === -1) return;
     // told while the child is still wired, so the bridge can compute the
     // index the AT will see the removal at
     a11yHooks.detach?.(this, child);
     // captured while the child is still attached, so it covers the rect the
     // child is about to stop occupying
-    const before = this.paintBounds();
+    const before = this._childListBefore();
     this.children.splice(index, 1);
+    if (outsideYoga(child)) this._nonYogaKids--;
     if (this._joinsYoga(child)) {
       this.yoga.removeChild(child.yoga);
     }
@@ -3199,7 +3285,10 @@ export class Node {
   _invalidateLayout(reason) {
     const root = this.root;
     if (!root) return;
-    root.invalidate(true, this.paintBounds(), reason);
+    // Same walk, same frame, same answer — see `_childListBefore`, whose
+    // record this shares so that a reflow and a child-list change on one
+    // node in one frame walk the subtree once between them.
+    root.invalidate(true, this._childListBefore(), reason);
     root._reflowed.add(this);
   }
 
@@ -9488,8 +9577,11 @@ export class WindowNode extends Scrollable(Node) {
 
   removeChild(child) {
     if (child.isWindow) {
-      const index = this.children.indexOf(child);
-      if (index !== -1) this.children.splice(index, 1);
+      const index = this._indexOfChild(child);
+      if (index !== -1) {
+        this.children.splice(index, 1);
+        this._nonYogaKids--;
+      }
       const id = child.window?.id;
       child.parent = null;
       child.destroySubtree();
@@ -10091,6 +10183,8 @@ export class WindowNode extends Scrollable(Node) {
       // replaced it. Claimed after layout because an inserted child has no
       // rect before it.
       for (const node of this._reflowed) {
+        // …and the pre-mutation walk this frame reused goes with it
+        node._reflowBefore = null;
         if (!node.destroyed)
           this._damage =
             this._damage === FULL_DAMAGE
@@ -10099,6 +10193,7 @@ export class WindowNode extends Scrollable(Node) {
       }
       this._reflowed.clear();
     } else if (this._reflowed.size) {
+      for (const node of this._reflowed) node._reflowBefore = null;
       this._reflowed.clear();
     }
     // any node this pass laid out may be what an open popup is anchored to
