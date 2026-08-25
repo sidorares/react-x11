@@ -210,16 +210,28 @@ test('the bar item is the first link in the trail', async () => {
   const item = wnd._reactX11Node.children[0].children[0];
   const theme = list.theme;
 
-  assert.equal(item.style.borderRadius, RADIUS_ROW, 'the same pill');
+  // The lit area is a child of the item rather than the item's own
+  // background, because it is wider than the item: it reaches past both
+  // edges into the neighbouring titles' halves of the strip, which is where
+  // a native bar's highlight ends. The item boxes still tile, so the pointer
+  // belongs to exactly one title everywhere along the bar.
+  const pill = () => item.children[0];
+  assert.equal(pill().style.borderRadius, RADIUS_ROW, 'the same pill');
+  assert.ok(pill().style.left < 0, 'reaches past the item it belongs to');
   assert.equal(
-    item.style.backgroundColor,
+    pill().style.left,
+    pill().style.right,
+    'by the same amount on both sides',
+  );
+  assert.equal(
+    pill().style.backgroundColor,
     theme.hoverBackground,
     'lit while its menu is open with nothing chosen in it',
   );
 
   await hoverRow(menu, 0);
   assert.equal(
-    item.style.backgroundColor,
+    pill().style.backgroundColor,
     theme.surfaceActive,
     'and quiet once a row down there takes the selection over',
   );
