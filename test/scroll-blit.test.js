@@ -394,7 +394,12 @@ test('the scrolled thumb is repainted at both its old and new place', async () =
 const ROW = 40;
 const ROWS = 1000;
 
-function VirtualList({ scrollRef, height }) {
+const LITERAL_ROWS = {
+  row: (i) => (i % 2 ? '#ffffff' : '#dbe4ee'),
+  marker: (hot) => (hot ? '#c03030' : '#8fa8c8'),
+};
+
+function VirtualList({ scrollRef, height, colors = LITERAL_ROWS }) {
   const [top, setTop] = React.useState(0);
   const first = Math.floor(top / ROW);
   const last = Math.min(ROWS, first + Math.ceil(height / ROW) + 2);
@@ -409,7 +414,7 @@ function VirtualList({ scrollRef, height }) {
             height: ROW,
             flexShrink: 0,
             padding: 8,
-            backgroundColor: i % 2 ? '#ffffff' : '#dbe4ee',
+            backgroundColor: colors.row(i),
           },
         },
         // A marker that follows the slice rather than the row: two rows in
@@ -420,7 +425,7 @@ function VirtualList({ scrollRef, height }) {
           style: {
             width: 24,
             height: 24,
-            backgroundColor: i === first + 3 ? '#c03030' : '#8fa8c8',
+            backgroundColor: colors.marker(i === first + 3),
           },
         }),
       ),
@@ -485,6 +490,59 @@ test('a virtualized list keeps the fast path through a wheel flick (#398)', asyn
     worst < 400 * 400 * 0.25,
     `worst frame repainted ${worst}px² of 160000 — the strip and the ` +
       'entering rows, not the viewport',
+  );
+  await x11Root.unmount();
+});
+
+test('token-styled rows keep the fast path too (issue #402)', async () => {
+  // The same flick with the rows' colours arriving through the palette
+  // instead of being written out — which is what docs/styling.md tells an
+  // app to do, and what the components stress tree does. Mounting a node
+  // whose style mentions a `$token` used to claim full-window damage from
+  // the theme walk, so a re-slice degraded every frame from the second on
+  // and the ledger never saw an eligible one.
+  const THEME = {
+    rowA: '#ffffff',
+    rowB: '#dbe4ee',
+    hot: '#c03030',
+    cold: '#8fa8c8',
+  };
+  const TOKEN_ROWS = {
+    row: (i) => (i % 2 ? '$rowA' : '$rowB'),
+    marker: (hot) => (hot ? '$hot' : '$cold'),
+  };
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const ref = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 400, height: 400, theme: THEME },
+      h(VirtualList, { scrollRef: ref, height: 400, colors: TOKEN_ROWS }),
+    ),
+  );
+  const wnd = app.windows[0];
+  for (let i = 0; i < 3; i++) await tick();
+
+  let blitted = 0;
+  const notches = 12;
+  for (let i = 0; i < notches; i++) {
+    wnd.calls.length = 0;
+    spinWheel(wnd, 100, 100, { deltaY: 1 });
+    await tick();
+    if (blits(wnd).length) blitted += 1;
+  }
+  assert.strictEqual(
+    blitted,
+    notches,
+    `only ${blitted}/${notches} notches blitted — following the palette ` +
+      'must not cost the fast path',
+  );
+  // and the rows really are the palette's colours, not stripped tokens
+  const row = ref.current.children[1];
+  assert.ok(
+    [THEME.rowA, THEME.rowB].includes(row.style.backgroundColor),
+    `row resolved to ${row.style.backgroundColor}`,
   );
   await x11Root.unmount();
 });

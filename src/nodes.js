@@ -2244,8 +2244,19 @@ export class Node {
   }
 
   /** The theme above or on this node changed: drop the caches and restyle
-   * the subtree, since a token can appear at any depth. */
-  _themeChanged() {
+   * the subtree, since a token can appear at any depth.
+   *
+   * `mounting` is `insertBefore` attaching a subtree that has never been in
+   * the tree: the walk still resolves every token — the nodes can see their
+   * ancestors now — but it claims no damage (issue #402). A node that has
+   * never painted has no stale pixels to cover, and the rect it is about to
+   * occupy is claimed by the child-list/layout-diff protocol like any other
+   * inserted child's; the unbounded claims below would turn every commit
+   * that mounts a token-styled node into a full-window repaint — which is
+   * every re-slice of a virtualized list whose rows follow the palette. A
+   * live theme *swap* is the other caller and keeps them: it moves pixels
+   * that are already on screen, anywhere in the subtree. */
+  _themeChanged(mounting = false) {
     // This walk visits every node itself, so the per-node re-resolution below
     // is enough — a style swap it causes must not start a second walk of the
     // same subtree from halfway down.
@@ -2269,19 +2280,23 @@ export class Node {
         if (localTextStyleChanged(this.style, before)) {
           this._textContentChanged();
         }
-        this.root?.invalidate(true, null, 'theme');
+        if (!mounting) this.root?.invalidate(true, null, 'theme');
       }
       // The palette is the floor under the cascade, so a theme swap moves the
       // resolved style of every node that named none of its own — and none of
       // that is in a style object, so nothing above would have noticed. A
       // swap that only changes `fontFamily` is the case that made this worth
       // having: nothing else about the node changes, and a cached layout
-      // carries the face it was shaped with.
-      if (this._retext() !== 0) this.root?.invalidate(true, null, 'theme');
+      // carries the face it was shaped with. `_retext` runs on a mount too —
+      // its own claims are bounded — but cannot answer non-zero there: a
+      // node that was never attached has never resolved a text style.
+      if (this._retext() !== 0 && !mounting) {
+        this.root?.invalidate(true, null, 'theme');
+      }
       if (wasDirection !== undefined && this.direction !== wasDirection) {
         this._directionMoved();
       }
-      for (const child of this.children) child._themeChanged();
+      for (const child of this.children) child._themeChanged(mounting);
     } finally {
       inThemeWalk--;
     }
@@ -2447,9 +2462,10 @@ export class Node {
       // popups live anywhere in the JSX tree but are independent
       // override-redirect windows: bookkeeping only, no yoga, no paint —
       // but they do inherit the theme of where they are written
+      const mounting = child.parent == null;
       this._spliceChild(child, beforeChild);
       child.parent = this;
-      if (this.theme || child.props.theme) child._themeChanged();
+      if (this.theme || child.props.theme) child._themeChanged(mounting);
       a11yHooks.attached?.(this, child);
       return;
     }
@@ -2495,6 +2511,10 @@ export class Node {
     if (child.parent === this && this._joinsYoga(child)) {
       this.yoga.removeChild(child.yoga);
     }
+    // no parent means never attached: this insert is a mount, and the theme
+    // walk resolves without claiming — a keyed reorder arrives here too, with
+    // its parent still set, and that one keeps the claims (issue #402)
+    const mounting = child.parent == null;
     const index = this._spliceChild(child, beforeChild);
     child.parent = this;
     if (this._joinsYoga(child)) {
@@ -2504,7 +2524,7 @@ export class Node {
     child._registerSizeQueries();
     // it can see its ancestors now, so any token in its style can resolve.
     // With no theme anywhere there is nothing to resolve and nothing to walk
-    if (this.theme || child.props.theme) child._themeChanged();
+    if (this.theme || child.props.theme) child._themeChanged(mounting);
     this._textContentChanged();
     this._childListChanged(before);
     a11yHooks.attached?.(this, child);
@@ -9743,6 +9763,7 @@ export class WindowNode extends Scrollable(Node) {
       return;
     }
     if (child.isWindow) {
+      const mounting = child.parent == null;
       this._spliceChild(child, beforeChild);
       child.parent = this;
       // Initial children are realized when this window realizes; a child
@@ -9754,7 +9775,7 @@ export class WindowNode extends Scrollable(Node) {
         child.realize(this.window);
         if (child.window) this._xStack.push(child.window.id);
       }
-      if (this.theme || child.props.theme) child._themeChanged();
+      if (this.theme || child.props.theme) child._themeChanged(mounting);
       // React reorders a keyed list with one insertBefore per moved child;
       // restacking once at the end of the commit skips the intermediate
       // orders, which nobody ever sees.
