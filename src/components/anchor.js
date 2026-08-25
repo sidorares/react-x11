@@ -165,18 +165,27 @@ export function measureLabel(node, text, style) {
   // exactly the kind of error that turns into an ellipsis on the longest
   // label in the menu (src/scale.js).
   const s = node?.scale ?? 1;
+  // The face **this node inherits**, not the literal `sans-serif` at whatever
+  // the defaults are: the labels these popups are sized around name no type
+  // of their own, so the one they are drawn in is the one that cascades down
+  // to them. Measuring in a different face is measuring the wrong label — a
+  // menu sized in sans-serif for a row that paints in a wider mono is a menu
+  // whose own options wrap.
+  //
+  // Which is every property that changes a glyph's advance, not the family
+  // alone. `fontVariationSettings` is the one that bites: a tree that sets
+  // `{ opsz: 17 }` on its window — the text cut of a variable face, wider
+  // than the display cut most files default to — draws every row in it and
+  // used to measure none, and the popup came out narrow enough to wrap its
+  // own labels. An explicit `style` still wins, since a caller that names a
+  // face is measuring something it is about to draw in that face.
+  const inherited = node?.inheritedTextStyle;
   const layout = fonts.layout(String(text), {
-    // The face **this node inherits**, not the literal `sans-serif`: the
-    // labels these popups are sized around name no family of their own, so
-    // the one they are drawn in is the palette's. Measuring in a different
-    // face is measuring the wrong label — a menu sized in sans-serif for a
-    // row that paints in a wider mono is a menu whose own options wrap.
-    family: style?.family ?? node?.inheritedTextStyle?.family ?? 'sans-serif',
+    family: style?.family ?? inherited?.family ?? 'sans-serif',
     size: size * s,
-    weight: style?.weight ?? 'normal',
-    // dropping this would measure a different face from the one drawn, and
-    // the popup sized here would be the wrong width for its own label
-    variations: style?.variations,
+    weight: style?.weight ?? inherited?.weight ?? 'normal',
+    style: style?.style ?? inherited?.style,
+    variations: style?.variations ?? inherited?.variations,
   });
   return { width: layout.width / s, height: layout.height / s };
 }
