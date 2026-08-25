@@ -983,15 +983,20 @@ somewhere to go is a tab stop, one that fits is not — and assigning over the
 getter throws. Override the getter if your element is focusable for a reason
 of its own.
 
-`measureScrollContent` is called once per layout pass, from `absolutize`, so
-it may read layout geometry, but it must not paint or invalidate. It has to
-return finite numbers: a `NaN` extent would otherwise become a `NaN` offset
-and a subtree laid out at `NaN`, so returning anything else throws naming the
-element, exactly as `measureContent` does.
+`measureScrollContent` is called at most once per layout pass, from
+`absolutize`, so it may read layout geometry, but it must not paint or
+invalidate. It has to return finite numbers: a `NaN` extent would otherwise
+become a `NaN` offset and a subtree laid out at `NaN`, so returning anything
+else throws naming the element, exactly as `measureContent` does. The answer
+is cached across passes that laid nothing inside the pane out again — a pass
+that merely scrolled reuses it, since a scroll cannot change how far the
+content reaches.
 
 When the drawing changes its own extent — a line was typed, rows arrived —
 say so the way any other layout change is said, with
-`this.invalidate(true, this, 'scroll')`; the next pass asks again.
+`this.invalidate(true, this, 'scroll')`; the next pass asks again. That call
+is also what re-arms the measurement above: content that grows silently and
+never invalidates would scroll against the stale extent.
 
 #### Scrolling the pixels, not just the offset
 
