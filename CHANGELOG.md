@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.4](https://github.com/sidorares/react-x11/compare/v2.1.3...v2.1.4) (2026-08-25)
+
+
+### Bug Fixes
+
+* **menu:** menus and the menu bar, measured against the platform's ([#409](https://github.com/sidorares/react-x11/issues/409)) ([d05b018](https://github.com/sidorares/react-x11/commit/d05b0184f84e9768f65fb352f897709fb84d8ef3))
+
 ## [2.1.3](https://github.com/sidorares/react-x11/compare/v2.1.2...v2.1.3) (2026-08-25)
 
 
