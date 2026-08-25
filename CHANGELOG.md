@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/sidorares/react-x11/compare/v2.1.0...v2.1.1) (2026-08-25)
+
+
+### Performance Improvements
+
+* **nodes:** amortize a commit's per-insert bookkeeping across the parent ([#399](https://github.com/sidorares/react-x11/issues/399)) ([4e030ef](https://github.com/sidorares/react-x11/commit/4e030ef4c4cfd0420f9b91e1f47f98c33cac6f52)), closes [#397](https://github.com/sidorares/react-x11/issues/397)
+* **scroll:** a blitting viewport keeps a ledger of what changed inside it ([#401](https://github.com/sidorares/react-x11/issues/401)) ([522279d](https://github.com/sidorares/react-x11/commit/522279d82daa33ca98115de31d0c73c346bda31a)), closes [#398](https://github.com/sidorares/react-x11/issues/398)
+
 ## [2.1.0](https://github.com/sidorares/react-x11/compare/v2.0.1...v2.1.0) (2026-08-24)
 
 
