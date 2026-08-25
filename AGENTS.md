@@ -978,10 +978,33 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   falls back to the plain repaint: too-small viewports and page-sized jumps
   are not worth the bookkeeping (`SCROLL_BLIT_MIN_AREA`,
   `SCROLL_BLIT_MIN_KEEP`), fractional offsets and diagonal deltas cannot
-  blit, any other claim near the viewport (checked at `invalidate` time,
-  _before_ rects coalesce and hide it), a border/borderRadius on the
-  scroll pane, an overlapping non-descendant, a debug overlay or DevTools
-  highlight all bail. The invariant, pinned by a pixel test in
+  blit, a border/borderRadius on the scroll pane, an overlapping
+  non-descendant, a debug overlay or DevTools highlight all bail.
+
+  A claim landing inside the viewport used to bail too. It now goes into a
+  per-frame **ledger** on the scrolling node (issue #398), recorded at
+  `invalidate` time — _before_ rects coalesce and hide it, the reason the
+  check was there at all (issue #295) — and repainted after the `CopyArea`,
+  moved by the frame's delta when the claim predates the layout pass. The
+  blit translates the previous frame's rendering, which is correct
+  everywhere the content did not change; the ledger is the list of places
+  it did. It still bails when a claim covers the viewport, when there are
+  more than `BLIT_MAX_CLAIMS` of them, or when what they add up to
+  (`BLIT_MAX_CLAIM_AREA`, and `SCROLL_BLIT_MAX_REPAINT` once the damage cap
+  has merged them with the strip and the scrollbar column) stops being
+  cheaper than the one pass it replaced. The case this exists for is the
+  **virtualized list**, whose own re-slice commit claims inside the viewport
+  on every scroll frame by construction — the spacers resize and the
+  entering rows mount — so the fast path used to fire on the first wheel
+  notch of a flick and never again. Three things feed the ledger the truth:
+  a claim from inside the viewport is clipped to it (`_claimBounds`, so a
+  spacer ninety thousand pixels tall does not coalesce the scroll's claim
+  into a damage rect many times the viewport), the container's child-list
+  claims go per-child instead of naming its own box, and the layout diff
+  runs under a scroll with the shift subtracted so it reports the children
+  that really moved rather than the ones that only rode the blit.
+
+  The invariant, pinned by a pixel test in
   `test/scroll-blit.test.js`, is that a blitted frame is byte-identical to
   the repaint it replaced; `REACT_X11_NO_SCROLL_BLIT=1` turns the path off
   for A/B measurement and as field first aid. The bench's scroll scenario is
@@ -990,6 +1013,9 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   silently stopped the fast path from firing would pass unnoticed. The fence
   is verifiable — `REACT_X11_NO_SCROLL_BLIT=1 npm run bench -- --check` must
   fail, and does (887 requests and 3.28 Mpx against a 437 / 0.65 baseline).
+  The virtualized-list scenario beside it is fenced the same way, and is
+  what prices the ledger: ten notches cost 295 requests / 0.56 Mpx with it
+  and 785 / 3.20 without.
 
   **Where scrolling actually spent its time was neither of those.** Profiling a
   50,000-row table found the cost in ntk's `clip()`: intersecting a clip

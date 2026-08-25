@@ -109,6 +109,17 @@
     "dupQueries": 0,
     "churn": 0
   },
+  "scroll: 10 notches over a virtualized list": {
+    "requests": 295,
+    "bytesOut": 14104,
+    "bytesIn": 3032,
+    "replies": 44,
+    "composites": 70,
+    "compositePixels": 561760,
+    "stalls": 12,
+    "dupQueries": 0,
+    "churn": 0
+  },
   "svg: 100 unchanged icons, full repaint": {
     "requests": 105,
     "bytesOut": 3676,

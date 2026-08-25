@@ -811,6 +811,104 @@ const SCENARIOS = [
     })(),
   ],
   [
+    // The same wheel flick over a *virtualized* list — the shape react-x11
+    // components' <Table> and <Tree> have, and the case the scroll-blit
+    // gate used to miss entirely (issue #398). Every notch is a scroll and
+    // a child-list commit in one frame: the two spacers resize and the
+    // entering rows mount, all inside the viewport the blit wants to keep.
+    //
+    // Baselined with the ledger live, like the plain scroll scenario above
+    // and for the same reason: --check only fails on an increase, so a
+    // change that quietly went back to poisoning the frame would sail past
+    // a fallback baseline and land on this one.
+    'scroll: 10 notches over a virtualized list',
+    (() => {
+      const ROW = 24;
+      const ROWS = 100000;
+      let root;
+      let setTop;
+      const frame = () => {
+        root._scheduled = false;
+        root.flush();
+      };
+      const List = () => {
+        const [top, set] = React.useState(0);
+        setTop = set;
+        const first = Math.floor(top / ROW);
+        const last = Math.min(ROWS, first + Math.ceil(H / ROW) + 2);
+        const rows = [];
+        for (let i = first; i < last; i++) {
+          rows.push(
+            React.createElement(
+              'box',
+              {
+                key: i,
+                style: {
+                  height: ROW,
+                  flexDirection: 'row',
+                  flexShrink: 0,
+                  gap: 6,
+                  padding: 4,
+                  backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+                },
+              },
+              React.createElement(
+                'text',
+                { style: { fontSize: 11 } },
+                `row ${i}: the quick brown fox`,
+              ),
+            ),
+          );
+        }
+        return React.createElement(
+          'box',
+          { style: { flexGrow: 1, overflow: 'scroll' } },
+          React.createElement('box', {
+            key: 'above',
+            style: { height: first * ROW, flexShrink: 0 },
+          }),
+          ...rows,
+          React.createElement('box', {
+            key: 'below',
+            style: { height: (ROWS - last) * ROW, flexShrink: 0 },
+          }),
+        );
+      };
+      return {
+        prepare: async (app, x11Root) => {
+          const instance = await new Promise((resolve) =>
+            x11Root.render(
+              React.createElement(
+                'window',
+                { width: W, height: H, style: { backgroundColor: '#f5f6fa' } },
+                React.createElement(List),
+              ),
+              resolve,
+            ),
+          );
+          root = instance._reactX11Node;
+          frame();
+        },
+        run: async (app) => {
+          const scroller = root.children[0];
+          for (let i = 0; i < 10; i++) {
+            // `_scheduled` reads as "a flush is already booked", so the
+            // notch and the re-slice it triggers land in one frame — the
+            // interleaving a real wheel flick produces
+            root._scheduled = true;
+            scroller.scrollBy(48);
+            setTop(scroller.scrollY);
+            for (let t = 0; t < 4; t++) {
+              await new Promise((resolve) => setImmediate(resolve));
+            }
+            frame();
+            await new Promise((resolve) => app.X.GetInputFocus(resolve));
+          }
+        },
+      };
+    })(),
+  ],
+  [
     // The frame the <svg> rasterization cache (issue #149) exists for: every
     // icon is inside the damage rect and not one of them changed. Damage
     // culling already skips unchanged subtrees *outside* the damage, so this

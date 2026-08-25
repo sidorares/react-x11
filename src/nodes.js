@@ -2511,24 +2511,6 @@ export class Node {
   }
 
   /**
-   * This node's paint bounds from before a child-list mutation — the `before`
-   * half of `_childListChanged`'s protocol, captured while a departing child
-   * is still attached.
-   *
-   * Walked once per node per frame rather than once per mutation. A commit
-   * that mounts a virtualized list's window inserts a hundred rows into one
-   * pane, one `insertBefore` at a time, and a walk of the whole pane per row
-   * is what made that commit O(rows x pane) (issue #397).
-   *
-   * Reusing the first walk's answer is not an approximation. Nothing is laid
-   * out or painted between two mutations in the same frame, so every child
-   * still carries the rect it was last painted at, and a child that leaves
-   * later in the frame was in the list — and so inside the rect — when the
-   * first walk ran. `root._reflowed` is the marker for "this frame already
-   * has one", which is exactly its lifetime: joined at the first claim,
-   * cleared by `flush()`.
-   */
-  /**
    * Is this node a scroll container that has a blit armed and still clean
    * this frame (issue #398)?
    *
@@ -2560,12 +2542,15 @@ export class Node {
    * enough that there is nothing left for the blit to keep — which the
    * caller turns into the poison the gate used to apply unconditionally.
    *
-   * `pre` records which side of the frame's layout pass the rect came from:
-   * a claim made during the commit names where the content sits *now*, and
-   * the blit is about to move it, so `_applyScrollBlits` shifts it. A claim
-   * from the layout diff already names where it landed.
+   * Which side of the frame's layout pass the rect came from decides
+   * whether it moves with the blit: a claim made during the commit names
+   * where the content sits *now*, and the blit is about to shift it, so
+   * `_applyScrollBlits` shifts the rect too. A claim raised once layout has
+   * run — the diff's, the reflow queue's — already names where it landed.
+   * Read off the window rather than passed in, so a claim from application
+   * code reached during the layout pass is filed on the right side of it.
    */
-  _recordBlitClaim(rect, pre) {
+  _recordBlitClaim(rect) {
     const ledger = this._blitLedger;
     if (!ledger || ledger.length >= BLIT_MAX_CLAIMS) return false;
     const inside = intersectRects(rect, this.abs);
@@ -2574,10 +2559,28 @@ export class Node {
     if (!inside) return true;
     // …and a claim that covers the viewport leaves the blit nothing to keep
     if (rectContains(inside, this.abs)) return false;
-    ledger.push({ ...inside, pre });
+    ledger.push({ ...inside, pre: !this.root?._laidOut });
     return true;
   }
 
+  /**
+   * This node's paint bounds from before a child-list mutation — the `before`
+   * half of `_childListChanged`'s protocol, captured while a departing child
+   * is still attached.
+   *
+   * Walked once per node per frame rather than once per mutation. A commit
+   * that mounts a virtualized list's window inserts a hundred rows into one
+   * pane, one `insertBefore` at a time, and a walk of the whole pane per row
+   * is what made that commit O(rows x pane) (issue #397).
+   *
+   * Reusing the first walk's answer is not an approximation. Nothing is laid
+   * out or painted between two mutations in the same frame, so every child
+   * still carries the rect it was last painted at, and a child that leaves
+   * later in the frame was in the list — and so inside the rect — when the
+   * first walk ran. `root._reflowed` is the marker for "this frame already
+   * has one", which is exactly its lifetime: joined at the first claim,
+   * cleared by `flush()`.
+   */
   _childListBefore() {
     const root = this.root;
     // A subtree still being built off-tree claims nothing — this is the
@@ -3416,14 +3419,6 @@ export class Node {
   }
 
   /**
-   * The region this node can put ink in: its own rect unioned with every
-   * descendant's. Not the same as `abs` — a child of a node that does not
-   * clip may stick out of it (absolute positioning, a negative margin), and
-   * culling a subtree by the parent's rect alone would drop that child's
-   * paint. Recomputed on demand rather than cached in `absolutize`, because
-   * it is only ever asked for on the handful of nodes that invalidate.
-   */
-  /**
    * `paintBounds()` with the one clip a damage claim must respect: a scroll
    * container above this node that is waiting to blit (issue #398).
    *
@@ -3451,14 +3446,21 @@ export class Node {
    *  whose box clips them (issue #398). One property read when no blit is
    *  pending, which is every frame that is not a scroll. */
   _blitViewport() {
-    const root = this.root;
-    if (!root?._pendingScrolls?.size) return null;
-    for (let n = this.parent; n && n !== root; n = n.parent) {
+    if (!this.root?._pendingScrolls?.size) return null;
+    for (let n = this.parent; n; n = n.parent) {
       if (n._blitLedgerOpen()) return n;
     }
     return null;
   }
 
+  /**
+   * The region this node can put ink in: its own rect unioned with every
+   * descendant's. Not the same as `abs` — a child of a node that does not
+   * clip may stick out of it (absolute positioning, a negative margin), and
+   * culling a subtree by the parent's rect alone would drop that child's
+   * paint. Recomputed on demand rather than cached in `absolutize`, because
+   * it is only ever asked for on the handful of nodes that invalidate.
+   */
   paintBounds() {
     const bounds = this._subtreeBounds();
     // inflated once, here — doing it inside the recursion would compound the
@@ -5367,7 +5369,7 @@ export const Scrollable = (Base) =>
           const vp = insetRect(this.abs, -DAMAGE_SLOP);
           layoutDiffSink = (rect) => {
             const clipped = intersectRects(rect, vp);
-            if (clipped && !this._recordBlitClaim(clipped, false)) {
+            if (clipped && !this._recordBlitClaim(clipped)) {
               this._pendingBlitFrom = BLIT_POISONED;
             }
           };
@@ -5553,10 +5555,7 @@ export const Scrollable = (Base) =>
             // has made them — which the ledger reads conservatively: a blob
             // that swallowed the viewport says so and poisons, exactly as
             // this gate used to for every claim it saw.
-            if (
-              rectsOverlap(rect, zone) &&
-              !this._recordBlitClaim(rect, true)
-            ) {
+            if (rectsOverlap(rect, zone) && !this._recordBlitClaim(rect)) {
               this._pendingBlitFrom = BLIT_POISONED;
               break;
             }
@@ -10235,10 +10234,12 @@ export class WindowNode extends Scrollable(Node) {
     // fails the blit's damage gate by itself.)
     // The region this claim actually covers — a node's paint reach, clipped
     // to a blitting viewport above it (issue #398), or the bare rect a
-    // caller handed over. Null when the clip left nothing: the node draws
-    // where nothing can be seen, so it owes no pixels.
+    // caller handed over. Null when the clip left nothing (the node draws
+    // where nothing can be seen, so it owes no pixels), and null on a frame
+    // that is already unbounded, which owes neither a rect nor the subtree
+    // walk that measures one — a blit cannot fire there either.
     const bounds =
-      damage && damage !== NO_DAMAGE
+      damage && damage !== NO_DAMAGE && this._damage !== FULL_DAMAGE
         ? damage._claimBounds
           ? damage._claimBounds()
           : damage
@@ -10272,7 +10273,7 @@ export class WindowNode extends Scrollable(Node) {
           // same pixels on screen for a fraction of the drawing. The
           // ledger says no when the frame stops paying, and then this
           // falls through to the poison exactly as before.
-          if (sv._blitLedgerOpen() && sv._recordBlitClaim(rect, true)) {
+          if (sv._blitLedgerOpen() && sv._recordBlitClaim(rect)) {
             continue;
           }
           // Poison rather than disarm (react-x11#295): a null here would
@@ -10354,6 +10355,10 @@ export class WindowNode extends Scrollable(Node) {
     // not the flag's post-pass value
     const layoutRan = this.needsLayout;
     if (this.needsLayout) {
+      // From here on a claim names where its content *landed*, not where it
+      // sat before the scroll — which is what decides whether a blit
+      // ledger's rect moves with the shift (issue #398).
+      this._laidOut = true;
       this._resolveSizeQueries(width, height);
       this._applyContentFloors(width);
       this.yoga.setWidth(width);
@@ -10400,7 +10405,7 @@ export class WindowNode extends Scrollable(Node) {
         const after = node._claimBounds();
         if (!after) continue;
         const sv = node._blitViewport();
-        if (sv && !sv._recordBlitClaim(after, false)) {
+        if (sv && !sv._recordBlitClaim(after)) {
           sv._pendingBlitFrom = BLIT_POISONED;
         }
         this._damage = addDamageRect(this._damage, after);
@@ -10416,6 +10421,9 @@ export class WindowNode extends Scrollable(Node) {
     // a frame that turns out to be a pure scroll blits the surviving band
     // and narrows its claim to the exposed strip
     this._applyScrollBlits(width, height, layoutMoved);
+    // …and the next commit's claims name the arrangement this frame leaves
+    // behind again, from before whatever scroll comes with them
+    this._laidOut = false;
     if (!this.needsPaint) return;
     this.needsPaint = false;
     const damage = this._takeDamage(width, height);
