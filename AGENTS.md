@@ -1071,6 +1071,40 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     out-of-flow node animating a layout property is bounded by its parent,
     which contains both where it was and where it is going.
 
+- **A commit's per-insert bookkeeping is amortized, not paid per row**
+  (issue #397). React mounts a subtree one `insertBefore` at a time, so a
+  virtualized list's re-slice — a hundred rows into one pane, per commit, for
+  the length of a scrollbar scrub — used to pay for the whole pane per row: a
+  `paintBounds()` walk for the before-damage, a scan of every sibling in front
+  of the new row to find its yoga slot, and two `indexOf` over the child list.
+  O(rows x pane), and about a third of commit time in the profile that found
+  it. Three pieces of bookkeeping replaced the scans:
+
+  - `_childListBefore()` walks the subtree **once per node per frame** and
+    hands the same rect to every later mutation. Sound because nothing is laid
+    out or painted between two mutations of one frame, so a child still in the
+    list carries the rect it was last painted at and one that leaves later was
+    inside the first walk's bound. `root._reflowed` is the marker for the
+    window — joined at the first claim, cleared by `flush()`.
+  - `_nonYogaKids` counts the children standing outside the parent's yoga tree
+    (`<window>`, `<popup>`, text chunks), so the usual all-boxes list answers
+    `_yogaIndexAt` with the child index instead of a walk.
+  - `_indexOfChild` remembers a child's slot and **proves** it before use —
+    `children[i] === child`, a node appearing in the list once — rather than
+    trusting it, so a stale hint costs a scan and never a wrong answer.
+    `_spliceChild` refreshes the two slots it knows, which is what keeps a run
+    of inserts in front of the same trailing sibling off the scan entirely.
+
+  Mounting 100 rows into an 800-row pane: 785k `_subtreeBounds` visits down to
+  23k, 89k `_joinsYoga` calls to 900, 55ms of `insertBefore` to 4ms.
+  `test/child-list-commit.test.js` fences the shape — the same commit against
+  a pane four times as long asks the same number of questions — and pins the
+  pixels against a full repaint. The pane in that pixel test is deliberately
+  smaller than the rows it holds and does not clip them: a row that leaves is
+  in no layout diff, and the arrangement claimed _after_ layout no longer
+  reaches the band it occupied, so the pre-mutation walk is the only thing
+  that erases it.
+
 - **A stalled frame clock under synthetic input.** ntk paces
   `requestAnimationFrame` behind a fence (a `GetInputFocus` whose reply
   confirms the server consumed the last frame). Driving events with
