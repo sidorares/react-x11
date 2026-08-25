@@ -1122,12 +1122,17 @@ panel uses ([globalmenu.md](globalmenu.md)). One column rather than
 two, because a second would indent every label in the menu to reserve room
 for icons most items do not have.
 
-The column is there for the menus that use it and gone from the ones that
-do not: a menu whose items are all plain commands has no column at all and
-its labels sit where a label sits, while one icon or one `toggleType`
-anywhere in a menu indents every label in it. That is deliberate — the
-reservation exists so a checkable row does not shuffle sideways as it is
-ticked, which is an argument about the menu rather than about the row.
+The column is there for the menus that draw in it and gone from the ones
+that do not. What counts is what a row actually paints: one icon, or one
+toggle that is _on_, anywhere in a menu indents every label in it — and a
+menu of plain commands, or of checkboxes that all happen to be off, has no
+column at all and its labels sit where a label sits.
+
+So ticking the first item in such a menu moves its labels sideways, once.
+Toolkits that reserve the column unconditionally are buying stillness in
+that one frame, and paying for it with an indent on every menu that has a
+toggle anywhere in it — this one makes the other trade. A menu that already
+has a mark in it keeps the column whatever happens to the rest.
 
 Pass a **function** for anything real. It is called with the colour the
 row's label is being drawn in and the size the column allows, which is what

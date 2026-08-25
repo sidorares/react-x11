@@ -147,9 +147,10 @@ const SUBMENU_GAP = 0;
 const MENU_ICON_SIZE = 12;
 // The air between that mark and the label it belongs to. A mark set against
 // its label with a pixel or two to spare reads as part of the word rather
-// than as a column of its own, so this is nearer the space between two words
-// than the hairline a centred icon box happens to leave over.
-const MENU_ICON_GAP = 8;
+// than as a column of its own — but the column is an indent every label in
+// the menu pays for, so it is the smallest gap that still reads as one:
+// enough to separate two things, less than the space between two words.
+const MENU_ICON_GAP = 6;
 // The check column: the mark's own box plus that gap. The mark starts at the
 // row's padding — flush with where a label starts in a menu that has no
 // column at all — so the whole of the column's width is the space after it.
@@ -182,24 +183,32 @@ function menuListHeight(items, fontSize) {
 }
 
 /**
- * The width of this menu's check column, which is `0` for a menu that has
- * nothing to put in it.
+ * The width of this menu's check column, which is `0` for a menu with
+ * nothing to draw in it.
  *
- * A menu of plain commands has no column, because a column of empty boxes is
- * an indent every label pays for and no row uses — the reason the gutter is
- * reserved at all is that a *checkable* item must not shuffle sideways as it
- * is ticked, and that argument only holds where something is checkable. So
- * the question is asked of the level as a whole rather than of the row: one
- * icon anywhere in a menu indents all of its labels, which is what keeps the
- * labels in a column of their own.
+ * The question is asked of the level rather than of the row — one mark
+ * anywhere in a menu indents every label in it, which is what puts the
+ * labels in a column of their own — and what counts is what is *drawn*, not
+ * what could be. A checkbox that is off draws nothing, so a menu of unticked
+ * toggles is a menu of plain commands as far as the eye is concerned, and it
+ * gets the plain menu's left edge.
  *
- * `toggleType` counts whatever the state is — an unticked checkbox is
- * exactly the case the reservation exists for — and a separator answers for
- * nothing, since it spans the row.
+ * The cost is the one every toolkit reserving this column is avoiding:
+ * ticking the first item in such a menu moves its labels sideways. That is
+ * the trade this codebase makes deliberately — an indent on every menu with
+ * a toggle anywhere in it, paid by every label in it, buys stillness in the
+ * one frame where something is ticked. A menu that already has a mark keeps
+ * the column whatever happens to the rest, so the movement is once at the
+ * boundary rather than on every tick.
+ *
+ * `toggleState` is dbusmenu's three-state one: `-1` draws a dash and counts,
+ * `0` draws nothing and does not. A separator answers for nothing either way,
+ * since it spans the row.
  */
 function menuGutter(items) {
   const wanted = visibleItems(items).some(
-    (item) => !isSeparator(item) && (item.toggleType || item.icon != null),
+    (item) =>
+      !isSeparator(item) && (toggleMark(item) != null || item.icon != null),
   );
   return wanted ? MENU_GUTTER : 0;
 }
