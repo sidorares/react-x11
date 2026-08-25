@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/sidorares/react-x11/compare/v2.1.1...v2.1.2) (2026-08-25)
+
+
+### Performance Improvements
+
+* **theme:** mounting a token-styled subtree no longer repaints the window ([#403](https://github.com/sidorares/react-x11/issues/403)) ([731cc2a](https://github.com/sidorares/react-x11/commit/731cc2a50f9604a0c290b19d9b4359a6a8fa245e)), closes [#402](https://github.com/sidorares/react-x11/issues/402)
+
 ## [2.1.1](https://github.com/sidorares/react-x11/compare/v2.1.0...v2.1.1) (2026-08-25)
 
 
