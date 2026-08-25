@@ -34,6 +34,7 @@
     "xi2:probe": "node scripts/xi2-probe.mjs",
     "globalmenu:host": "node scripts/globalmenu-host.mjs",
     "devtools:proxy": "node scripts/devtools-proxy.mjs",
+    "examples:configurator": "tsx examples/configurator/index.jsx",
     "examples:fonts": "tsx examples/fonts.jsx",
     "examples:form": "tsx examples/form.jsx",
     "examples:rules": "tsx examples/rules.jsx",
