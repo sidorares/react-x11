@@ -86,9 +86,13 @@ const MENU_BORDER = 1;
 // two ends: a pill that starts in the window's own corner reads as part of
 // the frame rather than as something on a strip, and the first menu is the
 // one every pointer arrives at.
+//
+// At the *ends* only. Between two titles there is nothing — no margin, no
+// strip showing through — and the space there is the two paddings meeting.
+// Only one title is ever lit, so two pills that touch never draw as one
+// shape, and a margin between them is a gap the pointer crosses on its way
+// from one menu to the next for no reason the eye can see.
 const BAR_INSET = 3;
-// the gap between two pills, split between them
-const BAR_GAP = 1;
 
 // A bar item wears the same pill as a row in the menu it opens, so it takes
 // the row's padding rather than numbers of its own: a title packed tighter
@@ -97,13 +101,14 @@ const BAR_GAP = 1;
 // text — which makes the pill `menuRowHeight` tall, and the bar that much
 // taller for it.
 //
-// Horizontally it takes a little more. A row's label in a menu that has a
-// check column is `MENU_ITEM_PAD + MENU_GUTTER` from the pill's edge rather
-// than `MENU_ITEM_PAD`, so matching the row's padding here would read as
-// the cramped one — a title on a strip has no column to sit past, but it
-// does sit shoulder to shoulder with the next title, with nothing but that
-// padding between one label and the next.
-const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 4;
+// Horizontally it takes a little more, and the number is measured rather
+// than argued: macOS leaves 22px between the ink of two menu bar titles, and
+// since the pills touch, that space is two of these. A row's label in a menu
+// with a check column is `MENU_ITEM_PAD + MENU_GUTTER` from the pill's edge
+// anyway, so the row's own padding would read as the cramped one here — a
+// title has no column to sit past, but it does sit shoulder to shoulder with
+// the next title.
+const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 3;
 
 // The bar entry that stands for the titles that did not fit. A symbol rather
 // than a `label`, because it is the one entry on the bar the application did
@@ -224,12 +229,11 @@ function barItemWidth(node, label, fontSize) {
     size: fontSize,
     weight: MENU_TEXT_WEIGHT,
   }).width;
-  return Math.ceil(text) + (BAR_ITEM_PAD_X + BAR_GAP) * 2;
+  return Math.ceil(text) + BAR_ITEM_PAD_X * 2;
 }
 
 /** The same, for the chevron: an icon box where a title has its label. */
-const barOverflowWidth = (fontSize) =>
-  iconSize(fontSize) + (BAR_ITEM_PAD_X + BAR_GAP) * 2;
+const barOverflowWidth = (fontSize) => iconSize(fontSize) + BAR_ITEM_PAD_X * 2;
 
 /**
  * How many titles the bar can paint, and therefore where it is cut. The rest
@@ -249,7 +253,7 @@ const barOverflowWidth = (fontSize) =>
  */
 function barCut(node, menus, fontSize, width) {
   const widths = menus.map((menu) => barItemWidth(node, menu.label, fontSize));
-  const inner = width - (BAR_INSET - BAR_GAP) * 2;
+  const inner = width - BAR_INSET * 2;
   const total = widths.reduce((sum, w) => sum + w, 0);
   if (total <= inner) return menus.length;
   const room = inner - barOverflowWidth(fontSize);
@@ -1199,8 +1203,8 @@ export function MenuBar({
           flexDirection: 'row',
           alignItems: 'center',
           backgroundColor: theme.surfaceHover,
-          paddingLeft: BAR_INSET - BAR_GAP,
-          paddingRight: BAR_INSET - BAR_GAP,
+          paddingLeft: BAR_INSET,
+          paddingRight: BAR_INSET,
           // `scroll` is what makes a box report its viewport, and the clip
           // that comes with it is wanted in its own right: it is what holds
           // the one frame before the first measurement — and any bar whose
@@ -1314,14 +1318,14 @@ export function MenuBar({
               //
               // The margin is what a radius needs to be seen — a rounded
               // rect flush against the strip's own edges reads as a cut
-              // corner rather than a pill. It sits *outside* the padding, so
-              // the bar is a menu row plus its two insets tall: the item and
-              // the row below it are then the same pill in the same size,
-              // which is the whole point of giving the bar one.
+              // corner rather than a pill. Vertical only: the strip's own
+              // padding does that job at the two ends, and between two titles
+              // there is nothing to hold apart. It sits *outside* the
+              // padding, so the bar is a menu row plus its two insets tall:
+              // the item and the row below it are then the same pill in the
+              // same size, which is the whole point of giving the bar one.
               marginTop: BAR_INSET,
               marginBottom: BAR_INSET,
-              marginLeft: BAR_GAP,
-              marginRight: BAR_GAP,
               paddingTop: MENU_ITEM_PAD,
               paddingBottom: MENU_ITEM_PAD,
               borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
