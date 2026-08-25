@@ -59,7 +59,12 @@ const h = React.createElement;
 const MENU_ITEM_PAD = 8;
 const menuRowHeight = (fontSize) => capBand(fontSize) + MENU_ITEM_PAD * 2;
 
-const MENU_SEPARATOR_HEIGHT = 7;
+// A separator is the hairline plus the air that makes it a division rather
+// than a row with a line through it — the two groups it stands between have
+// to read as apart, and at three pixels a side the line just crowds the
+// labels above and below it.
+const MENU_SEPARATOR_PAD = 5;
+const MENU_SEPARATOR_HEIGHT = MENU_SEPARATOR_PAD * 2 + 1;
 
 const MENU_MIN_WIDTH = 140;
 
@@ -76,28 +81,47 @@ const MENU_PAD = 4;
 // borders on its *controls* does not mean a 2px outline around every menu.
 const MENU_BORDER = 1;
 
-// How far a bar item's pill sits inside the bar, taken out of its padding so
-// the bar's height does not change. The strip carries the same inset at its
-// two ends: a pill that starts in the window's own corner reads as part of
-// the frame rather than as something on a strip, and the first menu is the
-// one every pointer arrives at.
-const BAR_INSET = 3;
-// the gap between two pills, split between them
-const BAR_GAP = 1;
-
 // A bar item wears the same pill as a row in the menu it opens, so it takes
 // the row's padding rather than numbers of its own: a title packed tighter
 // than its own first row is the tell that the two were measured separately.
 // Vertically that is `MENU_ITEM_PAD` exactly — same padding, same `capTrim`
-// text — which makes the pill `menuRowHeight` tall, and the bar that much
-// taller for it.
+// text — which makes the pill `menuRowHeight` tall and the strip exactly
+// that: a menu bar is one row, and its highlight fills it top to bottom the
+// way a real one does. Inset the pill instead and the bar is a row plus two
+// margins tall, with a highlight floating in a band of leftover strip.
 //
-// Horizontally it takes a little more. A row's label is not `MENU_ITEM_PAD`
-// from the pill's edge but a whole `MENU_GUTTER` in, past the check column,
-// so matching the row's padding here would read as the cramped one: on a
-// strip the pills sit shoulder to shoulder, with nothing but that padding
-// between one label and the next.
-const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 4;
+// Horizontally it takes a little more, and the number is measured rather
+// than argued: the bar this one is imitating leaves 22px between the ink of
+// two titles, so that is what a title's own padding and its neighbour's have
+// to add up to. A row's label in a menu with a check column is
+// `MENU_ITEM_PAD + MENU_GUTTER` from the pill's edge anyway, so the row's own
+// padding would read as the cramped one here — a title has no column to sit
+// past, but it does sit shoulder to shoulder with the next title.
+//
+const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 3;
+
+// The pill is wider than the item that owns it. Measured off the same bar:
+// its highlight runs 16px past the ink of the title it belongs to, which is
+// five past the halfway line between that title and the next — so a lit
+// title reaches *into* both neighbours' halves of the strip rather than
+// stopping politely at the boundary. It reads as one object sitting on the
+// bar; a pill that stops at the midpoint reads as one cell of a table that
+// happens to be filled in.
+//
+// Drawn, not laid out. The item box still tiles the strip, so the 22px
+// between two titles is still two paddings and the pointer still belongs to
+// exactly one item everywhere along the bar. Widening the boxes to the size
+// of the pill instead would overlap them by ten pixels, and then the last
+// five of a title's own highlight would open its neighbour's menu.
+const BAR_PILL_BLEED = 5;
+
+// What is left of the strip at its two ends, before the first pill and after
+// the last: a highlight cut off square by the window's edge is the one place
+// a pill has no room to be a pill. Measured like the rest — a native bar
+// leaves five — and the strip's padding is that plus the bleed, since the
+// pill starts before its item does.
+const BAR_END_INSET = 5;
+const BAR_END_PAD = BAR_END_INSET + BAR_PILL_BLEED;
 
 // The bar entry that stands for the titles that did not fit. A symbol rather
 // than a `label`, because it is the one entry on the bar the application did
@@ -119,9 +143,29 @@ const OVERFLOW_KEY = '\0menubar-overflow';
 // way (`movingToward`), so this is a matter of taste rather than of reach.
 const SUBMENU_GAP = 0;
 
-const MENU_GUTTER = 24; // room for the check column
-// what a self-drawing icon gets to fill, inside that column's 16px
+// what a self-drawing icon gets to fill
 const MENU_ICON_SIZE = 12;
+// The air between that mark and the label it belongs to. A mark set against
+// its label with a pixel or two to spare reads as part of the word rather
+// than as a column of its own — but the column is an indent every label in
+// the menu pays for, so it is the smallest gap that still reads as one:
+// enough to separate two things, less than the space between two words.
+const MENU_ICON_GAP = 6;
+// The check column: the mark's own box plus that gap. The mark starts at the
+// row's padding — flush with where a label starts in a menu that has no
+// column at all — so the whole of the column's width is the space after it.
+const MENU_GUTTER = MENU_ICON_SIZE + MENU_ICON_GAP;
+
+// Menu text sits a step above the body weight. A menu is read in glances
+// rather than in sentences — a title on a strip, a row under the pointer —
+// and the native ones are all set a shade heavier for it. Where the face has
+// a medium this picks it; where it has only a regular and a bold, 500 is
+// nearer the regular and nothing changes, which is the right failure.
+//
+// Every label measured for a popup's width is measured at this weight too
+// (`measureLabel` takes it), since a menu sized in regular for rows drawn in
+// medium is a menu whose own labels run into its shortcuts.
+const MENU_TEXT_WEIGHT = 500;
 
 const MENU_SHORTCUT_GAP = 24;
 // menus size to their content rather than scrolling, so a page is a fixed
@@ -138,6 +182,37 @@ function menuListHeight(items, fontSize) {
   return body + (MENU_PAD + MENU_BORDER) * 2;
 }
 
+/**
+ * The width of this menu's check column, which is `0` for a menu with
+ * nothing to draw in it.
+ *
+ * The question is asked of the level rather than of the row — one mark
+ * anywhere in a menu indents every label in it, which is what puts the
+ * labels in a column of their own — and what counts is what is *drawn*, not
+ * what could be. A checkbox that is off draws nothing, so a menu of unticked
+ * toggles is a menu of plain commands as far as the eye is concerned, and it
+ * gets the plain menu's left edge.
+ *
+ * The cost is the one every toolkit reserving this column is avoiding:
+ * ticking the first item in such a menu moves its labels sideways. That is
+ * the trade this codebase makes deliberately — an indent on every menu with
+ * a toggle anywhere in it, paid by every label in it, buys stillness in the
+ * one frame where something is ticked. A menu that already has a mark keeps
+ * the column whatever happens to the rest, so the movement is once at the
+ * boundary rather than on every tick.
+ *
+ * `toggleState` is dbusmenu's three-state one: `-1` draws a dash and counts,
+ * `0` draws nothing and does not. A separator answers for nothing either way,
+ * since it spans the row.
+ */
+function menuGutter(items) {
+  const wanted = visibleItems(items).some(
+    (item) =>
+      !isSeparator(item) && (toggleMark(item) != null || item.icon != null),
+  );
+  return wanted ? MENU_GUTTER : 0;
+}
+
 /** Widest label + shortcut, measured, so the popup can be sized up front. */
 function menuListWidth(node, items, fontSize) {
   let widest = 0;
@@ -145,20 +220,23 @@ function menuListWidth(node, items, fontSize) {
     if (isSeparator(item)) continue;
     const label = measureLabel(node, item.label ?? '', {
       size: fontSize,
+      weight: MENU_TEXT_WEIGHT,
     }).width;
     const accelerator = formatShortcut(item.shortcut);
     const shortcut = accelerator
-      ? measureLabel(node, accelerator, { size: fontSize }).width +
-        MENU_SHORTCUT_GAP
+      ? measureLabel(node, accelerator, {
+          size: fontSize,
+          weight: MENU_TEXT_WEIGHT,
+        }).width + MENU_SHORTCUT_GAP
       : 0;
     widest = Math.max(widest, label + shortcut);
   }
   return Math.max(
     MENU_MIN_WIDTH,
     Math.ceil(widest) +
-      MENU_GUTTER +
+      menuGutter(items) +
       (MENU_PAD + MENU_BORDER) * 2 +
-      MENU_ITEM_PAD +
+      MENU_ITEM_PAD * 2 +
       2,
   );
 }
@@ -169,13 +247,15 @@ function menuListWidth(node, items, fontSize) {
  * `menuListWidth` so the two cannot drift.
  */
 function barItemWidth(node, label, fontSize) {
-  const text = measureLabel(node, label ?? '', { size: fontSize }).width;
-  return Math.ceil(text) + (BAR_ITEM_PAD_X + BAR_GAP) * 2;
+  const text = measureLabel(node, label ?? '', {
+    size: fontSize,
+    weight: MENU_TEXT_WEIGHT,
+  }).width;
+  return Math.ceil(text) + BAR_ITEM_PAD_X * 2;
 }
 
 /** The same, for the chevron: an icon box where a title has its label. */
-const barOverflowWidth = (fontSize) =>
-  iconSize(fontSize) + (BAR_ITEM_PAD_X + BAR_GAP) * 2;
+const barOverflowWidth = (fontSize) => iconSize(fontSize) + BAR_ITEM_PAD_X * 2;
 
 /**
  * How many titles the bar can paint, and therefore where it is cut. The rest
@@ -195,7 +275,7 @@ const barOverflowWidth = (fontSize) =>
  */
 function barCut(node, menus, fontSize, width) {
   const widths = menus.map((menu) => barItemWidth(node, menu.label, fontSize));
-  const inner = width - (BAR_INSET - BAR_GAP) * 2;
+  const inner = width - BAR_END_PAD * 2;
   const total = widths.reduce((sum, w) => sum + w, 0);
   if (total <= inner) return menus.length;
   const room = inner - barOverflowWidth(fontSize);
@@ -314,6 +394,10 @@ function MenuRow({
   onMove,
   onSelect,
   fontSize,
+  // The width of the level's check column — the same number the popup was
+  // sized with, passed down rather than asked of the item, since a row with
+  // no mark of its own still keeps the column its neighbours need.
+  gutter,
   nodeRef,
 }) {
   const theme = useTheme();
@@ -369,7 +453,6 @@ function MenuRow({
         alignItems: 'center',
         paddingLeft: MENU_ITEM_PAD,
         paddingRight: MENU_ITEM_PAD,
-        cursor: dim ? undefined : 'pointer',
         // A pill inside the sheet: the row is inset from the popup edge by
         // the list's padding, and rounded so that its corner and the sheet's
         // share a centre — the two curves are then one shape rather than two
@@ -397,21 +480,37 @@ function MenuRow({
           : { ':active': { backgroundColor: theme.accentActive } }),
       },
     },
+    gutter > 0 &&
+      h(
+        'box',
+        {
+          // The mark sits at the head of the column and the gap is what
+          // follows it, rather than the column centring its box and leaving
+          // half the gap on either side: the label is the thing that has to
+          // stand clear, and the row's own padding already spaces the mark.
+          style: { width: gutter, alignItems: 'flex-start' },
+        },
+        gutterMark(item, { color: rowInk, fontSize }),
+      ),
     h(
-      'box',
-      { style: { width: MENU_GUTTER - MENU_ITEM_PAD, alignItems: 'center' } },
-      gutterMark(item, { color: rowInk, fontSize }),
+      'text',
+      { style: [capTrim, { fontSize, fontWeight: MENU_TEXT_WEIGHT }] },
+      item.label,
     ),
-    h('text', { style: [capTrim, { fontSize }] }, item.label),
     h('box', { style: { flexGrow: 1 } }),
-    // The accelerator and the chevron are quieter than the label at rest and
-    // rise with the row when it is chosen — so on an active row they say
-    // nothing and take what the row set.
+    // The accelerator is quieter than the label at rest and rises with the
+    // row when it is chosen — so on an active row it says nothing and takes
+    // what the row set. A shortcut is a second way to do what the label
+    // already says; the chevron below it is not, and keeps the row's ink.
     accelerator &&
       h(
         'text',
         {
-          style: [capTrim, { fontSize }, !active && { color: theme.textMuted }],
+          style: [
+            capTrim,
+            { fontSize, fontWeight: MENU_TEXT_WEIGHT },
+            !active && { color: theme.textMuted },
+          ],
         },
         accelerator,
       ),
@@ -424,7 +523,9 @@ function MenuRow({
         // stands as tall as its box, so `MENU_ICON_SIZE` would put an arrow
         // beside the label taller than the label.
         size: capBand(fontSize),
-        style: !active && { color: theme.textMuted },
+        // no `color`: the arrow is the row saying it has more behind it, as
+        // much a part of the entry as its label, and a muted one reads as a
+        // row that is half disabled rather than one with a submenu
       }),
   );
 }
@@ -463,6 +564,9 @@ function MenuLevel({
 }) {
   const theme = useTheme();
   const items = levelItems(rootItems, path, depth);
+  // one answer for the level, so every row indents by the same amount the
+  // popup was measured with
+  const gutter = menuGutter(items);
   const active = path[depth] ?? -1;
   const childItems = visibleItems(items[active]?.items);
   const childOpen = path.length > depth + 1 && childItems.length > 0;
@@ -621,6 +725,7 @@ function MenuLevel({
           item,
           state: rowState(index, active, handedOn),
           fontSize,
+          gutter,
           nodeRef: index === active ? activeRowRef : undefined,
           onHover: (ev) => hover(index, ev),
           onMove: (ev) => move(index, ev),
@@ -902,6 +1007,11 @@ export function MenuBar({
   const theme = useTheme();
   const rtl = useDirection() === 'rtl';
   const [openIndex, setOpenIndex] = useState(-1);
+  // The pointer's title, tracked here rather than left to a `:hover` block,
+  // because the thing that lights up is no longer the node the pointer is
+  // over: the pill is a child that reaches past its own item, and a state
+  // block only ever answers for the node it is written on.
+  const [hoverIndex, setHoverIndex] = useState(-1);
   const [rect, setRect] = useState(null);
   const [path, setPath] = useState([]);
   const refs = useRef([]);
@@ -1120,8 +1230,8 @@ export function MenuBar({
           flexDirection: 'row',
           alignItems: 'center',
           backgroundColor: theme.surfaceHover,
-          paddingLeft: BAR_INSET - BAR_GAP,
-          paddingRight: BAR_INSET - BAR_GAP,
+          paddingLeft: BAR_END_PAD,
+          paddingRight: BAR_END_PAD,
           // `scroll` is what makes a box report its viewport, and the clip
           // that comes with it is wanted in its own right: it is what holds
           // the one frame before the first measurement — and any bar whose
@@ -1172,9 +1282,16 @@ export function MenuBar({
           onMouseDown: () =>
             openIndex === index ? close() : openMenu(index, 'pointer'),
           onMouseEnter: () => {
+            setHoverIndex(index);
             if (openIndex >= 0 && openIndex !== index) {
               openMenu(index, 'pointer');
             }
+          },
+          onMouseLeave: () => {
+            // the index rather than -1 unconditionally: the pointer reaches
+            // the next title before this one hears it left, and clearing
+            // then would put the bar back to nothing lit for a frame
+            setHoverIndex((current) => (current === index ? -1 : current));
           },
           // read live: by the time a hand-off blurs this item, the item
           // taking over has already claimed the bar
@@ -1226,33 +1343,14 @@ export function MenuBar({
           },
           style: [
             {
-              cursor: 'pointer',
               paddingLeft: BAR_ITEM_PAD_X,
               paddingRight: BAR_ITEM_PAD_X,
-              // The same pill the rows inside the menu wear, at the same
-              // radius: the bar item and the first row of the menu it opens
-              // are one gesture, and a square title over rounded rows reads
-              // as two widgets that have not met.
-              //
-              // The margin is what a radius needs to be seen — a rounded
-              // rect flush against the strip's own edges reads as a cut
-              // corner rather than a pill. It sits *outside* the padding, so
-              // the bar is a menu row plus its two insets tall: the item and
-              // the row below it are then the same pill in the same size,
-              // which is the whole point of giving the bar one.
-              marginTop: BAR_INSET,
-              marginBottom: BAR_INSET,
-              marginLeft: BAR_GAP,
-              marginRight: BAR_GAP,
+              // No vertical margin: the pill fills the strip, which is a
+              // menu row tall and nothing more. The item and the first row
+              // of the menu it opens are then the same pill in the same
+              // size, which is the whole point of giving the bar one.
               paddingTop: MENU_ITEM_PAD,
               paddingBottom: MENU_ITEM_PAD,
-              borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
-              backgroundColor:
-                barState === 'active'
-                  ? theme.hoverBackground
-                  : barState === 'path'
-                    ? theme.surfaceActive
-                    : undefined,
               // No ring while this item's menu is up. Walking the bar with
               // the arrow keys opens each menu as it arrives, so the item is
               // already inverted with a menu hanging off it — a ring on top
@@ -1267,16 +1365,40 @@ export function MenuBar({
               // said once for whichever of the two the title turns out to be
               color: barState === 'active' ? theme.hoverText : theme.text,
             },
-            // Only while this menu is shut, as in `Select`: an open one is
-            // already showing the answer, and a state block would outrank
-            // the base colour that says so. The menu opens on the release,
-            // so `:active` is the whole of the answer to a held press.
-            openIndex !== index && {
-              ':hover': { backgroundColor: theme.surface },
-              ':active': { backgroundColor: theme.surfaceActive },
-            },
           ],
         },
+        // The pill, drawn before the title so the title is drawn on it. It
+        // is a box of its own rather than this item's background because it
+        // is wider than this item: `BAR_PILL_BLEED` past both edges, which
+        // is where a native bar's highlight ends (see the constant). Only
+        // while it has a colour to be — nothing at rest, since the strip
+        // under it is already that colour.
+        //
+        // Hover is the state that used to be a `:hover` block here and is
+        // now `hoverIndex`, and only while this menu is shut: an open one is
+        // already showing the answer, and the hover colour would outrank the
+        // base colour that says so.
+        (barState || hoverIndex === index) &&
+          h('box', {
+            style: {
+              position: 'absolute',
+              left: -BAR_PILL_BLEED,
+              right: -BAR_PILL_BLEED,
+              top: 0,
+              bottom: 0,
+              // the same radius the rows inside the menu wear: the bar item
+              // and the first row of the menu it opens are one gesture, and
+              // a square title over rounded rows reads as two widgets that
+              // have not met
+              borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
+              backgroundColor:
+                barState === 'active'
+                  ? theme.hoverBackground
+                  : barState === 'path'
+                    ? theme.surfaceActive
+                    : theme.surface,
+            },
+          }),
         overflow
           ? h(Icon, {
               // The set's own overflow mark, rather than the `»` Qt and
@@ -1288,7 +1410,11 @@ export function MenuBar({
               name: 'moreVertical',
               size: iconSize(fontSize),
             })
-          : h('text', { style: [capTrim, { fontSize }] }, menu.label),
+          : h(
+              'text',
+              { style: [capTrim, { fontSize, fontWeight: MENU_TEXT_WEIGHT }] },
+              menu.label,
+            ),
       );
     }),
     openIndex >= 0 &&

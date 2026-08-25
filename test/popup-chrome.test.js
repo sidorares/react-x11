@@ -210,18 +210,90 @@ test('the bar item is the first link in the trail', async () => {
   const item = wnd._reactX11Node.children[0].children[0];
   const theme = list.theme;
 
-  assert.equal(item.style.borderRadius, RADIUS_ROW, 'the same pill');
+  // The lit area is a child of the item rather than the item's own
+  // background, because it is wider than the item: it reaches past both
+  // edges into the neighbouring titles' halves of the strip, which is where
+  // a native bar's highlight ends. The item boxes still tile, so the pointer
+  // belongs to exactly one title everywhere along the bar.
+  const pill = () => item.children[0];
+  assert.equal(pill().style.borderRadius, RADIUS_ROW, 'the same pill');
+  assert.ok(pill().style.left < 0, 'reaches past the item it belongs to');
   assert.equal(
-    item.style.backgroundColor,
+    pill().style.left,
+    pill().style.right,
+    'by the same amount on both sides',
+  );
+  assert.equal(
+    pill().style.backgroundColor,
     theme.hoverBackground,
     'lit while its menu is open with nothing chosen in it',
   );
 
   await hoverRow(menu, 0);
   assert.equal(
-    item.style.backgroundColor,
+    pill().style.backgroundColor,
     theme.surfaceActive,
     'and quiet once a row down there takes the selection over',
+  );
+
+  await x11Root.unmount();
+});
+
+test('the check column is there for the marks that are drawn', async () => {
+  // Three menus of the same four commands: one plain, one whose first item
+  // is a checkbox that is *off*, one whose first item is ticked. What the
+  // column answers to is what a row draws, so only the last is indented.
+  const bar = [
+    { label: 'Plain', items: [{ label: 'Alpha' }, { label: 'Beta' }] },
+    {
+      label: 'Off',
+      items: [
+        { label: 'Alpha', toggleType: 'checkbox', toggleState: 0 },
+        { label: 'Beta' },
+      ],
+    },
+    {
+      label: 'On',
+      items: [
+        { label: 'Alpha', toggleType: 'checkbox', toggleState: 1 },
+        { label: 'Beta' },
+      ],
+    },
+  ];
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 300, height: 200 },
+      h(MenuBar, { menus: bar, fontSize: 13, globalMenu: false }),
+    ),
+  );
+  await tick();
+  const wnd = app.windows[0];
+
+  /** Where the second row's label starts, inside the popup `title` opens. */
+  const labelX = async (index) => {
+    const item = wnd._reactX11Node.children[0].children[index];
+    pressButton(wnd, item.abs.x + 4, item.abs.y + 4);
+    await tick();
+    await tick();
+    const popup = app.windows.at(-1);
+    // 'Beta' either way — the row with no mark of its own, which is the one
+    // the column has to answer for
+    const row = popup._reactX11Node.children[0].children[1];
+    const label = row.children.find((c) => c.kind === 'text');
+    const x = label.abs.x - popup._reactX11Node.abs.x;
+    pressButton(wnd, item.abs.x + 4, item.abs.y + 4); // shut it again
+    await tick();
+    return x;
+  };
+
+  const plain = await labelX(0);
+  assert.equal(await labelX(1), plain, 'a toggle that is off draws nothing');
+  assert.ok(
+    (await labelX(2)) > plain,
+    'and one that is ticked indents every label in its menu',
   );
 
   await x11Root.unmount();
