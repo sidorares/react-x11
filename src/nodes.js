@@ -1529,6 +1529,13 @@ export class Node {
     // delete themselves as they land; a loop entry (`loop: true`) is removed
     // by `_updateLoops` and by nothing else
     this._anim = null;
+    // False until the first frame places this node (`absolutize`). Read by
+    // `_retarget`: a style can be re-resolved several times between
+    // construction and that first frame — the attach-time theme merge is the
+    // common one, replacing a detached resolution against the desktop
+    // palette with one against the app's own — and none of those is a
+    // *change* the user saw, so no transition may start from it.
+    this._placed = false;
     // the loops this node's style declares, whether or not they are running
     this._loops = null;
     // `resolvedTextStyle()`'s cache: this node's own text style over what it
@@ -1674,24 +1681,32 @@ export class Node {
       }
       return this.style;
     }
-    for (const prop of Object.keys(target)) {
-      const to = target[prop];
-      const from = displayed[prop];
-      if (from === to || from === undefined) continue;
-      const duration = transitionFor(target, prop);
-      if (duration <= 0) continue;
-      if (interpolate(from, to, 0.5) === null) continue; // no midpoint: snap
-      (this._anim ??= new Map()).set(prop, {
-        from,
-        to,
-        duration,
-        // *now*, not the last frame's timestamp: between two user actions
-        // the window is idle and draws nothing, so the previous frame can
-        // be seconds old — and the first tick would then find the
-        // transition already over and jump straight to the end
-        start: now(),
-      });
-      this.root?._startAnimating(this);
+    // Only for a node the user has seen (`_placed`): between construction
+    // and the first frame a style is re-resolved several times — attach
+    // merges the real theme over the detached resolution's desktop palette,
+    // queries settle — and animating any of those would travel from a value
+    // that was never on screen. An inserted element *appears* at its style;
+    // transitions start on later changes, which is CSS's rule too.
+    if (this._placed) {
+      for (const prop of Object.keys(target)) {
+        const to = target[prop];
+        const from = displayed[prop];
+        if (from === to || from === undefined) continue;
+        const duration = transitionFor(target, prop);
+        if (duration <= 0) continue;
+        if (interpolate(from, to, 0.5) === null) continue; // no midpoint: snap
+        (this._anim ??= new Map()).set(prop, {
+          from,
+          to,
+          duration,
+          // *now*, not the last frame's timestamp: between two user actions
+          // the window is idle and draws nothing, so the previous frame can
+          // be seconds old — and the first tick would then find the
+          // transition already over and jump straight to the end
+          start: now(),
+        });
+        this.root?._startAnimating(this);
+      }
     }
     // After the transitions, before the style is assembled: a loop that just
     // arrived contributes a value to this very swap, so the first frame the
@@ -3186,6 +3201,9 @@ export class Node {
   }
 
   absolutize(originX, originY) {
+    // before the yoga check, so a span — placed by its paragraph, no box of
+    // its own — counts as on screen too
+    this._placed = true;
     if (!this.yoga) return;
     this._assignAbs(
       originX + this.yoga.getComputedLeft(),
@@ -5390,6 +5408,7 @@ export const Scrollable = (Base) =>
     }
 
     absolutize(originX, originY) {
+      this._placed = true;
       if (!this.yoga) return;
       this._assignAbs(
         originX + this.yoga.getComputedLeft(),
@@ -10523,6 +10542,7 @@ export class WindowNode extends Scrollable(Node) {
       this.yoga.setHeight(height);
       this.yoga.calculateLayout(width, height, this._rootDirection);
       this.abs = { x: 0, y: 0, width, height };
+      this._placed = true;
       // the root's rect is written here, not through _assignAbs, so its
       // cached hit reach is dropped here too (children bubble their own)
       this._hitBoundsCache = null;
