@@ -155,8 +155,9 @@ describe('examples/configurator', () => {
 
   test('Add to Bag acknowledges, counts, and hands the config out', async () => {
     const added = [];
-    // `ackMs` long enough that the acknowledgment outlives the harness's
-    // settle rounds — at the default 1800ms it expires inside `act`.
+    // The acknowledgment is a wall-clock transient, so the assertion below
+    // would be racing one: `ackMs` takes the clock out of it rather than
+    // trusting that a click stays faster than 1800ms on every machine.
     await mount({
       onAddToBag: (config, price) => added.push({ config, price }),
       ackMs: 60_000,
