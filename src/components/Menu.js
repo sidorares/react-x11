@@ -137,6 +137,17 @@ const MENU_ICON_GAP = 8;
 // column at all — so the whole of the column's width is the space after it.
 const MENU_GUTTER = MENU_ICON_SIZE + MENU_ICON_GAP;
 
+// Menu text sits a step above the body weight. A menu is read in glances
+// rather than in sentences — a title on a strip, a row under the pointer —
+// and the native ones are all set a shade heavier for it. Where the face has
+// a medium this picks it; where it has only a regular and a bold, 500 is
+// nearer the regular and nothing changes, which is the right failure.
+//
+// Every label measured for a popup's width is measured at this weight too
+// (`measureLabel` takes it), since a menu sized in regular for rows drawn in
+// medium is a menu whose own labels run into its shortcuts.
+const MENU_TEXT_WEIGHT = 500;
+
 const MENU_SHORTCUT_GAP = 24;
 // menus size to their content rather than scrolling, so a page is a fixed
 // stride — deriving one from the menu height would just equal Home/End
@@ -182,11 +193,14 @@ function menuListWidth(node, items, fontSize) {
     if (isSeparator(item)) continue;
     const label = measureLabel(node, item.label ?? '', {
       size: fontSize,
+      weight: MENU_TEXT_WEIGHT,
     }).width;
     const accelerator = formatShortcut(item.shortcut);
     const shortcut = accelerator
-      ? measureLabel(node, accelerator, { size: fontSize }).width +
-        MENU_SHORTCUT_GAP
+      ? measureLabel(node, accelerator, {
+          size: fontSize,
+          weight: MENU_TEXT_WEIGHT,
+        }).width + MENU_SHORTCUT_GAP
       : 0;
     widest = Math.max(widest, label + shortcut);
   }
@@ -206,7 +220,10 @@ function menuListWidth(node, items, fontSize) {
  * `menuListWidth` so the two cannot drift.
  */
 function barItemWidth(node, label, fontSize) {
-  const text = measureLabel(node, label ?? '', { size: fontSize }).width;
+  const text = measureLabel(node, label ?? '', {
+    size: fontSize,
+    weight: MENU_TEXT_WEIGHT,
+  }).width;
   return Math.ceil(text) + (BAR_ITEM_PAD_X + BAR_GAP) * 2;
 }
 
@@ -449,16 +466,25 @@ function MenuRow({
         },
         gutterMark(item, { color: rowInk, fontSize }),
       ),
-    h('text', { style: [capTrim, { fontSize }] }, item.label),
+    h(
+      'text',
+      { style: [capTrim, { fontSize, fontWeight: MENU_TEXT_WEIGHT }] },
+      item.label,
+    ),
     h('box', { style: { flexGrow: 1 } }),
-    // The accelerator and the chevron are quieter than the label at rest and
-    // rise with the row when it is chosen — so on an active row they say
-    // nothing and take what the row set.
+    // The accelerator is quieter than the label at rest and rises with the
+    // row when it is chosen — so on an active row it says nothing and takes
+    // what the row set. A shortcut is a second way to do what the label
+    // already says; the chevron below it is not, and keeps the row's ink.
     accelerator &&
       h(
         'text',
         {
-          style: [capTrim, { fontSize }, !active && { color: theme.textMuted }],
+          style: [
+            capTrim,
+            { fontSize, fontWeight: MENU_TEXT_WEIGHT },
+            !active && { color: theme.textMuted },
+          ],
         },
         accelerator,
       ),
@@ -471,7 +497,9 @@ function MenuRow({
         // stands as tall as its box, so `MENU_ICON_SIZE` would put an arrow
         // beside the label taller than the label.
         size: capBand(fontSize),
-        style: !active && { color: theme.textMuted },
+        // no `color`: the arrow is the row saying it has more behind it, as
+        // much a part of the entry as its label, and a muted one reads as a
+        // row that is half disabled rather than one with a submenu
       }),
   );
 }
@@ -1338,7 +1366,11 @@ export function MenuBar({
               name: 'moreVertical',
               size: iconSize(fontSize),
             })
-          : h('text', { style: [capTrim, { fontSize }] }, menu.label),
+          : h(
+              'text',
+              { style: [capTrim, { fontSize, fontWeight: MENU_TEXT_WEIGHT }] },
+              menu.label,
+            ),
       );
     }),
     openIndex >= 0 &&
