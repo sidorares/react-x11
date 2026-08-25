@@ -131,7 +131,6 @@ function Option({
         justifyContent: 'center',
         paddingLeft: ITEM_PAD_LEFT,
         paddingRight: ITEM_PAD_RIGHT,
-        cursor: 'pointer',
         // the menus' pill, for the same reason and by the same rule: an
         // option list and a menu are one surface with rows in it, and two
         // shapes for that would only say the widgets were written apart

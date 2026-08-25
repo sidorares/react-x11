@@ -59,7 +59,12 @@ const h = React.createElement;
 const MENU_ITEM_PAD = 8;
 const menuRowHeight = (fontSize) => capBand(fontSize) + MENU_ITEM_PAD * 2;
 
-const MENU_SEPARATOR_HEIGHT = 7;
+// A separator is the hairline plus the air that makes it a division rather
+// than a row with a line through it — the two groups it stands between have
+// to read as apart, and at three pixels a side the line just crowds the
+// labels above and below it.
+const MENU_SEPARATOR_PAD = 5;
+const MENU_SEPARATOR_HEIGHT = MENU_SEPARATOR_PAD * 2 + 1;
 
 const MENU_MIN_WIDTH = 140;
 
@@ -92,11 +97,12 @@ const BAR_GAP = 1;
 // text — which makes the pill `menuRowHeight` tall, and the bar that much
 // taller for it.
 //
-// Horizontally it takes a little more. A row's label is not `MENU_ITEM_PAD`
-// from the pill's edge but a whole `MENU_GUTTER` in, past the check column,
-// so matching the row's padding here would read as the cramped one: on a
-// strip the pills sit shoulder to shoulder, with nothing but that padding
-// between one label and the next.
+// Horizontally it takes a little more. A row's label in a menu that has a
+// check column is `MENU_ITEM_PAD + MENU_GUTTER` from the pill's edge rather
+// than `MENU_ITEM_PAD`, so matching the row's padding here would read as
+// the cramped one — a title on a strip has no column to sit past, but it
+// does sit shoulder to shoulder with the next title, with nothing but that
+// padding between one label and the next.
 const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 4;
 
 // The bar entry that stands for the titles that did not fit. A symbol rather
@@ -119,9 +125,17 @@ const OVERFLOW_KEY = '\0menubar-overflow';
 // way (`movingToward`), so this is a matter of taste rather than of reach.
 const SUBMENU_GAP = 0;
 
-const MENU_GUTTER = 24; // room for the check column
-// what a self-drawing icon gets to fill, inside that column's 16px
+// what a self-drawing icon gets to fill
 const MENU_ICON_SIZE = 12;
+// The air between that mark and the label it belongs to. A mark set against
+// its label with a pixel or two to spare reads as part of the word rather
+// than as a column of its own, so this is nearer the space between two words
+// than the hairline a centred icon box happens to leave over.
+const MENU_ICON_GAP = 8;
+// The check column: the mark's own box plus that gap. The mark starts at the
+// row's padding — flush with where a label starts in a menu that has no
+// column at all — so the whole of the column's width is the space after it.
+const MENU_GUTTER = MENU_ICON_SIZE + MENU_ICON_GAP;
 
 const MENU_SHORTCUT_GAP = 24;
 // menus size to their content rather than scrolling, so a page is a fixed
@@ -136,6 +150,29 @@ function menuListHeight(items, fontSize) {
     0,
   );
   return body + (MENU_PAD + MENU_BORDER) * 2;
+}
+
+/**
+ * The width of this menu's check column, which is `0` for a menu that has
+ * nothing to put in it.
+ *
+ * A menu of plain commands has no column, because a column of empty boxes is
+ * an indent every label pays for and no row uses — the reason the gutter is
+ * reserved at all is that a *checkable* item must not shuffle sideways as it
+ * is ticked, and that argument only holds where something is checkable. So
+ * the question is asked of the level as a whole rather than of the row: one
+ * icon anywhere in a menu indents all of its labels, which is what keeps the
+ * labels in a column of their own.
+ *
+ * `toggleType` counts whatever the state is — an unticked checkbox is
+ * exactly the case the reservation exists for — and a separator answers for
+ * nothing, since it spans the row.
+ */
+function menuGutter(items) {
+  const wanted = visibleItems(items).some(
+    (item) => !isSeparator(item) && (item.toggleType || item.icon != null),
+  );
+  return wanted ? MENU_GUTTER : 0;
 }
 
 /** Widest label + shortcut, measured, so the popup can be sized up front. */
@@ -156,9 +193,9 @@ function menuListWidth(node, items, fontSize) {
   return Math.max(
     MENU_MIN_WIDTH,
     Math.ceil(widest) +
-      MENU_GUTTER +
+      menuGutter(items) +
       (MENU_PAD + MENU_BORDER) * 2 +
-      MENU_ITEM_PAD +
+      MENU_ITEM_PAD * 2 +
       2,
   );
 }
@@ -314,6 +351,10 @@ function MenuRow({
   onMove,
   onSelect,
   fontSize,
+  // The width of the level's check column — the same number the popup was
+  // sized with, passed down rather than asked of the item, since a row with
+  // no mark of its own still keeps the column its neighbours need.
+  gutter,
   nodeRef,
 }) {
   const theme = useTheme();
@@ -369,7 +410,6 @@ function MenuRow({
         alignItems: 'center',
         paddingLeft: MENU_ITEM_PAD,
         paddingRight: MENU_ITEM_PAD,
-        cursor: dim ? undefined : 'pointer',
         // A pill inside the sheet: the row is inset from the popup edge by
         // the list's padding, and rounded so that its corner and the sheet's
         // share a centre — the two curves are then one shape rather than two
@@ -397,11 +437,18 @@ function MenuRow({
           : { ':active': { backgroundColor: theme.accentActive } }),
       },
     },
-    h(
-      'box',
-      { style: { width: MENU_GUTTER - MENU_ITEM_PAD, alignItems: 'center' } },
-      gutterMark(item, { color: rowInk, fontSize }),
-    ),
+    gutter > 0 &&
+      h(
+        'box',
+        {
+          // The mark sits at the head of the column and the gap is what
+          // follows it, rather than the column centring its box and leaving
+          // half the gap on either side: the label is the thing that has to
+          // stand clear, and the row's own padding already spaces the mark.
+          style: { width: gutter, alignItems: 'flex-start' },
+        },
+        gutterMark(item, { color: rowInk, fontSize }),
+      ),
     h('text', { style: [capTrim, { fontSize }] }, item.label),
     h('box', { style: { flexGrow: 1 } }),
     // The accelerator and the chevron are quieter than the label at rest and
@@ -463,6 +510,9 @@ function MenuLevel({
 }) {
   const theme = useTheme();
   const items = levelItems(rootItems, path, depth);
+  // one answer for the level, so every row indents by the same amount the
+  // popup was measured with
+  const gutter = menuGutter(items);
   const active = path[depth] ?? -1;
   const childItems = visibleItems(items[active]?.items);
   const childOpen = path.length > depth + 1 && childItems.length > 0;
@@ -621,6 +671,7 @@ function MenuLevel({
           item,
           state: rowState(index, active, handedOn),
           fontSize,
+          gutter,
           nodeRef: index === active ? activeRowRef : undefined,
           onHover: (ev) => hover(index, ev),
           onMove: (ev) => move(index, ev),
@@ -1226,7 +1277,6 @@ export function MenuBar({
           },
           style: [
             {
-              cursor: 'pointer',
               paddingLeft: BAR_ITEM_PAD_X,
               paddingRight: BAR_ITEM_PAD_X,
               // The same pill the rows inside the menu wear, at the same
