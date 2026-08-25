@@ -230,6 +230,13 @@ export class GlAreaNode extends Node {
     this._syncGeometry();
   }
 
+  // the scroll fast path moves `abs` without coming through absolutize
+  // (issue #405), and the real X window has to follow it all the same
+  _shiftAbs(dx, dy) {
+    super._shiftAbs(dx, dy);
+    this._syncGeometry();
+  }
+
   _syncGeometry() {
     const wnd = this.window;
     if (!wnd) return;

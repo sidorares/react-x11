@@ -3262,6 +3262,74 @@ export class Node {
   }
 
   /**
+   * Move an already-laid-out subtree by a constant, without asking yoga
+   * anything — the scroll fast path's walk (issue #405).
+   *
+   * A pure-scroll frame changes nothing about the arrangement inside a
+   * viewport: every descendant sits exactly where the last pass put it,
+   * shifted by the scroll delta. `absolutize` would re-derive each rect
+   * through four wasm-boundary getters to learn what one addition already
+   * says, so the scroller calls this instead — only after proving nothing
+   * inside was laid out this pass (see `_absolutizeChildren`).
+   *
+   * `abs` is adjusted in place rather than replaced: its identity is
+   * already long-lived (`_assignAbs` keeps the object whenever a rect is
+   * unchanged), and everything that records a rect for later copies it.
+   * The cached hit bounds ride along instead of being dropped — a uniform
+   * translation is the one change a cached union survives — which keeps a
+   * wheel flick from rebuilding the pane's whole hit-bounds tree per notch.
+   *
+   * No layout diff runs here, and none is owed: under a blit ledger the
+   * shifted diff's claims are the *deviations* from exactly this
+   * translation, and a subtree nothing laid out again has none.
+   */
+  _shiftAbs(dx, dy) {
+    if (!this.yoga) return;
+    const abs = this.abs;
+    abs.x += dx;
+    abs.y += dy;
+    const b = this._hitBoundsCache;
+    if (b) {
+      b.left += dx;
+      b.right += dx;
+      b.top += dy;
+      b.bottom += dy;
+    }
+    this._shiftChildren(dx, dy);
+  }
+
+  /** Split from `_shiftAbs` so a scroller can reroute its children through
+   * its own offset bookkeeping — the box moves rigidly, but the children's
+   * origin also carries scroll offsets that may have changed again this
+   * same frame (`Scrollable._shiftChildren`). */
+  _shiftChildren(dx, dy) {
+    for (const child of this.children) {
+      if (!child.isWindow) child._shiftAbs(dx, dy);
+    }
+  }
+
+  /**
+   * A layout-affecting change at this node may change how far the content
+   * of an enclosing scroll pane reaches through a route yoga never
+   * witnesses — an element that paints its own content growing its extent
+   * announces it with `invalidate(true, this, 'scroll')`
+   * (docs/extending.md), and no yoga node is dirtied by that. Mark every
+   * scroller whose measurement can see this node, so the next pass asks
+   * `measureScrollContent` again instead of reusing the cached reach
+   * (issue #405). The walk stops where the measurement does: at the first
+   * ancestor that clips its children, whose overflow is its own business.
+   */
+  _markScrollMeasureDirty() {
+    for (let n = this; n; n = n.parent) {
+      // only a Scrollable carries the flag; a stale `true` on a box that is
+      // not currently a scroller costs nothing and re-measures correctly if
+      // its style later makes it one
+      if (n._scrollMeasureDirty === false) n._scrollMeasureDirty = true;
+      if (n !== this && n.clipsChildren()) return;
+    }
+  }
+
+  /**
    * Ask the owning window to repaint. The damage lives on the window node,
    * which is the only node with a frame clock — this forwards there, so an
    * element says `this.invalidate(false, this, 'props')` and never has to
@@ -3274,6 +3342,9 @@ export class Node {
    * the mount invalidates in full anyway.
    */
   invalidate(layoutChanged = false, damage = null, reason = null) {
+    // a layout change may grow what an enclosing scroll pane has to scroll,
+    // through a route yoga never sees (issue #405)
+    if (layoutChanged) this._markScrollMeasureDirty();
     this.root?.invalidate(layoutChanged, damage, reason);
   }
 
@@ -3429,6 +3500,7 @@ export class Node {
    * FULL_DAMAGE the way a bare `invalidate(true, null)` would.
    */
   _invalidateLayout(reason) {
+    this._markScrollMeasureDirty();
     const root = this.root;
     if (!root) return;
     // Same walk, same frame, same answer — see `_childListBefore`, whose
@@ -5279,6 +5351,10 @@ export const Scrollable = (Base) =>
       this.scrollX = 0;
       this.contentHeight = 0;
       this.contentWidth = 0;
+      // `measureScrollContent` owed a fresh answer — true until the first
+      // layout pass measures, and re-raised by any change yoga cannot see
+      // (`_markScrollMeasureDirty`, issue #405)
+      this._scrollMeasureDirty = true;
     }
 
     /**
@@ -5301,6 +5377,9 @@ export const Scrollable = (Base) =>
      * position the same way when a box stops scrolling.
      */
     _overflowChanged() {
+      // whichever way the style flipped, the next scrolling pass starts
+      // from a fresh measurement
+      this._scrollMeasureDirty = true;
       if (this.isScroller()) return;
       this._scrollIntoViewTarget = null;
       this._childOrigin = null;
@@ -5335,20 +5414,39 @@ export const Scrollable = (Base) =>
         return;
       }
       const rtl = this.direction === 'rtl';
-      const size = this.measureScrollContent();
-      if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height)) {
-        // A NaN here does not throw on its own: it becomes a NaN max scroll,
-        // a NaN offset, and every child laid out at NaN — a whole tree gone
-        // with nothing naming the element that did it.
-        throw new Error(
-          `react-x11: <${this.kind}>.measureScrollContent() must return ` +
-            '{ width, height } as finite numbers; it returned ' +
-            `${describeSize(size)}. Return { width: 0, height: 0 } for ` +
-            'content that has not arrived yet.',
-        );
+      // A pure-scroll pass re-learns nothing by walking (issue #405): the
+      // content reach and every child's place *inside* the pane only change
+      // when layout inside the pane changes. Yoga's own has-new-layout flag
+      // is the witness — consumed here and nowhere else — set by any pass
+      // that laid this node or anything under it out again, and left clear
+      // by one that merely scrolled. `_scrollMeasureDirty` covers the one
+      // route yoga cannot see: an element that paints its own content
+      // growing its extent (docs/extending.md), announced through
+      // `invalidate(true, this, 'scroll')`. The root's yoga node re-flags
+      // on every pass, so a `<window overflow='scroll'>` always takes the
+      // full walk — the pane that holds an app's long list is a box.
+      const clean =
+        this._childOrigin != null &&
+        !this._scrollMeasureDirty &&
+        !this.yoga.hasNewLayout();
+      if (!clean) {
+        const size = this.measureScrollContent();
+        if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height)) {
+          // A NaN here does not throw on its own: it becomes a NaN max
+          // scroll, a NaN offset, and every child laid out at NaN — a whole
+          // tree gone with nothing naming the element that did it.
+          throw new Error(
+            `react-x11: <${this.kind}>.measureScrollContent() must return ` +
+              '{ width, height } as finite numbers; it returned ' +
+              `${describeSize(size)}. Return { width: 0, height: 0 } for ` +
+              'content that has not arrived yet.',
+          );
+        }
+        this.contentWidth = size.width;
+        this.contentHeight = size.height;
+        this._scrollMeasureDirty = false;
+        this.yoga.markLayoutSeen();
       }
-      this.contentWidth = size.width;
-      this.contentHeight = size.height;
       this._resolveScrollIntoView();
       this.scrollY = clampScroll(this.scrollY, this._maxScroll('y'));
       this.scrollX = clampScroll(this.scrollX, this._maxScroll('x'));
@@ -5373,6 +5471,23 @@ export const Scrollable = (Base) =>
       const wasOrigin = this._childOrigin;
       const shifted = wasOrigin && (wasOrigin.x !== ox || wasOrigin.y !== oy);
       this._childOrigin = { x: ox, y: oy };
+      if (clean) {
+        // The fast path (issue #405): nothing inside was laid out, so every
+        // child sits exactly where the last pass put it, shifted by however
+        // far the origin moved — one uniform translation instead of a
+        // per-node yoga re-derivation. The layout diff is owed nothing by
+        // construction: under a blit ledger the shifted diff's claims are
+        // the deviations from this very translation, and a clean pane has
+        // none — the walk below lands every node where the diff would have
+        // reported silence.
+        if (!shifted) return;
+        const dx = ox - wasOrigin.x;
+        const dy = oy - wasOrigin.y;
+        for (const child of this.children) {
+          if (!child.isWindow) child._shiftAbs(dx, dy);
+        }
+        return;
+      }
       const outer = layoutDiffSink;
       const outerShift = layoutDiffShift;
       const ledger = shifted && this._blitLedgerOpen();
@@ -5414,6 +5529,22 @@ export const Scrollable = (Base) =>
         layoutDiffSink = outer;
         layoutDiffShift = outerShift;
       }
+    }
+
+    /**
+     * A scroller inside a shifting subtree does not ride the translation
+     * blindly: its box moves rigidly, but its children's origin also
+     * carries the scroll offsets, which may have changed again this very
+     * frame — a wheel on a nested pane while an outer one scrolls.
+     * Re-entering `_absolutizeChildren` folds both into one delta, and
+     * re-runs the gate, so a nested pane that is not clean still walks
+     * properly. (Reached only under an outer pane's fast path, which
+     * proved nothing in here was laid out — the nested gate can only
+     * decline over its own `_scrollMeasureDirty`.)
+     */
+    _shiftChildren(dx, dy) {
+      if (!this.isScroller()) return super._shiftChildren(dx, dy);
+      this._absolutizeChildren(this.abs.x, this.abs.y);
     }
 
     /**
@@ -5477,8 +5608,14 @@ export const Scrollable = (Base) =>
      * wheel, the scrollbars, the scroll keys and the AT-SPI scroll pane all
      * read the numbers this returns (docs/extending.md).
      *
-     * Called once per layout pass, from `absolutize`, so it may read yoga
-     * geometry but must not invalidate or paint.
+     * Called at most once per layout pass, from `absolutize`, so it may
+     * read yoga geometry but must not invalidate or paint — and cached
+     * across passes that laid nothing inside the pane out again (issue
+     * #405): a pass that merely scrolled reuses the last answer, since a
+     * scroll cannot change how far the content reaches. An element whose
+     * extent changed by a route layout never saw — rows arrived, a line
+     * was typed — announces it with `invalidate(true, this, 'scroll')`,
+     * and the next pass asks again.
      */
     measureScrollContent() {
       const rtl = this.direction === 'rtl';
