@@ -81,25 +81,14 @@ const MENU_PAD = 4;
 // borders on its *controls* does not mean a 2px outline around every menu.
 const MENU_BORDER = 1;
 
-// How far a bar item's pill sits inside the bar, taken out of its padding so
-// the bar's height does not change. The strip carries the same inset at its
-// two ends: a pill that starts in the window's own corner reads as part of
-// the frame rather than as something on a strip, and the first menu is the
-// one every pointer arrives at.
-//
-// At the *ends* only. Between two titles there is nothing — no margin, no
-// strip showing through — and the space there is the two paddings meeting.
-// Only one title is ever lit, so two pills that touch never draw as one
-// shape, and a margin between them is a gap the pointer crosses on its way
-// from one menu to the next for no reason the eye can see.
-const BAR_INSET = 3;
-
 // A bar item wears the same pill as a row in the menu it opens, so it takes
 // the row's padding rather than numbers of its own: a title packed tighter
 // than its own first row is the tell that the two were measured separately.
 // Vertically that is `MENU_ITEM_PAD` exactly — same padding, same `capTrim`
-// text — which makes the pill `menuRowHeight` tall, and the bar that much
-// taller for it.
+// text — which makes the pill `menuRowHeight` tall and the strip exactly
+// that: a menu bar is one row, and its highlight fills it top to bottom the
+// way a real one does. Inset the pill instead and the bar is a row plus two
+// margins tall, with a highlight floating in a band of leftover strip.
 //
 // Horizontally it takes a little more, and the number is measured rather
 // than argued: the bar this one is imitating leaves 22px between the ink of
@@ -126,10 +115,13 @@ const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 3;
 // five of a title's own highlight would open its neighbour's menu.
 const BAR_PILL_BLEED = 5;
 
-// The strip's own ends have to hold the bleed as well as the pill, or the
-// first title's highlight is cut off square by the window's edge — the one
-// place a pill has no room to be a pill.
-const BAR_END_PAD = BAR_INSET + BAR_PILL_BLEED;
+// What is left of the strip at its two ends, before the first pill and after
+// the last: a highlight cut off square by the window's edge is the one place
+// a pill has no room to be a pill. Measured like the rest — a native bar
+// leaves five — and the strip's padding is that plus the bleed, since the
+// pill starts before its item does.
+const BAR_END_INSET = 5;
+const BAR_END_PAD = BAR_END_INSET + BAR_PILL_BLEED;
 
 // The bar entry that stands for the titles that did not fit. A symbol rather
 // than a `label`, because it is the one entry on the bar the application did
@@ -1344,14 +1336,10 @@ export function MenuBar({
             {
               paddingLeft: BAR_ITEM_PAD_X,
               paddingRight: BAR_ITEM_PAD_X,
-              // The margin is what a radius needs to be seen — a rounded
-              // rect flush against the strip's own edges reads as a cut
-              // corner rather than a pill. It sits *outside* the padding, so
-              // the bar is a menu row plus its two insets tall: the item and
-              // the row below it are then the same pill in the same size,
-              // which is the whole point of giving the bar one.
-              marginTop: BAR_INSET,
-              marginBottom: BAR_INSET,
+              // No vertical margin: the pill fills the strip, which is a
+              // menu row tall and nothing more. The item and the first row
+              // of the menu it opens are then the same pill in the same
+              // size, which is the whole point of giving the bar one.
               paddingTop: MENU_ITEM_PAD,
               paddingBottom: MENU_ITEM_PAD,
               // No ring while this item's menu is up. Walking the bar with
