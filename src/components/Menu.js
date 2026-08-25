@@ -102,13 +102,34 @@ const BAR_INSET = 3;
 // taller for it.
 //
 // Horizontally it takes a little more, and the number is measured rather
-// than argued: macOS leaves 22px between the ink of two menu bar titles, and
-// since the pills touch, that space is two of these. A row's label in a menu
-// with a check column is `MENU_ITEM_PAD + MENU_GUTTER` from the pill's edge
-// anyway, so the row's own padding would read as the cramped one here — a
-// title has no column to sit past, but it does sit shoulder to shoulder with
-// the next title.
+// than argued: the bar this one is imitating leaves 22px between the ink of
+// two titles, so that is what a title's own padding and its neighbour's have
+// to add up to. A row's label in a menu with a check column is
+// `MENU_ITEM_PAD + MENU_GUTTER` from the pill's edge anyway, so the row's own
+// padding would read as the cramped one here — a title has no column to sit
+// past, but it does sit shoulder to shoulder with the next title.
+//
 const BAR_ITEM_PAD_X = MENU_ITEM_PAD + 3;
+
+// The pill is wider than the item that owns it. Measured off the same bar:
+// its highlight runs 16px past the ink of the title it belongs to, which is
+// five past the halfway line between that title and the next — so a lit
+// title reaches *into* both neighbours' halves of the strip rather than
+// stopping politely at the boundary. It reads as one object sitting on the
+// bar; a pill that stops at the midpoint reads as one cell of a table that
+// happens to be filled in.
+//
+// Drawn, not laid out. The item box still tiles the strip, so the 22px
+// between two titles is still two paddings and the pointer still belongs to
+// exactly one item everywhere along the bar. Widening the boxes to the size
+// of the pill instead would overlap them by ten pixels, and then the last
+// five of a title's own highlight would open its neighbour's menu.
+const BAR_PILL_BLEED = 5;
+
+// The strip's own ends have to hold the bleed as well as the pill, or the
+// first title's highlight is cut off square by the window's edge — the one
+// place a pill has no room to be a pill.
+const BAR_END_PAD = BAR_INSET + BAR_PILL_BLEED;
 
 // The bar entry that stands for the titles that did not fit. A symbol rather
 // than a `label`, because it is the one entry on the bar the application did
@@ -253,7 +274,7 @@ const barOverflowWidth = (fontSize) => iconSize(fontSize) + BAR_ITEM_PAD_X * 2;
  */
 function barCut(node, menus, fontSize, width) {
   const widths = menus.map((menu) => barItemWidth(node, menu.label, fontSize));
-  const inner = width - BAR_INSET * 2;
+  const inner = width - BAR_END_PAD * 2;
   const total = widths.reduce((sum, w) => sum + w, 0);
   if (total <= inner) return menus.length;
   const room = inner - barOverflowWidth(fontSize);
@@ -985,6 +1006,11 @@ export function MenuBar({
   const theme = useTheme();
   const rtl = useDirection() === 'rtl';
   const [openIndex, setOpenIndex] = useState(-1);
+  // The pointer's title, tracked here rather than left to a `:hover` block,
+  // because the thing that lights up is no longer the node the pointer is
+  // over: the pill is a child that reaches past its own item, and a state
+  // block only ever answers for the node it is written on.
+  const [hoverIndex, setHoverIndex] = useState(-1);
   const [rect, setRect] = useState(null);
   const [path, setPath] = useState([]);
   const refs = useRef([]);
@@ -1203,8 +1229,8 @@ export function MenuBar({
           flexDirection: 'row',
           alignItems: 'center',
           backgroundColor: theme.surfaceHover,
-          paddingLeft: BAR_INSET,
-          paddingRight: BAR_INSET,
+          paddingLeft: BAR_END_PAD,
+          paddingRight: BAR_END_PAD,
           // `scroll` is what makes a box report its viewport, and the clip
           // that comes with it is wanted in its own right: it is what holds
           // the one frame before the first measurement — and any bar whose
@@ -1255,9 +1281,16 @@ export function MenuBar({
           onMouseDown: () =>
             openIndex === index ? close() : openMenu(index, 'pointer'),
           onMouseEnter: () => {
+            setHoverIndex(index);
             if (openIndex >= 0 && openIndex !== index) {
               openMenu(index, 'pointer');
             }
+          },
+          onMouseLeave: () => {
+            // the index rather than -1 unconditionally: the pointer reaches
+            // the next title before this one hears it left, and clearing
+            // then would put the bar back to nothing lit for a frame
+            setHoverIndex((current) => (current === index ? -1 : current));
           },
           // read live: by the time a hand-off blurs this item, the item
           // taking over has already claimed the bar
@@ -1311,30 +1344,16 @@ export function MenuBar({
             {
               paddingLeft: BAR_ITEM_PAD_X,
               paddingRight: BAR_ITEM_PAD_X,
-              // The same pill the rows inside the menu wear, at the same
-              // radius: the bar item and the first row of the menu it opens
-              // are one gesture, and a square title over rounded rows reads
-              // as two widgets that have not met.
-              //
               // The margin is what a radius needs to be seen — a rounded
               // rect flush against the strip's own edges reads as a cut
-              // corner rather than a pill. Vertical only: the strip's own
-              // padding does that job at the two ends, and between two titles
-              // there is nothing to hold apart. It sits *outside* the
-              // padding, so the bar is a menu row plus its two insets tall:
-              // the item and the row below it are then the same pill in the
-              // same size, which is the whole point of giving the bar one.
+              // corner rather than a pill. It sits *outside* the padding, so
+              // the bar is a menu row plus its two insets tall: the item and
+              // the row below it are then the same pill in the same size,
+              // which is the whole point of giving the bar one.
               marginTop: BAR_INSET,
               marginBottom: BAR_INSET,
               paddingTop: MENU_ITEM_PAD,
               paddingBottom: MENU_ITEM_PAD,
-              borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
-              backgroundColor:
-                barState === 'active'
-                  ? theme.hoverBackground
-                  : barState === 'path'
-                    ? theme.surfaceActive
-                    : undefined,
               // No ring while this item's menu is up. Walking the bar with
               // the arrow keys opens each menu as it arrives, so the item is
               // already inverted with a menu hanging off it — a ring on top
@@ -1349,16 +1368,40 @@ export function MenuBar({
               // said once for whichever of the two the title turns out to be
               color: barState === 'active' ? theme.hoverText : theme.text,
             },
-            // Only while this menu is shut, as in `Select`: an open one is
-            // already showing the answer, and a state block would outrank
-            // the base colour that says so. The menu opens on the release,
-            // so `:active` is the whole of the answer to a held press.
-            openIndex !== index && {
-              ':hover': { backgroundColor: theme.surface },
-              ':active': { backgroundColor: theme.surfaceActive },
-            },
           ],
         },
+        // The pill, drawn before the title so the title is drawn on it. It
+        // is a box of its own rather than this item's background because it
+        // is wider than this item: `BAR_PILL_BLEED` past both edges, which
+        // is where a native bar's highlight ends (see the constant). Only
+        // while it has a colour to be — nothing at rest, since the strip
+        // under it is already that colour.
+        //
+        // Hover is the state that used to be a `:hover` block here and is
+        // now `hoverIndex`, and only while this menu is shut: an open one is
+        // already showing the answer, and the hover colour would outrank the
+        // base colour that says so.
+        (barState || hoverIndex === index) &&
+          h('box', {
+            style: {
+              position: 'absolute',
+              left: -BAR_PILL_BLEED,
+              right: -BAR_PILL_BLEED,
+              top: 0,
+              bottom: 0,
+              // the same radius the rows inside the menu wear: the bar item
+              // and the first row of the menu it opens are one gesture, and
+              // a square title over rounded rows reads as two widgets that
+              // have not met
+              borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
+              backgroundColor:
+                barState === 'active'
+                  ? theme.hoverBackground
+                  : barState === 'path'
+                    ? theme.surfaceActive
+                    : theme.surface,
+            },
+          }),
         overflow
           ? h(Icon, {
               // The set's own overflow mark, rather than the `»` Qt and
