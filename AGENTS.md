@@ -158,9 +158,15 @@ no override-redirect staging (issue #4).
   than clamped (`RepeatPad` is unset, sidorares/ntk#271) — and that cannot be
   caught by a pixel test, since node-x11's in-process RENDER clamps by
   construction where a real server does not. And a CSS blur radius is _twice_
-  the gaussian's sigma while ntk's `setBlurFilter` takes the kernel's edge
+  the gaussian's sigma while the kernel helpers take the kernel's edge
   length, so the two numbers that look interchangeable are the two that must
-  not be. `inset` shadows and colour hints are refused rather than ignored.
+  not be. The blur is **baked into the shadow's pixels** (`bakeBlur`,
+  nodes.js) rather than set as a filter on its picture: a picture's filter is
+  re-run by the server on **every composite**, so the cached-and-hit path
+  still paid a full kernel per frame — 1.6s for one card's `:hover` on
+  XQuartz, against 1.5ms baked. `test/shadow-blur-baked.test.js` pins it, and
+  nothing else can: wire bytes, composited area and pixels are identical
+  either way, which is why `npm run bench` reports no change. `inset` shadows and colour hints are refused rather than ignored.
 - `src/events.js` — `EventManager`: ntk window events → synthetic events
   (click synthesis, hover enter/leave diffing, the wheel — ntk's `wheel`
   event, XI2 valuators where the server has them and buttons 4-7 where it

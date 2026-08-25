@@ -43,6 +43,7 @@ import {
 } from './styles.js';
 import {
   blurKernel,
+  gaussianKernel1d,
   gradientSpec,
   linearGradientGeometry,
   shadowExtent,
@@ -685,6 +686,72 @@ function shadowExtentOf(style, scale = 1) {
   const value = style?.boxShadow;
   if (!value || value === 'none') return 0;
   return shadowExtent(shadowSpecs(value, scale));
+}
+
+/**
+ * Blur an a8 coverage surface **into its pixels**, returning the result.
+ *
+ * The obvious implementation — `picture().setBlurFilter(...)` — leaves the
+ * convolution on the *picture*, where the server re-runs it on every
+ * composite. A cached shadow then costs its whole kernel every frame it is
+ * drawn, which is the difference between a repaint that is free and one that
+ * takes a second: a 61x61 kernel over a card-sized 489x134 coverage surface
+ * is 244 million multiply-accumulates, per shadow, per frame, inside the
+ * server. The cache was hiding it perfectly — the entry hits, nothing
+ * re-renders, and the frame still costs what it always did.
+ *
+ * So the blur runs once, here, and what comes back carries no filter: an
+ * ordinary masked composite however wide the blur was. Two separable 1-D
+ * passes rather than one 2-D kernel, which is 2k work instead of k² and
+ * gives an identical result, since the 2-D gaussian is exactly the outer
+ * product of two 1-D ones (`gaussianKernel1d`). The input is destroyed —
+ * nothing wants the sharp copy afterwards, and keeping it alive would double
+ * what the paint cache holds.
+ *
+ * `null` if anything goes wrong, which leaves the caller the sharp coverage
+ * it already has: a hard-edged shadow is wrong, but it is one frame's
+ * cosmetic loss rather than a broken paint.
+ */
+function bakeBlur(app, shape, size, sigma) {
+  const Render = app?.display?.Render;
+  if (!Render || typeof ntk.Surface !== 'function') return null;
+  const { width, height } = shape;
+  const kernel = gaussianKernel1d(size, sigma);
+  let scratch = null;
+  let out = null;
+  try {
+    scratch = new ntk.Surface(app, { width, height, format: 'a8' });
+    out = new ntk.Surface(app, { width, height, format: 'a8' });
+    // `Src`, not `Over`: each pass replaces its destination, which was
+    // cleared to transparent on creation. `Over` would leave the sharp
+    // copy's coverage under the blurred one and give the shadow a hard core.
+    const pass = (src, dst, params) => {
+      src.picture().setFilter('convolution', params);
+      Render.Composite(
+        Render.PictOp.Src,
+        src.picture().id,
+        0,
+        dst.picture().id,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        width,
+        height,
+      );
+    };
+    pass(shape, scratch, [size, 1, ...kernel]);
+    pass(scratch, out, [1, size, ...kernel]);
+    shape.destroy();
+    scratch.destroy();
+    return out;
+  } catch {
+    scratch?.destroy();
+    out?.destroy();
+    return null;
+  }
 }
 
 const DEV = process.env.NODE_ENV !== 'production';
@@ -4163,7 +4230,7 @@ export class Node {
         );
         sctx.fill();
       },
-      after: (surface) => surface.picture().setBlurFilter(size, sigma),
+      after: (surface) => bakeBlur(this.app, surface, size, sigma),
       live: () => this._paintShadowLive(ctx, plan),
     };
     const cache = this.root?._paintCache;
@@ -4190,7 +4257,10 @@ export class Node {
       surface.render((sctx) =>
         plan.draw(sctx, { x: 0, y: 0, width: plan.width, height: plan.height }),
       );
-      plan.after(surface);
+      // `after` may hand back a *different* surface — the blur is baked into
+      // a second one and the sharp copy destroyed — so both the drawing and
+      // the cleanup below follow what it returned.
+      surface = plan.after(surface) ?? surface;
       const before = ctx.fillStyle;
       ctx.fillStyle = plan.tint;
       ctx.drawImage(surface, plan.x, plan.y);

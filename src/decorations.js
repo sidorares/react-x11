@@ -382,6 +382,31 @@ function readShadow(part, value) {
  */
 const MAX_KERNEL = 61;
 
+/**
+ * The 1-D gaussian a separable blur runs, normalized so the two passes
+ * together preserve total coverage.
+ *
+ * Separable is not an optimization detail here, it is the difference between
+ * a shadow that can be repainted and one that cannot: a k-wide 2-D kernel
+ * costs k² multiplies per pixel where two 1-D passes cost 2k. At the widest
+ * kernel this vocabulary allows (61) that is 3721 against 122 — and the
+ * result is identical, because `exp(-((x²+y²)/2σ²))` is exactly the outer
+ * product of two 1-D gaussians.
+ */
+export function gaussianKernel1d(size, sigma) {
+  const reach = (size - 1) / 2;
+  const values = new Array(size);
+  let sum = 0;
+  for (let i = 0; i < size; i++) {
+    const d = i - reach;
+    const v = Math.exp(-(d * d) / (2 * sigma * sigma));
+    values[i] = v;
+    sum += v;
+  }
+  for (let i = 0; i < size; i++) values[i] /= sum;
+  return values;
+}
+
 export function blurKernel(blur) {
   const sigma = blur / 2;
   const reach = Math.ceil(3 * sigma);
