@@ -94,10 +94,18 @@ Two complementary rigs, both now in-repo or one command away:
 
 **Deterministic (CI-grade): `npm run bench`.** Runs scenarios against
 node-x11's in-process X server and counts requests / bytesOut / replies /
-`Composite` count / **composite pixel area** per scenario
-(`scripts/bench/xcount.js`). Requests and bytes miss pixel work entirely — a
-Composite is 36 bytes whether it touches ten pixels or the whole surface — so
-the Mpx column is the one that catches "correct but does far too much".
+`Composite` count / **composite pixel area** / **convolved pixels** per
+scenario (`scripts/bench/xcount.js`). Requests and bytes miss pixel work
+entirely — a Composite is 36 bytes whether it touches ten pixels or the whole
+surface — so the Mpx column is the one that catches "correct but does far too
+much". The convMpx column catches the layer under _that_: area prices every
+destination pixel the same, but a source or mask picture carrying RENDER's
+`convolution` filter is re-convolved by the server on every composite that
+reads it, so `kernel_w × kernel_h × area` is what the server actually runs.
+Issue #413 is the case that motivated it — a blurred `boxShadow` left the
+blur as a picture filter rather than baking it into the pixels, which made
+every shadowed repaint ~700x slower with requests, bytes, composites, area,
+stalls, dups, churn and the rendered pixels all unchanged.
 Since #380 the same counting proxy also analyses the stream: `stalls`
 (blocking round trips nothing was pipelined behind), `dupQueries` (repeated
 identical reply-carrying requests) and `churn` (server resources created and

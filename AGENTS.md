@@ -798,10 +798,27 @@ Rules, in rough order of how much they usually matter:
 ### Measuring it
 
 `npm run bench` runs scenarios against the in-process X server and reports
-requests, bytes, replies, Render composites and **the pixel area those
-composites touch**. That last metric exists because the others hide the
-most common regression: a change can add almost nothing to the wire while
-multiplying the server's work many times over.
+requests, bytes, replies, Render composites, **the pixel area those
+composites touch** and **the multiply-accumulates inside that area**. Those
+last two exist because the others hide the most common regression: a change
+can add almost nothing to the wire while multiplying the server's work many
+times over.
+
+Area and taps are two different assumptions, and both get away from you:
+
+- `Mpx` is area, and assumes a pixel costs the same everywhere.
+- `convMpx` is `kernel_w × kernel_h × area`, summed over any `convolution`
+  filter the composite's source or mask carries. A picture's filter is
+  re-applied by the server on _every_ composite that reads it, so the same
+  request over the same rectangle is one tap a pixel or 3721 depending on
+  picture state neither the request count nor the area looks at. Equal to
+  `Mpx` means nothing is filtered; `--hotspots` names the kernels.
+
+The gap between them is issue #413: a blurred `boxShadow` set the filter on
+its cached coverage instead of baking the blur in, every shadowed repaint
+re-convolved (~700x slower on a real display), and requests, bytes,
+composites, area, stalls, dups, churn and the rendered pixels were all
+unchanged across the fix.
 
 - `npm run bench -- --save` rewrites `scripts/bench/baseline.json`
 - `npm run bench -- --check` fails if a metric regressed past tolerance

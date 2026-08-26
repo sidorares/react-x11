@@ -6,6 +6,8 @@
     "replies": 7,
     "composites": 1,
     "compositePixels": 160000,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 0,
     "dupQueries": 0,
     "churn": 0
@@ -17,6 +19,8 @@
     "replies": 7,
     "composites": 1,
     "compositePixels": 160000,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 0,
     "dupQueries": 0,
     "churn": 0
@@ -28,6 +32,8 @@
     "replies": 7,
     "composites": 1,
     "compositePixels": 160000,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 0,
     "dupQueries": 0,
     "churn": 0
@@ -39,6 +45,8 @@
     "replies": 7,
     "composites": 1,
     "compositePixels": 160000,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 0,
     "dupQueries": 0,
     "churn": 0
@@ -50,6 +58,8 @@
     "replies": 7,
     "composites": 1,
     "compositePixels": 160000,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 0,
     "dupQueries": 0,
     "churn": 0
@@ -61,6 +71,8 @@
     "replies": 7,
     "composites": 1,
     "compositePixels": 160000,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 0,
     "dupQueries": 0,
     "churn": 0
@@ -72,6 +84,8 @@
     "replies": 1,
     "composites": 21,
     "compositePixels": 179200,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 1,
     "dupQueries": 0,
     "churn": 0
@@ -83,6 +97,8 @@
     "replies": 4,
     "composites": 2,
     "compositePixels": 800,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 2,
     "dupQueries": 0,
     "churn": 0
@@ -94,6 +110,8 @@
     "replies": 32,
     "composites": 21,
     "compositePixels": 298240,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 0,
     "dupQueries": 2,
     "churn": 0
@@ -105,6 +123,8 @@
     "replies": 22,
     "composites": 81,
     "compositePixels": 389520,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 4,
     "dupQueries": 0,
     "churn": 0
@@ -116,6 +136,8 @@
     "replies": 44,
     "composites": 70,
     "compositePixels": 561760,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 12,
     "dupQueries": 0,
     "churn": 0
@@ -127,6 +149,8 @@
     "replies": 3,
     "composites": 101,
     "compositePixels": 200000,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 1,
     "dupQueries": 0,
     "churn": 0
@@ -138,6 +162,8 @@
     "replies": 3,
     "composites": 11,
     "compositePixels": 10292,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 1,
     "dupQueries": 0,
     "churn": 0
@@ -149,6 +175,8 @@
     "replies": 36,
     "composites": 0,
     "compositePixels": 0,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 12,
     "dupQueries": 10,
     "churn": 0
@@ -160,6 +188,8 @@
     "replies": 31,
     "composites": 10,
     "compositePixels": 3240,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 31,
     "dupQueries": 0,
     "churn": 0
@@ -171,6 +201,8 @@
     "replies": 11,
     "composites": 245,
     "compositePixels": 2020640,
+    "filteredComposites": 120,
+    "convolvedPixels": 277248000,
     "stalls": 1,
     "dupQueries": 0,
     "churn": 0
@@ -182,6 +214,8 @@
     "replies": 8,
     "composites": 10,
     "compositePixels": 25020,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 4,
     "dupQueries": 0,
     "churn": 0
@@ -193,6 +227,8 @@
     "replies": 6,
     "composites": 10,
     "compositePixels": 31320,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 6,
     "dupQueries": 0,
     "churn": 0
@@ -204,6 +240,8 @@
     "replies": 7,
     "composites": 69,
     "compositePixels": 14863,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 5,
     "dupQueries": 0,
     "churn": 0
@@ -215,6 +253,8 @@
     "replies": 10,
     "composites": 308,
     "compositePixels": 59166,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 2,
     "dupQueries": 0,
     "churn": 0
@@ -226,6 +266,8 @@
     "replies": 11,
     "composites": 993,
     "compositePixels": 428249,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
     "stalls": 0,
     "dupQueries": 0,
     "churn": 0

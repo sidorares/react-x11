@@ -29,6 +29,14 @@
 //                        request is 36 bytes whether it touches ten pixels
 //                        or the whole surface), and it is where "correct
 //                        but does far too much pixel work" shows up
+//   convolved            multiply-accumulates inside those composites: the
+//                        area again, but multiplied by the kernel of any
+//                        `convolution` filter its source or mask carries.
+//                        Area assumes a pixel costs the same everywhere; a
+//                        filtered picture is re-convolved by the server on
+//                        every composite that reads it, so the same area can
+//                        be one tap a pixel or 3721 (issue #413). Equal to
+//                        `pixels` means nothing is filtered
 //   stalls               blocking round trips: replies that arrived while
 //                        their request was the last thing sent, so nothing
 //                        was pipelined behind it. The bench's own settle()
@@ -58,6 +66,7 @@ import {
   analysisMark,
   captureLines,
   compositePixels,
+  convolvedPixels,
   countStream,
   windowAnalysis,
 } from './xcount.js';
@@ -184,24 +193,26 @@ async function measure(name, fn) {
   }
   await settle(app);
 
-  const after = compositePixels(stats, app.display.Render.majorOpcode);
-  const beforePx = compositePixels(
-    { composites: stats.composites.slice(0, mark.composites) },
-    app.display.Render.majorOpcode,
-  );
+  const render = app.display.Render.majorOpcode;
+  // only what `fn` caused: the composites recorded after the mark
+  const drawn = { composites: stats.composites.slice(mark.composites) };
+  const area = compositePixels(drawn, render);
+  const conv = convolvedPixels(drawn, render);
   const analysis = windowAnalysis(stats, mark.analysis);
   const result = {
     requests: stats.requests - mark.requests,
     bytesOut: stats.bytesOut - mark.bytesOut,
     bytesIn: stats.bytesIn - mark.bytesIn,
     replies: stats.replies - mark.replies,
-    composites: after.composites - beforePx.composites,
-    compositePixels: after.pixels - beforePx.pixels,
+    composites: area.composites,
+    compositePixels: area.pixels,
+    filteredComposites: conv.composites,
+    convolvedPixels: conv.pixels,
     stalls: analysis.stalls,
     dupQueries: analysis.dupQueries,
     churn: analysis.churn,
   };
-  hotspots[name] = analysis;
+  hotspots[name] = { ...analysis, kernels: conv.byKernel };
   if (recordDir) {
     const file = join(recordDir, `${name.replace(/[^a-z0-9]+/gi, '-')}.x11cap`);
     writeFileSync(file, captureLines(stats, `bench: ${name}`));
@@ -1118,6 +1129,14 @@ const SCENARIOS = [
     // non-solid source through the coverage it already builds would take
     // this scenario back under 25KB; until then it is worth knowing that a
     // rounded gradient is the priciest box in this vocabulary.
+    //
+    // `convMpx` is the other number to read here, and it is ours: 277 Mpx
+    // against 2.02 composited, because each of the 120 shadow composites
+    // reads its coverage through a live 19x19 `convolution` filter and the
+    // server re-runs all 361 taps every frame. That is issue #413 — the cost
+    // no other column in this table can see. sidorares/react-x11#412 bakes
+    // the blur into the pixels and takes this column to 0.00 with every
+    // other metric in the row unmoved.
     'shapes: 24 gradient+shadow cards, 5 full repaints',
     (() => {
       let ctl;
@@ -1341,11 +1360,11 @@ if (args.includes('--save')) {
 
 const pad = (v, n) => String(v).padStart(n);
 console.log(
-  `${'scenario'.padEnd(38)} ${pad('reqs', 6)} ${pad('bytesOut', 9)} ${pad('replies', 8)} ${pad('composites', 11)} ${pad('Mpx', 8)} ${pad('stalls', 7)} ${pad('dupQ', 5)} ${pad('churn', 6)}`,
+  `${'scenario'.padEnd(38)} ${pad('reqs', 6)} ${pad('bytesOut', 9)} ${pad('replies', 8)} ${pad('composites', 11)} ${pad('Mpx', 8)} ${pad('convMpx', 9)} ${pad('stalls', 7)} ${pad('dupQ', 5)} ${pad('churn', 6)}`,
 );
 for (const [name, r] of Object.entries(results)) {
   console.log(
-    `${name.padEnd(38)} ${pad(r.requests, 6)} ${pad(r.bytesOut, 9)} ${pad(r.replies, 8)} ${pad(r.composites, 11)} ${pad((r.compositePixels / 1e6).toFixed(2), 8)} ${pad(r.stalls, 7)} ${pad(r.dupQueries, 5)} ${pad(r.churn, 6)}`,
+    `${name.padEnd(38)} ${pad(r.requests, 6)} ${pad(r.bytesOut, 9)} ${pad(r.replies, 8)} ${pad(r.composites, 11)} ${pad((r.compositePixels / 1e6).toFixed(2), 8)} ${pad((r.convolvedPixels / 1e6).toFixed(2), 9)} ${pad(r.stalls, 7)} ${pad(r.dupQueries, 5)} ${pad(r.churn, 6)}`,
   );
 }
 
@@ -1361,6 +1380,7 @@ if (args.includes('--hotspots')) {
     if (a.stallsBy.length) console.log(`  stalled on ${list(a.stallsBy)}`);
     if (a.dupsBy.length) console.log(`  repeated   ${list(a.dupsBy)}`);
     if (a.churnBy.length) console.log(`  churned    ${list(a.churnBy)}`);
+    if (a.kernels.length) console.log(`  convolved  ${list(a.kernels)}`);
   }
 }
 
@@ -1393,6 +1413,11 @@ if (args.includes('--check')) {
     bytesOut: [1.15, 256],
     composites: [1.15, 2],
     compositePixels: [1.15, 2],
+    // A filtered composite is the same request over the same area, so these
+    // two move with the same jitter as the pair above — and step by the
+    // kernel, which is three orders of magnitude past any tolerance.
+    filteredComposites: [1.15, 2],
+    convolvedPixels: [1.15, 2],
     stalls: [1.25, 5],
     dupQueries: [1.15, 2],
     churn: [1.15, 4],

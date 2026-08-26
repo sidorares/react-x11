@@ -30,6 +30,10 @@
 //                   the window (pixmap/picture/gc/region/…), with the
 //                   create's parameters kept so "same-sized pixmap rebuilt
 //                   every frame" is visible as repeats of one churn key.
+//   filters       — the live `convolution` filter, if any, on every picture,
+//                   so a Composite can be priced by the taps the server runs
+//                   per pixel rather than by area alone (see
+//                   `convolvedPixels`).
 //
 // Requests are named (core table + extension majors learned live from
 // QueryExtension replies, minor tables for the extensions this stack uses),
@@ -178,6 +182,20 @@ function fnv1a(buf, len) {
   return h;
 }
 
+// RENDER minors the picture-filter tracker cares about. A filter is picture
+// *state*: it is set once and re-applied by the server on every composite
+// that reads the picture, so pricing a Composite needs the filter that was
+// live when the Composite went out — which means following the state, not
+// looking at the Composite alone.
+const RENDER_CREATE_PICTURE = 4;
+const RENDER_FREE_PICTURE = 7;
+const RENDER_COMPOSITE = 8;
+const RENDER_SET_PICTURE_FILTER = 30;
+// CreateSolidFill / CreateLinear|Radial|ConicalGradient: also pictures, and
+// also worth clearing, because node-x11 recycles XIDs
+const RENDER_CREATE_SOURCE = new Set([33, 34, 35, 36]);
+const FIXED = 65536; // RENDER FIXED: 16.16 signed
+
 /** Widen a 16-bit wire sequence number against the full request count. */
 function widenSeq(low, current) {
   let full = (current & ~0xffff) | low;
@@ -207,6 +225,7 @@ export function countStream(inner, { record = false } = {}) {
     live: new Map(), // xid -> { type, key, seq }
     extNames: new Map(), // major opcode -> extension name
     pendingQueryExt: new Map(), // seq -> extension name asked about
+    filters: new Map(), // picture xid -> { taps, key } for a convolution
   };
 
   const stats = {
@@ -217,8 +236,9 @@ export function countStream(inner, { record = false } = {}) {
     errors: 0,
     bytesIn: 0,
     byOpcode: new Map(),
-    // (major, minor, w, h) for every 36-byte request, so Render Composite
-    // pixel area can be totalled once the extension opcode is known
+    // (major, minor, w, h, taps, kernel) for every 36-byte request, so Render
+    // Composite pixel area — and the convolution work inside that area —
+    // can be totalled once the extension opcode is known
     composites: [],
     analysis,
     captureRecords: record ? [] : null,
@@ -314,6 +334,84 @@ export function countStream(inner, { record = false } = {}) {
     }
   };
 
+  /**
+   * Follow RENDER's per-picture `convolution` filter.
+   *
+   * SetPictureFilter draws nothing itself, but it decides what every later
+   * Composite through that picture *does*: the server re-runs the kernel per
+   * composite, so a 61x61 filter turns each destination pixel into 3721
+   * multiply-accumulates. The XID is cleared on FreePicture and on any
+   * picture create, because node-x11 recycles ids and a stale kernel would
+   * price the wrong surface.
+   */
+  const trackFilter = (op, minor, buf, base, len) => {
+    if (analysis.extNames.get(op) !== 'RENDER') return;
+    if (
+      minor === RENDER_FREE_PICTURE ||
+      minor === RENDER_CREATE_PICTURE ||
+      RENDER_CREATE_SOURCE.has(minor)
+    ) {
+      analysis.filters.delete(buf.readUInt32LE(base + 4));
+      return;
+    }
+    if (minor !== RENDER_SET_PICTURE_FILTER || len < base + 12) return;
+    const pid = buf.readUInt32LE(base + 4);
+    const nameLen = buf.readUInt16LE(base + 8);
+    const nameEnd = base + 12 + nameLen;
+    // any other filter — and a convolution whose parameters we cannot read —
+    // is one tap a pixel, i.e. exactly what compositePixels already prices
+    if (len < nameEnd) return;
+    const params = base + 12 + ((nameLen + 3) & ~3);
+    if (
+      buf.toString('latin1', base + 12, nameEnd) !== 'convolution' ||
+      len < params + 8
+    ) {
+      analysis.filters.delete(pid);
+      return;
+    }
+    // a convolution's first two FIXED parameters are the kernel's extent
+    const kw = Math.max(1, Math.round(buf.readInt32LE(params) / FIXED));
+    const kh = Math.max(1, Math.round(buf.readInt32LE(params + 4) / FIXED));
+    analysis.filters.set(pid, { taps: kw * kh, key: `${kw}x${kh}` });
+  };
+
+  /**
+   * A Composite, with the convolution its source and mask carry folded in.
+   * Priced here rather than in `convolvedPixels` because the filter is
+   * mutable state: by the end of the run the picture may carry a different
+   * kernel, or none, or belong to something else entirely.
+   */
+  const trackComposite = (op, minor, buf, base, len) => {
+    if (len - base !== 36) return;
+    let taps = 0;
+    const kernels = [];
+    if (
+      analysis.extNames.get(op) === 'RENDER' &&
+      minor === RENDER_COMPOSITE &&
+      analysis.filters.size
+    ) {
+      for (const [role, at] of [
+        ['src', 8],
+        ['mask', 12],
+      ]) {
+        const filter = analysis.filters.get(buf.readUInt32LE(base + at));
+        if (!filter) continue;
+        taps += filter.taps;
+        kernels.push(`${role} ${filter.key}`);
+      }
+    }
+    const w = buf.readUInt16LE(base + 32);
+    const h = buf.readUInt16LE(base + 34);
+    stats.composites.push([
+      op,
+      minor,
+      w,
+      h,
+      taps * w * h,
+      kernels.join(' + ') || null,
+    ]);
+  };
+
   const onRequest = (buf, len) => {
     const op = buf[0];
     const minor = buf[1];
@@ -340,6 +438,8 @@ export function countStream(inner, { record = false } = {}) {
       }
     }
     trackResource(op, minor, buf, base);
+    trackFilter(op, minor, buf, base, len);
+    trackComposite(op, minor, buf, base, len);
   };
 
   const onReply = (buf) => {
@@ -389,14 +489,6 @@ export function countStream(inner, { record = false } = {}) {
       if (len === 0 || outBuf.length < len) return;
       stats.requests += 1;
       stats.byOpcode.set(opcode, (stats.byOpcode.get(opcode) ?? 0) + 1);
-      if (len === 36) {
-        stats.composites.push([
-          opcode,
-          outBuf[1],
-          outBuf.readUInt16LE(32),
-          outBuf.readUInt16LE(34),
-        ]);
-      }
       onRequest(outBuf, len);
       outBuf = outBuf.subarray(len);
     }
@@ -560,12 +652,50 @@ export function compositePixels(stats, renderOpcode) {
   let px = 0;
   let n = 0;
   for (const [major, minor, w, h] of stats.composites) {
-    if (major === renderOpcode && minor === 8) {
+    if (major === renderOpcode && minor === RENDER_COMPOSITE) {
       px += w * h;
       n += 1;
     }
   }
   return { composites: n, pixels: px };
+}
+
+/**
+ * Multiply-accumulates inside those composites. `compositePixels` counts
+ * *area*, and by doing so assumes a destination pixel costs the same
+ * everywhere. A source or mask picture carrying RENDER's `convolution`
+ * filter breaks that assumption, and breaks it by orders of magnitude: the
+ * server re-runs the kernel on every composite that reads the picture, so
+ * one composite of a 65k-pixel surface is 65k taps or 244M depending on a
+ * piece of picture state neither the request count nor the area can see.
+ *
+ * That is not hypothetical — it is issue #413. A blurred `boxShadow` set the
+ * filter on a cached coverage surface instead of baking the blur into its
+ * pixels; every shadowed repaint re-convolved, ~700x slower on a real
+ * display, and requests, bytes, composites, area, stalls, dups, churn and
+ * the rendered pixels were all unchanged across the fix.
+ *
+ * `pixels` is the tap count — `kernel_w × kernel_h × area`, summed over the
+ * source and the mask when both are filtered — so it is directly comparable
+ * with `compositePixels`: equal means one tap a pixel, 3721x means a 61x61
+ * gaussian is running over every one of them.
+ */
+export function convolvedPixels(stats, renderOpcode) {
+  let taps = 0;
+  let n = 0;
+  const byKernel = new Map();
+  for (const [major, minor, , , price, kernel] of stats.composites) {
+    if (major !== renderOpcode || minor !== RENDER_COMPOSITE || !price)
+      continue;
+    taps += price;
+    n += 1;
+    byKernel.set(kernel, (byKernel.get(kernel) ?? 0) + 1);
+  }
+  return {
+    composites: n,
+    pixels: taps,
+    byKernel: [...byKernel.entries()].sort((a, b) => b[1] - a[1]),
+  };
 }
 
 export function summarize(stats, topOpcodes = 6) {

@@ -18,11 +18,13 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
 import xserver from 'x11/lib/xserver/index.js';
-import { createClient, StaticFontSource } from 'ntk';
+import { createClient, StaticFontSource, Surface } from 'ntk';
 
 import {
   analysisMark,
   captureLines,
+  compositePixels,
+  convolvedPixels,
   countStream,
   windowAnalysis,
 } from '../scripts/bench/xcount.js';
@@ -250,6 +252,113 @@ test('RENDER create/free cycles churn as pictures', () => {
   assert.strictEqual(stats.analysis.churned[0].key, 'picture');
 });
 
+// --- filtered composites ------------------------------------------------
+
+const RENDER = 130;
+
+/** RENDER SetPictureFilter, packed the way node-x11 packs it. */
+function setPictureFilter(pid, name, params = []) {
+  const padded = (name.length + 3) & ~3;
+  const b = Buffer.alloc(12 + padded + params.length * 4);
+  b[0] = RENDER;
+  b[1] = 30;
+  b.writeUInt16LE(b.length / 4, 2);
+  b.writeUInt32LE(pid, 4);
+  b.writeUInt16LE(name.length, 8);
+  b.write(name, 12, 'latin1');
+  params.forEach((v, i) =>
+    b.writeInt32LE(Math.round(v * 65536), 12 + padded + i * 4),
+  );
+  return b;
+}
+
+/** RENDER Composite of `src` through `mask` onto `dst`, `w` x `h`. */
+function composite(src, mask, dst, w, h) {
+  const b = Buffer.alloc(36);
+  b[0] = RENDER;
+  b[1] = 8;
+  b.writeUInt16LE(9, 2);
+  b.writeUInt32LE(src, 8);
+  b.writeUInt32LE(mask, 12);
+  b.writeUInt32LE(dst, 16);
+  b.writeUInt16LE(w, 32);
+  b.writeUInt16LE(h, 34);
+  return b;
+}
+
+/** A 19x19 gaussian's worth of parameters — only the extent is read. */
+const kernel19 = [19, 19, ...Array(361).fill(1 / 361)];
+
+test('a convolution prices a composite by its kernel, not by its area', () => {
+  const { stream, stats } = started();
+  queryExtension(stream, 1, 'RENDER', RENDER);
+  stream.write(setPictureFilter(0x3001, 'convolution', kernel19));
+  stream.write(composite(0x3002, 0x3001, 0x3003, 40, 20)); // filtered mask
+  stream.write(composite(0x3002, 0, 0x3003, 40, 20)); // nothing filtered
+  // area cannot tell the two apart: same request, same rectangle
+  assert.deepStrictEqual(compositePixels(stats, RENDER), {
+    composites: 2,
+    pixels: 2 * 800,
+  });
+  const conv = convolvedPixels(stats, RENDER);
+  assert.strictEqual(conv.composites, 1);
+  assert.strictEqual(conv.pixels, 361 * 800);
+  assert.deepStrictEqual(conv.byKernel, [['mask 19x19', 1]]);
+});
+
+test('a filter on the source counts too, and both roles add up', () => {
+  const { stream, stats } = started();
+  queryExtension(stream, 1, 'RENDER', RENDER);
+  stream.write(setPictureFilter(0x3001, 'convolution', [3, 3, ...Array(9)]));
+  stream.write(composite(0x3001, 0, 0x3003, 10, 10));
+  stream.write(setPictureFilter(0x3002, 'convolution', [5, 5, ...Array(25)]));
+  stream.write(composite(0x3001, 0x3002, 0x3003, 10, 10));
+  const conv = convolvedPixels(stats, RENDER);
+  assert.strictEqual(conv.composites, 2);
+  assert.strictEqual(conv.pixels, 9 * 100 + (9 + 25) * 100);
+  assert.deepStrictEqual(conv.byKernel, [
+    ['src 3x3', 1],
+    ['src 3x3 + mask 5x5', 1],
+  ]);
+});
+
+test('the filter is picture state: it stops counting when it goes away', () => {
+  const { stream, stats } = started();
+  queryExtension(stream, 1, 'RENDER', RENDER);
+  const filtered = setPictureFilter(0x3001, 'convolution', kernel19);
+  const draw = () => stream.write(composite(0x3002, 0x3001, 0x3003, 40, 20));
+
+  stream.write(filtered);
+  draw();
+  // a plain resampling filter is one tap a pixel — already priced by area
+  stream.write(setPictureFilter(0x3001, 'bilinear'));
+  draw();
+  // FreePicture, then the recycled XID handed to a fresh unfiltered picture:
+  // node-x11 reuses ids, so a stale kernel would price the wrong surface
+  stream.write(filtered);
+  stream.write(req(RENDER, 7, [0x3001]));
+  draw();
+  stream.write(filtered);
+  stream.write(req(RENDER, 4, [0x3001, 0x2001, 0x11, 0])); // CreatePicture
+  draw();
+
+  const conv = convolvedPixels(stats, RENDER);
+  assert.strictEqual(conv.composites, 1);
+  assert.strictEqual(conv.pixels, 361 * 800);
+});
+
+test('a 1x1 convolution is one tap a pixel: filtered, but not costly', () => {
+  const { stream, stats } = started();
+  queryExtension(stream, 1, 'RENDER', RENDER);
+  // ntk sends this for a zero-radius blur — a filter, so the server's
+  // unfiltered fast path is off, but the same work per pixel as no filter
+  stream.write(setPictureFilter(0x3001, 'convolution', [1, 1, 1]));
+  stream.write(composite(0x3002, 0x3001, 0x3003, 40, 20));
+  const conv = convolvedPixels(stats, RENDER);
+  assert.strictEqual(conv.composites, 1);
+  assert.strictEqual(conv.pixels, compositePixels(stats, RENDER).pixels);
+});
+
 // --- GenericEvent framing ----------------------------------------------
 
 test('a long GenericEvent does not desync the reply parser', () => {
@@ -336,6 +445,54 @@ test('the analyzer prices real node-x11 traffic', async () => {
     assert.deepStrictEqual(windowed.dupsBy, [['InternAtom', 1]]);
     const churn = new Map(windowed.churnBy);
     assert.strictEqual(churn.get('pixmap 32x16x24'), 1);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a real blurred shadow is priced by its kernel, not by its box', async () => {
+  const server = xserver.createServer({ width: 200, height: 200 });
+  const [serverEnd, clientEnd] = xserver.createStreamPair();
+  server.addClientStream(serverEnd);
+  const { stats } = countStream(clientEnd);
+  const app = await createClient({
+    stream: clientEnd,
+    fontSource: new StaticFontSource(),
+  });
+  try {
+    const render = app.display.Render.majorOpcode;
+    // exactly what a blurred `boxShadow` did (src/nodes.js): coverage in an
+    // a8 surface, the blur set on its *picture*, painted through a colour.
+    // The parse has to survive node-x11's own SetPictureFilter packing —
+    // padded name, 16.16 FIXED parameters — which is why this runs against
+    // the real client rather than hand-built bytes.
+    const shadow = new Surface(app, { width: 32, height: 16, format: 'a8' });
+    shadow.render((ctx) => {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 32, 16);
+    });
+    shadow.picture().setBlurFilter(19, 9.5);
+    const dst = new Surface(app, { width: 64, height: 64 });
+    const mark = { composites: stats.composites.length };
+    dst.render((ctx) => {
+      ctx.fillStyle = '#000000';
+      ctx.drawImage(shadow, 0, 0);
+    });
+    await new Promise((resolve) => app.X.GetInputFocus(resolve));
+
+    const drawn = { composites: stats.composites.slice(mark.composites) };
+    const area = compositePixels(drawn, render);
+    const conv = convolvedPixels(drawn, render);
+    // ntk stages the tinted coverage, so the shadow is two composites of the
+    // surface — one of which reads it through the convolution
+    assert.strictEqual(area.pixels, area.composites * 32 * 16);
+    assert.strictEqual(conv.composites, 1);
+    assert.deepStrictEqual(conv.byKernel, [['mask 19x19', 1]]);
+    // the whole point: 36 bytes and 512 pixels on the wire either way, and
+    // 361 multiply-accumulates per pixel behind them
+    assert.strictEqual(conv.pixels, 361 * 32 * 16);
+    shadow.destroy();
+    dst.destroy();
   } finally {
     await app.close();
   }
