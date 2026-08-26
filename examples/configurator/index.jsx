@@ -40,9 +40,12 @@
 //                      towards you, at the bottom. `laptop3d.jsx` has the
 //                      scene and the reasons; the short version is that the
 //                      surface clears to the same paper colour as the page,
-//                      so it reads as part of it rather than as a viewport,
-//                      and that a machine whose GL cannot run shaders gets
-//                      the flat `<box>` laptop instead, which is still here.
+//                      so it reads as part of it rather than as a viewport;
+//                      that its edges are chamfered, which is what gives an
+//                      aluminium case its highlight; that it supersamples
+//                      itself because the direct backend's visual carries no
+//                      sample buffers; and that a machine whose GL cannot run
+//                      shaders gets the flat `<box>` laptop, still here.
 //   Gradients          `backgroundImage: linear-gradient(...)` paints the
 //                      laptop's wallpaper and the sheen on its hinge; the
 //                      sheen is a translucent white ramp *over* a solid
@@ -1226,9 +1229,13 @@ if (!process.env.REACT_X11_NO_AUTORUN) {
   // Not a default to copy blindly: an app that wants to belong on the
   // desktop wants the opposite, and turning the bridge off is what a screen
   // reader would notice on a Linux desktop.
-  // `glPolicy: 'auto'` takes the direct backend where the connection has it
-  // and indirect otherwise — the laptop is drawn with shaders, so 'auto' is
-  // what decides between the 3D panel and the flat one below it.
-  const root = await createRoot({ desktop: false, glPolicy: 'auto' });
+  // `glPolicy: 'direct'` rather than `'auto'`: this scene is GLSL and a
+  // framebuffer object, so the indirect backend cannot draw it at all —
+  // asking for direct and being told no is a cheaper, clearer answer than
+  // getting an indirect context and discovering it in `onCreated`. Strict is
+  // safe here: without direct, ntk reports no backend, the `<glarea>`'s
+  // `onError` fires, and the flat laptop takes over. `createRoot` itself
+  // never throws over it.
+  const root = await createRoot({ desktop: false, glPolicy: 'direct' });
   root.render(<App />);
 }

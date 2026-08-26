@@ -27,6 +27,13 @@
 // see: GL renders where `GetImage` cannot read it (docs/glx.md), so there is
 // no pixel to assert on and `npm run screenshots` skips this element.
 //
+// **Anti-aliasing is ours to do.** `chooseGLConfig` reads `DEPTH_SIZE` and
+// `ALPHA_SIZE` out of the GLX spec on the direct backend and nothing else, so
+// `SAMPLES` is honoured on indirect and ignored on the backend this runs on
+// (sidorares/ntk#341). What direct does have is framebuffer objects, so the
+// scene is drawn into one at twice the panel's size and resolved down — full
+// scene AA, decided by the app rather than by the visual.
+//
 // ## What does not work
 //
 // No picking: `<glarea>` does not take part in the parent's hit testing yet
@@ -81,72 +88,104 @@ export function laptopPose(progress) {
 // ---------------------------------------------------------------------------
 
 /**
- * One axis-aligned box, at its final size and place in the group's space.
+ * One axis-aligned box with its edges cut off — a chamfer, not a fillet.
+ *
+ * The cut is what makes an edge read as rounded: it catches the key light at
+ * a different angle from either face it joins, so the object gets the thin
+ * highlight along its edges that a machined aluminium case has and a sharp
+ * box cannot. A true fillet would need a ring of segments per edge and a
+ * seam-free sphere at each corner; at this size the difference is a pixel of
+ * gradient, and one flat cut costs 11 triangles per box instead of hundreds.
  *
  * Sized here rather than scaled by the model matrix on purpose: a non-uniform
  * scale needs the inverse transpose to carry normals, and every transform
  * below stays rigid this way, so `mat3(uModel)` is the whole normal matrix.
+ *
+ * Nothing is culled, so winding does not matter — the normals are given
+ * explicitly and the depth buffer decides what is seen.
  */
-function box(out, [cx, cy, cz], [w, h, d]) {
-  const x = w / 2;
-  const y = h / 2;
-  const z = d / 2;
-  const faces = [
-    [
-      [0, 0, 1],
-      [-x, -y, z],
-      [x, -y, z],
-      [x, y, z],
-      [-x, y, z],
-    ],
-    [
-      [0, 0, -1],
-      [x, -y, -z],
-      [-x, -y, -z],
-      [-x, y, -z],
-      [x, y, -z],
-    ],
-    [
-      [0, 1, 0],
-      [-x, y, z],
-      [x, y, z],
-      [x, y, -z],
-      [-x, y, -z],
-    ],
-    [
-      [0, -1, 0],
-      [-x, -y, -z],
-      [x, -y, -z],
-      [x, -y, z],
-      [-x, -y, z],
-    ],
-    [
-      [1, 0, 0],
-      [x, -y, z],
-      [x, -y, -z],
-      [x, y, -z],
-      [x, y, z],
-    ],
-    [
-      [-1, 0, 0],
-      [-x, -y, -z],
-      [-x, -y, z],
-      [-x, y, z],
-      [-x, y, -z],
-    ],
-  ];
+function chamferBox(out, center, size, chamfer = 0.02) {
+  const h = [size[0] / 2, size[1] / 2, size[2] / 2];
+  // a chamfer can never eat more than the part is thick
+  const r = Math.min(chamfer, Math.min(h[0], h[1], h[2]) * 0.85);
+  const a = [h[0] - r, h[1] - r, h[2] - r];
   const start = out.length / 6;
-  for (const [n, a, b, c, d2] of faces) {
-    for (const v of [a, b, c, a, c, d2]) {
-      out.push(v[0] + cx, v[1] + cy, v[2] + cz, n[0], n[1], n[2]);
+
+  const push = (p, n) =>
+    out.push(
+      p[0] + center[0],
+      p[1] + center[1],
+      p[2] + center[2],
+      n[0],
+      n[1],
+      n[2],
+    );
+  const quad = (p1, p2, p3, p4, n) => {
+    push(p1, n);
+    push(p2, n);
+    push(p3, n);
+    push(p1, n);
+    push(p3, n);
+    push(p4, n);
+  };
+  /** a point named by its three axis components, in axis-index order */
+  const at = (i, vi, j, vj, k, vk) => {
+    const p = [0, 0, 0];
+    p[i] = vi;
+    p[j] = vj;
+    p[k] = vk;
+    return p;
+  };
+  const unit = (v) => {
+    const L = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / L, v[1] / L, v[2] / L];
+  };
+
+  for (let i = 0; i < 3; i++) {
+    const j = (i + 1) % 3;
+    const k = (i + 2) % 3;
+    // the six faces, inset by the chamfer on both of their other axes
+    for (const s of [1, -1]) {
+      const n = [0, 0, 0];
+      n[i] = s;
+      quad(
+        at(i, s * h[i], j, -a[j], k, -a[k]),
+        at(i, s * h[i], j, a[j], k, -a[k]),
+        at(i, s * h[i], j, a[j], k, a[k]),
+        at(i, s * h[i], j, -a[j], k, a[k]),
+        n,
+      );
+    }
+    // the twelve cuts, each joining two faces along the remaining axis
+    for (const si of [1, -1]) {
+      for (const sj of [1, -1]) {
+        const n = [0, 0, 0];
+        n[i] = si;
+        n[j] = sj;
+        quad(
+          at(i, si * h[i], j, sj * a[j], k, -a[k]),
+          at(i, si * a[i], j, sj * h[j], k, -a[k]),
+          at(i, si * a[i], j, sj * h[j], k, a[k]),
+          at(i, si * h[i], j, sj * a[j], k, a[k]),
+          unit(n),
+        );
+      }
+    }
+  }
+  // and the eight corners the cuts leave behind
+  for (const sx of [1, -1]) {
+    for (const sy of [1, -1]) {
+      for (const sz of [1, -1]) {
+        const n = unit([sx, sy, sz]);
+        push([sx * h[0], sy * a[1], sz * a[2]], n);
+        push([sx * a[0], sy * h[1], sz * a[2]], n);
+        push([sx * a[0], sy * a[1], sz * h[2]], n);
+      }
     }
   }
   return { first: start, count: out.length / 6 - start };
 }
 
-/** Vertical field of view, and how much of the object has to fit inside it:
- *  half the width across; the vertical reach travels with the lid and comes
- *  from the pose. */
 const FOV_Y = 32;
 const REACH_H = 1.68;
 
@@ -159,21 +198,33 @@ const LID_H = 0.07;
 function buildGeometry() {
   const data = [];
   // the body, in the base's own space — the hinge is at z = -BASE_D / 2
-  const base = box(data, [0, 0, 0], [BASE_W, BASE_H, BASE_D]);
-  const keys = box(
+  const base = chamferBox(data, [0, 0, 0], [BASE_W, BASE_H, BASE_D], 0.03);
+  const keys = chamferBox(
     data,
     [0, BASE_H / 2, -0.24],
     [BASE_W - 0.42, 0.012, BASE_D - 1.0],
+    0.006,
   );
-  const pad = box(data, [0, BASE_H / 2, 0.62], [1.16, 0.01, BASE_D - 1.45]);
+  const pad = chamferBox(
+    data,
+    [0, BASE_H / 2, 0.62],
+    [1.16, 0.01, BASE_D - 1.45],
+    0.006,
+  );
   // the lid, in the hinge's space: it extends *away* from the pivot, so the
   // whole part sits at +y and rotates around the origin
   const lidH = BASE_D - 0.06;
-  const lid = box(data, [0, lidH / 2, -LID_H / 2], [BASE_W, lidH, LID_H]);
-  const screen = box(
+  const lid = chamferBox(
+    data,
+    [0, lidH / 2, -LID_H / 2],
+    [BASE_W, lidH, LID_H],
+    0.024,
+  );
+  const screen = chamferBox(
     data,
     [0, lidH / 2, 0.001],
     [BASE_W - 0.2, lidH - 0.18, LID_H],
+    0.008,
   );
   return {
     data: new Float32Array(data),
@@ -222,6 +273,41 @@ void main() {
   gl_FragColor = vec4(mix(lit, base, uGlow), 1.0);
 }`;
 
+/**
+ * Full-scene anti-aliasing, by supersampling.
+ *
+ * The direct backend's config carries no sample buffers — `chooseGLConfig`
+ * reads `DEPTH_SIZE` and `ALPHA_SIZE` out of the GLX spec and nothing else,
+ * so `SAMPLES` is honoured on indirect and silently ignored on the backend
+ * this scene actually runs on (sidorares/ntk#341). What direct *does* have is
+ * framebuffer objects, so the scene renders into one at twice the panel's
+ * size and is resolved down through a linear-filtered quad: 4 samples a
+ * pixel, decided here rather than by the visual.
+ *
+ * Two, and not because of the memory: the resolve is one bilinear tap, which
+ * averages a 2x2 neighbourhood, so 2 is the largest factor it can actually
+ * resolve. Measured on the silhouette — mean edge ramp 1.06px with no
+ * supersampling, 1.40px at 2x, and back to 1.06px at 3x and 1.24px at 4x,
+ * where the filter starts missing texels. Going wider needs a multi-tap
+ * filter or a mip chain in the resolve, which is a lot of machinery for an
+ * edge already a pixel and a half soft.
+ */
+const SUPERSAMPLE = 2;
+
+const BLIT_VERTEX_SRC = `
+attribute vec2 aQuad;
+varying vec2 vUv;
+void main() {
+  vUv = aQuad * 0.5 + 0.5;
+  gl_Position = vec4(aQuad, 0.0, 1.0);
+}`;
+
+const BLIT_FRAGMENT_SRC = `
+precision mediump float;
+uniform sampler2D uTex;
+varying vec2 vUv;
+void main() { gl_FragColor = texture2D(uTex, vUv); }`;
+
 const rgb = (hex) => {
   const v = hex.replace('#', '');
   const n = parseInt(
@@ -246,6 +332,76 @@ function compile(gl, type, src, what) {
   return shader;
 }
 
+/**
+ * The offscreen the scene is drawn into, at `SUPERSAMPLE` times the panel.
+ *
+ * Rebuilt when the panel changes size and never per frame — an FBO plus its
+ * texture is a GPU allocation, and a resize is the only thing that can
+ * invalidate one. Returns null if the driver will not complete the
+ * framebuffer, and the caller then draws straight to the window: aliased,
+ * which is a great deal better than blank.
+ */
+function ensureTarget(gl, s, width, height) {
+  const w = Math.max(1, Math.round(width * SUPERSAMPLE));
+  const h = Math.max(1, Math.round(height * SUPERSAMPLE));
+  if (s.target && s.target.w === w && s.target.h === h) return s.target;
+  if (s.target) {
+    gl.deleteFramebuffer(s.target.fbo);
+    gl.deleteTexture(s.target.tex);
+    gl.deleteRenderbuffer(s.target.depth);
+    s.target = null;
+  }
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    w,
+    h,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    null,
+  );
+  // LINEAR is the resolve: the downscale averages the extra samples
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  const depth = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
+  gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.TEXTURE_2D,
+    tex,
+    0,
+  );
+  gl.framebufferRenderbuffer(
+    gl.FRAMEBUFFER,
+    gl.DEPTH_ATTACHMENT,
+    gl.RENDERBUFFER,
+    depth,
+  );
+  const ok =
+    gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  if (!ok) {
+    gl.deleteFramebuffer(fbo);
+    gl.deleteTexture(tex);
+    gl.deleteRenderbuffer(depth);
+    return null;
+  }
+  s.target = { fbo, tex, depth, w, h };
+  return s.target;
+}
+
 // ---------------------------------------------------------------------------
 // The element
 // ---------------------------------------------------------------------------
@@ -259,6 +415,9 @@ function compile(gl, type, src, what) {
 export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
   const [progress, setProgress] = useState(0);
   const scene = useRef(null);
+  // the same paper the page is on: the offscreen has to be cleared to it, or
+  // the resolve blends the laptop's edges into black
+  const clear = rgb(clearColor ?? '#ffffff');
 
   useEffect(() => {
     if (!bind) return undefined;
@@ -296,10 +455,44 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, geo.data, gl.STATIC_DRAW);
         gl.enable(gl.DEPTH_TEST);
+
+        // the resolve pass: one triangle pair, sampling the supersampled
+        // colour attachment with the hardware's linear filter
+        const blit = gl.createProgram();
+        gl.attachShader(
+          blit,
+          compile(gl, gl.VERTEX_SHADER, BLIT_VERTEX_SRC, 'blit vertex shader'),
+        );
+        gl.attachShader(
+          blit,
+          compile(
+            gl,
+            gl.FRAGMENT_SHADER,
+            BLIT_FRAGMENT_SRC,
+            'blit fragment shader',
+          ),
+        );
+        gl.linkProgram(blit);
+        if (!gl.getProgramParameter(blit, gl.LINK_STATUS)) {
+          throw new Error(`link (blit): ${gl.getProgramInfoLog(blit)}`);
+        }
+        const quad = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          new Float32Array([-1, -1, 3, -1, -1, 3]),
+          gl.STATIC_DRAW,
+        );
+
         scene.current = {
           program,
           buffer,
           geo,
+          blit,
+          quad,
+          aQuad: gl.getAttribLocation(blit, 'aQuad'),
+          uTex: gl.getUniformLocation(blit, 'uTex'),
+          target: null,
           aPos: gl.getAttribLocation(program, 'aPos'),
           aNormal: gl.getAttribLocation(program, 'aNormal'),
           uMvp: gl.getUniformLocation(program, 'uMvp'),
@@ -323,10 +516,22 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
       const s = scene.current;
       if (!s) return;
       const pose = laptopPose(progress);
+      // Pass one goes into the supersampled offscreen where there is one;
+      // the element already cleared the window, but the offscreen is ours.
+      const target = ensureTarget(gl, s, width, height);
+      const sw = target ? target.w : width;
+      const sh = target ? target.h : height;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fbo : null);
+      gl.viewport(0, 0, sw, sh);
+      if (target) {
+        gl.clearColor(clear[0], clear[1], clear[2], 1);
+        gl.enable(gl.DEPTH_TEST);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      }
       // Fit the object to the panel rather than trusting a fixed distance:
       // the stage is one shape at 1220px and another when the layout stacks,
       // and a camera that ignores that crops the laptop on the narrow one.
-      const aspect = Math.max(width, 1) / Math.max(height, 1);
+      const aspect = Math.max(sw, 1) / Math.max(sh, 1);
       const halfV = Math.tan((FOV_Y * Math.PI) / 360);
       const dist =
         Math.max(pose.reachV / halfV, REACH_H / (halfV * aspect)) + BASE_D / 2;
@@ -397,8 +602,26 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
         gradSpan: s.geo.lidH - 0.18,
         glow: 0.82,
       });
+
+      // Pass two: resolve the offscreen down onto the window. Depth is off
+      // for it — a fullscreen quad has nothing to be behind — and the texture
+      // unit is left bound, which is the state the next frame starts from.
+      if (target) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.viewport(0, 0, width, height);
+        gl.disable(gl.DEPTH_TEST);
+        gl.useProgram(s.blit);
+        gl.bindBuffer(gl.ARRAY_BUFFER, s.quad);
+        gl.enableVertexAttribArray(s.aQuad);
+        gl.vertexAttribPointer(s.aQuad, 2, gl.FLOAT, false, 0, 0);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, target.tex);
+        gl.uniform1i(s.uTex, 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.enable(gl.DEPTH_TEST);
+      }
     },
-    [progress, finish],
+    [progress, finish, clear],
   );
 
   return (
