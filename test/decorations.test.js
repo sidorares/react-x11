@@ -11,6 +11,7 @@
 import assert from 'node:assert';
 import { test } from 'node:test';
 
+import { DEFAULT_SHADOW_POLICY, shadowReach } from 'ntk';
 import {
   blurKernel,
   linearGradientGeometry,
@@ -230,14 +231,24 @@ test('an unusable boxShadow names itself and the fix', () => {
 
 test('a CSS blur radius is twice the gaussian’s sigma', () => {
   assert.equal(blurKernel(8).sigma, 4);
-  const { size, pad } = blurKernel(8);
-  assert.equal(size % 2, 1, 'a convolution kernel has a centre');
-  assert.ok(size >= 2 * 3 * 4, `cut at 3 sigma, got ${size}`);
-  assert.ok(pad >= (size - 1) / 2, 'the surface holds the whole kernel');
+  // The padding has to hold the kernel ntk will run, or the blur clips
+  // square against the edge of the surface it was rendered into — and both
+  // numbers come from ntk's `shadowReach` so they cannot drift apart.
+  assert.ok(
+    blurKernel(8).pad >= shadowReach(4),
+    'the surface holds the whole kernel',
+  );
 });
 
 test('a huge blur is capped rather than convolving forever', () => {
-  assert.ok(blurKernel(400).size <= 61);
+  // The cap is ntk's shadow policy (maxSigma), applied by `shadowSigma`:
+  // past it the blur stops widening rather than becoming a kernel no frame
+  // finishes. It is a sigma cap now, not a kernel-width one — the passes are
+  // separable, so width costs 2k rather than k squared.
+  assert.equal(blurKernel(4000).sigma, DEFAULT_SHADOW_POLICY.maxSigma);
+  assert.ok(
+    blurKernel(4000).pad <= shadowReach(DEFAULT_SHADOW_POLICY.maxSigma) + 1,
+  );
 });
 
 test('the extent a shadow claims covers offset, spread and the blur’s tail', () => {

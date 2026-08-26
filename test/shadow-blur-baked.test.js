@@ -23,7 +23,8 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { blurKernel, gaussianKernel1d } from '../src/decorations.js';
+import { shadowReach } from 'ntk';
+import { blurKernel } from '../src/decorations.js';
 
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
@@ -110,36 +111,19 @@ test('a cached blurred shadow composites as a plain mask', async () => {
   await app.close();
 });
 
-test('the separable kernel is the 2-D gaussian it replaces', () => {
-  const { sigma, size } = blurKernel(20);
-  const k = gaussianKernel1d(size, sigma);
-  assert.equal(k.length, size);
-  const sum = k.reduce((a, b) => a + b, 0);
-  assert.ok(Math.abs(sum - 1) < 1e-12, `normalized, got ${sum}`);
-
-  // Two 1-D passes are one 2-D pass exactly when the 2-D kernel is their
-  // outer product, which is what makes this substitution invisible:
-  // exp(-(x²+y²)/2σ²) === exp(-x²/2σ²)·exp(-y²/2σ²).
-  const centre = (size - 1) / 2;
-  let worst = 0;
-  let total = 0;
-  const raw = [];
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const v = Math.exp(
-        -((x - centre) ** 2 + (y - centre) ** 2) / (2 * sigma * sigma),
-      );
-      raw.push(v);
-      total += v;
-    }
+test('the coverage surface is padded for the kernel ntk will run', () => {
+  // The blur is ntk's (`blurCoverage`), and it derives its own kernel from
+  // sigma — so the padding react-x11 puts around the shape has to cover
+  // *that* reach. Too little and the convolution samples past the surface,
+  // where RepeatNone reads transparent, and the shadow ends in a straight
+  // line down its own edge. Nothing about that looks like a bug from the
+  // style, and no pixel test in this repo draws a shadow big enough to show
+  // it, so the agreement is asserted directly.
+  for (const blur of [1, 4, 8, 20, 22, 42, 120, 4000]) {
+    const { sigma, pad } = blurKernel(blur);
+    assert.ok(
+      pad >= shadowReach(sigma),
+      `blur ${blur}: pad ${pad} must cover reach ${shadowReach(sigma)}`,
+    );
   }
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      worst = Math.max(
-        worst,
-        Math.abs(raw[y * size + x] / total - k[y] * k[x]),
-      );
-    }
-  }
-  assert.ok(worst < 1e-12, `separable within ${worst}`);
 });

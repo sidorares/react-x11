@@ -43,7 +43,6 @@ import {
 } from './styles.js';
 import {
   blurKernel,
-  gaussianKernel1d,
   gradientSpec,
   linearGradientGeometry,
   shadowExtent,
@@ -686,72 +685,6 @@ function shadowExtentOf(style, scale = 1) {
   const value = style?.boxShadow;
   if (!value || value === 'none') return 0;
   return shadowExtent(shadowSpecs(value, scale));
-}
-
-/**
- * Blur an a8 coverage surface **into its pixels**, returning the result.
- *
- * The obvious implementation — `picture().setBlurFilter(...)` — leaves the
- * convolution on the *picture*, where the server re-runs it on every
- * composite. A cached shadow then costs its whole kernel every frame it is
- * drawn, which is the difference between a repaint that is free and one that
- * takes a second: a 61x61 kernel over a card-sized 489x134 coverage surface
- * is 244 million multiply-accumulates, per shadow, per frame, inside the
- * server. The cache was hiding it perfectly — the entry hits, nothing
- * re-renders, and the frame still costs what it always did.
- *
- * So the blur runs once, here, and what comes back carries no filter: an
- * ordinary masked composite however wide the blur was. Two separable 1-D
- * passes rather than one 2-D kernel, which is 2k work instead of k² and
- * gives an identical result, since the 2-D gaussian is exactly the outer
- * product of two 1-D ones (`gaussianKernel1d`). The input is destroyed —
- * nothing wants the sharp copy afterwards, and keeping it alive would double
- * what the paint cache holds.
- *
- * `null` if anything goes wrong, which leaves the caller the sharp coverage
- * it already has: a hard-edged shadow is wrong, but it is one frame's
- * cosmetic loss rather than a broken paint.
- */
-function bakeBlur(app, shape, size, sigma) {
-  const Render = app?.display?.Render;
-  if (!Render || typeof ntk.Surface !== 'function') return null;
-  const { width, height } = shape;
-  const kernel = gaussianKernel1d(size, sigma);
-  let scratch = null;
-  let out = null;
-  try {
-    scratch = new ntk.Surface(app, { width, height, format: 'a8' });
-    out = new ntk.Surface(app, { width, height, format: 'a8' });
-    // `Src`, not `Over`: each pass replaces its destination, which was
-    // cleared to transparent on creation. `Over` would leave the sharp
-    // copy's coverage under the blurred one and give the shadow a hard core.
-    const pass = (src, dst, params) => {
-      src.picture().setFilter('convolution', params);
-      Render.Composite(
-        Render.PictOp.Src,
-        src.picture().id,
-        0,
-        dst.picture().id,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
-        width,
-        height,
-      );
-    };
-    pass(shape, scratch, [size, 1, ...kernel]);
-    pass(scratch, out, [1, size, ...kernel]);
-    shape.destroy();
-    scratch.destroy();
-    return out;
-  } catch {
-    scratch?.destroy();
-    out?.destroy();
-    return null;
-  }
 }
 
 const DEV = process.env.NODE_ENV !== 'production';
@@ -4194,19 +4127,28 @@ export class Node {
    * One blurred shadow, through the paint cache when there is one.
    *
    * The surface is the shadow's rectangle plus `pad` on every side, and the
-   * padding is load-bearing: the convolution reads outside the picture as
+   * padding is load-bearing: a convolution reads outside the picture as
    * transparent, so a kernel that runs off the edge ends the shadow in a
-   * straight line. The blur is set on the *picture* rather than baked into
-   * the pixels, which is why it survives in a cached entry and why the
-   * surface itself is a plain white rectangle.
+   * straight line. `blurKernel` takes that reach from the same function
+   * ntk builds the kernel with, so the two cannot drift apart.
+   *
+   * The blur is **baked into the pixels** by `blurCoverage` (ntk 8.6,
+   * ntk#335) rather than set as a filter on the picture. That is the
+   * difference between a cached shadow and a cached shadow that costs
+   * nothing to draw: a picture's filter is re-applied by the server on every
+   * composite, so the entry would hit, re-render nothing, and still pay its
+   * whole kernel every frame — 244M multiply-accumulates for one card-sized
+   * shadow, which was 1.6s per `:hover` on XQuartz. Baked, what the cache
+   * holds composites as an ordinary mask however wide the blur was, and the
+   * two separable passes run once per distinct geometry.
    *
    * `maxPixels` is raised well above the cache's default: a card's shadow is
    * as big as the card, an entry for one is a8 (a byte a pixel), and the
-   * thing being avoided — a convolution per frame over the whole box — is
-   * exactly the cost the default cap exists to bound elsewhere.
+   * thing being avoided is exactly the cost the default cap bounds
+   * elsewhere.
    */
   _paintBlurredShadow(ctx, rect, radius, blur, color) {
-    const { sigma, size, pad } = blurKernel(blur);
+    const { sigma, pad } = blurKernel(blur);
     // integral, because the surface is pixels; the blur is far wider than
     // the rounding, so nothing about the result is visibly quantized
     const width = Math.round(rect.width);
@@ -4230,7 +4172,7 @@ export class Node {
         );
         sctx.fill();
       },
-      after: (surface) => bakeBlur(this.app, surface, size, sigma),
+      after: (surface) => ntk.blurCoverage(surface, sigma),
       live: () => this._paintShadowLive(ctx, plan),
     };
     const cache = this.root?._paintCache;
@@ -4243,7 +4185,9 @@ export class Node {
    * build, an entry too big for the budget, and the first frame of a shadow
    * the cache has only seen once. A surface per frame is what a shadow costs
    * without a cache; it is still one composite on the wire, and the
-   * alternative is not painting it.
+   * alternative is not painting it. The blur is baked here too: two
+   * separable passes and a plain composite still beat one composite through
+   * a k x k kernel, by the ratio of 2k to k squared.
    */
   _paintShadowLive(ctx, plan) {
     if (typeof ntk.Surface !== 'function' || !this.app?.display?.Render) return;

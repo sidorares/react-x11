@@ -160,131 +160,21 @@ no override-redirect staging (issue #4).
   construction where a real server does not. And a CSS blur radius is _twice_
   the gaussian's sigma while the kernel helpers take the kernel's edge
   length, so the two numbers that look interchangeable are the two that must
-  not be. The blur is **baked into the shadow's pixels** (`bakeBlur`,
-  nodes.js) rather than set as a filter on its picture: a picture's filter is
-  re-run by the server on **every composite**, so the cached-and-hit path
-  still paid a full kernel per frame — 1.6s for one card's `:hover` on
-  XQuartz, against 1.5ms baked. `test/shadow-blur-baked.test.js` pins it, and
-  nothing else can: wire bytes, composited area and pixels are identical
-  either way, which is why `npm run bench` reports no change. `inset` shadows and colour hints are refused rather than ignored.
-- `src/events.js` — `EventManager`: ntk window events → synthetic events
-  (click synthesis, hover enter/leave diffing, the wheel — ntk's `wheel`
-  event, XI2 valuators where the server has them and buttons 4-7 where it
-  does not, converted from notches to pixels here (#273) — focus/Tab).
-  Three ancestor-chain diffs live here and share one shape — `:hover`,
-  `:active` over the press chain, and `:focus-within`. **Focus follows
-  visibility** (#202): a subtree that goes off the screen — `hideInstance`
-  for `<Suspense>`/`<Activity>`, a `display: 'none'`, a `<popup>` unmapped —
-  gives up the keyboard, and gets it back on the reveal unless something
-  else took it meanwhile. Two things about that are easy to undo. The
-  question is _containment_, since React only hides the topmost host
-  instance of a branch and the focused control is usually deeper; and the
-  restore is not a navigation — it neither scrolls nor calls `SetInputFocus`,
-  because a background window revealing something must not take the keyboard
-  off another application.
-- `src/clientmessage.js` — `<window onClientMessage>`: the element-scoped
-  seam for the protocols X layers on ClientMessage (EWMH, XEmbed, the system
-  tray), where the alternative was `X.on('event')` over the whole connection
-  — which is what `src/xsettings.js` still does internally, correctly, since
-  a settings daemon's window is nobody's element. Two decisions live there.
-  The type is handed over as the atom's **name**, so a handler is a `switch`
-  over strings rather than an atom table it had to intern first; and because
-  a protocol an application only _receives_ has never named its atoms, an
-  unknown one costs a `GetAtomName` — behind which **every message queues**.
-  That FIFO gate is not optional and `test/client-message.test.js` pins it:
-  the tray's balloon messages and XEmbed's opcodes reassemble by arrival
-  order alone, so a round trip that let a later message overtake an earlier
-  one would corrupt them undetectably. `preventDefault()` is the usual
-  default-action seam, and reaches XDND (`src/dnd.js`), which is the one
-  ClientMessage protocol core answers on the same stream.
-- `src/textselection.js` + `src/textrange.js` — selecting read-only text
-  (#259). `textrange.js` is the pure half: words, blocks, and the code
-  point ↔ code unit table anything reading ntk run geometry needs, shared
-  with `<textinput>`'s editing keys so a double click picks the same word in
-  a document and in a field. `textselection.js` is the model — the surface a
-  `selectable` element becomes, and the registry that holds the one rule no
-  surface can hold for itself: **only one selection is visible in an
-  application at a time**, so a drag across a document collapses the
-  highlight in the field beside it and vice versa. Two decisions live there.
-  A participant is any node that answers the four geometry accessors on
-  `Node` (`textContent`, `textIndexAt`, `textCaretRect`, `textRangeRects`),
-  so a terminal written outside this package joins a document with no
-  registration call. And the separators a copy assembles with come from the
-  **layout** rather than from the markup — two pieces of text sharing a band
-  of pixels are joined with a tab, one that starts below the last with a
-  newline — because core cannot know which `<text>` is a table cell, and
-  asking applications to say so would be a second authoring model for
-  something the screen already shows.
-- `src/inputtime.js` — the two selection timestamps, both public since #18's
-  second gap: `lastInputTime(app)` is the last input event's server time,
-  stashed off the event stream because ICCCM wants "the timestamp of the
-  event that caused this" and the causing event is four frames above the code
-  that copies; `serverTime(app)` derives a fresh one for an acquisition no
-  user action caused. The failure they exist to prevent is silent —
-  `CurrentTime` is accepted by the server and leaves two clients racing for a
-  selection unorderable — so neither should ever be `?? 0`-ed at a call site.
-- `src/fonts.js` + `src/fonthooks.js` — a font file an application opens
-  for itself (#346): `openFont(app, source)` reads one, `loadFont` reads it
-  **and** registers it, `useFont` is the hook. The line between the two is
-  the whole design and is easy to erase by accident — registering a face
-  does not only make a `fontFamily` resolve to it, it puts the face ahead of
-  the system chain for **every codepoint the current font is missing**, so a
-  font browser that registered what it previewed would change the glyphs its
-  own UI borrows. The family name is derived from the file rather than
-  invented by the caller, and scoped (`Inter 2`) only where a second file
-  would otherwise be unreachable — a family is a _set_ of faces, so bold
-  beside regular is not a collision. Both verbs go through `app.fonts`,
-  including its `_open`, because a second `Font` for one file is a second
-  glyph atlas.
-- `src/compose.js` — dead keys and the Compose key (#272): the sequence
-  table and the state machine `EventManager` runs between an application's
-  `onKeyDown` and the element's `defaultKeyDown`. The dead-key half is
-  **Unicode's composition rather than a table of ours** — `dead_acute` is
-  U+0301 and the rest is `normalize('NFC')` — which is what makes it 30
-  entries instead of X's 6000 and correct for scripts nobody listed. Only
-  what Unicode has no rule for is written down: `ø`, the currency signs, and
-  the `Multi_key` symbols. `probe`/`apply` are separate on purpose, since
-  the key event is dispatched to the application before the composer may
-  eat it.
-- `src/accelerators.js` + `src/acceleratorhooks.js` — a menu `shortcut` that
-  is a binding and not a caption (#351). The matcher is pure and the registry
-  is in `EventManager`, next to the key path it is the last step of: after the
-  element's `defaultKeyDown` and before Tab's focus cycle, so `preventDefault()`
-  is what keeps Ctrl+C in a focused `<textinput>`. Four decisions are load
-  bearing and none of them is obvious from the call site. The chord's key is
-  resolved from **`ev.keysym`**, so a layout switch cannot turn a shortcut off,
-  and a chord naming a _symbol_ also matches the character the key typed —
-  `plus` is the shifted `=` and `Ctrl++` has to be pressable — with letters
-  kept out of that path because it is exactly what would fire Ctrl+S on
-  Ctrl+Shift+S. The four modifiers are compared exactly and the **locks are not
-  in the comparison at all**, which is the line hand-rolled bindings get wrong.
-  A binding is gated by the node it hangs off being on the screen and inside
-  the innermost focus scope, which is what makes a modal `<popup>` take the
-  application's shortcuts with the keyboard and still leave a menu declared
-  inside it working. And a `MenuBar` keeps its bindings when the desktop's
-  panel takes the menu over — the panel draws the rows, but the key is pressed
-  in our window and nothing else will deliver it, which is why the anchor falls
-  back from the bar to the window rather than unregistering.
-- `src/priority.js` — shared React update-priority state (discrete vs
-  continuous events).
-- `src/DevToolsIntegration.js` — opt-in React DevTools bridge
-  (`REACT_X11_DEVTOOLS=1`; needs `react-devtools-core` + `ws`, dev-only).
-- `examples/` — runnable demos (need a real X server, see below).
-- `test/smoke.test.js` — headless tests over a mock ntk app object.
-- `test/integration.test.js` — end-to-end against node-x11's in-process
-  pure-JS X server with pixel-readback assertions. No `$DISPLAY` needed.
-- `test/wm.test.js` — the window-manager example against that same server,
-  two connections: one plays the WM, the other an application. Needs
-  x11 >= 3.2.0, which is where substructure redirect landed.
-- `src/index.d.ts` + `src/types/*.d.ts` — hand-written TypeScript
-  declarations for the public API, and `src/jsx-runtime.{js,d.ts}` (plus the
-  dev variant) so a project can set `jsxImportSource: "react-x11"` and have
-  JSX check against the X11 elements. See
-  [docs/typescript.md](docs/typescript.md) and the note below.
-- `test/types/api.tsx` — compiled, not run: the type tests.
-- `website/` — the documentation site (Docusaurus, deployed to GitHub
-  Pages). It **renders `docs/`, it does not restate it** — see "The
-  documentation site" below before writing anything there.
+  not be. The blur is **baked into the shadow's pixels**
+  (ntk's `blurCoverage`, ntk >= 8.6) rather than set as a filter on its
+  picture: a picture's filter is re-run by the server on **every composite**,
+  so the cached-and-hit path still paid a full kernel per frame — 1.6s for
+  one card's `:hover` on XQuartz, against 1.5ms baked. Two things follow that
+  are easy to undo. The surface's padding comes from the same `shadowReach`
+  ntk builds the kernel with, because a surface padded by less than the
+  kernel's reach ends the shadow in a straight line down its own edge. And
+  `blurCoverage` returns a **new** surface and destroys the one it was given,
+  which is why `paintcache`'s `after` hook honours what it returns rather
+  than mutating in place. `test/shadow-blur-baked.test.js` pins the shape of
+  it — that the cached surface's picture carries no convolution filter — and
+  `npm run bench` prices it, but only since the `convolvedPixels` metric
+  (#414): every other number is identical either way, which is how this
+  survived a full bench run at 277M convolved pixels.
 
 ## Pre-release: there is nothing to be compatible with
 

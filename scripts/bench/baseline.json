@@ -195,15 +195,15 @@
     "churn": 0
   },
   "shapes: 24 gradient+shadow cards, 5 full repaints": {
-    "requests": 381,
-    "bytesOut": 475564,
-    "bytesIn": 352,
-    "replies": 11,
+    "requests": 379,
+    "bytesOut": 475532,
+    "bytesIn": 320,
+    "replies": 10,
     "composites": 245,
     "compositePixels": 2020640,
-    "filteredComposites": 120,
-    "convolvedPixels": 277248000,
-    "stalls": 1,
+    "filteredComposites": 0,
+    "convolvedPixels": 0,
+    "stalls": 2,
     "dupQueries": 0,
     "churn": 0
   },

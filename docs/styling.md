@@ -398,8 +398,8 @@ The blur is **baked into the cached surface's pixels**, in two separable 1-D
 passes, rather than left as a filter on its picture. That is not an internal
 detail: XRender applies a picture's filter on every composite, so a shadow
 whose blur rode on the picture paid its whole kernel again every frame it was
-drawn — a 61×61 kernel over a card-sized coverage surface is 244 million
-multiply-accumulates, in the server, per shadow, per repaint. Baked, a
+drawn — a card-sized coverage surface at a wide blur is hundreds of millions
+of multiply-accumulates, in the server, per shadow, per repaint. Baked, a
 repaint composites a plain mask however wide the blur is, and the convolution
 runs once per distinct geometry.
 
