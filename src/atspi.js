@@ -32,7 +32,7 @@
 // resurrected: the slots are cleared and the app simply stops being
 // accessible until restarted, the same contract bus.js documents.
 
-import { addressFor, loadTransport } from './bus.js';
+import { loadTransport, resolveAddress } from './bus.js';
 import {
   hooks,
   ATSPI_ROLE,
@@ -1818,8 +1818,11 @@ async function connected(bus) {
  */
 async function accessibilityBusAddress(dbus) {
   if (process.env.AT_SPI_BUS_ADDRESS) return process.env.AT_SPI_BUS_ADDRESS;
-  const busAddress = addressFor('session');
-  if (!busAddress && process.platform !== 'darwin') return null;
+  // Resolved, not read: on macOS this is where the session bus address comes
+  // from, and letting `dbus-native` find it for itself would be a blocking
+  // `spawnSync` on the way to the first frame (#417).
+  const busAddress = await resolveAddress('session');
+  if (!busAddress) return null;
   let sbus = null;
   try {
     sbus = dbus.createClient({ busAddress });

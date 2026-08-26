@@ -57,6 +57,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { loadTransport, sessionBus } from './bus.js';
+import { desktopIntegrationEnabled } from './desktopintegration.js';
 import {
   DBUSMENU_IFACE,
   PROPERTY_TYPES,
@@ -126,6 +127,10 @@ const menuPathFor = (xid) => `/com/react_x11/menus/${xid}`;
  * it is the one that works without touching application code.
  */
 function globalMenuEnabled() {
+  // `createRoot({ desktop: false })` first: handing the menu to a panel is
+  // one of the three things core turns on for you, and that is the switch
+  // that turns the group off (src/desktopintegration.js, #417).
+  if (!desktopIntegrationEnabled('globalMenu')) return false;
   const flag = process.env.REACT_X11_NO_GLOBAL_MENU;
   return !flag || flag === '0';
 }

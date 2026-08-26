@@ -53,6 +53,7 @@ import { endIdle } from './idle.js';
 import { endKeyboardState } from './keyboardstate.js';
 import { endXSettings } from './xsettings.js';
 import { watchAppearance } from './appearance.js';
+import { setDesktopIntegration } from './desktopintegration.js';
 import { ForeignNode } from './foreignnodes.js';
 import { GlAreaNode } from './glnodes.js';
 import { createRegisteredNode, registeredElements } from './registry.js';
@@ -605,6 +606,12 @@ function watchConnection(app, onDisconnect, deliberate) {
  *
  * `display`, `fontSource`, `glxVisual` and `onXError` go straight to ntk.
  * Anything else ntk understands, build the client yourself and pass `app`.
+ *
+ * `desktop: false` turns off the three things this turns on for you that talk
+ * to the session bus — the appearance ladder, the accessibility bridge and
+ * the global menu — for an embedder that owns them, or a process that must
+ * not fork. `desktop: { appearance: false }` names one. See
+ * src/desktopintegration.js and docs/desktop.md.
  */
 export async function createRoot(options = {}) {
   // Before anything builds a node: every drawn node creates a yoga node in
@@ -627,6 +634,11 @@ export async function createRoot(options = {}) {
   }
   const { app: borrowed, onDisconnect, ...rest } = options;
   const owned = borrowed === undefined;
+  // Before anything starts, for two reasons: a bad `desktop` shape must throw
+  // with nothing in flight, like the check above it — and `startA11y()` below
+  // reads this policy, so it has to be settled before the first await, not
+  // after (src/desktopintegration.js).
+  setDesktopIntegration(rest.desktop);
   // The connection is started first, and the order is the point rather than a
   // detail. `loadLayout()` is only nominally asynchronous: instantiating the
   // engine blocks the event loop for 15-50 ms before it returns its promise

@@ -135,9 +135,8 @@ export async function loadTransport() {
  * address is incoherent under sharing. Two callers, two addresses, one
  * socket — which would win? Tests use this same seam.
  *
- * Not public, but exported for atspi.js, whose one-shot discovery probe
- * dials its own short-lived connection rather than the shared one — see
- * the note in `accessibilityBusAddress`.
+ * Synchronous, and so it cannot answer on macOS — see `resolveAddress`,
+ * which is what every dial goes through.
  */
 export function addressFor(kind) {
   if (kind === 'system') {
@@ -149,21 +148,102 @@ export function addressFor(kind) {
   if (process.env.DBUS_SESSION_BUS_ADDRESS) {
     return process.env.DBUS_SESSION_BUS_ADDRESS;
   }
-  // macOS advertises the session bus through launchd, which dbus-native
-  // already falls back to on its own. Leave it undefined and let it.
+  // macOS advertises the session bus through launchd rather than through the
+  // environment, and asking launchd is a subprocess — see `launchdAddress`.
   if (process.platform === 'darwin') return undefined;
   const runtimeDir = process.env.XDG_RUNTIME_DIR;
   return runtimeDir ? `unix:path=${runtimeDir}/bus` : undefined;
 }
 
+/**
+ * The in-flight or settled lookup, shared by every dial in the process.
+ *
+ * **Failure is cached here**, which is the one place in this module where it
+ * is — and the exception is deliberate. A session bus can genuinely appear
+ * under `$XDG_RUNTIME_DIR` mid-run, so that answer is never remembered; what
+ * launchd exports is a *login session* fact, set when the bus is installed
+ * and started, which does not happen under a running app. Re-asking would be
+ * a fork per feature probe to learn the same "no".
+ */
+let launchd = null;
+
+/**
+ * Ask launchd where the session bus is, **without blocking the event loop**.
+ *
+ * This is the whole reason `resolveAddress` exists (#417). `dbus-native` will
+ * do this lookup itself, from `createStream`, with `spawnSync` — it has to,
+ * because its own entry point is synchronous — and a fork+exec of `launchctl`
+ * on a cold page cache costs 120–150 ms of *blocked loop*, measured. Landing
+ * that inside `createRoot()` stalls the X handshake, the yoga instantiate and
+ * the first paint behind a question about the colour scheme.
+ *
+ * Every caller here is already asynchronous, so the same lookup done with
+ * `execFile` costs the same wall clock and none of the loop: the handshake
+ * and the layout engine run through it. Handing `dbus-native` the resolved
+ * `unix:path=…` is then what keeps it off its own synchronous path.
+ *
+ * The variable name is D-Bus's, and the fallback to our own environment is
+ * `launchdSocketPath`'s: a process launched from a shell that has it already
+ * knows the answer.
+ */
+function launchdAddress() {
+  if (launchd) return launchd;
+  launchd = (async () => {
+    const VAR = 'DBUS_LAUNCHD_SESSION_BUS_SOCKET';
+    let fromLaunchd = '';
+    try {
+      const { execFile } = await import('node:child_process');
+      fromLaunchd = await new Promise((resolve) => {
+        execFile(
+          'launchctl',
+          ['getenv', VAR],
+          { encoding: 'utf8' },
+          (err, stdout) => resolve(err ? '' : String(stdout).trim()),
+        );
+      });
+    } catch {
+      // no `launchctl` on $PATH, or no child processes to be had at all
+    }
+    const socket = fromLaunchd || process.env[VAR] || '';
+    return socket ? `unix:path=${socket}` : undefined;
+  })();
+  return launchd;
+}
+
+/**
+ * Where to dial, resolved — the synchronous sources first, and launchd only
+ * where they have nothing to say.
+ *
+ * Not public, but exported for atspi.js, whose one-shot discovery probe
+ * dials its own short-lived connection rather than the shared one — see the
+ * note in `accessibilityBusAddress`. It matters that it goes through here
+ * too: two dials that each let `dbus-native` ask launchd are two blocking
+ * forks, and the answer is the same both times.
+ *
+ * @param {BusKind} kind
+ * @returns {Promise<string | undefined>}
+ */
+export async function resolveAddress(kind) {
+  const direct = addressFor(kind);
+  if (direct !== undefined) return direct;
+  if (kind !== 'session' || process.platform !== 'darwin') return undefined;
+  return await launchdAddress();
+}
+
 function noAddressError(kind) {
+  if (kind !== 'session') {
+    return new Error(
+      'react-x11: no system bus address. $DBUS_SYSTEM_BUS_ADDRESS is unset ' +
+        'and there is no default.',
+    );
+  }
   return new Error(
-    `react-x11: no ${kind} bus address. ` +
-      (kind === 'session'
-        ? '$DBUS_SESSION_BUS_ADDRESS is unset and $XDG_RUNTIME_DIR is not ' +
-          'set either, which is normal over ssh, under a bare startx and in ' +
-          'most containers.'
-        : '$DBUS_SYSTEM_BUS_ADDRESS is unset and there is no default.'),
+    'react-x11: no session bus address. $DBUS_SESSION_BUS_ADDRESS is unset ' +
+      (process.platform === 'darwin'
+        ? 'and launchd has no $DBUS_LAUNCHD_SESSION_BUS_SOCKET either, which ' +
+          'is normal on a Mac with no D-Bus installed.'
+        : 'and $XDG_RUNTIME_DIR is not set either, which is normal over ssh, ' +
+          'under a bare startx and in most containers.'),
   );
 }
 
@@ -216,8 +296,11 @@ async function connect(kind, generation) {
     return fail(noTransportError(cause));
   }
 
-  const busAddress = addressFor(kind);
-  if (!busAddress && process.platform !== 'darwin') {
+  // Resolved rather than read, so `dbus-native` never reaches its own
+  // `spawnSync` fallback on macOS (#417) — and so "this Mac has no D-Bus"
+  // fails here, before a socket is dialled, instead of inside a constructor.
+  const busAddress = await resolveAddress(kind);
+  if (!busAddress) {
     return fail(noAddressError(kind));
   }
 
@@ -538,6 +621,10 @@ export function busRefs(kind) {
  * exported object survives into the next test.
  */
 export function _resetBusState() {
+  // Including what launchd said: a suite that pins `process.platform` would
+  // otherwise inherit the answer — or the absence of one — from a case that
+  // ran under a different one.
+  launchd = null;
   for (const kind of KINDS) {
     state[kind] = newState(kind, state[kind].generation + 1);
     notify(kind);

@@ -57,6 +57,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { sessionBus } from './bus.js';
+import { desktopIntegrationEnabled } from './desktopintegration.js';
 import { PORTAL_NAME, PORTAL_PATH } from './portal.js';
 import { beginXSettings, watchXSettings, xsettings } from './xsettings.js';
 
@@ -238,6 +239,12 @@ function sanitize(saved) {
 function load() {
   if (cacheChecked) return;
   cacheChecked = true;
+  // `createRoot({ desktop: false })` means this process does not follow the
+  // desktop, and that has to include the remembered answer: seeding from the
+  // cache would leave an app that opted out drawing in whatever colours this
+  // machine happened to be in last time, which is the opposite of the
+  // determinism the switch is asked for (#417).
+  if (!desktopIntegrationEnabled('appearance')) return;
   const file = cacheFile();
   if (!file) return;
   try {
@@ -702,6 +709,10 @@ async function runLadder(app) {
  */
 export function systemAppearance(options = {}) {
   if (owner) return Promise.resolve(snapshot);
+  // Turned off, so there is nothing to climb and nothing to remember: the
+  // defaults, which is a real answer — `'no-preference'` means *use your own*
+  // (src/desktopintegration.js).
+  if (!desktopIntegrationEnabled('appearance')) return Promise.resolve(NOTHING);
   load();
   if (!probe) {
     // **Failure is not cached**, for the same reason `bus.js` does not cache

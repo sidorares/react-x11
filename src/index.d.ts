@@ -298,6 +298,43 @@ export interface RootOptions {
    * and coming back is the user's own Tab.
    */
   restoreFocusOnReveal?: boolean;
+  /**
+   * Whether this process talks to the desktop over D-Bus. On by default, and
+   * `false` turns off all three things react-x11 starts for you (#417,
+   * docs/desktop.md):
+   *
+   * | | |
+   * | --- | --- |
+   * | `appearance` | following the desktop's light/dark, accent, contrast and reduced motion (docs/appearance.md) |
+   * | `a11y` | the AT-SPI bridge that makes the app reachable by a screen reader (docs/accessibility.md) |
+   * | `globalMenu` | a `MenuBar` handing its menu to the panel instead of drawing it (docs/globalmenu.md) |
+   *
+   * ```js
+   * await createRoot({ desktop: false });                  // none of it
+   * await createRoot({ desktop: { appearance: false } });  // just that one
+   * ```
+   *
+   * For an embedder that owns those integrations itself, a kiosk or daemon
+   * that must not fork a subprocess to find the bus, and a test that wants
+   * one answer on every machine. With all three off nothing dials the
+   * session bus at startup.
+   *
+   * **Off is process-wide and it latches.** There is one desktop and one
+   * D-Bus identity per process, so a second root cannot turn back on what
+   * another turned off — and a feature already started stays started, so
+   * pass this on the first root.
+   */
+  desktop?: boolean | DesktopIntegrationOptions;
+}
+
+/** Which desktop integrations run. See {@link CreateRootOptions.desktop}. */
+export interface DesktopIntegrationOptions {
+  /** Follow the desktop's light/dark, accent, contrast and reduced motion. */
+  appearance?: boolean;
+  /** The AT-SPI bridge — whether a screen reader can see this app. */
+  a11y?: boolean;
+  /** Whether a `MenuBar` hands its menu to the panel. */
+  globalMenu?: boolean;
 }
 
 export interface ComposeOptions {
