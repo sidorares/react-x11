@@ -30,12 +30,6 @@
 // - `textShadow`: per glyph, through the glyph cache, and much rarer in a
 //   desktop UI.
 
-// The kernel maths is ntk's: `blurCoverage` runs the blur, so the reach it
-// derives is the padding a coverage surface has to carry. Both are pure
-// functions — no connection, nothing drawn — so this module stays testable
-// without a server.
-import { shadowReach, shadowSigma } from 'ntk';
-
 /** A number, with or without the `px` CSS wants and this vocabulary does not. */
 const LENGTH = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:px)?$/i;
 /** …and the same thing as a percentage, which colour stops also take. */
@@ -372,27 +366,36 @@ function readShadow(part, value) {
 }
 
 /**
- * The gaussian a `blur` asks for, and the padding its coverage surface needs.
+ * The gaussian a CSS blur radius means, and the room it needs.
  *
- * CSS defines the blur radius as *twice* the standard deviation, so the two
- * names that look like they match are the two that must not be passed to
- * each other; `shadowSigma` is the halving, and it applies ntk's policy cap
- * so a 4000px blur asked for by accident cannot become a kernel nothing
- * finishes.
+ * CSS defines the blur radius as *twice* the standard deviation, and ntk's
+ * `Picture.setBlurFilter(size, sigma)` takes the convolution kernel's edge
+ * length rather than a radius — so the two names that look like they match
+ * are the two that must not be passed to each other. The kernel is cut at
+ * 3σ, where the gaussian is down to 1% and the truncation is invisible;
+ * `pad` is the same distance, and it is what stops the blur clipping square
+ * against the edge of the surface it was rendered into.
  *
- * `pad` is the reach of the kernel **ntk will actually run** — that is why
- * it comes from `shadowReach` rather than from arithmetic of our own. The
- * blur is baked by `blurCoverage`, which derives its own kernel from sigma,
- * and a surface padded by less than that reach ends the shadow in a straight
- * line where the kernel ran out of pixels. The two numbers have to agree and
- * nothing about a wrong answer looks like a bug, so they come from one
- * place. The extra pixel is slack against the rounding above.
+ * `MAX_KERNEL` bounds a pathological value: the server convolves N² taps per
+ * pixel, so a 200px blur asked for by accident would otherwise be a frame
+ * that never lands.
  */
+const MAX_KERNEL = 61;
+
 export function blurKernel(blur) {
-  const sigma = shadowSigma(blur);
-  return { sigma, pad: sigma > 0 ? shadowReach(sigma) + 1 : 0 };
+  const sigma = blur / 2;
+  const reach = Math.ceil(3 * sigma);
+  const size = Math.min(MAX_KERNEL, 2 * reach + 1);
+  return { sigma, size, pad: (size - 1) / 2 + 1 };
 }
 
+/**
+ * How far outside the node's own box this shadow list reaches, in device
+ * pixels — the damage inflation, and the reason a shadow is not just a
+ * colour. Symmetric on purpose: a shadow offset down and right claims the
+ * same slack above and left, which costs a few pixels of repaint and saves
+ * every caller from carrying four numbers around.
+ */
 export function shadowExtent(shadows) {
   let extent = 0;
   for (const s of shadows ?? []) {
