@@ -1218,6 +1218,19 @@ function contentSpan(node, axis, intrinsic, out) {
  * one pass by `contentSpan`. `floored` collects what was written so the next
  * measurement can take it back off — a floor left in place would be read
  * back as content that cannot give, and could then only ratchet upwards.
+ *
+ * A floor is written **unrounded**, and the measurement it came from ran
+ * with the pixel grid off (`measuringExactly`) for the reason given there:
+ * rounding a floor grows the tree a pixel per nesting level. What that
+ * leaves is a sharp edge in yoga worth knowing about before writing a
+ * measure function. A line whose items are all held at their floors is one
+ * yoga freezes item by item, subtracting each item's shrink factor from the
+ * line's total as it goes; the total only cancels to zero if the sizes add
+ * up exactly in binary. Three items of, say, 239.28 in a column that
+ * overflows do not, and yoga divides the overflow by the rounding residue
+ * instead of skipping the division — the items come back a billion pixels
+ * tall (issue #411). Whole pixels cancel exactly, which is why the text
+ * measures here answer in them (`TextNode._trim`).
  */
 function writeContentFloors(node, axis, mins, floored) {
   const axisIsMain = mainAxisOf(node) === axis;
@@ -4587,7 +4600,12 @@ export class TextNode extends Node {
 
   /** Height for a width: the paragraph shaped into whatever is on offer.
    * The offer is `Infinity` when nothing bounds it, which is also what
-   * `textWrap: 'nowrap'` asks for, so neither needs a mode. */
+   * `textWrap: 'nowrap'` asks for, so neither needs a mode.
+   *
+   * Both answers are **whole pixels**, the trimmed one included — see
+   * `_trim` for why the rounding is not cosmetic. The glyphs are placed
+   * from the unrounded trim (`_placedLayout`), so what the rounding moves
+   * is the bottom edge of the box, by less than half a pixel. */
   measureContent({ width }) {
     const layout = this._layoutFor(this._wrapWidth(width));
     if (!layout) return { width: 0, height: 0 };
@@ -4596,7 +4614,9 @@ export class TextNode extends Node {
       width: Math.ceil(layout.width),
       height: Math.max(
         0,
-        Math.ceil(layout.height) - (trim ? trim.top + trim.bottom : 0),
+        trim
+          ? Math.round(Math.ceil(layout.height) - (trim.top + trim.bottom))
+          : Math.ceil(layout.height),
       ),
     };
   }
@@ -4852,6 +4872,21 @@ export class TextNode extends Node {
    * Measured in the coordinates the layout is **drawn** in, not the ones it
    * reports: `halfLeading` shifts it, and deriving the baseline from the
    * metrics again would silently disagree the day that shift changes.
+   *
+   * The amounts are fractions of a pixel and stay that way — the glyphs are
+   * placed from them (`_placedLayout`). What must not stay fractional is the
+   * **box** they leave behind, which is why `measureContent` rounds the
+   * height it reports and this does not (issue #411).
+   *
+   * A trimmed label measures to the cap band, and a cap height is a fraction
+   * of the em — so before the rounding, a column of trimmed titles handed
+   * yoga three or four flex items whose main size had a fraction in it and
+   * whose content floors (#249) were that same fraction. Yoga freezes a line
+   * like that item by item and divides the overflow by a total shrink factor
+   * that should have cancelled to zero; a fraction that is not exact in
+   * binary leaves a rounding residue there instead, and dividing by it laid
+   * the section titles of `examples/configurator` out 5.6 billion pixels
+   * tall. See `writeContentFloors`, which is the other end of it.
    */
   _trim(layout) {
     if (this.style.textBoxTrim !== 'cap-alphabetic') return null;
@@ -6645,8 +6680,8 @@ export class TextInputNode extends Node {
   /** A preferred width, capped to whatever is on offer — `Infinity` when
    * nothing is, which is what makes the `Math.min` the whole rule. */
   measureContent({ width }) {
-    // Not rounded here: a trimmed `<text>` hands layout the raw cap band
-    // too, and rounding one of them and not the other is a pixel of
+    // `_capBand` rounds, and a trimmed `<text>` rounds the same band the
+    // same way — rounding one of them and not the other is a pixel of
     // difference between a field and the button beside it.
     return { width: Math.min(150, width), height: this._capBand() };
   }
@@ -6896,12 +6931,16 @@ export class TextInputNode extends Node {
     };
   }
 
+  /** Whole pixels either way: a field's height is a flex item's main size,
+   *  and a fractional one costs the tree its content floors (see
+   *  `TextNode._trim`, issue #411). The face with no `capHeight` to round is
+   *  the one that reaches the fallback. */
   _capBand() {
     const style = this.resolvedTextStyle();
     const cap = this.app?.fonts
       ?.match?.(style.family, { weight: style.weight, style: style.style })
       ?.metrics?.(style.size)?.capHeight;
-    return cap ? Math.round(cap) : this._lineHeight();
+    return Math.round(cap || this._lineHeight());
   }
 
   /** Shaped layout of the current value, cached per (value, style,
