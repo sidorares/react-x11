@@ -129,6 +129,16 @@ would win? The address seam is D-Bus's own, `$DBUS_SESSION_BUS_ADDRESS`, plus
 an `$XDG_RUNTIME_DIR/bus` fallback until
 [dbus-native#389](https://github.com/sidorares/dbus-native/pull/389) lands.
 
+On **macOS** there is a third source and it is not a variable: D-Bus
+advertises the socket through launchd, and finding it means running
+`launchctl getenv`. That lookup is asynchronous and happens once per process,
+which is the whole of
+[#417](https://github.com/sidorares/react-x11/issues/417) — `dbus-native`
+would otherwise do it from a synchronous constructor with `spawnSync`, and
+120–150 ms of blocked event loop in front of the first frame is not a price
+for finding out whether there is a bus. See
+[desktop.md](desktop.md#not-blocking-the-first-frame-on-the-bus).
+
 ## One connection, on purpose
 
 `dbus-native`'s own `sessionBus()` is a constructor in disguise: every call

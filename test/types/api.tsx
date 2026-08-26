@@ -1060,6 +1060,20 @@ async function main() {
   // @ts-expect-error — it is on or off, not a moment
   await createRoot({ restoreFocusOnReveal: 'reveal' });
 
+  // the desktop integrations, as a group and one at a time
+  const noDesktop = await createRoot({ desktop: false });
+  await noDesktop.unmount();
+  const noAppearance = await createRoot({
+    desktop: { appearance: false, a11y: true, globalMenu: false },
+  });
+  await noAppearance.unmount();
+
+  // @ts-expect-error — no such integration
+  await createRoot({ desktop: { notifications: false } });
+
+  // @ts-expect-error — each one is on or off
+  await createRoot({ desktop: { appearance: 'portal' } });
+
   root.render(<RawGl />);
   root.render(<Popup />, () => {});
   root.render(<AnchoredPopup />);

@@ -243,6 +243,19 @@ socket goes back to `unref()`d: an app whose windows have closed still exits,
 and an app with a window on screen is awake anyway and gets the signal. The
 macOS child is spawned `unref()`d and killed on exit.
 
+### Not climbing it at all
+
+```jsx
+await createRoot({ desktop: { appearance: false } });
+```
+
+For an app that owns its palette, an embedder that follows the desktop its own
+way, and a test that needs the same answer on every machine. The ladder does
+not run and **the remembered answer is not read either**: `colorScheme` stays
+`'no-preference'` with `source: null`, which means use your own default. See
+[desktop.md](desktop.md#turning-the-desktop-off) — `desktop: false` turns this
+off along with the other two integrations that talk to the session bus.
+
 ## What each rung can actually answer
 
 |                 | portal                               | XSETTINGS           | macOS |

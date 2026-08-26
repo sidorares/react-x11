@@ -1,9 +1,9 @@
 # Desktop integration
 
 What an app has to tell the desktop about itself, beyond drawing. Today that
-is startup notification, which is on by default and has nothing to call, and
-what a password field has to do to be reachable by the desktop's password
-managers.
+is startup notification, which is on by default and has nothing to call, what
+a password field has to do to be reachable by the desktop's password managers,
+and the one switch that turns off everything here that talks over D-Bus.
 
 The menu bar is the other half of this and has a page of its own —
 [globalmenu.md](globalmenu.md) — because on a desktop that shows application
@@ -154,6 +154,72 @@ it. On X11 that is the pre-existing no-isolation story rather than a new
 exposure — see [security.md](security.md) — but it is the reason the
 messages carry the id the launcher gave us and nothing invented, and the
 reason the variable's value is never logged.
+
+## Turning the desktop off
+
+Three things react-x11 turns on for you reach the **session bus**, and none
+of them was asked for:
+
+|              |                                                                         |                                      |
+| ------------ | ----------------------------------------------------------------------- | ------------------------------------ |
+| `appearance` | following the desktop's light/dark, accent, contrast and reduced motion | [appearance.md](appearance.md)       |
+| `a11y`       | the AT-SPI bridge — whether a screen reader can see the app             | [accessibility.md](accessibility.md) |
+| `globalMenu` | a `MenuBar` handing its menu to the panel instead of drawing it         | [globalmenu.md](globalmenu.md)       |
+
+Each is the right default: an app that follows the desktop looks like it
+belongs there, one a screen reader can read is one more person can use, and a
+menu in the panel is what the panel is for. But sooner or later an embedder
+owns the thing we assumed was ours, and until
+[#417](https://github.com/sidorares/react-x11/issues/417) the only way out was
+an **environment variable** — `NO_AT_BRIDGE=1`,
+`REACT_X11_NO_GLOBAL_MENU=1`, or unsetting `DBUS_SESSION_BUS_ADDRESS`. That is
+a seam an app cannot reach for itself: the environment is inherited, so
+setting one before `createRoot()` sets it for every child process too, and the
+D-Bus one takes the portals and the app's own exported services down with the
+follower.
+
+```jsx
+await createRoot({ desktop: false }); // none of the three
+await createRoot({ desktop: { appearance: false } }); // just that one
+```
+
+With all three off, **nothing dials the session bus at startup** — no
+connection, no subprocess, no portal probe. That is the shape an embedder
+wants, and a kiosk, and a test that needs the same answer on every machine.
+
+Turning `appearance` off means the app draws in its own palette rather than
+the desktop's: `useSystemAppearance()` reports `'no-preference'` with
+`source: null`, and the remembered answer on disk is not read either — an
+opted-out app that started in whatever colours the machine was in last time
+would be the opposite of what the switch is for.
+
+**Off is process-wide, and it latches.** There is one desktop, one D-Bus
+identity and one AT-SPI bridge per process, so the policy cannot honestly be
+per-root: a second root turning back on what the first turned off would be a
+bug rather than a feature. Nothing turns an integration back on, and a
+feature already started stays started — pass this on the first root.
+
+## Not blocking the first frame on the bus
+
+Worth knowing because it is invisible when it works, and was worth ~150 ms
+when it did not.
+
+On macOS the session bus address is not in the environment; D-Bus advertises
+it through **launchd**, and finding it means running `launchctl getenv`.
+`dbus-native`'s entry point is synchronous, so it has to do that with
+`spawnSync` — 120–150 ms of _blocked event loop_ on a cold page cache, landing
+in front of the X handshake, the layout engine's WebAssembly and the first
+paint, all so the accessibility bridge could find out there was nothing to
+connect to.
+
+Every dial now goes through one asynchronous, once-per-process lookup instead,
+and hands `dbus-native` a resolved `unix:path=…`. The same wall clock is
+spent, none of it on the loop: the handshake and the layout engine run
+straight through it. There is nothing to configure — it is the same address,
+found the same way, off the critical path.
+
+Linux is unaffected: `$DBUS_SESSION_BUS_ADDRESS` or `$XDG_RUNTIME_DIR/bus`
+answers without a subprocess, and always did.
 
 ## Password fields and password managers
 

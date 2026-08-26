@@ -40,6 +40,10 @@
 //     from gi.repository import Atspi; \
 //     print({k: int(getattr(Atspi.Role, k)) for k in dir(Atspi.Role) if not k.startswith('_')})"
 
+// The one import, and it keeps this file's promise: a `Set` and two functions
+// over it, with no D-Bus, no node builtins and nothing at module scope.
+import { desktopIntegrationEnabled } from './desktopintegration.js';
+
 /** AT-SPI role numbers (AtspiRole). */
 export const ATSPI_ROLE = Object.freeze({
   INVALID: 0,
@@ -1245,6 +1249,10 @@ let startPromise = null;
  * tests are exactly this case.
  */
 function a11yEnabled() {
+  // `createRoot({ desktop: false })` outranks every environment variable,
+  // including the one that forces the climb: it is the embedder saying this
+  // process does not talk to the desktop (src/desktopintegration.js, #417).
+  if (!desktopIntegrationEnabled('a11y')) return false;
   const own = process.env.REACT_X11_A11Y;
   if (own === '0') return false;
   if (own) return true;

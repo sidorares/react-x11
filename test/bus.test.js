@@ -7,7 +7,6 @@
 // session, a container, CI, a Node 20 install with no transport at all.
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -17,12 +16,14 @@ import React from 'react';
 import {
   BusUnavailableError,
   closeBus,
+  resolveAddress,
   sessionBus,
   systemBus,
   _resetBusState,
 } from '../src/bus.js';
 import { useSessionBus } from '../src/bushooks.js';
 import { act, cleanup, renderX11 } from '../src/testing/index.js';
+import { runScript } from './helpers/run-script.js';
 import {
   startBroker,
   stopBroker,
@@ -32,7 +33,6 @@ import {
 } from './helpers/with-bus.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.join(here, '..');
 
 // On Node 20 npm skips `dbus-native` (its own engines field is >=22.12), which
 // is the degradation this layer is designed around rather than a problem to
@@ -42,28 +42,6 @@ const haveTransport = await transportAvailable();
 const needsBroker = haveTransport
   ? {}
   : { skip: 'dbus-native is not installed (expected on Node < 22.12)' };
-
-function run(args, env = {}, timeout = 20000) {
-  return new Promise((resolve) => {
-    const child = execFile(
-      process.execPath,
-      args,
-      { cwd: repo, env: { ...process.env, ...env }, timeout },
-      (error, stdout, stderr) =>
-        resolve({ code: error?.code ?? 0, error, stdout, stderr }),
-    );
-    child.on('error', () => {});
-  });
-}
-
-/** Run a snippet of ESM in a child process, from the repo root. */
-function runScript(source, env = {}, nodeArgs = [], timeout) {
-  return run(
-    [...nodeArgs, '--input-type=module', '--eval', source],
-    env,
-    timeout,
-  );
-}
 
 /**
  * Poll a rendering condition, flushing React's queue between attempts.
@@ -683,5 +661,165 @@ describe('the hooks', { ...needsBroker }, () => {
         await cleanup();
       },
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('finding the address without blocking the loop (#417)', () => {
+  // macOS keeps the session bus socket in launchd's environment rather than in
+  // ours, and `dbus-native` looks it up from `createStream` — which is
+  // synchronous, so it has to use `spawnSync`. A fork+exec of `launchctl` on a
+  // cold page cache is 120-150 ms of *blocked event loop*, and `createRoot()`
+  // put it in front of the X handshake, the layout engine and the first paint.
+  //
+  // The fix is that every dial goes through `resolveAddress()`, which asks
+  // asynchronously and once. These tests pin both halves: nothing here is
+  // synchronous, and the answer is not asked for twice.
+
+  /**
+   * Run `fn` as if on a Mac with no D-Bus in the environment, counting what
+   * `child_process` was asked to do.
+   *
+   * `syncBuiltinESMExports()` is what makes the patch visible to
+   * `await import('node:child_process')` inside src/bus.js — the ESM named
+   * exports of a builtin are bound at instantiation and only re-read on that
+   * call.
+   */
+  async function onFakeDarwin(fn) {
+    const nodeModule = await import('node:module');
+    // The *CommonJS* exports object: an ESM namespace is frozen, and this is
+    // also the object `dbus-native` reaches through `require`.
+    const cp = nodeModule.createRequire(import.meta.url)('node:child_process');
+    const real = { spawnSync: cp.spawnSync, execFile: cp.execFile };
+    const calls = { spawnSync: [], execFile: [] };
+    const saved = {
+      platform: process.platform,
+      address: process.env.DBUS_SESSION_BUS_ADDRESS,
+      socket: process.env.DBUS_LAUNCHD_SESSION_BUS_SOCKET,
+    };
+
+    cp.spawnSync = (...args) => {
+      calls.spawnSync.push(args[0]);
+      return real.spawnSync(...args);
+    };
+    cp.execFile = (...args) => {
+      calls.execFile.push(args[0]);
+      return real.execFile(...args);
+    };
+    nodeModule.syncBuiltinESMExports();
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    delete process.env.DBUS_SESSION_BUS_ADDRESS;
+    delete process.env.DBUS_LAUNCHD_SESSION_BUS_SOCKET;
+    _resetBusState();
+
+    try {
+      return await fn(calls);
+    } finally {
+      cp.spawnSync = real.spawnSync;
+      cp.execFile = real.execFile;
+      nodeModule.syncBuiltinESMExports();
+      Object.defineProperty(process, 'platform', { value: saved.platform });
+      if (saved.address !== undefined)
+        process.env.DBUS_SESSION_BUS_ADDRESS = saved.address;
+      if (saved.socket !== undefined)
+        process.env.DBUS_LAUNCHD_SESSION_BUS_SOCKET = saved.socket;
+      _resetBusState();
+    }
+  }
+
+  test('launchd is asked with execFile, never spawnSync', async () => {
+    await onFakeDarwin(async (calls) => {
+      await resolveAddress('session');
+      assert.deepEqual(
+        calls.spawnSync,
+        [],
+        'nothing blocked the loop looking for the bus',
+      );
+      assert.deepEqual(calls.execFile, ['launchctl']);
+    });
+  });
+
+  test('and asked once, however many dials there are', async () => {
+    await onFakeDarwin(async (calls) => {
+      await Promise.all([resolveAddress('session'), resolveAddress('session')]);
+      await resolveAddress('session');
+      // one fork for the process, not one per consumer: the shared bus, the
+      // a11y discovery probe and the appearance ladder all come through here
+      assert.deepEqual(calls.execFile, ['launchctl']);
+    });
+  });
+
+  test('the environment still wins, and costs no subprocess at all', async () => {
+    await onFakeDarwin(async (calls) => {
+      process.env.DBUS_LAUNCHD_SESSION_BUS_SOCKET = '/tmp/rx11-fake-socket';
+      _resetBusState();
+      assert.equal(
+        await resolveAddress('session'),
+        'unix:path=/tmp/rx11-fake-socket',
+      );
+      assert.deepEqual(calls.spawnSync, []);
+    });
+  });
+
+  test('a Mac with no D-Bus fails before it dials, and says so', async () => {
+    await onFakeDarwin(async () => {
+      // `launchctl` answers nothing here (or is not installed at all, off
+      // macOS), which used to reach dbus-native's `unknown bus address` throw
+      // via a second blocking spawn
+      if ((await resolveAddress('session')) !== undefined) return;
+      assert.equal(await sessionBus(), null);
+      await assert.rejects(
+        () => sessionBus({ required: true }),
+        (err) => {
+          assert.match(err.cause.message, /no session bus address/);
+          assert.match(err.cause.message, /DBUS_LAUNCHD_SESSION_BUS_SOCKET/);
+          return true;
+        },
+      );
+    });
+  });
+
+  test('a synchronous spawn never happens on the way to a root', async () => {
+    // The end-to-end shape of #417, in a child process so the count covers
+    // everything a cold start does: connect, the layout engine, the a11y
+    // climb. Run on whatever platform CI is: on a Mac it is the regression
+    // itself, everywhere else it is the guard that keeps the next blocking
+    // lookup from being added.
+    //
+    // Deliberately **not** the mock app: `react-x11/test` sets NO_AT_BRIDGE,
+    // which turns off the very climb this is watching — the assertion would
+    // hold for the wrong reason. A root over the in-process X server is a
+    // real cold start with accessibility on, the way an application runs.
+    const source = `
+      import module from 'node:module';
+      import cp from 'node:child_process';
+      const sync = [];
+      const real = cp.spawnSync;
+      cp.spawnSync = (...args) => { sync.push(args[0]); return real(...args); };
+      module.syncBuiltinESMExports();
+
+      const xserver = (await import('x11/lib/xserver/index.js')).default;
+      const { createRoot } = await import('./src/index.js');
+      const server = xserver.createServer({ width: 64, height: 48 });
+      const [serverEnd, clientEnd] = xserver.createStreamPair();
+      server.addClientStream(serverEnd);
+
+      const root = await createRoot({ stream: clientEnd });
+      // the a11y climb is deliberately not awaited by createRoot, so give it
+      // the turns of the loop it would have had before the first frame
+      await new Promise((r) => setTimeout(r, 500));
+      await root.unmount();
+      console.log(JSON.stringify(sync));
+    `;
+    // And NO_AT_BRIDGE cleared: importing `react-x11/test` sets it for the
+    // whole process, this suite does import it, and the child inherits the
+    // environment — so without this the climb never happens and the count is
+    // zero for a reason that has nothing to do with #417.
+    const { code, stdout, stderr } = await runScript(source, {
+      NO_AT_BRIDGE: '',
+    });
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(JSON.parse(stdout.trim().split('\n').pop()), []);
   });
 });

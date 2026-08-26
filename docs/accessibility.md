@@ -380,6 +380,19 @@ Environment switches, in priority order:
   `react-x11/test` sets it, so a test run on a desktop does not parade
   phantom applications through a running screen reader.
 
+And one that is not environmental, for an app that has to turn the bridge off
+for itself without setting a variable every child process will inherit:
+
+```jsx
+await createRoot({ desktop: { a11y: false } });
+```
+
+It outranks every switch above, `REACT_X11_A11Y=1` included — see
+[desktop.md](desktop.md#turning-the-desktop-off), where `desktop: false` turns
+this off along with the other two integrations that talk to the session bus.
+Pass it on the first root: the climb happens once per process, and a second
+root's switch cannot unstart a bridge that is already up.
+
 A dead accessibility bus is not redialled — the same contract as
 [dbus.md](dbus.md): the app simply stops being accessible until restarted.
 

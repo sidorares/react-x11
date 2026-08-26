@@ -160,9 +160,17 @@ attaches to the live registrar rather than competing for the name.
 REACT_X11_NO_GLOBAL_MENU=1
 ```
 
-The prop is for one bar; the environment variable is process-wide and needs no
-application change, which is what an embedder that owns the toplevel — or a
-user working around a panel that renders something badly — actually has.
+```jsx
+await createRoot({ desktop: { globalMenu: false } });
+```
+
+The prop is for one bar. The other two are process-wide: the environment
+variable needs no application change, which is what a user working around a
+panel that renders something badly actually has, and the `createRoot` option
+is the one an embedder can reach without also setting it for every child
+process it spawns — see [desktop.md](desktop.md#turning-the-desktop-off),
+where `desktop: false` turns this off along with the other two integrations
+that talk to the session bus.
 
 ## Drawing your own bar
 
