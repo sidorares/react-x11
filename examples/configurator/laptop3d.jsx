@@ -203,6 +203,16 @@ const BASE_D = 2.1;
 const BASE_H = 0.13;
 const LID_H = 0.07;
 
+/**
+ * The screen's aspect ratio, which the page reads before capturing itself.
+ *
+ * The panel is cropped to fill the screen ("cover"), so anything captured
+ * outside this shape is read off the window, pushed across the wire and then
+ * discarded by the fragment shader. Handing the capture this number lets it
+ * read the band that will actually be seen.
+ */
+export const SCREEN_ASPECT = (BASE_W - 0.2) / (BASE_D - 0.06 - 0.18);
+
 /** The parts, in two groups: what stays put and what swings on the hinge. */
 function buildGeometry() {
   const data = [];
