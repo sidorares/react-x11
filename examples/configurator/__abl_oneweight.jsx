@@ -16,14 +16,6 @@
 //                      machine, including one with no fonts installed at
 //                      all. Two are variable fonts: `fontWeight` drives the
 //                      `wght` axis, so one Inter file is every weight here.
-//                      The face is put on the root box rather than left to
-//                      the palette, and that is not a detail: the floor a
-//                      `<text>` falls back to is the **window's** theme, and
-//                      the provider here is inside the window — so without
-//                      it the nav and the body copy came out in the host's
-//                      sans-serif while the headings used the shipped serif.
-//                      It cost the promise above, and 450ms of the first
-//                      paint in `fc-match` calls (docs/styling.md).
 //   Display type       Instrument Serif at 52px for the headline and 24px
 //                      for the section titles, with an italic span for the
 //                      accent — `fontStyle` picks the second face of the
@@ -288,22 +280,7 @@ const makePalette = (fonts) => ({
 // ---------------------------------------------------------------------------
 
 const s = createStyles({
-  root: {
-    flexGrow: 1,
-    flexDirection: 'column',
-    backgroundColor: '$paper',
-    // The face, the size and the ink for everything below, by inheritance
-    // (docs/styling.md). Without this, a `<text>` that names no family falls
-    // back to the palette floor of the **outermost element** — the
-    // `<window>`, which is above the provider — and that floor is
-    // `sans-serif`: the nav, the labels and the body copy would all be drawn
-    // in whatever the host machine calls sans-serif, which is the one thing
-    // an example that ships its fonts must not do. It also costs an
-    // `fc-match` per weight on the first paint, ~450ms of it here.
-    fontFamily: '$fontFamily',
-    fontSize: '$fontSize',
-    color: '$ink',
-  },
+  root: { flexGrow: 1, flexDirection: 'column', backgroundColor: '$paper' },
 
   // -- top bar ------------------------------------------------------------
   topbar: {
@@ -446,7 +423,7 @@ const s = createStyles({
     borderRadius: 20,
     padding: 4,
     boxShadow:
-      '0 16px 28px rgba(46, 36, 22, 0.20), 0 3px 8px rgba(46, 36, 22, 0.09)',
+      '0 22px 42px rgba(46, 36, 22, 0.18), 0 4px 12px rgba(46, 36, 22, 0.08)',
     transition: { backgroundColor: 260 },
   },
   bezel: {
@@ -634,13 +611,13 @@ const s = createStyles({
     borderTopWidth: 1,
     borderColor: '$hairline',
     backgroundColor: '$surface',
-    boxShadow: '0 -4px 12px rgba(46, 36, 22, 0.06)',
+    boxShadow: '0 -8px 24px rgba(46, 36, 22, 0.05)',
   },
   totalCol: { flexDirection: 'column', gap: 4, flexGrow: 1 },
   totalRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8 },
   total: {
     fontSize: 24,
-    fontWeight: 700,
+    fontWeight: 600,
     color: '$ink',
   },
   totalNote: { fontSize: 12, color: '$inkSoft' },
@@ -665,7 +642,7 @@ const s = createStyles({
     ':hover': { backgroundColor: '$surfaceHover', borderColor: '$inkFaint' },
     ':active': { backgroundColor: '$surfaceActive' },
   },
-  ghostText: { fontSize: 13.5, fontWeight: 500 },
+  ghostText: { fontSize: 13.5, fontWeight: 600 },
   primary: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -4162,6 +4162,10 @@ export class Node {
       format: 'a8',
       tint: color,
       maxPixels: 1024 * 1024,
+      // Cache on the first sighting rather than the second: what the gate
+      // saves elsewhere is a cheap redraw, and what it costs here is a whole
+      // gaussian — the one thing this entry exists to avoid running twice.
+      eager: true,
       draw: (sctx, box) => {
         // full coverage: the colour arrives at composite time
         sctx.fillStyle = '#ffffff';

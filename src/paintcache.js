@@ -232,7 +232,13 @@ export class PaintCache {
     }
 
     this.stats.misses++;
-    const seen = (this.pending.get(plan.key) ?? 0) + 1;
+    // `eager` skips the gate below for a drawing whose *live* path is the
+    // expensive thing — a blurred shadow, whose first sighting otherwise
+    // runs a convolution that is then thrown away, and a second one to keep.
+    // The gate is there so a page cycling unique content cannot fill the
+    // cache with entries drawn once; an eager plan opts out of that
+    // protection deliberately, and the LRU budget is what still bounds it.
+    const seen = plan.eager ? 2 : (this.pending.get(plan.key) ?? 0) + 1;
     if (seen < 2) {
       if (this.pending.size >= MAX_PENDING) this.pending.clear();
       this.pending.set(plan.key, seen);
