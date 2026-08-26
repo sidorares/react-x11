@@ -1155,6 +1155,17 @@ export function App(props) {
 export default App;
 
 if (!process.env.REACT_X11_NO_AUTORUN) {
-  const root = await createRoot();
+  // `desktop: false` turns off the three followers that talk to the session
+  // bus — appearance, the accessibility bridge and the global menu — and so
+  // nothing dials it at startup (docs/desktop.md). This page owns its
+  // palette outright (`colorScheme="light"` below), so following the
+  // desktop's would only overwrite colours somebody chose; and on macOS the
+  // bus lookup is a *synchronous* `launchctl` spawn, ~150ms of a first paint
+  // spent on something this page never reads.
+  //
+  // Not a default to copy blindly: an app that wants to belong on the
+  // desktop wants the opposite, and turning the bridge off is what a screen
+  // reader would notice on a Linux desktop.
+  const root = await createRoot({ desktop: false });
   root.render(<App />);
 }
