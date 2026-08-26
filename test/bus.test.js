@@ -762,23 +762,30 @@ describe('finding the address without blocking the loop (#417)', () => {
     });
   });
 
-  test('a Mac with no D-Bus fails before it dials, and says so', async () => {
-    await onFakeDarwin(async () => {
-      // `launchctl` answers nothing here (or is not installed at all, off
-      // macOS), which used to reach dbus-native's `unknown bus address` throw
-      // via a second blocking spawn
-      if ((await resolveAddress('session')) !== undefined) return;
-      assert.equal(await sessionBus(), null);
-      await assert.rejects(
-        () => sessionBus({ required: true }),
-        (err) => {
-          assert.match(err.cause.message, /no session bus address/);
-          assert.match(err.cause.message, /DBUS_LAUNCHD_SESSION_BUS_SOCKET/);
-          return true;
-        },
-      );
-    });
-  });
+  // Guarded on the transport rather than on a broker: with `dbus-native`
+  // absent — Node 20 — `connect()` reports *that* and never reaches the
+  // address at all, which is the right answer and a different one.
+  test(
+    'a Mac with no D-Bus fails before it dials, and says so',
+    { ...needsBroker },
+    async () => {
+      await onFakeDarwin(async () => {
+        // `launchctl` answers nothing here (or is not installed at all, off
+        // macOS), which used to reach dbus-native's `unknown bus address`
+        // throw via a second blocking spawn
+        if ((await resolveAddress('session')) !== undefined) return;
+        assert.equal(await sessionBus(), null);
+        await assert.rejects(
+          () => sessionBus({ required: true }),
+          (err) => {
+            assert.match(err.cause.message, /no session bus address/);
+            assert.match(err.cause.message, /DBUS_LAUNCHD_SESSION_BUS_SOCKET/);
+            return true;
+          },
+        );
+      });
+    },
+  );
 
   test('a synchronous spawn never happens on the way to a root', async () => {
     // The end-to-end shape of #417, in a child process so the count covers
