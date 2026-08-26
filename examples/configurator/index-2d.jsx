@@ -33,16 +33,6 @@
 //                      and the artwork, and a 1px ring on the selected card
 //                      (`0 0 0 1px $accent`) — a border would move the
 //                      layout, a shadow paints outside it and moves nothing.
-//   A real 3D panel    the product shot is a `<glarea>` — an OpenGL surface
-//                      in the layout — and it is scrubbed by the scroll
-//                      position of the configuration beside it: the laptop
-//                      is shut at the top of the page and open, turned
-//                      towards you, at the bottom. `laptop3d.jsx` has the
-//                      scene and the reasons; the short version is that the
-//                      surface clears to the same paper colour as the page,
-//                      so it reads as part of it rather than as a viewport,
-//                      and that a machine whose GL cannot run shaders gets
-//                      the flat `<box>` laptop instead, which is still here.
 //   Gradients          `backgroundImage: linear-gradient(...)` paints the
 //                      laptop's wallpaper and the sheen on its hinge; the
 //                      sheen is a translucent white ramp *over* a solid
@@ -63,12 +53,9 @@
 //
 // ## What to try
 //
-//   Scroll the options the laptop opens and turns as the panel on the right
-//                      scrolls, one redraw per scroll event and no clock
-//                      running when you stop.
-//   Pick a finish      the laptop repaints — body, hinge and screen — and on
-//                      the flat fallback the same change is a 260ms colour
-//                      transition; the summary line under it follows.
+//   Pick a finish      the laptop repaints — lid, hinge and wallpaper — with
+//                      a 260ms colour transition, and the summary line under
+//                      it follows.
 //   Hover a card       hairline darkens, a soft shadow appears. Hold the
 //                      press: the surface tints on the *down*, the selection
 //                      moves on the release.
@@ -81,12 +68,6 @@
 //                      configuration.
 //
 // ## What does not work
-//
-// **The 3D panel cannot be screenshotted.** GL renders where `GetImage`
-// cannot read it (docs/glx.md), so a capture of this window has a hole where
-// the laptop is — `gl.readPixels` inside `onDraw` is the only way to see it,
-// which is what `examples/labs/direct-gl.jsx` is for. It also does not take
-// part in hit testing yet, so the scroll position is its only input.
 //
 // `textBoxTrim` is the one thing this page pointedly does not use: a
 // trimmed text inside an overflowing scroll pane makes the content floors
@@ -109,10 +90,8 @@ import {
   createStyles,
   loadFont,
   useApp,
-  useSupports,
 } from '../../src/index.js';
 import { XK_DOWN, XK_LEFT, XK_RIGHT, XK_UP } from '../../src/keysyms.js';
-import { LaptopGL } from './laptop3d.jsx';
 
 // ---------------------------------------------------------------------------
 // The catalogue. Data, so the page is one map over it — and so the test can
@@ -128,7 +107,6 @@ export const CATALOG = {
       body: '#e7e5e0',
       edge: '#f7f6f3',
       well: '#d5d2ca',
-      screen: ['#f6e6d2', '#8794ad'],
       wallpaper: 'linear-gradient(155deg, #f3e2cd, #c9a183 52%, #7d89a6)',
     },
     {
@@ -137,7 +115,6 @@ export const CATALOG = {
       body: '#43413d',
       edge: '#5d5a55',
       well: '#33312e',
-      screen: ['#5d688a', '#141726'],
       wallpaper: 'linear-gradient(155deg, #55607a, #272b3a 55%, #121420)',
     },
     {
@@ -146,7 +123,6 @@ export const CATALOG = {
       body: '#b96e48',
       edge: '#d38a60',
       well: '#a05a38',
-      screen: ['#f7d3ac', '#6b3350'],
       wallpaper: 'linear-gradient(155deg, #f2c8a2, #c2683d 55%, #63304c)',
     },
   ],
@@ -455,15 +431,12 @@ const s = createStyles({
 
   // -- the laptop ---------------------------------------------------------
   stage: {
-    // A defined panel rather than "whatever the column has left": the render
-    // inside is framed to an aspect, and a stage that grows with the window
-    // reframes it on every resize.
-    height: 300,
-    flexShrink: 0,
+    flexGrow: 1,
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 0,
+    minHeight: 292,
     '@height < 720': { display: 'none' },
     '@width < 1020': { display: 'none' },
   },
@@ -524,9 +497,6 @@ const s = createStyles({
     transition: { backgroundColor: 260 },
   },
 
-  // The GL surface is a real X window stacked above everything the parent
-  // paints, so it gets the stage to itself and the chips sit below it.
-  stageGl: { flexGrow: 1, alignSelf: 'stretch' },
   chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -787,11 +757,10 @@ function SectionHeader({ index, eyebrow, title, caption }) {
   );
 }
 
-/** The product out of boxes — the fallback, and what every machine without a
- *  shader-capable GL context sees. The finish sets three solid colours (which
- *  transition) and one gradient (which snaps — a wallpaper change reads as a
- *  change, not a fade). */
-function LaptopFlat({ finish }) {
+/** The product, out of boxes: rim, bezel, wallpaper, hinge. The finish sets
+ *  three solid colours (which transition) and one gradient (which snaps —
+ *  a wallpaper change reads as a change, not a fade). */
+function Laptop({ finish }) {
   return (
     <box style={s.stage} data-testname="stage" aria-hidden>
       <box style={[s.rim, { backgroundColor: finish.body }]}>
@@ -852,16 +821,6 @@ export function Configurator({
   const palette = useMemo(() => makePalette(fonts), [fonts]);
 
   const [config, setConfig] = useState(initial);
-  // The 3D panel, and the ladder down from it. `useSupports('shaders')` is
-  // "could this connection run GLSL"; `glGone` is what the surface itself
-  // said when it tried — an indirect backend, a refused visual, a shader that
-  // would not compile. Either one puts the flat laptop back.
-  const shaders = useSupports('shaders');
-  const [glGone, setGlGone] = useState(null);
-  const use3d = shaders && !glGone;
-  // A ref rather than state on purpose: the scroll handler pushes straight
-  // into the GL panel, so scrolling the options does not re-render them.
-  const scrollBind = useRef({ set: null });
   const [bag, setBag] = useState(0);
   const [added, setAdded] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -977,19 +936,7 @@ export function Configurator({
               follows along.
             </text>
 
-            {use3d ? (
-              <box style={s.stage} data-testname="stage" aria-hidden>
-                <LaptopGL
-                  finish={finish}
-                  bind={scrollBind}
-                  clearColor={PAPER}
-                  style={s.stageGl}
-                  onUnavailable={setGlGone}
-                />
-              </box>
-            ) : (
-              <LaptopFlat finish={finish} />
-            )}
+            <Laptop finish={finish} />
 
             <box style={{ flexDirection: 'column', gap: 12 }}>
               <box style={s.chipsRow}>
@@ -1011,14 +958,7 @@ export function Configurator({
           </box>
 
           {/* ---------------------------------------------- options ------- */}
-          <box
-            style={s.options}
-            data-testname="options"
-            onScroll={(ev) => {
-              const travel = ev.contentHeight - ev.viewportHeight;
-              scrollBind.current.set?.(travel > 0 ? ev.scrollY / travel : 0);
-            }}
-          >
+          <box style={s.options} data-testname="options">
             <box style={s.section}>
               <SectionHeader
                 index="01"
@@ -1226,9 +1166,6 @@ if (!process.env.REACT_X11_NO_AUTORUN) {
   // Not a default to copy blindly: an app that wants to belong on the
   // desktop wants the opposite, and turning the bridge off is what a screen
   // reader would notice on a Linux desktop.
-  // `glPolicy: 'auto'` takes the direct backend where the connection has it
-  // and indirect otherwise — the laptop is drawn with shaders, so 'auto' is
-  // what decides between the 3D panel and the flat one below it.
-  const root = await createRoot({ desktop: false, glPolicy: 'auto' });
+  const root = await createRoot({ desktop: false });
   root.render(<App />);
 }

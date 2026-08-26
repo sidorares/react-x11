@@ -25,6 +25,7 @@ process.env.REACT_X11_NO_AUTORUN = '1';
 
 const { Configurator, CATALOG, priceOf } =
   await import('../examples/configurator/index.jsx');
+const { laptopPose } = await import('../examples/configurator/laptop3d.jsx');
 
 afterEach(cleanup);
 
@@ -170,5 +171,36 @@ describe('examples/configurator', () => {
     assert.equal(added.length, 1);
     assert.equal(added[0].price, CATALOG.base);
     assert.equal(added[0].config.chip, 'argon9');
+  });
+  test('the laptop is shut at the top of the page and open at the bottom', () => {
+    // The pose is the only part of the 3D panel a headless test can see: GL
+    // renders where GetImage cannot read it, so there is no pixel to assert
+    // on (docs/glx.md). What matters is that it is a *function of the scroll
+    // position* — the same offset gives the same frame, and it only opens.
+    const shut = laptopPose(0);
+    const open = laptopPose(1);
+    assert.ok(shut.lid < 0.1, `shut at the top, got ${shut.lid}`);
+    assert.ok(open.lid > 1.9, `open at the bottom, got ${open.lid}`);
+    assert.ok(open.turn > shut.turn, 'and it turns as it opens');
+
+    let previous = -Infinity;
+    for (let i = 0; i <= 20; i++) {
+      const { lid } = laptopPose(i / 20);
+      assert.ok(lid >= previous, `the lid never closes again (at ${i / 20})`);
+      previous = lid;
+    }
+    // Past either end it holds rather than folding through itself, because a
+    // scroll container answers with offsets outside its own travel.
+    assert.deepEqual(laptopPose(-3), shut);
+    assert.deepEqual(laptopPose(9), open);
+  });
+
+  test('without a shader-capable GL context the flat laptop is what renders', async () => {
+    // Which is what this suite runs on: the in-process server has no GLX, so
+    // `useSupports('shaders')` is false and the ladder goes down a rung. The
+    // page still has its product shot, and every assertion above still held.
+    await mount();
+    screen.getByTestName('stage');
+    assert.equal(screen.queryAllByTestName('stage-gl').length, 0);
   });
 });
