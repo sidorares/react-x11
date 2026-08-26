@@ -260,12 +260,17 @@ export class PaintCache {
       surface.render((sctx) =>
         plan.draw(this.verify ? recordingContext(sctx, state) : sctx, box),
       );
-      plan.after?.(surface);
+      // `after` may hand back a *different* surface than it was given — a
+      // blurred shadow bakes its convolution into a second one and destroys
+      // the sharp copy, so that what this entry holds composites as a plain
+      // mask instead of re-running a kernel on every blit. What it returns
+      // is what the cache owns from here on.
+      const final = plan.after?.(surface) ?? surface;
       this.stats.renders++;
       return {
         key: plan.key,
-        surface,
-        bytes: surface.bytes,
+        surface: final,
+        bytes: final.bytes,
         digest: this.verify ? state.digest : 0,
       };
     } catch (err) {

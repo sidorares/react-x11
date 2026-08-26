@@ -1529,6 +1529,13 @@ export class Node {
     // delete themselves as they land; a loop entry (`loop: true`) is removed
     // by `_updateLoops` and by nothing else
     this._anim = null;
+    // False until the first frame places this node (`absolutize`). Read by
+    // `_retarget`: a style can be re-resolved several times between
+    // construction and that first frame — the attach-time theme merge is the
+    // common one, replacing a detached resolution against the desktop
+    // palette with one against the app's own — and none of those is a
+    // *change* the user saw, so no transition may start from it.
+    this._placed = false;
     // the loops this node's style declares, whether or not they are running
     this._loops = null;
     // `resolvedTextStyle()`'s cache: this node's own text style over what it
@@ -1674,24 +1681,32 @@ export class Node {
       }
       return this.style;
     }
-    for (const prop of Object.keys(target)) {
-      const to = target[prop];
-      const from = displayed[prop];
-      if (from === to || from === undefined) continue;
-      const duration = transitionFor(target, prop);
-      if (duration <= 0) continue;
-      if (interpolate(from, to, 0.5) === null) continue; // no midpoint: snap
-      (this._anim ??= new Map()).set(prop, {
-        from,
-        to,
-        duration,
-        // *now*, not the last frame's timestamp: between two user actions
-        // the window is idle and draws nothing, so the previous frame can
-        // be seconds old — and the first tick would then find the
-        // transition already over and jump straight to the end
-        start: now(),
-      });
-      this.root?._startAnimating(this);
+    // Only for a node the user has seen (`_placed`): between construction
+    // and the first frame a style is re-resolved several times — attach
+    // merges the real theme over the detached resolution's desktop palette,
+    // queries settle — and animating any of those would travel from a value
+    // that was never on screen. An inserted element *appears* at its style;
+    // transitions start on later changes, which is CSS's rule too.
+    if (this._placed) {
+      for (const prop of Object.keys(target)) {
+        const to = target[prop];
+        const from = displayed[prop];
+        if (from === to || from === undefined) continue;
+        const duration = transitionFor(target, prop);
+        if (duration <= 0) continue;
+        if (interpolate(from, to, 0.5) === null) continue; // no midpoint: snap
+        (this._anim ??= new Map()).set(prop, {
+          from,
+          to,
+          duration,
+          // *now*, not the last frame's timestamp: between two user actions
+          // the window is idle and draws nothing, so the previous frame can
+          // be seconds old — and the first tick would then find the
+          // transition already over and jump straight to the end
+          start: now(),
+        });
+        this.root?._startAnimating(this);
+      }
     }
     // After the transitions, before the style is assembled: a loop that just
     // arrived contributes a value to this very swap, so the first frame the
@@ -3186,6 +3201,9 @@ export class Node {
   }
 
   absolutize(originX, originY) {
+    // before the yoga check, so a span — placed by its paragraph, no box of
+    // its own — counts as on screen too
+    this._placed = true;
     if (!this.yoga) return;
     this._assignAbs(
       originX + this.yoga.getComputedLeft(),
@@ -4109,19 +4127,28 @@ export class Node {
    * One blurred shadow, through the paint cache when there is one.
    *
    * The surface is the shadow's rectangle plus `pad` on every side, and the
-   * padding is load-bearing: the convolution reads outside the picture as
+   * padding is load-bearing: a convolution reads outside the picture as
    * transparent, so a kernel that runs off the edge ends the shadow in a
-   * straight line. The blur is set on the *picture* rather than baked into
-   * the pixels, which is why it survives in a cached entry and why the
-   * surface itself is a plain white rectangle.
+   * straight line. `blurKernel` takes that reach from the same function
+   * ntk builds the kernel with, so the two cannot drift apart.
+   *
+   * The blur is **baked into the pixels** by `blurCoverage` (ntk 8.6,
+   * ntk#335) rather than set as a filter on the picture. That is the
+   * difference between a cached shadow and a cached shadow that costs
+   * nothing to draw: a picture's filter is re-applied by the server on every
+   * composite, so the entry would hit, re-render nothing, and still pay its
+   * whole kernel every frame — 244M multiply-accumulates for one card-sized
+   * shadow, which was 1.6s per `:hover` on XQuartz. Baked, what the cache
+   * holds composites as an ordinary mask however wide the blur was, and the
+   * two separable passes run once per distinct geometry.
    *
    * `maxPixels` is raised well above the cache's default: a card's shadow is
    * as big as the card, an entry for one is a8 (a byte a pixel), and the
-   * thing being avoided — a convolution per frame over the whole box — is
-   * exactly the cost the default cap exists to bound elsewhere.
+   * thing being avoided is exactly the cost the default cap bounds
+   * elsewhere.
    */
   _paintBlurredShadow(ctx, rect, radius, blur, color) {
-    const { sigma, size, pad } = blurKernel(blur);
+    const { sigma, pad } = blurKernel(blur);
     // integral, because the surface is pixels; the blur is far wider than
     // the rounding, so nothing about the result is visibly quantized
     const width = Math.round(rect.width);
@@ -4145,7 +4172,7 @@ export class Node {
         );
         sctx.fill();
       },
-      after: (surface) => surface.picture().setBlurFilter(size, sigma),
+      after: (surface) => ntk.blurCoverage(surface, sigma),
       live: () => this._paintShadowLive(ctx, plan),
     };
     const cache = this.root?._paintCache;
@@ -4158,7 +4185,9 @@ export class Node {
    * build, an entry too big for the budget, and the first frame of a shadow
    * the cache has only seen once. A surface per frame is what a shadow costs
    * without a cache; it is still one composite on the wire, and the
-   * alternative is not painting it.
+   * alternative is not painting it. The blur is baked here too: two
+   * separable passes and a plain composite still beat one composite through
+   * a k x k kernel, by the ratio of 2k to k squared.
    */
   _paintShadowLive(ctx, plan) {
     if (typeof ntk.Surface !== 'function' || !this.app?.display?.Render) return;
@@ -4172,7 +4201,10 @@ export class Node {
       surface.render((sctx) =>
         plan.draw(sctx, { x: 0, y: 0, width: plan.width, height: plan.height }),
       );
-      plan.after(surface);
+      // `after` may hand back a *different* surface — the blur is baked into
+      // a second one and the sharp copy destroyed — so both the drawing and
+      // the cleanup below follow what it returned.
+      surface = plan.after(surface) ?? surface;
       const before = ctx.fillStyle;
       ctx.fillStyle = plan.tint;
       ctx.drawImage(surface, plan.x, plan.y);
@@ -5390,6 +5422,7 @@ export const Scrollable = (Base) =>
     }
 
     absolutize(originX, originY) {
+      this._placed = true;
       if (!this.yoga) return;
       this._assignAbs(
         originX + this.yoga.getComputedLeft(),
@@ -10523,6 +10556,7 @@ export class WindowNode extends Scrollable(Node) {
       this.yoga.setHeight(height);
       this.yoga.calculateLayout(width, height, this._rootDirection);
       this.abs = { x: 0, y: 0, width, height };
+      this._placed = true;
       // the root's rect is written here, not through _assignAbs, so its
       // cached hit reach is dropped here too (children bubble their own)
       this._hitBoundsCache = null;
