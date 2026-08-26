@@ -68,7 +68,10 @@
 //
 //   Scroll the options the laptop opens and turns as the panel on the right
 //                      scrolls, one redraw per scroll event and no clock
-//                      running when you stop.
+//                      running when you stop — and the screen in the render
+//                      is that panel, so the machine on the page is running
+//                      the page. It re-reads on every choice, and on a rest
+//                      after a scroll rather than during one.
 //   Pick a finish      the laptop repaints — body, hinge and screen — and on
 //                      the flat fallback the same change is a 260ms colour
 //                      transition; the summary line under it follows.
@@ -103,7 +106,13 @@
 // does not paint on the in-process X server (ntk#287), which is why
 // `test/configurator.test.js` asserts selection state and prices, never
 // shadow pixels.
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -113,6 +122,7 @@ import {
   loadFont,
   useApp,
   useSupports,
+  useTopLevelWindow,
 } from '../../src/index.js';
 import { XK_DOWN, XK_LEFT, XK_RIGHT, XK_UP } from '../../src/keysyms.js';
 import { LaptopGL } from './laptop3d.jsx';
@@ -863,14 +873,25 @@ export function Configurator({
   const [glGone, setGlGone] = useState(null);
   const use3d = shaders && !glGone;
   // A ref rather than state on purpose: the scroll handler pushes straight
-  // into the GL panel, so scrolling the options does not re-render them.
-  const scrollBind = useRef({ set: null });
+  // into the GL panel, so scrolling the options does not re-render them. The
+  // screen capture goes the same way, for the same reason.
+  const scrollBind = useRef({ set: null, setPage: null });
+  const windowRef = useTopLevelWindow();
+  const optionsRef = useRef(null);
+  const captureSeq = useRef(0);
+  const recapture = useRef(null);
   const [bag, setBag] = useState(0);
   const [added, setAdded] = useState(false);
   const [saved, setSaved] = useState(false);
   const addedTimer = useRef(null);
   const cardRefs = useRef(new Map());
-  useEffect(() => () => clearTimeout(addedTimer.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(addedTimer.current);
+      clearTimeout(recapture.current);
+    },
+    [],
+  );
 
   const total = priceOf(config);
   const finish = CATALOG.finishes.find((f) => f.id === config.finish);
@@ -884,6 +905,55 @@ export function Configurator({
         ? prev.extras.filter((x) => x !== id)
         : [...prev.extras, id],
     }));
+
+  /**
+   * Read the configuration panel back off the window and hand it to the
+   * laptop, so the screen in the render is running the page it is part of.
+   *
+   * This is `getImageData` on the window's own 2d context, which works for
+   * one reason worth stating: the panel is ordinary 2D content in the
+   * window's backing pixmap. The GL child is the thing that cannot be read
+   * this way — its pixels never live in an X drawable at all — so the
+   * capture goes one way and never the other, and there is no recursion to
+   * guard against. The rect is the pane's, which is also what keeps the
+   * laptop out of its own screen: the render is in the hero, and the hero is
+   * not in the rect.
+   */
+  const capture = useCallback(() => {
+    const win = windowRef.current?.window;
+    const pane = optionsRef.current;
+    if (!win || !pane?.abs?.width || !use3d) return;
+    const { x, y, width, height } = pane.abs;
+    let ctx;
+    try {
+      ctx = win.getContext('2d');
+    } catch {
+      return; // no context to read: the screen keeps its gradient
+    }
+    ctx.getImageData(x, y, width, height, (err, img) => {
+      if (err || !img) return;
+      scrollBind.current.setPage?.({
+        // a texture wants plain bytes, and `data` is a clamped view
+        data: new Uint8Array(img.data.buffer ?? img.data),
+        width,
+        height,
+        seq: ++captureSeq.current,
+      });
+    });
+  }, [windowRef, use3d]);
+
+  // On the frame *after* a change, so the panel has already repainted into
+  // the pixmap this reads: the renderer asked for that frame during the
+  // commit, so a callback registered here runs behind its.
+  useEffect(() => {
+    const win = windowRef.current?.window;
+    if (!win?.requestAnimationFrame) return undefined;
+    let live = true;
+    win.requestAnimationFrame(() => live && capture());
+    return () => {
+      live = false;
+    };
+  }, [config, use3d, capture, windowRef]);
 
   /** Arrow keys rove the radio group: move the choice, move the focus. */
   const roving = (group) => (ev) => {
@@ -1016,10 +1086,17 @@ export function Configurator({
           {/* ---------------------------------------------- options ------- */}
           <box
             style={s.options}
+            ref={optionsRef}
             data-testname="options"
             onScroll={(ev) => {
               const travel = ev.contentHeight - ev.viewportHeight;
               scrollBind.current.set?.(travel > 0 ? ev.scrollY / travel : 0);
+              // The screen follows the scroll too, but on a rest rather than
+              // per event: a capture is a round trip and a megabyte of
+              // pixels, which is nothing once a gesture ends and far too
+              // much sixty times a second while it runs.
+              clearTimeout(recapture.current);
+              recapture.current = setTimeout(capture, 140);
             }}
           >
             <box style={s.section}>

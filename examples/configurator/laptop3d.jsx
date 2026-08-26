@@ -27,6 +27,15 @@
 // see: GL renders where `GetImage` cannot read it (docs/glx.md), so there is
 // no pixel to assert on and `npm run screenshots` skips this element.
 //
+// **The screen shows the page.** What the laptop is displaying is the
+// configuration panel beside it, read back off the window with
+// `getImageData` and uploaded as a texture whenever a choice changes — the
+// app running on itself. That works in one direction only, and the asymmetry
+// is the whole reason it is safe: the panel is ordinary 2D content in the
+// window's backing pixmap and can simply be read, while the GL surface's
+// pixels never live in an X drawable at all, so the screen can never contain
+// the screen. The rect captured is the pane's, and the render is not in it.
+//
 // **Anti-aliasing is ours to do.** `chooseGLConfig` reads `DEPTH_SIZE` and
 // `ALPHA_SIZE` out of the GLX spec on the direct backend and nothing else, so
 // `SAMPLES` is honoured on indirect and ignored on the backend this runs on
@@ -243,10 +252,10 @@ attribute vec3 aNormal;
 uniform mat4 uMvp;
 uniform mat4 uModel;
 varying vec3 vNormal;
-varying float vY;
+varying vec3 vLocal;
 void main() {
   vNormal = normalize(mat3(uModel) * aNormal);
-  vY = aPos.y;
+  vLocal = aPos;
   gl_Position = uMvp * vec4(aPos, 1.0);
 }`;
 
@@ -261,14 +270,32 @@ uniform float uGrad;
 uniform float uGradMin;
 uniform float uGradSpan;
 uniform float uGlow;
+// the screen: what the configuration panel looked like when it was last
+// read back, fitted into the panel without stretching it
+uniform sampler2D uTex;
+uniform float uScreen;
+uniform vec4 uScreenBox;
+uniform vec2 uFit;
 varying vec3 vNormal;
-varying float vY;
+varying vec3 vLocal;
 void main() {
+  if (uScreen > 0.5) {
+    vec2 uv = (vLocal.xy - uScreenBox.xy) / uScreenBox.zw;
+    // Cover, not contain: an app on a laptop fills its screen. The panel is
+    // portrait and the screen is landscape, so this crops the panel rather
+    // than shrinking it into a letterbox nobody could read — the alternative
+    // put the whole page on screen at a size where the type was mush.
+    uv = (uv - 0.5) / uFit + 0.5;
+    // an X image reads top row first; a texture's v counts up from the bottom
+    uv.y = 1.0 - uv.y;
+    gl_FragColor = vec4(texture2D(uTex, uv).rgb, 1.0);
+    return;
+  }
   vec3 n = normalize(vNormal);
   float key = max(dot(n, normalize(vec3(-0.35, 0.85, 0.55))), 0.0);
   float fill = max(dot(n, normalize(vec3(0.7, 0.25, 0.4))), 0.0);
   float bounce = max(-n.y, 0.0);
-  vec3 base = mix(uColor, uColor2, uGrad * clamp((vY - uGradMin) / uGradSpan, 0.0, 1.0));
+  vec3 base = mix(uColor, uColor2, uGrad * clamp((vLocal.y - uGradMin) / uGradSpan, 0.0, 1.0));
   vec3 lit = base * (0.52 + 0.46 * key + 0.16 * fill + 0.08 * bounce);
   gl_FragColor = vec4(mix(lit, base, uGlow), 1.0);
 }`;
@@ -414,6 +441,10 @@ function ensureTarget(gl, s, width, height) {
  */
 export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
   const [progress, setProgress] = useState(0);
+  // The page's own configuration panel, read back off the window and shown on
+  // the laptop's screen. State rather than a ref because a new capture has to
+  // reach `onDraw`, and `onDraw`'s identity is what asks for the frame.
+  const [page, setPage] = useState(null);
   const scene = useRef(null);
   // the same paper the page is on: the offscreen has to be cleared to it, or
   // the resolve blends the laptop's edges into black
@@ -422,8 +453,10 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
   useEffect(() => {
     if (!bind) return undefined;
     bind.current.set = setProgress;
+    bind.current.setPage = setPage;
     return () => {
       bind.current.set = null;
+      bind.current.setPage = null;
     };
   }, [bind]);
 
@@ -503,6 +536,14 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
           uGradMin: gl.getUniformLocation(program, 'uGradMin'),
           uGradSpan: gl.getUniformLocation(program, 'uGradSpan'),
           uGlow: gl.getUniformLocation(program, 'uGlow'),
+          uPageTex: gl.getUniformLocation(program, 'uTex'),
+          uScreen: gl.getUniformLocation(program, 'uScreen'),
+          uScreenBox: gl.getUniformLocation(program, 'uScreenBox'),
+          uFit: gl.getUniformLocation(program, 'uFit'),
+          // the page's own pixels, uploaded when a new capture arrives
+          pageTex: gl.createTexture(),
+          pageSeq: -1,
+          pageAspect: 1,
         };
       } catch (err) {
         onUnavailable?.(String(err?.message ?? err));
@@ -585,8 +626,34 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
         gl.uniform1f(s.uGradMin, opts.gradMin ?? 0);
         gl.uniform1f(s.uGradSpan, opts.gradSpan ?? 1);
         gl.uniform1f(s.uGlow, opts.glow ?? 0);
+        gl.uniform1f(s.uScreen, opts.screen ? 1 : 0);
         gl.drawArrays(gl.TRIANGLES, first, count);
       };
+
+      // A capture is uploaded once, on the frame after it arrives: the
+      // texture is the same object across frames, so a scroll that changes
+      // nothing about the page re-binds rather than re-uploads.
+      if (page && page.seq !== s.pageSeq) {
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, s.pageTex);
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          page.width,
+          page.height,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          page.data,
+        );
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        s.pageSeq = page.seq;
+        s.pageAspect = page.width / page.height;
+      }
 
       const p = s.geo.parts;
       part(body, p.base, body3);
@@ -595,13 +662,36 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
       part(hinge, p.lid, body3);
       // the screen is lit by itself rather than by the room, which is what
       // makes it read as a screen and not as a painted panel
-      part(hinge, p.screen, top3, {
-        grad: true,
-        color2: bottom3,
-        gradMin: 0.09,
-        gradSpan: s.geo.lidH - 0.18,
-        glow: 0.82,
-      });
+      if (page) {
+        const boxW = BASE_W - 0.2;
+        const boxH = s.geo.lidH - 0.18;
+        const screenAspect = boxW / boxH;
+        // cover: fill the screen on the tighter axis and crop the other
+        const fit =
+          s.pageAspect > screenAspect
+            ? [s.pageAspect / screenAspect, 1]
+            : [1, screenAspect / s.pageAspect];
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, s.pageTex);
+        gl.uniform1i(s.uPageTex, 1);
+        gl.uniform4f(
+          s.uScreenBox,
+          -boxW / 2,
+          s.geo.lidH / 2 - boxH / 2,
+          boxW,
+          boxH,
+        );
+        gl.uniform2f(s.uFit, fit[0], fit[1]);
+        part(hinge, p.screen, top3, { screen: true });
+      } else {
+        part(hinge, p.screen, top3, {
+          grad: true,
+          color2: bottom3,
+          gradMin: 0.09,
+          gradSpan: s.geo.lidH - 0.18,
+          glow: 0.82,
+        });
+      }
 
       // Pass two: resolve the offscreen down onto the window. Depth is off
       // for it — a fullscreen quad has nothing to be behind — and the texture
@@ -621,7 +711,7 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
         gl.enable(gl.DEPTH_TEST);
       }
     },
-    [progress, finish, clear],
+    [progress, finish, clear, page],
   );
 
   return (
