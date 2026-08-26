@@ -49,8 +49,8 @@
 // and refuses to pretend: on `direct` it says so and draws nothing, because
 // code written against one backend does not run on the other, and an
 // example that quietly drew a different scene on each would teach the wrong
-// thing. The declarative route (`<Canvas3D>` and the scene elements) is what
-// spans both, and it is moving to `@react-x11/components`.
+// thing. The declarative route — `<Canvas>` and the scene elements in
+// `@react-x11/components/three` — is what spans both.
 //
 // **Nobody can screenshot it.** On XQuartz, GL renders into a Metal surface
 // the compositor owns rather than into the X drawable, so `GetImage` reads
@@ -71,7 +71,7 @@ import {
   Switch,
   createRoot,
   createStyles,
-  useApp,
+  useSupports,
 } from '../src/index.js';
 
 // ---------------------------------------------------------------------------
@@ -279,7 +279,7 @@ export function ViewerPanel({
   initialModel,
   initialSpin = true,
 }) {
-  const app = useApp();
+  const shaders = useSupports('shaders');
   const [modelId, setModelId] = useState(initialModel ?? models[0].id);
   const [shading, setShading] = useState('smooth');
   const [spin, setSpin] = useState(initialSpin);
@@ -358,8 +358,6 @@ export function ViewerPanel({
     cam.distance = Math.min(30, Math.max(2.6, cam.distance + ev.deltaY * 0.4));
   }, []);
 
-  const glCaps = app?.glCapabilities?.();
-
   return (
     <box style={s.root}>
       <box style={s.stage}>
@@ -380,7 +378,8 @@ export function ViewerPanel({
               The direct backend hands `onDraw` an OpenGL ES 2 context —
               camelCase, shaders, vertex buffers — and nothing translates
               between the two spellings, so the fixed-function code this file is
-              made of would not run. {'`<Canvas3D>`'} is what spans both.
+              made of would not run. {'`<Canvas>`'} from
+              `@react-x11/components/three` is what spans both.
             </text>
           </box>
         ) : (
@@ -442,13 +441,12 @@ export function ViewerPanel({
           <text style={s.h}>Backend</text>
           <text style={s.value}>{backend ?? 'starting…'}</text>
           <text style={s.dim}>
-            {glCaps
-              ? `direct ${glCaps.direct ? 'available' : 'unavailable'}`
-              : 'no capability report'}
+            {shaders ? 'shaders available' : 'no shaders under this glPolicy'}
           </text>
           <text style={s.dim}>
-            No shaders, no framebuffers, no vertex arrays — the GLX protocol
-            encodes none of them.
+            {shaders
+              ? 'Shaders, framebuffers and vertex buffers all live on this backend.'
+              : 'No shaders, no framebuffers, no vertex arrays — the GLX protocol encodes none of them.'}
           </text>
         </box>
       </box>
