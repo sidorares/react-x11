@@ -1732,8 +1732,28 @@ costs one `CallList`.
 Layout treats it as a leaf: it is sized and positioned like any other node,
 and its X window follows that rect. The window is stacked above everything
 drawn in the parent, so 2D content cannot overlap it — a HUD needs a
-sibling `<popup>`. Pointer events over the surface go to its own window;
-`<glarea>` does not take part in the parent's hit testing yet.
+sibling `<popup>`.
+
+**The wheel reaches it; the rest of the pointer does not, yet.** Pointer
+events over the surface are delivered to its own X window rather than to the
+one the tree is hit-tested in, which is why nothing over a `<glarea>` used to
+reach an application at all. The surface now selects the wheel there and
+hands it back to the window's event manager, naming itself as the target —
+so `onWheel` is an ordinary synthetic event at this node: deltas in pixels,
+bubbling to the ancestors, `preventDefault()` to keep it from the default
+scroll action. It is named rather than hit-tested because a window-owning
+child is not in its parent's paint order, so a hit test would answer with
+the box behind the surface.
+
+```jsx
+<glarea onWheel={(ev) => zoom(ev.deltaY)} />
+```
+
+Two limits worth knowing. Smooth deltas are not part of it: XI2 is selected
+on the window the manager owns rather than on this child, so a touchpad's
+fractions arrive as whole notches from buttons 4-7. And clicks, motion and
+hover still do not — a scene that needs picking has to read the pointer some
+other way.
 
 `onDraw` is the raw escape hatch; for a scene, put 3D elements inside
 (below) and let the renderer drive the GL. See `examples/viewer3d.jsx` for

@@ -232,7 +232,13 @@ export class PaintCache {
     }
 
     this.stats.misses++;
-    const seen = (this.pending.get(plan.key) ?? 0) + 1;
+    // `eager` skips the gate below for a drawing whose *live* path is the
+    // expensive thing — a blurred shadow, whose first sighting otherwise
+    // runs a convolution that is then thrown away, and a second one to keep.
+    // The gate is there so a page cycling unique content cannot fill the
+    // cache with entries drawn once; an eager plan opts out of that
+    // protection deliberately, and the LRU budget is what still bounds it.
+    const seen = plan.eager ? 2 : (this.pending.get(plan.key) ?? 0) + 1;
     if (seen < 2) {
       if (this.pending.size >= MAX_PENDING) this.pending.clear();
       this.pending.set(plan.key, seen);
@@ -260,12 +266,17 @@ export class PaintCache {
       surface.render((sctx) =>
         plan.draw(this.verify ? recordingContext(sctx, state) : sctx, box),
       );
-      plan.after?.(surface);
+      // `after` may hand back a *different* surface than it was given — a
+      // blurred shadow bakes its convolution into a second one and destroys
+      // the sharp copy, so that what this entry holds composites as a plain
+      // mask instead of re-running a kernel on every blit. What it returns
+      // is what the cache owns from here on.
+      const final = plan.after?.(surface) ?? surface;
       this.stats.renders++;
       return {
         key: plan.key,
-        surface,
-        bytes: surface.bytes,
+        surface: final,
+        bytes: final.bytes,
         digest: this.verify ? state.digest : 0,
       };
     } catch (err) {

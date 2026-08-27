@@ -23,6 +23,7 @@ import type {
   SubmitEvent,
   SyntheticEvent,
   ViewportEvent,
+  WheelEvent,
   WindowResizeEvent,
 } from './events.js';
 
@@ -841,6 +842,15 @@ export interface GlAreaProps extends DrawnProps<DrawnNode> {
   onDraw?: (gl: any, info: DrawInfo) => void;
   /** No GL surface — no GLX, or no matching visual. */
   onError?: (err: Error) => void;
+  /**
+   * The wheel over the surface. Inherited from `EventHandlers` like every
+   * other element's, and listed here because it is the **only** pointer
+   * event a `<glarea>` currently reports: the surface owns its own X window,
+   * so it selects the wheel there and hands it to the window's event manager
+   * (see docs/elements.md). Deltas are pixels, `preventDefault()` takes the
+   * default scroll action back, and it bubbles from this node.
+   */
+  onWheel?: (ev: WheelEvent<DrawnNode>) => void;
   /** A click inside the surface that hit no mesh. */
   onPointerMissed?: (ev: MouseEvent<DrawnNode>) => void;
 }

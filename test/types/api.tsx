@@ -665,6 +665,9 @@ function RawGl() {
       onCreated={(gl) => gl.Enable(gl.DEPTH_TEST)}
       onDraw={(gl, { width }) => gl.Viewport(0, 0, width, width)}
       onError={(err) => void err.message}
+      // the wheel reaches a GL surface (it selects it and hands it to the
+      // window's manager), and carries pixels like every other wheel
+      onWheel={(ev) => void (ev.deltaY + ev.deltaX)}
     />
   );
 }

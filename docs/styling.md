@@ -394,6 +394,15 @@ own `color`. A blurred shadow is a real gaussian — RENDER's convolution over
 a coverage surface — cached by size, radius and blur, so a list of identical
 cards renders one and composites it many times.
 
+The blur is **baked into the cached surface's pixels**, in two separable 1-D
+passes, rather than left as a filter on its picture. That is not an internal
+detail: XRender applies a picture's filter on every composite, so a shadow
+whose blur rode on the picture paid its whole kernel again every frame it was
+drawn — a card-sized coverage surface at a wide blur is hundreds of millions
+of multiply-accumulates, in the server, per shadow, per repaint. Baked, a
+repaint composites a plain mask however wide the blur is, and the convolution
+runs once per distinct geometry.
+
 What it does not do, and why:
 
 - **`inset` throws.** An inner shadow is a different drawing and a different
@@ -794,6 +803,27 @@ what a node inherits:
   <text style={{ fontFamily: '$monoFamily' }}>the palette's mono face, 16</text>
   <text style={{ fontSize: 24 }}>Inter at 24</text>
 </window>
+```
+
+**The floor is read from the window, not from the nearest provider.** That is
+the sentence to remember, because the failing shape looks right: a
+`<ThemeProvider value={palette}>` _inside_ a `<window>` feeds `useTheme()` and
+resolves every `$token` under it, so the styles that name a face get one — and
+every `<text>` that names none still falls back to the **window's** palette,
+which is the desktop's `sans-serif` unless the window itself was given a
+theme. An app that ships its own fonts then draws its headings in the face it
+shipped and its body copy in whatever the machine calls sans-serif, which is
+both wrong and slow: resolving a generic family costs an `fc-match` per weight
+on the first paint (~110ms each here).
+
+Two ways to say it, and the second is usually the one you want:
+
+```jsx
+<window theme={palette}>            {/* the floor, for everything inside */}
+
+<box style={{ fontFamily: '$fontFamily', color: '$text' }}>
+  {/* or hand the face to a subtree by inheritance, which needs no window */}
+</box>
 ```
 
 `monoFamily` has no such fallback — nothing is monospace unless it says so, and

@@ -34,6 +34,7 @@
     "xi2:probe": "node scripts/xi2-probe.mjs",
     "globalmenu:host": "node scripts/globalmenu-host.mjs",
     "devtools:proxy": "node scripts/devtools-proxy.mjs",
+    "examples:configurator": "tsx examples/configurator/index.jsx",
     "examples:fonts": "tsx examples/fonts.jsx",
     "examples:form": "tsx examples/form.jsx",
     "examples:rules": "tsx examples/rules.jsx",
@@ -83,7 +84,7 @@
     "node": ">=20.19"
   },
   "dependencies": {
-    "ntk": "^8.5.0",
+    "ntk": "^8.7.0",
     "react-reconciler": "^0.33.0",
     "yoga-layout": "^3.2.1"
   },
@@ -118,6 +119,9 @@
     "@babel/core": "^8.0.1",
     "@babel/plugin-transform-react-jsx": "^8.0.1",
     "@eslint/js": "^9.32.0",
+    "@fontsource/instrument-serif": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
     "@types/react": "^19.2.17",
     "eslint": "^9.32.0",
     "eslint-plugin-react": "^7.37.5",
