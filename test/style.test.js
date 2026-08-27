@@ -99,13 +99,23 @@ test('a $token resolves inside a decoration, not only as the whole value', async
       boxShadow: '0 2px 8px rgba(0, 0, 0, .4)',
     },
   );
-  assert.throws(
-    () =>
-      resolveTokens(
-        { backgroundImage: 'linear-gradient($nope, #000)' },
-        theme,
-        '<box style>',
-      ),
+  // A token inside a value is the same mistake as a whole-value one, and
+  // gets the same treatment: the property is dropped rather than painted
+  // half-substituted, and the message goes to the caller to place.
+  const problems = [];
+  assert.deepStrictEqual(
+    resolveTokens(
+      { backgroundImage: 'linear-gradient($nope, #000)' },
+      theme,
+      '<box style>',
+      true,
+      problems,
+    ),
+    {},
+    'a gradient missing one stop is not a shorter gradient',
+  );
+  assert.match(
+    problems.join('\n'),
     /unknown theme token "\$nope" in <box style> backgroundImage/,
   );
 });
@@ -967,14 +977,12 @@ test('a popup inherits the theme of where it is written, not its window', async 
 test('an unknown token is an error naming what the theme has', async () => {
   const app = createMockApp();
   const errors = [];
-  // The tree throws on purpose. `onUncaughtError` is the channel for that —
-  // the default one logs *and* sets process.exitCode, which is right for an
-  // app and wrong for a test asserting on the message.
-  const x11Root = await createRoot({
-    app,
-    onUncaughtError: (err) => errors.push(String(err?.message ?? err)),
-  });
+  const x11Root = await createRoot({ app });
+  // The report logs *and* sets process.exitCode, which is right for an app
+  // and wrong for a test asserting on the message (test/theme-token-errors
+  // pins both halves).
   const orig = console.error;
+  const origCode = process.exitCode;
   console.error = (...a) => errors.push(a.join(' '));
   try {
     x11Root.render(
@@ -987,6 +995,7 @@ test('an unknown token is an error naming what the theme has', async () => {
     await tick();
   } finally {
     console.error = orig;
+    process.exitCode = origCode;
   }
   assert.match(errors.join('\n'), /unknown theme token "\$pannel"/);
   // The palette a node sees is the built-in one with this `theme` prop
@@ -1175,11 +1184,9 @@ test('a $token with no provider resolves against the desktop’s palette', async
 test('a $token nothing defines is still an error, provider or not', async () => {
   const app = createMockApp();
   const errors = [];
-  const x11Root = await createRoot({
-    app,
-    onUncaughtError: (err) => errors.push(String(err?.message ?? err)),
-  });
+  const x11Root = await createRoot({ app });
   const orig = console.error;
+  const origCode = process.exitCode;
   console.error = (...a) => errors.push(a.join(' '));
   try {
     x11Root.render(
@@ -1192,6 +1199,7 @@ test('a $token nothing defines is still an error, provider or not', async () => 
     await tick();
   } finally {
     console.error = orig;
+    process.exitCode = origCode;
   }
   // It used to be a one-off warning and a silently dropped property, because
   // there was no palette to check against. Now there always is, so this is

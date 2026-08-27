@@ -1206,16 +1206,37 @@ export function stripTokens(style) {
  * `strict` says the node's ancestry is complete, so a token that does not
  * resolve is a mistake. While a subtree is still being built its nodes can
  * see only part of their ancestry — the theme two levels up does not exist
- * for them yet — so resolution there is provisional: unknown tokens are
- * dropped and the node restyles when it attaches.
+ * for them yet — so resolution there is provisional.
+ *
+ * Both cases drop the property, because a value is either resolved or absent
+ * and `'$textMuted1'` is not a colour. What `strict` changes is whether
+ * anyone hears about it: mistakes are pushed onto `problems` and the caller
+ * decides what one costs. Resolving itself never throws — it runs from a
+ * commit and from an X event alike, and only the caller knows whether React
+ * is on the stack to route a throw to a boundary (src/nodes.js).
+ *
+ * A cache hit replays the problems it recorded, so the second node to wear a
+ * misspelled shared style is reported like the first.
  */
-export function resolveTokens(style, theme, where = 'style', strict = true) {
+export function resolveTokens(
+  style,
+  theme,
+  where = 'style',
+  strict = true,
+  problems = null,
+) {
   if (!theme) return stripTokens(style);
   let byTheme = strict ? resolvedCache.get(style) : null;
   if (strict && !byTheme) resolvedCache.set(style, (byTheme = new WeakMap()));
   const hit = byTheme?.get(theme);
-  if (hit) return hit;
+  if (hit) {
+    if (problems && hit.problems) problems.push(...hit.problems);
+    return hit.out;
+  }
 
+  // collected here rather than pushed straight to `problems` so the cache
+  // entry can keep them: the caller that misses is not the only one to hear
+  const found = strict ? [] : null;
   const out = {};
   for (const key of Object.keys(style)) {
     const v = style[key];
@@ -1225,11 +1246,7 @@ export function resolveTokens(style, theme, where = 'style', strict = true) {
         out[key] = theme[name];
         continue;
       }
-      if (!strict) continue;
-      throw new Error(
-        `react-x11: unknown theme token "${v}" in ${where} ` +
-          `(theme has ${Object.keys(theme).join(', ') || 'nothing'})`,
-      );
+      if (strict) found.push(unknownToken(v, theme, where));
     } else if (mentionsToken(v)) {
       let unknown = null;
       const substituted = v.replace(TOKEN_IN_VALUE, (token) => {
@@ -1245,13 +1262,10 @@ export function resolveTokens(style, theme, where = 'style', strict = true) {
       // frame instead of at the style.
       if (!unknown) out[key] = substituted;
       else if (strict) {
-        throw new Error(
-          `react-x11: unknown theme token "${unknown}" in ${where} ${key} ` +
-            `(theme has ${Object.keys(theme).join(', ') || 'nothing'})`,
-        );
+        found.push(unknownToken(unknown, theme, `${where} ${key}`));
       }
     } else if (key.charCodeAt(0) === 58 && v) {
-      out[key] = resolveTokens(v, theme, `${where} ${key}`, strict);
+      out[key] = resolveTokens(v, theme, `${where} ${key}`, strict, found);
     } else if (key === 'animation' && v && typeof v === 'object') {
       const loops = {};
       let incomplete = false;
@@ -1266,11 +1280,11 @@ export function resolveTokens(style, theme, where = 'style', strict = true) {
           theme,
           `${where} animation ${prop}`,
           strict,
+          found,
         );
-        // A provisional resolution drops what it cannot resolve, which for
-        // an ordinary property means "not styled yet". A loop with one end
-        // missing is not a shorter loop, so the whole declaration waits for
-        // the ancestry to complete rather than throwing at a half of one.
+        // A loop with one end missing is not a shorter loop, so a
+        // declaration that lost a value is dropped whole rather than run
+        // between a colour and nothing.
         if (Object.keys(resolved).length !== Object.keys(entry).length) {
           incomplete = true;
         }
@@ -1281,8 +1295,18 @@ export function resolveTokens(style, theme, where = 'style', strict = true) {
       out[key] = v;
     }
   }
-  byTheme?.set(theme, out);
+  if (found?.length && problems) problems.push(...found);
+  byTheme?.set(theme, { out, problems: found?.length ? found : null });
   return out;
+}
+
+/** The one message, written once: what was named, and what the palette in
+ *  force actually has — listing the alternatives is most of the fix. */
+function unknownToken(token, theme, where) {
+  return (
+    `react-x11: unknown theme token "${token}" in ${where} ` +
+    `(theme has ${Object.keys(theme).join(', ') || 'nothing'})`
+  );
 }
 
 export { validateStyle };

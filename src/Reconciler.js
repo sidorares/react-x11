@@ -34,7 +34,11 @@ import {
 } from './nodes.js';
 import { hasDropProps } from './dnd.js';
 import { AppProvider } from './appcontext.js';
-import { defaultRootHandlers, setErrorHandler } from './errors.js';
+import {
+  defaultRootHandlers,
+  setErrorHandler,
+  STRICT_TOKENS,
+} from './errors.js';
 import {
   registerApp,
   unregisterApp,
@@ -303,15 +307,29 @@ const HostConfig = {
     // and trapFocus need commitMount too — the node has to be in the tree
     // first, so it can find the EventManager that owns focus. Drop targets
     // likewise: registration needs the root, which insertion assigns.
+    //
+    // Under REACT_X11_STRICT_TOKENS every token-styled node asks for one as
+    // well, since a bad token is only *found* once the node is attached —
+    // which is after this ran — and commitMount is the first moment React
+    // holds that node's own fiber (nodes.js `_tokenProblem`). Gated on the
+    // flag so the default mount pays nothing for a debugging mode.
     return (
       type === 'popup' ||
       Boolean(props.autoFocus) ||
       Boolean(props.trapFocus) ||
-      hasDropProps(props)
+      hasDropProps(props) ||
+      (STRICT_TOKENS && instance._usesTokens)
     );
   },
 
   commitMount(instance, type, props) {
+    // first, and before any of the work below: the tree is on its way out.
+    // `false` afterwards marks this instance's one commitMount spent, so a
+    // later re-attach throws at once rather than deferring to a call that
+    // will never come (nodes.js `_tokenProblem`).
+    const tokenError = instance._tokenError;
+    instance._tokenError = false;
+    if (tokenError) throw tokenError;
     if (type === 'popup') {
       instance.realize(null);
     }

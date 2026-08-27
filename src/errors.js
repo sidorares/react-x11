@@ -59,6 +59,48 @@ export function reportHandlerError(node, handler, error) {
   markFailed();
 }
 
+/**
+ * `REACT_X11_STRICT_TOKENS=1` makes a `$token` the theme does not define
+ * fatal again, for a build that would rather stop than paint something
+ * wrong. The default reports and carries on — see `reportStyleError`.
+ *
+ * Guarded rather than a bare `process.env` because the playground bundle
+ * runs in a browser, where there is no `process` at all.
+ */
+export const STRICT_TOKENS =
+  (typeof process === 'undefined'
+    ? undefined
+    : process.env?.REACT_X11_STRICT_TOKENS) === '1';
+
+/** Messages already printed, so a shared misspelled style reports once per
+ *  (node, message) rather than once per restyle — a theme swap re-resolves
+ *  the whole subtree and would otherwise print the same line every time. */
+const reportedStyleErrors = new WeakMap();
+
+/**
+ * A style the node cannot resolve — today only an unknown `$token`.
+ *
+ * Not a throw, and deliberately: the mistake is one property in one style,
+ * and the tree it would take down is the whole GUI. The property is dropped
+ * (so the widget paints without it, visibly wrong), the message names the
+ * token and whose element wore it, and `process.exitCode` is set so a test
+ * run or a supervisor still counts this as a failure. `REACT_X11_STRICT_TOKENS=1`
+ * restores the throw.
+ */
+export function reportStyleError(node, message) {
+  const seen = reportedStyleErrors.get(node);
+  if (seen?.has(message)) return;
+  if (seen) seen.add(message);
+  else reportedStyleErrors.set(node, new Set([message]));
+  const owner = ownerName(node);
+  console.error(
+    `${message}${owner ? ` — in ${owner}` : ''}. ` +
+      'The property is dropped and the app carries on; set ' +
+      'REACT_X11_STRICT_TOKENS=1 to make this throw instead.',
+  );
+  markFailed();
+}
+
 /** Wrap a call to user code so a throw is reported instead of escaping. */
 export function callHandler(node, handler, fn, ev) {
   try {
