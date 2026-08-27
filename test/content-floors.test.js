@@ -12,12 +12,22 @@
 // wrapping row rather than a paragraph.
 import { test } from 'node:test';
 import assert from 'node:assert';
+import path from 'node:path';
+import { createRequire } from 'node:module';
 import React from 'react';
 import { createRoot } from '../src/index.js';
 import { createStyles } from '../src/styles.js';
 import { registerElement, unregisterElement } from '../src/host.js';
 import { Node } from '../src/node.js';
 import { createMockApp, spinWheel } from './helpers/mock-app.js';
+import { renderX11, screen, cleanup } from '../src/testing/index.js';
+
+const require = createRequire(import.meta.url);
+const fontsDir = path.join(
+  path.dirname(require.resolve('katex/package.json')),
+  'dist',
+  'fonts',
+);
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -416,4 +426,99 @@ test('an unknown flex value says what the three are', async () => {
     () => createStyles({ bad: { flex: 'fill' } }),
     /invalid flex "fill" in styles\.bad .*expected a number/s,
   );
+});
+
+// --- a floor is only exact if the content is whole pixels --------------------
+//
+// The one place in this file with real faces loaded, because the bug needs a
+// content size with a fraction in it and headless text measures 0x0.
+//
+// A floor is written unrounded and measured with the pixel grid off, on
+// purpose (`measuringExactly`): rounding one grows the tree a pixel per
+// level. What that costs is exactness — `contentSpan` adds the pieces up in
+// doubles and yoga keeps the floor as a float, so a fractional content size
+// comes back as a floor one ulp *under* the size it was measured from. Yoga's
+// shrink pass then has a line of items each a hair over their floor, freezes
+// all of them, and divides by a total shrink factor that should have
+// cancelled to zero and is instead the rounding residue. Three items in a
+// column are enough; the answer comes back in the billions of pixels
+// (issue #411).
+//
+// So the rule the measure functions keep is that a content size is a whole
+// number of pixels — `textBoxTrim: 'cap-alphabetic'` was the one that did
+// not, since the cap band it measures to is a fraction of the em.
+const trimFonts = {
+  // cap height 9.562 at 14px: the fraction that used to reach yoga
+  'sans-serif': path.join(fontsDir, 'KaTeX_Main-Regular.ttf'),
+};
+
+const trimmedSection = (i) =>
+  h(
+    'box',
+    { key: i, style: { flexDirection: 'column', gap: 14 } },
+    h('text', { style: { textBoxTrim: 'cap-alphabetic' } }, 'Room to think.'),
+    box({ height: 60 }),
+    box({ height: 60 }),
+    box({ height: 60 }),
+  );
+
+test('a trimmed label measures to a whole pixel', async () => {
+  const label = React.createRef();
+  await renderX11(
+    h(
+      'text',
+      { ref: label, style: { textBoxTrim: 'cap-alphabetic' } },
+      'Room to think.',
+    ),
+    { width: 300, height: 120, fonts: trimFonts },
+  );
+  const measured = label.current.measureContent({ width: 300 });
+  assert.strictEqual(
+    measured.height,
+    Math.round(measured.height),
+    `the trimmed cap band reached layout as ${measured.height}`,
+  );
+  assert.ok(measured.height > 0, 'and it is still the cap band');
+  await cleanup();
+});
+
+test('a scroll pane of trimmed titles lays out in pixels, not billions', async () => {
+  // The issue's own tree: a column that overflows its viewport, so every
+  // section is squeezed against the floor its content just wrote.
+  await renderX11(
+    h(
+      'box',
+      {
+        'data-testname': 'pane',
+        style: {
+          width: 500,
+          overflow: 'scroll',
+          flexDirection: 'column',
+          gap: 30,
+          padding: 36,
+        },
+      },
+      ...Array.from({ length: 4 }, (_, i) => trimmedSection(i)),
+    ),
+    { width: 600, height: 400, fonts: trimFonts },
+  );
+  const pane = screen.getByTestName('pane');
+  for (const section of pane.children) {
+    assert.ok(
+      section.abs.height > 0 && section.abs.height < 1000,
+      `section laid out at ${section.abs.height}px`,
+    );
+  }
+  // and the ones past the fold are still where the ones above put them
+  const tops = pane.children.map((section) => section.abs.y);
+  assert.deepStrictEqual(
+    tops,
+    [...tops].sort((a, b) => a - b),
+    'sections stack in order',
+  );
+  assert.ok(
+    tops[3] - tops[0] < 1000,
+    `the fourth section sits at ${tops[3]}, ${tops[3] - tops[0]} below the first`,
+  );
+  await cleanup();
 });
