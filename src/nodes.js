@@ -109,7 +109,12 @@ import {
   windowOrigin,
 } from './anchor.js';
 import { baseTheme } from './palette.js';
-import { callHandler, ownerName } from './errors.js';
+import {
+  callHandler,
+  ownerName,
+  reportStyleError,
+  STRICT_TOKENS,
+} from './errors.js';
 import {
   hooks as a11yHooks,
   isFocusable as a11yFocusable,
@@ -1557,6 +1562,11 @@ export class Node {
     // subtree's hit reach, invalidated through _clearHitBounds()
     this._paintOrderCache = null;
     this._hitBoundsCache = null;
+    // a `$token` the theme does not define, held for `commitMount` to throw
+    // on this node's own fiber — see `_tokenProblem`. Strict mode only.
+    // `null` is "commitMount is still to come", `false` is "it has been and
+    // gone", and an Error is one waiting for it
+    this._tokenError = null;
     this._syncStyle(props);
     this.yoga = yoga ? createLayoutNode() : null;
     if (this.yoga) {
@@ -1588,7 +1598,7 @@ export class Node {
    * them. `baseStyle` is the flattened `style` prop; `style` is that with
    * the active state blocks overlaid.
    */
-  _syncStyle(props) {
+  _syncStyle(props, mounting = false) {
     if (DEV && this.stylable) {
       assertNoFlatStyleProps(props, this.kind, this.semanticNames);
       validateStyle(flattenStyle(props.style), `<${this.kind} style>`);
@@ -1597,12 +1607,16 @@ export class Node {
     this._usesTokens = this.stylable && styleUsesTokens(this._baseStyle);
     if (this._usesTokens) {
       const theme = this.theme;
+      const strict = this.placed;
+      const problems = strict ? [] : null;
       this._baseStyle = resolveTokens(
         this._baseStyle,
         theme,
         `<${this.kind} style>`,
-        this.placed,
+        strict,
+        problems,
       );
+      if (problems?.length) this._tokenProblem(problems, mounting);
     }
     // `disabled` is a prop, not something the pointer does, so it is read
     // straight off props rather than driven by the event manager
@@ -2241,6 +2255,46 @@ export class Node {
     return owner.isPopup ? owner.parent != null : true;
   }
 
+  /**
+   * A `$token` this node's completed ancestry does not define.
+   *
+   * The default is `reportStyleError`: say so loudly, set `process.exitCode`,
+   * and keep the property dropped. `REACT_X11_STRICT_TOKENS=1` makes it fatal
+   * again, and then *where* the throw lands is the whole question — an error
+   * boundary only catches what React invoked, on the fiber React thinks it
+   * is working on.
+   *
+   * `mounting` is the attach walk, which runs inside `appendInitialChild`
+   * while React is completing the nearest host *ancestor* — the `<window>`,
+   * for a whole tree rendered at once. A throw there is attributed to the
+   * window and sails past every boundary the app wrote inside it, which is
+   * the bug this deferral exists for (#420). Stashed instead, and thrown
+   * from `commitMount` on this node's own fiber, where the walk up finds a
+   * boundary at any depth.
+   *
+   * Every other caller already has the right fiber (`commitUpdate`) or has
+   * no React on the stack at all (`appearanceChanged`, from an X event) —
+   * for those, throwing here is both the earliest and the only option, and
+   * the second is the crash strict mode asked for.
+   *
+   * `commitMount` happens once per instance, so a node re-attached after it
+   * has been and gone has nothing left to defer *to*; stashing there would
+   * swallow the error instead of raising it late. Those throw at once, like
+   * the keyed reorder they resemble.
+   */
+  _tokenProblem(problems, mounting) {
+    if (!STRICT_TOKENS) {
+      // every one of them: two misspellings in a style are two things to
+      // fix, and a report that named only the first would send someone back
+      // for a second run to find the second
+      for (const message of problems) reportStyleError(this, message);
+      return;
+    }
+    const error = new Error(problems[0]);
+    if (mounting && this._tokenError === null) this._tokenError = error;
+    else throw error;
+  }
+
   /** The owning window resized: re-resolve, since a query block may now
    * match that did not, or the other way round. */
   _sizeQueriesChanged() {
@@ -2287,7 +2341,7 @@ export class Node {
       if (this.isWindow) this._syncWindowBackground();
       if (this._usesTokens) {
         const before = this.style;
-        this._syncStyle(this.props);
+        this._syncStyle(this.props, mounting);
         // a token change reaches the node without React re-rendering it, so
         // the invalidation a commit would have done has to happen here too
         if (localTextStyleChanged(this.style, before)) {

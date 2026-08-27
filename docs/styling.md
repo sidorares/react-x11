@@ -820,12 +820,34 @@ not change are still updated — which is why a theme change also drops the
 memoised text layouts under it, or cached text would keep painting the old
 colour.
 
-An unknown token is an error naming what the theme does have, and a token
-with **no** theme above it at all warns in dev — that one is otherwise
-silent, since the whole style is stripped rather than one value failing.
-Resolution is cached per (style object, theme object), so a hoisted style
-under one theme keeps its identity across renders and the `===` fast path
-still applies.
+An unknown token is **reported and dropped**: the message names the token,
+the element, the component that wrote it, and every token the palette in
+force does have; that one property goes missing, so the widget paints
+visibly wrong rather than the app dying; and `process.exitCode` is set to 1,
+so a test run, a CI job or a supervisor still counts the run as failed.
+
+That is deliberately not a throw. Resolution happens when a node's ancestry
+completes — inside a commit, and also from an X event when the desktop
+switches between light and dark — and on both of those paths a throw is
+uncatchable: it either lands on the `<window>` fiber above every error
+boundary the app wrote inside it, or it unwinds into the frame loop with no
+React on the stack at all. One wrong character in a style value should not
+be able to blank the screen.
+
+Set **`REACT_X11_STRICT_TOKENS=1`** to make it fatal again — for a kiosk, or
+a build that would rather stop than paint something wrong. Strict mode also
+throws in the right _place_: the error is raised from the offending node's
+own `commitMount`, so an error boundary at any depth inside the window
+catches it and shows a fallback for that subtree. Where React genuinely is
+not on the stack — the desktop appearance switch — strict mode crashes,
+which is what it was asked for.
+
+A token with **no** theme above it at all warns in dev — that one is
+otherwise silent, since the whole style is stripped rather than one value
+failing. Resolution is cached per (style object, theme object), so a hoisted
+style under one theme keeps its identity across renders and the `===` fast
+path still applies; a misspelling in a shared style is reported for every
+node that wears it, not just the first.
 
 Resolution walks the node tree, not React context, so a palette has to reach
 the tree to be seen. `<ThemeProvider>` puts it in both places — the context
@@ -838,8 +860,8 @@ subtree — and in a style you pass one — with no provider anywhere.
 With no `theme` prop above it at all, a token resolves against **the
 desktop's palette** — `backgroundColor: '$background'` in an app that never
 wrote a `<ThemeProvider>` is dark on a dark desktop, which is how that app
-blends in ([appearance.md](appearance.md)). A token no palette defines is an
-error naming every token the one in force does have.
+blends in ([appearance.md](appearance.md)). A token no palette defines is
+reported the same way, naming every token the one in force does have.
 
 ## Transitions
 

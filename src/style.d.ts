@@ -43,12 +43,15 @@ export function tokenNames(
   style: StyleProperties,
   out?: Set<string>,
 ): Set<string>;
-/** Replace `$token` references with values from the theme. */
+/** Replace `$token` references with values from the theme. A token the theme
+ *  does not define is dropped either way; with `strict`, the message naming
+ *  it is pushed onto `problems` for the caller to report or throw. */
 export function resolveTokens(
   style: StyleProperties,
   theme: Record<string, unknown> | null | undefined,
   where?: string,
   strict?: boolean,
+  problems?: string[] | null,
 ): StyleProperties;
 
 export function styleHasSizeQueries(style: StyleProperties): boolean;

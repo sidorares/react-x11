@@ -136,6 +136,38 @@ It covers the element-owned form of the same shift as well —
 that pans a scene it drew itself calls — so a scene that misrenders while
 panning is one variable away from being told apart from one that misdraws.
 
+## `REACT_X11_STRICT_TOKENS=1`
+
+Makes an unresolvable `$token` fatal instead of reported.
+
+By default a token the palette in force does not define is dropped, named
+loudly on stderr — token, element, owning component, and every token the
+palette _does_ have — and counted as a failure through `process.exitCode`.
+The widget paints one property short, which is visible, and the rest of the
+app keeps running. That is the default because the check runs when a node's
+ancestry completes, and on most of those paths a throw cannot be caught: on
+a fresh mount React is completing the `<window>`, so the error is attributed
+above every boundary inside it, and a desktop light/dark switch reaches the
+tree from an X event with no React on the stack at all.
+
+Set this when you would rather stop than paint something wrong — a kiosk, or
+a CI job that should fail at the first bad token rather than at the
+screenshot diff:
+
+```sh
+REACT_X11_STRICT_TOKENS=1 npm run examples:theming
+```
+
+Strict mode still throws somewhere useful. The error is raised from the
+offending node's own `commitMount`, on its own fiber, so an
+[error boundary](react-features.md) at any depth inside the window catches
+it and renders a fallback for that subtree rather than losing the window.
+With no boundary above it, it reaches `onUncaughtError` and the process
+stops — which is the point. The one path that cannot be routed is the
+desktop appearance switch; there strict mode crashes.
+
+Read once at startup like the switches above, and answers only to `1`.
+
 ## `REACT_X11_NO_TRANSPARENCY=1`
 
 Makes every display answer the way one with no 32-bit visual does:
