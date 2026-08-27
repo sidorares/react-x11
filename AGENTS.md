@@ -822,6 +822,15 @@ unchanged across the fix.
 
 - `npm run bench -- --save` rewrites `scripts/bench/baseline.json`
 - `npm run bench -- --check` fails if a metric regressed past tolerance
+- `npm run bench -- --only <substring>` runs (and with `--save`, re-records)
+  just the scenarios whose names match — repeatable
+- Each scenario runs in its own process, because they are not independent in
+  one: ntk frees X resources from FinalizationRegistry callbacks, so a change
+  to an _earlier_ scenario's garbage moves when the collector runs inside a
+  later one, and a pause inside a paced frame turns a bounded repaint into a
+  full-window one (issue #416 — 6x the composite pixels in a scenario the
+  change never touched). `--no-isolate` puts them back in one process: ~3x
+  faster for a development loop, and coupled again
 
 For a live app rather than the bench scenarios, `REACT_X11_TRACE=summary`
 (or `requests`, or `chrome:/tmp/t.json` for Perfetto) traces the protocol
