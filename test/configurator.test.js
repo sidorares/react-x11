@@ -165,7 +165,9 @@ describe('examples/configurator', () => {
     });
 
     await userEvent.click(button('Add to Bag'));
-    await waitFor(() => screen.getByText('✓ Added'));
+    // 'Added', not '✓ Added': the check is an <svg> now, because the latin
+    // font subsets carry no U+2713 (see `Check` in the example).
+    await waitFor(() => screen.getByText('Added'));
     assert.match(textOf(screen.getByTestName('bag')), /1/);
 
     assert.equal(added.length, 1);

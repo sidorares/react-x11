@@ -10,12 +10,16 @@
 //
 // What it leans on, and where to look:
 //
-//   Shipped fonts      three OFL families in `./fonts`, loaded by file path
-//                      through `loadFont` (#346) and never through
-//                      fontconfig — so the page renders identically on any
-//                      machine, including one with no fonts installed at
-//                      all. Two are variable fonts: `fontWeight` drives the
-//                      `wght` axis, so one Inter file is every weight here.
+//   Fonts from npm     three OFL families, pulled in as devDependencies
+//                      (`@fontsource/*`) and loaded by file path through
+//                      `loadFont` (#346) — never through fontconfig, so the
+//                      page renders identically on any machine, including
+//                      one with no fonts installed at all. They are not in
+//                      git: a font binary is the file a repository is worst
+//                      at keeping, and the lockfile pins the same bytes by
+//                      hash without any of the history. Two are variable, so
+//                      `fontWeight` drives a `wght` axis and one file is
+//                      every weight here.
 //                      The face is put on the root box rather than left to
 //                      the palette, and that is not a detail: the floor a
 //                      `<text>` falls back to is the **window's** theme, and
@@ -83,7 +87,8 @@
 //                      ring is the theme's (`focusRing` tokens).
 //   Resize             below 1020px wide the hero stacks over the options;
 //                      below 720px tall the artwork bows out.
-//   Add to Bag         the button acknowledges (`✓ Added`), the bag chip in
+//   Add to Bag         the button acknowledges (a drawn check, since the
+//                      latin subsets carry no U+2713), the bag chip in
 //                      the top bar counts up, the price keeps following the
 //                      configuration.
 //
@@ -114,7 +119,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 import {
   ThemeProvider,
@@ -133,6 +138,10 @@ import { LaptopGL, SCREEN_ASPECT } from './laptop3d.jsx';
 // price a configuration without repeating the arithmetic by hand.
 // ---------------------------------------------------------------------------
 
+// Plain hyphens rather than U+2011: the latin subsets the fonts arrive in
+// carry no non-breaking hyphen, so one would be drawn from whatever the
+// machine has — a different glyph per desktop, and an `fc-match` on the first
+// paint that uses it. Nothing here wraps at a hyphen anyway.
 export const CATALOG = {
   base: 1599,
   finishes: [
@@ -174,19 +183,19 @@ export const CATALOG = {
         {
           id: 'argon9',
           name: 'Argon 9',
-          detail: '10‑core CPU · 16‑core GPU',
+          detail: '10-core CPU · 16-core GPU',
           price: 0,
         },
         {
           id: 'argon9pro',
           name: 'Argon 9 Pro',
-          detail: '12‑core CPU · 19‑core GPU',
+          detail: '12-core CPU · 19-core GPU',
           price: 300,
         },
         {
           id: 'argon9max',
           name: 'Argon 9 Max',
-          detail: '14‑core CPU · 30‑core GPU',
+          detail: '14-core CPU · 30-core GPU',
           price: 700,
         },
       ],
@@ -208,9 +217,9 @@ export const CATALOG = {
       title: 'Keep everything.',
       caption: 'Every drive here reads at 7 GB/s. Size is the only choice.',
       options: [
-        { id: 's512', name: '512 GB', detail: 'Solid‑state drive', price: 0 },
-        { id: 's1tb', name: '1 TB', detail: 'Solid‑state drive', price: 250 },
-        { id: 's2tb', name: '2 TB', detail: 'Solid‑state drive', price: 650 },
+        { id: 's512', name: '512 GB', detail: 'Solid-state drive', price: 0 },
+        { id: 's1tb', name: '1 TB', detail: 'Solid-state drive', price: 250 },
+        { id: 's2tb', name: '2 TB', detail: 'Solid-state drive', price: 650 },
       ],
     },
   ],
@@ -224,7 +233,7 @@ export const CATALOG = {
     {
       id: 'aurora',
       name: 'Aurora keys',
-      detail: 'Per‑key backlight, tuned to the wallpaper.',
+      detail: 'Per-key backlight, tuned to the wallpaper.',
       price: 49,
     },
   ],
@@ -299,16 +308,76 @@ const usd = (n) => '$' + n.toLocaleString('en-US');
 // `fontWeight` from one face each.
 // ---------------------------------------------------------------------------
 
-const fontPath = (file) =>
-  fileURLToPath(new URL(`./fonts/${file}`, import.meta.url));
+/**
+ * The faces come from **npm**, not from this directory.
+ *
+ * Committing 1.3MB of font binaries put them in the history for good, and a
+ * font is the kind of file git is worst at: opaque, large, and re-added whole
+ * on every update. `@fontsource/*` publishes the same OFL families, so the
+ * lockfile pins them by integrity hash, `npm ci` fetches them once, and CI
+ * gets the same bytes a laptop does with no extra step. The promise this page
+ * makes — that it renders identically anywhere — is kept by the lockfile
+ * rather than by the repository.
+ *
+ * They are `.woff2`, which fontkit reads directly, and they are the **latin**
+ * subsets, since everything on this page is latin. What the subset costs is
+ * written down where it bites — see `Check` below.
+ */
+const require_ = createRequire(import.meta.url);
+
+/**
+ * The faces, by npm package rather than by path into this directory.
+ *
+ * **Static weights, not a variable font**, and the reason is a hard edge
+ * rather than a preference: npm's font packages ship `.woff2` only, and
+ * fontkit can parse a compressed font but cannot instantiate an axis out of
+ * one — `loadFont` on a variable `.woff2` fails with exactly that, naming the
+ * file and the fix. So Inter arrives as four faces at the weights this page
+ * uses, all registered under the one family, and `fontWeight` picks between
+ * them (docs/styling.md). Which is the other half of `loadFont`'s contract
+ * and worth showing anyway.
+ */
+const FONT_FILES = {
+  sans: {
+    400: '@fontsource/inter/files/inter-latin-400-normal.woff2',
+    500: '@fontsource/inter/files/inter-latin-500-normal.woff2',
+    600: '@fontsource/inter/files/inter-latin-600-normal.woff2',
+    700: '@fontsource/inter/files/inter-latin-700-normal.woff2',
+  },
+  serif:
+    '@fontsource/instrument-serif/files/instrument-serif-latin-400-normal.woff2',
+  serifItalic:
+    '@fontsource/instrument-serif/files/instrument-serif-latin-400-italic.woff2',
+  mono: '@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2',
+};
 
 function useShippedFonts() {
   const app = useApp();
   return useMemo(() => {
-    const sans = loadFont(app, fontPath('InterVariable.ttf'));
-    const serif = loadFont(app, fontPath('InstrumentSerif-Regular.ttf'));
-    loadFont(app, fontPath('InstrumentSerif-Italic.ttf'));
-    const mono = loadFont(app, fontPath('JetBrainsMono-Variable.ttf'));
+    const resolve = (id) => {
+      try {
+        return require_.resolve(id);
+      } catch (err) {
+        throw new Error(
+          `examples/configurator: ${id} is not installed. The fonts are ` +
+            'devDependencies rather than files in the repository — run ' +
+            '`npm install` in the root.',
+          { cause: err },
+        );
+      }
+    };
+    // One family, four weights: the name comes off the file and every face
+    // keeps it, so `fontWeight: 600` reaches the 600 face and nothing else
+    // has to know there are four.
+    let sans = null;
+    for (const [weight, id] of Object.entries(FONT_FILES.sans)) {
+      const face = loadFont(app, resolve(id), { weight: Number(weight) });
+      sans ??= face;
+    }
+    const serif = loadFont(app, resolve(FONT_FILES.serif));
+    // the same family, and `fontStyle: 'italic'` is what picks it
+    loadFont(app, resolve(FONT_FILES.serifItalic), { style: 'italic' });
+    const mono = loadFont(app, resolve(FONT_FILES.mono));
     return { sans: sans.family, serif: serif.family, mono: mono.family };
   }, [app]);
 }
@@ -726,6 +795,7 @@ const s = createStyles({
   ghost: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
     paddingStart: 18,
     paddingEnd: 18,
     paddingTop: 10,
@@ -783,6 +853,30 @@ function BagIcon() {
         fill="none"
         stroke="currentColor"
         strokeWidth={1.3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * A check mark, drawn rather than typed.
+ *
+ * U+2713 lives in Dingbats, which the latin subsets above do not carry — so
+ * `'✓ Added'` would be set from whatever the machine happens to have: a
+ * different mark on every desktop, and an `fc-match` on the first paint that
+ * uses it (~110ms, blocking, and the exact stall this page was profiled to
+ * remove). A `<path>` is the same everywhere and resolves nothing.
+ */
+function Check({ size = 13, color = 'white' }) {
+  return (
+    <svg viewBox="0 0 16 16" style={{ width: size, height: size }}>
+      <path
+        d="M3 8.5l3.2 3L13 4.5"
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
         strokeLinecap="round"
         strokeLinejoin="round"
       />
@@ -884,7 +978,8 @@ function OptionCard({ option, on, onSelect, nodeRef }) {
 // The page
 // ---------------------------------------------------------------------------
 
-// `ackMs` is how long "✓ Added" stands before the button offers itself
+// `ackMs` is how long the "Added" acknowledgment stands before the button
+// offers itself
 // again. A seam rather than a constant because a test has to hold the
 // moment still — the in-process server is slower than 1.8 real seconds.
 export function Configurator({
@@ -1147,7 +1242,7 @@ export function Configurator({
                   '3.2K OLED · 120 HZ',
                   '78 WH BATTERY',
                   '1.29 KG',
-                  'WI‑FI 7',
+                  'WI-FI 7',
                 ].map((spec) => (
                   <box key={spec} style={s.specChip}>
                     <text style={s.specChipText}>{spec}</text>
@@ -1331,8 +1426,9 @@ export function Configurator({
             onClick={() => setSaved((v) => !v)}
           >
             <text style={s.ghostText}>
-              {saved ? 'Saved ✓' : 'Save for later'}
+              {saved ? 'Saved' : 'Save for later'}
             </text>
+            {saved ? <Check size={12} color="#2f7a4d" /> : null}
           </box>
           <box
             style={[s.primary, added && s.primaryAdded]}
@@ -1341,9 +1437,8 @@ export function Configurator({
             aria-label="Add to Bag"
             onClick={addToBag}
           >
-            <text style={s.primaryText}>
-              {added ? '✓ Added' : 'Add to Bag'}
-            </text>
+            {added ? <Check /> : null}
+            <text style={s.primaryText}>{added ? 'Added' : 'Add to Bag'}</text>
           </box>
         </box>
       </box>
