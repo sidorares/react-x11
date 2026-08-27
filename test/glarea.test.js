@@ -12,6 +12,7 @@ import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
 import { createRoot } from '../src/index.js';
+import { WHEEL_NOTCH_PX } from '../src/events.js';
 
 const require = createRequire(import.meta.url);
 const { createGlxExtension, RecordingBackend } = require('x11/browser/glx');
@@ -254,6 +255,59 @@ test('a failed <glarea> leaves no X window over the fallback', async () => {
     await x11Root.unmount();
     await settle(app);
   } finally {
+    await app.close();
+  }
+});
+
+test('a wheel over the surface is a synthetic Wheel at the <glarea>', async () => {
+  // The surface owns its own X window, so the server delivers the wheel
+  // there and nothing in the parent's hit testing can see it — the element
+  // selects it and hands it back, naming itself as the target. Without the
+  // naming, the box *behind* the surface is what a hit test answers with (a
+  // window-owning child is not in its parent's paint order), which is
+  // silently wrong rather than broken: the handler simply never runs.
+  const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
+  try {
+    const seen = [];
+    let drew = false;
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240 },
+        h('glarea', {
+          style: { flexGrow: 1 },
+          onWheel: (ev) => seen.push(ev),
+          onDraw: () => {
+            drew = true;
+          },
+        }),
+      ),
+      x11Root,
+    );
+    // the GL window is made once the visual query answers, so wait for the
+    // first frame the way the tests above do
+    await waitFor(() => drew, 'the first frame');
+    await settle(app);
+    const area = instance._reactX11Node.children[0];
+    assert.equal(area.kind, 'glarea');
+    assert.ok(area.window, 'the surface has a window of its own');
+
+    area.window.emit('wheel', {
+      x: 20,
+      y: 30,
+      deltaX: 0,
+      deltaY: 1,
+      buttons: 0,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(seen.length, 1, 'the handler on the <glarea> ran');
+    // pixels, not notches — the same conversion every other wheel gets
+    assert.equal(seen[0].deltaY, WHEEL_NOTCH_PX);
+    assert.equal(seen[0].deltaX, 0);
+  } finally {
+    await x11Root.unmount();
     await app.close();
   }
 });

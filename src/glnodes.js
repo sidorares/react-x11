@@ -194,6 +194,21 @@ export class GlAreaNode extends Node {
       // GL draws into the window itself: no 2d backing pixmap, and the
       // frame clock is ours to drive
       backingStore: false,
+      // The wheel, and only the wheel. A GL surface owns a real X window, so
+      // the pointer events over it are delivered *there* rather than to the
+      // window the rest of the tree is hit-tested in — which is why nothing
+      // over a `<glarea>` reached an application before. Selecting it here
+      // and handing it back to the owning window's manager (`_onWheel`
+      // below) is the whole of it: from there the event is an ordinary
+      // synthetic `Wheel` at this node, so it bubbles, `preventDefault()`
+      // takes it back for a scene that zooms instead, and the default action
+      // scrolls the nearest container the way it does anywhere else.
+      //
+      // Selected unconditionally rather than when a handler is declared: the
+      // default action is what a reader expects from a wheel over a page,
+      // and an element that wants it back has `preventDefault()`. One
+      // ButtonPress per notch is not a cost worth a conditional.
+      onWheel: (ev) => this._onWheel(ev),
     });
     this.window = wnd;
     this.rect = rect;
@@ -311,6 +326,34 @@ export class GlAreaNode extends Node {
     this.props.onDraw?.(gl, info);
     gl.SwapBuffers();
     if (this.props.frameLoop === 'always') this.requestFrame();
+  }
+
+  /**
+   * A wheel over the surface, handed to the window the tree lives in.
+   *
+   * ntk reports the position inside *this* window; the manager hit-tests in
+   * the owning window's space, so the node's own origin goes back on. Both
+   * are device pixels — the scale is applied at the far end, where a handler
+   * reads `ev.x` (src/events.js).
+   *
+   * Smooth deltas are not part of this yet: XI2 is selected on the window
+   * the manager owns, not on this child, so a touchpad's fractions arrive
+   * here as whole notches from buttons 4-7.
+   */
+  _onWheel(native) {
+    const events = this.root?.events;
+    if (!events || this.destroyed) return;
+    events._onWheel(
+      {
+        ...native,
+        x: (native.x ?? 0) + this.abs.x,
+        y: (native.y ?? 0) + this.abs.y,
+      },
+      // named rather than hit-tested: a window-owning child is not in its
+      // parent's paint order, so the hit test would answer with the box
+      // behind this surface
+      this,
+    );
   }
 
   applyProps(newProps, oldProps) {

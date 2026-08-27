@@ -733,7 +733,16 @@ export class EventManager {
    * way somewhere rather than one, and React must be free to interrupt the
    * render it started for the notch before.
    */
-  _onWheel(native) {
+  /**
+   * @param {object} native ntk's wheel event, in this window's coordinates
+   * @param {object} [over] the node the wheel happened over, when the caller
+   *   already knows. A `<glarea>` owns its own X window, so the server
+   *   delivers the event *there* and the surface hands it back translated
+   *   (src/glnodes.js) — and a hit test would answer with the box behind it,
+   *   because a window-owning child is not in its parent's paint order.
+   *   Knowing beats guessing; everything after this line is the same.
+   */
+  _onWheel(native, over = null) {
     // The first wheel is what says this window wants smooth scrolling. It was
     // created on core events — an XI2 selection costs four times as many
     // bytes per *pointer move*, which a window that is never scrolled would
@@ -747,7 +756,7 @@ export class EventManager {
     // outside gets, and for the same reason (`_pressOutside`).
     if (this._dismissOutside(native)) return;
     runWithPriority(ContinuousEventPriority, () => {
-      const target = this._hit(native);
+      const target = over ?? this._hit(native);
       // Shift turns a vertical wheel sideways — the convention for the mouse
       // and the touchpad that have no horizontal axis. Read off the delta
       // rather than off the source: a plain wheel mouse on an XI2 connection

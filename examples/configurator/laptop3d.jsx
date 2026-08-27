@@ -45,9 +45,11 @@
 //
 // ## What does not work
 //
-// No picking: `<glarea>` does not take part in the parent's hit testing yet
-// (docs/elements.md), so the laptop cannot be dragged to orbit it — the
-// scroll position is the only input. Reduced motion is not honoured here
+// No picking: `<glarea>` still does not hit-test for the *pointer*
+// (docs/elements.md), so the laptop cannot be dragged to orbit it. The wheel
+// does arrive — the surface selects it and hands it to the window's manager
+// — and this page spends it on the configuration beside the render, which is
+// what a reader turning the wheel over the laptop is looking at. Reduced motion is not honoured here
 // either: `animation` loops are core's to stop, and this is an app drawing
 // its own frames, so a scrubbed scene keeps scrubbing.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -449,7 +451,14 @@ function ensureTarget(gl, s, width, height) {
  * the position to the page — re-renders the whole configuration on every
  * scroll event to move a laptop, which is the one thing a scroll must not do.
  */
-export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
+export function LaptopGL({
+  finish,
+  bind,
+  clearColor,
+  onUnavailable,
+  onWheel,
+  style,
+}) {
   const [progress, setProgress] = useState(0);
   // The page's own configuration panel, read back off the window and shown on
   // the laptop's screen. State rather than a ref because a new capture has to
@@ -732,6 +741,7 @@ export function LaptopGL({ finish, bind, clearColor, onUnavailable, style }) {
       glx={{ DEPTH_SIZE: 24 }}
       onCreated={onCreated}
       onDraw={onDraw}
+      onWheel={onWheel}
       onError={(err) =>
         onUnavailable?.(err?.message ?? err?.code ?? 'no GL surface')
       }

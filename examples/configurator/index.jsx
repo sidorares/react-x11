@@ -1240,6 +1240,12 @@ export function Configurator({
                   clearColor={PAPER}
                   style={s.stageGl}
                   onUnavailable={setGlGone}
+                  // A wheel over the render scrolls the configuration, which
+                  // is what the reader is looking at while they turn it. The
+                  // surface is not inside the pane — it is the other column —
+                  // so the default action has nothing to scroll, and this is
+                  // where it goes instead.
+                  onWheel={(ev) => optionsRef.current?.scrollBy(ev.deltaY)}
                 />
               </box>
             ) : (
