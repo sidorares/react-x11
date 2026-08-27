@@ -568,13 +568,23 @@ const s = createStyles({
 
   // -- the laptop ---------------------------------------------------------
   stage: {
-    // A defined panel rather than "whatever the column has left": the render
-    // inside is framed to an aspect, and a stage that grows with the window
-    // reframes it on every resize.
-    height: 300,
-    flexShrink: 0,
+    // The render takes the height the hero has left, so the spec chips and
+    // the summary sit at the bottom of the column rather than floating in
+    // the middle of a tall window.
+    //
+    // `minHeight: 0` is load-bearing. A flex item's automatic minimum is its
+    // content, and a `<glarea>` reports the size it was last given — so a
+    // growing stage in a column whose content already overflows takes that
+    // as a floor and ratchets: the panel came out 1210px tall inside a 691px
+    // hero, anchored above the window. Naming a minimum is how an author
+    // opts out of that (docs/styling.md), and the camera reframes the
+    // laptop for whatever shape is left over, so there is no size this
+    // cannot draw into.
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: 0,
     flexDirection: 'column',
-    alignItems: 'center',
+    alignItems: 'stretch',
     justifyContent: 'center',
     gap: 0,
     '@height < 720': { display: 'none' },
@@ -639,7 +649,7 @@ const s = createStyles({
 
   // The GL surface is a real X window stacked above everything the parent
   // paints, so it gets the stage to itself and the chips sit below it.
-  stageGl: { flexGrow: 1, alignSelf: 'stretch' },
+  stageGl: { flexGrow: 1, minHeight: 0 },
   chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
