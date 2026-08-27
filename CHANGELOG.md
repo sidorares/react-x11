@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/sidorares/react-x11/compare/v2.2.0...v2.2.1) (2026-08-27)
+
+
+### Bug Fixes
+
+* **styles:** an unknown theme token reports instead of taking the app down ([#420](https://github.com/sidorares/react-x11/issues/420)) ([b806a7c](https://github.com/sidorares/react-x11/commit/b806a7cf34f03facc2e18bca346211e02195bded))
+
 ## [2.2.0](https://github.com/sidorares/react-x11/compare/v2.1.4...v2.2.0) (2026-08-27)
 
 
