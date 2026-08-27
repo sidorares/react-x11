@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.2.0](https://github.com/sidorares/react-x11/compare/v2.1.4...v2.2.0) (2026-08-27)
+
+
+### Features
+
+* **bench:** price a composite by the taps behind it, not just its area ([#414](https://github.com/sidorares/react-x11/issues/414)) ([2aa2a51](https://github.com/sidorares/react-x11/commit/2aa2a516357417786fabe345dd68764cd5218e5e)), closes [#413](https://github.com/sidorares/react-x11/issues/413)
+* **desktop:** an off switch for the bus-backed followers, and no blocking spawn before the first frame ([#418](https://github.com/sidorares/react-x11/issues/418)) ([1b17501](https://github.com/sidorares/react-x11/commit/1b175016c2f8410e4dde69d0790bf77dd6ac8973))
+
+
+### Bug Fixes
+
+* **text:** a trimmed label measures to a whole pixel ([#419](https://github.com/sidorares/react-x11/issues/419)) ([28986df](https://github.com/sidorares/react-x11/commit/28986df77860390ecd9aad7bfcecf46ed17dc53b)), closes [#411](https://github.com/sidorares/react-x11/issues/411)
+
 ## [2.1.4](https://github.com/sidorares/react-x11/compare/v2.1.3...v2.1.4) (2026-08-25)
 
 
