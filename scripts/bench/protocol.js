@@ -3,10 +3,17 @@
 //   npm run bench                        # print the current numbers
 //   npm run bench -- --save              # rewrite the committed baseline
 //   npm run bench -- --check             # fail if a metric regressed
+//   npm run bench -- --only <substring>  # only scenarios whose name matches
+//                                        #   (repeatable; --save then updates
+//                                        #   just those baseline entries)
+//   npm run bench -- --no-isolate        # all scenarios in one process: ~3x
+//                                        #   faster, and coupled (see below)
 //   npm run bench -- --hotspots          # per-scenario efficiency detail:
 //                                        #   the request-name histogram, and
 //                                        #   which requests stalled, repeated
 //                                        #   or churned
+//   npm run bench -- --baseline <file>   # --save/--check against another
+//                                        #   file than the committed one
 //   npm run bench -- --record-dir <dir>  # one .x11cap per scenario, openable
 //                                        #   and diffable with x11vis
 //
@@ -19,6 +26,27 @@
 // request went out. The --check tolerances below are sized to that noise —
 // they exist to catch step changes (a new per-frame resource cycle, a new
 // serialized round trip), not single-request jitter.
+//
+// That jitter is per-*ordering*, not per-metric, which is why the run is
+// arranged the way it is (issue #416). Scenarios sharing a process are not
+// independent in it: a change that only alters how much garbage an
+// *earlier* scenario leaves moves a later, unrelated one, because the
+// collection lands inside the later scenario's paced frames. A frame that
+// misses its deadline repaints the whole window instead of its damage —
+// 6x the composite pixels in a scenario the change never touched.
+// Tolerances sized for "a few requests" cannot absorb a frame changing
+// category, so the run removes the coupling instead of widening the gates:
+//
+//   * every scenario gets its own process, which is the only way the
+//     numbers are actually independent. This is the default; --no-isolate
+//     puts them all back in one process, ~3x faster and coupled again;
+//   * under --no-isolate, `global.gc()` runs between scenarios (the `bench`
+//     script passes --expose-gc), which collapses the FinalizationRegistry
+//     backlog at a point where nothing is being measured. Cheaper, and it
+//     narrows the coupling rather than removing it.
+//
+// --only is the third piece: a --check failure naming a scenario a change
+// does not touch is worth re-running on its own before believing it.
 //
 // Metrics, and why each is here:
 //
@@ -55,9 +83,11 @@
 // round trips but cannot price them — a fence that costs nothing here costs
 // a full RTT on a real display. Grading latency work needs the real-display
 // lane (x11vis --record / --diff); this lane keeps the counts honest.
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
@@ -78,17 +108,36 @@ const { Node } = await import('../../src/node.js');
 const { Checkbox } = await import('../../src/components/index.js');
 
 const args = process.argv.slice(2);
-const recordDir = args.includes('--record-dir')
-  ? args[args.indexOf('--record-dir') + 1]
-  : null;
-if (
-  args.includes('--record-dir') &&
-  (!recordDir || recordDir.startsWith('--'))
-) {
-  console.error('--record-dir needs a directory argument');
-  process.exit(1);
+
+/** Every value given for a repeatable `--flag <value>` option. */
+function flagValues(flag) {
+  const values = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] !== flag) continue;
+    const value = args[i + 1];
+    if (!value || value.startsWith('--')) {
+      console.error(`${flag} needs an argument`);
+      process.exit(1);
+    }
+    values.push(value);
+  }
+  return values;
 }
+
+const recordDir = flagValues('--record-dir').at(-1) ?? null;
 if (recordDir) mkdirSync(recordDir, { recursive: true });
+
+// Case-insensitive substring match, so `--only pan` picks both pan
+// scenarios and `--only 'absolute box'` picks exactly one.
+const only = flagValues('--only').map((s) => s.toLowerCase());
+// The child half of --isolate: run one scenario, print its numbers as JSON,
+// exit. Internal — the parent passes an index, not a name, so a scenario
+// whose name contains another's cannot be misdirected here.
+const childIndex = flagValues('--child-scenario').at(-1) ?? null;
+// On by default: a coupled number is not worth its ~3x speed, and a
+// printed table that does not match what --check gates is worse than a
+// slow one. --no-isolate is the fast development loop.
+const isolate = !childIndex && !args.includes('--no-isolate');
 
 const require = createRequire(import.meta.url);
 const fontDir = join(
@@ -96,10 +145,11 @@ const fontDir = join(
   'dist',
   'fonts',
 );
-const baselinePath = join(
-  dirname(new URL(import.meta.url).pathname),
-  'baseline.json',
-);
+// --baseline points --save/--check at another file: a scratch copy in a
+// test, or the baseline a branch you are comparing against committed.
+const baselinePath =
+  flagValues('--baseline').at(-1) ??
+  join(dirname(new URL(import.meta.url).pathname), 'baseline.json');
 
 const W = 400;
 const H = 400;
@@ -1345,16 +1395,121 @@ const SCENARIOS = [
 
 // --- run ---------------------------------------------------------------
 
+/**
+ * Collapse the GC backlog between scenarios (issue #416).
+ *
+ * ntk frees X resources from FinalizationRegistry callbacks, so whatever a
+ * scenario dropped is collected at some arbitrary later point — inside the
+ * *next* scenario's paced frames, where the pause can push a frame past its
+ * deadline and turn a bounded repaint into a full-window one. Collecting
+ * here puts that work at a point where nothing is being measured.
+ *
+ * The finalization callbacks are scheduled after the collection rather than
+ * run inside it, so this gives them a turn and then collects again to sweep
+ * what they released. A no-op without --expose-gc (the `bench` script passes
+ * it; `npx tsx scripts/bench/protocol.js` does not).
+ */
+async function collectGarbage() {
+  if (typeof globalThis.gc !== 'function') return;
+  for (let i = 0; i < 2; i++) {
+    globalThis.gc();
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+const selected = SCENARIOS.map((scenario, index) => [index, scenario]).filter(
+  ([, [name]]) =>
+    only.length === 0 ||
+    only.some((needle) => name.toLowerCase().includes(needle)),
+);
+if (!selected.length) {
+  console.error(`--only matched no scenario: ${only.join(', ')}`);
+  console.error('scenarios are:');
+  for (const [name] of SCENARIOS) console.error(`  ${name}`);
+  process.exit(1);
+}
+
+// The isolation child: one scenario, its numbers on stdout as JSON.
+if (childIndex !== null) {
+  const scenario = SCENARIOS[Number(childIndex)];
+  if (!scenario) {
+    console.error(`--child-scenario ${childIndex} is not a scenario index`);
+    process.exit(1);
+  }
+  const [name, fn] = scenario;
+  const [key, value] = await measure(name, fn);
+  process.stdout.write(
+    `${JSON.stringify({ name: key, result: value, hotspots: hotspots[key] })}\n`,
+  );
+  process.exit(0);
+}
+
+/** Run one scenario in a fresh process, so nothing that ran before it can
+ * have left the heap — or the server — in a different state. */
+function measureIsolated(index, name) {
+  const childArgs = [
+    ...process.execArgv,
+    fileURLToPath(import.meta.url),
+    '--child-scenario',
+    String(index),
+    ...(recordDir ? ['--record-dir', recordDir] : []),
+  ];
+  const child = spawnSync(process.execPath, childArgs, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'inherit'],
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (child.status !== 0) {
+    console.error(`\nscenario "${name}" failed in its own process`);
+    process.exit(child.status || 1);
+  }
+  try {
+    return JSON.parse(child.stdout.trim().split('\n').at(-1));
+  } catch {
+    console.error(`\nscenario "${name}" printed no numbers:`);
+    console.error(child.stdout);
+    process.exit(1);
+  }
+}
+
 const results = {};
-for (const [name, fn] of SCENARIOS) {
+for (const [index, [name, fn]] of selected) {
   // progress to stderr so a hung CI run says which scenario it was in
   process.stderr.write(`· ${name}\n`);
+  if (isolate) {
+    const child = measureIsolated(index, name);
+    results[child.name] = child.result;
+    hotspots[child.name] = child.hotspots;
+    continue;
+  }
   const [key, value] = await measure(name, fn);
   results[key] = value;
+  await collectGarbage();
 }
 
 if (args.includes('--save')) {
-  writeFileSync(baselinePath, `${JSON.stringify(results, null, 2)}\n`);
+  // --only saves the scenarios it ran and leaves the rest of the file
+  // alone — re-measuring one entry must not drop the other twenty, and a
+  // partial run is not evidence that an entry it never ran is stale.
+  let saved = results;
+  if (only.length) {
+    let previous = {};
+    try {
+      previous = JSON.parse(readFileSync(baselinePath, 'utf8'));
+    } catch {
+      // no baseline yet — a filtered --save writes the first entries
+    }
+    // SCENARIOS order, so the file stays diffable against a full --save
+    const merged = { ...previous, ...results };
+    saved = {};
+    for (const [name] of SCENARIOS) {
+      if (merged[name] !== undefined) saved[name] = merged[name];
+    }
+    for (const [name, value] of Object.entries(merged)) {
+      saved[name] ??= value;
+    }
+  }
+  writeFileSync(baselinePath, `${JSON.stringify(saved, null, 2)}\n`);
   console.log(`wrote ${baselinePath}`);
 }
 
@@ -1393,10 +1548,14 @@ if (args.includes('--check')) {
     process.exit(1);
   }
   // A scenario in only one of the two sets means the baseline is stale —
-  // and a renamed scenario would otherwise silently lose its gate.
+  // and a renamed scenario would otherwise silently lose its gate. Under
+  // --only the run is deliberately partial, so a baseline entry that did
+  // not run is expected; an entry that ran without one is still stale.
   const missing = [
     ...Object.keys(results).filter((name) => !baseline[name]),
-    ...Object.keys(baseline).filter((name) => !results[name]),
+    ...(only.length
+      ? []
+      : Object.keys(baseline).filter((name) => !results[name])),
   ];
   if (missing.length) {
     console.error('\nbaseline out of date — run `npm run bench -- --save`:');
@@ -1439,9 +1598,25 @@ if (args.includes('--check')) {
   if (regressions.length) {
     console.error('\nprotocol regressions:');
     for (const r of regressions) console.error(`  ${r}`);
+    // Naming one scenario is the fastest way to look at it on its own —
+    // and under --no-isolate it is also how you tell a real regression from
+    // one an earlier scenario's garbage caused (issue #416).
+    const first = regressions[0].split(' — ')[0];
+    console.error(
+      `\nto re-run just this one: npm run bench -- --only ${JSON.stringify(first)}`,
+    );
+    if (!isolate) {
+      console.error(
+        'these scenarios shared a process (--no-isolate): re-run without it',
+      );
+    }
     process.exit(1);
   }
-  console.log('\nno regressions against the baseline');
+  console.log(
+    only.length
+      ? `\nno regressions against the baseline (${Object.keys(results).length} of ${SCENARIOS.length} scenarios)`
+      : '\nno regressions against the baseline',
+  );
 }
 
 process.exit(0);

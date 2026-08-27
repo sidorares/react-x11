@@ -51,9 +51,14 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # One retry: the counts carry a little event-loop/GC jitter (see the
-      # header of scripts/bench/protocol.js) and the tolerances absorb it,
-      # but a real regression fails twice; a rare unlucky run does not.
+      # Each scenario runs in its own process (issue #416): in one process
+      # they are not independent — a change to an earlier scenario's garbage
+      # moves when the collector runs inside a later one, and a pause inside
+      # a paced frame turns that frame's bounded repaint into a full-window
+      # one, which is a 6x metric swing no tolerance can absorb.
+      # One retry on top, for the per-scenario event-loop jitter the header
+      # of scripts/bench/protocol.js describes: a real regression fails
+      # twice; a rare unlucky run does not.
       - run: npm run bench -- --check || npm run bench -- --check
       # The other half of the gate, and the one that makes the first half
       # safe: cheaper is only an optimization if the picture is the same.
