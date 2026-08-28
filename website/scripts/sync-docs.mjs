@@ -195,6 +195,7 @@ const ORDER = [
   'appearance.md',
   'system.md',
   'remote.md',
+  'wayland.md',
   'security.md',
   'packaging.md',
   'devtools.md',

@@ -103,6 +103,11 @@
   machine and drawing to a display on another. `ssh -X` vs `-Y`, what the
   protocol costs on a link, the other X servers, and why Xwayland works
   where native Wayland structurally cannot.
+- [wayland.md](wayland.md) — the research RFC for a native Wayland
+  backend: a second target beside X11, not a migration. What the protocol
+  actually changes, the fd transport (why the prototype is Bun-first), the
+  rendering tiers from a pure-JS span compositor to GPU 2d over x11-dri,
+  what maps and what is gone by design, and the phased plan.
 - [security.md](security.md) — the threat model, plainly: X11 has no
   isolation between clients, `$XAUTHORITY` is a password, and what
   react-x11 does and does not defend against.
