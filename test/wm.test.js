@@ -11,6 +11,7 @@ import {
   BORDER,
   TASKBAR_H,
   TITLE_H,
+  Thumbnails,
   WindowManager,
   frameHeight,
   frameWidth,
@@ -50,8 +51,8 @@ async function until(app, predicate, what) {
 }
 
 /** A window manager with a fake frame per client — this tests wm-core, not JSX. */
-async function startWM(wmApp) {
-  const wm = new WindowManager(wmApp);
+async function startWM(wmApp, options) {
+  const wm = new WindowManager(wmApp, options);
   await wm.start();
   // React normally hands the frame over once it has realized the <window>;
   // here the test plays that part.
@@ -398,4 +399,286 @@ test('a second window manager is refused', async () => {
 test('the frame is the client plus its decoration', () => {
   assert.equal(frameWidth(300), 300 + 2 * BORDER);
   assert.equal(frameHeight(200), 200 + 2 * BORDER + TITLE_H);
+});
+
+// --- previews ---------------------------------------------------------------
+//
+// The real provider needs a server with Composite, which the in-process one
+// does not have (it registers RENDER and nothing else) — so `openThumbnails`
+// is the seam and these drive both sides of it: a fake for the wiring, and
+// the real `Thumbnails` against a fake extension for the pixmap bookkeeping.
+
+/** Records what the window manager asks a provider to do. */
+function recordingThumbnails() {
+  const calls = [];
+  const drawables = new Map();
+  return {
+    calls,
+    provider: {
+      track: (id) => calls.push(['track', id]),
+      get: (id) => drawables.get(id) ?? null,
+      capture: async (id) => {
+        const drawable = { id: 0x900 + id, width: 40, height: 30, depth: 24 };
+        drawables.set(id, drawable);
+        calls.push(['capture', id]);
+        return drawable;
+      },
+      invalidate: (id) => {
+        drawables.delete(id);
+        calls.push(['invalidate', id]);
+      },
+      forget: (id) => calls.push(['forget', id]),
+    },
+  };
+}
+
+/** A managed client, framed, with `wm` already running. */
+async function oneFramedClient(options) {
+  const { wmApp, clientApp } = await headlessPair();
+  const { wm, frames } = await startWM(wmApp, options);
+  const app = clientApp.createWindow({ width: 300, height: 200 });
+  app.map();
+  await until(wmApp, () => wm.clients.size === 1, 'the client to be managed');
+  wm.attachFakeFrames();
+  await settle(wmApp);
+  return { wmApp, clientApp, wm, frames, app };
+}
+
+test('a server without Composite manages windows with no previews at all', async () => {
+  // the default opener, against a server that really has no Composite
+  const { wmApp, clientApp, wm, app } = await oneFramedClient();
+
+  assert.equal(wm.thumbnails, null, 'no provider where there is no extension');
+  assert.equal(wm.getSnapshot()[0].thumbnail, null);
+
+  // and the call the UI makes is a no-op rather than a throw, which is what
+  // lets the React side ask for a preview without checking first
+  let woken = 0;
+  wm.subscribe(() => woken++);
+  await wm.peek(app.id);
+  assert.equal(woken, 0, 'nothing to publish, nothing to re-render for');
+  assert.equal(wm.getSnapshot()[0].thumbnail, null);
+
+  await wmApp.close();
+  await clientApp.close();
+});
+
+test('a frame is tracked when it is attached and released when the client goes', async () => {
+  const { calls, provider } = recordingThumbnails();
+  const { wmApp, clientApp, wm, app } = await oneFramedClient({
+    openThumbnails: async () => provider,
+  });
+
+  assert.deepEqual(calls, [['track', app.id]], 'redirected at attach time');
+
+  app.destroy();
+  await until(wmApp, () => wm.clients.size === 0, 'the client to be dropped');
+  assert.deepEqual(calls.at(-1), ['forget', app.id]);
+
+  await wmApp.close();
+  await clientApp.close();
+});
+
+test('peek publishes a preview into the snapshot, and wakes React once', async () => {
+  const { provider } = recordingThumbnails();
+  const { wmApp, clientApp, wm, app } = await oneFramedClient({
+    openThumbnails: async () => provider,
+  });
+
+  let woken = 0;
+  wm.subscribe(() => woken++);
+  assert.equal(wm.getSnapshot()[0].thumbnail, null, 'nothing until asked');
+
+  await wm.peek(app.id);
+  assert.equal(woken, 1);
+  assert.deepEqual(wm.getSnapshot()[0].thumbnail, {
+    id: 0x900 + app.id,
+    width: 40,
+    height: 30,
+    depth: 24,
+  });
+
+  await wmApp.close();
+  await clientApp.close();
+});
+
+test('a resize drops the preview and a move keeps it', async () => {
+  const { calls, provider } = recordingThumbnails();
+  const { wmApp, clientApp, wm, app } = await oneFramedClient({
+    openThumbnails: async () => provider,
+  });
+  await wm.peek(app.id);
+
+  // a drag is a move: the client rides along inside the frame at its own
+  // size, so the pixmap the server named is still the right one
+  wm.setGeometry(app.id, { x: 120, y: 90 });
+  assert.ok(wm.getSnapshot()[0].thumbnail, 'a move keeps the preview');
+  assert.equal(
+    calls.filter(([what]) => what === 'invalidate').length,
+    0,
+    'and asks for nothing',
+  );
+
+  // a resize ends the generation the pixmap belonged to
+  wm.setGeometry(app.id, { width: 420 });
+  assert.deepEqual(calls.at(-1), ['invalidate', app.id]);
+  assert.equal(wm.getSnapshot()[0].thumbnail, null);
+
+  // as does maximizing, which is a resize by another name
+  await wm.peek(app.id);
+  wm.toggleMaximize(app.id);
+  assert.deepEqual(calls.at(-1), ['invalidate', app.id]);
+
+  await wmApp.close();
+  await clientApp.close();
+});
+
+/**
+ * A Composite that does what the server does: `NameWindowPixmap` really
+ * creates a pixmap at the id the caller allocated, so `Pixmap.adopt` can
+ * measure it and `FreePixmap` can take it away again. Without that the test
+ * would only be checking that we called a function.
+ */
+function fakeComposite(X, { width, height, depth = 24 }, root) {
+  const calls = { redirected: [], unredirected: [], named: [] };
+  return {
+    calls,
+    Redirect: { Automatic: 0, Manual: 1 },
+    RedirectWindow: (window, type) => calls.redirected.push([window, type]),
+    UnredirectWindow: (window) => calls.unredirected.push(window),
+    NameWindowPixmap: (window, pixmap) => {
+      calls.named.push([window, pixmap]);
+      X.CreatePixmap(pixmap, root, depth, width, height);
+    },
+  };
+}
+
+/**
+ * Run `fn` with ntk's warning about unroutable X errors turned off.
+ *
+ * Asking about a pixmap that is meant to be gone answers with a
+ * BadDrawable, and node-x11 emits those on the client as well as handing
+ * them to the callback — so the tests below would print a warning per
+ * assertion, as if something had gone wrong. Settles before restoring, so
+ * the error the request provokes is still inside the quiet window.
+ */
+async function withoutXErrorWarnings(app, fn) {
+  const previous = app.options.onXError;
+  app.options.onXError = () => {};
+  try {
+    const answer = await fn();
+    await settle(app);
+    return answer;
+  } finally {
+    app.options.onXError = previous;
+  }
+}
+
+/** Does `pixmap` still exist? GetGeometry is the cheapest way to ask. */
+const alive = (app, pixmap) =>
+  withoutXErrorWarnings(
+    app,
+    () =>
+      new Promise((resolve) =>
+        app.X.GetGeometry(pixmap, (err) => resolve(!err)),
+      ),
+  );
+
+test('Thumbnails names a fresh pixmap each time and measures it once', async () => {
+  const { wmApp, clientApp, wm, app } = await oneFramedClient();
+  const X = wmApp.X;
+  const root = wmApp.display.screen[0].root;
+  const composite = fakeComposite(X, { width: 308, height: 230 }, root);
+  const thumbnails = new Thumbnails(wmApp, composite);
+
+  thumbnails.track(app.id, wm.clients.get(app.id).frame);
+  assert.equal(composite.calls.redirected.length, 1);
+  assert.equal(
+    composite.calls.redirected[0][1],
+    composite.Redirect.Automatic,
+    'Automatic: the server keeps painting the window itself',
+  );
+  assert.equal(thumbnails.get(app.id), null, 'tracking names nothing yet');
+
+  const first = await thumbnails.capture(app.id);
+  assert.equal(first.width, 308, 'geometry comes from the server, not a guess');
+  assert.equal(first.height, 230);
+  assert.equal(first.depth, 24);
+  assert.deepEqual(thumbnails.get(app.id), first);
+
+  // A second name is a different id for the same window contents — which is
+  // the whole mechanism behind a live preview, because the id is what tells
+  // <image> its source changed.
+  const second = await thumbnails.capture(app.id);
+  assert.notEqual(second.id, first.id);
+  assert.deepEqual(
+    [second.width, second.height, second.depth],
+    [308, 230, 24],
+    'and the same rectangle',
+  );
+
+  // one generation behind: nothing has composited from `first` since React
+  // was handed `second`, but it was still alive while it might have been
+  assert.equal(
+    await alive(wmApp, first.id),
+    true,
+    'kept for one more generation',
+  );
+  const third = await thumbnails.capture(app.id);
+  assert.equal(await alive(wmApp, first.id), false, 'and freed by the next');
+  assert.equal(await alive(wmApp, second.id), true);
+  assert.equal(await alive(wmApp, third.id), true);
+
+  await wmApp.close();
+  await clientApp.close();
+});
+
+test('Thumbnails reports nothing when the name did not land', async () => {
+  const { wmApp, clientApp, wm, app } = await oneFramedClient();
+  // a Composite whose NameWindowPixmap creates nothing — what a frame that
+  // is not viewable yet looks like from here
+  const composite = {
+    Redirect: { Automatic: 0 },
+    RedirectWindow: () => {},
+    UnredirectWindow: () => {},
+    NameWindowPixmap: () => {},
+  };
+  const thumbnails = new Thumbnails(wmApp, composite);
+  thumbnails.track(app.id, wm.clients.get(app.id).frame);
+
+  assert.equal(
+    await withoutXErrorWarnings(wmApp, () => thumbnails.capture(app.id)),
+    null,
+    'an id that names nothing is reported, not handed on to XRender',
+  );
+  assert.equal(thumbnails.get(app.id), null);
+
+  await wmApp.close();
+  await clientApp.close();
+});
+
+test('forgetting a tracked frame frees every pixmap it named', async () => {
+  const { wmApp, clientApp, wm, app } = await oneFramedClient();
+  const X = wmApp.X;
+  const root = wmApp.display.screen[0].root;
+  const composite = fakeComposite(X, { width: 308, height: 230 }, root);
+  const thumbnails = new Thumbnails(wmApp, composite);
+  const frame = wm.clients.get(app.id).frame;
+
+  thumbnails.track(app.id, frame);
+  const first = await thumbnails.capture(app.id);
+  const second = await thumbnails.capture(app.id);
+
+  thumbnails.forget(app.id);
+  await settle(wmApp);
+  assert.equal(await alive(wmApp, first.id), false, 'the retired one goes too');
+  assert.equal(await alive(wmApp, second.id), false);
+  assert.equal(thumbnails.get(app.id), null);
+  // The redirect is left alone on purpose: it dies with the frame, which is
+  // about to be unmounted, and node-x11's UnredirectWindow is a BadLength on
+  // a real server anyway — sidorares/node-x11#292.
+  assert.deepEqual(composite.calls.unredirected, []);
+
+  await wmApp.close();
+  await clientApp.close();
 });

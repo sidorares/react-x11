@@ -7,6 +7,8 @@
 // shown or resized the server asks *us* instead of doing it. Everything
 // below follows from that one fact.
 
+import { Pixmap } from 'ntk';
+
 // X11 protocol constants, spelled out rather than imported: x11 is ntk's
 // dependency, not this package's.
 const SUBSTRUCTURE_NOTIFY = 0x00080000; // event masks
@@ -153,13 +155,177 @@ export function resizeRect(start, edges, dx, dy, limits) {
   return { x, y, width, height };
 }
 
+// ---------------------------------------------------------------------------
+// Live window contents
+//
+// A window manager can show what a window looks like without reading a
+// single pixel back. The Composite extension redirects a window's drawing
+// into an offscreen pixmap; `NameWindowPixmap` gives that pixmap an id, and
+// react-x11's `<image drawable>` composites straight from it through
+// XRender. The server does the scaling, so a 900x600 window shown 240px
+// wide costs one composite per repaint and nothing at all on the socket.
+//
+// `Automatic` is the update type that keeps this a *reparenting* window
+// manager rather than a compositing one: the server goes on painting the
+// redirected window into its parent itself, so the desktop looks and
+// behaves exactly as it did before the redirect. `Manual` is what a
+// compositing manager asks for, and it takes on the job of putting every
+// window on screen in return.
+//
+// Two things about a named pixmap decide the shape of the class below.
+//
+//  - **It is a generation, not a handle.** The server drops it when the
+//    window is resized, so a resize has to name a new one — which is why
+//    `invalidate` exists and why `setGeometry` calls it.
+//  - **Naming it again is cheap and always current.** Every name refers to
+//    the pixmap the window is drawing into *now*, so re-naming is how a
+//    preview stays live: a new id is what tells `<image>` its source
+//    changed. DAMAGE would say exactly when that is worth doing instead of
+//    on a timer, and this example does not go that far — see the note in
+//    wm.jsx.
+//
+// Not everywhere, though: XQuartz carries RENDER, DAMAGE, XFIXES and SHAPE
+// but no Composite at all, and neither does node-x11's in-process server.
+// So `wm.thumbnails` is null on those and everything else works unchanged.
+// ---------------------------------------------------------------------------
+
+/**
+ * The offscreen pixmap behind each frame, named on demand.
+ *
+ * `WindowManager` takes the opener as a seam (`new WindowManager(app, {
+ * openThumbnails })`) so a test can hand it a fake — the real one needs a
+ * server with Composite, which the headless suite does not have.
+ */
+export class Thumbnails {
+  /** The provider for `app`, or null where the server has no Composite. */
+  static async open(app) {
+    const composite = await app.composite?.();
+    return composite ? new Thumbnails(app, composite) : null;
+  }
+
+  constructor(app, composite) {
+    this.app = app;
+    this.X = app.X;
+    this.composite = composite;
+    // client id -> { frameId, pixmap, retired, drawable }
+    this._entries = new Map();
+  }
+
+  /**
+   * Start redirecting `frame`, so its contents can be named later.
+   *
+   * Done for every frame rather than for the ones somebody looks at:
+   * redirection only decides *where* the server draws, and under
+   * `Automatic` it draws to both places, so the window that is never
+   * previewed costs one request and nothing after it. Naming a pixmap is
+   * the part that waits for a reason.
+   */
+  track(id, frame) {
+    if (this._entries.has(id)) return;
+    this.composite.RedirectWindow(frame.id, this.composite.Redirect.Automatic);
+    this._entries.set(id, {
+      frameId: frame.id,
+      pixmap: null,
+      retired: null,
+      drawable: null,
+    });
+  }
+
+  /** The descriptor `<image drawable>` takes, or null until `capture`. */
+  get(id) {
+    return this._entries.get(id)?.drawable ?? null;
+  }
+
+  /**
+   * Name this frame's current pixmap and take ownership of it.
+   *
+   * Adopting is what confirms the name landed: `NameWindowPixmap` is a void
+   * request against an id we allocated ourselves, so a frame that is not
+   * viewable yet fails asynchronously, and an unchecked id reaches XRender
+   * as a BadPixmap in the middle of a paint — a much worse place to find
+   * out. ntk's `Pixmap.adopt` is built for exactly this handover and says
+   * so; it also skips its round trip when the geometry is already known,
+   * which is every refresh after the first in a generation.
+   */
+  async capture(id) {
+    const entry = this._entries.get(id);
+    if (!entry) return null;
+    const name = this.X.AllocID();
+    this.composite.NameWindowPixmap(entry.frameId, name);
+    const known = entry.drawable;
+    const pixmap = await Pixmap.adopt(
+      this.app,
+      name,
+      known
+        ? { width: known.width, height: known.height, depth: known.depth }
+        : {},
+    ).catch(() => null);
+    // the client can be gone by the time a first adopt answers
+    if (!pixmap || !this._entries.has(id)) {
+      pixmap?.destroy();
+      return null;
+    }
+    // One generation behind on purpose. React has already been handed
+    // `entry.pixmap` and swapped its Picture over to it, so nothing is
+    // compositing from `entry.retired` any more.
+    entry.retired?.destroy();
+    entry.retired = entry.pixmap;
+    entry.pixmap = pixmap;
+    entry.drawable = {
+      id: pixmap.id,
+      width: pixmap.width,
+      height: pixmap.height,
+      depth: pixmap.depth,
+    };
+    return entry.drawable;
+  }
+
+  /**
+   * The frame changed size, so the pixmap the server was drawing into is
+   * gone and the geometry we cached with it is wrong. The next `capture`
+   * names the new generation and pays the round trip to measure it.
+   */
+  invalidate(id) {
+    const entry = this._entries.get(id);
+    if (!entry) return;
+    entry.pixmap?.destroy();
+    entry.retired?.destroy();
+    entry.pixmap = null;
+    entry.retired = null;
+    entry.drawable = null;
+  }
+
+  /**
+   * Stop tracking `id`.
+   *
+   * The redirect is not undone, and that is deliberate twice over. A
+   * window's redirection dies with the window, and the only caller is the
+   * one place a frame is about to be unmounted — so there is nothing left
+   * to hand back. And `UnredirectWindow` could not do it anyway:
+   * node-x11 encodes it eight bytes long with no `update` field where the
+   * protocol says twelve with one, so the request is a BadLength on every
+   * real server. See sidorares/node-x11#292.
+   */
+  forget(id) {
+    if (!this._entries.has(id)) return;
+    this.invalidate(id);
+    this._entries.delete(id);
+  }
+}
+
 /**
  * The managed-client registry. React subscribes to it with
  * useSyncExternalStore, so every change here — a new window, a new title, a
  * drag in progress — is one re-render of the frames.
  */
 export class WindowManager {
-  constructor(app) {
+  /**
+   * `openThumbnails` is the seam: it is what talks to the server about
+   * Composite, and the headless suite has no Composite to talk to. The
+   * default is the real thing; a test passes a fake, or one that answers
+   * null to drive the no-previews path.
+   */
+  constructor(app, { openThumbnails = Thumbnails.open } = {}) {
     this.app = app;
     this.X = app.X;
     this.root = app.rootWindow();
@@ -171,6 +337,9 @@ export class WindowManager {
     this._ourWindows = new Set(); // frames and the taskbar
     this._placed = 0;
     this._serial = 0;
+    this._openThumbnails = openThumbnails;
+    /** The Composite-backed preview store, or null where there is none. */
+    this.thumbnails = null;
   }
 
   get workArea() {
@@ -194,6 +363,9 @@ export class WindowManager {
     this._snapshot = [...this.clients.values()].map((client) => ({
       ...client,
       focused: client.id === this.focused,
+      // null until something asks for one with `peek` — and null forever
+      // on a server without Composite
+      thumbnail: this.thumbnails?.get(client.id) ?? null,
     }));
     this.publishState();
     for (const listener of this._listeners) listener();
@@ -227,6 +399,10 @@ export class WindowManager {
 
     await this.announce();
     await this.internWatchedAtoms();
+    // Before adoptExisting, which attaches no frames itself but is the
+    // first thing that can lead to one: a provider that arrived late would
+    // miss the redirect for every window already on screen.
+    this.thumbnails = await this._openThumbnails(this.app);
     this.paintDesktop();
     this.watchClientClicks();
 
@@ -492,6 +668,7 @@ export class WindowManager {
       client.window.reparentTo(this.root, client.x, client.y);
       client.window.removeFromSaveSet();
     }
+    this.thumbnails?.forget(id);
     this.clients.delete(id);
     if (this.focused === id) {
       this.focused = null;
@@ -597,6 +774,9 @@ export class WindowManager {
     if (!client || client.frame === frame) return;
     client.frame = frame;
     this._ourWindows.add(frame.id);
+    // Before the reparent, so the client's very first paint already lands
+    // in the frame's offscreen pixmap rather than only in the one after it.
+    this.thumbnails?.track(id, frame);
 
     // Redirect the frame *before* reparenting into it. A window's requests
     // are redirected by whoever holds SubstructureRedirect on its parent —
@@ -685,6 +865,12 @@ export class WindowManager {
     };
     const resized =
       next.width !== client.width || next.height !== client.height;
+    // Before `_update`, which is what rebuilds the snapshot: the server
+    // drops the named pixmap when the frame resizes, and a snapshot still
+    // carrying it hands React an id that is already a BadPixmap. Dropping
+    // it here means the worst a preview does across a resize is disappear
+    // for the round trip it takes to name the next generation.
+    if (resized) this.thumbnails?.invalidate(id);
     const updated = this._update(id, next);
     // a plain move does not touch the client: it rides along inside the
     // frame, and one ConfigureWindow per motion event is enough
@@ -711,6 +897,8 @@ export class WindowManager {
           width: area.width - 2 * BORDER,
           height: area.height - 2 * BORDER - TITLE_H,
         };
+    // before `_update`, for the reason setGeometry gives
+    this.thumbnails?.invalidate(id);
     const updated = this._update(id, next);
     updated.window.resize(updated.width, updated.height);
     this.notifyGeometry(updated);
@@ -768,6 +956,20 @@ export class WindowManager {
     // bump it to the top of the focus order so repeated Alt+Tab keeps moving
     next.serial = ++this._serial;
     this.focus(next.id);
+  }
+
+  /**
+   * Refresh the preview for `id` and wake React with it.
+   *
+   * Called by whatever is showing one, on its own cadence: naming a pixmap
+   * for a window nobody is looking at buys nothing, and naming it again is
+   * how the preview stays current (see Thumbnails). A no-op where the
+   * server has no Composite, which is what makes the caller's "is there a
+   * thumbnail?" the only check it needs.
+   */
+  async peek(id) {
+    if (!this.thumbnails || !this.clients.has(id)) return;
+    if (await this.thumbnails.capture(id)) this._changed();
   }
 
   async close(id) {
