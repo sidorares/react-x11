@@ -79,12 +79,14 @@ three:
 - **three platforms.** X11 only. macOS means XQuartz — a separate install, a
   non-native look and no menu bar integration. Windows is out; if you need
   Windows, use Electron or Tauri.
-- **native Wayland.** There is no Wayland backend and there is not going to
-  be one; that would be a different renderer, not a flag. Ordinary
+- **native Wayland — today.** There is no Wayland backend yet. Ordinary
   application windows work fine on a Wayland desktop through Xwayland, which
   is not going away — but the desktop-shell half of X11 (panel struts,
   global key grabs, screen capture, and the window-manager example below)
-  needs a real X session.
+  needs a real X session. A native backend is researched and planned as a
+  **second target beside X11, not a migration**:
+  [docs/wayland.md](docs/wayland.md) is the RFC, from the fd transport up
+  to what the rendering would ride on.
 - **reusing web components.** There is no DOM. Your MUI, your Tailwind and
   your `recharts` do not come with you; the state, data-fetching, validation
   and math libraries mostly do. [docs/ecosystem.md](docs/ecosystem.md) says
