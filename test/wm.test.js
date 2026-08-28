@@ -657,7 +657,7 @@ test('Thumbnails reports nothing when the name did not land', async () => {
   await clientApp.close();
 });
 
-test('forgetting a tracked frame frees its pixmaps and undoes the redirect', async () => {
+test('forgetting a tracked frame frees every pixmap it named', async () => {
   const { wmApp, clientApp, wm, app } = await oneFramedClient();
   const X = wmApp.X;
   const root = wmApp.display.screen[0].root;
@@ -673,8 +673,11 @@ test('forgetting a tracked frame frees its pixmaps and undoes the redirect', asy
   await settle(wmApp);
   assert.equal(await alive(wmApp, first.id), false, 'the retired one goes too');
   assert.equal(await alive(wmApp, second.id), false);
-  assert.deepEqual(composite.calls.unredirected, [frame.id]);
   assert.equal(thumbnails.get(app.id), null);
+  // The redirect is left alone on purpose: it dies with the frame, which is
+  // about to be unmounted, and node-x11's UnredirectWindow is a BadLength on
+  // a real server anyway — sidorares/node-x11#292.
+  assert.deepEqual(composite.calls.unredirected, []);
 
   await wmApp.close();
   await clientApp.close();

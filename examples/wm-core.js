@@ -295,13 +295,21 @@ export class Thumbnails {
     entry.drawable = null;
   }
 
-  /** Stop tracking `id` and hand the frame back to the server. */
+  /**
+   * Stop tracking `id`.
+   *
+   * The redirect is not undone, and that is deliberate twice over. A
+   * window's redirection dies with the window, and the only caller is the
+   * one place a frame is about to be unmounted — so there is nothing left
+   * to hand back. And `UnredirectWindow` could not do it anyway:
+   * node-x11 encodes it eight bytes long with no `update` field where the
+   * protocol says twelve with one, so the request is a BadLength on every
+   * real server. See sidorares/node-x11#292.
+   */
   forget(id) {
-    const entry = this._entries.get(id);
-    if (!entry) return;
+    if (!this._entries.has(id)) return;
     this.invalidate(id);
     this._entries.delete(id);
-    this.composite.UnredirectWindow(entry.frameId);
   }
 }
 

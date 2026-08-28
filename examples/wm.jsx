@@ -17,6 +17,8 @@
 // SHAPE but no Composite at all, and neither does the in-process server the
 // tests run against. There, `wm.thumbnails` is null, a taskbar item says
 // "no preview", and everything else here works exactly as it does with it.
+// Xephyr does have it, so `Xephyr :10 -screen 1200x800` is where to see
+// this — which is the nested server this file already recommends.
 //
 // Run it against a nested server so it does not fight the one managing your
 // desktop:
