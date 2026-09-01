@@ -260,6 +260,7 @@ function App() {
         {
           label: 'Quit',
           icon: ICONS.power,
+          iconName: 'power',
           shortcut: [['Control', 'Q']],
           onSelect: note('Quit'),
         },
@@ -271,12 +272,14 @@ function App() {
         {
           label: 'Undo',
           icon: ICONS.undo,
+          iconName: 'arrow.uturn.backward',
           shortcut: [['Control', 'Z']],
           onSelect: note('Undo'),
         },
         {
           label: 'Redo',
           icon: ICONS.redo,
+          iconName: 'arrow.uturn.forward',
           shortcut: [['Control', 'Y']],
           enabled: false,
         },
@@ -284,6 +287,7 @@ function App() {
         {
           label: 'Cut',
           icon: ICONS.scissors,
+          iconName: 'scissors',
           shortcut: [['Control', 'X']],
           onSelect: note('Cut'),
         },

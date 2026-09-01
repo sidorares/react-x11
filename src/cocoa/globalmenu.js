@@ -107,6 +107,11 @@ export class CocoaGlobalMenuExport {
         if (props.enabled === false) out.enabled = false;
         if (props.visible === false) out.hidden = true;
         if (props['toggle-state'] === 1) out.checked = true;
+        // the serialisable icon pair (menuitem.js): the name is read in
+        // the platform's icon theme — SF Symbols here, freedesktop on a
+        // Linux panel — and the bytes are the literal-pixel fallback
+        if (props['icon-name']) out.iconName = props['icon-name'];
+        if (props['icon-data']) out.iconData = props['icon-data'];
         const key = keyEquivalent(props.shortcut);
         if (key) {
           out.key = key.key;
