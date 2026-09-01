@@ -10264,8 +10264,20 @@ export class WindowNode extends Scrollable(Node) {
    * before laying out. This is the whole reason a size query may carry
    * layout properties while a state block may not: it only ever runs inside
    * a layout pass the resize already required.
+   *
+   * Callers pass the size in device pixels — it comes off the window or out
+   * of yoga, and both live on the device grid — but `querySize` is stored
+   * in **logical** pixels, because that is the unit the thresholds were
+   * written in: `'@width >= 620'` sits in a style block next to `width:
+   * 620`, and the same number must mean the same thing. At scale 1 the two
+   * coincide, which is how comparing device pixels survived every 1x
+   * display it was ever run on and broke on the first retina one (every
+   * query read double, so none of them ever changed answer under a drag).
    */
-  _resolveSizeQueries(width, height) {
+  _resolveSizeQueries(deviceWidth, deviceHeight) {
+    const s = this.scale || 1;
+    const width = deviceWidth / s;
+    const height = deviceHeight / s;
     if (this._sizeQueryNodes.size === 0) {
       this.querySize = this.querySize ?? { width, height };
       return false;

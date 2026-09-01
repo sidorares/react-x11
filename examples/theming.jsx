@@ -102,7 +102,7 @@ function ModeIcon({ mode, color }) {
   );
 }
 
-export function ThemingPanel() {
+export function ThemingPanel({ windowSize }) {
   const [name, setName] = useState('github');
   // **The desktop until the user picks.** `null` means "follow"; the toggle
   // in the header sets an explicit mode and takes over from there. Starting
@@ -158,7 +158,12 @@ export function ThemingPanel() {
         </Button>
         <box style={s.spacerHide} />
         <text style={s.caption}>
-          resize me: the gallery splits in two past 620px
+          {windowSize
+            ? // the measured size first, so it survives the clip when the
+              // bar runs out of room: logical px, the unit the 520/620
+              // thresholds are in
+              `${Math.round(windowSize.width)}×${Math.round(windowSize.height)} — resize me: the gallery splits in two past 620px`
+            : 'resize me: the gallery splits in two past 620px'}
         </text>
       </box>
 
@@ -267,9 +272,18 @@ export function ThemingPanel() {
 }
 
 function App() {
+  // `onResize` reports in logical px — the same unit the `@width` blocks
+  // above compare against — so the caption shows exactly what is measured.
+  const [size, setSize] = useState({ width: 720, height: 480 });
   return (
-    <window title="theming" width={720} height={480} minWidth={360}>
-      <ThemingPanel />
+    <window
+      title="theming"
+      width={720}
+      height={480}
+      minWidth={360}
+      onResize={(ev) => setSize({ width: ev.width, height: ev.height })}
+    >
+      <ThemingPanel windowSize={size} />
     </window>
   );
 }

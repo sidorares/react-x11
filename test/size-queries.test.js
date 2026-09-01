@@ -213,3 +213,30 @@ test('a query that hides a node takes it out of the paint too', async () => {
 
   await x11Root.unmount();
 });
+
+test('the threshold is logical pixels, whatever the display scale', async () => {
+  // An 800-logical window on a 2x display is 1600 device pixels. The
+  // threshold sits in a style block next to `width:`-style numbers, so it
+  // must read the logical size: `@width < 1000` matches here, where the
+  // device size would not. Comparing device pixels was invisible at scale
+  // 1 and made every query on a retina display read double — none of them
+  // ever changed answer under a resize.
+  const app = createMockApp();
+  const x11Root = await createRoot({ app, scale: 2 });
+  x11Root.render(
+    h(
+      'window',
+      { width: 800, height: 300 },
+      h('box', {
+        style: {
+          width: 10,
+          height: 10,
+          '@width < 1000': { backgroundColor: 'red' },
+        },
+      }),
+    ),
+  );
+  await tick();
+  assert.strictEqual(nodeOf(app).children[0].style.backgroundColor, 'red');
+  await x11Root.unmount();
+});
