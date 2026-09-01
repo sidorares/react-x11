@@ -19,14 +19,14 @@ const s = createStyles({
   row: { flexDirection: 'row', gap: 16, alignItems: 'flex-start' },
   col: { flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 8 },
   card: {
-    backgroundColor: '$background',
+    backgroundColor: '$surface',
     borderWidth: 1,
     borderColor: '$track',
     borderRadius: 4,
     padding: 12,
     gap: 6,
   },
-  label: { fontSize: 10, color: '$border' },
+  label: { fontSize: 10, color: '$textMuted' },
   controls: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -62,7 +62,7 @@ const VARIANTS = [
   },
   { label: 'centered', style: { fontSize: 13, textAlign: 'center' } },
   { label: 'right', style: { fontSize: 13, textAlign: 'right' } },
-  { label: 'dim colour', style: { fontSize: 13, color: '#95a5a6' } },
+  { label: 'dim colour', style: { fontSize: 13, color: '$textMuted' } },
 ];
 
 // Bidi: Hebrew with an embedded Latin word. The Latin runs LTR inside an RTL

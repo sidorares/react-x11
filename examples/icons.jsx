@@ -483,7 +483,11 @@ function watchPaint(root, { quiet = 0 } = {}) {
     const entry = { n, where, area, client, why, server: undefined };
     queue.push(entry);
 
-    if (!X) {
+    // No X connection (headless), or a backend whose display has no fence
+    // request (the Cocoa backend talks to no X server): the client column is
+    // still real, but there is no server tail to wait on — report it as
+    // unmeasured rather than inventing a number.
+    if (typeof X?.GetInputFocus !== 'function') {
       entry.server = null;
       drain();
       return result;
