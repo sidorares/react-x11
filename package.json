@@ -65,7 +65,8 @@
     "bench:frames": "tsx scripts/bench/frames.js",
     "docs:dev": "npm --prefix website start",
     "docs:build": "npm --prefix website run build",
-    "docs:test": "npm --prefix website test"
+    "docs:test": "npm --prefix website test",
+    "bench:presenters": "node --import tsx scripts/bench/presenters.js"
   },
   "repository": {
     "type": "git",

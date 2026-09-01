@@ -337,7 +337,7 @@ export class CocoaLayerPresenter {
     this.fonts = window.app.fonts;
     this.visuals = new Map(); // node -> Visual
     this.rasters = new Map(); // node -> RasterState
-    this.bars = new Map(); // scroller node -> { layer, raster, props }
+    this.bars = new Map(); // scroller node -> Map(axis -> { layer, raster })
     this.dirty = new Set();
     this.dirtyAll = true; // first frame rasters everything
     this.rootVisual = {
@@ -378,7 +378,9 @@ export class CocoaLayerPresenter {
           this.rasters.delete(node);
           const bars = this.bars.get(node);
           if (bars) {
-            native.removeFromSuperlayer(bars.layer);
+            for (const entry of bars.values()) {
+              native.removeFromSuperlayer(entry.layer);
+            }
             this.bars.delete(node);
           }
         }
@@ -673,40 +675,87 @@ export class CocoaLayerPresenter {
     this.native.surfaceToLayer(raster.surface, visual.layer);
   }
 
+  /**
+   * One thin overlay layer per scroll axis, rastered at the bar's own strip
+   * — never at the scroller's size. The strip is the track extent by the
+   * bar width plus an antialiasing pad, so a scroll frame re-rasters a few
+   * thousand pixels instead of the viewport: the first run of the
+   * presenter bench caught the full-size version costing more than the
+   * content it decorated (scripts/bench/presenters.js, `scroll`).
+   *
+   * The painter is still `_paintScrollbars` — both bars, one call — with
+   * the other axis's ink falling outside this strip's surface, where
+   * CoreGraphics clips it for free. Cheaper than a per-bar painting seam,
+   * and the corner case where both bars show costs two thin rasters
+   * instead of one bounding box that would be nearly the scroller again.
+   */
   _syncBars(node, visual) {
     const scrollbars = node._scrollbars?.() ?? [];
     let bars = this.bars.get(node);
     if (!scrollbars.length) {
-      if (bars) this.native.setLayerProps(bars.layer, { hidden: true });
+      if (bars) {
+        for (const entry of bars.values()) {
+          this.native.setLayerProps(entry.layer, { hidden: true });
+        }
+      }
       return;
     }
     if (!bars) {
-      bars = { layer: this.native.createLayer(), raster: new RasterState() };
-      this.native.addSublayer(visual.layer, bars.layer);
+      bars = new Map();
       this.bars.set(node, bars);
     }
-    const abs = node.abs;
-    const width = Math.max(1, Math.ceil(abs.width));
-    const height = Math.max(1, Math.ceil(abs.height));
-    this.native.setLayerProps(bars.layer, {
-      frame: [
-        (abs.x - visual.origin.x) / this.scale,
-        (abs.y - visual.origin.y) / this.scale,
-        width / this.scale,
-        height / this.scale,
-      ],
-      zPosition: 1e6,
-      hidden: false,
-    });
-    const ctx = bars.raster.ensure(this, width, height, this.window.scale);
-    ctx.save();
-    try {
-      ctx.clearRect(0, 0, width, height);
-      ctx.translate(-abs.x, -abs.y);
-      node._paintScrollbars(ctx);
-    } finally {
-      ctx.restore();
+    const s = this.scale;
+    const pad = Math.ceil(2 * s);
+    const seen = new Set();
+    for (const bar of scrollbars) {
+      seen.add(bar.axis);
+      let entry = bars.get(bar.axis);
+      if (!entry) {
+        entry = { layer: this.native.createLayer(), raster: new RasterState() };
+        this.native.addSublayer(visual.layer, entry.layer);
+        bars.set(bar.axis, entry);
+      }
+      const strip =
+        bar.axis === 'x'
+          ? {
+              x: bar.trackStart - pad,
+              y: bar.crossStart - pad,
+              width: bar.trackLength + 2 * pad,
+              height: bar.height + 2 * pad,
+            }
+          : {
+              x: bar.crossStart - pad,
+              y: bar.trackStart - pad,
+              width: bar.width + 2 * pad,
+              height: bar.trackLength + 2 * pad,
+            };
+      const width = Math.max(1, Math.ceil(strip.width));
+      const height = Math.max(1, Math.ceil(strip.height));
+      this.native.setLayerProps(entry.layer, {
+        frame: [
+          (strip.x - visual.origin.x) / s,
+          (strip.y - visual.origin.y) / s,
+          width / s,
+          height / s,
+        ],
+        zPosition: 1e6,
+        hidden: false,
+      });
+      const ctx = entry.raster.ensure(this, width, height, this.window.scale);
+      ctx.save();
+      try {
+        ctx.clearRect(0, 0, width, height);
+        ctx.translate(-strip.x, -strip.y);
+        node._paintScrollbars(ctx);
+      } finally {
+        ctx.restore();
+      }
+      this.native.surfaceToLayer(entry.raster.surface, entry.layer);
     }
-    this.native.surfaceToLayer(bars.raster.surface, bars.layer);
+    for (const [axis, entry] of bars) {
+      if (!seen.has(axis)) {
+        this.native.setLayerProps(entry.layer, { hidden: true });
+      }
+    }
   }
 }
