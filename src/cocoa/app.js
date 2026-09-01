@@ -20,6 +20,7 @@ import { setScreensForTests } from '../screens.js';
 import { setScaleForTests } from '../scale.js';
 import { BezelStore } from './bezels.js';
 import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
+import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaFontManager } from './fonts.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
@@ -65,6 +66,12 @@ class CocoaApp {
     // the runtime and settles _glCapsResolved.
     this.glPolicy = { mode: options.glPolicy ?? 'auto' };
     this._cocoaGL = null;
+
+    // the global-menu exports, newest active: the macOS menu bar is one per
+    // app, so the most recent MenuBar owns it (per-focused-window switching
+    // is the follow-up — docs/macos.md §Menus)
+    this._globalMenus = [];
+    this._activeGlobalMenu = null;
 
     // The X stub: just enough for the modules that carry an X escape hatch
     // to no-op the way they do against the headless mock.
@@ -158,6 +165,28 @@ class CocoaApp {
    */
   chooseGLConfig(spec) {
     return cocoaGLConfig(this, spec);
+  }
+
+  /**
+   * The `useGlobalMenu` transport seam: same owner shape as the D-Bus
+   * GlobalMenuExport (start/stop/update), pointed at the macOS menu bar.
+   */
+  createGlobalMenuExport(options) {
+    return new CocoaGlobalMenuExport(this, options);
+  }
+
+  _registerGlobalMenu(exporter) {
+    this._globalMenus.push(exporter);
+    this._activeGlobalMenu = exporter;
+  }
+
+  _unregisterGlobalMenu(exporter) {
+    this._globalMenus = this._globalMenus.filter((e) => e !== exporter);
+    if (this._activeGlobalMenu === exporter) {
+      this._activeGlobalMenu = this._globalMenus.at(-1) ?? null;
+      if (this._activeGlobalMenu) this._activeGlobalMenu._install();
+      else this._native.setMainMenu([{ title: 'App', items: [] }]);
+    }
   }
 
   /**
@@ -264,6 +293,9 @@ class CocoaApp {
         return this._routeFocus(ev, 'focus');
       case 'window-blur':
         return this._routeFocus(ev, 'blur');
+      case 'menu-activate':
+        this._activeGlobalMenu?.activate(ev.id);
+        return this._afterInput();
       default:
         return undefined;
     }
