@@ -416,6 +416,32 @@ async function runChild() {
       stats.layersMade += 1;
       return createLayer(...a);
     };
+    // the IOSurface swapchain's present path: a flip plus a damage-sized
+    // catch-up copy — counted into the same columns so the table reads the
+    // same either way (uploads = handoffs, kpx = pixels actually moved)
+    if (native.copySurfaceRegion) {
+      const copy = native.copySurfaceRegion.bind(native);
+      native.copySurfaceRegion = (src, dst, rects) => {
+        const t0 = performance.now();
+        copy(src, dst, rects);
+        stats.uploadMs += performance.now() - t0;
+        if (rects && rects.length) {
+          for (let i = 0; i + 3 < rects.length; i += 4) {
+            stats.uploadPx += rects[i + 2] * rects[i + 3];
+          }
+        } else {
+          const size = sizeOf(src);
+          stats.uploadPx += size.width * size.height;
+        }
+      };
+    }
+    if (native.setLayerContentsIOSurface) {
+      const flip = native.setLayerContentsIOSurface.bind(native);
+      native.setLayerContentsIOSurface = (layer, id) => {
+        stats.uploads += 1;
+        return flip(layer, id);
+      };
+    }
   }
 
   let tick = 0;

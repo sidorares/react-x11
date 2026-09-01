@@ -222,6 +222,17 @@ export class CocoaWindow {
 
   // --- drawing -------------------------------------------------------------
 
+  /**
+   * The backing store is a two-buffer IOSurface swapchain: painters draw
+   * into the back buffer's CG bitmap, and presenting is `layer.contents =
+   * iosurface` — zero-copy, where the plain-surface path paid a
+   * window-sized CGImage copy per dirty frame (12ms at 900x700@2x — the
+   * presenter bench's whole surface-vs-layers gap on bounded damage).
+   * After a flip the new back buffer is one frame stale, so present copies
+   * the just-shown frame's damage across — a damage-sized memcpy replacing
+   * a window-sized upload. Falls back to the single plain surface where
+   * IOSurface creation fails.
+   */
   _ensureSurface() {
     const w = this.width;
     const h = this.height;
@@ -231,10 +242,22 @@ export class CocoaWindow {
       this._surfaceSize?.height !== h
     ) {
       const hadSurface = Boolean(this._surface);
-      this._surface = this._native.createSurface(w, h, this.scale);
-      this._native.ctxClearRect(this._surface, 0, 0, w, h);
+      this._chain = null;
+      try {
+        const a = this._native.createSurfaceIOSurface(w, h, this.scale);
+        const b = this._native.createSurfaceIOSurface(w, h, this.scale);
+        this._chain = { back: a, front: b };
+        this._native.surfaceLock(a.handle);
+        this._native.ctxClearRect(a.handle, 0, 0, w, h);
+        this._native.ctxClearRect(b.handle, 0, 0, w, h);
+        this._surface = a.handle;
+      } catch {
+        this._surface = this._native.createSurface(w, h, this.scale);
+        this._native.ctxClearRect(this._surface, 0, 0, w, h);
+      }
       this._surfaceSize = { width: w, height: h };
       this._surfaceGen++;
+      this._flushDamage = 'full';
       // A replaced backing surface holds nothing: whatever bounded damage
       // this frame carries, everything else on it would be garbage. Ask for
       // the full frame — one extra repaint per real resize, correctness for
@@ -247,6 +270,21 @@ export class CocoaWindow {
       }
     }
     return this._surface;
+  }
+
+  /**
+   * The per-flush painted rects (nodes.js's swapchain seam), accumulated
+   * until the next present: they are what the flip's catch-up copy covers.
+   * `'full'`/null collapse the set — one full copy beats bookkeeping.
+   */
+  noteFrameDamage(rects) {
+    if (this._presenter) return;
+    if (this._flushDamage === 'full') return;
+    if (!rects) {
+      this._flushDamage = 'full';
+      return;
+    }
+    (this._flushDamage ??= []).push(...rects);
   }
 
   getContext() {
@@ -300,6 +338,34 @@ export class CocoaWindow {
     if (this._presenter) return; // layers upload as they sync
     if (!this._dirty || !this._surface || this.destroyed) return;
     this._dirty = false;
+    if (this._chain) {
+      const shown = this._chain.back;
+      this._native.surfaceUnlock(shown.handle);
+      this._native.setLayerContentsIOSurface(this._layer, shown.iosurfaceId);
+      this._chain.back = this._chain.front;
+      this._chain.front = shown;
+      this._surface = this._chain.back.handle;
+      // a different native surface owns the graphics state now — the
+      // context re-syncs its sticky state off the generation
+      this._surfaceGen++;
+      this._native.surfaceLock(this._surface);
+      const damage = this._flushDamage;
+      this._flushDamage = null;
+      this._native.copySurfaceRegion(
+        shown.handle,
+        this._surface,
+        damage === 'full' || !damage
+          ? null
+          : damage.flatMap((r) => [
+              Math.floor(r.x),
+              Math.floor(r.y),
+              Math.ceil(r.width) + 1,
+              Math.ceil(r.height) + 1,
+            ]),
+      );
+      if (this._transparentWindow) this.app._shadowStale.add(this);
+      return;
+    }
     this._native.surfaceToLayer(this._surface, this._layer);
     // AppKit derives a transparent window's shadow from the content's
     // opaque shape and does not recompute it on repaints — a popup whose

@@ -10779,6 +10779,12 @@ export class WindowNode extends Scrollable(Node) {
     // after every region: an entry drawn in one damage rect must not be
     // evicted before the next rect of the same frame asks for it
     this._paintCache?.endFrame();
+    // The swapchain seam: a backend presenting from double buffers has to
+    // know exactly which pixels each flush touched — several flushes can
+    // land between two presents, so reading only the last frame's rects
+    // would leave the flipped-in back buffer stale where an earlier flush
+    // painted. Feature-detected like presentFrame; null means everything.
+    this.window.noteFrameDamage?.(damage ?? null);
     if (frameHook) {
       frameHook({
         root: this,
