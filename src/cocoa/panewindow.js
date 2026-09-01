@@ -43,7 +43,9 @@ export class CocoaPaneWindow {
     this._surface = null;
     this._surfaceGen = 0;
     this._surfaceSize = null;
-    this._chain = null;
+    this._ring = null;
+    this._drawIndex = 0;
+    this._shownIndex = -1;
     this._ctx = null;
     this._dirty = false;
     this._flushDamage = 'full';
@@ -100,22 +102,35 @@ export class CocoaPaneWindow {
     return false;
   }
 
+  // Three buffers, not two. A pane is cross-process: the host keeps
+  // scanning the last buffer it was handed until it processes the next
+  // present message, and nothing here waits for that. With two buffers the
+  // next paint (and the catch-up copy) lands in the very buffer the host is
+  // still displaying — every present tears it, the flash. A third buffer is
+  // always at least two presents behind what the host shows, so the pane
+  // never writes a buffer the host might still be reading. Same-process
+  // windows need only two because Core Animation latches the front buffer.
+  static RING = 3;
+
   _ensureSurface() {
     const w = this.width;
     const h = this.height;
     if (
-      !this._surface ||
+      !this._ring ||
       this._surfaceSize?.width !== w ||
       this._surfaceSize?.height !== h
     ) {
-      const hadSurface = Boolean(this._surface);
-      const a = this._native.createSurfaceIOSurface(w, h, this.scale, true);
-      const b = this._native.createSurfaceIOSurface(w, h, this.scale, true);
-      this._chain = { back: a, front: b };
-      this._native.surfaceLock(a.handle);
-      this._native.ctxClearRect(a.handle, 0, 0, w, h);
-      this._native.ctxClearRect(b.handle, 0, 0, w, h);
-      this._surface = a.handle;
+      const hadSurface = Boolean(this._ring);
+      this._ring = [];
+      for (let i = 0; i < CocoaPaneWindow.RING; i += 1) {
+        const s = this._native.createSurfaceIOSurface(w, h, this.scale, true);
+        this._native.ctxClearRect(s.handle, 0, 0, w, h);
+        this._ring.push(s);
+      }
+      this._drawIndex = 0;
+      this._shownIndex = -1;
+      this._native.surfaceLock(this._ring[0].handle);
+      this._surface = this._ring[0].handle;
       this._surfaceSize = { width: w, height: h };
       this._surfaceGen++;
       this._flushDamage = 'full';
@@ -174,9 +189,9 @@ export class CocoaPaneWindow {
 
   /** Flip and tell the host, instead of touching any layer of our own. */
   present() {
-    if (!this._dirty || !this._surface || this.destroyed) return;
+    if (!this._dirty || !this._ring || this.destroyed) return;
     this._dirty = false;
-    const shown = this._chain.back;
+    const shown = this._ring[this._drawIndex];
     this._native.surfaceUnlock(shown.handle);
     const damage = this._flushDamage;
     this._flushDamage = null;
@@ -187,23 +202,24 @@ export class CocoaPaneWindow {
       width: this.width,
       height: this.height,
     });
-    this._chain.back = this._chain.front;
-    this._chain.front = shown;
-    this._surface = this._chain.back.handle;
+    this._shownIndex = this._drawIndex;
+    // the next buffer round the ring — two behind what the host will be
+    // showing, so it is safe to write even before the host has switched
+    this._drawIndex = (this._drawIndex + 1) % CocoaPaneWindow.RING;
+    const next = this._ring[this._drawIndex];
+    this._surface = next.handle;
     this._surfaceGen++;
-    this._native.surfaceLock(this._surface);
-    this._native.copySurfaceRegion(
-      shown.handle,
-      this._surface,
-      damage === 'full' || !damage
-        ? null
-        : damage.flatMap((r) => [
-            Math.floor(r.x),
-            Math.floor(r.y),
-            Math.ceil(r.width) + 1,
-            Math.ceil(r.height) + 1,
-          ]),
-    );
+    this._native.surfaceLock(next.handle);
+    // A full-repaint frame overwrites everything next, so no catch-up is
+    // needed. A partial frame paints only its damage, so `next` must first
+    // hold the last complete frame underneath — and the WHOLE of it, not
+    // just this frame's rects, because in a three-buffer ring `next` was
+    // last drawn two presents ago and is stale everywhere. A full copy of
+    // the just-shown buffer is the complete background; the safe target is
+    // what triple buffering buys.
+    if (damage !== 'full' && damage) {
+      this._native.copySurfaceRegion(shown.handle, next.handle, null);
+    }
   }
 
   snapshot() {
@@ -214,7 +230,7 @@ export class CocoaPaneWindow {
     if (this.destroyed) return;
     this.destroyed = true;
     this.app._unregisterWindow(this);
-    this._chain = null;
+    this._ring = null;
     this._surface = null;
   }
 }
