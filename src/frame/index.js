@@ -481,19 +481,30 @@ function PaneHostView({
   focusable,
   onEmbedError,
 }) {
+  // `onEmbedError` is a fresh closure every host render (it captures
+  // setState), and the host ticks its own state many times a second — so it
+  // must not be an effect dependency, or the effect below tears the pane
+  // layer down and rebuilds it on every host render, and the gap between
+  // `host.destroy()` and the next present is a visible full-pane flash. A
+  // ref carries the latest callback into a once-per-session effect.
+  const embedErrorRef = useRef(onEmbedError);
+  embedErrorRef.current = onEmbedError;
+
   useEffect(() => {
     const s = session.current;
     const node = containerRef.current;
     const wnd = node?.root?.window;
     if (!s || !node || !wnd) {
-      onEmbedError?.(new Error('the pane region has no window to sit in'));
+      embedErrorRef.current?.(
+        new Error('the pane region has no window to sit in'),
+      );
       return undefined;
     }
     let host;
     try {
       host = app.createPaneHost(wnd);
     } catch (err) {
-      onEmbedError?.(err);
+      embedErrorRef.current?.(err);
       return undefined;
     }
     s.paneHost = host;
@@ -540,7 +551,7 @@ function PaneHostView({
       if (s.paneHost === host) s.paneHost = null;
       host.destroy();
     };
-  }, [app, session, containerRef, onEmbedError]);
+  }, [app, session, containerRef]);
 
   const forward = (name, data) => (ev) => {
     const s = session.current;
