@@ -558,19 +558,47 @@ export class CocoaContext2D {
     this._dirty();
   }
 
-  getImageData(x, y, w, h) {
-    const buf = this._native.ctxGetImageData(
-      this._s(),
-      Math.round(x),
-      Math.round(y),
-      Math.round(w),
-      Math.round(h),
-    );
-    return {
-      data: new Uint8ClampedArray(buf.buffer, buf.byteOffset, buf.length),
-      width: Math.round(w),
-      height: Math.round(h),
+  /**
+   * ntk's contract, not the browser's: with a callback it delivers
+   * `(err, imageData)`; without one it returns a Promise. On X11 the read
+   * is a server round trip, so every consumer in the tree is written
+   * async — the configurator's screen capture, the pixel harness,
+   * scripts/capture.js — and a backend that answered synchronously would
+   * strand their callbacks unfired. The pixels are read at call time (the
+   * surface only changes in the pump, which cannot run before a
+   * microtask), the delivery is a tick later like a resolved promise's.
+   */
+  getImageData(x, y, w, h, cb) {
+    const read = () => {
+      const buf = this._native.ctxGetImageData(
+        this._s(),
+        Math.round(x),
+        Math.round(y),
+        Math.round(w),
+        Math.round(h),
+      );
+      return {
+        data: new Uint8ClampedArray(buf.buffer, buf.byteOffset, buf.length),
+        width: Math.round(w),
+        height: Math.round(h),
+      };
     };
+    let result;
+    let failure;
+    try {
+      result = read();
+    } catch (err) {
+      failure = err;
+    }
+    const promise = failure ? Promise.reject(failure) : Promise.resolve(result);
+    if (typeof cb === 'function') {
+      promise.then(
+        (data) => cb(null, data),
+        (err) => cb(err),
+      );
+      return undefined;
+    }
+    return promise;
   }
 
   // --- text (minimal: enough for <canvas onDraw> users) --------------------
