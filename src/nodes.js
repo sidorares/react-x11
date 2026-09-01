@@ -10489,6 +10489,11 @@ export class WindowNode extends Scrollable(Node) {
       }
       (this._frameReasons ??= new Set()).add(reason);
     }
+    // A retained presenter keeps a per-node diff instead of damage rects,
+    // and this is the one channel every change already announces itself on
+    // (docs/macos.md §"One renderer, two presenters"). Feature-detected: an
+    // ntk window has no ear here and the X11 path is byte-identical.
+    this.window?.noteInvalidate?.(damage, layoutChanged, reason);
     if (layoutChanged) {
       this.needsLayout = true;
       // The content floors are measured from the tree, so anything that
@@ -10729,6 +10734,16 @@ export class WindowNode extends Scrollable(Node) {
       );
     }
     this._fullRepaintCause = null;
+    // A retained presenter takes the frame from here: the model half above —
+    // animations, layout, absolutize, the scroll offsets — is shared, and
+    // what changes per backend is how a frame reaches the screen. The damage
+    // list was still taken (its bookkeeping is what keeps the two paths one
+    // code) and is simply not consumed; the presenter diffs at the layer.
+    if (typeof this.window.presentFrame === 'function') {
+      this.window.presentFrame(this, damage);
+      this.app._reactX11Startup?.painted();
+      return;
+    }
     if (typeof this.window.getContext !== 'function') return; // headless mock
     // ntk getContext creates a fresh context (with window-event
     // subscriptions) on every call — cache one per window

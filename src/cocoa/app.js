@@ -40,6 +40,13 @@ class CocoaApp {
     this.scale = screens[0]?.scale ?? 1;
     this._screens = screens;
 
+    // 'surface' (the measured default) or 'layers' — the retained CALayer
+    // presenter, opt-in while docs/macos.md's measure-first gate is open.
+    this._presenterMode =
+      options.cocoa?.presenter ??
+      process.env.REACT_X11_COCOA_PRESENTER ??
+      'surface';
+
     this.fonts = new CocoaFontManager();
 
     // The X stub: just enough for the modules that carry an X escape hatch

@@ -7,6 +7,7 @@
 // _screenOrigin. The divide-by-scale into Cocoa points happens against the
 // native layer and nowhere above it.
 import { CocoaContext2D } from './context2d.js';
+import { CocoaLayerPresenter } from './presenter.js';
 
 let nextWindowId = 1;
 
@@ -47,20 +48,39 @@ export class CocoaWindow {
       options.x = attributes.x / s;
       options.y = attributes.y / s;
     }
-    if (attributes.backgroundColor !== undefined) {
-      const parsed = app._parseColor(attributes.backgroundColor);
-      if (parsed) options.backgroundColor = parsed;
-    }
     // `transparent` arrives as a 32-bit visual request on X; here every
     // window can composite, so the flag simply makes the glass clear.
-    if (attributes.visual !== undefined || attributes.transparent) {
-      options.opaque = false;
+    const transparent =
+      attributes.visual !== undefined || attributes.transparent;
+    if (transparent) options.opaque = false;
+    // The root layer's background is the "what newly exposed area shows"
+    // attribute an X window has — worth seeding on an opaque window so a
+    // resize flashes the right colour. On a transparent one it would sit
+    // OPAQUE behind the alpha the renderer paints (rounded corners went
+    // square behind it), and the honest ground there is nothing at all.
+    if (!transparent && attributes.backgroundColor !== undefined) {
+      const parsed = app._parseColor(attributes.backgroundColor);
+      if (parsed) options.backgroundColor = parsed;
     }
     this._h = this._native.createWindow2(options);
     this.windowNumber = this._native.windowNumber(this._h);
     this._layer = this._native.windowRootLayer(this._h);
     this._refreshOrigin();
     if (attributes.sizeHints) this.setSizeHints(attributes.sizeHints);
+
+    // The retained layer presenter (docs/macos.md Tier L), behind
+    // REACT_X11_COCOA_PRESENTER=layers while the surface path is the
+    // measured default. Its two hooks exist only in this mode, so the
+    // feature detection in nodes.js keeps the surface path byte-identical;
+    // the scroll blit is shadowed off because a layer frame has no backing
+    // bitmap to blit.
+    if (app._presenterMode === 'layers') {
+      this._presenter = new CocoaLayerPresenter(this);
+      this.presentFrame = (windowNode) => this._presenter.frame(windowNode);
+      this.noteInvalidate = (damage, layoutChanged) =>
+        this._presenter.noteInvalidate(damage, layoutChanged);
+      this.scrollRegion = null;
+    }
     app._registerWindow(this);
   }
 
@@ -254,6 +274,7 @@ export class CocoaWindow {
 
   /** Push the backing surface at the WindowServer, if anything drew. */
   present() {
+    if (this._presenter) return; // layers upload as they sync
     if (!this._dirty || !this._surface || this.destroyed) return;
     this._dirty = false;
     this._native.surfaceToLayer(this._surface, this._layer);
