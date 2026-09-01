@@ -174,7 +174,7 @@ export interface RootOptions {
    * Which display system a root that opens its own connection talks to.
    * `'auto'` (the default) uses the native Core Animation backend on macOS
    * and X11 via `$DISPLAY` everywhere else; on a mac without the
-   * `node-calayers` bridge installed it falls back to X11. Naming
+   * `@windowkit/appkit` bridge installed it falls back to X11. Naming
    * `'cocoa'` makes the bridge required. `REACT_X11_BACKEND` overrides.
    * Ignored when {@link RootOptions.app} is passed — a connection already
    * is a backend.

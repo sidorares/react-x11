@@ -1,4 +1,4 @@
-// A canvas-shaped 2d context over a node-calayers CoreGraphics surface.
+// A canvas-shaped 2d context over a @windowkit/appkit CoreGraphics surface.
 //
 // This is the raster half of the Cocoa backend: on the surface presenter it
 // is the whole drawing path, and on the layer presenter it stays as the
@@ -67,7 +67,7 @@ class LinearGradient {
 
 export class CocoaContext2D {
   /**
-   * @param native the node-calayers module
+   * @param native the @windowkit/appkit module
    * @param surfaceOf () => current surface handle — the owner replaces the
    *   surface on resize, and this context follows it.
    * @param genOf () => surface generation number

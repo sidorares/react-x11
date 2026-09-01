@@ -59,7 +59,7 @@ function keysymFromChars(chars) {
 
 /**
  * The three key facts events.js reads off a native key event, from the raw
- * node-calayers payload.
+ * @windowkit/appkit payload.
  */
 export function decodeKey(ev) {
   const fixed = VK_KEYSYMS.get(ev.keyCode);

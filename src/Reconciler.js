@@ -577,7 +577,7 @@ const isNtkApp = (v) =>
  * `'auto'` — the default — is one rule: macOS gets the native Core
  * Animation backend, everything else gets X11 via `$DISPLAY`. (More rungs —
  * Wayland — join this ladder, not a new one; docs/wayland.md.) On a mac
- * without the `node-calayers` bridge installed, auto falls back to X11 so
+ * without the `@windowkit/appkit` bridge installed, auto falls back to X11 so
  * an XQuartz setup keeps working; asking for `'cocoa'` by name means the
  * bridge is required, and its absence is an error that says how to fix it.
  * `REACT_X11_BACKEND` overrides for A/B runs without touching code.
@@ -737,7 +737,7 @@ export async function createRoot(options = {}) {
             if (cocoaAsked) throw err;
             if (process.env.NODE_ENV !== 'production') {
               console.warn(
-                'react-x11: no node-calayers bridge — falling back to the ' +
+                'react-x11: no @windowkit/appkit bridge — falling back to the ' +
                   `X11 backend. (${err.message.split('\n')[0]})`,
               );
             }

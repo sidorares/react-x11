@@ -21,9 +21,9 @@ import { IdAllocator, ROOT_ID, snapshot } from '../dbusmenu.js';
 // only counts up from ROOT_ID, so no real item can collide with it.
 const QUIT_ID = -2;
 
-// NSEventModifierFlags
+// NSEventModifierFlags. No Control here on purpose: a cross-platform
+// shortcut's primary modifier maps to Command, not the Mac's own ⌃.
 const FLAG_SHIFT = 1 << 17;
-const FLAG_CONTROL = 1 << 18;
 const FLAG_OPTION = 1 << 19;
 const FLAG_COMMAND = 1 << 20;
 
