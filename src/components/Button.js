@@ -3,6 +3,14 @@
 // build-step-free for consumers.
 
 import React from 'react';
+import { useAppOrNull } from '../appcontext.js';
+import {
+  ABS_FILL,
+  Bezel,
+  bezelNatural,
+  pressWash,
+  useNativeControls,
+} from './native.js';
 import { labelContent, useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
@@ -46,6 +54,7 @@ export function Button({
   variant = 'solid',
   size = 'medium',
   disabled = false,
+  native,
   style,
   ...boxProps
 }) {
@@ -61,12 +70,71 @@ export function Button({
     throw new Error(`<Button size="${size}">: one of ${SIZES.join(', ')}`);
   }
   const theme = useTheme();
+  const app = useAppOrNull();
+  const nativeControls = useNativeControls(native);
   const { props, style: controlStyle } = useControl(disabled, onPress, {
     styled: true,
   });
   const solid = variant === 'solid';
   const ghost = variant === 'ghost';
   const small = size === 'small';
+
+  // Only the solid variant has a native counterpart: outline and ghost are
+  // deliberately chrome-less designs AppKit has no bezel for, so they keep
+  // the drawn rendering under every policy.
+  if (nativeControls && solid) {
+    const controlSize = small ? 'small' : 'regular';
+    const nat = bezelNatural(app, 'push', controlSize);
+    return h(
+      'box',
+      {
+        theme,
+        role: 'button',
+        ...props,
+        ...boxProps,
+        style: [
+          controlStyle,
+          {
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: small ? 6 : 8,
+            // AppKit's metrics, not the palette's: a native bezel is
+            // designed at its own height, and stretching it is what this
+            // mode exists to avoid. Width still follows the label.
+            height: nat.height,
+            paddingLeft: small ? 10 : 14,
+            paddingRight: small ? 10 : 14,
+            color: disabled
+              ? theme.textMuted
+              : primary
+                ? theme.accentText
+                : theme.text,
+          },
+          style,
+        ],
+      },
+      h(Bezel, {
+        kind: 'push',
+        controlSize,
+        enabled: !disabled,
+        // the Return-key accent fill is AppKit's own "default button"
+        isDefault: primary && !disabled,
+        style: ABS_FILL,
+      }),
+      labelContent(children ?? label),
+      // The press answer. Last child on purpose: `:active` marks the
+      // pressed node and its ancestors, and the topmost child is what the
+      // press lands on. No hover tint — AppKit buttons have none.
+      h('box', {
+        style: [
+          ABS_FILL,
+          { borderRadius: small ? 5 : 6 },
+          !disabled && { ':active': { backgroundColor: pressWash(theme) } },
+        ],
+      }),
+    );
+  }
   const background = !solid
     ? // `transparent` rather than the ground's colour: an outline or ghost
       // button sits on whatever it sits on — a toolbar, a card, a table row —

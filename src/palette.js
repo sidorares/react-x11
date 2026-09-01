@@ -222,6 +222,19 @@ export const DefaultTheme = {
   // than it looks next to a CSS padding for that reason: 12 here is about
   // what 8 came to once a typical face's ascent had been added on.
   paddingY: 12,
+  // Which scheme this palette *is* — 'light' or 'dark'. Not a colour but a
+  // fact about the colours, for the consumers that have to match them with
+  // something they do not paint themselves: the Cocoa backend picks the
+  // AppKit appearance its native control bezels are rendered in from this,
+  // so a pinned-light app gets light bezels on a dark desktop. A custom
+  // dark palette built over the light base should say `scheme: 'dark'`.
+  scheme: 'light',
+  // How the core controls render where the backend offers the platform's
+  // own: `'auto'` (native where supported — today the Cocoa backend),
+  // `'native'` (ask for it; warns and falls back to drawn where there is
+  // none) or `'drawn'` (always the themed rendering). Per-instance escape
+  // hatch: `native={false}` on the one custom-branded control.
+  controls: 'auto',
 };
 
 // Which pressed token is derived from which pair, when the palette does not
@@ -332,6 +345,7 @@ export function resolveTheme(value, base = DefaultTheme) {
  * theme after it gets to do.
  */
 export const DarkTheme = resolveTheme({
+  scheme: 'dark',
   // A near-black with a little blue in it rather than #000: pure black shows
   // every seam between a window and the widgets on it, and no desktop's dark
   // theme uses it.

@@ -3,7 +3,9 @@
 // build-step-free for consumers.
 
 import React, { useContext, useEffect, useMemo, useRef } from 'react';
+import { useAppOrNull } from '../appcontext.js';
 import { changeEvent } from './change.js';
+import { Bezel, bezelNatural, useNativeControls } from './native.js';
 import { focusRingStyle, labelContent, useControl, useTheme } from './theme.js';
 import { XK_DOWN, XK_LEFT, XK_RIGHT, XK_UP } from './keys.js';
 
@@ -52,8 +54,10 @@ export function RadioGroup({
   );
 }
 
-export function Radio({ value, children, label, disabled = false }) {
+export function Radio({ value, children, label, disabled = false, native }) {
   const theme = useTheme();
+  const app = useAppOrNull();
+  const nativeControls = useNativeControls(native);
   const group = useContext(RadioGroupContext);
   if (!group) {
     throw new Error('react-x11: <Radio> must be inside a <RadioGroup>');
@@ -78,6 +82,38 @@ export function Radio({ value, children, label, disabled = false }) {
       if (ev.keysym === XK_DOWN || ev.keysym === XK_RIGHT) group.move(1);
       else if (ev.keysym === XK_UP || ev.keysym === XK_LEFT) group.move(-1);
     };
+  }
+
+  // The well swap Checkbox documents, with the radio bezel.
+  if (nativeControls) {
+    const nat = bezelNatural(app, 'radio');
+    return h(
+      'box',
+      {
+        theme,
+        role: 'radio',
+        'aria-checked': selected,
+        ...props,
+        style: [
+          controlStyle,
+          { flexDirection: 'row', alignItems: 'center', gap: 8 },
+        ],
+      },
+      h(Bezel, {
+        kind: 'radio',
+        state: selected ? 1 : 0,
+        pressed,
+        enabled: !disabled,
+        style: {
+          width: nat.width,
+          height: nat.height,
+          ...focusRingStyle(theme, focused),
+        },
+      }),
+      labelContent(children ?? label, {
+        color: disabled ? theme.textMuted : theme.text,
+      }),
+    );
   }
   // The dot only appears on the release, so the well answers the press
   // itself — see Checkbox, both for the three-look treatment and for why

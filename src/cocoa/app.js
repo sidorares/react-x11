@@ -18,6 +18,7 @@ import { flushPendingFrames } from '../frames.js';
 import { setCompositingForTests } from '../compositing.js';
 import { setScreensForTests } from '../screens.js';
 import { setScaleForTests } from '../scale.js';
+import { BezelStore } from './bezels.js';
 import { CocoaFontManager } from './fonts.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
@@ -49,6 +50,13 @@ class CocoaApp {
       'surface';
 
     this.fonts = new CocoaFontManager();
+
+    // AppKit-rendered control bezels. Its *presence* is the capability:
+    // `useSupports('nativeControls')` and the widget set's `controls:
+    // 'auto'` policy both test for this property, so a backend without it
+    // (X11, the headless mock) draws the themed controls with no further
+    // branching.
+    this.nativeBezels = new BezelStore(native);
 
     // The X stub: just enough for the modules that carry an X escape hatch
     // to no-op the way they do against the headless mock.

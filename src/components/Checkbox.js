@@ -3,8 +3,10 @@
 // build-step-free for consumers.
 
 import React from 'react';
+import { useAppOrNull } from '../appcontext.js';
 import { changeEvent } from './change.js';
 import { Icon } from './Icon.js';
+import { Bezel, bezelNatural, useNativeControls } from './native.js';
 import { focusRingStyle, labelContent, useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
@@ -32,10 +34,13 @@ export function Checkbox({
   onChange,
   name,
   disabled = false,
+  native,
   style,
   ...boxProps
 }) {
   const theme = useTheme();
+  const app = useAppOrNull();
+  const nativeControls = useNativeControls(native);
   const {
     hover,
     focused,
@@ -45,6 +50,44 @@ export function Checkbox({
   } = useControl(disabled, () =>
     onChange?.(changeEvent('checkbox', name, !checked)),
   );
+
+  // Native mode swaps only the well: AppKit's checkbox bezel at its natural
+  // size, driven by the same React press state the drawn well uses — the
+  // pressed bezel is a re-keyed image, so the press still lands on the
+  // press frame. Focus keeps the shared ring (the one focus look the whole
+  // app has), and hover has no tint because AppKit checkboxes have none.
+  if (nativeControls) {
+    const nat = bezelNatural(app, 'checkbox');
+    return h(
+      'box',
+      {
+        theme,
+        role: 'checkbox',
+        'aria-checked': checked,
+        ...props,
+        ...boxProps,
+        style: [
+          controlStyle,
+          { flexDirection: 'row', alignItems: 'center', gap: 8 },
+          style,
+        ],
+      },
+      h(Bezel, {
+        kind: 'checkbox',
+        state: checked ? 1 : 0,
+        pressed,
+        enabled: !disabled,
+        style: {
+          width: nat.width,
+          height: nat.height,
+          ...focusRingStyle(theme, focused),
+        },
+      }),
+      labelContent(children ?? label, {
+        color: disabled ? theme.textMuted : theme.text,
+      }),
+    );
+  }
   const fill = disabled
     ? theme.textMuted
     : pressed
