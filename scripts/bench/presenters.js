@@ -191,6 +191,64 @@ const SCENARIOS = {
     },
   },
 
+  /** 24 SVG icons re-tinted every tick — the icon hot path. In layers mode
+   *  each icon is retained CAShapeLayers, so a tint change is setShapeProps
+   *  on the render server's own primitives: zero rasters, zero uploads. The
+   *  surface presenter re-rasters the claim and re-uploads the window. */
+  svg: {
+    tree: (tick) => {
+      const TINT = ['#e8590c', '#1c7ed6', '#2f9e44', '#9c36b5'];
+      const icons = [];
+      for (let i = 0; i < 24; i += 1) {
+        const color = TINT[(i + tick) % TINT.length];
+        icons.push(
+          e(
+            'svg',
+            {
+              key: i,
+              viewBox: '0 0 24 24',
+              style: { width: 72, height: 72 },
+            },
+            e('circle', {
+              cx: 12,
+              cy: 12,
+              r: 9,
+              fill: 'none',
+              stroke: color,
+              strokeWidth: 2.5,
+            }),
+            e('path', {
+              d: 'M12 7 v5 l4 3',
+              stroke: color,
+              strokeWidth: 2.5,
+              fill: 'none',
+              strokeLinecap: 'round',
+            }),
+          ),
+        );
+      }
+      return windowOf(
+        [
+          e(
+            'box',
+            {
+              style: {
+                flexGrow: 1,
+                padding: 20,
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                gap: 16,
+                alignContent: 'flex-start',
+              },
+            },
+            ...icons,
+          ),
+        ],
+        'bench svg',
+      );
+    },
+  },
+
   /** A wheel notch per tick over 300 rows. The layers presenter's native
    *  scroll should answer with ~2 property sets and no uploads; the
    *  surface presenter blits and re-uploads the window. Also an input

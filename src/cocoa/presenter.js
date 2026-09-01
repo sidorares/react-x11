@@ -129,12 +129,29 @@ class ShapeRecorder {
     this._dash = Array.isArray(segments) ? segments : [];
   }
 
-  createLinearGradient() {
-    this.unsupported = true;
-    return { addColorStop() {} };
+  /**
+   * A recording gradient: SvgView resolves an SVG paint server to canvas
+   * gradient calls, and CAGradientLayer speaks the same vocabulary — a
+   * line, stops, colours — so a linear fill stays retained instead of
+   * pushing the whole document to the raster fallback. The line is mapped
+   * through the current matrix at creation, which is also where SvgView
+   * computes it.
+   */
+  createLinearGradient(x0, y0, x1, y1) {
+    return {
+      __shapeGradient: true,
+      a: this._apply(x0, y0),
+      b: this._apply(x1, y1),
+      stops: [],
+      addColorStop(offset, color) {
+        this.stops.push([offset, color]);
+      },
+    };
   }
 
   createRadialGradient() {
+    // CA's radial type does not speak canvas's two-circle geometry; wrong
+    // pixels are worse than rastered ones, so this stays the fallback.
     this.unsupported = true;
     return { addColorStop() {} };
   }
@@ -192,8 +209,33 @@ class ShapeRecorder {
 
   fill(path, rule) {
     const ops = this._pathOps(path);
-    const color = this._color(this.fillStyle);
-    if (!ops || !color || color[3] === 0) return;
+    if (!ops) return;
+    const style = this.fillStyle;
+    if (style && style.__shapeGradient) {
+      const stops = [];
+      for (const [offset, color] of style.stops) {
+        const parsed = cssColorStraight(String(color));
+        if (!parsed) continue;
+        const [r, g, b, a] = parsed;
+        stops.push([
+          Math.min(1, Math.max(0, offset)),
+          [r, g, b, a * this._alpha],
+        ]);
+      }
+      if (stops.length === 0) return;
+      stops.sort((p, q) => p[0] - q[0]);
+      this.ops.push({
+        kind: 'gradientFill',
+        path: ops,
+        a: style.a,
+        b: style.b,
+        stops,
+        rule: rule ?? 'nonzero',
+      });
+      return;
+    }
+    const color = this._color(style);
+    if (!color || color[3] === 0) return;
     this.ops.push({ kind: 'fill', path: ops, color, rule: rule ?? 'nonzero' });
   }
 
@@ -574,21 +616,55 @@ export class CocoaLayerPresenter {
     const native = this.native;
     visual.shapeLayers ??= [];
     while (visual.shapeLayers.length > recorder.ops.length) {
-      native.removeFromSuperlayer(visual.shapeLayers.pop());
+      native.removeFromSuperlayer(visual.shapeLayers.pop().layer);
     }
+    const w = rect.width / s;
+    const h = rect.height / s;
     recorder.ops.forEach((op, i) => {
-      let layer = visual.shapeLayers[i];
-      if (!layer) {
-        layer = native.createShapeLayer();
-        native.addSublayer(visual.layer, layer);
-        visual.shapeLayers[i] = layer;
+      const wantGradient = op.kind === 'gradientFill';
+      let entry = visual.shapeLayers[i];
+      if (entry && entry.gradient !== wantGradient) {
+        native.removeFromSuperlayer(entry.layer);
+        entry = null;
       }
-      native.setLayerProps(layer, {
-        frame: [0, 0, rect.width / s, rect.height / s],
+      if (!entry) {
+        entry = wantGradient
+          ? {
+              gradient: true,
+              layer: native.createGradientLayer(),
+              // the mask is not in the sublayer tree — CA owns the
+              // relationship, and the External's finalizer owns the memory
+              mask: native.createShapeLayer(),
+            }
+          : { gradient: false, layer: native.createShapeLayer() };
+        native.addSublayer(visual.layer, entry.layer);
+        visual.shapeLayers[i] = entry;
+      }
+      native.setLayerProps(entry.layer, {
+        frame: [0, 0, w, h],
         zPosition: i,
+        ...(wantGradient ? { mask: entry.mask } : {}),
       });
+      if (wantGradient) {
+        native.setLayerProps(entry.mask, { frame: [0, 0, w, h] });
+        native.setShapeProps(entry.mask, {
+          path: op.path,
+          fillColor: [0, 0, 0, 1],
+          strokeColor: null,
+          fillRule: op.rule,
+        });
+        // start/end are unit coordinates across the layer's bounds
+        native.setGradientProps(entry.layer, {
+          colors: op.stops.map(([, color]) => color),
+          locations: op.stops.map(([offset]) => offset),
+          startPoint: [op.a[0] / (w || 1), op.a[1] / (h || 1)],
+          endPoint: [op.b[0] / (w || 1), op.b[1] / (h || 1)],
+          type: 'axial',
+        });
+        return;
+      }
       native.setShapeProps(
-        layer,
+        entry.layer,
         op.kind === 'fill'
           ? {
               path: op.path,
@@ -611,8 +687,8 @@ export class CocoaLayerPresenter {
 
   _dropSvgShapes(visual) {
     if (!visual.shapeLayers) return;
-    for (const layer of visual.shapeLayers) {
-      this.native.removeFromSuperlayer(layer);
+    for (const entry of visual.shapeLayers) {
+      this.native.removeFromSuperlayer(entry.layer);
     }
     visual.shapeLayers = null;
     visual.shapeSignature = null;
