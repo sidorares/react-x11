@@ -6567,13 +6567,16 @@ export function openEditMenu(node, at, actions = {}) {
   if (items.length === 0) return;
 
   const style = node.resolvedTextStyle();
+  // `at` is `{x: ev.x, y: ev.y}` per the doc above — logical, like every
+  // coordinate a handler reads — and everything below is device: the
+  // geometry takes the scale so its chrome lands on the same grid as the
+  // device-sized text it measures.
+  const s = node.scale;
   const geometry = editMenuGeometry(
     items,
     (text) => app?.fonts?.layout(text, style)?.width,
+    s,
   );
-  // `at` is `{x: ev.x, y: ev.y}` per the doc above — logical, like every
-  // coordinate a handler reads — and the origin math below is device.
-  const s = node.scale;
   const deviceAt = at && {
     ...at,
     ...(Number.isFinite(at.x) && { x: at.x * s }),

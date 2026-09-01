@@ -21,6 +21,11 @@
  */
 import { formatShortcut, isSeparator } from './menuitem.js';
 
+// Logical px, multiplied by the display scale where they are used: the
+// menu's text is measured and painted in device pixels (fonts are sized on
+// the device grid), so the chrome around it has to live on the same grid —
+// unscaled constants against scaled glyph ink is rows shorter than their
+// own labels (the compact-menu bug, first seen on the 2x Cocoa backend).
 const ROW_HEIGHT = 22;
 const SEPARATOR_HEIGHT = 7;
 const PAD_X = 10;
@@ -143,33 +148,35 @@ export function editMenuItems(actions = {}, { canPaste = true } = {}) {
  * @param {(text: string) => number|null} [measure] text width, or null when
  *   nothing can be measured yet
  */
-export function editMenuGeometry(items, measure) {
+export function editMenuGeometry(items, measure, scale = 1) {
   const widthOf = (text) => {
     if (!text) return 0;
     const w = measure?.(text);
     return typeof w === 'number' && w > 0
       ? w
-      : text.length * FALLBACK_CHAR_WIDTH;
+      : text.length * FALLBACK_CHAR_WIDTH * scale;
   };
   const rows = [];
-  let y = PAD_Y;
+  let y = PAD_Y * scale;
   let widest = 0;
   for (const item of items) {
     const separator = isSeparator(item);
     const shortcut = formatShortcut(item.shortcut);
-    const height = separator ? SEPARATOR_HEIGHT : ROW_HEIGHT;
+    const height = (separator ? SEPARATOR_HEIGHT : ROW_HEIGHT) * scale;
     rows.push({ ...item, separator, shortcut, y, height });
     y += height;
     if (separator) continue;
     widest = Math.max(
       widest,
-      widthOf(item.label) + (shortcut ? SHORTCUT_GAP + widthOf(shortcut) : 0),
+      widthOf(item.label) +
+        (shortcut ? SHORTCUT_GAP * scale + widthOf(shortcut) : 0),
     );
   }
   return {
     rows,
-    width: Math.max(MIN_WIDTH, Math.ceil(widest + PAD_X * 2)),
-    height: Math.ceil(y + PAD_Y),
+    scale,
+    width: Math.max(MIN_WIDTH * scale, Math.ceil(widest + PAD_X * scale * 2)),
+    height: Math.ceil(y + PAD_Y * scale),
   };
 }
 
@@ -220,12 +227,14 @@ export function paintEditMenu(
   { geometry, active = -1, colors = EDIT_MENU_COLORS, layoutOf, radius = 4 },
 ) {
   const { width, height, rows } = geometry;
+  const s = geometry.scale ?? 1;
+  const padX = PAD_X * s;
 
-  panelPath(ctx, width, height, radius);
+  panelPath(ctx, width, height, radius * s);
   ctx.fillStyle = colors.background;
   ctx.fill();
   ctx.strokeStyle = colors.border;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = s;
   ctx.stroke();
 
   const label = (text, color, x, row) => {
@@ -241,10 +250,10 @@ export function paintEditMenu(
     if (row.separator) {
       ctx.fillStyle = colors.separator;
       ctx.fillRect(
-        PAD_X,
+        padX,
         Math.round(row.y + row.height / 2) + 0.5,
-        width - PAD_X * 2,
-        1,
+        width - padX * 2,
+        s,
       );
       continue;
     }
@@ -259,14 +268,14 @@ export function paintEditMenu(
       : on
         ? colors.highlightText
         : colors.text;
-    label(row.label, color, PAD_X, row);
+    label(row.label, color, padX, row);
     if (row.shortcut) {
       // the shortcut column stays quieter than the label, except in the
       // highlighted row where it has to stay legible on the accent
       const shortcutColor = on ? colors.highlightText : colors.dim;
       const layout = layoutOf?.(row.shortcut, shortcutColor);
       const w = layout?.width ?? 0;
-      label(row.shortcut, shortcutColor, width - PAD_X - w, row);
+      label(row.shortcut, shortcutColor, width - padX - w, row);
     }
   }
 }
