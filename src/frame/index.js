@@ -43,6 +43,7 @@ import React, {
   useState,
 } from 'react';
 
+import { useAppOrNull } from '../appcontext.js';
 import { FrameEnv } from './env.js';
 import { CallbackTable, PROTOCOL } from './protocol.js';
 
@@ -220,6 +221,11 @@ export function Frame({
   ref,
 }) {
   const env = useContext(FrameEnv);
+  // A backend that composites panes from shared memory (Cocoa) declares
+  // itself with createPaneHost; everything else embeds the pane's real
+  // window through <foreign>, exactly as before.
+  const appOrNull = useAppOrNull();
+  const paneApp = appOrNull?.createPaneHost ? appOrNull : null;
   const [state, setState] = useState({
     phase: 'starting',
     windowId: null,
@@ -365,9 +371,10 @@ export function Frame({
     // rather than one frame of default before an update lands.
     const { props: p, env: e, bridge: b } = current.current;
     const node = containerRef.current;
+    const sc = node?.scale ?? 1;
     const rect = {
-      width: Math.max(1, Math.round(node?.abs?.width || 0)) || 400,
-      height: Math.max(1, Math.round(node?.abs?.height || 0)) || 300,
+      width: Math.round((node?.abs?.width || 0) / sc) || 400,
+      height: Math.round((node?.abs?.height || 0) / sc) || 300,
     };
     s.sent = { props: p, env: e, bridge: b };
     trySend({
@@ -413,6 +420,23 @@ export function Frame({
   }, [props, env, bridge, generation]);
 
   if (state.phase === 'running') {
+    if (paneApp) {
+      return h(PaneHostView, {
+        containerRef,
+        session,
+        app: paneApp,
+        style,
+        focusable,
+        onEmbedError: (err) => {
+          session.current?.shutdown?.();
+          setState({
+            phase: 'failed',
+            windowId: null,
+            error: Object.assign(err, { phase: 'embed' }),
+          });
+        },
+      });
+    }
     return h('foreign', {
       ref: containerRef,
       windowId: state.windowId,
@@ -441,4 +465,129 @@ export function Frame({
         : fallback
       : null,
   );
+}
+
+/**
+ * The Cocoa pane region: a box for layout, focus and input — hit-tested
+ * here, in the host, and forwarded over the channel — with a backend pane
+ * host object carrying the composited layer. The pane process presents by
+ * message; this view points the layer at each presented buffer.
+ */
+function PaneHostView({
+  containerRef,
+  session,
+  app,
+  style,
+  focusable,
+  onEmbedError,
+}) {
+  useEffect(() => {
+    const s = session.current;
+    const node = containerRef.current;
+    const wnd = node?.root?.window;
+    if (!s || !node || !wnd) {
+      onEmbedError?.(new Error('the pane region has no window to sit in'));
+      return undefined;
+    }
+    let host;
+    try {
+      host = app.createPaneHost(wnd);
+    } catch (err) {
+      onEmbedError?.(err);
+      return undefined;
+    }
+    s.paneHost = host;
+
+    // The pane's size is this box's laid-out size, told to the pane whenever
+    // it changes — the same absolutize hook a <foreign> child window uses
+    // (src/foreignnodes.js), because onViewport fires only for scrollers.
+    let sentSize = null;
+    const syncSize = () => {
+      host.setRect(node.abs);
+      const sc = node.scale ?? 1;
+      const width = Math.max(1, Math.round(node.abs.width / sc));
+      const height = Math.max(1, Math.round(node.abs.height / sc));
+      if (sentSize && sentSize.width === width && sentSize.height === height) {
+        return;
+      }
+      sentSize = { width, height };
+      s.trySend?.({ type: 'pane-rect', width, height, scale: sc });
+    };
+    const origAbsolutize = node.absolutize.bind(node);
+    node.absolutize = (ox, oy) => {
+      origAbsolutize(ox, oy);
+      syncSize();
+    };
+    const origShift = node._shiftAbs?.bind(node);
+    if (origShift) {
+      node._shiftAbs = (dx, dy) => {
+        origShift(dx, dy);
+        host.setRect(node.abs);
+      };
+    }
+    if (node.abs?.width) syncSize();
+
+    const off = s.transport.onMessage((msg) => {
+      if (msg?.type === 'pane-present') {
+        host.setRect(node.abs);
+        host.present(msg.id);
+      }
+    });
+    return () => {
+      off();
+      node.absolutize = origAbsolutize;
+      if (origShift) node._shiftAbs = origShift;
+      if (s.paneHost === host) s.paneHost = null;
+      host.destroy();
+    };
+  }, [app, session, containerRef, onEmbedError]);
+
+  const forward = (name, data) => (ev) => {
+    const s = session.current;
+    const node = containerRef.current;
+    if (!s || !node) return;
+    const sc = node.scale ?? 1;
+    const payload = {
+      x: Math.max(0, Math.round(ev.x * sc - node.abs.x)),
+      y: Math.max(0, Math.round(ev.y * sc - node.abs.y)),
+      rootx: Math.round(ev.x * sc),
+      rooty: Math.round(ev.y * sc),
+      buttons: ev.buttons ?? 0,
+      time: Date.now(),
+      ...data(ev),
+    };
+    try {
+      s.trySend?.({ type: 'pane-event', name, ev: payload });
+    } catch {
+      // the exit path owns the failure story
+    }
+  };
+
+  return h('box', {
+    ref: containerRef,
+    style,
+    focusable: focusable ?? true,
+    onMouseDown: forward('mousedown', (ev) => ({ keycode: ev.button ?? 1 })),
+    onMouseUp: forward('mouseup', (ev) => ({ keycode: ev.button ?? 1 })),
+    onMouseMove: forward('mousemove', () => ({})),
+    onWheel: forward('wheel', (ev) => ({
+      deltaX: ev.deltaX ?? 0,
+      deltaY: ev.deltaY ?? 0,
+      deltaMode: ev.deltaMode ?? 'line',
+      smooth: Boolean(ev.smooth),
+      source: 'forwarded',
+    })),
+    onKeyDown: forward('keydown', (ev) => ({
+      keysym: ev.keysym,
+      baseKeysym: ev.baseKeysym ?? ev.keysym,
+      codepoint: ev.codepoint,
+      keycode: ev.keycode ?? 0,
+    })),
+    onKeyUp: forward('keyup', (ev) => ({
+      keysym: ev.keysym,
+      baseKeysym: ev.baseKeysym ?? ev.keysym,
+      codepoint: ev.codepoint,
+      keycode: ev.keycode ?? 0,
+    })),
+  });
 }

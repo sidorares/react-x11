@@ -21,6 +21,8 @@ import { setScaleForTests } from '../scale.js';
 import { BezelStore } from './bezels.js';
 import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
+import { CocoaPaneHost } from './panehost.js';
+import { CocoaPaneWindow } from './panewindow.js';
 import { CocoaFontManager } from './fonts.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
@@ -72,6 +74,11 @@ class CocoaApp {
     // is the follow-up — docs/macos.md §Menus)
     this._globalMenus = [];
     this._activeGlobalMenu = null;
+
+    // Frame-pane mode: this process renders a pane whose pixels a host
+    // composites (REACT_X11_FRAME is what the Frame host sets on the fork).
+    this._paneMode = options.pane ?? process.env.REACT_X11_FRAME === '1';
+    this._paneSend = null;
 
     // The X stub: just enough for the modules that carry an X escape hatch
     // to no-op the way they do against the headless mock.
@@ -142,6 +149,12 @@ class CocoaApp {
   }
 
   createWindow(attributes = {}) {
+    // A frame pane's window: no NSWindow at all — the pane paints into
+    // shared IOSurfaces and the HOST composites them (src/cocoa/
+    // panewindow.js). Chosen by the same prop the X11 pane uses.
+    if (this._paneMode && attributes.embeddable) {
+      return new CocoaPaneWindow(this, attributes);
+    }
     if (attributes.parent) {
       // A parented "window" here is a GL child surface — GlAreaNode's
       // contract, the one child-window consumer this backend has. It is a
@@ -165,6 +178,15 @@ class CocoaApp {
    */
   chooseGLConfig(spec) {
     return cocoaGLConfig(this, spec);
+  }
+
+  /**
+   * The Frame host seam (src/frame/index.js): a pane's composited region
+   * in this window. Its presence is what routes <Frame> to the shared-
+   * memory pane path instead of the X foreign-window embed.
+   */
+  createPaneHost(wnd) {
+    return new CocoaPaneHost(this, wnd);
   }
 
   /**
@@ -206,6 +228,33 @@ class CocoaApp {
     this._windows.set(wnd.windowNumber, wnd);
   }
 
+  /**
+   * The pane's end of the frame channel (childmain hands it over,
+   * feature-detected so the X11 pane path never notices): geometry and
+   * input come in, pane-present goes out.
+   */
+  attachPaneChannel(channel) {
+    if (!this._paneMode) return;
+    this._paneSend = (msg) => {
+      try {
+        channel.send(msg);
+      } catch {
+        // the host is going away; its shutdown owns the rest
+      }
+    };
+    channel.onMessage((msg) => {
+      const wnd = [...this._windows.values()][0];
+      if (!wnd) return;
+      if (msg?.type === 'pane-rect') {
+        wnd.setPaneSize(msg.width, msg.height, msg.scale);
+        this._afterInput();
+      } else if (msg?.type === 'pane-event') {
+        wnd.emit(msg.name, msg.ev);
+        this._afterInput();
+      }
+    });
+  }
+
   _unregisterWindow(wnd) {
     this._windows.delete(wnd.windowNumber);
     if (this._grabWindow === wnd) this._grabWindow = null;
@@ -216,6 +265,15 @@ class CocoaApp {
   start({ pumpInterval = 8 } = {}) {
     if (this._pump) return;
     const native = this._native;
+    // A pane process has no NSApplication to pump — no windows, no events,
+    // no dock presence. Its loop is frames and presents only.
+    if (this._paneMode) {
+      this._pump = setInterval(() => {
+        this._tickFrames();
+        this._presentAll();
+      }, pumpInterval);
+      return;
+    }
     native.initApp();
     native.setBackendEventCallback((ev) => this._route(ev));
     this._pump = setInterval(() => {
