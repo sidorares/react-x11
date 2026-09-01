@@ -28,8 +28,14 @@ export class CocoaWindow {
     this._dirty = false;
 
     const s = this.scale;
-    this.width = Math.max(1, Math.round(attributes.width ?? 640));
-    this.height = Math.max(1, Math.round(attributes.height ?? 480));
+    // Snapped to whole POINTS: AppKit rounds window sizes to the point
+    // grid, so an odd device-pixel request comes back one short in the
+    // resize echo, the echo re-requests, and the backing surface churns —
+    // each swap an uninitialized canvas only the next damage rect repaints.
+    const snap = (v, fallback) =>
+      Math.max(1, Math.round(Math.max(1, Math.round(v ?? fallback)) / s) * s);
+    this.width = snap(attributes.width, 640);
+    this.height = snap(attributes.height, 480);
     this.title = attributes.title ?? '';
     this._popup = attributes.overrideRedirect === true;
 
@@ -52,6 +58,7 @@ export class CocoaWindow {
     // window can composite, so the flag simply makes the glass clear.
     const transparent =
       attributes.visual !== undefined || attributes.transparent;
+    this._transparentWindow = Boolean(transparent);
     if (transparent) options.opaque = false;
     // The root layer's background is the "what newly exposed area shows"
     // attribute an X window has — worth seeding on an opaque window so a
@@ -120,8 +127,8 @@ export class CocoaWindow {
 
   resize(width, height) {
     const s = this.scale;
-    this.width = Math.max(1, Math.round(width));
-    this.height = Math.max(1, Math.round(height));
+    this.width = Math.max(1, Math.round(Math.round(width) / s) * s);
+    this.height = Math.max(1, Math.round(Math.round(height) / s) * s);
     this._native.setWindowFrame(
       this._h,
       null,
@@ -223,9 +230,21 @@ export class CocoaWindow {
       this._surfaceSize?.width !== w ||
       this._surfaceSize?.height !== h
     ) {
+      const hadSurface = Boolean(this._surface);
       this._surface = this._native.createSurface(w, h, this.scale);
+      this._native.ctxClearRect(this._surface, 0, 0, w, h);
       this._surfaceSize = { width: w, height: h };
       this._surfaceGen++;
+      // A replaced backing surface holds nothing: whatever bounded damage
+      // this frame carries, everything else on it would be garbage. Ask for
+      // the full frame — one extra repaint per real resize, correctness for
+      // every pixel outside the damage rect.
+      if (hadSurface) {
+        queueMicrotask(() => {
+          const node = this._reactX11Node;
+          if (node && !node.destroyed) node.invalidate(true, null, 'resize');
+        });
+      }
     }
     return this._surface;
   }
@@ -278,6 +297,14 @@ export class CocoaWindow {
     if (!this._dirty || !this._surface || this.destroyed) return;
     this._dirty = false;
     this._native.surfaceToLayer(this._surface, this._layer);
+    // AppKit derives a transparent window's shadow from the content's
+    // opaque shape and does not recompute it on repaints — a popup whose
+    // card lands a frame after the map keeps the full-frame square AppKit
+    // guessed first. Recompute — but only once this present's transaction
+    // has actually flushed to the render server, or the recompute reads
+    // the frame BEFORE this one and keeps the square rim for menus that
+    // paint once and are only hovered after.
+    if (this._transparentWindow) this.app._shadowStale.add(this);
   }
 
   snapshot(path) {

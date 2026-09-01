@@ -17,7 +17,7 @@
 import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 
-import { cssColorStraight } from 'ntk';
+import { cssColorStraight, Font } from 'ntk';
 
 import { loadNative } from './native.js';
 
@@ -161,6 +161,121 @@ export class CocoaFontManager {
     this._native = loadNative();
     this._fonts = new Map(); // family|weight|italic|size -> handle
     this._faces = new Map(); // family|weight|italic -> face wrapper
+    this._registered = new Map(); // lowercase family -> [{cg, weight, italic}]
+    this._byKey = new Map(); // ntk Font key -> { cg } | { ps }
+    this._sized = new Map(); // face key|size|variations -> CTFont handle
+    this._layouts = new Map(); // layout signature -> CocoaTextLayout (LRU)
+  }
+
+  /**
+   * `openFont()`'s engine seam (src/fonts.js `openThrough`): parse the face
+   * with fontkit — the object applications read metrics and axes off — and
+   * feed the same bytes to CoreText so the face RENDERS here too, by
+   * family name or as a `span.font`. An opened file is a face the user
+   * chose to look at; a backend where it measures but draws as the system
+   * font answers a different question than the one asked.
+   */
+  _open(candidate) {
+    const { key, path, data, postscriptName } = candidate;
+    const font =
+      path !== undefined
+        ? Font.loadSync(path, postscriptName)
+        : Font.fromData(data, candidate);
+    try {
+      let bytes =
+        path !== undefined
+          ? readFileSync(path)
+          : Buffer.isBuffer(data)
+            ? data
+            : Buffer.from(data.buffer ?? data);
+      const magic = bytes.length >= 4 ? bytes.readUInt32BE(0) : 0;
+      if (magic === 0x774f4646) bytes = woffToSfnt(bytes);
+      if (magic !== 0x774f4632 /* woff2 stays fontkit-only */) {
+        const info = this._native.fontFromData(bytes);
+        // a .ttc's data handle is its FIRST face; when a specific face was
+        // asked for and this is not it, leave rendering to the PostScript
+        // route (installed collections resolve there anyway)
+        const face = postscriptName ?? font.postscriptName;
+        if (info && (!face || info.postScriptName === face)) {
+          this._byKey.set(font.key ?? key, { cg: info.cg });
+          const family = (info.familyName ?? '').toLowerCase();
+          if (family) {
+            const faces = this._registered.get(family) ?? [];
+            faces.push({
+              cg: info.cg,
+              weight: numericWeight(info.weight),
+              italic: Boolean(info.italic),
+            });
+            this._registered.set(family, faces);
+          }
+          this._fonts.clear();
+          this._faces.clear();
+          this._sized.clear();
+        }
+      }
+    } catch {
+      // the fontkit face still measures; rendering falls back by family
+    }
+    return font;
+  }
+
+  /**
+   * A CTFont for an ntk `Font` face handed over as `span.font` — the way
+   * the fonts app renders the face it opened, and the way `loadFont`'s
+   * faces reach glyphs. Resolution: an installed face by its exact
+   * PostScript name; otherwise the file's own bytes (unwrapping `.woff`),
+   * cached per face key.
+   */
+  _faceFont(face, size, variations) {
+    const key = face.key ?? `${face.path ?? ''}#${face.postscriptName ?? ''}`;
+    let entry = this._byKey.get(key);
+    if (!entry) {
+      entry = {};
+      const ps = face.postscriptName;
+      if (ps && this._native.fontByPostScriptName(ps, 12)) {
+        entry.ps = ps;
+      } else {
+        let data = null;
+        if (face.path) {
+          try {
+            data = readFileSync(face.path);
+          } catch {
+            data = null;
+          }
+        }
+        if (!data && face.fk?.stream?.buffer) {
+          data = Buffer.from(face.fk.stream.buffer);
+        }
+        if (data) {
+          if (data.length >= 4 && data.readUInt32BE(0) === 0x774f4646) {
+            data = woffToSfnt(data);
+          }
+          const info = this._native.fontFromData(data);
+          if (info) entry.cg = info.cg;
+        }
+      }
+      this._byKey.set(key, entry);
+    }
+    const sizedKey = `${key}|${size}|${variations ? JSON.stringify(variations) : ''}`;
+    let handle = this._sized.get(sizedKey);
+    if (handle) return handle;
+    if (entry.ps) handle = this._native.fontByPostScriptName(entry.ps, size);
+    else if (entry.cg) handle = this._native.cgFontWithSize(entry.cg, size);
+    if (!handle) return null;
+    handle = this._withVariations(handle, variations);
+    this._sized.set(sizedKey, handle);
+    return handle;
+  }
+
+  _withVariations(handle, variations) {
+    if (
+      variations &&
+      typeof variations === 'object' &&
+      Object.keys(variations).length > 0
+    ) {
+      return this._native.fontApplyVariations(handle, variations);
+    }
+    return handle;
   }
 
   /**
@@ -207,7 +322,26 @@ export class CocoaFontManager {
     const key = `${family}|${weight}|${italic}|${size}`;
     let handle = this._fonts.get(key);
     if (!handle) {
-      handle = this._native.matchFont({
+      // Faces the app loaded win over system matching for their family —
+      // an app that ships a font means the one it ships (src/fonts.js).
+      for (const name of familyList(family)) {
+        const faces = this._registered.get(name.toLowerCase());
+        if (!faces?.length) continue;
+        let best = null;
+        let bestCost = Infinity;
+        for (const face of faces) {
+          const cost =
+            Math.abs(face.weight - weight) +
+            (face.italic === italic ? 0 : 1000);
+          if (cost < bestCost) {
+            bestCost = cost;
+            best = face;
+          }
+        }
+        handle = this._native.cgFontWithSize(best.cg, size);
+        break;
+      }
+      handle ??= this._native.matchFont({
         families: familyList(family),
         size,
         weight,
@@ -260,7 +394,7 @@ export class CocoaFontManager {
    * different compression CoreText cannot take and this engine does not
    * rebuild — the error says what to load instead.
    */
-  load(source) {
+  load(source, opts = {}) {
     let data;
     if (typeof source === 'string') {
       data = readFileSync(source);
@@ -284,7 +418,7 @@ export class CocoaFontManager {
       );
     }
     if (magic === 0x774f4646 /* wOFF */) data = woffToSfnt(data);
-    const info = this._native.loadFontData(data);
+    const info = this._native.fontFromData(data);
     if (!info) {
       throw new Error(
         'react-x11: loadFont — CoreText could not read the font data' +
@@ -292,12 +426,27 @@ export class CocoaFontManager {
           ' (expected .ttf, .otf, .ttc or .woff).',
       );
     }
+    // The process's own handle to the face, kept in a registry family
+    // matching consults FIRST — CoreText registration of in-memory data is
+    // best-effort at most, and rendering must not depend on it.
+    const family = (opts.family ?? info.familyName ?? '').toLowerCase();
+    if (family) {
+      const faces = this._registered.get(family) ?? [];
+      faces.push({
+        cg: info.cg,
+        weight: numericWeight(opts.weight ?? info.weight),
+        italic: opts.style ? isItalic(opts.style) : Boolean(info.italic),
+      });
+      this._registered.set(family, faces);
+    }
     // matches resolved before this face existed are stale now
     this._fonts.clear();
     this._faces.clear();
+    this._sized.clear();
+    this._layouts.clear();
     // `null` on purpose: src/fonts.js keeps the fontkit face it already
     // opened as the handle, which is the one whose metrics apps can read;
-    // the CoreText registration above is what rendering matches against.
+    // the registry above is what rendering resolves against.
     return null;
   }
 
@@ -307,23 +456,68 @@ export class CocoaFontManager {
     // iterating a string as spans was a caret pinned to x = 0.
     if (typeof spans === 'string') spans = [{ text: spans }];
     else if (!Array.isArray(spans)) spans = [spans];
+    // Memoized: an immediate-mode caller (the fonts app's specimen canvas,
+    // a hover pass) lays the same paragraph out every repaint, and a
+    // CTFramesetter per pointer move is what sluggish feels like. The key
+    // is everything shaping reads; ~64 entries covers a screenful.
+    const signature = JSON.stringify([
+      spans.map((sp) => [
+        sp.text,
+        sp.family ?? base.family,
+        sp.size ?? base.size,
+        sp.weight ?? base.weight,
+        sp.style ?? base.style,
+        sp.color ?? base.color ?? null,
+        sp.variations ?? base.variations ?? null,
+        (sp.font ?? base.font)?.key ?? null,
+      ]),
+      options.maxWidth,
+      options.align,
+      options.lineHeight,
+      options.maxLines,
+      options.overflow,
+      options.direction,
+    ]);
+    const hit = this._layouts.get(signature);
+    if (hit) {
+      // refresh LRU position
+      this._layouts.delete(signature);
+      this._layouts.set(signature, hit);
+      return hit;
+    }
     const { maxWidth, align, lineHeight, maxLines, overflow, direction } =
       options;
     const nativeSpans = [];
     let text = '';
+    let contextInk = false;
     for (const span of spans) {
       const t = String(span.text ?? '');
       if (!t) continue;
       text += t;
-      nativeSpans.push({
-        text: t,
-        font: this._font(
+      const size = span.size ?? base.size ?? 14;
+      const variations = span.variations ?? base.variations;
+      // A span may carry the face itself — an ntk Font from openFont(),
+      // which is how the fonts app renders exactly the file it opened.
+      const face = span.font ?? base.font;
+      let handle =
+        face && (face.postscriptName || face.path || face.fk)
+          ? this._faceFont(face, size, variations)
+          : null;
+      handle ??= this._withVariations(
+        this._font(
           span.family ?? base.family,
           numericWeight(span.weight ?? base.weight),
           isItalic(span.style ?? base.style),
-          span.size ?? base.size ?? 14,
+          size,
         ),
-        color: parseColor(span.color ?? base.color),
+        variations,
+      );
+      const color = span.color ?? base.color;
+      if (color == null) contextInk = true;
+      nativeSpans.push({
+        text: t,
+        font: handle,
+        ...(color == null ? {} : { color: parseColor(color) }),
       });
     }
     const raw = this._native.createLayout({
@@ -336,6 +530,12 @@ export class CocoaFontManager {
       ellipsis: overflow === 'ellipsis',
       rtl: direction === 'rtl',
     });
-    return new CocoaTextLayout(this._native, raw, text);
+    const layout = new CocoaTextLayout(this._native, raw, text);
+    layout._contextInk = contextInk;
+    this._layouts.set(signature, layout);
+    if (this._layouts.size > 64) {
+      this._layouts.delete(this._layouts.keys().next().value);
+    }
+    return layout;
   }
 }

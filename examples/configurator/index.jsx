@@ -586,7 +586,11 @@ const s = createStyles({
     flexShrink: 1,
     minHeight: 0,
     flexDirection: 'column',
-    alignItems: 'stretch',
+    // centred, not stretched: the lid (424) and the base (496) are
+    // different widths on purpose — a laptop's deck is wider than its
+    // screen — and stretch-alignment left both flush left, base jutting
+    // out to one side
+    alignItems: 'center',
     justifyContent: 'center',
     gap: 0,
     '@height < 720': { display: 'none' },
@@ -651,7 +655,10 @@ const s = createStyles({
 
   // The GL surface is a real X window stacked above everything the parent
   // paints, so it gets the stage to itself and the chips sit below it.
-  stageGl: { flexGrow: 1, minHeight: 0 },
+  // `alignSelf: 'stretch'`: the stage centres its children now (the flat
+  // laptop's lid and base are deliberately different widths), and the GL
+  // surface still wants the full column.
+  stageGl: { flexGrow: 1, minHeight: 0, alignSelf: 'stretch' },
   chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

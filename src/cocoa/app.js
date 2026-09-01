@@ -33,6 +33,7 @@ class CocoaApp {
     this._grabWindow = null;
     this._rafQueue = [];
     this._rafLast = 0;
+    this._shadowStale = new Set();
     this._pump = null;
     this._closed = false;
 
@@ -144,7 +145,13 @@ class CocoaApp {
     native.initApp();
     native.setBackendEventCallback((ev) => this._route(ev));
     this._pump = setInterval(() => {
-      native.pump2();
+      native.pump2(); // flushes the previous tick's CATransaction
+      if (this._shadowStale.size) {
+        for (const wnd of this._shadowStale) {
+          if (!wnd.destroyed) native.invalidateWindowShadow(wnd._h);
+        }
+        this._shadowStale.clear();
+      }
       this._tickFrames();
       this._presentAll();
     }, pumpInterval);
@@ -337,6 +344,14 @@ class CocoaApp {
     // During a live resize AppKit's modal loop owns the thread and Node
     // timers stall; flushing here is what keeps layout tracking the drag.
     this._afterInput();
+    // The React HALF of the response — an anchored popup following the
+    // window, an onResize setState — commits on a microtask AFTER this
+    // handler returns, and the pump that would paint it is the thing the
+    // modal loop stalled. A second flush queued BEHIND that commit is what
+    // lets an open menu resize with the drag instead of on release.
+    queueMicrotask(() => {
+      if (!this._closed) this._afterInput();
+    });
   }
 
   _routeClose(ev) {

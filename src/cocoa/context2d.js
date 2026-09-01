@@ -28,6 +28,41 @@ class LinearGradient {
     const [r, g, b, a] = parseColor(color);
     this._stops.push(offset, r, g, b, a);
   }
+
+  /**
+   * CoreGraphics requires stop locations inside [0, 1]; the decorations
+   * parser deliberately pads a gradient's line past both ends (its end
+   * colours pinned there — see src/decorations.js). Out-of-range locations
+   * fed to CGGradient render as a solid block, so the line is re-derived:
+   * the coordinates extend to cover the outermost stops and every location
+   * remaps into [0, 1].
+   */
+  _normalized() {
+    const stops = [];
+    for (let i = 0; i + 4 < this._stops.length; i += 5) {
+      stops.push(this._stops.slice(i, i + 5));
+    }
+    stops.sort((p, q) => p[0] - q[0]);
+    if (stops.length === 0) return { coords: this._coords, flat: [] };
+    if (stops.length === 1) stops.push([...stops[0]]);
+    const min = Math.min(0, stops[0][0]);
+    const max = Math.max(1, stops[stops.length - 1][0]);
+    let [x0, y0, x1, y1] = this._coords;
+    if (min !== 0 || max !== 1) {
+      const dx = x1 - x0;
+      const dy = y1 - y0;
+      const nx0 = x0 + dx * min;
+      const ny0 = y0 + dy * min;
+      x1 = x0 + dx * max;
+      y1 = y0 + dy * max;
+      x0 = nx0;
+      y0 = ny0;
+      const span = max - min;
+      for (const stop of stops) stop[0] = (stop[0] - min) / span;
+    }
+    for (const stop of stops) stop[0] = Math.min(1, Math.max(0, stop[0]));
+    return { coords: [x0, y0, x1, y1], flat: stops.flat() };
+  }
 }
 
 export class CocoaContext2D {
@@ -53,6 +88,11 @@ export class CocoaContext2D {
       dash: [],
       dashOffset: 0,
       font: '10px sans-serif',
+      shadowBlur: 0,
+      shadowOffsetX: 0,
+      shadowOffsetY: 0,
+      shadowColor: 'rgba(0,0,0,0)',
+      ctm: [1, 0, 0, 1, 0, 0],
     };
     this._onDirty = null;
   }
@@ -145,6 +185,64 @@ export class CocoaContext2D {
     this._state.font = String(value);
   }
 
+  get shadowBlur() {
+    return this._state.shadowBlur;
+  }
+
+  set shadowBlur(value) {
+    if (typeof value === 'number' && value >= 0) {
+      this._state.shadowBlur = value;
+      this._syncShadow();
+    }
+  }
+
+  get shadowOffsetX() {
+    return this._state.shadowOffsetX;
+  }
+
+  set shadowOffsetX(value) {
+    if (typeof value === 'number') {
+      this._state.shadowOffsetX = value;
+      this._syncShadow();
+    }
+  }
+
+  get shadowOffsetY() {
+    return this._state.shadowOffsetY;
+  }
+
+  set shadowOffsetY(value) {
+    if (typeof value === 'number') {
+      this._state.shadowOffsetY = value;
+      this._syncShadow();
+    }
+  }
+
+  get shadowColor() {
+    return this._state.shadowColor;
+  }
+
+  set shadowColor(value) {
+    this._state.shadowColor = value;
+    this._syncShadow();
+  }
+
+  _syncShadow() {
+    const st = this._state;
+    const [r, g, b, a] = parseColor(st.shadowColor);
+    const on = st.shadowBlur > 0 && a > 0;
+    this._native.ctxSetShadow(
+      this._s(),
+      on ? st.shadowBlur : 0,
+      st.shadowOffsetX,
+      st.shadowOffsetY,
+      r,
+      g,
+      b,
+      a,
+    );
+  }
+
   setLineDash(segments) {
     this._state.dash = Array.isArray(segments) ? segments : [];
     this._native.ctxSetLineDash(this._s(), this._state.dash, 0);
@@ -165,16 +263,69 @@ export class CocoaContext2D {
     this._native.ctxRestore(this._s());
   }
 
+  _concat(a2, b2, c2, d2, e2, f2) {
+    const [a, b, c, d, e, f] = this._state.ctm;
+    this._state.ctm = [
+      a * a2 + c * b2,
+      b * a2 + d * b2,
+      a * c2 + c * d2,
+      b * c2 + d * d2,
+      a * e2 + c * f2 + e,
+      b * e2 + d * f2 + f,
+    ];
+  }
+
   translate(x, y) {
+    this._concat(1, 0, 0, 1, x, y);
     this._native.ctxTranslate(this._s(), x, y);
   }
 
   scale(x, y) {
+    this._concat(x, 0, 0, y, 0, 0);
     this._native.ctxScale(this._s(), x, y);
   }
 
   rotate(angle) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    this._concat(cos, sin, -sin, cos, 0, 0);
     this._native.ctxRotate(this._s(), angle);
+  }
+
+  transform(a, b, c, d, e, f) {
+    this._concat(a, b, c, d, e, f);
+    this._native.ctxTransform(this._s(), a, b, c, d, e, f);
+  }
+
+  setTransform(a, b, c, d, e, f) {
+    if (typeof a === 'object' && a) ({ a, b, c, d, e, f } = a);
+    // concat the delta that takes the current matrix to the requested one
+    const [ca, cb, cc, cd, ce, cf] = this._state.ctm;
+    const det = ca * cd - cb * cc;
+    if (!det) return;
+    const ia = cd / det;
+    const ib = -cb / det;
+    const ic = -cc / det;
+    const id = ca / det;
+    const ie = -(ia * ce + ic * cf);
+    const iff = -(ib * ce + id * cf);
+    this.transform(
+      ia * a + ic * b,
+      ib * a + id * b,
+      ia * c + ic * d,
+      ib * c + id * d,
+      ia * e + ic * f + ie,
+      ib * e + id * f + iff,
+    );
+  }
+
+  resetTransform() {
+    this.setTransform(1, 0, 0, 1, 0, 0);
+  }
+
+  getTransform() {
+    const [a, b, c, d, e, f] = this._state.ctm;
+    return { a, b, c, d, e, f };
   }
 
   // --- paths ---------------------------------------------------------------
@@ -257,17 +408,44 @@ export class CocoaContext2D {
     this._native.ctxSetStrokeColor(this._s(), r, g, b, a);
   }
 
-  fill(rule) {
+  /**
+   * Replay an ntk/canvas Path2D (normalized M/L/C/Q/Z commands on `_cmds`)
+   * into the native context path. The fill/stroke/clip overloads that take
+   * a path argument route through this — ignoring the argument would run
+   * the operation on whatever path a PREVIOUS painter left behind, which
+   * is how a 44px SVG icon once filled a whole card with its accent.
+   */
+  _replayPath(path) {
+    const cmds = path?._cmds;
+    if (!Array.isArray(cmds)) return false;
+    const n = this._native;
+    const s = this._s();
+    n.ctxBeginPath(s);
+    for (const c of cmds) {
+      if (c.type === 'M') n.ctxMoveTo(s, c.x, c.y);
+      else if (c.type === 'L') n.ctxLineTo(s, c.x, c.y);
+      else if (c.type === 'C')
+        n.ctxCurveTo(s, c.x1, c.y1, c.x2, c.y2, c.x, c.y);
+      else if (c.type === 'Q') n.ctxQuadTo(s, c.x1, c.y1, c.x, c.y);
+      else if (c.type === 'Z') n.ctxClosePath(s);
+    }
+    return true;
+  }
+
+  fill(pathOrRule, maybeRule) {
+    const hasPath = pathOrRule != null && typeof pathOrRule === 'object';
+    const rule = hasPath ? maybeRule : pathOrRule;
+    if (hasPath && !this._replayPath(pathOrRule)) return;
     const style = this._state.fillStyle;
     if (style instanceof LinearGradient) {
-      const [x0, y0, x1, y1] = style._coords;
+      const { coords, flat } = style._normalized();
       this._native.ctxFillLinearGradient(
         this._s(),
-        x0,
-        y0,
-        x1,
-        y1,
-        style._stops,
+        coords[0],
+        coords[1],
+        coords[2],
+        coords[3],
+        flat,
       );
     } else {
       this._applyFill();
@@ -276,13 +454,23 @@ export class CocoaContext2D {
     this._dirty();
   }
 
-  stroke() {
+  stroke(path) {
+    if (path != null && typeof path === 'object' && !this._replayPath(path)) {
+      return;
+    }
     this._applyStroke();
     this._native.ctxStroke(this._s());
     this._dirty();
   }
 
-  clip() {
+  clip(pathOrRule) {
+    if (
+      pathOrRule != null &&
+      typeof pathOrRule === 'object' &&
+      !this._replayPath(pathOrRule)
+    ) {
+      return;
+    }
     this._native.ctxClip(this._s());
   }
 
@@ -290,14 +478,14 @@ export class CocoaContext2D {
     if (!(w > 0) || !(h > 0)) return;
     const style = this._state.fillStyle;
     if (style instanceof LinearGradient) {
-      const [x0, y0, x1, y1] = style._coords;
+      const { coords, flat } = style._normalized();
       this._native.ctxFillLinearGradient(
         this._s(),
-        x0,
-        y0,
-        x1,
-        y1,
-        style._stops,
+        coords[0],
+        coords[1],
+        coords[2],
+        coords[3],
+        flat,
         x,
         y,
         w,
@@ -388,6 +576,26 @@ export class CocoaContext2D {
   // --- text (minimal: enough for <canvas onDraw> users) --------------------
 
   _drawLayout(layout, x, y) {
+    if (layout._contextInk) {
+      const style = this._state.fillStyle;
+      if (style instanceof LinearGradient) {
+        const { coords, flat } = style._normalized();
+        this._native.drawLayoutGradient(
+          this._s(),
+          layout._handle,
+          x,
+          y,
+          coords[0],
+          coords[1],
+          coords[2],
+          coords[3],
+          flat,
+        );
+        this._dirty();
+        return;
+      }
+      this._applyFill();
+    }
     this._native.drawLayout(this._s(), layout._handle, x, y);
     this._dirty();
   }
@@ -400,7 +608,7 @@ export class CocoaContext2D {
   }
 
   fillText(text, x, y) {
-    const layout = this._fontLayout(text, this._state.fillStyle);
+    const layout = this._fontLayout(text);
     if (!layout) return;
     // canvas fillText's y is the baseline; layouts draw from their top
     const baseline = layout.lines[0]?.baseline ?? 0;

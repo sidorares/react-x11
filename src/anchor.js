@@ -28,11 +28,20 @@ import { availableArea } from './screens.js';
 export function screenRect(node) {
   if (!node?.abs) return null;
   const origin = windowOrigin(node);
+  // Logical pixels, like every rect application code touches: this is a
+  // public export, and the rects it is compared against — `anchorRect`'s
+  // result, `anchorArea` — answer in logical too. The device-pixel sum
+  // (origin + abs) divides once, here; a caller that needs the device rect
+  // is placement math and multiplies back by `node.scale` itself. On a 1x
+  // display the two units coincide, which is how a mix survived until the
+  // first 2x backend ran the tooltip arrow into the wrong half of the
+  // bubble.
+  const s = node.scale ?? 1;
   return {
-    x: origin.x + node.abs.x,
-    y: origin.y + node.abs.y,
-    width: node.abs.width,
-    height: node.abs.height,
+    x: (origin.x + node.abs.x) / s,
+    y: (origin.y + node.abs.y) / s,
+    width: node.abs.width / s,
+    height: node.abs.height / s,
   };
 }
 
@@ -136,7 +145,8 @@ export function deviceAnchorArea(node) {
   const app = node?.app;
   if (!app) return null;
   const at = screenRect(node);
-  return availableArea(app, at ? { x: at.x, y: at.y } : null);
+  const s = node.scale ?? 1;
+  return availableArea(app, at ? { x: at.x * s, y: at.y * s } : null);
 }
 
 /**

@@ -23,9 +23,194 @@
 // same "no bound named repaints everything" rule the X11 damage model has),
 // and geometry is re-diffed every frame because comparing four numbers is
 // cheaper than knowing.
+import { cssColorStraight } from 'ntk';
+
 import { CocoaContext2D } from './context2d.js';
 
 const RASTER_PAD = 2; // antialiasing/italic overhang outside the ink bounds
+
+/**
+ * A recording "context" for ntk's SvgView.draw: instead of rasterizing, it
+ * captures every fill/stroke as a flat op the bridge's CAShapeLayer path
+ * vocabulary can take verbatim. SVG is CA's native tongue — a path per
+ * layer, composited and tintable by the render server — and this recorder
+ * is what turns the existing, fully-debugged SvgView traversal into that
+ * without reimplementing SVG. Anything it cannot express (gradients,
+ * images, text, clips) flips `unsupported` and the node falls back to the
+ * raster visual, so correctness never depends on coverage.
+ */
+class ShapeRecorder {
+  constructor(matrix) {
+    this.ops = [];
+    this.unsupported = false;
+    this._stack = [];
+    this._m = matrix; // [a, b, c, d, e, f]
+    this._alpha = 1;
+    this.fillStyle = '#000';
+    this.strokeStyle = 'none';
+    this.lineWidth = 1;
+    this.lineCap = 'butt';
+    this.lineJoin = 'miter';
+    this._dash = [];
+  }
+
+  _apply(x, y) {
+    const [a, b, c, d, e, f] = this._m;
+    return [a * x + c * y + e, b * x + d * y + f];
+  }
+
+  _scaleFactor() {
+    const [a, b, c, d] = this._m;
+    return Math.sqrt(Math.abs(a * d - b * c));
+  }
+
+  save() {
+    this._stack.push({ m: [...this._m], alpha: this._alpha });
+  }
+
+  restore() {
+    const prev = this._stack.pop();
+    if (prev) {
+      this._m = prev.m;
+      this._alpha = prev.alpha;
+    }
+  }
+
+  translate(x, y) {
+    const [a, b, c, d, e, f] = this._m;
+    this._m = [a, b, c, d, a * x + c * y + e, b * x + d * y + f];
+  }
+
+  scale(x, y) {
+    const [a, b, c, d, e, f] = this._m;
+    this._m = [a * x, b * x, c * y, d * y, e, f];
+  }
+
+  rotate(angle) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const [a, b, c, d, e, f] = this._m;
+    this._m = [
+      a * cos + c * sin,
+      b * cos + d * sin,
+      c * cos - a * sin,
+      d * cos - b * sin,
+      e,
+      f,
+    ];
+  }
+
+  transform(a2, b2, c2, d2, e2, f2) {
+    const [a, b, c, d, e, f] = this._m;
+    this._m = [
+      a * a2 + c * b2,
+      b * a2 + d * b2,
+      a * c2 + c * d2,
+      b * c2 + d * d2,
+      a * e2 + c * f2 + e,
+      b * e2 + d * f2 + f,
+    ];
+  }
+
+  getTransform() {
+    const [a, b, c, d, e, f] = this._m;
+    return { a, b, c, d, e, f };
+  }
+
+  set globalAlpha(value) {
+    if (typeof value === 'number') this._alpha = value;
+  }
+
+  get globalAlpha() {
+    return this._alpha;
+  }
+
+  setLineDash(segments) {
+    this._dash = Array.isArray(segments) ? segments : [];
+  }
+
+  createLinearGradient() {
+    this.unsupported = true;
+    return { addColorStop() {} };
+  }
+
+  createRadialGradient() {
+    this.unsupported = true;
+    return { addColorStop() {} };
+  }
+
+  drawImage() {
+    this.unsupported = true;
+  }
+
+  fillText() {
+    this.unsupported = true;
+  }
+
+  clip() {
+    this.unsupported = true;
+  }
+
+  _pathOps(path) {
+    const cmds = path?._cmds;
+    if (!Array.isArray(cmds)) {
+      this.unsupported = true;
+      return null;
+    }
+    const out = [];
+    for (const c of cmds) {
+      if (c.type === 'M') out.push(['move', ...this._apply(c.x, c.y)]);
+      else if (c.type === 'L') out.push(['line', ...this._apply(c.x, c.y)]);
+      else if (c.type === 'C')
+        out.push([
+          'curve',
+          ...this._apply(c.x1, c.y1),
+          ...this._apply(c.x2, c.y2),
+          ...this._apply(c.x, c.y),
+        ]);
+      else if (c.type === 'Q')
+        out.push([
+          'quad',
+          ...this._apply(c.x1, c.y1),
+          ...this._apply(c.x, c.y),
+        ]);
+      else if (c.type === 'Z') out.push(['close']);
+    }
+    return out;
+  }
+
+  _color(style) {
+    if (typeof style !== 'string') {
+      this.unsupported = true;
+      return null;
+    }
+    const parsed = cssColorStraight(style);
+    if (!parsed) return null;
+    const [r, g, b, a] = parsed;
+    return [r, g, b, a * this._alpha];
+  }
+
+  fill(path, rule) {
+    const ops = this._pathOps(path);
+    const color = this._color(this.fillStyle);
+    if (!ops || !color || color[3] === 0) return;
+    this.ops.push({ kind: 'fill', path: ops, color, rule: rule ?? 'nonzero' });
+  }
+
+  stroke(path) {
+    const ops = this._pathOps(path);
+    const color = this._color(this.strokeStyle);
+    if (!ops || !color || color[3] === 0) return;
+    this.ops.push({
+      kind: 'stroke',
+      path: ops,
+      color,
+      lineWidth: this.lineWidth * this._scaleFactor(),
+      lineCap: this.lineCap,
+      dash: this._dash.map((v) => v * this._scaleFactor()),
+    });
+  }
+}
 
 /** Paint everything a node draws itself — Node.paint minus the children. */
 function paintSelf(node, ctx) {
@@ -328,6 +513,87 @@ export class CocoaLayerPresenter {
     });
   }
 
+  /**
+   * `<svg>` as CAShapeLayers: record SvgView's own traversal through the
+   * ShapeRecorder and hand each captured fill/stroke to a shape layer. One
+   * icon becomes two or three server-composited paths instead of a bitmap;
+   * anything the recorder cannot express falls back to the raster visual.
+   * Returns whether the shape route handled the node.
+   */
+  _trySvgShapes(node, visual, rect, sizeChanged) {
+    const s = this.scale;
+    if (
+      !sizeChanged &&
+      !this.dirtyAll &&
+      !this.dirty.has(node) &&
+      visual.shapeSignature
+    ) {
+      return true; // shapes are current
+    }
+    const recorder = new ShapeRecorder([
+      1 / s,
+      0,
+      0,
+      1 / s,
+      -rect.x / s,
+      -rect.y / s,
+    ]);
+    try {
+      node.paintContent(recorder);
+    } catch {
+      return false;
+    }
+    if (recorder.unsupported) return false;
+    const signature = JSON.stringify(recorder.ops);
+    if (signature === visual.shapeSignature) return true;
+    visual.shapeSignature = signature;
+    const native = this.native;
+    visual.shapeLayers ??= [];
+    while (visual.shapeLayers.length > recorder.ops.length) {
+      native.removeFromSuperlayer(visual.shapeLayers.pop());
+    }
+    recorder.ops.forEach((op, i) => {
+      let layer = visual.shapeLayers[i];
+      if (!layer) {
+        layer = native.createShapeLayer();
+        native.addSublayer(visual.layer, layer);
+        visual.shapeLayers[i] = layer;
+      }
+      native.setLayerProps(layer, {
+        frame: [0, 0, rect.width / s, rect.height / s],
+        zPosition: i,
+      });
+      native.setShapeProps(
+        layer,
+        op.kind === 'fill'
+          ? {
+              path: op.path,
+              fillColor: op.color,
+              strokeColor: null,
+              fillRule: op.rule,
+            }
+          : {
+              path: op.path,
+              fillColor: null,
+              strokeColor: op.color,
+              lineWidth: op.lineWidth,
+              lineCap: op.lineCap,
+              ...(op.dash.length ? { lineDashPattern: op.dash } : {}),
+            },
+      );
+    });
+    return true;
+  }
+
+  _dropSvgShapes(visual) {
+    if (!visual.shapeLayers) return;
+    for (const layer of visual.shapeLayers) {
+      this.native.removeFromSuperlayer(layer);
+    }
+    visual.shapeLayers = null;
+    visual.shapeSignature = null;
+  }
+
   _syncRaster(node, visual, parentOrigin, order) {
     const bounds = node._ownPaintBounds
       ? node._ownPaintBounds()
@@ -364,6 +630,14 @@ export class CocoaLayerPresenter {
     }
     const sizeChanged =
       raster.width !== rect.width || raster.height !== rect.height;
+    if (node.kind === 'svg') {
+      if (this._trySvgShapes(node, visual, rect, sizeChanged)) {
+        raster.width = rect.width;
+        raster.height = rect.height;
+        return;
+      }
+      this._dropSvgShapes(visual);
+    }
     if (!this.dirtyAll && !this.dirty.has(node) && !sizeChanged) return;
     const ctx = raster.ensure(this, rect.width, rect.height, this.window.scale);
     ctx.save();
