@@ -542,6 +542,22 @@ export class CocoaContext2D {
     this._dirty();
   }
 
+  /**
+   * Browser contract: a blank RGBA pixel block for the caller to fill and
+   * hand back to putImageData. Pure allocation — nothing touches the
+   * surface — but it lives on the context because that is where every
+   * canvas consumer looks for it (the Frame pane's mandelbrot does).
+   */
+  createImageData(width, height) {
+    const w = Math.max(1, Math.round(width));
+    const h = Math.max(1, Math.round(height));
+    return {
+      data: new Uint8ClampedArray(w * h * 4),
+      width: w,
+      height: h,
+    };
+  }
+
   putImageData(data, x, y) {
     if (!data?.data) return;
     const buf = Buffer.isBuffer(data.data)
