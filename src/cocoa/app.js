@@ -19,6 +19,7 @@ import { setCompositingForTests } from '../compositing.js';
 import { setScreensForTests } from '../screens.js';
 import { setScaleForTests } from '../scale.js';
 import { BezelStore } from './bezels.js';
+import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
 import { CocoaFontManager } from './fonts.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
@@ -57,6 +58,13 @@ class CocoaApp {
     // (X11, the headless mock) draws the themed controls with no further
     // branching.
     this.nativeBezels = new BezelStore(native);
+
+    // The GL policy, glbackend.js's shape. No GLX exists here, so the
+    // default is 'auto' (the direct backend where the runtime loads);
+    // useSupports('shaders') stays false until the first <glarea> resolves
+    // the runtime and settles _glCapsResolved.
+    this.glPolicy = { mode: options.glPolicy ?? 'auto' };
+    this._cocoaGL = null;
 
     // The X stub: just enough for the modules that carry an X escape hatch
     // to no-op the way they do against the headless mock.
@@ -128,12 +136,41 @@ class CocoaApp {
 
   createWindow(attributes = {}) {
     if (attributes.parent) {
+      // A parented "window" here is a GL child surface — GlAreaNode's
+      // contract, the one child-window consumer this backend has. It is a
+      // sublayer, not an NSWindow; nested <window> elements proper are
+      // still not supported.
+      if (attributes.parent instanceof CocoaWindow) {
+        return new CocoaGLArea(this, attributes);
+      }
       throw new Error(
         'react-x11: nested <window> elements are not supported on the ' +
           'cocoa backend yet — track docs/macos.md.',
       );
     }
     return new CocoaWindow(this, attributes);
+  }
+
+  /**
+   * The `<glarea>` config seam (src/glnodes.js): resolve the GL runtime and
+   * answer which rung of the API ladder this area draws through. See
+   * src/cocoa/glarea.js for the ladder.
+   */
+  chooseGLConfig(spec) {
+    return cocoaGLConfig(this, spec);
+  }
+
+  /**
+   * What the machine can do, `useSupports('shaders')`'s slow half: ntk
+   * settles this during its connect handshake, and here it settles on the
+   * first ask — watchDirectGL calls it exactly when a component subscribes
+   * before any <glarea> forced the probe (src/glbackend.js).
+   */
+  glCapabilities() {
+    return resolveCocoaGLRuntime(this).then(
+      () => this._glCapsResolved,
+      () => this._glCapsResolved,
+    );
   }
 
   _registerWindow(wnd) {
@@ -386,6 +423,8 @@ class CocoaApp {
     this._closed = true;
     if (this._pump) clearInterval(this._pump);
     this._pump = null;
+    this._cocoaGL?.destroy();
+    this._cocoaGL = null;
     this._native.setBackendEventCallback(null);
     for (const wnd of [...this._windows.values()]) wnd.destroy();
     return Promise.resolve();
