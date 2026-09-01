@@ -267,20 +267,24 @@ export class CocoaWindow {
     return this._ctx;
   }
 
-  /** The scroll-blit fast path: move pixels inside the backing surface. */
+  /** The scroll-blit fast path: move pixels inside the backing surface,
+   * with ntk Window.scrollRegion's contract — the shift happens WITHIN the
+   * rect, and a delta that leaves no surviving band reports false so the
+   * caller falls back to the plain repaint. */
   scrollRegion(rect, dx, dy) {
     if (!this._surface) return false;
-    this._native.scrollSurface(
+    if (!Number.isInteger(dx) || !Number.isInteger(dy)) return false;
+    const moved = this._native.scrollSurface(
       this._surface,
       Math.round(rect.x),
       Math.round(rect.y),
       Math.round(rect.width),
       Math.round(rect.height),
-      Math.round(dx),
-      Math.round(dy),
+      dx,
+      dy,
     );
-    this._dirty = true;
-    return true;
+    if (moved) this._dirty = true;
+    return Boolean(moved);
   }
 
   frameInFlight() {

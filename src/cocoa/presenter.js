@@ -434,22 +434,26 @@ export class CocoaLayerPresenter {
     }
     // Children live inside the node's CONTENT box. A property box clips on
     // its own layer; a rastered box whose layer covers its ink bounds needs
-    // an inner clip layer at the content box, or `overflow: hidden` under a
-    // gradient background would stop clipping.
+    // an inner clip layer at the content box — and a SCROLLER always gets
+    // one, because the clip host is where Core Animation's native scroll
+    // lives: children sit at content coordinates and the host's bounds
+    // origin is the offset, so a wheel notch is one property set and the
+    // render server shifts what it already has.
+    const scroller = Boolean(node.isScroller?.());
     let childHost = visual;
-    if (wantsRaster && node.clipsChildren?.()) {
-      childHost = this._ensureClipHost(node, visual);
+    if (scroller || (wantsRaster && node.clipsChildren?.())) {
+      childHost = this._ensureClipHost(node, visual, scroller);
     } else if (visual.clipHost) {
       this.native.removeFromSuperlayer(visual.clipHost.layer);
       visual.clipHost = null;
     }
-    if (node.isScroller?.()) this._syncBars(node, childHost);
+    if (scroller) this._syncBars(node, visual);
     // A <text>'s spans are painted by the paragraph's own raster
     // (collectSpans walks them); giving them layers would draw them twice.
     if (node.kind !== 'text') this._syncChildren(node, childHost, seen);
   }
 
-  _ensureClipHost(node, visual) {
+  _ensureClipHost(node, visual, scroller = false) {
     if (!visual.clipHost) {
       const layer = this.native.createLayer();
       this.native.addSublayer(visual.layer, layer);
@@ -458,22 +462,40 @@ export class CocoaLayerPresenter {
     const abs = node.abs;
     const host = visual.clipHost;
     const s = this.scale;
+    const scrollX = scroller ? (node.scrollX ?? 0) : 0;
+    const scrollY = scroller ? (node.scrollY ?? 0) : 0;
     const frame = [
       (abs.x - visual.origin.x) / s,
       (abs.y - visual.origin.y) / s,
       Math.max(0, abs.width) / s,
       Math.max(0, abs.height) / s,
     ];
-    const prev = host.props.frame;
-    if (!prev || prev.some((value, i) => value !== frame[i])) {
-      host.props.frame = frame;
+    const bounds = [
+      scrollX / s,
+      scrollY / s,
+      Math.max(0, abs.width) / s,
+      Math.max(0, abs.height) / s,
+    ];
+    const prev = host.props;
+    const frameChanged =
+      !prev.frame || prev.frame.some((value, i) => value !== frame[i]);
+    const boundsChanged =
+      !prev.bounds || prev.bounds.some((value, i) => value !== bounds[i]);
+    if (frameChanged || boundsChanged) {
+      prev.frame = frame;
+      prev.bounds = bounds;
       this.native.setLayerProps(host.layer, {
         frame,
+        bounds,
         masksToBounds: true,
         zPosition: 0.5,
       });
     }
-    host.origin = { x: abs.x, y: abs.y };
+    // Children position against CONTENT coordinates: node.abs already has
+    // the scroll subtracted (absolutize applies the offset), so adding it
+    // back here means a pure scroll changes nothing about any child's
+    // frame — only the bounds origin above moves.
+    host.origin = { x: abs.x - scrollX, y: abs.y - scrollY };
     return host;
   }
 
@@ -497,7 +519,7 @@ export class CocoaLayerPresenter {
       ],
       zPosition: order,
       hidden: Boolean(node.hidden),
-      masksToBounds: Boolean(node.clipsChildren?.()),
+      masksToBounds: Boolean(node.clipsChildren?.()) && !node.isScroller?.(),
       cornerRadius: (uniformRadius(style.borderRadius) ?? 0) / s,
       backgroundColor: style.backgroundColor
         ? (this.window.app._parseColor(String(style.backgroundColor)) ?? [
@@ -667,7 +689,12 @@ export class CocoaLayerPresenter {
     const width = Math.max(1, Math.ceil(abs.width));
     const height = Math.max(1, Math.ceil(abs.height));
     this.native.setLayerProps(bars.layer, {
-      frame: [0, 0, width / this.scale, height / this.scale],
+      frame: [
+        (abs.x - visual.origin.x) / this.scale,
+        (abs.y - visual.origin.y) / this.scale,
+        width / this.scale,
+        height / this.scale,
+      ],
       zPosition: 1e6,
       hidden: false,
     });
