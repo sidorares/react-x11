@@ -14,9 +14,57 @@
 // code points (what the selection and caret code speak). CoreText itself is
 // UTF-16 end to end; the code-point conversion happens at this boundary and
 // nowhere else.
+import { readFileSync } from 'node:fs';
+import { inflateSync } from 'node:zlib';
+
 import { cssColorStraight } from 'ntk';
 
 import { loadNative } from './native.js';
+
+/**
+ * WOFF v1 -> sfnt: the same table directory, zlib per table. ~40 lines of
+ * unwrapping is what lets every `.woff` an app already ships keep working
+ * on this backend without a converter in the build.
+ */
+function woffToSfnt(woff) {
+  const numTables = woff.readUInt16BE(12);
+  const flavor = woff.readUInt32BE(4);
+  const entries = [];
+  for (let i = 0; i < numTables; i++) {
+    const at = 44 + i * 20;
+    const compLength = woff.readUInt32BE(at + 8);
+    const origLength = woff.readUInt32BE(at + 12);
+    const offset = woff.readUInt32BE(at + 4);
+    const compressed = woff.subarray(offset, offset + compLength);
+    entries.push({
+      tag: woff.readUInt32BE(at),
+      checksum: woff.readUInt32BE(at + 16),
+      data: compLength === origLength ? compressed : inflateSync(compressed),
+      origLength,
+    });
+  }
+  const headerSize = 12 + numTables * 16;
+  let total = headerSize;
+  for (const entry of entries) total += (entry.origLength + 3) & ~3;
+  const out = Buffer.alloc(total);
+  out.writeUInt32BE(flavor, 0);
+  out.writeUInt16BE(numTables, 4);
+  const pow2 = 1 << Math.floor(Math.log2(numTables));
+  out.writeUInt16BE(pow2 * 16, 6); // searchRange
+  out.writeUInt16BE(Math.floor(Math.log2(numTables)), 8); // entrySelector
+  out.writeUInt16BE(numTables * 16 - pow2 * 16, 10); // rangeShift
+  let dataAt = headerSize;
+  entries.forEach((entry, i) => {
+    const dir = 12 + i * 16;
+    out.writeUInt32BE(entry.tag, dir);
+    out.writeUInt32BE(entry.checksum, dir + 4);
+    out.writeUInt32BE(dataAt, dir + 8);
+    out.writeUInt32BE(entry.origLength, dir + 12);
+    entry.data.copy(out, dataAt);
+    dataAt += (entry.origLength + 3) & ~3;
+  });
+  return out;
+}
 
 /** family list string -> array: 'Inter, "SF Pro", sans-serif' */
 function familyList(family) {
@@ -98,12 +146,61 @@ function flushFor(align, direction) {
   return ALIGN_FLUSH[align] ?? 0;
 }
 
+const GENERIC_FAMILIES = new Set([
+  'sans-serif',
+  'serif',
+  'monospace',
+  'cursive',
+  'system-ui',
+  'ui-sans-serif',
+  'ui-monospace',
+]);
+
 export class CocoaFontManager {
   constructor() {
     this._native = loadNative();
     this._fonts = new Map(); // family|weight|italic|size -> handle
     this._faces = new Map(); // family|weight|italic -> face wrapper
-    this._loaded = []; // families registered via load(), tried first
+  }
+
+  /**
+   * The catalogue seam ntk exposes as `fonts.source` — what the fonts app
+   * browses. On X that is fontconfig; here it is CoreText's collection.
+   * Pattern syntax: the family, with fontconfig's `:modifiers` tolerated
+   * and ignored (`Menlo:bold`, `:lang=ru` — the part after the colon is
+   * fontconfig vocabulary CoreText does not speak).
+   */
+  get source() {
+    return (this._source ??= {
+      matchSortedAsync: async ({ family } = {}) => {
+        const pattern = String(family ?? '').trim();
+        let name = pattern.split(':')[0].trim();
+        if (name && GENERIC_FAMILIES.has(name.toLowerCase())) {
+          // Rendering resolves generics to the system face, but its family
+          // is a hidden name (`.AppleSystemUIFont`) the catalogue cannot
+          // enumerate — a browser wants the visible families instead.
+          name =
+            {
+              serif: 'Times New Roman',
+              monospace: 'Menlo',
+              'ui-monospace': 'Menlo',
+              cursive: 'Snell Roundhand',
+            }[name.toLowerCase()] ?? 'Helvetica Neue';
+        }
+        const rows = this._native.listFonts(
+          name ? { family: name } : { limit: 400 },
+        );
+        return rows
+          .filter((row) => row.path)
+          .map((row) => ({
+            path: row.path,
+            postscriptName: row.postScriptName,
+            family: row.familyName,
+            style: row.styleName,
+            charset: '',
+          }));
+      },
+    });
   }
 
   _font(family, weight, italic, size) {
@@ -111,7 +208,7 @@ export class CocoaFontManager {
     let handle = this._fonts.get(key);
     if (!handle) {
       handle = this._native.matchFont({
-        families: [...this._loaded, ...familyList(family)],
+        families: familyList(family),
         size,
         weight,
         italic,
@@ -152,27 +249,64 @@ export class CocoaFontManager {
   }
 
   /**
-   * `loadFont()`'s engine half: register font bytes with CoreText for this
-   * process and put the family first in every later match.
+   * `loadFont()`'s engine half: register the face with CoreText so the
+   * process can match it by family name (with real weight/italic traits —
+   * they are read off the file, so four weights of one family resolve the
+   * way `fontWeight` expects). `source` is a path or the font bytes, the
+   * two shapes `src/fonts.js` hands over.
+   *
+   * Container rule: CoreText reads sfnt (ttf/otf/ttc). A `.woff` is those
+   * same tables zlib-wrapped and is unwrapped here; a `.woff2` is a
+   * different compression CoreText cannot take and this engine does not
+   * rebuild — the error says what to load instead.
    */
-  load(data) {
-    const info = this._native.loadFontData(
-      Buffer.isBuffer(data) ? data : Buffer.from(data),
-    );
-    if (!info) {
+  load(source) {
+    let data;
+    if (typeof source === 'string') {
+      data = readFileSync(source);
+    } else if (Buffer.isBuffer(source)) {
+      data = source;
+    } else if (source instanceof Uint8Array) {
+      data = Buffer.from(source.buffer, source.byteOffset, source.byteLength);
+    } else {
       throw new Error(
-        'react-x11: loadFont — CoreText could not read the font data.',
+        'react-x11: loadFont — expected a file path or font bytes, got ' +
+          typeof source,
       );
     }
-    if (!this._loaded.includes(info.familyName)) {
-      this._loaded.unshift(info.familyName);
+    const magic = data.length >= 4 ? data.readUInt32BE(0) : 0;
+    if (magic === 0x774f4632 /* wOF2 */) {
+      throw new Error(
+        'react-x11: loadFont — this is a .woff2 file, and the macOS font ' +
+          'loader (CoreText) does not read that container. Load the .ttf, ' +
+          '.otf or .woff of the same face instead — @fontsource packages ' +
+          'ship a .woff beside every .woff2.',
+      );
     }
-    // sized matches are stale the moment a better family exists
+    if (magic === 0x774f4646 /* wOFF */) data = woffToSfnt(data);
+    const info = this._native.loadFontData(data);
+    if (!info) {
+      throw new Error(
+        'react-x11: loadFont — CoreText could not read the font data' +
+          (typeof source === 'string' ? ` in ${source}` : '') +
+          ' (expected .ttf, .otf, .ttc or .woff).',
+      );
+    }
+    // matches resolved before this face existed are stale now
     this._fonts.clear();
-    return { family: info.familyName, postScriptName: info.postScriptName };
+    this._faces.clear();
+    // `null` on purpose: src/fonts.js keeps the fontkit face it already
+    // opened as the handle, which is the one whose metrics apps can read;
+    // the CoreText registration above is what rendering matches against.
+    return null;
   }
 
   layout(spans, base, options = {}) {
+    // ntk's contract: a bare string or a single span are one-span
+    // paragraphs. TextInputNode's value layout passes the string form, and
+    // iterating a string as spans was a caret pinned to x = 0.
+    if (typeof spans === 'string') spans = [{ text: spans }];
+    else if (!Array.isArray(spans)) spans = [spans];
     const { maxWidth, align, lineHeight, maxLines, overflow, direction } =
       options;
     const nativeSpans = [];

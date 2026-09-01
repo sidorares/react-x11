@@ -319,9 +319,11 @@ const usd = (n) => '$' + n.toLocaleString('en-US');
  * makes — that it renders identically anywhere — is kept by the lockfile
  * rather than by the repository.
  *
- * They are `.woff2`, which fontkit reads directly, and they are the **latin**
- * subsets, since everything on this page is latin. What the subset costs is
- * written down where it bites — see `Check` below.
+ * They are `.woff` — the container both engines read: fontkit directly, and
+ * the macOS backend's CoreText after a zlib unwrap (`.woff2`'s compression
+ * is the one CoreText cannot take). They are the **latin** subsets, since
+ * everything on this page is latin. What the subset costs is written down
+ * where it bites — see `Check` below.
  */
 const require_ = createRequire(import.meta.url);
 
@@ -339,16 +341,16 @@ const require_ = createRequire(import.meta.url);
  */
 const FONT_FILES = {
   sans: {
-    400: '@fontsource/inter/files/inter-latin-400-normal.woff2',
-    500: '@fontsource/inter/files/inter-latin-500-normal.woff2',
-    600: '@fontsource/inter/files/inter-latin-600-normal.woff2',
-    700: '@fontsource/inter/files/inter-latin-700-normal.woff2',
+    400: '@fontsource/inter/files/inter-latin-400-normal.woff',
+    500: '@fontsource/inter/files/inter-latin-500-normal.woff',
+    600: '@fontsource/inter/files/inter-latin-600-normal.woff',
+    700: '@fontsource/inter/files/inter-latin-700-normal.woff',
   },
   serif:
-    '@fontsource/instrument-serif/files/instrument-serif-latin-400-normal.woff2',
+    '@fontsource/instrument-serif/files/instrument-serif-latin-400-normal.woff',
   serifItalic:
-    '@fontsource/instrument-serif/files/instrument-serif-latin-400-italic.woff2',
-  mono: '@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2',
+    '@fontsource/instrument-serif/files/instrument-serif-latin-400-italic.woff',
+  mono: '@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff',
 };
 
 function useShippedFonts() {

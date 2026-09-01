@@ -18,7 +18,9 @@ import { keysymOf, MOD } from '../keysyms.js';
 const VK_KEYSYMS = new Map([
   [36, 0xff0d], // Return
   [48, 0xff09], // Tab
-  [49, 0x0020], // Space
+  // NOT space (kVK 49): space TYPES a character, so it goes through the
+  // character rule below and keeps its code point — a table entry here made
+  // `codepoint` undefined and a pressed spacebar inserted nothing.
   [51, 0xff08], // Delete (backspace)
   [53, 0xff1b], // Escape
   [76, 0xff8d], // KP_Enter
