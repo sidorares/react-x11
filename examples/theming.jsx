@@ -6,7 +6,7 @@
 // the palette it is given, the panel's own styles name it with `$tokens`,
 // and switching theme replaces one object.
 // Run with: npm run examples:theming  (needs an X server / DISPLAY)
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -20,6 +20,7 @@ import {
   Switch,
   Tabs,
   ThemeProvider,
+  useSupports,
   useSystemAppearance,
 } from '../src/index.js';
 import { THEME_OPTIONS, themeFor } from './themes.js';
@@ -118,7 +119,18 @@ export function ThemingPanel() {
   const [tab, setTab] = useState('one');
   const [presses, setPresses] = useState(0);
 
-  const theme = themeFor(name, mode);
+  // Every demo theme draws its own controls (`controls: 'drawn'` in
+  // themes.js) — except that picking the macOS impression on a backend that
+  // can render the real thing swaps the lookalike for AppKit's own bezels.
+  // `useSupports` is the capability question, so the same file runs on X11
+  // (where the impression stays drawn) without a warning.
+  const nativeControls = useSupports('nativeControls');
+  const theme = useMemo(() => {
+    const base = themeFor(name, mode);
+    return name === 'macos' && nativeControls
+      ? { ...base, controls: 'native' }
+      : base;
+  }, [name, mode, nativeControls]);
 
   return (
     // One provider, both channels: the widgets read it with useTheme() and

@@ -13,9 +13,16 @@
 // That is what `background` (the ground) and `surface` (what is raised off
 // it) are now, so the demo's own tokens are gone.
 
+// Each impression names `controls: 'drawn'`: these palettes ARE the point,
+// and on the Cocoa backend — where the widgets default to AppKit's own
+// bezels — a green GitHub button rendered as a native macOS button would be
+// the theme demo demonstrating nothing. The macOS impression is the one
+// exception, upgraded by the panel itself where the backend can oblige.
+
 /** GitHub's Primer: square-ish, roomy, green primary buttons. */
 const github = {
   light: {
+    controls: 'drawn',
     background: '#ffffff',
     surface: '#f6f8fa',
     text: '#1f2328',
@@ -37,6 +44,7 @@ const github = {
     paddingY: 10,
   },
   dark: {
+    controls: 'drawn',
     background: '#0d1117',
     surface: '#21262d',
     text: '#e6edf3',
@@ -70,6 +78,7 @@ const sfMono = '".SF NS Mono", "SF Mono", monospace';
 /** macOS: softer greys, tighter type, the system blue. */
 const macos = {
   light: {
+    controls: 'drawn',
     fontFamily: sfText,
     monoFamily: sfMono,
     background: '#ececec',
@@ -93,6 +102,7 @@ const macos = {
     paddingY: 9,
   },
   dark: {
+    controls: 'drawn',
     fontFamily: sfText,
     monoFamily: sfMono,
     background: '#1e1e1e',
@@ -120,6 +130,7 @@ const macos = {
 /** Windows 11 / Fluent: tighter corners, flatter surfaces. */
 const windows = {
   light: {
+    controls: 'drawn',
     background: '#f3f3f3',
     surface: '#ffffff',
     text: '#1b1b1b',
@@ -141,6 +152,7 @@ const windows = {
     paddingY: 10,
   },
   dark: {
+    controls: 'drawn',
     background: '#202020',
     surface: '#323232',
     text: '#ffffff',
