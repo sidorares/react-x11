@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.3.1](https://github.com/sidorares/react-x11/compare/v2.3.0...v2.3.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **types:** declare Node.scale and renderX11's scale, and say which rects are device ([#430](https://github.com/sidorares/react-x11/issues/430)) ([e4fb3f1](https://github.com/sidorares/react-x11/commit/e4fb3f12b78d904bc234930f8d62da0c0954870e))
+
 ## [2.3.0](https://github.com/sidorares/react-x11/compare/v2.2.1...v2.3.0) (2026-09-02)
 
 
