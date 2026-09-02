@@ -91,7 +91,8 @@
   },
   "optionalDependencies": {
     "@windowkit/appkit": "^0.1.0",
-    "dbus-native": "^0.15.1"
+    "dbus-native": "^0.15.1",
+    "x11-dri": "^0.7.0"
   },
   "peerDependencies": {
     "@babel/core": "^8.0.0",
