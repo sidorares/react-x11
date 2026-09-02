@@ -21,7 +21,7 @@ import { loadNative } from '../src/cocoa/native.js';
 // --- the fake bridge ----------------------------------------------------------
 
 /**
- * A bridge shaped like @windowkit/appkit 0.2's font and glyph natives.
+ * A bridge shaped like @windowkit/appkit 0.3's font and glyph natives.
  * Handles are plain objects keyed by what made them, so the same request
  * answers the same object — the property `drawGlyphs`'s grouping and
  * `fallbackFor`'s "no substitution needed" both stand on. Glyph ids are
@@ -94,29 +94,62 @@ function fakeNative() {
       }
       return null;
     },
-    createLayout({ spans, rtl }) {
-      const text = spans.map((s) => s.text).join('');
-      const width = [...text].length * 8;
-      return {
-        handle: { text, font: spans[0]?.font, rtl: Boolean(rtl) },
-        width,
-        height: 16,
-        lines: [
-          {
-            x: 0,
-            y: 0,
-            width,
-            height: 16,
-            baseline: 12,
-            start: 0,
-            end: text.length,
-            runs: [],
-          },
-        ],
-      };
+    fontWithSize(h, size) {
+      return handleFor(`${h.ps}@${size}`, {
+        ps: h.ps,
+        family: h.family,
+        size,
+      });
     },
-    drawLayout(surface, handle, x, y) {
-      calls.push(['layout', handle.text, x, y]);
+    // 0.3's contract: one CTLine read back run by run; a run's font is null
+    // for the font asked for and a handle for a face CoreText substituted
+    fontShapeText(h, text) {
+      if (text === 'é') {
+        // a base and a mark: the mark sits back over the base, raised
+        return {
+          width: 8,
+          runs: [
+            {
+              font: null,
+              glyphs: Uint16Array.from([0x66, 0x302]),
+              positions: Float64Array.from([0, 0, 6, 2]),
+              advances: Float64Array.from([8, 0]),
+            },
+          ],
+        };
+      }
+      if (text === '☺️') {
+        // CoreText substituted the emoji face for the whole cluster
+        return {
+          width: 16,
+          runs: [
+            {
+              font: handleFor(`AppleColorEmoji@${h.size}`, {
+                ps: 'AppleColorEmoji',
+                family: 'Emoji',
+                size: h.size,
+              }),
+              glyphs: Uint16Array.from([77]),
+              positions: Float64Array.from([0, 0]),
+              advances: Float64Array.from([16]),
+            },
+          ],
+        };
+      }
+      const cps = [...text].map((ch) => ch.codePointAt(0));
+      return {
+        width: cps.length * 8,
+        runs: cps.length
+          ? [
+              {
+                font: null,
+                glyphs: Uint16Array.from(cps, (cp) => cp + 1),
+                positions: Float64Array.from(cps.flatMap((_, i) => [i * 8, 0])),
+                advances: Float64Array.from(cps, () => 8),
+              },
+            ]
+          : [],
+      };
     },
     fontFromData() {
       return {
@@ -206,48 +239,45 @@ test('a matched face answers ntk seams: glyph ids, advances at a size, both metr
   assert.equal(face.postscriptName, 'Menlo-400');
 });
 
-test('shape answers covered text from the cmap: real ids, advances at the size, a pen that walks', () => {
+test('shape walks the pen: ax from the advances, dx/dy from the positions, y up', () => {
   const fonts = new CocoaFontManager(fakeNative());
   const face = fonts.match('Menlo');
-  const shaped = face.shape('Hi', 14);
+  const shaped = face.shape('é', 14);
   assert.strictEqual(shaped.font, face);
   assert.equal(shaped.size, 14);
-  assert.deepEqual(shaped.glyphs, [glyph(0x49, 8.4), glyph(0x6a, 8.4)]);
-  assert.equal(shaped.width, 16.8);
+  assert.equal(shaped.width, 8);
   assert.equal(shaped.direction, 'ltr');
+  assert.deepEqual(shaped.glyphs, [glyph(0x66, 8), glyph(0x302, 0, -2, 2)]);
+  const plain = face.shape('Hi', 14);
+  assert.deepEqual(plain.glyphs, [glyph(0x49, 8), glyph(0x6a, 8)]);
+  assert.equal(plain.width, 16);
+  assert.equal(
+    plain.glyphs[0].font,
+    undefined,
+    'no face on a glyph of the font asked for',
+  );
   assert.deepEqual(face.shape('', 14).glyphs, []);
+  assert.equal(face.shape('ab', 14, { direction: 'rtl' }).direction, 'rtl');
 });
 
-test('shape sends what the cmap cannot answer through the typesetter, as one glyph carrying its line', () => {
+test('a run CoreText substituted carries its face on the glyph, and it is the fallback face', () => {
   const fonts = new CocoaFontManager(fakeNative());
   const face = fonts.match('Menlo');
-  const cases = [
-    ['é', 'a base with a mark is one grapheme of two code points'],
-    ['☺️', 'an emoji with a variation selector'],
-    ['漢', 'a code point this face lacks'],
-    ['a漢', 'one uncovered cluster takes the whole text along'],
-  ];
-  for (const [text, why] of cases) {
-    const shaped = face.shape(text, 14);
-    assert.equal(shaped.glyphs.length, 1, why);
-    const [g] = shaped.glyphs;
-    assert.equal(g.id, 0, why);
-    assert.equal(g.ax, [...text].length * 8, `the line's width: ${why}`);
-    assert.equal(g.dx, 0);
-    assert.equal(g.dy, 0);
-    assert.equal(g._layout.lines[0].baseline, 12, why);
-    assert.strictEqual(
-      g._layout._handle.font,
-      face._handle(14),
-      'in this face at this size',
-    );
-    assert.equal(shaped.width, g.ax);
-  }
-  // right-to-left text is the typesetter's even when covered
-  const rtl = face.shape('ab', 14, { direction: 'rtl' });
-  assert.equal(rtl.glyphs.length, 1);
-  assert.equal(rtl.glyphs[0]._layout._handle.rtl, true);
-  assert.equal(rtl.direction, 'rtl');
+  const shaped = face.shape('☺️', 14);
+  assert.strictEqual(shaped.font, face, 'the result is still this face');
+  assert.equal(shaped.glyphs.length, 1);
+  const { font: emoji, ...rest } = shaped.glyphs[0];
+  assert.deepEqual(rest, glyph(77, 16));
+  assert.ok(emoji instanceof CocoaFace);
+  assert.equal(emoji.postscriptName, 'AppleColorEmoji');
+  assert.equal(emoji.glyphIdFor(0x1f600), 0x601);
+  // one object per PostScript name, whichever route found it
+  assert.strictEqual(fonts.fallbackFor(0x1f600, 'Menlo'), emoji);
+  // and it answers at every size through fontWithSize, as itself
+  assert.equal(emoji._handle(14).key, 'AppleColorEmoji@14');
+  assert.equal(emoji._handle(20).key, 'AppleColorEmoji@20');
+  assert.equal(emoji.advanceOf(1, 20), 12);
+  assert.equal(emoji.metrics(10).lineHeight, 11);
 });
 
 test('fallbackFor: the base for what it covers, a cascade face otherwise, null when nothing does, cached', () => {
@@ -273,17 +303,16 @@ test('fallbackFor: the base for what it covers, a cascade face otherwise, null w
   assert.equal(emoji.glyphIdFor(0x1f600), 0x601);
 });
 
-test('a fallback face answers at every size by asking CoreText the same question at that size', () => {
-  const native = fakeNative();
-  const fonts = new CocoaFontManager(native);
+test('a fallback face answers at every size as itself, through fontWithSize', () => {
+  const fonts = new CocoaFontManager(fakeNative());
   const box = fonts.fallbackFor(0x2500, 'Menlo');
-  assert.equal(box._handle(14).size, 14, 'seeded with the handle it came at');
   assert.equal(
-    box.advanceOf(0x2500, 20),
-    12,
-    'fontFallbackFor off Menlo at 20',
+    box._handle(14).key,
+    'Fallback@14',
+    'seeded with the handle it came at',
   );
-  assert.equal(box._handle(20).key, 'Fallback@20');
+  assert.equal(box.advanceOf(0x2500, 20), 12);
+  assert.equal(box._handle(20).key, 'Fallback-Regular@20');
   assert.equal(box.metrics(10).lineHeight, 11);
 });
 
@@ -353,7 +382,7 @@ test('drawGlyphs groups by face and size, walks the pen, flips dy, and sets the 
   assert.equal(dirty(), 1);
 });
 
-test('a typeset cluster draws its line at the pen, top-aligned from the baseline; a run nobody can resolve is skipped', () => {
+test('a glyph with a face of its own draws with that face; a run nobody can resolve is skipped', () => {
   const native = fakeNative();
   const { ctx, fonts } = context(native);
   const menlo = fonts.match('Menlo');
@@ -374,17 +403,23 @@ test('a typeset cluster draws its line at the pen, top-aligned from the baseline
   ]);
   assert.deepEqual(native.calls[0], ['fill', 1, 1, 1, 1]);
   const [, runs] = native.calls[1];
-  assert.equal(runs.length, 1);
-  assert.deepEqual(runs[0].glyphs, [1, 2]);
-  assert.deepEqual(
-    runs[0].positions,
-    [0, 30, 24, 30],
-    'the pen advanced past the cluster',
+  assert.equal(
+    runs.length,
+    2,
+    'the base face and the substitute, one native run each',
   );
-  // the line: 16 wide (two code points in the fake), drawn after the glyph
-  // batch at x = 8 and a baseline (12) above y = 30
-  assert.deepEqual(native.calls[2], ['layout', '☺️', 8, 18]);
-  assert.equal(native.calls.length, 3);
+  const base = runs.find((r) => r.font.family === 'Menlo');
+  const sub = runs.find((r) => r.font.family === 'Emoji');
+  assert.deepEqual(base.glyphs, [1, 2]);
+  assert.deepEqual(
+    base.positions,
+    [0, 30, 24, 30],
+    'the pen advanced past the emoji',
+  );
+  assert.deepEqual(sub.glyphs, [77]);
+  assert.deepEqual(sub.positions, [8, 30]);
+  assert.equal(sub.font.size, 14, "the substitute at the run's size");
+  assert.equal(native.calls.length, 2);
 });
 
 test('every op draws as Over on this bridge; nothing to draw is no call at all', () => {
@@ -513,26 +548,45 @@ describe(
       assert.equal(fonts.fallbackFor(0xffff, 'Menlo'), null);
     });
 
-    test('shape: covered text is real ids; a mark cluster, an emoji sequence and RTL are one typeset glyph', () => {
+    test('shape: real ids, a composed mark, and substituted runs carrying their face', () => {
       const fonts = new CocoaFontManager(bridge);
       const menlo = fonts.match('Menlo');
-      const plain = menlo.shape('Hé', 14);
-      assert.equal(plain.glyphs.length, 2);
-      assert.equal(plain.glyphs[0].id, menlo.glyphIdFor(0x48));
-      assert.equal(plain.glyphs[1].id, menlo.glyphIdFor(0xe9));
-      assert.ok(plain.width > 14);
-      for (const text of ['é', '☺️', '👍🏽', 'של']) {
-        const shaped = menlo.shape(
-          text,
-          14,
-          text === 'של' ? { direction: 'rtl' } : {},
-        );
-        assert.equal(shaped.glyphs.length, 1, text);
-        assert.equal(shaped.glyphs[0].id, 0, text);
-        assert.ok(shaped.glyphs[0]._layout, text);
-        assert.ok(shaped.glyphs[0].ax > 0, text);
-        assert.equal(shaped.width, shaped.glyphs[0].ax);
+      const plain = menlo.shape('Hi', 14);
+      assert.deepEqual(
+        plain.glyphs.map((g) => g.id),
+        [menlo.glyphIdFor(0x48), menlo.glyphIdFor(0x69)],
+      );
+      assert.ok(
+        Math.abs(plain.width - plain.glyphs[0].ax - plain.glyphs[1].ax) < 1e-6,
+      );
+      // e + combining acute composes into Menlo's own é
+      const composed = menlo.shape('e\u0301', 14);
+      assert.deepEqual(
+        composed.glyphs.map((g) => g.id),
+        [menlo.glyphIdFor(0xe9)],
+      );
+      assert.equal(composed.glyphs[0].font, undefined);
+      for (const [text, count] of [
+        ['☺️', 1],
+        ['👍🏽', 1],
+        ['של', 2],
+      ]) {
+        const shaped = menlo.shape(text, 14);
+        assert.equal(shaped.glyphs.length, count, text);
+        for (const g of shaped.glyphs) {
+          assert.ok(g.font instanceof CocoaFace, `${text}: a substituted face`);
+          assert.ok(Number.isInteger(g.id) && g.id > 0, text);
+          assert.ok(g.ax > 0, text);
+        }
       }
+      const smiley = menlo.shape('☺️', 14).glyphs[0];
+      assert.equal(smiley.font.familyName, 'Apple Color Emoji');
+      assert.strictEqual(
+        smiley.font,
+        fonts.fallbackFor(0x1f600, 'Menlo'),
+        'one face per PostScript name',
+      );
+      assert.equal(smiley.font.metrics(28).size, 28);
     });
 
     test('drawGlyphs puts an H upright between the cap line and its baseline, in the ink asked for', () => {
@@ -570,38 +624,36 @@ describe(
       );
     });
 
-    test('a typeset cluster in a run draws where the pen puts it, in the same ink', () => {
+    test('a substituted glyph in a run draws with its own face where the pen puts it', () => {
       const fonts = new CocoaFontManager(bridge);
       const menlo = fonts.match('Menlo');
-      const cluster = menlo.shape('é', 20).glyphs[0];
+      const [smiley] = menlo.shape('☺️', 20).glyphs;
       const run = {
         font: menlo,
         size: 20,
-        glyphs: [glyph(menlo.glyphIdFor(0x48), 12), cluster],
+        glyphs: [glyph(menlo.glyphIdFor(0x48), 12), smiley],
       };
-      const { px } = paint(fonts, 64, 32, (c) =>
+      const { px } = paint(fonts, 64, 40, (c) =>
         c.drawGlyphs(3, c.createSolidPicture(1, 0, 0, 1), [
-          { run, x: 4, y: 24 },
+          { run, x: 4, y: 30 },
         ]),
       );
-      // the cluster's column: x from 16 on; ink above the baseline, none below
-      const cols = new Set();
-      const rows = new Set();
-      for (let y = 0; y < 32; y++) {
-        for (let x = 16; x < 64; x++) {
+      // the emoji's column starts a Menlo advance past x = 4 and is coloured
+      // by the face itself, not by the red ink: yellow pixels there, and
+      // nothing above the H's cap line to its left
+      const capTop = 30 - menlo.metrics(20).capHeight - 1;
+      let yellow = 0;
+      let aboveTheH = 0;
+      for (let y = 0; y < 40; y++) {
+        for (let x = 0; x < 64; x++) {
           const i = (y * 64 + x) * 4;
-          if (red(px[i], px[i + 1])) {
-            cols.add(x);
-            rows.add(y);
-          }
+          const [r, g, b] = [px[i], px[i + 1], px[i + 2]];
+          if (x >= 16 && r > 128 && g > 100 && b < 120) yellow++;
+          if (x < 16 && y < capTop && r + g + b > 60) aboveTheH++;
         }
       }
-      assert.ok(cols.size > 3, 'the cluster inked');
-      assert.ok(Math.max(...rows) <= 24, 'nothing below the baseline');
-      assert.ok(
-        Math.min(...rows) < 24 - 10,
-        'the mark sits above the x-height',
-      );
+      assert.ok(yellow > 20, `the emoji inked in its own colours (${yellow})`);
+      assert.equal(aboveTheH, 0);
     });
 
     test('Src draws as Over on this bridge', () => {

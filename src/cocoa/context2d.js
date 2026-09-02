@@ -668,9 +668,9 @@ export class CocoaContext2D {
    * so a frame of terminal text is one call per foreground colour.
    * `run.font` is a face from `fonts.match()`/`fallbackFor()`, or an ntk
    * `Font` from `openFont()` (resolved to CoreText from the same bytes, so
-   * its glyph ids hold). A glyph carrying a typeset line — what `shape()`
-   * answers for a cluster the cmap alone cannot — draws that line at the
-   * pen instead, in the same ink.
+   * its glyph ids hold); a glyph carrying a `font` of its own — what
+   * `shape()` produces when CoreText substituted a face — draws with that
+   * face.
    *
    * One difference from ntk, stated: the transform applies to the glyphs as
    * well as to their origins, because CoreGraphics draws text through the
@@ -683,50 +683,43 @@ export class CocoaContext2D {
     const fonts = this._fonts;
     if (typeof fonts?._runHandle !== 'function') return;
     const batches = new Map(); // CTFont handle -> { font, glyphs, positions }
-    const lines = []; // typeset clusters: [layout, x, y]
     for (const placed of positioned) {
       const run = placed?.run;
       const glyphs = run?.glyphs;
       if (!glyphs?.length) continue;
-      const handle = fonts._runHandle(run.font, run.size);
+      const size = run.size;
+      const runHandle = fonts._runHandle(run.font, size);
       let pen = 0;
       for (const g of glyphs) {
-        const x = placed.x + pen + (g.dx || 0);
-        const y = placed.y - (g.dy || 0);
-        if (g._layout) {
-          lines.push([g._layout, x, y]);
-        } else if (handle) {
+        const handle = g.font ? fonts._runHandle(g.font, size) : runHandle;
+        if (handle) {
           let batch = batches.get(handle);
           if (!batch) {
             batch = { font: handle, glyphs: [], positions: [] };
             batches.set(handle, batch);
           }
           batch.glyphs.push(g.id);
-          batch.positions.push(x, y);
+          batch.positions.push(
+            placed.x + pen + (g.dx || 0),
+            placed.y - (g.dy || 0),
+          );
         }
         pen += g.ax || 0;
       }
     }
-    if (batches.size === 0 && lines.length === 0) return;
+    if (batches.size === 0) return;
     const [r, g, b, a] = this._inkOf(src);
     const surface = this._s();
     this._native.ctxSetFillColor(surface, r, g, b, a);
-    if (batches.size) {
-      const runs = [];
-      for (const batch of batches.values()) {
-        runs.push({
-          font: batch.font,
-          glyphs: Uint16Array.from(batch.glyphs),
-          positions: Float64Array.from(batch.positions),
-        });
-      }
-      this._native.ctxDrawGlyphs(surface, runs);
+    const runs = [];
+    for (const batch of batches.values()) {
+      runs.push({
+        font: batch.font,
+        glyphs: Uint16Array.from(batch.glyphs),
+        positions: Float64Array.from(batch.positions),
+      });
     }
-    for (const [layout, x, y] of lines) {
-      // a line draws from its top; the glyph's y is its baseline
-      const baseline = layout.lines[0]?.baseline ?? 0;
-      this._native.drawLayout(surface, layout._handle, x, y - baseline);
-    }
+    this._native.ctxDrawGlyphs(surface, runs);
     this._dirty();
   }
 

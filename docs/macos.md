@@ -547,7 +547,7 @@ implements it over CoreText:
   extensions the terminal and code-editor components use.
 
 The glyph-run seams are part of that contract on both backends (issue
-#432, over @windowkit/appkit 0.2's glyph natives — windowkit/appkit#1).
+#432, over @windowkit/appkit 0.3's glyph natives — windowkit/appkit#1).
 The face `fonts.match()` returns answers ntk's `glyphIdFor(cp)` (`null`
 when unmapped), `advanceOf(id, size)` and `shape(text, size)` beside
 `metrics(size)` — which reports ntk's `lineGap`/`lineHeight` alongside
@@ -558,11 +558,10 @@ context answers `drawGlyphs(op, src, positioned)`,
 ntk's exact run contract, grouping the runs by face and size into one
 `CTFontDrawGlyphs` per colour, so a renderer written against ntk's
 context — `<Terminal backend="vt">` — runs unchanged. Three things
-differ from ntk and are stated where they live: `shape()` answers
-covered text from the cmap and sends anything that needs the typesetter
-(marks, emoji sequences, uncovered or right-to-left text) through one
-`createLayout` as a single glyph carrying its line, which `drawGlyphs`
-draws — so an emoji cluster in Menlo comes out as the emoji, where ntk
+differ from ntk and are stated where they live: `shape()` runs the text
+through the typesetter (`fontShapeText`), and a glyph from a run
+CoreText substituted carries that face as `font`, which `drawGlyphs`
+honours — so an emoji cluster in Menlo comes out as the emoji, where ntk
 shapes `.notdef`; every op draws as Over, which for the opaque inks text
 uses is what Src does too; and the transform scales glyphs as well as
 their origins, because CoreGraphics draws text through the CTM like
@@ -917,9 +916,8 @@ raw-buffer upload; the API supports both so the choice can be measured.)
 `caretOffset`, range rects, truncation/`maxLines`, draw-to-bitmap ✅ and
 draw-into-surface 🆕, glyph-run access for `drawGlyphs` ✅
 (`fontGlyphForCodepoint`, `fontGlyphAdvances`, `fontFallbackFor`,
-`ctxDrawGlyphs` — windowkit/appkit#1, shipped in 0.2.0; a shaped line
-read back as glyph ids would let `shape()` answer clusters as real
-glyphs instead of a typeset line);
+`ctxDrawGlyphs` in 0.2.0, `fontShapeText` and `fontWithSize` in 0.3.0 —
+windowkit/appkit#1);
 font matching by family list/weight/style/variations → descriptor, and
 loading app-supplied font files (`loadFont`) 🆕; `hasGlyph` ✅.
 
