@@ -130,6 +130,15 @@ And what you read:
   layout.
 - `this.contentBox()` — `abs` inset by the border and the padding: where the
   content goes, and where every built-in draws.
+- `this.scale` — device pixels per logical pixel ([scale.md](scale.md)).
+  `this.style`, `this.abs`, `contentBox()`, the paint context, every rect you
+  hand `invalidate` or `scrollContents` and every rect you report to a screen
+  reader are device pixels already; a synthetic event's `x`/`y` are logical,
+  so a hit test against `abs` reads `ev.nativeEvent.x`/`y`, or multiplies.
+  On a 1x display the two units coincide — which is exactly how an element
+  that mixes them passes every headless test and then hovers, drags and
+  frames at half the distance on a retina panel.
+  `renderX11(element, { scale: 2 })` is the test that catches it.
 - `this.resolvedTextStyle()` — the text style this node resolves to, ready to
   hand to `app.fonts.layout` (below).
 - `this.direction` — which way this node reads, resolved: `'ltr'` or
@@ -272,9 +281,10 @@ class LogViewNode extends Node {
 **Two spaces, and both are the ones already in use.** Indices are **code
 points** — the space ntk's `TextLayout.caretPosition`/`indexAt` speak, so an
 emoji is one position and not two — and rectangles are in the **owning
-window's** coordinates, the same as `abs`, `contentBox()` and a mouse
-event's `x`/`y`. An element that answers in its own local coordinates is one
-whose highlight is drawn somewhere else on the screen.
+window's** coordinates, the same as `abs` and `contentBox()`: device pixels.
+(A mouse event's `x`/`y` are the same coordinates in logical pixels —
+[scale.md](scale.md).) An element that answers in its own local coordinates
+is one whose highlight is drawn somewhere else on the screen.
 
 **Answer from what you draw.** `<text>` computes its layout and its origin
 in one place and uses it for painting and for all four accessors, because a
@@ -1085,8 +1095,8 @@ than the one exception to it. Both are opt-in, and both keep core's answer
 when you say nothing.
 
 **Painting: `paintDamage()`.** The rect this pass covers, in the owning
-window's coordinates — the same space as `abs` and a mouse event's `x`/`y` —
-or `null` when the frame is unbounded and everything has to be drawn. Cull
+window's coordinates — the same space as `abs`, in device pixels — or `null`
+when the frame is unbounded and everything has to be drawn. Cull
 against it exactly as core culls the tree:
 
 ```js
@@ -1236,9 +1246,9 @@ Four things worth knowing, in the order they bite:
 **`dx`/`dy` are how far the pixels moved.** The sense `Surface.copyWithin`
 and ntk's `scrollRegion` use, not a scroll offset's: panning the scene right
 by ten is `dx: 10`, and the exposed band is down the left edge. Both whole
-pixels — a fractional shift is not a copy — and `rect` in window coordinates
-(the same space as `abs`, `contentBox()` and an event's `x`/`y`) and inside
-your node.
+device pixels — a fractional shift is not a copy — and `rect` in window
+coordinates (the same space as `abs` and `contentBox()`: device pixels) and
+inside your node.
 
 **You promise one thing: that inside `rect` the frame really is that
 translation.** Everything else is core's to check, and each of them declines

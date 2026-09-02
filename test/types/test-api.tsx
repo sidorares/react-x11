@@ -61,6 +61,7 @@ async function suite() {
     fonts: { 'sans-serif': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf' },
     wrap: true,
     title: 'a test',
+    scale: 2,
   });
 
   // queries return nodes, and the node API is the public one

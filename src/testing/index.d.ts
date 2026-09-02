@@ -66,6 +66,14 @@ export interface RenderX11Options {
    * D-Bus anywhere. See docs/accessibility.md.
    */
   a11y?: boolean;
+  /**
+   * Pin the display scale — device pixels per logical pixel (docs/scale.md).
+   * The headless harnesses resolve to exactly 1 on their own, so every
+   * geometry assertion means its numbers literally; `2` renders the tree
+   * the way a retina panel does, which is the only way to catch an element
+   * that compares a logical event coordinate with its device `abs`.
+   */
+  scale?: 'auto' | number;
 }
 
 /** One recorded assistive-technology fact, plus its one-line `summary`. */

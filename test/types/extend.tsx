@@ -87,6 +87,7 @@ class SparklineNode extends Node {
     super.paint(ctx);
     // the subclass surface docs/extending.md promises
     const _rect: number = this.abs.width;
+    const _scale: number = this.scale;
     const _kind: string = this.kind;
     const _destroyed: boolean = this.destroyed;
     void this.style;

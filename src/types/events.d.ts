@@ -13,7 +13,8 @@ export interface NativeEvent {
   /** X event type number. */
   type: number;
   name?: string;
-  /** Window-relative pointer position. */
+  /** Window-relative pointer position, in device pixels — the numbers off
+   * the wire, and the ones to compare with a node's `abs` (docs/scale.md). */
   x: number;
   y: number;
   /** Screen coordinates — what you anchor a `<popup>` at. */
@@ -33,7 +34,9 @@ export interface SyntheticEvent<T = DrawnNode> {
   target: T;
   /** The node whose handler is running. */
   currentTarget: T | null;
-  /** Window coordinates. */
+  /** Window coordinates, in logical pixels — the unit styles are written
+   * in. `nativeEvent.x`/`y` are the same point in device pixels, which is
+   * what a node's `abs` is in (docs/scale.md). */
   x: number;
   y: number;
   /** Coordinates relative to `target`'s box. */

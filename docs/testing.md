@@ -44,14 +44,15 @@ what they mean there.
 Mounts the tree and returns a handle **plus the queries bound to it**, so
 `const { getByText } = await renderX11(<App />)` reads the familiar way.
 
-| option            |                                                                       |
-| ----------------- | --------------------------------------------------------------------- |
-| `width`, `height` | the window (default 640×480)                                          |
-| `screen`          | the display (defaults comfortably larger than the window — see below) |
-| `backend`         | `'xserver'` (default) or `'mock'`                                     |
-| `fonts`           | `{ family: '/path/to.ttf' }` — **required for text pixels**           |
-| `wrap`            | wrap in a `<window>`; default true unless the element is one          |
-| `app`             | render into a connection you already have                             |
+| option            |                                                                        |
+| ----------------- | ---------------------------------------------------------------------- |
+| `width`, `height` | the window (default 640×480)                                           |
+| `screen`          | the display (defaults comfortably larger than the window — see below)  |
+| `backend`         | `'xserver'` (default) or `'mock'`                                      |
+| `fonts`           | `{ family: '/path/to.ttf' }` — **required for text pixels**            |
+| `wrap`            | wrap in a `<window>`; default true unless the element is one           |
+| `app`             | render into a connection you already have                              |
+| `scale`           | pin the display scale — `2` renders as a retina panel would; default 1 |
 
 | on the result         |                                                                       |
 | --------------------- | --------------------------------------------------------------------- |
