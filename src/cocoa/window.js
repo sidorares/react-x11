@@ -321,7 +321,22 @@ export class CocoaWindow {
       dx,
       dy,
     );
-    if (moved) this._dirty = true;
+    if (moved) {
+      this._dirty = true;
+      // The band moved inside the BACK buffer only. After the flip the
+      // other buffer still holds the band where it was, and the catch-up
+      // copy only covers what the flush painted — the strips the shift
+      // exposed — so the next frame would blit a band one frame stale.
+      // Record the shifted rect as painted, and the flip's copy carries it.
+      this.noteFrameDamage([
+        {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+        },
+      ]);
+    }
     return Boolean(moved);
   }
 
