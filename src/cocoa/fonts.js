@@ -6,7 +6,15 @@
 //                               overflow, direction })
 //     -> { width, height, lines, draw(ctx, x, y),
 //          indexAt(x, y), caretPosition(cp) }
-//   fonts.match(family, { weight, style }) -> { metrics(size) }
+//   fonts.match(family, { weight, style }) -> face
+//   fonts.fallbackFor(codepoint, family, { weight, style }) -> face | null
+//
+// and a face is ntk's `Font` as far as a renderer that positions glyphs
+// itself reads it — `metrics(size)`, `hasGlyph(cp)`, `glyphIdFor(cp)`,
+// `advanceOf(id, size)`, `shape(text, size)` — so a run built here draws
+// through `ctx.drawGlyphs` here (issue #432, over @windowkit/appkit 0.3's
+// fontGlyphForCodepoint / fontGlyphAdvances / fontFallbackFor /
+// fontShapeText / fontWithSize / ctxDrawGlyphs).
 //
 // Index spaces, because two meet here: `lines[].start/end` and
 // `runs[].start/end` are UTF-16 code units (what `rangeBands` in nodes.js
@@ -156,15 +164,199 @@ const GENERIC_FAMILIES = new Set([
   'ui-monospace',
 ]);
 
+/** The size a face is probed at when the question has no size in it. */
+const PROBE_SIZE = 14;
+
+/**
+ * A face — what `match()` and `fallbackFor()` answer — in the shape of
+ * ntk's `Font` as far as a renderer that positions glyphs itself reads it
+ * (ntk docs/text.md#glyph-runs): `metrics`, `hasGlyph`, `glyphIdFor`,
+ * `advanceOf`, `shape`. The face defers size the way ntk's does: `_handle`
+ * is the CTFont at a concrete pixel size, and every member that needs one
+ * asks for it, so one face serves a terminal at 13px and a label at 24px.
+ *
+ * Glyph ids are the font's own indices in both engines, so a run built
+ * from `glyphIdFor` here draws through `ctx.drawGlyphs` here with no
+ * translation; `run.font` is simply this object.
+ */
+export class CocoaFace {
+  /**
+   * @param manager the CocoaFontManager
+   * @param key stable identity (the match key, or the PostScript name of a
+   *   face that arrived by substitution)
+   * @param sizedHandle (size) => CTFont handle for this face at that size
+   */
+  constructor(manager, key, sizedHandle) {
+    this._manager = manager;
+    this.key = key;
+    this._sizedHandle = sizedHandle;
+    this._sized = new Map(); // size -> handle
+    this._covers = new Map(); // code point -> face that covers it | null
+    this._names = null;
+  }
+
+  _handle(size) {
+    const s = Number.isFinite(size) && size > 0 ? size : PROBE_SIZE;
+    let handle = this._sized.get(s);
+    if (handle === undefined) {
+      handle = this._sizedHandle(s) ?? null;
+      this._sized.set(s, handle);
+    }
+    return handle;
+  }
+
+  _name() {
+    if (!this._names) {
+      const m = this._manager._native.fontMetrics(this._handle(PROBE_SIZE));
+      this._names = {
+        familyName: m.familyName ?? '',
+        postscriptName: m.postScriptName ?? '',
+      };
+    }
+    return this._names;
+  }
+
+  /** The family CoreText resolved — `Menlo`, `Apple Color Emoji`. */
+  get familyName() {
+    return this._name().familyName;
+  }
+
+  /** ntk's spelling of the PostScript name, for callers written against
+   *  its `Font`. */
+  get postscriptName() {
+    return this._name().postscriptName;
+  }
+
+  /**
+   * Scaled to a pixel size. CoreText's names (`leading`) and ntk's
+   * (`lineGap`, `lineHeight`) side by side, so a caller written against
+   * either reads a finite line height.
+   */
+  metrics(size) {
+    const m = this._manager._native.fontMetrics(this._handle(size));
+    return {
+      ...m,
+      lineGap: m.leading,
+      lineHeight: m.ascent + m.descent + m.leading,
+    };
+  }
+
+  /**
+   * Coverage. A code point (ntk's contract) or a string — the two forms
+   * `hasGlyph` has been asked in.
+   */
+  hasGlyph(codepoint) {
+    if (typeof codepoint === 'number')
+      return this.glyphIdFor(codepoint) !== null;
+    return this._manager._native.fontHasGlyph(
+      this._handle(PROBE_SIZE),
+      String(codepoint),
+    );
+  }
+
+  /**
+   * Glyph id for a code point, or `null` when this face does not map it —
+   * the lookup twin of `hasGlyph` (ntk#254). A cmap lookup only: no
+   * shaping, so text that needs ligatures or marks goes through `shape()`.
+   */
+  glyphIdFor(codepoint) {
+    if (typeof codepoint !== 'number') return null;
+    return this._manager._native.fontGlyphForCodepoint(
+      this._handle(PROBE_SIZE),
+      codepoint,
+    );
+  }
+
+  /** Nominal (unshaped) horizontal advance of a glyph id, in pixels at
+   *  `size`. */
+  advanceOf(glyphId, size) {
+    const advances = this._manager._native.fontGlyphAdvances(
+      this._handle(size),
+      [glyphId],
+    );
+    return advances[0] ?? 0;
+  }
+
+  /**
+   * Shape a run of text at a pixel size: `{ font, size, direction, width,
+   * glyphs: [{ id, ax, dx, dy }] }`, glyphs in visual order with ntk's
+   * pen contract — `ax` the advance, `dx`/`dy` the drawing offset from the
+   * pen (y up). One CTLine through the typesetter (`fontShapeText`),
+   * which is what a cluster — a base with combining marks, an emoji
+   * sequence, a variation selector — needs and a grid renderer bypasses
+   * for everything else; the terminal shapes a cluster at a time and
+   * caches the run, so the typesetter runs once per distinct cluster.
+   *
+   * One thing ntk's `shape()` never does happens here: CoreText substitutes
+   * a face for characters this one lacks instead of shaping them as
+   * `.notdef`, and a glyph from a substituted run carries that face as
+   * `font` — an extra field ntk's contract ignores and this backend's
+   * `drawGlyphs` honours, so `☺️` in Menlo comes out as the emoji rather
+   * than Menlo's glyph at the emoji font's index.
+   */
+  shape(text, size, opts = {}) {
+    const manager = this._manager;
+    const raw = manager._native.fontShapeText(this._handle(size), String(text));
+    const glyphs = [];
+    let pen = 0;
+    for (const run of raw.runs) {
+      const face = run.font ? manager._faceOfHandle(run.font, size) : null;
+      for (let i = 0; i < run.glyphs.length; i++) {
+        const ax = run.advances[i];
+        const glyph = {
+          id: run.glyphs[i],
+          ax,
+          dx: run.positions[i * 2] - pen,
+          dy: run.positions[i * 2 + 1],
+        };
+        if (face) glyph.font = face;
+        glyphs.push(glyph);
+        pen += ax;
+      }
+    }
+    return {
+      font: this,
+      size,
+      direction: opts.direction ?? 'ltr',
+      width: raw.width,
+      glyphs,
+    };
+  }
+
+  /**
+   * A face that covers `codepoint` when this one does not — this face
+   * itself when it does, `null` when nothing on the system does. Faces the
+   * app loaded first, then CoreText's cascade off this face
+   * (`fontFallbackFor`). Cached per code point.
+   */
+  _coverFor(codepoint) {
+    if (this._covers.has(codepoint)) return this._covers.get(codepoint);
+    const found = this._manager._fallbackFrom(this, codepoint);
+    this._covers.set(codepoint, found);
+    return found;
+  }
+}
+
 export class CocoaFontManager {
-  constructor() {
-    this._native = loadNative();
+  /** @param native the @windowkit/appkit module; the tests hand in a fake */
+  constructor(native = loadNative()) {
+    this._native = native;
     this._fonts = new Map(); // family|weight|italic|size -> handle
     this._faces = new Map(); // family|weight|italic -> face wrapper
     this._registered = new Map(); // lowercase family -> [{cg, weight, italic}]
     this._byKey = new Map(); // ntk Font key -> { cg } | { ps }
     this._sized = new Map(); // face key|size|variations -> CTFont handle
     this._layouts = new Map(); // layout signature -> CocoaTextLayout (LRU)
+    this._faceByPs = new Map(); // PostScript name -> face CoreText chose itself
+  }
+
+  /** A face the app loaded joins every fallback chain: what the faces that
+   *  outlive `_faces.clear()` remembered about coverage is stale. */
+  _forgetCovers() {
+    for (const face of this._faceByPs.values()) face._covers.clear();
+    for (const faces of this._registered.values()) {
+      for (const reg of faces) reg.face?._covers.clear();
+    }
   }
 
   /**
@@ -211,6 +403,7 @@ export class CocoaFontManager {
           this._fonts.clear();
           this._faces.clear();
           this._sized.clear();
+          this._forgetCovers();
         }
       }
     } catch {
@@ -354,8 +547,10 @@ export class CocoaFontManager {
 
   /**
    * A face by family/weight/style — what `textBoxTrim` reads `capHeight`
-   * from. The face defers size, like ntk's: `metrics(size)` answers for a
-   * concrete pixel size.
+   * from and what a terminal builds its glyph runs on. The face defers
+   * size, like ntk's: `metrics(size)` answers for a concrete pixel size,
+   * and the family re-resolves per size through `_font` (SF's optical
+   * sizing is a different face at 13px and at 28px).
    */
   match(family, { weight, style } = {}) {
     const w = numericWeight(weight);
@@ -363,23 +558,114 @@ export class CocoaFontManager {
     const key = `${family}|${w}|${italic}`;
     let face = this._faces.get(key);
     if (!face) {
-      const manager = this;
-      face = {
-        metrics(size) {
-          return manager._native.fontMetrics(
-            manager._font(family, w, italic, size ?? 14),
-          );
-        },
-        hasGlyph(char) {
-          return manager._native.fontHasGlyph(
-            manager._font(family, w, italic, 14),
-            String(char),
-          );
-        },
-      };
+      face = new CocoaFace(this, key, (size) =>
+        this._font(family, w, italic, size),
+      );
       this._faces.set(key, face);
     }
     return face;
+  }
+
+  /**
+   * A face that covers `codepoint` when the one for `family` does not, or
+   * `null` when nothing on the system does — ntk's
+   * `FontManager.fallbackFor`, in its order: faces the app loaded first (an
+   * app that ships a font means the one it ships), then CoreText's cascade
+   * off the matched face (`CTFontCreateForString`), the same substitution
+   * `layout()` gets from the typesetter. Cached per family, weight, style
+   * and code point; the matched face itself when it already covers the
+   * code point, so runs group with the base's.
+   */
+  fallbackFor(codepoint, family = 'sans-serif', opts = {}) {
+    if (typeof codepoint !== 'number') {
+      codepoint = String(codepoint).codePointAt(0) ?? -1;
+    }
+    return this.match(family, opts)._coverFor(codepoint);
+  }
+
+  /** `fallbackFor` from a face rather than a family — see `_coverFor`. */
+  _fallbackFrom(base, codepoint) {
+    let found = null;
+    for (const faces of this._registered.values()) {
+      for (const reg of faces) {
+        const face = this._registeredFace(reg);
+        if (face.glyphIdFor(codepoint) !== null) {
+          found = face;
+          break;
+        }
+      }
+      if (found) break;
+    }
+    if (!found) {
+      let text = null;
+      try {
+        text = String.fromCodePoint(codepoint);
+      } catch {
+        text = null; // not a scalar value: nothing covers it
+      }
+      if (text !== null) {
+        const probe = base._handle(PROBE_SIZE);
+        const handle = this._native.fontFallbackFor(probe, text);
+        // the bridge answers the probe handle itself when the face covers
+        // the text: no substitution needed
+        if (handle === probe) found = base;
+        else if (handle) found = this._faceOfHandle(handle, PROBE_SIZE);
+      }
+    }
+    if (
+      found &&
+      found !== base &&
+      found.postscriptName === base.postscriptName
+    ) {
+      found = base;
+    }
+    return found;
+  }
+
+  /** The face of a loaded file, over its own CGFont handle. */
+  _registeredFace(reg) {
+    if (!reg.face) {
+      reg.face = new CocoaFace(this, 'registered', (size) =>
+        this._native.cgFontWithSize(reg.cg, size),
+      );
+      reg.face.key = `registered:${reg.face.postscriptName}`;
+    }
+    return reg.face;
+  }
+
+  /**
+   * The face behind a CTFont handle CoreText chose itself — a fallback, or
+   * a substituted run inside `shape()` — one object per PostScript name, so
+   * runs from either route group together in `drawGlyphs`. The handle seeds
+   * the size it came at; other sizes are copies of it (`fontWithSize`),
+   * which is how a face with no family to re-match by answers
+   * `metrics(size)` and advances everywhere, as itself.
+   */
+  _faceOfHandle(handle, size) {
+    const ps = this._native.fontMetrics(handle).postScriptName;
+    let face = this._faceByPs.get(ps);
+    if (!face) {
+      face = new CocoaFace(this, `ps:${ps}`, (s) =>
+        this._native.fontWithSize(handle, s),
+      );
+      this._faceByPs.set(ps, face);
+    }
+    if (!face._sized.has(size)) face._sized.set(size, handle);
+    return face;
+  }
+
+  /**
+   * The CTFont a glyph run draws with (`CocoaContext2D.drawGlyphs`): a face
+   * of this engine's at the run's size, or an ntk `Font` — `openFont()`'s —
+   * resolved to CoreText from the same bytes, so the glyph ids it shaped
+   * with hold. Null for anything else, and the run is skipped.
+   */
+  _runHandle(font, size) {
+    if (font instanceof CocoaFace) return font._handle(size);
+    if (font && (font.postscriptName || font.path || font.fk)) {
+      return this._faceFont(font, size);
+    }
+    return null;
   }
 
   /**
@@ -444,6 +730,7 @@ export class CocoaFontManager {
     this._faces.clear();
     this._sized.clear();
     this._layouts.clear();
+    this._forgetCovers();
     // `null` on purpose: src/fonts.js keeps the fontkit face it already
     // opened as the handle, which is the one whose metrics apps can read;
     // the registry above is what rendering resolves against.
@@ -500,9 +787,11 @@ export class CocoaFontManager {
       // which is how the fonts app renders exactly the file it opened.
       const face = span.font ?? base.font;
       let handle =
-        face && (face.postscriptName || face.path || face.fk)
-          ? this._faceFont(face, size, variations)
-          : null;
+        face instanceof CocoaFace
+          ? this._withVariations(face._handle(size), variations)
+          : face && (face.postscriptName || face.path || face.fk)
+            ? this._faceFont(face, size, variations)
+            : null;
       handle ??= this._withVariations(
         this._font(
           span.family ?? base.family,

@@ -65,6 +65,32 @@ class LinearGradient {
   }
 }
 
+const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
+
+/**
+ * The Render ops text draws with, numbered as XRender numbers them so a
+ * caller's `ctx.Render?.PictOp?.Over ?? 3` reads the same on both
+ * backends. Every op draws as Over here: the bridge composites glyph
+ * coverage with the context's fill and offers no blend-mode switch, and
+ * for the opaque inks text uses Src and Over agree.
+ */
+const PICT_OP = Object.freeze({ Src: 1, Over: 3 });
+const RENDER = Object.freeze({ PictOp: PICT_OP });
+
+/**
+ * A solid ink for `drawGlyphs` — ntk's `createSolidPicture` answers an
+ * XRender picture; here it is the colour itself. Premultiplied 0..1 in, as
+ * XRender solids are (the identity for the opaque inks text uses), straight
+ * for CoreGraphics inside.
+ */
+class SolidPicture {
+  constructor(r, g, b, a) {
+    const alpha = clamp01(a);
+    const straight = (c) => (alpha > 0 ? clamp01(c / alpha) : 0);
+    this._rgba = [straight(r), straight(g), straight(b), alpha];
+  }
+}
+
 export class CocoaContext2D {
   /**
    * @param native the @windowkit/appkit module
@@ -615,6 +641,107 @@ export class CocoaContext2D {
       return undefined;
     }
     return promise;
+  }
+
+  // --- glyph runs (ntk's documented run contract) --------------------------
+
+  /** ntk's Render extension object, as much of it as text needs. */
+  get Render() {
+    return RENDER;
+  }
+
+  createSolidPicture(r, g, b, a) {
+    return new SolidPicture(r, g, b, a);
+  }
+
+  /**
+   * Composite glyph runs — ntk's contract (its docs/text.md#glyph-runs),
+   * so a renderer written against ntk's context runs here unchanged:
+   * `positioned` is `[{ run: { font, size, glyphs: [{ id, ax, dx, dy }] },
+   * x, y }]`, `x`/`y` the run's baseline origin in user space, the pen
+   * starting at `x` and each glyph inking at `(pen + dx, y - dy)` — `dy`
+   * y-up — before advancing by `ax`. `op` is `Render.PictOp.Over` or
+   * `.Src`; `src` a `createSolidPicture` ink.
+   *
+   * The glyphs are grouped by face and size and go out as one native call
+   * — `CTFontDrawGlyphs` per group, with the fill set to `src`'s colour —
+   * so a frame of terminal text is one call per foreground colour.
+   * `run.font` is a face from `fonts.match()`/`fallbackFor()`, or an ntk
+   * `Font` from `openFont()` (resolved to CoreText from the same bytes, so
+   * its glyph ids hold); a glyph carrying a `font` of its own — what
+   * `shape()` produces when CoreText substituted a face — draws with that
+   * face.
+   *
+   * One difference from ntk, stated: the transform applies to the glyphs as
+   * well as to their origins, because CoreGraphics draws text through the
+   * CTM like everything else, where ntk moves the origins and keeps the
+   * advances in device pixels. Under a translate, which is what a node's
+   * paint runs in, the two agree.
+   */
+  drawGlyphs(op, src, positioned) {
+    if (!Array.isArray(positioned) || positioned.length === 0) return;
+    const fonts = this._fonts;
+    if (typeof fonts?._runHandle !== 'function') return;
+    const batches = new Map(); // CTFont handle -> { font, glyphs, positions }
+    for (const placed of positioned) {
+      const run = placed?.run;
+      const glyphs = run?.glyphs;
+      if (!glyphs?.length) continue;
+      const size = run.size;
+      const runHandle = fonts._runHandle(run.font, size);
+      let pen = 0;
+      for (const g of glyphs) {
+        const handle = g.font ? fonts._runHandle(g.font, size) : runHandle;
+        if (handle) {
+          let batch = batches.get(handle);
+          if (!batch) {
+            batch = { font: handle, glyphs: [], positions: [] };
+            batches.set(handle, batch);
+          }
+          batch.glyphs.push(g.id);
+          batch.positions.push(
+            placed.x + pen + (g.dx || 0),
+            placed.y - (g.dy || 0),
+          );
+        }
+        pen += g.ax || 0;
+      }
+    }
+    if (batches.size === 0) return;
+    const [r, g, b, a] = this._inkOf(src);
+    const surface = this._s();
+    this._native.ctxSetFillColor(surface, r, g, b, a);
+    const runs = [];
+    for (const batch of batches.values()) {
+      runs.push({
+        font: batch.font,
+        glyphs: Uint16Array.from(batch.glyphs),
+        positions: Float64Array.from(batch.positions),
+      });
+    }
+    this._native.ctxDrawGlyphs(surface, runs);
+    this._dirty();
+  }
+
+  /**
+   * The straight colour a `drawGlyphs` source paints with: a solid ink, a
+   * CSS colour string, a straight `[r, g, b, a]` — or, for anything else
+   * (a gradient, which glyph runs do not fill through here), the fill
+   * style in force.
+   */
+  _inkOf(src) {
+    if (src instanceof SolidPicture) return src._rgba;
+    if (typeof src === 'string') return parseColor(src);
+    if (Array.isArray(src) && src.length >= 3) {
+      return [
+        clamp01(src[0]),
+        clamp01(src[1]),
+        clamp01(src[2]),
+        src.length > 3 ? clamp01(src[3]) : 1,
+      ];
+    }
+    const style = this._state.fillStyle;
+    return style instanceof LinearGradient ? BLACK : parseColor(style);
   }
 
   // --- text (minimal: enough for <canvas onDraw> users) --------------------

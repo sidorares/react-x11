@@ -90,7 +90,7 @@
     "yoga-layout": "^3.2.1"
   },
   "optionalDependencies": {
-    "@windowkit/appkit": "^0.1.0",
+    "@windowkit/appkit": "^0.3.0",
     "dbus-native": "^0.15.1",
     "x11-dri": "^0.7.0"
   },
