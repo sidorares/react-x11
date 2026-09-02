@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.4.0](https://github.com/sidorares/react-x11/compare/v2.3.1...v2.4.0) (2026-09-02)
+
+
+### Features
+
+* **cocoa:** the face and the ctx grow ntk's glyph-run seams ([#434](https://github.com/sidorares/react-x11/issues/434)) ([8d6019c](https://github.com/sidorares/react-x11/commit/8d6019c10cd71ec00f161f68efdb40badeedec3e))
+
+
+### Bug Fixes
+
+* **scroll-blit:** an element blit survives a rounded ancestor, and the cocoa swapchain keeps the band it moved ([#438](https://github.com/sidorares/react-x11/issues/438)) ([a067717](https://github.com/sidorares/react-x11/commit/a067717f7825aeb25bc5d9599c7f13232a65cc83))
+* **selection:** a press and a drag land under the pointer, whatever the display scale ([#436](https://github.com/sidorares/react-x11/issues/436)) ([fc7bf42](https://github.com/sidorares/react-x11/commit/fc7bf4266ca79f902a2adea0a60e51a10fa9ea5f)), closes [#435](https://github.com/sidorares/react-x11/issues/435)
+
 ## [2.3.1](https://github.com/sidorares/react-x11/compare/v2.3.0...v2.3.1) (2026-09-02)
 
 
