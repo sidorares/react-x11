@@ -180,16 +180,31 @@ const blits = (wnd) => wnd.calls.filter(([name]) => name === 'scrollRegion');
 
 const area = (rects) => rects.reduce((sum, r) => sum + r.width * r.height, 0);
 
-async function mount({ paneProps = {}, extra = null, definition } = {}) {
+async function mount({
+  paneProps = {},
+  extra = null,
+  definition,
+  wrapStyle = null,
+} = {}) {
   register('pan', definition);
   const app = createMockApp();
   const x11Root = await createRoot({ app });
   const ref = React.createRef();
+  // `wrapStyle` puts the pane inside a box carrying that style — the shape
+  // a widget takes when the app's own style (a border, a radius) goes on a
+  // box around the drawn element
+  const pane = wrapStyle
+    ? h(
+        'box',
+        { style: { flexGrow: 1, margin: INSET, ...wrapStyle } },
+        h('pan', { ref, style: { flexGrow: 1 }, ...paneProps }),
+      )
+    : h('pan', { ref, style: { flexGrow: 1, margin: INSET }, ...paneProps });
   x11Root.render(
     h(
       'window',
       { width: W, height: H, style: { backgroundColor: '#101820' } },
-      h('pan', { ref, style: { flexGrow: 1, margin: INSET }, ...paneProps }),
+      pane,
       extra,
     ),
   );
@@ -527,6 +542,56 @@ test('a rounded corner on the element itself keeps the full repaint', async () =
   node.pan(0, 40);
   await tick();
   assert.deepStrictEqual(blits(wnd), []);
+});
+
+test('a rounded ancestor leaves its corner rows behind and blits the rest', async () => {
+  // The arc of a rounded corner does not translate, but it lives in the
+  // four radius-sized squares at the corners and nowhere else: the rows
+  // they reach into come out of the blit as bands the element repaints,
+  // and the band between them shifts. A graph pane inside a rounded card
+  // panned at 3fps before this, on every backend.
+  const RADIUS = 8;
+  const { wnd, node, root } = await mount({ wrapStyle: { borderRadius: 8 } });
+  assert.deepStrictEqual(node.abs, VP, 'the pane fills the rounded box');
+
+  assert.strictEqual(node.pan(0, 40), true);
+  await tick();
+  const shifted = {
+    x: VP.x,
+    y: VP.y + RADIUS,
+    width: VP.width,
+    height: VP.height - 2 * RADIUS,
+  };
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', shifted, 0, 40]]);
+  const rects = root._lastDamageRects;
+  assert.ok(rects, 'the frame stayed bounded');
+  const byY = [...rects].sort((a, b) => a.y - b.y);
+  assert.deepStrictEqual(byY, [
+    { x: VP.x, y: VP.y, width: VP.width, height: RADIUS },
+    { x: VP.x, y: shifted.y, width: VP.width, height: 40 },
+    {
+      x: VP.x,
+      y: shifted.y + shifted.height,
+      width: VP.width,
+      height: RADIUS,
+    },
+  ]);
+  assert.ok(
+    area(rects) < VP.width * VP.height * 0.25,
+    `repainted ${area(rects)}px² of ${VP.width * VP.height}`,
+  );
+});
+
+test('a rounded ancestor whose corners stay clear of the region blits it whole', async () => {
+  const { wnd, node } = await mount({
+    wrapStyle: { borderRadius: 8, padding: 12 },
+  });
+  const inner = { ...node.abs };
+  assert.ok(inner.x > VP.x && inner.y > VP.y, 'the pane sits inside the box');
+
+  node.pan(0, 40);
+  await tick();
+  assert.deepStrictEqual(blits(wnd), [['scrollRegion', inner, 0, 40]]);
 });
 
 test('a region outside the element is refused', async () => {

@@ -486,6 +486,25 @@ function rectsBounds(rects) {
 }
 
 /** Do two rects share any area? Touching edges do not count. */
+/** Does `rect` reach into any of the four `radius`-sized corner squares of
+ * `box` — the only part of a rounded border a translation cannot keep? */
+function cornerSquaresOverlap(box, radius, rect) {
+  const r = Math.min(radius, box.width / 2, box.height / 2);
+  if (!(r > 0)) return false;
+  const corners = [
+    { x: box.x, y: box.y, width: r, height: r },
+    { x: box.x + box.width - r, y: box.y, width: r, height: r },
+    { x: box.x, y: box.y + box.height - r, width: r, height: r },
+    {
+      x: box.x + box.width - r,
+      y: box.y + box.height - r,
+      width: r,
+      height: r,
+    },
+  ];
+  return corners.some((square) => rectsOverlap(square, rect));
+}
+
 function rectsOverlap(a, b) {
   return (
     a.x < b.x + b.width &&
@@ -11127,12 +11146,51 @@ export class WindowNode extends Scrollable(Node) {
     }
     const keep = this._blitKeptDamage(vp, true);
     if (!keep) return;
-    if (!this._scrollBlitSafe(node, vp)) return;
+    // An ancestor's rounded corners reach into the top and bottom rows of
+    // the region (a graph pane inside a rounded card is the common shape):
+    // those rows do not translate, so they leave the blit and get repainted
+    // as bands — the same carve the element does for its own furniture —
+    // and the band that shifts is what is left between them.
+    const bands = this._cornerBands(node, vp);
+    const shifted =
+      bands.top || bands.bottom
+        ? {
+            x: vp.x,
+            y: vp.y + bands.top,
+            width: vp.width,
+            height: vp.height - bands.top - bands.bottom,
+          }
+        : vp;
+    if (shifted.height <= 0 || Math.abs(dy) >= shifted.height) return;
+    if (
+      (shifted.width - Math.abs(dx)) * (shifted.height - Math.abs(dy)) <
+      area * SCROLL_BLIT_MIN_KEEP
+    ) {
+      return;
+    }
+    if (!this._scrollBlitSafe(node, shifted)) return;
     // the element's deltas are already how far the pixels moved, the sense
     // scrollRegion takes (0 + x rather than x: a caller's -0 would survive
     // into request buffers and test comparisons)
-    if (!this.window.scrollRegion({ ...vp }, 0 + dx, 0 + dy)) return;
+    if (!this.window.scrollRegion({ ...shifted }, 0 + dx, 0 + dy)) return;
     let rects = keep;
+    if (bands.top) {
+      rects = addDamageRect(rects, {
+        x: vp.x,
+        y: vp.y,
+        width: vp.width,
+        height: bands.top,
+      });
+    }
+    if (bands.bottom) {
+      rects = addDamageRect(rects, {
+        x: vp.x,
+        y: shifted.y + shifted.height,
+        width: vp.width,
+        height: bands.bottom,
+      });
+    }
+    vp = shifted;
     // The strips the shift exposed, on the sides the pixels came from. The
     // horizontal one takes the full width and the vertical one takes what
     // is left, so a diagonal shift claims two rects that do not overlap —
@@ -11155,6 +11213,28 @@ export class WindowNode extends Scrollable(Node) {
       });
     }
     this._damage = rects;
+  }
+
+  /**
+   * How many rows at the top and at the bottom of `vp` an ancestor's rounded
+   * corners reach into — the rows an element blit has to leave behind and
+   * repaint, so that what shifts stays clear of every corner square
+   * (`_scrollBlitSafe`). Whole pixels, and zero when no corner reaches in.
+   */
+  _cornerBands(node, vp) {
+    let top = 0;
+    let bottom = 0;
+    for (let n = node.parent; n && n !== this; n = n.parent) {
+      const radius = n.style?.borderRadius ?? 0;
+      if (!(radius > 0) || !n.abs) continue;
+      if (!cornerSquaresOverlap(n.abs, radius, vp)) continue;
+      top = Math.max(top, Math.ceil(n.abs.y + radius - vp.y));
+      bottom = Math.max(
+        bottom,
+        Math.ceil(vp.y + vp.height - (n.abs.y + n.abs.height - radius)),
+      );
+    }
+    return { top: Math.max(0, top), bottom: Math.max(0, bottom) };
   }
 
   /**
@@ -11186,14 +11266,18 @@ export class WindowNode extends Scrollable(Node) {
             child.style ?? EMPTY_STYLE,
             child.direction,
           );
-          const inset = Math.max(
-            bw.top,
-            bw.right,
-            bw.bottom,
-            bw.left,
-            child.style?.borderRadius ?? 0,
-          );
-          if (inset > 0 && !rectContains(insetRect(child.abs, inset), vp)) {
+          const ring = Math.max(bw.top, bw.right, bw.bottom, bw.left);
+          if (ring > 0 && !rectContains(insetRect(child.abs, ring), vp)) {
+            return false;
+          }
+          // A rounded corner is not a ring: the arc lives in the four
+          // radius-sized squares at the corners, and the straight run of
+          // the edge between them is the border ring already excluded
+          // above. A viewport that reaches the edge but stays clear of the
+          // squares — an element that carved the corner rows into bands it
+          // repaints (`_cornerBands`) — is translation-safe.
+          const radius = child.style?.borderRadius ?? 0;
+          if (radius > 0 && cornerSquaresOverlap(child.abs, radius, vp)) {
             return false;
           }
           if (typeof child._scrollbars === 'function') {
