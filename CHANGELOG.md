@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.3.0](https://github.com/sidorares/react-x11/compare/v2.2.1...v2.3.0) (2026-09-02)
+
+
+### Features
+
+* **examples:** a configure-to-order store page set in the fonts it ships ([#412](https://github.com/sidorares/react-x11/issues/412)) ([c2df804](https://github.com/sidorares/react-x11/commit/c2df804c1e857741da6a6912019e66a808bd6b37))
+* **examples:** live window previews in the wm example ([#426](https://github.com/sidorares/react-x11/issues/426)) ([00f8cde](https://github.com/sidorares/react-x11/commit/00f8cdec94083b6cff10545451d8f892db7c3fbf))
+* native macOS backend over Core Animation ([#429](https://github.com/sidorares/react-x11/issues/429)) ([d12c21a](https://github.com/sidorares/react-x11/commit/d12c21ade22483c4d40ae11111cd0f22a4b53407))
+
+
+### Bug Fixes
+
+* **bench:** a scenario's numbers no longer depend on what ran before it ([#422](https://github.com/sidorares/react-x11/issues/422)) ([8f23b46](https://github.com/sidorares/react-x11/commit/8f23b46a039768b78b6b125f3ccb29ca059bf0d5)), closes [#416](https://github.com/sidorares/react-x11/issues/416)
+* **deps:** resolve x11 to 4.1.0 so Bun apps keep shared memory and direct GL ([#424](https://github.com/sidorares/react-x11/issues/424)) ([cbce93b](https://github.com/sidorares/react-x11/commit/cbce93b599233a8d7e655f1c50e17d9cfca4d6ff))
+
 ## [2.2.1](https://github.com/sidorares/react-x11/compare/v2.2.0...v2.2.1) (2026-08-27)
 
 
