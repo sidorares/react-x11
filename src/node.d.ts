@@ -106,8 +106,9 @@ export interface A11ySceneItem {
    * is destroyed and recreated under every screen reader holding it. */
   id: string;
   /** Where it is drawn, in the owning window's coordinates — the same
-   * space as `abs` and a mouse event's `x`/`y`. Where AT focus draws and
-   * what a magnifier follows. */
+   * space as `abs`, which is device pixels; a mouse event's `x`/`y` are
+   * logical, `scale` apart (docs/scale.md). Where AT focus draws and what
+   * a magnifier follows. */
   rect: Rect;
   /** The ARIA role it plays. `'group'` when it says none, which is
    * audible and promises nothing. A role that promises activation
@@ -186,8 +187,19 @@ export declare class Node {
   /** The owning `<window>` node, once attached. */
   readonly root: Node | null;
   readonly destroyed: boolean;
-  /** Position and size within the owning window, valid after layout. */
+  /** Position and size within the owning window, valid after layout. In
+   * device pixels, like everything painted (docs/scale.md). */
   readonly abs: Rect;
+  /**
+   * Device pixels per logical pixel for this node's connection — resolved
+   * once by `createRoot` (docs/scale.md) and constant for the node's life.
+   * `this.style`, `this.abs` and `contentBox()` are already device pixels;
+   * a synthetic event's `x`/`y` are logical. This is for what never passes
+   * through a style — a paint constant such as a caret's width, or an
+   * event coordinate on its way to a comparison with `abs`. `1` on an
+   * ordinary display, `2` on a retina panel.
+   */
+  readonly scale: number;
   /** `abs` inset by the border and the padding — where the content goes,
    * and where every built-in draws. The insets come off the layout, which
    * is where percentages and the per-side overrides have already been
@@ -221,9 +233,10 @@ export declare class Node {
   //
   // Four questions in one index space and one coordinate space: characters
   // are **code points**, rectangles are in the owning window's coordinates —
-  // the same ones `abs`, `contentBox()` and a mouse event's `x`/`y` use.
-  // An element that answers them can be selected across by a `selectable`
-  // ancestor with no registration of any kind.
+  // the same ones `abs` and `contentBox()` use, which are device pixels; a
+  // mouse event's `x`/`y` are the logical ones, `scale` apart. An element
+  // that answers them can be selected across by a `selectable` ancestor
+  // with no registration of any kind.
 
   /** This element's text, or null when it has none. The default. */
   textContent(): string | null;

@@ -48,8 +48,10 @@ const scale = useScale(); // 1, 2, 1.5... static for the life of the root
   every fill off ntk's server-side fast paths besides.
 - a registered element's `paint()` and `hitTest()` (see
   [extending.md](extending.md)): `this.style` and `this.abs` arrive already
-  device, synthetic events are logical, and `this.scale` is on every node
-  for the constants that never pass through a style.
+  device, and so are `paintDamage()`, the rects handed to `invalidate` and
+  `scrollContents` and the rects of an a11y scene; synthetic events are
+  logical, and `this.scale` is on every node for the constants that never
+  pass through a style and the event coordinate on its way to `abs`.
 
 Fonts are the point of the whole exercise: a `fontSize: 14` at scale 2 is
 shaped, measured and rasterized at 28px. Text on a retina panel is _sharper_,
@@ -223,7 +225,8 @@ such seams.
 
 **What tests see.** The headless harnesses resolve to exactly 1 — a mock
 app has no display to ask — so every geometry assertion in the suite means
-its numbers literally. `createRoot({ app, scale: 2 })` opts a test in;
+its numbers literally. `createRoot({ app, scale: 2 })` opts a test in, and
+so does `renderX11(element, { scale: 2 })` from `react-x11/test`;
 `test/scale-render.test.js` is the boundary contract pinned as tests.
 `setScaleForTests()` (from `src/scale.js`) pins a factor without a
 connection.

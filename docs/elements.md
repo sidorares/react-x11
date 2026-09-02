@@ -1251,7 +1251,8 @@ node.textRangeRects(4, 14); // the bands a highlight over [4, 14) fills
 
 Indices are **code points**, not UTF-16 units, so an emoji is one position.
 Rectangles are in the owning window's coordinates — the same space as
-`abs`, `contentBox()` and a mouse event's `x`/`y`. `textRangeRects` returns
+`abs` and `contentBox()`, which is device pixels; a mouse event's `x`/`y`
+are logical ([scale.md](scale.md)). `textRangeRects` returns
 one band per line _and_ one per direction run inside a line: a range that
 crosses from Latin into Arabic covers two separate stretches of pixels, and
 a single rectangle drawn between two caret positions would paint over text
