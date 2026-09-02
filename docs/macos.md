@@ -546,6 +546,24 @@ implements it over CoreText:
   (`CTFontDrawGlyphs`) backs the `drawGlyphs`/`positioned` context
   extensions the terminal and code-editor components use.
 
+The glyph-run seams are part of that contract on both backends (issue
+#432, over windowkit/appkit#1). The face `fonts.match()` returns answers
+ntk's `glyphIdFor(cp)` (`null` when unmapped), `advanceOf(id, size)` and
+`shape(text, size)` beside `metrics(size)` — which reports ntk's
+`lineGap`/`lineHeight` alongside CoreText's `leading` — and the manager
+answers `fallbackFor(cp, family, opts)` off the app's loaded faces and
+then CoreText's cascade. The context answers `drawGlyphs(op, src,
+positioned)`, `createSolidPicture(r, g, b, a)` and
+`Render.PictOp.{Over, Src}` with ntk's exact run contract, grouping the
+runs by face and size into one `CTFontDrawGlyphs` per colour, so a
+renderer written against ntk's context — `<Terminal backend="vt">` —
+runs unchanged. Two things differ from ntk and are stated where they
+live: `shape()` may hand back a glyph carrying the face CoreText
+substituted (an emoji cluster in Menlo draws as the emoji, where ntk
+shapes `.notdef`), and the transform scales glyphs as well as their
+origins, because CoreGraphics draws text through the CTM like everything
+else.
+
 The alternative — reusing ntk's fontkit shaping stack on macOS and
 rasterizing through the Wayland Tier-A span compositor — is recorded,
 not chosen: it buys byte-identical metrics across backends (one test
@@ -893,9 +911,11 @@ raw-buffer upload; the API supports both so the choice can be measured.)
 **Text.** measure ✅ → full layout object 🆕: build from span list
 (attributed string), report lines/runs/origins, `indexAt`,
 `caretOffset`, range rects, truncation/`maxLines`, draw-to-bitmap ✅ and
-draw-into-surface 🆕, glyph-run access for `drawGlyphs` 🆕; font
-matching by family list/weight/style/variations → descriptor, and
-loading app-supplied font files (`loadFont`) 🆕; `hasGlyph` 🆕.
+draw-into-surface 🆕, glyph-run access for `drawGlyphs` ✅
+(`fontGlyphForCodepoint`, `fontGlyphAdvances`, `fontFallbackFor`,
+`fontWithSize`, `fontShapeText`, `ctxDrawGlyphs` — windowkit/appkit#1);
+font matching by family list/weight/style/variations → descriptor, and
+loading app-supplied font files (`loadFont`) 🆕; `hasGlyph` ✅.
 
 **Controls.** `controls.render` ✅ (push/default/checkbox/radio/popup/
 slider/switch, states, sizes, appearance) — add: focus-ring state,
