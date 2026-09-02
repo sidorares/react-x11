@@ -631,3 +631,47 @@ test('a press lands on the character the accessors name', async () => {
   fireEvent.mouseUp(text, { dx: to.x - centre });
   await act();
 });
+
+// --- the display scale ------------------------------------------------------
+//
+// `abs` and the four accessors are device pixels; a synthetic event's `x`/`y`
+// are logical (docs/scale.md). At 1x — every other test here — the two
+// coincide, which is how a press resolved straight from `ev.x` landed on the
+// right character in this suite and then, on a retina panel, on one half as
+// far from the window's origin (#435). The press-and-drag test again at 2x,
+// with the text set in from the origin so a wrong unit cannot cancel out.
+
+test('at a display scale of 2 a press and a drag land under the pointer', async () => {
+  const surface = React.createRef();
+  const { windowNode } = await renderX11(
+    scene(
+      h(
+        'box',
+        { ref: surface, selectable: true, style: { width: 300, padding: 20 } },
+        h('text', null, 'alpha beta gamma'),
+      ),
+    ),
+    { fonts: FONTS, wrap: false, width: W, height: H, scale: 2 },
+  );
+  const [text] = find(windowNode, 'text');
+  assert.ok(
+    text.abs.x >= 40 && text.abs.y >= 40,
+    `the text is set in from the origin on the device grid: ${text.abs.x},${text.abs.y}`,
+  );
+  // the accessors answer in device pixels — a 16px face shaped at 32
+  const from = text.textCaretRect(6);
+  const to = text.textCaretRect(10);
+  assert.ok(
+    to.x - from.x > 40,
+    `"beta" is ${to.x - from.x} device pixels wide`,
+  );
+  // ...and so do the harness's offsets, from the node's device `abs`
+  const centre = text.abs.x + text.abs.width / 2;
+  fireEvent.mouseDown(text, { dx: from.x - centre });
+  await act();
+  await dragTo(text, { dx: to.x - centre });
+  assert.deepStrictEqual(text.selectionRange, { start: 6, end: 10 });
+  assert.equal(surface.current.selectedText(), 'beta');
+  fireEvent.mouseUp(text, { dx: to.x - centre });
+  await act();
+});
