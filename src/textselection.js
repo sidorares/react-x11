@@ -169,7 +169,7 @@ export class TextSelection {
 
   press(ev) {
     if (ev.button !== 1) return;
-    const at = this.positionAt(ev.x, ev.y);
+    const at = this.positionAt(...this.devicePoint(ev));
     if (!at) return;
     this.granularity =
       ev.detail >= 3 ? 'block' : ev.detail === 2 ? 'word' : 'char';
@@ -190,7 +190,7 @@ export class TextSelection {
 
   drag(ev) {
     if (!this.dragging) return;
-    const at = this.positionAt(ev.x, ev.y);
+    const at = this.positionAt(...this.devicePoint(ev));
     if (!at) return;
     this.focus = at;
     this.apply();
@@ -221,9 +221,27 @@ export class TextSelection {
     }
   }
 
+  /**
+   * The pointer in the space `abs` and the four accessors are in — device
+   * pixels (docs/scale.md). A synthetic event's `x`/`y` are logical, so on
+   * a 2x panel they name a point half as far from the window's origin as the
+   * pointer is: a press landed on the wrong character and a drag stopped
+   * short at half its distance. The X event underneath already carries the
+   * device numbers; an event synthesized without one is multiplied up, the
+   * way every other pointer consumer in nodes.js does it.
+   */
+  devicePoint(ev) {
+    const scale = this.node.scale > 0 ? this.node.scale : 1;
+    return [
+      ev.nativeEvent?.x ?? ev.x * scale,
+      ev.nativeEvent?.y ?? ev.y * scale,
+    ];
+  }
+
   // --- the selection itself ----------------------------------------------
 
-  /** The participant and index nearest a point in window coordinates. */
+  /** The participant and index nearest a point in window coordinates —
+   * device pixels, the unit `abs` and `textIndexAt` speak. */
   positionAt(x, y) {
     let best = null;
     let bestScore = Infinity;
