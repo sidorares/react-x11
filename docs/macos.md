@@ -547,22 +547,26 @@ implements it over CoreText:
   extensions the terminal and code-editor components use.
 
 The glyph-run seams are part of that contract on both backends (issue
-#432, over windowkit/appkit#1). The face `fonts.match()` returns answers
-ntk's `glyphIdFor(cp)` (`null` when unmapped), `advanceOf(id, size)` and
-`shape(text, size)` beside `metrics(size)` — which reports ntk's
-`lineGap`/`lineHeight` alongside CoreText's `leading` — and the manager
-answers `fallbackFor(cp, family, opts)` off the app's loaded faces and
-then CoreText's cascade. The context answers `drawGlyphs(op, src,
-positioned)`, `createSolidPicture(r, g, b, a)` and
-`Render.PictOp.{Over, Src}` with ntk's exact run contract, grouping the
-runs by face and size into one `CTFontDrawGlyphs` per colour, so a
-renderer written against ntk's context — `<Terminal backend="vt">` —
-runs unchanged. Two things differ from ntk and are stated where they
-live: `shape()` may hand back a glyph carrying the face CoreText
-substituted (an emoji cluster in Menlo draws as the emoji, where ntk
-shapes `.notdef`), and the transform scales glyphs as well as their
-origins, because CoreGraphics draws text through the CTM like everything
-else.
+#432, over @windowkit/appkit 0.2's glyph natives — windowkit/appkit#1).
+The face `fonts.match()` returns answers ntk's `glyphIdFor(cp)` (`null`
+when unmapped), `advanceOf(id, size)` and `shape(text, size)` beside
+`metrics(size)` — which reports ntk's `lineGap`/`lineHeight` alongside
+CoreText's `leading` — and the manager answers `fallbackFor(cp, family,
+opts)` off the app's loaded faces and then CoreText's cascade. The
+context answers `drawGlyphs(op, src, positioned)`,
+`createSolidPicture(r, g, b, a)` and `Render.PictOp.{Over, Src}` with
+ntk's exact run contract, grouping the runs by face and size into one
+`CTFontDrawGlyphs` per colour, so a renderer written against ntk's
+context — `<Terminal backend="vt">` — runs unchanged. Three things
+differ from ntk and are stated where they live: `shape()` answers
+covered text from the cmap and sends anything that needs the typesetter
+(marks, emoji sequences, uncovered or right-to-left text) through one
+`createLayout` as a single glyph carrying its line, which `drawGlyphs`
+draws — so an emoji cluster in Menlo comes out as the emoji, where ntk
+shapes `.notdef`; every op draws as Over, which for the opaque inks text
+uses is what Src does too; and the transform scales glyphs as well as
+their origins, because CoreGraphics draws text through the CTM like
+everything else.
 
 The alternative — reusing ntk's fontkit shaping stack on macOS and
 rasterizing through the Wayland Tier-A span compositor — is recorded,
@@ -913,7 +917,9 @@ raw-buffer upload; the API supports both so the choice can be measured.)
 `caretOffset`, range rects, truncation/`maxLines`, draw-to-bitmap ✅ and
 draw-into-surface 🆕, glyph-run access for `drawGlyphs` ✅
 (`fontGlyphForCodepoint`, `fontGlyphAdvances`, `fontFallbackFor`,
-`fontWithSize`, `fontShapeText`, `ctxDrawGlyphs` — windowkit/appkit#1);
+`ctxDrawGlyphs` — windowkit/appkit#1, shipped in 0.2.0; a shaped line
+read back as glyph ids would let `shape()` answer clusters as real
+glyphs instead of a typeset line);
 font matching by family list/weight/style/variations → descriptor, and
 loading app-supplied font files (`loadFont`) 🆕; `hasGlyph` ✅.
 

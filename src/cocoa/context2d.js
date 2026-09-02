@@ -70,9 +70,9 @@ const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
 /**
  * The Render ops text draws with, numbered as XRender numbers them so a
  * caller's `ctx.Render?.PictOp?.Over ?? 3` reads the same on both
- * backends. `Over` composites; `Src` replaces (CG's copy blend mode over
- * the glyph coverage, the nearest thing to XRender's). Anything else
- * `drawGlyphs` is handed draws as Over.
+ * backends. Every op draws as Over here: the bridge composites glyph
+ * coverage with the context's fill and offers no blend-mode switch, and
+ * for the opaque inks text uses Src and Over agree.
  */
 const PICT_OP = Object.freeze({ Src: 1, Over: 3 });
 const RENDER = Object.freeze({ PictOp: PICT_OP });
@@ -668,9 +668,9 @@ export class CocoaContext2D {
    * so a frame of terminal text is one call per foreground colour.
    * `run.font` is a face from `fonts.match()`/`fallbackFor()`, or an ntk
    * `Font` from `openFont()` (resolved to CoreText from the same bytes, so
-   * its glyph ids hold); a glyph carrying a `font` of its own — what
-   * `shape()` produces when CoreText substituted a face — draws with that
-   * face.
+   * its glyph ids hold). A glyph carrying a typeset line — what `shape()`
+   * answers for a cluster the cmap alone cannot — draws that line at the
+   * pen instead, in the same ink.
    *
    * One difference from ntk, stated: the transform applies to the glyphs as
    * well as to their origins, because CoreGraphics draws text through the
@@ -683,43 +683,50 @@ export class CocoaContext2D {
     const fonts = this._fonts;
     if (typeof fonts?._runHandle !== 'function') return;
     const batches = new Map(); // CTFont handle -> { font, glyphs, positions }
+    const lines = []; // typeset clusters: [layout, x, y]
     for (const placed of positioned) {
       const run = placed?.run;
       const glyphs = run?.glyphs;
       if (!glyphs?.length) continue;
-      const size = run.size;
-      const runHandle = fonts._runHandle(run.font, size);
+      const handle = fonts._runHandle(run.font, run.size);
       let pen = 0;
       for (const g of glyphs) {
-        const handle = g.font ? fonts._runHandle(g.font, size) : runHandle;
-        if (handle) {
+        const x = placed.x + pen + (g.dx || 0);
+        const y = placed.y - (g.dy || 0);
+        if (g._layout) {
+          lines.push([g._layout, x, y]);
+        } else if (handle) {
           let batch = batches.get(handle);
           if (!batch) {
             batch = { font: handle, glyphs: [], positions: [] };
             batches.set(handle, batch);
           }
           batch.glyphs.push(g.id);
-          batch.positions.push(
-            placed.x + pen + (g.dx || 0),
-            placed.y - (g.dy || 0),
-          );
+          batch.positions.push(x, y);
         }
         pen += g.ax || 0;
       }
     }
-    if (batches.size === 0) return;
+    if (batches.size === 0 && lines.length === 0) return;
     const [r, g, b, a] = this._inkOf(src);
     const surface = this._s();
     this._native.ctxSetFillColor(surface, r, g, b, a);
-    const runs = [];
-    for (const batch of batches.values()) {
-      runs.push({
-        font: batch.font,
-        glyphs: Uint16Array.from(batch.glyphs),
-        positions: Float64Array.from(batch.positions),
-      });
+    if (batches.size) {
+      const runs = [];
+      for (const batch of batches.values()) {
+        runs.push({
+          font: batch.font,
+          glyphs: Uint16Array.from(batch.glyphs),
+          positions: Float64Array.from(batch.positions),
+        });
+      }
+      this._native.ctxDrawGlyphs(surface, runs);
     }
-    this._native.ctxDrawGlyphs(surface, runs, op === PICT_OP.Src);
+    for (const [layout, x, y] of lines) {
+      // a line draws from its top; the glyph's y is its baseline
+      const baseline = layout.lines[0]?.baseline ?? 0;
+      this._native.drawLayout(surface, layout._handle, x, y - baseline);
+    }
     this._dirty();
   }
 
