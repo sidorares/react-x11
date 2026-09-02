@@ -3,8 +3,16 @@
 // build-step-free for consumers.
 
 import React, { useEffect, useRef, useState } from 'react';
+import { useAppOrNull } from '../appcontext.js';
 import { capBand, capTrim, rowRadius, useTheme } from './theme.js';
 import { Icon } from './Icon.js';
+import {
+  ABS_FILL,
+  Bezel,
+  bezelNatural,
+  pressWash,
+  useNativeControls,
+} from './native.js';
 import { changeEvent } from './change.js';
 import {
   anchorArea,
@@ -184,10 +192,13 @@ export function Select({
   onChange,
   name,
   placeholder = 'Select…',
+  native,
   style,
   ...boxProps
 }) {
   const theme = useTheme();
+  const app = useAppOrNull();
+  const nativeControls = useNativeControls(native);
   const [open, setOpen] = useState(false);
   const [anchor, setAnchor] = useState(null);
   const [focused, setFocused] = useState(false);
@@ -336,25 +347,38 @@ export function Select({
       onKeyDown,
       ...boxProps,
       style: [
-        {
-          cursor: 'pointer',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 8,
-          // The vertical padding is the palette's, the same one a `<Button>`
-          // takes, because these are controls of one family and a form puts
-          // them in a row together. Horizontally it is its own, tighter
-          // number: a dropdown is a field with a value in it, not a button
-          // with a word centred on it.
-          paddingTop: theme.paddingY,
-          paddingBottom: theme.paddingY,
-          paddingLeft: 10,
-          paddingRight: 10,
-          borderWidth: theme.borderWidth,
-          borderRadius: theme.radius,
-          borderColor: focused || open ? theme.borderFocus : theme.border,
-          backgroundColor: theme.surface,
-        },
+        nativeControls
+          ? // The native popup bezel carries the border, the fill and the
+            // arrow capsule, so the trigger keeps only its row layout and
+            // AppKit's own height. The right padding clears the arrows.
+            {
+              cursor: 'pointer',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              height: bezelNatural(app, 'popup').height,
+              paddingLeft: 10,
+              paddingRight: 26,
+            }
+          : {
+              cursor: 'pointer',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              // The vertical padding is the palette's, the same one a `<Button>`
+              // takes, because these are controls of one family and a form puts
+              // them in a row together. Horizontally it is its own, tighter
+              // number: a dropdown is a field with a value in it, not a button
+              // with a word centred on it.
+              paddingTop: theme.paddingY,
+              paddingBottom: theme.paddingY,
+              paddingLeft: 10,
+              paddingRight: 10,
+              borderWidth: theme.borderWidth,
+              borderRadius: theme.radius,
+              borderColor: focused || open ? theme.borderFocus : theme.border,
+              backgroundColor: theme.surface,
+            },
         // Hover and press belong to the trigger while it is *shut*: they say
         // "this opens". Once the menu is down that is answered, and the
         // trigger's job is to read as one surface with the popup hanging off
@@ -364,13 +388,25 @@ export function Select({
         // state block always outranks the base style, so there is no colour
         // the open state could put in `backgroundColor` that `:hover` would
         // not overwrite. The only way for open to win is to not be competing.
-        !open && {
-          ':hover': { backgroundColor: theme.surfaceHover },
-          ':active': { backgroundColor: theme.surfaceActive },
-        },
+        // (In native mode the wash overlay below answers the press instead.)
+        !nativeControls &&
+          !open && {
+            ':hover': { backgroundColor: theme.surfaceHover },
+            ':active': { backgroundColor: theme.surfaceActive },
+          },
         style,
       ],
     },
+    // `pressed` while the menu is down: AppKit's popup answers being open
+    // by highlighting the arrow capsule, which is the open look this
+    // trigger otherwise lost with its borderFocus.
+    nativeControls &&
+      h(Bezel, {
+        kind: 'popup',
+        pressed: open,
+        enabled: true,
+        style: ABS_FILL,
+      }),
     h(
       'text',
       { style: [capTrim, { color: current ? theme.text : theme.textMuted }] },
@@ -382,11 +418,20 @@ export function Select({
     // row have to be one height, and they only are if the tallest thing in
     // each is measured the same way. A glyph taller than the cap band makes
     // the dropdown alone two pixels taller than everything next to it.
-    h(Icon, {
-      name: 'chevronDown',
-      size: capBand(theme.fontSize),
-      color: theme.textMuted,
-    }),
+    // The native bezel draws its own arrow capsule instead.
+    nativeControls
+      ? h('box', {
+          style: [
+            ABS_FILL,
+            { borderRadius: 6 },
+            !open && { ':active': { backgroundColor: pressWash(theme) } },
+          ],
+        })
+      : h(Icon, {
+          name: 'chevronDown',
+          size: capBand(theme.fontSize),
+          color: theme.textMuted,
+        }),
     open &&
       anchor &&
       h(

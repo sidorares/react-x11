@@ -3,6 +3,8 @@
 // build-step-free for consumers.
 
 import React, { useRef, useState } from 'react';
+import { useAppOrNull } from '../appcontext.js';
+import { Bezel, bezelNatural, useNativeControls } from './native.js';
 import { useTheme } from './theme.js';
 import { changeEvent } from './change.js';
 import {
@@ -42,10 +44,13 @@ export function Slider({
   name,
   disabled = false,
   height = 4,
+  native,
   style,
   ...boxProps
 }) {
   const theme = useTheme();
+  const app = useAppOrNull();
+  const nativeControls = useNativeControls(native);
   const [focused, setFocused] = useState(false);
   const [dragging, setDragging] = useState(false);
   const trackRef = useRef(null);
@@ -151,6 +156,60 @@ export function Slider({
           }
         },
       };
+
+  // The whole control as one NSSlider render, keyed by the value so a drag
+  // is a sequence of cached-or-rendered bezels. Pointer math, keyboard and
+  // a11y are the shared implementation above — the bezel is presentation.
+  //
+  // The *small* control size on purpose: its 16pt knob is exactly the
+  // drawn thumb's footprint, so rows laid out for the drawn slider fit,
+  // and the pointer math shares one thumb constant across both modes —
+  // the regular size's 20pt knob overflowed every compact row it met.
+  if (nativeControls) {
+    const nat = bezelNatural(app, 'slider', 'small');
+    return h(
+      'box',
+      {
+        theme,
+        role: 'slider',
+        'aria-valuenow': clamp(value),
+        'aria-valuemin': min,
+        'aria-valuemax': max,
+        'aria-orientation': 'horizontal',
+        ref: trackRef,
+        ...controlProps,
+        ...boxProps,
+        style: [
+          disabled || { cursor: 'pointer' },
+          {
+            height: nat.height,
+            minWidth: 0,
+            hitSlop: {
+              top: Math.max(0, (24 - nat.height) / 2),
+              bottom: Math.max(0, (24 - nat.height) / 2),
+            },
+          },
+          style,
+        ],
+      },
+      h(Bezel, {
+        kind: 'slider',
+        controlSize: 'small',
+        // quantized so a drag reuses cache entries instead of minting one
+        // per sub-pixel float; 400 steps is finer than any track is wide
+        value: Math.round(fraction * 400) / 400,
+        enabled: !disabled,
+        style: {
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          pointerEvents: 'none',
+        },
+      }),
+    );
+  }
 
   return h(
     'box',

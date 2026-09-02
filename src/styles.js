@@ -466,6 +466,11 @@ const isState = (key) => key.charCodeAt(0) === 58; /* ':' */
  * what a style can usefully ask about here is the window it is being laid
  * out in, not the screen.
  *
+ * The threshold is **logical** pixels, like every other number in a style
+ * block: `'@width >= 620'` flips where `width: 620` would fit, whatever
+ * the display scale (the window node divides its device size out before
+ * matching — `_resolveSizeQueries`).
+ *
  * Unlike a state block, a size query *may* set layout properties. That is
  * not an inconsistency: pointer state changes must never reflow the tree,
  * but a size query is only ever re-evaluated during a layout pass that a

@@ -6567,13 +6567,16 @@ export function openEditMenu(node, at, actions = {}) {
   if (items.length === 0) return;
 
   const style = node.resolvedTextStyle();
+  // `at` is `{x: ev.x, y: ev.y}` per the doc above — logical, like every
+  // coordinate a handler reads — and everything below is device: the
+  // geometry takes the scale so its chrome lands on the same grid as the
+  // device-sized text it measures.
+  const s = node.scale;
   const geometry = editMenuGeometry(
     items,
     (text) => app?.fonts?.layout(text, style)?.width,
+    s,
   );
-  // `at` is `{x: ev.x, y: ev.y}` per the doc above — logical, like every
-  // coordinate a handler reads — and the origin math below is device.
-  const s = node.scale;
   const deviceAt = at && {
     ...at,
     ...(Number.isFinite(at.x) && { x: at.x * s }),
@@ -10264,8 +10267,20 @@ export class WindowNode extends Scrollable(Node) {
    * before laying out. This is the whole reason a size query may carry
    * layout properties while a state block may not: it only ever runs inside
    * a layout pass the resize already required.
+   *
+   * Callers pass the size in device pixels — it comes off the window or out
+   * of yoga, and both live on the device grid — but `querySize` is stored
+   * in **logical** pixels, because that is the unit the thresholds were
+   * written in: `'@width >= 620'` sits in a style block next to `width:
+   * 620`, and the same number must mean the same thing. At scale 1 the two
+   * coincide, which is how comparing device pixels survived every 1x
+   * display it was ever run on and broke on the first retina one (every
+   * query read double, so none of them ever changed answer under a drag).
    */
-  _resolveSizeQueries(width, height) {
+  _resolveSizeQueries(deviceWidth, deviceHeight) {
+    const s = this.scale || 1;
+    const width = deviceWidth / s;
+    const height = deviceHeight / s;
     if (this._sizeQueryNodes.size === 0) {
       this.querySize = this.querySize ?? { width, height };
       return false;
@@ -10489,6 +10504,11 @@ export class WindowNode extends Scrollable(Node) {
       }
       (this._frameReasons ??= new Set()).add(reason);
     }
+    // A retained presenter keeps a per-node diff instead of damage rects,
+    // and this is the one channel every change already announces itself on
+    // (docs/macos.md §"One renderer, two presenters"). Feature-detected: an
+    // ntk window has no ear here and the X11 path is byte-identical.
+    this.window?.noteInvalidate?.(damage, layoutChanged, reason);
     if (layoutChanged) {
       this.needsLayout = true;
       // The content floors are measured from the tree, so anything that
@@ -10729,6 +10749,16 @@ export class WindowNode extends Scrollable(Node) {
       );
     }
     this._fullRepaintCause = null;
+    // A retained presenter takes the frame from here: the model half above —
+    // animations, layout, absolutize, the scroll offsets — is shared, and
+    // what changes per backend is how a frame reaches the screen. The damage
+    // list was still taken (its bookkeeping is what keeps the two paths one
+    // code) and is simply not consumed; the presenter diffs at the layer.
+    if (typeof this.window.presentFrame === 'function') {
+      this.window.presentFrame(this, damage);
+      this.app._reactX11Startup?.painted();
+      return;
+    }
     if (typeof this.window.getContext !== 'function') return; // headless mock
     // ntk getContext creates a fresh context (with window-event
     // subscriptions) on every call — cache one per window
@@ -10749,6 +10779,12 @@ export class WindowNode extends Scrollable(Node) {
     // after every region: an entry drawn in one damage rect must not be
     // evicted before the next rect of the same frame asks for it
     this._paintCache?.endFrame();
+    // The swapchain seam: a backend presenting from double buffers has to
+    // know exactly which pixels each flush touched — several flushes can
+    // land between two presents, so reading only the last frame's rects
+    // would leave the flipped-in back buffer stale where an earlier flush
+    // painted. Feature-detected like presentFrame; null means everything.
+    this.window.noteFrameDamage?.(damage ?? null);
     if (frameHook) {
       frameHook({
         root: this,

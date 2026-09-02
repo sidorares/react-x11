@@ -6,7 +6,7 @@
 // the palette it is given, the panel's own styles name it with `$tokens`,
 // and switching theme replaces one object.
 // Run with: npm run examples:theming  (needs an X server / DISPLAY)
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Button,
   Checkbox,
@@ -20,6 +20,7 @@ import {
   Switch,
   Tabs,
   ThemeProvider,
+  useSupports,
   useSystemAppearance,
 } from '../src/index.js';
 import { THEME_OPTIONS, themeFor } from './themes.js';
@@ -101,7 +102,7 @@ function ModeIcon({ mode, color }) {
   );
 }
 
-export function ThemingPanel() {
+export function ThemingPanel({ windowSize }) {
   const [name, setName] = useState('github');
   // **The desktop until the user picks.** `null` means "follow"; the toggle
   // in the header sets an explicit mode and takes over from there. Starting
@@ -118,7 +119,18 @@ export function ThemingPanel() {
   const [tab, setTab] = useState('one');
   const [presses, setPresses] = useState(0);
 
-  const theme = themeFor(name, mode);
+  // Every demo theme draws its own controls (`controls: 'drawn'` in
+  // themes.js) — except that picking the macOS impression on a backend that
+  // can render the real thing swaps the lookalike for AppKit's own bezels.
+  // `useSupports` is the capability question, so the same file runs on X11
+  // (where the impression stays drawn) without a warning.
+  const nativeControls = useSupports('nativeControls');
+  const theme = useMemo(() => {
+    const base = themeFor(name, mode);
+    return name === 'macos' && nativeControls
+      ? { ...base, controls: 'native' }
+      : base;
+  }, [name, mode, nativeControls]);
 
   return (
     // One provider, both channels: the widgets read it with useTheme() and
@@ -146,7 +158,12 @@ export function ThemingPanel() {
         </Button>
         <box style={s.spacerHide} />
         <text style={s.caption}>
-          resize me: the gallery splits in two past 620px
+          {windowSize
+            ? // the measured size first, so it survives the clip when the
+              // bar runs out of room: logical px, the unit the 520/620
+              // thresholds are in
+              `${Math.round(windowSize.width)}×${Math.round(windowSize.height)} — resize me: the gallery splits in two past 620px`
+            : 'resize me: the gallery splits in two past 620px'}
         </text>
       </box>
 
@@ -255,9 +272,18 @@ export function ThemingPanel() {
 }
 
 function App() {
+  // `onResize` reports in logical px — the same unit the `@width` blocks
+  // above compare against — so the caption shows exactly what is measured.
+  const [size, setSize] = useState({ width: 720, height: 480 });
   return (
-    <window title="theming" width={720} height={480} minWidth={360}>
-      <ThemingPanel />
+    <window
+      title="theming"
+      width={720}
+      height={480}
+      minWidth={360}
+      onResize={(ev) => setSize({ width: ev.width, height: ev.height })}
+    >
+      <ThemingPanel windowSize={size} />
     </window>
   );
 }

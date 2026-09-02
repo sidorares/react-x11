@@ -65,7 +65,8 @@
     "bench:frames": "tsx scripts/bench/frames.js",
     "docs:dev": "npm --prefix website start",
     "docs:build": "npm --prefix website run build",
-    "docs:test": "npm --prefix website test"
+    "docs:test": "npm --prefix website test",
+    "bench:presenters": "node --import tsx scripts/bench/presenters.js"
   },
   "repository": {
     "type": "git",
@@ -89,7 +90,9 @@
     "yoga-layout": "^3.2.1"
   },
   "optionalDependencies": {
-    "dbus-native": "^0.15.1"
+    "@windowkit/appkit": "^0.1.0",
+    "dbus-native": "^0.15.1",
+    "x11-dri": "^0.7.0"
   },
   "peerDependencies": {
     "@babel/core": "^8.0.0",

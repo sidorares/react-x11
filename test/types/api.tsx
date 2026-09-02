@@ -1013,6 +1013,14 @@ async function main() {
   const borrowing = await createRoot({ app: root.app });
   await borrowing.unmount();
 
+  // the backend ladder: auto (the default), or one by name
+  const native = await createRoot({ backend: 'cocoa' });
+  await native.unmount();
+  await (await createRoot({ backend: 'auto' })).unmount();
+  await (await createRoot({ backend: 'x11', display: ':1' })).unmount();
+  // @ts-expect-error -- not a backend
+  await createRoot({ backend: 'wayland' });
+
   // startup notification: on by default, three ways to say otherwise
   const off = await createRoot({ startupNotification: false });
   await off.unmount();

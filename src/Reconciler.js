@@ -571,6 +571,36 @@ async function connect(options) {
 const isNtkApp = (v) =>
   Boolean(v) && typeof v.createWindow === 'function' && typeof v.X === 'object';
 
+/**
+ * Which display system a root that opens its own connection talks to.
+ *
+ * `'auto'` — the default — is one rule: macOS gets the native Core
+ * Animation backend, everything else gets X11 via `$DISPLAY`. (More rungs —
+ * Wayland — join this ladder, not a new one; docs/wayland.md.) On a mac
+ * without the `@windowkit/appkit` bridge installed, auto falls back to X11 so
+ * an XQuartz setup keeps working; asking for `'cocoa'` by name means the
+ * bridge is required, and its absence is an error that says how to fix it.
+ * `REACT_X11_BACKEND` overrides for A/B runs without touching code.
+ */
+function resolveBackend(options) {
+  const asked = options.backend ?? process.env.REACT_X11_BACKEND ?? 'auto';
+  if (asked === 'x11' || asked === 'cocoa') return asked;
+  if (asked !== 'auto') {
+    throw new Error(
+      `react-x11: unknown backend ${JSON.stringify(asked)} — expected ` +
+        "'x11', 'cocoa' or 'auto'.",
+    );
+  }
+  // Naming an X endpoint is choosing X11: a `display` or a `stream` (the
+  // tests' in-process server, a tunnel) would be silently ignored by any
+  // other backend, and an ignored connection option is worse than either
+  // answer.
+  if (options.display !== undefined || options.stream !== undefined) {
+    return 'x11';
+  }
+  return process.platform === 'darwin' ? 'cocoa' : 'x11';
+}
+
 // What a root that opens its own connection forwards to ntk. `stream` is
 // how you reach a server that is not on the other end of $DISPLAY — an
 // in-process one, a tunnel — and is what the tests connect through.
@@ -652,11 +682,24 @@ export async function createRoot(options = {}) {
   }
   const { app: borrowed, onDisconnect, ...rest } = options;
   const owned = borrowed === undefined;
+  // Which display system this root speaks — resolved before anything runs,
+  // because the desktop-integration default below depends on it. A borrowed
+  // app already IS a backend, so the option only steers owned connections.
+  const backend = owned ? resolveBackend(rest) : null;
   // Before anything starts, for two reasons: a bad `desktop` shape must throw
   // with nothing in flight, like the check above it — and `startA11y()` below
   // reads this policy, so it has to be settled before the first await, not
   // after (src/desktopintegration.js).
-  setDesktopIntegration(rest.desktop);
+  //
+  // The cocoa backend's desktop is not freedesktop's: the AT-SPI bridge and
+  // the D-Bus global menu have nothing to register against there, so they
+  // default off (their macOS replacements are their own workstream —
+  // docs/macos.md). The appearance ladder stays on: its macOS rung is the
+  // one that answers. An explicit `desktop` option still wins.
+  setDesktopIntegration(
+    rest.desktop ??
+      (backend === 'cocoa' ? { a11y: false, globalMenu: false } : undefined),
+  );
   // The connection is started first, and the order is the point rather than a
   // detail. `loadLayout()` is only nominally asynchronous: instantiating the
   // engine blocks the event loop for 15-50 ms before it returns its promise
@@ -669,16 +712,38 @@ export async function createRoot(options = {}) {
   // synchronous block, and only where the handshake takes longer than it. It
   // is not measurable on a Unix socket, and it is lost in the noise on a link
   // slow enough to matter. This is the right order, not a fast one.
-  const connecting = owned
-    ? connect(
-        Object.fromEntries(
-          CONNECT_OPTIONS.filter((k) => rest[k] !== undefined).map((k) => [
-            k,
-            rest[k],
-          ]),
-        ),
-      )
-    : Promise.resolve(borrowed);
+  const connectX11 = () =>
+    connect(
+      Object.fromEntries(
+        CONNECT_OPTIONS.filter((k) => rest[k] !== undefined).map((k) => [
+          k,
+          rest[k],
+        ]),
+      ),
+    );
+  const cocoaAsked =
+    rest.backend === 'cocoa' || process.env.REACT_X11_BACKEND === 'cocoa';
+  const connecting = !owned
+    ? Promise.resolve(borrowed)
+    : backend === 'cocoa'
+      ? import('./cocoa/app.js')
+          .then(({ createCocoaApp }) => createCocoaApp(rest))
+          .catch((err) => {
+            // Asked for by name, the bridge is required and its absence is
+            // the error (it says how to install). Reached by 'auto', a mac
+            // without it falls back to X11 so an XQuartz setup keeps
+            // working — said once, because a silent fallback would look
+            // like the native backend being broken rather than absent.
+            if (cocoaAsked) throw err;
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn(
+                'react-x11: no @windowkit/appkit bridge — falling back to the ' +
+                  `X11 backend. (${err.message.split('\n')[0]})`,
+              );
+            }
+            return connectX11();
+          })
+      : connectX11();
   const layout = loadLayout();
   const integrations = loadIntegrations(); // null when there is nothing to install
   const [app] = await Promise.all([connecting, layout, integrations]);

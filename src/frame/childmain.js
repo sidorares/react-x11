@@ -233,6 +233,15 @@ export async function runFrameChild(transport, options = {}) {
     return fatal('connect', err);
   }
 
+  // A backend that presents panes over shared memory instead of a server
+  // (the Cocoa one) takes the channel itself: geometry and input in,
+  // presents out. Feature-detected — the X11 pane path has a real window
+  // and a real server and needs none of this.
+  root.app.attachPaneChannel?.({
+    send: (msg) => transport.send(msg),
+    onMessage: (cb) => transport.onMessage(cb),
+  });
+
   let closing = false;
   const close = async () => {
     if (closing) return;

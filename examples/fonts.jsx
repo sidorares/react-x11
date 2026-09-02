@@ -220,9 +220,11 @@ function paintGuideLines(ctx, width, rows, lines) {
  * one above; the line it belongs to has not moved, and the colour is what
  * ties the two together.
  */
-function paintGuideLabels(ctx, width, height, rows) {
-  ctx.font = '9px sans-serif';
-  const gap = 11;
+function paintGuideLabels(ctx, width, height, rows, scale = 1) {
+  // the canvas draws in device pixels; a size written as if logical is
+  // half-height on a 2x display
+  ctx.font = `${Math.round(9 * scale)}px sans-serif`;
+  const gap = 11 * scale;
   let lowest = -Infinity;
   for (const { label, colour, y } of rows) {
     const at = Math.min(height - 2, Math.max(y, lowest + gap));
@@ -255,7 +257,7 @@ function paintGlyphBox(ctx, hover) {
 }
 
 /** The specimen: a background, guides, a shadow, the face, and a hover box. */
-function paintSpecimen(ctx, { width, height, node }, opts) {
+function paintSpecimen(ctx, { width, height, node, scale = 1 }, opts) {
   const {
     gradient,
     ink,
@@ -356,7 +358,7 @@ function paintSpecimen(ctx, { width, height, node }, opts) {
   layout.draw(ctx, TEXT_X, top);
   ctx.restore();
 
-  if (rows.length) paintGuideLabels(ctx, width, height, rows);
+  if (rows.length) paintGuideLabels(ctx, width, height, rows, scale);
   if (hover) paintGlyphBox(ctx, hover);
 }
 

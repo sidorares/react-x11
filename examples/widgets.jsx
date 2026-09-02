@@ -72,7 +72,12 @@ export function WidgetsPanel() {
           `$dangerText` — derived from the fill, so it stays legible if the
           theme moves the red. */}
       <Row label="Status">
+        {/* A control that names its own colours opts out of the platform
+            bezel: a native button ignores style fills, so `native={false}`
+            keeps the danger ramp everywhere (docs/macos.md §Native
+            controls — the per-instance escape hatch). */}
         <Button
+          native={false}
           style={{
             backgroundColor: '$danger',
             borderColor: '$danger',

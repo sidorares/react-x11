@@ -28,14 +28,6 @@ import { ControlsPanel } from './controls.jsx';
 import { DamagePanel } from './damage.jsx';
 import { MixedPanel } from './mixed.jsx';
 
-const PALETTE = {
-  background: '#f5f6fa',
-  surface: '#ffffff',
-  text: '#2d3436',
-  textMuted: '#7f8c8d',
-  edge: '#dfe6e9',
-};
-
 const s = createStyles({
   window: { backgroundColor: '$background' },
   shell: { flexGrow: 1, minHeight: 0 },
@@ -78,7 +70,6 @@ function App({ onRoot, width = 1100, height = 760, section: initial }) {
       height={height}
       minWidth={640}
       minHeight={480}
-      theme={PALETTE}
       style={s.window}
     >
       <box ref={shell} style={s.shell}>

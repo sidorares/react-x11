@@ -3,8 +3,16 @@
 // build-step-free for consumers.
 
 import React from 'react';
+import { useAppOrNull } from '../appcontext.js';
 import { createStyles } from '../styles.js';
 import { changeEvent } from './change.js';
+import {
+  ABS_FILL,
+  Bezel,
+  bezelNatural,
+  pressWash,
+  useNativeControls,
+} from './native.js';
 import { useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
@@ -74,15 +82,59 @@ export function Switch({
   onChange,
   name,
   disabled = false,
+  native,
   style,
   ...boxProps
 }) {
   const theme = useTheme();
+  const app = useAppOrNull();
+  const nativeControls = useNativeControls(native);
   const control = useControl(
     disabled,
     () => onChange?.(changeEvent('checkbox', name, !checked)),
     { styled: true },
   );
+
+  // NSSwitch's own pixels, on/off as two cached bezels. The knob slide is
+  // the fidelity this loses for now (docs/macos.md flags the switch as the
+  // one control worth revisiting if that disappoints); the press keeps its
+  // answer as the wash, since NSSwitch renders no pressed state offscreen.
+  if (nativeControls) {
+    const nat = bezelNatural(app, 'switch');
+    return h(
+      'box',
+      {
+        theme,
+        role: 'switch',
+        'aria-checked': checked,
+        ...control.props,
+        ...boxProps,
+        style: [
+          control.style,
+          {
+            width: nat.width,
+            height: nat.height,
+            hitSlop: Math.max(0, (24 - nat.height) / 2),
+          },
+          style,
+        ],
+      },
+      h(Bezel, {
+        kind: 'switch',
+        state: checked ? 1 : 0,
+        enabled: !disabled,
+        style: ABS_FILL,
+      }),
+      h('box', {
+        style: [
+          ABS_FILL,
+          { borderRadius: nat.height / 2 },
+          !disabled && { ':active': { backgroundColor: pressWash(theme) } },
+        ],
+      }),
+    );
+  }
+
   return h(
     'box',
     {

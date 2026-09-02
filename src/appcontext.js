@@ -57,7 +57,16 @@ export function useApp() {
   return app;
 }
 
-const SUPPORTS_FEATURES = new Set(['transparency', 'shaders']);
+const SUPPORTS_FEATURES = new Set([
+  'transparency',
+  'shaders',
+  'nativeControls',
+]);
+
+// 'nativeControls' is a property of the backend, decided before the first
+// render and never changing after — so its subscription has nothing to
+// deliver and its snapshot is a property test.
+const NEVER_CHANGES = () => () => {};
 
 /**
  * Can this **display** do something, as a value a component can branch on?
@@ -105,6 +114,13 @@ const SUPPORTS_FEATURES = new Set(['transparency', 'shaders']);
  * disagree exactly when the policy did not ask. The capabilities also say
  * *why* this is false; see docs/gl.md.
  *
+ * `'nativeControls'` is true when this backend renders the platform's own
+ * control bezels — today the Cocoa backend, never X11. The widget set
+ * already branches on it through the theme's `controls: 'auto'` policy, so
+ * this hook is for application code composing its own controls that wants
+ * to sit beside native ones. It is a property of the backend and never
+ * changes over the app's life.
+ *
  * Unlike `'transparency'`, which comes and goes with the compositor, this
  * settles once and then holds still: under a policy that could pick direct,
  * `createRoot()` waits for ntk's probe before handing the app back, so the
@@ -127,18 +143,22 @@ export function useSupports(feature) {
   // side of it from disagreeing (see watchDirectGL).
   const subscribe = useCallback(
     (onChange) =>
-      feature === 'shaders'
-        ? watchDirectGL(app, onChange)
-        : watchCompositing(app, onChange),
+      feature === 'nativeControls'
+        ? NEVER_CHANGES()
+        : feature === 'shaders'
+          ? watchDirectGL(app, onChange)
+          : watchCompositing(app, onChange),
     [app, feature],
   );
   // a boolean, so the snapshot is stable for a given state — returning the
   // visual object here would tear on every render
   const snapshot = useCallback(
     () =>
-      feature === 'shaders'
-        ? hasDirectGL(app)
-        : compositingActive(app) && Boolean(argbVisual(app)),
+      feature === 'nativeControls'
+        ? Boolean(app.nativeBezels)
+        : feature === 'shaders'
+          ? hasDirectGL(app)
+          : compositingActive(app) && Boolean(argbVisual(app)),
     [app, feature],
   );
   return useSyncExternalStore(subscribe, snapshot, snapshot);

@@ -67,6 +67,7 @@ import {
   snapshot,
   IdAllocator,
 } from './dbusmenu.js';
+import { useAppOrNull } from './appcontext.js';
 import { useTopLevelWindow, windowIdOf } from './windowid.js';
 
 export const REGISTRAR_NAME = 'com.canonical.AppMenu.Registrar';
@@ -649,6 +650,7 @@ export function useGlobalMenu(
   { onSelect, onAboutToShow, enabled = true } = {},
 ) {
   const target = useTopLevelWindow();
+  const app = useAppOrNull();
   const [exported, setExported] = useState(false);
   const exportRef = useRef(null);
 
@@ -661,7 +663,7 @@ export function useGlobalMenu(
 
   useEffect(() => {
     if (!enabled) return undefined;
-    const owner = new GlobalMenuExport({
+    const config = {
       getMenus: () => live.current.menus ?? [],
       onSelect: (item) => {
         item.onSelect?.(item);
@@ -670,7 +672,13 @@ export function useGlobalMenu(
       onAboutToShow: (item) => live.current.onAboutToShow?.(item),
       target,
       onChange: setExported,
-    });
+    };
+    // The transport is the backend's where it has one — the Cocoa backend
+    // owns the macOS menu bar and answers immediately — and D-Bus with the
+    // registrar dance everywhere else. Same owner contract either way.
+    const owner = app?.createGlobalMenuExport
+      ? app.createGlobalMenuExport(config)
+      : new GlobalMenuExport(config);
     exportRef.current = owner;
     owner.start().catch(() => {});
     return () => {
@@ -678,7 +686,7 @@ export function useGlobalMenu(
       setExported(false);
       owner.stop().catch(() => {});
     };
-  }, [enabled, target]);
+  }, [enabled, target, app]);
 
   useEffect(() => {
     exportRef.current?.update(menus ?? []);
