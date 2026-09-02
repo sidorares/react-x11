@@ -152,6 +152,11 @@ await esbuild.build({
     'node:path': path.join(shimsDir, 'path.js'),
     util: path.join(shimsDir, 'util.js'),
     'node:util': path.join(shimsDir, 'util.js'),
+    // the Cocoa font manager's woff decoder — macOS-backend only, never
+    // reached in a browser, but esbuild bundles the dynamically-imported
+    // cocoa backend and must resolve the specifier
+    zlib: path.join(shimsDir, 'zlib.js'),
+    'node:zlib': path.join(shimsDir, 'zlib.js'),
     // createRequire, used by react-x11 to read its own package.json
     module: path.join(shimsDir, 'module.js'),
     'node:module': path.join(shimsDir, 'module.js'),
