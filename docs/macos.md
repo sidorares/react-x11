@@ -757,7 +757,12 @@ with no D-Bus in sight. The macOS adapter consumes precisely that:
 The escape hatches all reduce to one rule stated in Tier L: **a node
 whose content is painted code gets a raster visual** — a bitmap-backed
 layer, the CG canvas2d context translated to its box, redraw on the
-node's own damage claims, `contentsScale` from the window.
+node's own damage claims, `contentsScale` from the window. A claim that
+names the node re-rasters that node; a bare rect — an element's
+`invalidate(false, rect)` for the box a dragged item moved through, the
+region `scrollContents` shifts, the strip an animation ticks in —
+re-rasters every raster visual whose ink it touches, the same
+conservative answer the damage model gives a rect on X11.
 
 - `<canvas onDraw>`: `paintContent` runs against the CG ctx; a new
   `onDraw` closure invalidates the node (existing rule); `putImageData`
@@ -767,10 +772,13 @@ node's own damage claims, `contentsScale` from the window.
   (name, size) and tints per ink via `CGContextClipToMask` + fill, so
   the a8-coverage economics survive (ink stays out of the raster key).
 - `registerElement` + `Node.paint(ctx)` subclasses (all seven components
-  elements): work unchanged through the raster visual. The
-  `Context2D` dialect the consumers exercise — including `fillRects`,
-  `drawGlyphs`, `positioned`, `layoutSubtree`, `vw/vh/em` — is part of
-  the ctx contract on both backends.
+  elements): work unchanged through the raster visual. An element that
+  overrides `paint` — `super.paint(ctx)` for the box, then its scene —
+  has its content nowhere but in that override, so the raster replays
+  the override itself, with the child walk held back (the children have
+  visuals of their own). The `Context2D` dialect the consumers exercise
+  — including `fillRects`, `drawGlyphs`, `positioned`, `layoutSubtree`,
+  `vw/vh/em` — is part of the ctx contract on both backends.
 - `ntk.Surface` offscreen allocation (charts, terminal, flow): the Cocoa
   app object supplies one. `app.createSurface(options)` answers ntk's
   `Surface` contract over a CG bitmap (`src/cocoa/surface.js`, issue

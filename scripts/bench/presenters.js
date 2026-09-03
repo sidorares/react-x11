@@ -1024,6 +1024,112 @@ const SCENARIOS = {
   },
 };
 
+/**
+ * A registered element that draws its own scene — the components' <Flow>
+ * shape: `paint` overridden, `super.paint` for the box, the scene after it
+ * — panned by `scrollContents` every tick. Its content exists only through
+ * that override, so this is the raster visual's contract (docs/macos.md
+ * §"Custom drawing on a layer tree") as a number: the pane must re-raster
+ * on the claim, and the label beside it must not. The surface presenter
+ * blits the surviving band and repaints the exposed strip.
+ */
+const PANE_CELL = 28;
+const PANE_GAP = 12;
+const PANE_TINTS = ['#4c6ef5', '#12b886', '#fd7e14', '#be4bdb'];
+
+function definePane(NodeClass) {
+  return class BenchPaneNode extends NodeClass {
+    constructor(props, app) {
+      super('benchpane', props, app);
+      this.offset = 0; // device pixels the scene has moved right
+    }
+
+    pan(dx) {
+      this.offset += dx;
+      // "the pixels in here moved by dx; the strip is new"
+      this.scrollContents(this.contentBox(), dx, 0);
+    }
+
+    paint(ctx) {
+      super.paint(ctx);
+      const box = this.contentBox();
+      if (!(box.width > 0 && box.height > 0)) return;
+      const damage = this.paintDamage();
+      const s = this.scale;
+      const cell = PANE_CELL * s;
+      const pitch = (PANE_CELL + PANE_GAP) * s;
+      const phase = ((this.offset % pitch) + pitch) % pitch;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(box.x, box.y, box.width, box.height);
+      ctx.clip();
+      let row = 0;
+      for (let y = box.y + PANE_GAP * s; y < box.y + box.height; y += pitch) {
+        let col = 0;
+        for (let x = box.x + phase - pitch; x < box.x + box.width; x += pitch) {
+          const r = { x, y, width: cell, height: cell };
+          col += 1;
+          if (
+            damage &&
+            !(
+              r.x < damage.x + damage.width &&
+              damage.x < r.x + r.width &&
+              r.y < damage.y + damage.height &&
+              damage.y < r.y + r.height
+            )
+          ) {
+            continue;
+          }
+          ctx.fillStyle = PANE_TINTS[(row + col) % PANE_TINTS.length];
+          ctx.fillRect(r.x, r.y, r.width, r.height);
+          ctx.strokeStyle = '#1f2933';
+          ctx.lineWidth = s;
+          ctx.beginPath();
+          ctx.moveTo(r.x + cell, r.y + cell / 2);
+          ctx.lineTo(r.x + pitch, r.y + cell / 2 + cell / 3);
+          ctx.stroke();
+        }
+        row += 1;
+      }
+      ctx.restore();
+    }
+  };
+}
+
+SCENARIOS.pane = {
+  latency: true,
+  tree: () =>
+    windowOf(
+      [
+        e(
+          'box',
+          { style: { flexGrow: 1, padding: 16, gap: 12 } },
+          e(
+            'text',
+            { style: { color: '#7f8c8d' } },
+            'a label beside the pane — it must not re-raster on a pan',
+          ),
+          e('benchpane', {
+            style: {
+              flexGrow: 1,
+              borderWidth: 1,
+              borderColor: '#c3ccd8',
+              backgroundColor: '#ffffff',
+            },
+          }),
+        ),
+      ],
+      'bench pane',
+    ),
+  drive(ctx) {
+    const pane = ctx.find((n) => n.kind === 'benchpane');
+    if (!pane) return;
+    const step = Math.round(2 * (pane.scale || 1));
+    ctx.stamp();
+    pane.pan(ctx.tick % 120 < 60 ? step : -step); // sweep right, then back
+  },
+};
+
 // ---------------------------------------------------------------------------
 // Child: run one (scenario, presenter/backend) and print a JSON line.
 // ---------------------------------------------------------------------------
@@ -1033,6 +1139,14 @@ async function runChild() {
   const scenario = SCENARIOS[name];
   process.env.REACT_X11_NO_AUTORUN = '1';
   const { createRoot } = await import('../../src/index.js');
+  // the `pane` scenario's element, registered before anything renders —
+  // harmless to every other scenario, and the registry is per process
+  const { Node } = await import('../../src/node.js');
+  const { registerElement } = await import('../../src/host.js');
+  const BenchPaneNode = definePane(Node);
+  registerElement('benchpane', {
+    create: (props, app) => new BenchPaneNode(props, app),
+  });
   const { Icon } = await import('../../src/components/Icon.js');
   const store = makeStore(COLS * ROWS);
   const deps = { Icon, store };
