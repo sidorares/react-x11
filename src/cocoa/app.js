@@ -724,6 +724,46 @@ export class CocoaApp {
 }
 
 /**
+ * `listScreens()` turned into the screen layout `src/screens.js` publishes.
+ *
+ * **One scale for every screen, and it is the app's.** macOS lays all the
+ * displays out in a single global point space, and `app.scale` is this
+ * app's points-to-device-pixels factor for the whole of it — window
+ * origins, event coordinates, these rects. Converting a 1x external
+ * display by *its own* 1 while windows on it still report `points * 2`
+ * would put the monitor somewhere no window ever is, and `monitorAt()`
+ * would answer with the wrong head. (What backing scale a window on a
+ * mixed-DPI desk should raster at is a real and separate question; the
+ * layout is not where it is answered.)
+ *
+ * **A usable rect per monitor.** `NSScreen.visibleFrame` is per screen —
+ * that display's own menu bar and Dock taken off — so each monitor carries
+ * its `visible` and `usable()` takes it as a rect. Publishing only the
+ * primary's, the way `_NET_WORKAREA` forces on X11, applied the primary's
+ * *width* as a bound to every other head: a second display wider than the
+ * built-in had its right edge pulled in by the difference, and every
+ * anchored popup that reached past it was clamped back (issue #453).
+ */
+export function screenLayout(screens, scale) {
+  const rect = (r) => ({
+    x: Math.round(r.x * scale),
+    y: Math.round(r.y * scale),
+    width: Math.round(r.width * scale),
+    height: Math.round(r.height * scale),
+  });
+  const primary = screens?.[0];
+  return {
+    monitors: (screens ?? []).map((screen) => ({
+      ...rect(screen),
+      ...(screen.visible ? { visible: rect(screen.visible) } : null),
+    })),
+    // Still published for `useScreens().workArea`, which is one rect for
+    // the desktop by definition; the primary's is the closest macOS has.
+    workArea: primary?.visible ? rect(primary.visible) : null,
+  };
+}
+
+/**
  * Build the app and seed the platform stores the way the mock seeds them —
  * `beginScale`/`beginScreens`/`beginCompositing` find a session already
  * open and leave it alone, so `createRoot`'s shared flow runs unchanged.
@@ -733,25 +773,7 @@ export async function createCocoaApp(options = {}) {
   const app = new CocoaApp(native, options);
 
   setScaleForTests(app, app.scale, 'cocoa');
-  const s = app.scale;
-  const monitors = app._screens.map((screen) => ({
-    x: Math.round(screen.x * s),
-    y: Math.round(screen.y * s),
-    width: Math.round(screen.width * s),
-    height: Math.round(screen.height * s),
-  }));
-  const primary = app._screens[0];
-  setScreensForTests(app, {
-    monitors,
-    workArea: primary
-      ? {
-          x: Math.round(primary.visible.x * s),
-          y: Math.round(primary.visible.y * s),
-          width: Math.round(primary.visible.width * s),
-          height: Math.round(primary.visible.height * s),
-        }
-      : null,
-  });
+  setScreensForTests(app, screenLayout(app._screens, app.scale));
   setCompositingForTests(app, true);
 
   app.start(options.cocoa ?? {});

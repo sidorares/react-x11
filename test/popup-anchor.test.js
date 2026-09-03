@@ -69,6 +69,76 @@ test('`at` anchors to a rect inside the node, in the node’s coordinates', () =
   assert.deepStrictEqual([whole.x, whole.y], [100 + 10, 50 + 20 + 300 + 2]);
 });
 
+// The bug behind issue #453: on Cocoa the whole layout was seeded with the
+// primary screen's `visibleFrame` as *the* work area, and `usable()` applies
+// a desktop-wide work area as a per-axis bound on whichever monitor was
+// picked. A second display wider than the built-in therefore kept its own
+// `x` and inherited the primary's `width`, and every popup that reached past
+// that short right edge was silently pulled back to it.
+test('a popup on a wider second display is not clamped to the primary’s width', () => {
+  const twoHeads = (workArea) => {
+    const app = {};
+    setScreensForTests(app, {
+      monitors: [
+        {
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 900,
+          visible: { x: 0, y: 25, width: 1440, height: 875 },
+        },
+        {
+          x: 1440,
+          y: 0,
+          width: 2560,
+          height: 1440,
+          visible: { x: 1440, y: 0, width: 2560, height: 1440 },
+        },
+      ],
+      workArea,
+    });
+    return app;
+  };
+  // a trigger three quarters of the way across the external display
+  const trigger = (app) => ({
+    abs: { x: 100, y: 50, width: 200, height: 30 },
+    root: { window: { x: 2900, y: 100 } },
+    app,
+  });
+
+  const at = anchorRect(trigger(twoHeads(null)), { width: 300, height: 200 });
+  assert.deepStrictEqual(
+    [at.x, at.y],
+    [3000, 100 + 50 + 30 + 2],
+    'placed where it was asked, well inside the 1440..4000 head',
+  );
+
+  // and the primary's work area riding along as the desktop's — which is
+  // what the Cocoa backend published — changes nothing, because each head
+  // now carries its own usable rect
+  const withPrimaryWorkArea = anchorRect(
+    trigger(twoHeads({ x: 0, y: 25, width: 1440, height: 875 })),
+    { width: 300, height: 200 },
+  );
+  assert.strictEqual(withPrimaryWorkArea.x, 3000);
+
+  // the same layout with no per-monitor rects is the old behaviour, and is
+  // what the assertion above is worth: 1440 as a width bound puts the
+  // external head's right edge at 2880, and the popup back at 2580.
+  const app = {};
+  setScreensForTests(app, {
+    monitors: [
+      { x: 0, y: 0, width: 1440, height: 900 },
+      { x: 1440, y: 0, width: 2560, height: 1440 },
+    ],
+    workArea: { x: 0, y: 25, width: 1440, height: 875 },
+  });
+  assert.strictEqual(
+    anchorRect(trigger(app), { width: 300, height: 200 }).x,
+    2580,
+  );
+});
+
 test('a sub-rect flips and clamps as if it were the node', () => {
   // an editor filling the screen, with the caret near the bottom of it: what
   // has to flip is the popup at *the caret*, and the editor's own bottom edge

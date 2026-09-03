@@ -327,6 +327,72 @@ describe('useScreens', () => {
     ]);
   });
 
+  // A backend that knows each head's own usable rect (Cocoa's
+  // `visibleFrame`) hands it over instead, and then the per-axis
+  // compromise above does not apply at all — including the part of it that
+  // made the primary's *width* a bound on a wider second display.
+  test('a monitor’s own visible rect wins over the desktop work area', async () => {
+    const { app } = await renderX11(h('box'), { backend: 'mock' });
+    setScreensForTests(app, {
+      monitors: [
+        {
+          name: 'built-in',
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 900,
+          visible: { x: 0, y: 25, width: 1440, height: 875 },
+        },
+        {
+          name: 'external',
+          x: 1440,
+          y: 0,
+          width: 2560,
+          height: 1440,
+          visible: { x: 1440, y: 0, width: 2560, height: 1440 },
+        },
+      ],
+      // the primary's, standing in for a desktop-wide one — which is what
+      // the Cocoa backend used to publish for every head
+      workArea: { x: 0, y: 25, width: 1440, height: 875 },
+    });
+    const { screens } = screensSnapshot(app);
+    assert.deepEqual(
+      screens.map((s) => s.available),
+      [
+        { x: 0, y: 25, width: 1440, height: 875 },
+        // and NOT 1440 wide, which is what the per-axis clamp gave it
+        { x: 1440, y: 0, width: 2560, height: 1440 },
+      ],
+    );
+  });
+
+  // A `visible` a backend reports outside its own monitor is taken as the
+  // overlap, so `available` is never a rect off the head it belongs to.
+  test('a visible rect that overhangs its monitor is intersected', async () => {
+    const { app } = await renderX11(h('box'), { backend: 'mock' });
+    setScreensForTests(app, {
+      monitors: [
+        {
+          x: 100,
+          y: 0,
+          width: 800,
+          height: 600,
+          // wider than its head on both sides, and a menu bar's worth
+          // shorter at the top
+          visible: { x: 0, y: 50, width: 1000, height: 400 },
+        },
+      ],
+    });
+    const [screen] = screensSnapshot(app).screens;
+    assert.deepEqual(screen.available, {
+      x: 100,
+      y: 50,
+      width: 800,
+      height: 400,
+    });
+  });
+
   // The no-work-area branch is the one that had the bug, so it gets its own
   // case: with nothing to clamp against, `available` is still only a rect.
   test('available is a rect with no work area either', async () => {

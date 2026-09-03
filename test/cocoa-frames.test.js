@@ -30,7 +30,7 @@ import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
 
-import { CocoaApp } from '../src/cocoa/app.js';
+import { CocoaApp, screenLayout } from '../src/cocoa/app.js';
 import { CocoaPaneHost } from '../src/cocoa/panehost.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { createRoot } from '../src/index.js';
@@ -928,4 +928,76 @@ test('a wheel notch is answered on the event, like a press', async () => {
     2,
     'and the frame went out before the route returned',
   );
+});
+
+// --- the screen layout ------------------------------------------------------
+
+// Issue #453: the layout used to publish the primary screen's `visibleFrame`
+// as *the* work area for every head, and `usable()` reads a desktop-wide
+// work area as a per-axis bound — so a second display wider than the
+// built-in had the built-in's width applied to it, and every anchored popup
+// past that line was clamped back. `NSScreen.visibleFrame` is per screen, so
+// each monitor carries its own instead.
+test('each monitor carries its own usable rect, in the app’s one scale', () => {
+  // a 2x built-in with a menu bar, and a wider 1x display to its right;
+  // `listScreens` reports both in the one global point space, top-left
+  const layout = screenLayout(
+    [
+      {
+        x: 0,
+        y: 0,
+        width: 1440,
+        height: 900,
+        scale: 2,
+        visible: { x: 0, y: 25, width: 1440, height: 875 },
+        primary: true,
+      },
+      {
+        x: 1440,
+        y: 0,
+        width: 2560,
+        height: 1440,
+        scale: 1,
+        visible: { x: 1440, y: 0, width: 2560, height: 1440 },
+      },
+    ],
+    2,
+  );
+
+  assert.deepStrictEqual(layout.monitors, [
+    {
+      x: 0,
+      y: 0,
+      width: 2880,
+      height: 1800,
+      visible: { x: 0, y: 50, width: 2880, height: 1750 },
+    },
+    // the external head converts with the APP's scale, not its own 1: a
+    // window on it reports `points * 2` like every other window, so a rect
+    // in points would sit where no window ever is and `monitorAt()` would
+    // answer with the wrong head
+    {
+      x: 2880,
+      y: 0,
+      width: 5120,
+      height: 2880,
+      visible: { x: 2880, y: 0, width: 5120, height: 2880 },
+    },
+  ]);
+  // one rect for the desktop is still published for `useScreens().workArea`,
+  // and the primary's is the closest macOS has to one
+  assert.deepStrictEqual(layout.workArea, {
+    x: 0,
+    y: 50,
+    width: 2880,
+    height: 1750,
+  });
+});
+
+test('a screen the bridge reports no visible rect for carries none', () => {
+  const layout = screenLayout([{ x: 0, y: 0, width: 800, height: 600 }], 1);
+  assert.deepStrictEqual(layout.monitors, [
+    { x: 0, y: 0, width: 800, height: 600 },
+  ]);
+  assert.strictEqual(layout.workArea, null);
 });

@@ -72,12 +72,17 @@
  * Letting the WM have the last word costs a clamped-to-the-edge window one
  * correction it would have made anyway.
  *
- * **A per-monitor work area.** `_NET_WORKAREA` is one rect for the whole
- * virtual desktop. Deriving a real per-monitor one means reading
+ * **A per-monitor work area, on X11.** `_NET_WORKAREA` is one rect for the
+ * whole virtual desktop. Deriving a real per-monitor one means reading
  * `_NET_WM_STRUT_PARTIAL` off every window on the screen and intersecting
  * the reservations that fall on each head — a full window-tree walk, redone
  * whenever any panel changes. `available` below is the per-axis
  * approximation instead, and says so.
+ *
+ * A backend that *does* know each monitor's usable rect says so directly
+ * instead: a `visible` rect on the monitor record, which `usable()` prefers
+ * over the whole-desktop compromise. Cocoa's `NSScreen.visibleFrame` is
+ * exactly that, so the macOS backend never goes through the approximation.
  */
 
 import { requireExtension } from './extensions.js';
@@ -206,9 +211,36 @@ function monitorAt(monitors, point) {
   return best;
 }
 
+/** The overlap of two rects, or `null` where they do not touch. */
+function intersect(a, b) {
+  const x0 = Math.max(a.x, b.x);
+  const y0 = Math.max(a.y, b.y);
+  const x1 = Math.min(a.x + a.width, b.x + b.width);
+  const y1 = Math.min(a.y + a.height, b.y + b.height);
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
 /**
- * The monitor rect clamped per axis by `_NET_WORKAREA` — see the note on
- * per-monitor work areas at the top of the file.
+ * The usable part of one monitor.
+ *
+ * Two ways to get there, and the first one is the real answer:
+ *
+ * - A monitor record may carry its **own** usable rect as `visible`, in the
+ *   same screen coordinates as the monitor itself. That is what Cocoa's
+ *   `NSScreen.visibleFrame` is — per screen, minus that screen's menu bar
+ *   and Dock — and it is taken as a rect, intersected with the monitor in
+ *   case a backend reports one that overhangs.
+ * - Otherwise the monitor rect clamped **per axis** by `_NET_WORKAREA`,
+ *   which is one rect for the whole virtual desktop and so cannot be
+ *   positioned against a single head — see the note at the top of the file.
+ *
+ * The distinction matters the moment the monitors differ in size. A global
+ * work area no wider than the primary, applied as a width bound to a wider
+ * second display, moves that display's right edge inward by the difference
+ * and every anchored popup with it. On X11 the property spans the virtual
+ * desktop and the clamp is a no-op on the width, which is why the
+ * approximation held there and only there.
  *
  * Always **only** a rect. A monitor record carries a name, a primary flag and
  * physical sizes as well, and spreading it here put all of that inside
@@ -221,6 +253,7 @@ function usable(monitor, work) {
     width: monitor.width,
     height: monitor.height,
   };
+  if (monitor.visible) return intersect(rect, monitor.visible) ?? rect;
   if (!work) return rect;
   rect.width = Math.min(rect.width, work.width);
   rect.height = Math.min(rect.height, work.height);
@@ -756,6 +789,8 @@ export function endScreens(app) {
  * `monitors` entries may carry the RandR fields (`name`, `primary`,
  * `widthMM`, `heightMM`, `refreshRate`, `rotation`) as well as the rect, so
  * a test can state a named two-head desktop without a server that has RandR.
+ * An entry may also carry its own `visible` rect — the monitor's usable
+ * area, which takes precedence over the whole-desktop `workArea`.
  */
 export function setScreensForTests(app, { monitors = null, workArea = null }) {
   let session = sessions.get(app);
