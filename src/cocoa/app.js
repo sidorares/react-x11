@@ -54,7 +54,10 @@ export class CocoaApp {
       process.env.REACT_X11_COCOA_PRESENTER ??
       'surface';
 
-    this.fonts = new CocoaFontManager();
+    // the app's own bridge, so an app over a fake one (the tests) needs no
+    // real bridge on the machine — the manager's default loads it only when
+    // it is built standalone
+    this.fonts = new CocoaFontManager(native);
 
     // AppKit-rendered control bezels. Its *presence* is the capability:
     // `useSupports('nativeControls')` and the widget set's `controls:
