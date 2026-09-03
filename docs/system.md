@@ -87,7 +87,7 @@ yet_ and keep the last one rather than writing it.
 server with neither extension. `null` is a headless mock with no display at
 all.
 
-### `available` is an approximation, and the only one here
+### `available` is an approximation on X11, and the only one here
 
 `_NET_WORKAREA` — the desktop minus the docks and panels that reserved space —
 is published **for the whole virtual desktop**, not per monitor. That is an
@@ -100,6 +100,12 @@ A true per-monitor work area means reading `_NET_WM_STRUT_PARTIAL` off every
 window on the screen and intersecting the reservations that land on each head
 — a full window-tree walk, redone whenever any panel changes. If you need
 that, `useApp().X` is the escape hatch.
+
+**On macOS it is exact.** `NSScreen.visibleFrame` is per screen already — that
+display's own menu bar and Dock taken off — so each monitor carries its real
+usable rect and no approximation runs. `workArea` there is still one rect,
+because the field is one rect by definition; it is the primary screen's, and
+on a multi-display Mac `screens[n].available` is the answer to prefer.
 
 ### Mirroring
 
