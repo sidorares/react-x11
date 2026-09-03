@@ -22,6 +22,14 @@
 // Multi-colour drawings bake their colours in, which is right, because those
 // colours belong to the drawing. `SvgView.paintKind` decides which is which.
 //
+// Coverage needs a backend that composites a mask through a colour, which
+// X Render does and the Cocoa backend's surfaces do not (src/cocoa/
+// surface.js — no `a8`). There a mono drawing is cached as argb32 with its
+// colour in the key: one entry per colour it is seen in rather than one for
+// all of them, which is still one render per colour instead of one per
+// cell per frame. A coverage-only plan — a blurred shadow, whose blur is a
+// pass over the mask — stays live on that backend.
+//
 // ## Self-limiting, on purpose
 //
 // X gives no back-pressure: the first sign of overspending is `BadAlloc` on
@@ -35,6 +43,12 @@
 // SyntaxError — the whole renderer, not just the cache. Same shape as the
 // `typeof wnd?.scrollRegion !== 'function'` guard for ntk without #139.
 import * as ntk from 'ntk';
+
+// The surface this cache draws into is `react-x11/ntk`'s: ntk's pixmap on
+// an X connection, the app's own (`app.createSurface`) on a backend that
+// makes them — the Cocoa backend's CG bitmap. One import, so the cache
+// names neither.
+import { Surface } from './ntk.js';
 
 /** Stale pixels are undebuggable, and every other optimization here has an
  * escape hatch — see NO_SCROLL_BLIT. */
@@ -145,6 +159,9 @@ export class PaintCache {
     this.app = app;
     this.budget = budget;
     this.verify = verify;
+    /** whether an `a8` entry can be painted through a colour here — X
+     * Render composites a mask through the fill; nothing else does yet */
+    this.coverage = Boolean(app?.display?.Render);
     /** key -> entry. Map iteration is insertion order, so re-inserting on
      * access makes this an LRU list for free — same trick as getGlyphPage. */
     this.entries = new Map();
@@ -193,7 +210,7 @@ export class PaintCache {
     return this.drawing(ctx, {
       ...plan,
       label: `<${node.kind}>`,
-      draw: (sctx, box) => node.paintCached(sctx, box),
+      draw: (sctx, box, ink) => node.paintCached(sctx, box, ink),
       live: () => node.paintContent(ctx),
     });
   }
@@ -211,9 +228,22 @@ export class PaintCache {
    *
    * `maxPixels` overrides the per-item cap for a caller whose drawing is
    * legitimately box-sized rather than icon-sized.
+   *
+   * `draw` is handed the ink a mono drawing paints in as its third
+   * argument: white into a coverage surface, where only the alpha survives
+   * and the tint arrives at blit time, and the tint itself on a backend
+   * without coverage, where the entry bakes its colour and carries it in
+   * the key (`_bakeTint`).
    */
   drawing(ctx, plan) {
     if (!isDeviceSpace(ctx)) return plan.live(ctx);
+    if (plan.format === 'a8' && !this.coverage) {
+      // A plan whose `after` pass works on the mask — a blurred shadow —
+      // has no argb32 equivalent: it paints live, which is what the frame
+      // owed with no cache at all.
+      if (plan.after) return plan.live(ctx);
+      plan = this._bakeTint(plan);
+    }
 
     if (plan.width * plan.height > (plan.maxPixels ?? MAX_ITEM_PIXELS)) {
       this.stats.tooBig++;
@@ -254,9 +284,30 @@ export class PaintCache {
     return this._blit(ctx, entry, plan);
   }
 
+  /**
+   * A coverage plan on a backend that cannot composite coverage, as an
+   * argb32 plan that paints its tint: the same pixels, one entry per colour
+   * instead of one per drawing.
+   */
+  _bakeTint(plan) {
+    const tint = plan.tint;
+    return {
+      ...plan,
+      format: 'argb32',
+      key: `${plan.key}|ink:${tint}`,
+      draw: (sctx, box) => plan.draw(sctx, box, tint),
+    };
+  }
+
+  /** The colour a drawing paints in: white into coverage, the tint into a
+   * baked entry, and nothing a multi-colour drawing reads. */
+  static inkFor(plan) {
+    return plan.format === 'a8' ? '#ffffff' : (plan.tint ?? '#ffffff');
+  }
+
   _render(plan) {
     try {
-      const surface = new ntk.Surface(this.app, {
+      const surface = new Surface(this.app, {
         width: plan.width,
         height: plan.height,
         format: plan.format,
@@ -264,7 +315,11 @@ export class PaintCache {
       const box = { x: 0, y: 0, width: plan.width, height: plan.height };
       const state = { digest: 0x811c9dc5 };
       surface.render((sctx) =>
-        plan.draw(this.verify ? recordingContext(sctx, state) : sctx, box),
+        plan.draw(
+          this.verify ? recordingContext(sctx, state) : sctx,
+          box,
+          PaintCache.inkFor(plan),
+        ),
       );
       // `after` may hand back a *different* surface than it was given — a
       // blurred shadow bakes its convolution into a second one and destroys
@@ -310,18 +365,17 @@ export class PaintCache {
     const state = { digest: 0x811c9dc5 };
     let scratch = null;
     try {
-      scratch = new ntk.Surface(this.app, {
+      scratch = new Surface(this.app, {
         width: plan.width,
         height: plan.height,
         format: plan.format,
       });
       scratch.render((sctx) =>
-        plan.draw(recordingContext(sctx, state), {
-          x: 0,
-          y: 0,
-          width: plan.width,
-          height: plan.height,
-        }),
+        plan.draw(
+          recordingContext(sctx, state),
+          { x: 0, y: 0, width: plan.width, height: plan.height },
+          PaintCache.inkFor(plan),
+        ),
       );
     } catch {
       return; // verification is best-effort; never break a frame over it
@@ -365,6 +419,12 @@ export class PaintCache {
  * cannot, and the answer is simply that nothing is cached. */
 export const paintCacheSupported = () => typeof ntk.Surface === 'function';
 
+/** Whether `app` can make an offscreen surface at all: an X connection
+ * with the Render extension (ntk's pixmap surface), or a backend with a
+ * surface of its own — the Cocoa app's `createSurface` (docs/macos.md). */
+const canMakeSurfaces = (app) =>
+  Boolean(app?.display?.Render) || typeof app?.createSurface === 'function';
+
 /**
  * The cache for an app, created on first use. Null when caching is off, when
  * the installed ntk is too old, or when the app cannot make surfaces — the
@@ -372,6 +432,6 @@ export const paintCacheSupported = () => typeof ntk.Surface === 'function';
  * there must paint live.
  */
 export function paintCacheFor(app) {
-  if (DISABLED || !paintCacheSupported() || !app?.display?.Render) return null;
+  if (DISABLED || !paintCacheSupported() || !canMakeSurfaces(app)) return null;
   return (app._paintCache ??= new PaintCache(app));
 }

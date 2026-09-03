@@ -294,13 +294,14 @@ export class SvgNode extends Node {
     };
   }
 
-  paintCached(ctx, box) {
+  paintCached(ctx, box, ink = '#ffffff') {
     const view = this._ensureView();
     if (!view) return;
     // Into a coverage surface, only the alpha of a paint survives, and the
-    // tint arrives at blit time — so any opaque colour renders the same mask.
+    // tint arrives at blit time — so any opaque colour renders the same
+    // mask, and the cache says white then, or the tint where it bakes colour.
     view.draw(ctx, box.x, box.y, box.width, box.height, {
-      color: view.paintKind === 'mono' ? '#ffffff' : this._currentColor(),
+      color: view.paintKind === 'mono' ? ink : this._currentColor(),
     });
   }
 }

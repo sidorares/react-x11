@@ -295,6 +295,22 @@ test('drawImage composites one surface into another through ctxDrawSurface, in e
   assert.equal(native.of('ctxDrawSurface').length, 3);
 });
 
+test('destroy releases the bitmap through the bridge when it can, and once', () => {
+  const native = fakeNative();
+  const released = [];
+  native.releaseSurface = (handle) => released.push(handle.id);
+  const surface = new CocoaSurface(appOver(native), { width: 4, height: 4 });
+  const id = surface._surfaceHandle.id;
+  surface.destroy();
+  surface.destroy();
+  assert.deepEqual(released, [id], 'freed on the call, not on collection');
+  // a bridge without the verb: the finalizer owns it, and destroy is a drop
+  const older = fakeNative();
+  const other = new CocoaSurface(appOver(older), { width: 4, height: 4 });
+  assert.doesNotThrow(() => other.destroy());
+  assert.equal(other._surfaceHandle, null);
+});
+
 test('destroy drops the handle, refuses further drawing with a reason, and is idempotent', () => {
   const native = fakeNative();
   const surface = new CocoaSurface(appOver(native), { width: 8, height: 8 });

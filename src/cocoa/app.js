@@ -29,12 +29,13 @@ import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
 
-// The frame interval: how often a scheduled frame may paint, in ms. 16 is a
-// 60Hz display's period. `createRoot({ cocoa: { frameInterval } })` sets it
-// — 8 on a 120Hz panel paints every refresh — and the honest default is the
-// display's own period, which the bridge does not report yet
-// (NSScreen.maximumFramesPerSecond); until it does, 60Hz is the floor every
-// Mac clears rather than a ceiling half of them hit.
+// The frame interval: how often a scheduled frame may paint, in ms. The
+// default is the period of the display the window is on — `listScreens`
+// reports each panel's `fps` (NSScreen.maximumFramesPerSecond, bridge 0.4),
+// so a 120Hz panel paints every 8.3ms and a 60Hz monitor every 16.7 —
+// and `createRoot({ cocoa: { frameInterval } })` overrides it for every
+// window. 16 stands in where the OS cannot say (`fps: 0`) and under a
+// bridge that does not report it: a 60Hz floor every Mac clears.
 const RAF_INTERVAL_MS = 16;
 const PUMP_INTERVAL_MS = 8;
 
@@ -45,8 +46,11 @@ export class CocoaApp {
     this._windows = new Map(); // windowNumber -> CocoaWindow
     this._grabWindow = null;
     this._rafQueue = []; // [{ cb, wnd }]
+    // the app's own frame clock, for a frame no window owns (a pane's)
     this._rafLast = 0;
-    this._frameInterval = options.cocoa?.frameInterval ?? RAF_INTERVAL_MS;
+    // an explicit interval applies to every window; null means each
+    // window paces itself on its own display (`frameIntervalFor`)
+    this._frameInterval = options.cocoa?.frameInterval ?? null;
     this._pumpInterval = PUMP_INTERVAL_MS;
     this._geometryFlushQueued = false;
     this._shadowStale = new Set();
@@ -254,6 +258,35 @@ export class CocoaApp {
   }
 
   /**
+   * How often `wnd` may paint, in ms: the explicit `frameInterval` when the
+   * root was given one, else the period of the screen under the window's
+   * centre — the display's own rate is the only honest cadence, and on a
+   * desk with a 120Hz panel and a 60Hz monitor the two windows differ. A
+   * window on no screen (mid-drag between two, or off the edge) and a
+   * screen the OS reports no rate for take the primary's, then 16ms.
+   */
+  frameIntervalFor(wnd) {
+    if (this._frameInterval != null) return this._frameInterval;
+    const s = this.scale;
+    const screens = this._screens ?? [];
+    let screen = null;
+    if (wnd) {
+      const cx = (wnd.x + wnd.width / 2) / s;
+      const cy = (wnd.y + wnd.height / 2) / s;
+      screen =
+        screens.find(
+          (sc) =>
+            cx >= sc.x &&
+            cx < sc.x + sc.width &&
+            cy >= sc.y &&
+            cy < sc.y + sc.height,
+        ) ?? null;
+    }
+    const fps = screen?.fps || screens[0]?.fps || 0;
+    return fps > 0 ? 1000 / fps : RAF_INTERVAL_MS;
+  }
+
+  /**
    * The pane's end of the frame channel (childmain hands it over,
    * feature-detected so the X11 pane path never notices): geometry and
    * input come in, pane-present goes out.
@@ -331,27 +364,46 @@ export class CocoaApp {
     return this._rafQueue.length;
   }
 
+  /**
+   * Whether `clock` — a window, or the app for a frame no window owns —
+   * is due a frame at `now`, and if so, stamps it. The gate is the interval
+   * less half a pump, so a frame lands on the first pump tick at or after
+   * the interval. Gated at exactly one interval, timer drift put every
+   * other frame a tick late — 16ms frames arriving as 16, 24, 16, 24 —
+   * which a 60Hz display shows as a 50fps stutter, and which the presenter
+   * bench measured as 52fps against a 62.5Hz driver.
+   */
+  _frameDue(clock, now) {
+    const interval =
+      clock === this ? this.frameIntervalFor(null) : clock._frameInterval;
+    if (now - clock._rafLast < interval - this._pumpInterval / 2) return false;
+    clock._rafLast = now;
+    return true;
+  }
+
   _tickFrames() {
     if (!this._rafQueue.length) return;
     const now = performance.now();
-    // The gate is the interval less half a pump, so a frame lands on the
-    // first pump tick at or after the interval. Gated at exactly one
-    // interval, timer drift put every other frame a tick late — 16ms frames
-    // arriving as 16, 24, 16, 24 — which a 60Hz display shows as a 50fps
-    // stutter, and which the presenter bench measured as 52fps against a
-    // 62.5Hz driver.
-    if (now - this._rafLast < this._frameInterval - this._pumpInterval / 2) {
-      return;
-    }
-    this._rafLast = now;
+    // Each window keeps its own clock, so a window on a 120Hz panel paints
+    // every refresh while one on a 60Hz monitor paints every other pump
+    // tick. Decided once per clock per tick: every frame a window queued
+    // runs when it is due, not just the first.
+    const due = new Map();
     const queue = this._rafQueue;
     this._rafQueue = [];
     for (const entry of queue) {
+      const clock = entry.wnd ?? this;
+      if (!due.has(clock)) due.set(clock, this._frameDue(clock, now));
+      if (!due.get(clock)) {
+        this._rafQueue.push(entry);
+        continue;
+      }
       // A window nobody can see owes no frame: its callback waits here until
       // it is back on glass, and the damage it answers accumulates on the
       // node — one catch-up frame then, instead of a full paint per tick
       // into a backing store no one reads. `_visible` is the window's own
-      // rule (mapped, not ordered out, not miniaturized).
+      // rule (mapped, not ordered out, not miniaturized, not entirely
+      // behind another application's window).
       if (entry.wnd && !entry.wnd._visible()) {
         this._rafQueue.push(entry);
         continue;
@@ -405,6 +457,8 @@ export class CocoaApp {
         return this._routeFocus(ev, 'focus');
       case 'window-blur':
         return this._routeFocus(ev, 'blur');
+      case 'window-occlusion':
+        return this._routeOcclusion(ev);
       case 'menu-activate':
         this._activeGlobalMenu?.activate(ev.id);
         return this._afterInput();
@@ -557,6 +611,19 @@ export class CocoaApp {
         if (!this._closed) this._afterInput();
       });
     }
+  }
+
+  /**
+   * `windowDidChangeOcclusionState`: `visible` is "some pixel of the window
+   * is on glass". Off, the window's frames wait in the queue and its
+   * present waits with them (`CocoaWindow._visible`); on, the next pump
+   * tick runs the catch-up frame and puts it on glass — no early flush,
+   * since nothing was asked for and the pump is at most one interval away.
+   */
+  _routeOcclusion(ev) {
+    const wnd = this._window(ev);
+    if (!wnd || wnd.destroyed) return;
+    wnd._occluded = ev.visible === false;
   }
 
   _routeClose(ev) {

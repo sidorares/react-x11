@@ -649,12 +649,14 @@ callbacks fire on link ticks, commits wrap in explicit `CATransaction`s,
 and the "answer the input" early-flush (`flushPendingFrames` on handler
 unwind) maps to committing the transaction before the pump returns to
 AppKit — same policy, new mechanism. What runs today is the timer pump
-with a frame interval over it (`frameInterval`, 16ms by default; the gate
-is the interval less half a pump, so a frame lands on the first tick at or
-after it rather than alternating between the tick before and the tick
-after), discrete input and the wheel flushed on the event, and a
-window that is not on glass deferring its frames — see "Measured" below
-for what each of those was worth.
+with a frame interval over it (`frameInterval`; by default the period of
+the display each window is on, as `listScreens` reports it — 8.3ms on a
+120Hz panel, 16.7 on a 60Hz monitor — and the gate is the interval less
+half a pump, so a frame lands on the first tick at or after it rather
+than alternating between the tick before and the tick after), discrete
+input and the wheel flushed on the event, and a window that is not on
+glass deferring its frames — see "Measured" below for what each of those
+was worth.
 
 ## Native controls
 
@@ -1154,10 +1156,10 @@ Five changes, each fenced by a test:
   the measured path.
 - **A window nobody can see owes nothing** (`CocoaWindow._visible`): frames
   for a window that is ordered out or miniaturized wait in the queue and
-  its present waits with them; one catch-up frame when it is back. Occlusion
-  by another application's window is not read yet — the bridge does not
-  forward `windowDidChangeOcclusionState`, and that is the one place to add
-  it. The frame gate also moved from "one interval since the last frame" to
+  its present waits with them; one catch-up frame when it is back. (A
+  window entirely behind another application's window joined that rule in
+  the pass after this one — see below.) The frame gate also moved from
+  "one interval since the last frame" to
   "the first pump tick at or after it", which took a 16/24/16/24ms cadence
   to a steady 16 (52 → 56fps against the 62.5Hz driver), and the wheel is
   answered on the event like a press — AppKit already delivers scroll
@@ -1172,6 +1174,74 @@ hidden window against `scripts/bench/presenters-gate.json`, and
 that reaches a hot path. CI's `bench-cocoa` job does the same on a macOS
 runner.
 
+**What was left, in order of what it cost** — the list that became #442,
+and the pass below.
+
+## Measured: after the frame-clock pass
+
+Written 2026-09-03 against react-x11 2.5.0 and `@windowkit/appkit` 0.4.0
+(windowkit/appkit#10, which shipped the bridge half of #442: `releaseSurface`,
+every surface's bytes accounted to V8, `fps` on `listScreens`, and
+`window-occlusion` events), same machine, same bench, the surface presenter.
+Four of the six items are closed by it; the two that remain are the
+renderer's own and are listed at the end.
+
+| what                                                          | before                  | after                 |
+| ------------------------------------------------------------- | ----------------------- | --------------------- |
+| a 40-tick resize burst, no yield between ticks — rss during   | +572 to +655MB          | +12 to +14MB          |
+| `anim` on the 120Hz panel                                     | 55.7fps, 32% cpu (16ms) | 113.5fps, 49% (8.3ms) |
+| `hover` on the 120Hz panel, input → flush p50 / p95           | 7.2ms / 16.8            | 3.1 / 9.2             |
+| `icons` — 300 mono icons re-tinted per tick, flush avg / p95  | 2.98ms / 3.35, 72% cpu  | 2.07 / 2.42, 67%      |
+| `covered` — the big tree behind another window, cell per tick | a frame per tick        | 0 frames              |
+
+- **The retired pair is released on the flip** (`CocoaWindow._releaseBacking`,
+  `releaseSurface`). A resize tick allocates two window-sized IOSurfaces and
+  used to leave the two it replaced to their handles' finalizers — which run
+  on the event loop, and inside AppKit's resize loop the event loop does not
+  run, so a drag held every pair it ever made until the release. The bridge's
+  accounting alone (`napi_adjust_external_memory`) makes the collection
+  prompt once the loop is back; the explicit free is what bounds the peak
+  while it is not, which is the number in the table. The row is a script
+  driving forty `setWindowFrame`s synchronously, the way the modal loop
+  delivers them; the bench's `resize` cell yields between ticks and its rss
+  column is collection noise either way now. `CocoaSurface.destroy()` and
+  the layer presenter's rasters release the same way, and a bridge without
+  the verb gets the drop it always had. `test/cocoa-frames.test.js`,
+  `test/cocoa-surface.test.js`.
+- **Each window paces itself on its own display** (`CocoaApp.frameIntervalFor`,
+  `_frameDue`). The default interval is `1000 / fps` of the screen under the
+  window's centre, re-read when it moves; `createRoot({ cocoa: { frameInterval
+} })` still overrides it for every window. The frame queue keeps a clock per
+  window, so a window on the 120Hz panel paints every refresh while one on a
+  60Hz monitor paints every other pump tick. What it is worth is the `anim`
+  and `hover` rows: twice the frames for half again the CPU, and input →
+  flush halved, on the panel that can show it. One honest limit: the 8ms
+  pump quantizes the cadence, so a 75Hz monitor (13.3ms) paints at 62.5fps
+  — the gate is the interval less half a pump, and 9.3ms falls on the 16ms
+  tick. `pumpInterval` is the seam; the display link (§"Input and the run
+  loop") is the mechanism that would make the period exact.
+- **A window entirely behind another application's window owes nothing**
+  (`CocoaApp._routeOcclusion`, `CocoaWindow._visible`). AppKit's
+  `windowDidChangeOcclusionState` arrives as `window-occlusion`; off, the
+  window's frames wait in the queue and its present with them, exactly as an
+  ordered-out window's do; on, the next pump tick runs one catch-up frame.
+  `map()` resets the flag, since a show is a claim to be on glass and AppKit
+  corrects it a pump later. The bench's new `covered` scenario opens a window
+  of our own over the tree and is in the gate at zero frames. What is not
+  free while covered is the React commit itself: the scenario's 41% CPU is
+  `root.render` of a 3,662-node tree per tick, and no frame clock can take
+  that.
+- **The paint cache is on** (`paintCacheFor` accepts an app with
+  `createSurface`; `PaintCache.coverage`). Entries are `CocoaSurface`s
+  through `react-x11/ntk`'s `Surface`, composited with one `ctxDrawSurface`.
+  This backend has no coverage surface, so a mono drawing is cached as
+  argb32 with its colour in the key — `paintCached(ctx, box, ink)` now says
+  which colour to paint in — one entry per colour rather than one for all of
+  them, still one render per colour instead of one per cell per frame. A
+  blurred shadow, whose blur is a pass over the mask, stays live. The `icons`
+  row is the gain, and the larger cost left in that scenario is the React
+  re-render of 300 unmemoized components. `test/cocoa-paint-cache.test.js`.
+
 **What is left, in order of what it costs:**
 
 1. **A full relayout of a large tree: 44ms at 3,600 nodes, 320ms at
@@ -1185,31 +1255,14 @@ runner.
    below it — is the change that would take a panel toggle or a theme
    switch on a big screen from 18fps to 40. Bounded, not small; it touches
    the passes `test/content-floors.test.js` pins.
-2. **The swapchain is reallocated per resize tick** — two window-sized
-   IOSurfaces, 20MB at 900x700@2x, freed on GC. Allocation is 0.1ms; the
-   cost is memory (`rss +80MB` over a 40-tick drag) and the GC that
-   eventually returns it. Two fixes, both in the bridge: report native
-   memory to V8 (`napi_adjust_external_memory`) so collection is prompt, or
-   a `releaseSurface` verb so the window frees the old pair on the flip.
-   Over-allocating the chain to a rounded-up size would need
-   `contentsRect` on the layer, which `setLayerProps` does not take yet.
-3. **The frame interval is a guess at the display.** 16ms is right on a
-   60Hz panel and half the rate of a 120Hz one; `createRoot({ cocoa: {
-frameInterval: 8 } })` is the seam, and on this 120Hz panel it is worth
-   taking: `anim` runs at 102fps instead of 51 for 40% of a core instead of
-   36, and hover's input → flush goes from 5.4ms p50 / 18 p95 to 2.8 / 10
-   (`npm run bench:presenters -- --frame=8`). The honest default is the
-   display's own period — `NSScreen.maximumFramesPerSecond`, which
-   `listScreens` should report.
-4. **The paint cache is off on this backend** (`paintCacheFor` gates on an
-   X `Render` extension), so 300 mono icons re-tinted per tick are 300
-   live canvas paints (`icons`: 2.9ms). `CocoaSurface` exists now; wiring
-   the cache over `app.createSurface` (argb only — the a8 coverage entries
-   need a tint in the key here) is the remaining step.
-5. **Nothing is drawn at a level of detail.** `tiny` shapes and draws 5,000
+2. **Nothing is drawn at a level of detail.** `tiny` shapes and draws 5,000
    five-pixel labels nobody can read. A box smaller than a pixel already
    costs one fill; text below a legible size could cost one strip. Not
-   started.
+   started, and the win is bounded by item 1 for the relayout half.
+3. **The pump quantizes the frame period** (above): a display whose period
+   is not a multiple of 8ms paints at the tick after it. A finer pump costs
+   input polling; the display link costs the run-loop work §"Input and the
+   run loop" describes.
 
 ## Testing
 

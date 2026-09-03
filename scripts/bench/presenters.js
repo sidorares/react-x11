@@ -29,6 +29,9 @@
 //   npm run bench:presenters -- --columns=surface   # one presenter only
 //   npm run bench:presenters -- --x11           # extra column via $DISPLAY
 //   npm run bench:presenters -- --cells=2400    # bigger stress trees
+//   npm run bench:presenters -- --at=200,200    # the window at a point (on
+//                                               # the screen whose rate you
+//                                               # mean to measure)
 //   npm run bench:presenters -- --prof --scenario=tree --columns=surface
 //                                               # a .cpuprofile per cell
 //   npm run bench:presenters -- --shots         # snapshot each run's last
@@ -69,6 +72,10 @@ const CELLS = Number(flag('cells', 1200));
 const COLUMNS = flag('columns', null);
 const SIZE = flag('size', '900x700');
 const FRAME = flag('frame', null); // cocoa frame interval, ms
+// --at=x,y: where to put the window, in points, top-left global — on a
+// desk with a 120Hz panel and a 75Hz monitor the default frame interval is
+// the display's, so which screen the window lands on is part of the result
+const AT = flag('at', null);
 // --check: the structural gate (scripts/bench/presenters-gate.json) — counts
 // and areas the frame clock and the damage model must keep, judged per
 // scenario and never in milliseconds, so the answer is the same on a shared
@@ -975,6 +982,38 @@ const SCENARIOS = {
     },
   },
 
+  /** The same tree and tick, in a window that is on screen but entirely
+   *  behind another window — one of our own, opened over it in setup, the
+   *  way another application's would sit. AppKit reports the difference
+   *  (`windowDidChangeOcclusionState`, bridge 0.4) and a covered window
+   *  owes what a hidden one does: no frames, no presents. */
+  covered: {
+    cocoaOnly: true,
+    tree: (tick) =>
+      windowOf(
+        [header('covered'), grid({ hot: hotOne(tick) })],
+        'bench covered',
+      ),
+    setup(ctx) {
+      // points, top-left global; padded so the cover takes the title bar
+      // and the shadow with it, whatever AppKit added around the content
+      const f = ctx.native.getWindowFrame(ctx.wnd._h);
+      const pad = 80;
+      const cover = ctx.native.createWindow2({
+        x: f.x - pad,
+        y: f.y - pad,
+        width: f.width + 2 * pad,
+        height: f.height + 2 * pad,
+        title: 'bench cover',
+        kind: 'normal',
+        resizable: false,
+        backgroundColor: [0.25, 0.25, 0.25, 1],
+      });
+      ctx.native.showWindow(cover, true);
+      ctx.cover = cover; // kept so it is not collected out from over us
+    },
+  },
+
   /** Nothing happens: the big tree on screen, no ticks. What the app costs
    *  at rest is the pump and nothing else — `cpu` and `pump` are the
    *  columns, and `frames` must be zero. */
@@ -1114,6 +1153,10 @@ async function runChild() {
 
   const wnd = cocoa ? [...app._windows.values()][0] : null;
   const win = node.window;
+  if (AT && wnd) {
+    const [x, y] = AT.split(',').map(Number);
+    wnd.move(x * wnd.scale, y * wnd.scale);
+  }
   {
     const flush = node.flush.bind(node);
     node.flush = (...a) => {
@@ -1307,6 +1350,7 @@ function runCell(name, env) {
       `--cells=${CELLS}`,
       `--size=${SIZE}`,
       ...(FRAME ? [`--frame=${FRAME}`] : []),
+      ...(AT ? [`--at=${AT}`] : []),
       ...(SHOTS ? ['--shots'] : []),
     ],
     {

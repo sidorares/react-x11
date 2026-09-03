@@ -354,6 +354,9 @@ class RasterState {
 
   ensure(presenter, width, height, scale) {
     if (!this.surface || this.width !== width || this.height !== height) {
+      // the layer holds its own copy of what it shows, so the bitmap a
+      // resize retires can go now rather than with the handle's finalizer
+      this.release(presenter.native);
       this.surface = presenter.native.createSurface(width, height, scale);
       this.width = width;
       this.height = height;
@@ -368,6 +371,16 @@ class RasterState {
       }
     }
     return this.ctx;
+  }
+
+  /** Free the bitmap now (bridge 0.4's `releaseSurface`); older bridges
+   * free it from the handle's finalizer, and this is then just the drop. */
+  release(native) {
+    const surface = this.surface;
+    this.surface = null;
+    if (surface && typeof native.releaseSurface === 'function') {
+      native.releaseSurface(surface);
+    }
   }
 }
 
@@ -417,11 +430,12 @@ export class CocoaLayerPresenter {
         if (!seen.has(node)) {
           visual.destroy();
           this.visuals.delete(node);
-          this.rasters.delete(node);
+          this._dropRaster(node);
           const bars = this.bars.get(node);
           if (bars) {
             for (const entry of bars.values()) {
               native.removeFromSuperlayer(entry.layer);
+              entry.raster.release(native);
             }
             this.bars.delete(node);
           }
@@ -432,6 +446,13 @@ export class CocoaLayerPresenter {
     }
     this.dirty.clear();
     this.dirtyAll = false;
+  }
+
+  _dropRaster(node) {
+    const raster = this.rasters.get(node);
+    if (!raster) return;
+    raster.release(this.native);
+    this.rasters.delete(node);
   }
 
   _syncWindowBackground(windowNode) {
@@ -460,7 +481,7 @@ export class CocoaLayerPresenter {
     let visual = this.visuals.get(node);
     if (visual && visual.isRaster !== wantsRaster) {
       visual.destroy();
-      this.rasters.delete(node);
+      this._dropRaster(node);
       visual = null;
     }
     if (!visual) {
