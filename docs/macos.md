@@ -1241,6 +1241,19 @@ renderer's own and are listed at the end.
   blurred shadow, whose blur is a pass over the mask, stays live. The `icons`
   row is the gain, and the larger cost left in that scenario is the React
   re-render of 300 unmemoized components. `test/cocoa-paint-cache.test.js`.
+- **A pane's frame gate is real** (`CocoaPaneWindow.frameInFlight`). The
+  early flush a discrete input gets (`flushPendingFrames`, src/frames.js) is
+  safe because it is gated on the last frame having landed — that gate is
+  what folds a burst into one paced frame — and the pane window answered it
+  with a constant `false`. So every message the host had queued while the
+  pane was busy painting got a full frame of its own: a forty-tick resize of
+  `examples/frame.jsx`'s pane, whose frame costs 250–320ms, stepped through
+  42 presents at 42 intermediate sizes and reached the final one twelve
+  seconds after the drag had ended, each step the previous IOSurface
+  stretched to the layer's new frame. A pane hears nothing back from the
+  host, so a present now counts as in flight for one frame interval; the
+  same burst is one frame at the size it ended on, plus the one the first
+  message was answered with. `test/cocoa-frames.test.js`.
 
 **What is left, in order of what it costs:**
 

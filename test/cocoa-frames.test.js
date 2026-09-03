@@ -181,6 +181,13 @@ async function mount(
   await tick();
   const wnd = [...app._windows.values()][0];
   const node = wnd._reactX11Node;
+  const flushes = countFlushes(node);
+  app._tickFrames();
+  return { native, app, root, wnd, node, flushes };
+}
+
+/** Frames that painted, and how many of them were full. */
+function countFlushes(node) {
   const flushes = { count: 0, full: 0 };
   const flush = node.flush.bind(node);
   node.flush = (...a) => {
@@ -193,8 +200,43 @@ async function mount(
     }
     return out;
   };
+  return flushes;
+}
+
+/**
+ * The pane's end of a `<Frame>`: the app in pane mode, its window over the
+ * shared ring rather than an NSWindow, geometry and input arriving as
+ * channel messages and presents leaving as them (src/cocoa/panewindow.js).
+ * `deliver` is the host speaking; `sent` is what the pane said back.
+ */
+async function mountPane(children, { width = 100, height = 80 } = {}) {
+  const native = fakeBridge({});
+  const app = new CocoaApp(native, { pane: true });
+  setScaleForTests(app, 2, 'cocoa');
+  setScreensForTests(app, {
+    monitors: [{ x: 0, y: 0, width: 2880, height: 1800 }],
+    workArea: { x: 0, y: 0, width: 2880, height: 1750 },
+  });
+  setCompositingForTests(app, true);
+  app._frameInterval = 0;
+  const sent = [];
+  let onMessage = null;
+  app.attachPaneChannel({
+    send: (msg) => sent.push(msg),
+    onMessage: (cb) => {
+      onMessage = cb;
+    },
+  });
+  const root = await createRoot({ app });
+  roots.push(root);
+  root.render(h('window', { width, height, embeddable: true }, children));
+  await tick();
+  const wnd = [...app._windows.values()][0];
+  const node = wnd._reactX11Node;
+  const flushes = countFlushes(node);
   app._tickFrames();
-  return { native, app, root, wnd, node, flushes };
+  const presents = () => sent.filter((m) => m.type === 'pane-present');
+  return { app, wnd, node, flushes, presents, deliver: (m) => onMessage(m) };
 }
 
 const box = (style) => h('box', { style });
@@ -641,6 +683,48 @@ test('a frame lands on the first pump tick at or after the interval, not the one
   app._rafLast = performance.now() - 13;
   app._tickFrames();
   assert.equal(ran, 1);
+});
+
+// --- a pane -------------------------------------------------------------------------
+
+test('a pane answers a burst of geometry with one frame, not one per message', async () => {
+  const { app, wnd, flushes, presents, deliver } = await mountPane(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  assert.equal(flushes.count, 1, 'the mount frame');
+  // The gate on, at any interval: what is under test is that a present
+  // counts as in flight at all, not for how long.
+  app._frameInterval = 1e9;
+  // A pane that was busy painting finds the host's messages queued behind
+  // it — one resize tick per 16ms of the drag — and Node hands them over
+  // back to back. The first, after a quiet interval, is answered on the
+  // spot, like a press…
+  deliver({ type: 'pane-rect', width: 104, height: 82, scale: 2 });
+  assert.equal(flushes.count, 2, 'answered on the spot');
+  assert.equal(presents().length, 1, 'and presented');
+  assert.equal(wnd.frameInFlight(), true, 'which is now in flight');
+  // …and the rest of the burst finds that present in flight: each one
+  // resizes the window and asks for a frame, none of them paints
+  for (let i = 2; i <= 8; i += 1) {
+    deliver({ type: 'pane-rect', width: 100 + i * 4, height: 80 + i * 2 });
+  }
+  assert.equal(wnd.width, 264, 'the window is the size the burst ended on');
+  assert.equal(flushes.count, 2, 'without a frame per message');
+  assert.equal(presents().length, 1);
+  // the pump: one paced frame, at that size
+  app._rafLast = -Infinity;
+  app._tickFrames();
+  app._presentAll();
+  assert.equal(flushes.count, 3, 'one catch-up frame');
+  assert.equal(flushes.full, 3, 'a full one');
+  const last = presents().at(-1);
+  assert.equal(presents().length, 2);
+  assert.deepEqual([last.width, last.height], [264, 192]);
+  // the interval passes: the next lone message is answered on the spot again
+  wnd._presentedAt = -Infinity;
+  deliver({ type: 'pane-rect', width: 140, height: 100 });
+  assert.equal(flushes.count, 4);
+  assert.equal(presents().length, 3);
 });
 
 // --- the wheel ----------------------------------------------------------------------
