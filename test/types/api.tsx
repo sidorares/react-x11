@@ -9,6 +9,8 @@
 import React, { useRef, useState } from 'react';
 import { startTrace } from 'react-x11/debug';
 import { XK_MULTI_KEY, isDeadKeysym, keysymFromName } from 'react-x11/keysyms';
+import { Surface } from 'react-x11/ntk';
+import type { Context2D } from 'react-x11/node';
 import { onReload, performReactRefresh } from 'react-x11/refresh';
 import { registerRefresh, createTransformer } from 'react-x11/refresh/loader';
 import type { ReloadEvent } from 'react-x11/refresh';
@@ -1055,6 +1057,29 @@ async function main() {
 
   // @ts-expect-error — compose takes a table, not a boolean either way
   await createRoot({ compose: true });
+
+  // an offscreen surface, on whichever backend the app is: ntk's pixmap on
+  // X11, a CG bitmap on cocoa, one shape
+  const surface: Surface = new Surface(ownCompose.app, {
+    width: 64,
+    height: 32,
+  });
+  const sctx: Context2D = surface.getContext('2d');
+  void sctx;
+  surface.render((c: Context2D) => void c).clear();
+  const survived: boolean = surface.copyWithin(
+    { x: 0, y: 0, width: surface.width, height: surface.height },
+    0,
+    -8,
+  );
+  void survived;
+  const budget: number = surface.bytes;
+  void budget;
+  surface.destroy();
+  // @ts-expect-error — two formats, and a8 is one of them by name
+  new Surface(ownCompose.app, { width: 1, height: 1, format: 'rgb24' });
+  // @ts-expect-error — a size is not optional
+  new Surface(ownCompose.app, { width: 1 });
 
   // accelerators: the Latin keysym by default, and two ways to say otherwise
   const byLayout = await createRoot({ accelerators: 'layout' });

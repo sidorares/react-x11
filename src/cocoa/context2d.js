@@ -279,15 +279,33 @@ export class CocoaContext2D {
   }
 
   save() {
+    // Sync before pushing: a fresh surface empties the stack on its way in,
+    // and a state pushed ahead of that sync was lost to it — the first
+    // save/restore pair on a new context restored nothing.
+    const surface = this._s();
     this._stack.push({ ...this._state, dash: [...this._state.dash] });
-    this._native.ctxSave(this._s());
+    this._native.ctxSave(surface);
   }
 
   restore() {
+    // Canvas's rule: a restore with nothing saved does nothing. It is also
+    // what keeps a surface's base state safe under an unbalanced painter —
+    // the native stack below the JS one is the surface's own — and what a
+    // replaced backing surface wants, since it has nothing saved either.
+    const surface = this._s();
     const prev = this._stack.pop();
-    if (prev) this._state = prev;
-    this._native.ctxRestore(this._s());
+    if (!prev) return;
+    this._state = prev;
+    this._native.ctxRestore(surface);
   }
+
+  /**
+   * ntk's contract has a caller who took a context owing it a `destroy()`
+   * — there it is a GC and a Picture. Here a context is JS state over the
+   * surface's own graphics state, so there is nothing to free; the call is
+   * honoured so a caller written against ntk needs no branch.
+   */
+  destroy() {}
 
   _concat(a2, b2, c2, d2, e2, f2) {
     const [a, b, c, d, e, f] = this._state.ctm;
