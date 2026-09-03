@@ -761,8 +761,12 @@ node's own damage claims, `contentsScale` from the window. A claim that
 names the node re-rasters that node; a bare rect — an element's
 `invalidate(false, rect)` for the box a dragged item moved through, the
 region `scrollContents` shifts, the strip an animation ticks in —
-re-rasters every raster visual whose ink it touches, the same
-conservative answer the damage model gives a rect on X11.
+repaints every raster visual whose ink it touches, the same
+conservative answer the damage model gives a rect on X11 — and only that
+part of each: the raster keeps its bitmap as the visual's composition
+cache, the pass clears and clips to the claim, and `paintDamage()` names
+it, so an element culls a drag step or an animation tick the way it does
+on X11 instead of replaying its whole scene into a clip.
 
 - `<canvas onDraw>`: `paintContent` runs against the CG ctx; a new
   `onDraw` closure invalidates the node (existing rule); `putImageData`
