@@ -188,6 +188,19 @@ export interface DrawnProps<T = DrawnNode>
     SelectionProps<T>,
     EventHandlers<T> {
   ref?: Ref<T>;
+  /**
+   * Zoom this subtree, CSS `zoom` rather than a transform: every length
+   * under here — and this element's *own* style — is multiplied by it, so
+   * `scale={2}` is a card twice the size with text shaped at twice the size
+   * inside it, not a 1x picture stretched. Nested props multiply, and the
+   * display scale is the floor they multiply
+   * ([scale.md](scale.md#a-subtree-of-its-own)).
+   *
+   * A positive number; leaving it out means 1. `<window>` and `<popup>`
+   * take no `scale`: a real X window is its own root, so a menu opened from
+   * a zoomed card comes up at the app's own size.
+   */
+  scale?: number;
 }
 
 /**

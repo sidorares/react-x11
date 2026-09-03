@@ -138,7 +138,10 @@ And what you read:
   On a 1x display the two units coincide — which is exactly how an element
   that mixes them passes every headless test and then hovers, drags and
   frames at half the distance on a retina panel.
-  `renderX11(element, { scale: 2 })` is the test that catches it.
+  `renderX11(element, { scale: 2 })` is the test that catches it. It is a
+  per-node number rather than a per-window one — an enclosing `scale` prop
+  zooms a subtree ([scale.md](scale.md#a-subtree-of-its-own)) — so read it
+  off the node rather than caching one for the tree.
 - `this.resolvedTextStyle()` — the text style this node resolves to, ready to
   hand to `app.fonts.layout` (below).
 - `this.direction` — which way this node reads, resolved: `'ltr'` or

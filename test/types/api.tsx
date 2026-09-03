@@ -465,6 +465,17 @@ const _div = <div />;
 const _img = <img />;
 // @ts-expect-error — <box> has no 'className'
 const _classy = <box className="nope" />;
+// `scale` zooms a subtree (docs/scale.md): a number on any drawn element,
+// never on a window, which is its own scale root.
+const _zoomed = (
+  <box scale={1.5}>
+    <text scale={2}>zoomed</text>
+  </box>
+);
+// @ts-expect-error — a subtree scale is a number, not a CSS-ish string
+const _badZoom = <box scale="150%" />;
+// @ts-expect-error — <window> takes no scale; createRoot({ scale }) is that
+const _zoomedWindow = <window title="t" scale={2} />;
 // Size is style everywhere except <window>, so the elements that measure
 // themselves do not get to take it flat either (issue #118).
 // @ts-expect-error — <image> is sized by style, not by a width prop

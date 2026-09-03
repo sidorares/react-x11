@@ -153,6 +153,12 @@ mount: [drag-and-drop.md](drag-and-drop.md).
 dragged over, copied and handed to the PRIMARY selection. See
 [Selecting text](#selecting-text) below.
 
+`scale` zooms a subtree, CSS `zoom` rather than a transform: every length
+under the element — and the element's own style — is multiplied by it, and
+text is shaped at the size it will be drawn at. It is what an element owning
+a viewport (a graph pane, a map) mounts its content inside. Windows take no
+`scale`: [scale.md](scale.md#a-subtree-of-its-own).
+
 ---
 
 ## `<window>`

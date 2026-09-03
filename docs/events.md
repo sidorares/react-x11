@@ -116,6 +116,13 @@ const root = await createRoot({
 `nativeEvent.rootx/rooty` are screen coordinates — useful for anchoring a
 `<popup>` at the pointer.
 
+`x`/`y`/`localX`/`localY` and the wheel deltas are logical pixels in **the
+target's** unit — the display scale, times any `scale` prop above it
+([scale.md](scale.md#a-subtree-of-its-own)). With no `scale` in the tree
+that is one unit for the whole window; with one, a handler on an unzoomed
+ancestor is reading the zoomed target's pixels, and `ev.nativeEvent.x`/`y`
+are the way back to the window's own.
+
 **A Ctrl chord is read from the keysym, not the code point.** `codepoint`
 comes from the _shifted_ keysym, so Ctrl+Shift+Z arrives as `Z` and Ctrl+Z as
 `z`; a handler that compares code points misses half of its own shortcut.
