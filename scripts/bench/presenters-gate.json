@@ -27,6 +27,7 @@
       "maxSurfacesPerResize": 2
     },
     "occluded": { "maxFrames": 0 },
+    "covered": { "maxFrames": 0 },
     "idle": { "maxFrames": 0 }
   }
 }

@@ -26,6 +26,12 @@ export class CocoaWindow {
     this._surfaceGen = 0;
     this._ctx = null;
     this._dirty = false;
+    // AppKit's occlusion state, as the delegate reports it (`_visible`).
+    this._occluded = false;
+    // This window's frame clock: when it last painted, and how often it may
+    // — the period of the display it is on (`_refreshFrameInterval`).
+    this._rafLast = 0;
+    this._frameInterval = 0;
 
     const s = this.scale;
     // Snapped to whole POINTS: AppKit rounds window sizes to the point
@@ -73,6 +79,7 @@ export class CocoaWindow {
     this.windowNumber = this._native.windowNumber(this._h);
     this._layer = this._native.windowRootLayer(this._h);
     this._refreshOrigin();
+    this._refreshFrameInterval();
     if (attributes.sizeHints) this.setSizeHints(attributes.sizeHints);
 
     // How many damage rects a frame may keep before merging them (nodes.js,
@@ -124,6 +131,18 @@ export class CocoaWindow {
     this._screenOrigin = { x: this.x, y: this.y };
   }
 
+  /**
+   * How often this window may paint: the period of the display it is on,
+   * asked of the app (`frameIntervalFor`), which reads the screen list the
+   * bridge reported. Re-read whenever the window moves, because a drag
+   * from a 120Hz panel to a 60Hz monitor halves the rate it is worth
+   * painting at — and a window that straddles two answers for the one
+   * under its centre.
+   */
+  _refreshFrameInterval() {
+    this._frameInterval = this.app.frameIntervalFor(this);
+  }
+
   /** Native geometry changed (delegate event, points). */
   _nativeResized(points) {
     const s = this.scale;
@@ -132,6 +151,7 @@ export class CocoaWindow {
     this.x = Math.round(points.x * s);
     this.y = Math.round(points.y * s);
     this._screenOrigin = { x: this.x, y: this.y };
+    this._refreshFrameInterval();
     // AppKit's inLiveResize, as the delegate reported it: the renderer
     // answers a live tick with the layout floors it has and measures fresh
     // ones after the drag (nodes.js, `_deferContentFloors`). Cleared by
@@ -159,6 +179,7 @@ export class CocoaWindow {
     this.y = Math.round(y);
     this._native.setWindowFrame(this._h, x / s, y / s, null, null);
     this._screenOrigin = { x: this.x, y: this.y };
+    this._refreshFrameInterval();
   }
 
   // --- lifecycle -----------------------------------------------------------
@@ -166,10 +187,17 @@ export class CocoaWindow {
   map() {
     if (this.destroyed) return;
     this.mapped = true;
+    // Showing is a claim that the window is on glass; if it comes up behind
+    // another application's window, AppKit's occlusion event says so on the
+    // next pump and the frames wait from then. Reset here rather than kept,
+    // so a window that was hidden behind one, unmapped and mapped again
+    // does not wait on an event that may already have been delivered.
+    this._occluded = false;
     // A popup must not take the keyboard from its owner; a toplevel's first
     // map is the app coming up and takes it.
     this._native.showWindow(this._h, !this._popup);
     this._refreshOrigin();
+    this._refreshFrameInterval();
   }
 
   unmap() {
@@ -184,7 +212,7 @@ export class CocoaWindow {
     this.mapped = false;
     this.app._unregisterWindow(this);
     this._native.destroyWindow2(this._h);
-    this._surface = null;
+    this._releaseBacking();
   }
 
   // --- window-manager-ish surface (feature-detected by nodes.js) -----------
@@ -247,6 +275,14 @@ export class CocoaWindow {
    * the just-shown frame's damage across — a damage-sized memcpy replacing
    * a window-sized upload. Falls back to the single plain surface where
    * IOSurface creation fails.
+   *
+   * A new size retires the pair, and the retired pair is released on the
+   * spot (`_releaseBacking`): a resize tick allocates two window-sized
+   * IOSurfaces, 20MB at 900x700@2x, and left to the handles' finalizers a
+   * forty-tick drag held 800MB until a collection happened to run — the
+   * `rss +80MB` docs/macos.md measured. The layer keeps its own reference
+   * to whichever IOSurface it is still showing, so the free is safe while
+   * that frame is on glass.
    */
   _ensureSurface() {
     const w = this.width;
@@ -257,7 +293,7 @@ export class CocoaWindow {
       this._surfaceSize?.height !== h
     ) {
       const hadSurface = Boolean(this._surface);
-      this._chain = null;
+      this._releaseBacking();
       try {
         const a = this._native.createSurfaceIOSurface(w, h, this.scale);
         const b = this._native.createSurfaceIOSurface(w, h, this.scale);
@@ -286,6 +322,26 @@ export class CocoaWindow {
       if (hadSurface) this._freshSurface = true;
     }
     return this._surface;
+  }
+
+  /**
+   * Free the backing store now — the swapchain pair, or the plain surface
+   * the fallback holds — rather than when V8 collects the handles. Bridges
+   * before 0.4 have no `releaseSurface`; there the finalizer is still the
+   * only owner, and this is the drop it always was.
+   */
+  _releaseBacking() {
+    const release = this._native.releaseSurface;
+    if (typeof release === 'function') {
+      if (this._chain) {
+        release.call(this._native, this._chain.back.handle);
+        release.call(this._native, this._chain.front.handle);
+      } else if (this._surface) {
+        release.call(this._native, this._surface);
+      }
+    }
+    this._chain = null;
+    this._surface = null;
   }
 
   /**
@@ -326,12 +382,15 @@ export class CocoaWindow {
    * its last paint stays unpresented until it is back on glass, where one
    * catch-up frame covers everything that changed in between.
    *
-   * Occlusion by another application's window is not read here yet: AppKit
-   * reports it through `windowDidChangeOcclusionState`, which the bridge
-   * does not forward. When it does, this is the one place to add it.
+   * Occlusion by another application's window counts too: a window that
+   * is entirely behind one is visible by `isVisible`'s measure and still
+   * costs every frame its tree produces, and AppKit knows the difference.
+   * `windowDidChangeOcclusionState` arrives as the bridge's
+   * `window-occlusion` event (`CocoaApp._routeOcclusion`), `visible` being
+   * "some pixel of it is on glass"; `_occluded` is the last word of it.
    */
   _visible() {
-    if (this.destroyed || !this.mapped) return false;
+    if (this.destroyed || !this.mapped || this._occluded) return false;
     return this._native.windowIsVisible(this._h) !== false;
   }
 

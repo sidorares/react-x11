@@ -4496,10 +4496,16 @@ export class Node {
    *     format,          // 'argb32', or 'a8' for coverage that gets tinted
    *     tint,            // the colour an 'a8' surface is painted through
    *   }
-   *   paintCached(ctx, box) -> void   // draw at the origin of `box`
+   *   paintCached(ctx, box, ink) -> void   // draw at the origin of `box`
    *
    * Returning null opts out for this frame, which is the right answer
    * whenever the paint depends on something the key cannot see.
+   *
+   * `ink` is the colour a mono drawing — one that asked for `'a8'` — must
+   * paint in: white where the surface is coverage and the tint arrives at
+   * blit time, the tint itself on a backend without coverage surfaces,
+   * where the cache bakes the colour into an argb32 entry and puts it in
+   * the key (src/paintcache.js). A multi-colour drawing ignores it.
    *
    * **The key is the entire correctness surface.** It must name every input
    * `paintCached` reads, derived from the same values `applyProps` compares
@@ -6472,7 +6478,7 @@ export class CanvasNode extends Node {
     };
   }
 
-  paintCached(ctx, box) {
+  paintCached(ctx, box, ink = '#ffffff') {
     const onDraw = this.props.onDraw;
     if (typeof onDraw !== 'function') return;
     ctx.save();
@@ -6481,8 +6487,9 @@ export class CanvasNode extends Node {
     ctx.clip();
     ctx.translate(box.x, box.y);
     // Into a coverage surface only the alpha of a paint survives and the
-    // tint arrives at blit time, so any opaque colour renders the same mask.
-    if (this.props.mono) this._presetMono(ctx, '#ffffff');
+    // tint arrives at blit time, so any opaque colour renders the same mask
+    // — and the cache says white then, or the tint where it bakes colour.
+    if (this.props.mono) this._presetMono(ctx, ink);
     try {
       onDraw(ctx, {
         width: box.width,

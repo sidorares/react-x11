@@ -8,8 +8,17 @@
 //   - a live-resize tick is ONE full frame, and its microtasks add none;
 //   - a bounded flush onto a fresh backing surface asks for a full frame and
 //     holds the present until it lands, so garbage is never on glass;
-//   - a window nobody can see owes no frame and no present;
+//   - a window nobody can see owes no frame and no present — ordered out,
+//     miniaturized, or entirely behind another application's window;
 //   - a wheel notch is answered on the event, like a press.
+//
+// And three more from the pass after it (#442, over bridge 0.4):
+//
+//   - the pair a resize retires is released on the spot, not on GC;
+//   - a window paces itself on the display it is on, and each window on
+//     its own;
+//   - an occlusion event holds the frames and the present until the
+//     window is back on glass.
 import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
@@ -33,7 +42,7 @@ const h = React.createElement;
  * from inside the call), surfaces are handles with a size, and every verb
  * that decides something is recorded.
  */
-function fakeBridge() {
+function fakeBridge({ screens } = {}) {
   const calls = [];
   let seq = 0;
   let backendCb = null;
@@ -41,17 +50,19 @@ function fakeBridge() {
     calls,
     of: (name) => calls.filter((c) => c[0] === name),
     visible: true,
-    listScreens: () => [
-      {
-        x: 0,
-        y: 0,
-        width: 1440,
-        height: 900,
-        scale: 2,
-        visible: { x: 0, y: 0, width: 1440, height: 875 },
-        primary: true,
-      },
-    ],
+    emit: (ev) => backendCb?.(ev),
+    listScreens: () =>
+      screens ?? [
+        {
+          x: 0,
+          y: 0,
+          width: 1440,
+          height: 900,
+          scale: 2,
+          visible: { x: 0, y: 0, width: 1440, height: 875 },
+          primary: true,
+        },
+      ],
     createWindow2(options) {
       const handle = { id: ++seq, options: { ...options } };
       calls.push(['createWindow2', options.width, options.height]);
@@ -60,8 +71,8 @@ function fakeBridge() {
     windowNumber: (handle) => handle.id,
     windowRootLayer: (handle) => ({ root: handle.id }),
     getWindowFrame: (handle) => ({
-      x: 0,
-      y: 0,
+      x: handle.options.x ?? 0,
+      y: handle.options.y ?? 0,
       width: handle.options.width,
       height: handle.options.height,
     }),
@@ -77,6 +88,8 @@ function fakeBridge() {
     },
     initApp() {},
     setWindowFrame(handle, x, y, width, height) {
+      if (typeof x === 'number') handle.options.x = x;
+      if (typeof y === 'number') handle.options.y = y;
       if (typeof width === 'number') handle.options.width = width;
       if (typeof height === 'number') handle.options.height = height;
       calls.push([
@@ -91,8 +104,8 @@ function fakeBridge() {
         windowNumber: handle.id,
         width: handle.options.width,
         height: handle.options.height,
-        x: 0,
-        y: 0,
+        x: handle.options.x ?? 0,
+        y: handle.options.y ?? 0,
         live: true,
       });
     },
@@ -104,6 +117,9 @@ function fakeBridge() {
     createSurface(width, height, scale) {
       calls.push(['createSurface', width, height]);
       return { id: ++seq, width, height, scale };
+    },
+    releaseSurface(handle) {
+      calls.push(['releaseSurface', handle.id]);
     },
     surfaceSize: (handle) => ({
       width: handle.width,
@@ -145,8 +161,11 @@ afterEach(async () => {
  * (`app._tickFrames()`), and the cadence gate is off unless a test turns
  * it on.
  */
-async function mount(children, { width = 100, height = 80 } = {}) {
-  const native = fakeBridge();
+async function mount(
+  children,
+  { width = 100, height = 80, screens, frameInterval = 0, ...attrs } = {},
+) {
+  const native = fakeBridge({ screens });
   const app = new CocoaApp(native);
   setScaleForTests(app, 2, 'cocoa');
   setScreensForTests(app, {
@@ -154,11 +173,11 @@ async function mount(children, { width = 100, height = 80 } = {}) {
     workArea: { x: 0, y: 0, width: 2880, height: 1750 },
   });
   setCompositingForTests(app, true);
-  app._frameInterval = 0;
+  app._frameInterval = frameInterval;
   native.setBackendEventCallback((ev) => app._route(ev));
   const root = await createRoot({ app });
   roots.push(root);
-  root.render(h('window', { width, height }, children));
+  root.render(h('window', { width, height, ...attrs }, children));
   await tick();
   const wnd = [...app._windows.values()][0];
   const node = wnd._reactX11Node;
@@ -378,6 +397,71 @@ test('a window that is not on glass owes no frame and no present until it is bac
   assert.equal(app._rafQueue.length, 0);
 });
 
+test("a window entirely behind another application's window owes nothing until it is back", async () => {
+  const { native, app, wnd, node, flushes } = await mount(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  const inner = node.children[0];
+  // windowDidChangeOcclusionState: no pixel of this window is on glass
+  native.emit({
+    type: 'window-occlusion',
+    windowNumber: wnd.windowNumber,
+    visible: false,
+  });
+  assert.equal(wnd._visible(), false);
+  inner.invalidate(false, inner, 'props');
+  app._tickFrames();
+  assert.equal(flushes.count, 1, 'the frame waits');
+  assert.equal(app._rafQueue.length, 1, 'in the queue');
+  const before = flips(native);
+  wnd._dirty = true;
+  wnd.present();
+  assert.equal(flips(native), before, 'no present while covered');
+  assert.equal(wnd._dirty, true, 'but it is still owed');
+
+  // the cover moves away
+  native.emit({
+    type: 'window-occlusion',
+    windowNumber: wnd.windowNumber,
+    visible: true,
+  });
+  assert.equal(wnd._visible(), true);
+  app._tickFrames();
+  assert.equal(flushes.count, 2, 'one catch-up frame');
+  wnd.present();
+  assert.equal(flips(native), before + 1, 'presented on return');
+  assert.equal(app._rafQueue.length, 0);
+});
+
+test('mapping a window is a claim that it is on glass, whatever the last occlusion event said', async () => {
+  const { native, wnd } = await mount(box({ flexGrow: 1 }));
+  native.emit({
+    type: 'window-occlusion',
+    windowNumber: wnd.windowNumber,
+    visible: false,
+  });
+  wnd.unmap();
+  assert.equal(wnd._visible(), false);
+  // the show fires its own occlusion event a pump later; until it lands
+  // the frames must not wait on the one delivered before the hide
+  wnd.map();
+  assert.equal(wnd._occluded, false);
+  assert.equal(wnd._visible(), true);
+});
+
+test('an occlusion event for a window that is gone is nothing', async () => {
+  const { native, app, wnd } = await mount(box({ flexGrow: 1 }));
+  const number = wnd.windowNumber;
+  wnd.destroy();
+  native.emit({
+    type: 'window-occlusion',
+    windowNumber: number,
+    visible: false,
+  });
+  native.emit({ type: 'window-occlusion', windowNumber: 999, visible: false });
+  assert.equal(app._windows.size, 0);
+});
+
 test('an unmapped window is not on glass either', async () => {
   const { app, node, flushes, wnd } = await mount(
     box({ flexGrow: 1, backgroundColor: '#3498db' }),
@@ -391,7 +475,153 @@ test('an unmapped window is not on glass either', async () => {
   assert.equal(flushes.count, 2);
 });
 
+// --- the swapchain's memory ------------------------------------------------------
+
+test('the pair a resize retires is released on the spot, and the last pair with the window', async () => {
+  const { native, wnd } = await mount(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  const made = () => native.of('createSurfaceIOSurface').length;
+  const released = () => native.of('releaseSurface').length;
+  assert.equal(made(), 2, 'the mount pair');
+  assert.equal(released(), 0);
+  // five ticks of a drag: each retires the pair before it
+  for (let i = 1; i <= 5; i += 1) {
+    native.setWindowFrame(wnd._h, null, null, 100 + i * 4, 80 + i * 2);
+  }
+  assert.equal(made(), 12);
+  assert.equal(released(), 10, 'every retired handle, at the tick');
+  // never the pair in use: the live back buffer and the frame on glass
+  const live = [wnd._chain.back.handle.id, wnd._chain.front.handle.id];
+  for (const [, id] of native.of('releaseSurface')) {
+    assert.ok(!live.includes(id), `released a live surface ${id}`);
+  }
+  wnd.destroy();
+  assert.equal(released(), 12, 'and the last pair goes with the window');
+  assert.equal(wnd._chain, null);
+  assert.equal(wnd._surface, null);
+});
+
+test('a bridge without releaseSurface leaves the retired pair to the finalizer', async () => {
+  const { native, wnd } = await mount(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  delete native.releaseSurface; // the Proxy answers a no-op for it now
+  native.setWindowFrame(wnd._h, null, null, 120, 90);
+  assert.equal(native.of('releaseSurface').length, 0);
+  assert.equal(native.of('createSurfaceIOSurface').length, 4);
+  wnd.destroy();
+});
+
 // --- the cadence ------------------------------------------------------------------
+
+const twoScreens = [
+  {
+    x: 0,
+    y: 0,
+    width: 1440,
+    height: 900,
+    scale: 2,
+    visible: { x: 0, y: 0, width: 1440, height: 875 },
+    primary: true,
+    fps: 120,
+  },
+  {
+    x: 1440,
+    y: 0,
+    width: 2560,
+    height: 1440,
+    scale: 2,
+    visible: { x: 1440, y: 0, width: 2560, height: 1440 },
+    primary: false,
+    fps: 60,
+  },
+];
+
+test('a window paces itself on the display it is on', async () => {
+  const { app, wnd, native } = await mount(box({ flexGrow: 1 }), {
+    screens: twoScreens,
+    frameInterval: null,
+  });
+  // on the 120Hz panel: one frame per refresh
+  assert.ok(
+    Math.abs(wnd._frameInterval - 1000 / 120) < 1e-9,
+    `${wnd._frameInterval}`,
+  );
+  // dragged onto the 60Hz monitor (points; the window is 50x40 there)
+  native.setWindowFrame(wnd._h, 1500, 100, null, null);
+  assert.ok(Math.abs(wnd._frameInterval - 1000 / 60) < 1e-9);
+  // and back, by the renderer's own move
+  wnd.move(0, 0);
+  assert.ok(Math.abs(wnd._frameInterval - 1000 / 120) < 1e-9);
+  // a frame no window owns takes the primary's period
+  assert.ok(Math.abs(app.frameIntervalFor(null) - 1000 / 120) < 1e-9);
+});
+
+test('a screen the OS reports no rate for, and a bridge that reports none, pace at 60Hz', async () => {
+  const silent = twoScreens.map((sc) => ({ ...sc, fps: 0 }));
+  const { wnd: a } = await mount(box({ flexGrow: 1 }), {
+    screens: silent,
+    frameInterval: null,
+  });
+  assert.equal(a._frameInterval, 16);
+  const { wnd: b } = await mount(box({ flexGrow: 1 }), {
+    frameInterval: null, // the default screens carry no fps at all
+  });
+  assert.equal(b._frameInterval, 16);
+  // a window off every screen takes the primary's rate
+  const { wnd: c, native } = await mount(box({ flexGrow: 1 }), {
+    screens: twoScreens,
+    frameInterval: null,
+  });
+  native.setWindowFrame(c._h, -5000, -5000, null, null);
+  assert.ok(Math.abs(c._frameInterval - 1000 / 120) < 1e-9);
+});
+
+test('an explicit frameInterval applies to every window, whatever its display', async () => {
+  const { wnd, native, app } = await mount(box({ flexGrow: 1 }), {
+    screens: twoScreens,
+    frameInterval: 8,
+  });
+  assert.equal(wnd._frameInterval, 8);
+  native.setWindowFrame(wnd._h, 1500, 100, null, null);
+  assert.equal(wnd._frameInterval, 8);
+  assert.equal(app.frameIntervalFor(null), 8);
+});
+
+test('two windows keep two clocks: the one on the faster display paints while the other waits', async () => {
+  const {
+    app,
+    wnd: fast,
+    native,
+  } = await mount(box({ flexGrow: 1 }), {
+    screens: twoScreens,
+    frameInterval: null,
+  });
+  app._pumpInterval = 8;
+  const slow = app.createWindow({ width: 100, height: 80, x: 3000, y: 200 });
+  slow.map();
+  assert.ok(Math.abs(slow._frameInterval - 1000 / 60) < 1e-9);
+  let fastRan = 0;
+  let slowRan = 0;
+  fast.requestAnimationFrame(() => (fastRan += 1));
+  fast.requestAnimationFrame(() => (fastRan += 1));
+  slow.requestAnimationFrame(() => (slowRan += 1));
+  // 9ms since either last painted: past the 120Hz gate (8.3 - 4), short
+  // of the 60Hz one (16.7 - 4)
+  fast._rafLast = performance.now() - 9;
+  slow._rafLast = performance.now() - 9;
+  app._tickFrames();
+  assert.equal(fastRan, 2, 'every frame the fast window queued');
+  assert.equal(slowRan, 0);
+  assert.equal(app._rafQueue.length, 1, 'the slow one waits');
+  slow._rafLast = performance.now() - 14;
+  app._tickFrames();
+  assert.equal(slowRan, 1);
+  assert.equal(app._rafQueue.length, 0);
+  slow.destroy();
+  void native;
+});
 
 test('a frame lands on the first pump tick at or after the interval, not the one after', async () => {
   const { app } = await mount(box({ flexGrow: 1 }));

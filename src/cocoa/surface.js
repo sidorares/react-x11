@@ -33,9 +33,11 @@
 //   composite differently.
 // - **No Picture.** `picture()` is X's compositing handle; here a surface
 //   composites through `ctx.drawImage`, and asking for the picture says so.
-// - **Freed on collection.** The bridge frees the bitmap from the handle's
-//   finalizer; `destroy()` drops the handle and refuses further use, so the
-//   memory goes with the next GC rather than on the call.
+// - **Freed on `destroy()`.** The bridge's `releaseSurface` (0.4) frees the
+//   bitmap on the call and hands its bytes back to V8's account; the
+//   handle's finalizer stays as the safety net for a surface that is
+//   dropped without one. Under an older bridge the memory goes with the
+//   next GC, as it always did.
 //
 // Units are device pixels, like the window's backing store: a caller sizes
 // one from `contentBox()` numbers, which are device pixels already
@@ -217,8 +219,12 @@ export class CocoaSurface {
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    const handle = this._surfaceHandle;
     this._surfaceHandle = null;
     this._ctx = null;
+    if (typeof this._native.releaseSurface === 'function') {
+      this._native.releaseSurface(handle);
+    }
   }
 
   [Symbol.dispose]() {
