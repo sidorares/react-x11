@@ -58,6 +58,11 @@ shaped, measured and rasterized at 28px. Text on a retina panel is _sharper_,
 not bigger-blurrier — the same reason every native toolkit renders this way
 instead of transform-scaling a 1x picture.
 
+"Logical" is per node rather than per window as soon as a `scale` prop is in
+the tree: everything in the first list is divided by the scale of the node
+it is about, which is the display's until an enclosing `scale` says
+otherwise. See "A subtree of its own" below.
+
 ## How `'auto'` decides
 
 X11 never grew a scale protocol, so the answer is scattered across four
@@ -171,6 +176,74 @@ everything else on this window system.
 Static-at-startup is the other honest limitation: a mid-session change of
 `Xft.dpi` or a monitor swap does not re-scale running windows. Rare enough
 that GTK3 apps mostly share it; restart the app.
+
+## A subtree of its own
+
+The display scale is one number for the whole window. `scale` on an element
+is a second factor for one **subtree** of it:
+
+```jsx
+<box scale={zoom} style={{ width: w / zoom, height: h / zoom }}>
+  <NodeBody /> // written in plain logical pixels, unaware of the zoom
+</box>
+```
+
+The semantics are CSS's `zoom`, not a transform:
+
+- A node's **effective scale** is its parent's times its own `scale` prop,
+  so nested props multiply and the display scale is the floor they multiply.
+  `node.scale` is that number, and every path that already asked for it —
+  `scaleResolvedStyle` at the end of the style funnel, the caret and
+  scrollbar constants, shadows and gradients, a registered element's own
+  `paint()` — follows with no second mechanism.
+- **The node's own style scales too.** `scale={2}` on a box with
+  `padding: 8` gets 16 device pixels of padding, not 8 with bigger children
+  inside it. That is what makes the caller's job the one-liner above: divide
+  the size you want the box to occupy by the zoom, and write everything
+  inside it at 1x.
+- **Text is shaped at the size it is drawn at.** A `fontSize: 14` inside
+  `scale={2}` is shaped, measured and rasterized at 28 — the same thing the
+  display scale does, for the same reason. A zoomed-in graph is not a
+  stretched screenshot of a zoomed-out one.
+- **Yoga lays out the scaled numbers** like any others, so a zoomed subtree
+  wraps, flexes and measures its content floors at the size it is drawn.
+
+What it is for: an element that owns a viewport — a graph pane, a canvas, a
+map — and mounts application content inside it. The pane draws its own
+world, and the React subtree beside it has to follow the same zoom;
+`ctx.scale()` cannot do that here (see "Why multiply values instead of
+transforming the context" below) and a layer transform on the Cocoa
+presenter would draw a zoomed body whose hit testing still lived at the
+unzoomed rects.
+
+### What a boundary costs
+
+**Events are in the target's unit.** `ev.x`, `ev.y`, `localX`/`localY` and
+`getClientRects()` on a node inside a zoomed subtree are all divided by
+_that node's_ scale, so they agree with each other and with the styles it
+was written in — a handler inside the subtree needs to know nothing. The
+trade-off is CSS `zoom`'s: a handler on an **unzoomed ancestor** reads a
+coordinate in the zoomed descendant's unit, because the target is what
+decides. When a pane needs its own coordinates for a hit that landed inside
+the content it hosts, `ev.nativeEvent` is the way back — device pixels of
+the window, which `/ node.scale` converts to whichever unit is wanted.
+`screenX`/`screenY` are unaffected: they are desktop coordinates, and the
+desktop has one scale.
+
+A wheel notch scrolls `48` of the target's logical pixels, so content under
+the pointer travels the distance the zoom says it should.
+
+**A real X window is its own root.** `<window>` and `<popup>` take no
+`scale` prop and ignore an enclosing one: their geometry is the server's, a
+window manager sees no zoom, and a menu opened from a zoomed card should
+come up at the size the rest of the app's menus are. `<glarea>` and
+`<foreign>` do inherit — their boxes are laid out by the parent like any
+other child's.
+
+**Quantise a gesture-driven zoom.** Every distinct factor is a distinct
+font size to shape and cache, so a wheel handler feeding the raw accumulator
+into `scale` makes a new set of glyphs per frame. Round to a step — 5%, or
+a ladder of preset zooms — and the cache does its job.
 
 ## Prior art, and where this sits
 

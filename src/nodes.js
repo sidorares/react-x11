@@ -283,6 +283,7 @@ const INVALIDATE_REASONS = new Set([
   'outline', // …and the same for an outline a style swap took away
   'theme', // a theme/token change restyled a subtree
   'direction', // the reading direction moved: sides, glyph order, bar edge
+  'scale', // a `scale` prop zoomed a subtree: every length in it moved
   'animation', // a transition frame
   'scroll', // scrollTo/scrollBy/scrollIntoView, textarea/textinput panning
   'text', // text content, input value or caret editing
@@ -1722,6 +1723,33 @@ function shallowEqual(a, b) {
   return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
 }
 
+/**
+ * A node's own `scale` prop as a factor: what it multiplies the scale it
+ * inherits by (`Node.scale`). Absent means 1, which is every node in a tree
+ * that never mentions it.
+ *
+ * A zero, a negative or a NaN is a mistake rather than a design — it would
+ * lay the subtree out at nothing, or at infinity — and in development it
+ * says so where the mistake is, rather than as a blank pane three frames
+ * later. Production falls back to 1 for the same reason a bad token keeps
+ * the property dropped: a GUI that carries on is worth more than one that
+ * dies on a fraction somebody divided by.
+ */
+function scaleFactorOf(props, kind) {
+  const own = props?.scale;
+  if (own === undefined) return 1;
+  if (typeof own === 'number' && Number.isFinite(own) && own > 0) return own;
+  if (DEV) {
+    throw new Error(
+      `react-x11: <${kind} scale={${JSON.stringify(own)}}> — a subtree ` +
+        'scale is a positive number, the factor this subtree is zoomed by ' +
+        '(2 draws it twice the size, 0.5 half), and leaving it out means 1. ' +
+        'See docs/scale.md, "A subtree of its own".',
+    );
+  }
+  return 1;
+}
+
 /** The half of `Node._joinsYoga` that is about the child alone — a real X
  * window (`<window>`, `<popup>`) or a node built without a box at all (a text
  * chunk) sits outside whatever parent it lands in. This is what
@@ -1735,16 +1763,93 @@ export class Node {
   }
 
   /**
-   * Device pixels per logical pixel for this node's connection — resolved
-   * once by `createRoot` (src/scale.js) and constant for the node's life,
-   * which is what makes the instance cache below sound. `this.style` and
-   * `this.abs` are already device pixels; this is for the values that never
-   * pass through a style — a paint constant like the caret's width, or an
-   * event coordinate on its way back to logical. A registered element that
-   * draws with its own constants multiplies them by this.
+   * Device pixels per logical pixel **for this node** — the display scale
+   * `createRoot` resolved (src/scale.js), times every `scale` prop between
+   * this node and its window. `this.style` and `this.abs` are already
+   * device pixels; this is for the values that never pass through a style —
+   * a paint constant like the caret's width, or an event coordinate on its
+   * way back to logical. A registered element that draws with its own
+   * constants multiplies them by this.
+   *
+   * The `scale` prop is CSS `zoom`, not a transform: it multiplies the
+   * inherited factor, and the node's *own* style scales with it. So
+   * everything downstream of the style funnel follows with no second
+   * mechanism — yoga lays out the scaled numbers like any others, paint
+   * reads the scaled style, the caret and the scrollbar read this getter,
+   * and text is shaped at the size it will be drawn at rather than
+   * rasterized once and stretched (docs/scale.md, "A subtree of its own").
+   *
+   * **A real X window is its own root.** `<window>` and `<popup>` geometry
+   * is the server's, in the display's pixels — `scaleWindowGeometry` reads
+   * `scaleOf(app)` directly and a WM sees no zoom — so the cascade stops
+   * there and a menu opened from a zoomed card comes up at the app's own
+   * size. Everything else inherits, including `<glarea>` and `<foreign>`,
+   * whose boxes are laid out by the parent like any other child's.
+   *
+   * Cached per node, dropped by `_rescaleSubtree` — the same contract
+   * `theme` and `direction` have, for the same reason.
    */
   get scale() {
-    return (this._scaleCache ??= scaleOf(this.app));
+    if (this._scaleCache !== undefined) return this._scaleCache;
+    if (this.isWindow) return (this._scaleCache = scaleOf(this.app));
+    const base = this.parent ? this.parent.scale : scaleOf(this.app);
+    return (this._scaleCache = base * scaleFactorOf(this.props, this.kind));
+  }
+
+  /**
+   * The effective scale of this node moved — its own `scale` prop changed,
+   * or it was attached under an ancestor whose scale is not the one it
+   * resolved against while detached.
+   *
+   * Everything below inherits, so the whole subtree is restyled; the early
+   * out is the answer not having moved, which is what makes the call at
+   * each of the attach sites free in the overwhelmingly common case of a
+   * tree with no `scale` prop in it at all.
+   *
+   * `mounting` is `insertBefore` attaching a subtree that has never been in
+   * the tree, and means the same thing it means to `_themeChanged`: resolve
+   * everything, claim nothing (issue #402). A node that has never painted
+   * has no stale pixels to cover, and where it lands is claimed by the
+   * child-list protocol.
+   */
+  _rescaleSubtree(mounting = false) {
+    if (!this._rescaleMoved()) return;
+    // One claim for the whole walk: `_invalidateLayout` bounds the subtree
+    // as it stands and queues the after-layout claim, so the per-node
+    // repeats the recursion below would make are the same rect over again.
+    if (!mounting) this._invalidateLayout('scale');
+    this._rescaled(mounting);
+  }
+
+  /** Drop the cached scale and re-ask; true when the answer moved. The
+   *  getter is the only place the rule lives, so a `<window>` — which
+   *  resolves the display scale whatever it is written inside — answers
+   *  false here and the walk stops at it. */
+  _rescaleMoved() {
+    const before = this._scaleCache;
+    this._scaleCache = undefined;
+    return this.scale !== before;
+  }
+
+  /** …the walk itself, for a node whose scale is already known to have
+   *  moved. Restyle in the new unit, then carry it down: an ordinary
+   *  descendant's scale is a product of this one, so it moved too. */
+  _rescaled(mounting) {
+    // both hold a size in device pixels at the old scale
+    this._textBase = undefined;
+    this._textScaled = null;
+    const prevStyle = this.style;
+    const style = this._syncStyle(this.props, mounting);
+    if (this.yoga && style !== prevStyle) {
+      applyLayoutStyle(this.yoga, style, prevStyle);
+    }
+    if (localTextStyleChanged(style, prevStyle)) this._textContentChanged();
+    // its own claims are bounded, so this runs on a mount too — the same
+    // rule `_themeChanged` follows
+    this._retext();
+    for (const child of this.children) {
+      if (child._rescaleMoved()) child._rescaled(mounting);
+    }
   }
 
   constructor(kind, props, app, { yoga = true } = {}) {
@@ -1813,6 +1918,11 @@ export class Node {
     // inherits. Undefined means "never asked", which is load-bearing — see
     // `_retext`
     this._resolvedText = undefined;
+    // `inheritedTextStyle`'s cache at a *scale boundary* — a node whose
+    // `scale` prop puts it in a different unit from its parent, so the
+    // device size it inherits has to be re-expressed. Null everywhere else,
+    // which is every node in a tree with no `scale` prop in it.
+    this._textScaled = null;
     // `direction`'s cache, same contract as `_resolvedText`'s: undefined means
     // "never asked", which is what lets `_redirectSubtree` stop at a node
     // nothing below has resolved through
@@ -2435,7 +2545,26 @@ export class Node {
    * `insertBefore` re-resolves the subtree against the real one.
    */
   get inheritedTextStyle() {
-    if (this.parent) return this.parent.resolvedTextStyle();
+    if (this.parent) {
+      const inherited = this.parent.resolvedTextStyle();
+      // A **scale boundary** — this node's `scale` prop, or a `<popup>`
+      // written inside a zoomed subtree, which goes back to the display's
+      // own unit. What comes down the cascade is already device pixels at
+      // the parent's scale (that is the point of resolving the theme's size
+      // once, at the root), so re-expressing it here is the only place a
+      // second multiply is right: a `fontSize: 14` theme inside a
+      // `scale={2}` box is 28 logical, 28 device at 1x, and the descendants
+      // below inherit that without compounding it again.
+      const from = this.parent.scale;
+      const to = this.scale;
+      if (from === to) return inherited;
+      const size = (inherited.size * to) / from;
+      const cached = this._textScaled;
+      if (cached?.from !== inherited || cached.style.size !== size) {
+        this._textScaled = { from: inherited, style: { ...inherited, size } };
+      }
+      return this._textScaled.style;
+    }
     const theme = this.theme;
     const color = theme.text;
     // A palette can reach a node as a bare `theme` **prop** rather than a
@@ -2888,6 +3017,9 @@ export class Node {
     // it can see its ancestors now, so any token in its style can resolve.
     // With no theme anywhere there is nothing to resolve and nothing to walk
     if (this.theme || child.props.theme) child._themeChanged(mounting);
+    // …and the same for the scale: a subtree styled while detached resolved
+    // against the app's, and only now can see the `scale` props above it.
+    child._rescaleSubtree(mounting);
     this._textContentChanged();
     this._childListChanged(before);
     a11yHooks.attached?.(this, child);
@@ -3080,6 +3212,11 @@ export class Node {
     const themeChanged = newProps.theme !== prev.theme;
     this.props = newProps;
     if (themeChanged) this._themeChanged();
+    // Ahead of the `_syncStyle` below, because the funnel that runs
+    // multiplies by `this.scale` and this is what makes it read the new
+    // factor. The walk restyles this node too, so the call after it hits
+    // the identity check and costs nothing twice.
+    if (newProps.scale !== prev.scale) this._rescaleSubtree();
     const style = this._syncStyle(newProps);
     let layoutChanged = false;
     // hoisted styles hit the identity check and skip the whole update

@@ -78,7 +78,16 @@ class SyntheticEvent {
     // by, and `localX` below subtracts an `abs` divided the same way
     // (src/scale.js). Everything *internal* — hit testing, drag
     // thresholds, the scroll accumulator — keeps reading `native`.
-    const s = manager.scale;
+    //
+    // **The target's** unit, not the window's, so that a subtree zoomed by
+    // a `scale` prop reads its own: `ev.x` then compares with the target's
+    // `getClientRects()`, which divides by the same factor, and `localX`
+    // lands on the styles that node was written with. This is CSS `zoom`'s
+    // trade-off rather than a transform's, and the corner it costs is
+    // named in docs/scale.md — a handler on an *unzoomed* ancestor reads a
+    // coordinate in the zoomed descendant's unit, because the target is
+    // what decides. `nativeEvent` is the way back to the window's pixels.
+    const s = target?.scale ?? manager.scale;
     this._manager = manager;
     this._targetNode = target;
     this.type = type;
@@ -802,8 +811,14 @@ export class EventManager {
       // `ev.deltaX/Y` are logical (what handlers read); the scroll they
       // become moves device pixels, and truncating *after* the multiply is
       // what keeps the blit on whole device pixels at fractional scales.
-      const owedX = this._wheelOwed.x + ev.deltaX * this.scale;
-      const owedY = this._wheelOwed.y + ev.deltaY * this.scale;
+      // The target's scale, the same unit the event's coordinates are in
+      // (`SyntheticEvent`), so a notch over a subtree zoomed by a `scale`
+      // prop moves a notch of *its* pixels — the content under the pointer
+      // travels the distance the zoom says, which is what CSS `zoom` does
+      // and what a pane whose rows are twice the size needs.
+      const wheelScale = target.scale;
+      const owedX = this._wheelOwed.x + ev.deltaX * wheelScale;
+      const owedY = this._wheelOwed.y + ev.deltaY * wheelScale;
       const dx = Math.trunc(owedX);
       const dy = Math.trunc(owedY);
       this._wheelOwed = { x: owedX - dx, y: owedY - dy };
@@ -822,9 +837,12 @@ export class EventManager {
       for (let n = target; n; n = n.parent) {
         if (n.canScroll?.(dx, dy)) {
           // built-in scrollers take the device delta whole; a registered
-          // element's own scrollBy speaks the public (logical) unit
+          // element's own scrollBy speaks the public (logical) unit — and
+          // *that node's* logical unit, since `scrollBy` multiplies by its
+          // own scale on the way back in, which is the only division that
+          // round-trips exactly across a scale boundary
           if (n._scrollByDevice) n._scrollByDevice(dx, dy);
-          else n.scrollBy({ x: dx / this.scale, y: dy / this.scale });
+          else n.scrollBy({ x: dx / n.scale, y: dy / n.scale });
           break;
         }
         if (n === this.node) break;
