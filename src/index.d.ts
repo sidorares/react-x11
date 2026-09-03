@@ -198,6 +198,13 @@ export interface RootOptions {
     frameInterval?: number;
     pumpInterval?: number;
   };
+  /**
+   * The size, in logical pixels, under which a `<text>` is painted as a
+   * strip of its ink where its lines are instead of as glyphs — a
+   * zoomed-out view's labels, which nobody can read and which cost a glyph
+   * run each. 6 by default; 0 paints glyphs at every size.
+   */
+  textStripBelow?: number;
   /** `':1'`, `'host:0.0'`, or a unix socket path. Defaults to `$DISPLAY`. */
   display?: string;
   /**

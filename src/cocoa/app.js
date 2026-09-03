@@ -38,6 +38,9 @@ import { loadNative } from './native.js';
 // bridge that does not report it: a 60Hz floor every Mac clears.
 const RAF_INTERVAL_MS = 16;
 const PUMP_INTERVAL_MS = 8;
+// How early a pump tick may take a frame that is not quite due, in ms — the
+// drift of a timer, not a fraction of the pump (`_frameDue`).
+const FRAME_SLACK_MS = 1;
 
 export class CocoaApp {
   constructor(native, options = {}) {
@@ -52,6 +55,10 @@ export class CocoaApp {
     // window paces itself on its own display (`frameIntervalFor`)
     this._frameInterval = options.cocoa?.frameInterval ?? null;
     this._pumpInterval = PUMP_INTERVAL_MS;
+    // the one-shot that runs a frame due between two pump ticks, and when
+    // it is due (`_armFrameTimer`)
+    this._frameTimer = null;
+    this._frameTimerAt = 0;
     this._geometryFlushQueued = false;
     this._shadowStale = new Set();
     this._pump = null;
@@ -366,19 +373,72 @@ export class CocoaApp {
 
   /**
    * Whether `clock` — a window, or the app for a frame no window owns —
-   * is due a frame at `now`, and if so, stamps it. The gate is the interval
-   * less half a pump, so a frame lands on the first pump tick at or after
-   * the interval. Gated at exactly one interval, timer drift put every
-   * other frame a tick late — 16ms frames arriving as 16, 24, 16, 24 —
-   * which a 60Hz display shows as a 50fps stutter, and which the presenter
-   * bench measured as 52fps against a 62.5Hz driver.
+   * is due a frame at `now`, and if so, stamps it.
+   *
+   * The clock keeps the display's period, not the pump's: a frame that ran
+   * is stamped one interval after the last one was due rather than at the
+   * moment it happened to run, so a tick that took it a little early or a
+   * timer that fired a little late moves nothing — the next frame is still
+   * due where the display's next refresh is. A frame that arrives more than
+   * an interval late (a slow one) re-anchors the clock instead of owing the
+   * frames it missed.
+   *
+   * The gate is a millisecond of slack under the interval, which is a
+   * timer's drift and no more. It used to be half a pump, so that a frame
+   * would land on the first tick at or after the interval instead of
+   * alternating between the tick before and the one after; that quantized
+   * the period to the pump — a 75Hz monitor's 13.3ms gate of 9.3 fell on
+   * the 16ms tick, and the window painted at 62.5fps. A frame due between
+   * two ticks now gets a timer of its own (`_armFrameTimer`), and the
+   * period is the display's whatever the pump's cadence.
    */
   _frameDue(clock, now) {
     const interval =
       clock === this ? this.frameIntervalFor(null) : clock._frameInterval;
-    if (now - clock._rafLast < interval - this._pumpInterval / 2) return false;
-    clock._rafLast = now;
+    const since = now - clock._rafLast;
+    if (since < interval - FRAME_SLACK_MS) return false;
+    clock._rafLast = since < 2 * interval ? clock._rafLast + interval : now;
     return true;
+  }
+
+  /** How long until `clock` is due, from `now`. */
+  _frameWait(clock, now) {
+    const interval =
+      clock === this ? this.frameIntervalFor(null) : clock._frameInterval;
+    return interval - FRAME_SLACK_MS - (now - clock._rafLast);
+  }
+
+  /**
+   * A frame that falls between two pump ticks gets a tick of its own: a
+   * one-shot timer at the moment it is due, which runs the frame queue and
+   * presents what it painted. Only when the next pump tick would be late
+   * for it — a frame due after that tick waits for the tick, which decides
+   * again. One timer at a time, at the soonest of what is owed; a pump tick
+   * that comes first runs whatever is due and re-arms for the rest.
+   *
+   * The timer costs the frame nothing the tick does not: a present commits
+   * its own transaction (the bridge flushes on the flip), so what is
+   * painted here is on glass without waiting for the next pump. What the
+   * tick alone still does is pump AppKit's events, which is what
+   * `pumpInterval` stays the cadence of.
+   */
+  _armFrameTimer(wait, now) {
+    if (!(wait > 0 && wait < this._pumpInterval)) return;
+    const at = now + wait;
+    if (this._frameTimer) {
+      if (at >= this._frameTimerAt) return;
+      clearTimeout(this._frameTimer);
+    }
+    this._frameTimerAt = at;
+    this._frameTimer = setTimeout(
+      () => {
+        this._frameTimer = null;
+        if (this._closed) return;
+        this._tickFrames();
+        this._presentAll();
+      },
+      Math.max(1, Math.round(wait)),
+    );
   }
 
   _tickFrames() {
@@ -391,11 +451,13 @@ export class CocoaApp {
     const due = new Map();
     const queue = this._rafQueue;
     this._rafQueue = [];
+    let soonest = Infinity;
     for (const entry of queue) {
       const clock = entry.wnd ?? this;
       if (!due.has(clock)) due.set(clock, this._frameDue(clock, now));
       if (!due.get(clock)) {
         this._rafQueue.push(entry);
+        soonest = Math.min(soonest, this._frameWait(clock, now));
         continue;
       }
       // A window nobody can see owes no frame: its callback waits here until
@@ -416,6 +478,7 @@ export class CocoaApp {
         });
       }
     }
+    this._armFrameTimer(soonest, now);
   }
 
   _presentAll() {
@@ -650,6 +713,8 @@ export class CocoaApp {
     this._closed = true;
     if (this._pump) clearInterval(this._pump);
     this._pump = null;
+    if (this._frameTimer) clearTimeout(this._frameTimer);
+    this._frameTimer = null;
     this._cocoaGL?.destroy();
     this._cocoaGL = null;
     this._native.setBackendEventCallback(null);

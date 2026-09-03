@@ -343,14 +343,16 @@ test('scrolling does not re-measure the floors', async () => {
     ),
   );
   assert.strictEqual(node._floorsDirty, false, 'settled after the first frame');
-  const floored = node._floored.size;
-  assert.ok(floored > 0, 'the rows carry floors');
+  const measured = node._floorsMeasured;
+  const passes = node._layoutPasses;
+  assert.ok(measured > 0, 'the rows were measured');
 
   spinWheel(app.windows[0], 50, 50, 1);
   app.windows[0].flushFrame?.();
   await tick();
   assert.strictEqual(node._floorsDirty, false, 'still the same answer');
-  assert.strictEqual(node._floored.size, floored);
+  assert.strictEqual(node._floorsMeasured, measured, 'nothing re-measured');
+  assert.strictEqual(node._layoutPasses, passes + 1, 'one layout pass');
   await root.unmount();
 });
 
@@ -521,4 +523,209 @@ test('a scroll pane of trimmed titles lays out in pixels, not billions', async (
     `the fourth section sits at ${tops[3]}, ${tops[3] - tops[0]} below the first`,
   );
   await cleanup();
+});
+
+// --- what a change measures ---------------------------------------------------
+//
+// Every node keeps the extent it was last measured at, and a measurement
+// re-reads only the nodes whose subtree changed (`collectFloorStale`); the
+// height passes run only when a floor is going to be written from what they
+// find. `_floorsMeasured` counts the nodes a measurement read,
+// `_layoutPasses` the passes over the root — the real one included.
+
+const WINDOW = { title: 'floors', width: 300, height: 200 };
+
+async function rerender(app, root, children, windowProps = {}) {
+  root.render(h('window', { ...WINDOW, ...windowProps }, children));
+  await tick();
+  app.windows[0].flushFrame?.();
+  await tick();
+}
+
+/** A label of a width its prop names: content that can change. */
+class LabelNode extends Node {
+  constructor(props, app) {
+    super('label', props, app);
+  }
+
+  measureContent({ width }) {
+    return { width: Math.min(this.props.length, width), height: 20 };
+  }
+
+  applyProps(next, prev) {
+    const out = super.applyProps(next, prev);
+    if (next.length !== prev?.length) this.invalidateMeasure('props');
+    return out;
+  }
+}
+
+test('a padding change on a container measures the container and nothing below it', async () => {
+  const rows = () => [
+    box({ height: 20 }),
+    box({ height: 30 }),
+    box({ height: 40 }),
+  ];
+  const container = (pad) =>
+    h('box', { key: 'c', style: { padding: pad } }, ...rows());
+  const { app, root, node } = await mount(container(8));
+  const measured = node._floorsMeasured;
+  const passes = node._layoutPasses;
+  await rerender(app, root, container(12));
+  assert.strictEqual(node._floorsMeasured - measured, 1, 'the container alone');
+  assert.strictEqual(
+    node._layoutPasses - passes,
+    3,
+    'the two height passes and the layout',
+  );
+  await root.unmount();
+});
+
+test('a row that mounts measures itself alone', async () => {
+  const container = (n) =>
+    h(
+      'box',
+      { key: 'c', style: { padding: 8 } },
+      ...Array.from({ length: n }, (_, i) =>
+        h('box', { key: i, style: { height: 20 + i } }),
+      ),
+    );
+  const { app, root, node } = await mount(container(3));
+  const measured = node._floorsMeasured;
+  await rerender(app, root, container(4));
+  assert.strictEqual(
+    node._floorsMeasured - measured,
+    2,
+    'the row and the container it joined',
+  );
+  await root.unmount();
+});
+
+test('a colour change measures nothing and lays out nothing', async () => {
+  const tree = (color) =>
+    h(
+      'box',
+      { key: 'c', style: { padding: 8 } },
+      box({ height: 20, backgroundColor: color }),
+      box({ height: 30 }),
+    );
+  const { app, root, node } = await mount(tree('#ff0000'));
+  const measured = node._floorsMeasured;
+  const passes = node._layoutPasses;
+  await rerender(app, root, tree('#00ff00'));
+  assert.strictEqual(node._floorsMeasured, measured);
+  assert.strictEqual(node._layoutPasses, passes);
+  await root.unmount();
+});
+
+test('a label that shrinks in a row takes its floor with it', async () => {
+  registerElement('label', {
+    create: (props, app) => new LabelNode(props, app),
+  });
+  try {
+    const label = React.createRef();
+    const tree = (length) =>
+      box(
+        { flexDirection: 'row' },
+        h('label', { ref: label, length }),
+        box({ flexGrow: 1 }),
+      );
+    const { app, root, node } = await mount(tree(100));
+    assert.strictEqual(label.current.abs.width, 100);
+    const passes = node._layoutPasses;
+    await rerender(app, root, tree(60));
+    assert.strictEqual(label.current.abs.width, 60, 'the floor followed');
+    assert.strictEqual(
+      node._layoutPasses - passes,
+      4,
+      'the width pass, the two height passes and the layout',
+    );
+    await root.unmount();
+  } finally {
+    unregisterElement('label');
+  }
+});
+
+test('a resize that wraps nothing is one layout pass; one that wraps a paragraph measures the heights', async () => {
+  registerElement('paragraph', {
+    create: (props, app) => new ParagraphNode(props, app),
+  });
+  try {
+    const para = React.createRef();
+    const tree = () =>
+      h(
+        'box',
+        { key: 'c' },
+        h('paragraph', { ref: para }),
+        box({ height: 20 }),
+      );
+    const { app, root, node } = await mount(tree());
+    assert.strictEqual(para.current.abs.height, LINE_HEIGHT);
+    let passes = node._layoutPasses;
+    let measured = node._floorsMeasured;
+    await rerender(app, root, tree(), { width: 250 });
+    assert.strictEqual(node.abs.width, 250, 'resized');
+    assert.strictEqual(para.current.abs.height, LINE_HEIGHT, 'still one line');
+    assert.strictEqual(node._layoutPasses - passes, 1, 'one pass');
+    assert.strictEqual(node._floorsMeasured, measured, 'nothing measured');
+    passes = node._layoutPasses;
+    measured = node._floorsMeasured;
+    await rerender(app, root, tree(), { width: 80 });
+    assert.strictEqual(node.abs.width, 80);
+    assert.strictEqual(para.current.abs.height, 2 * LINE_HEIGHT, 'two lines');
+    assert.strictEqual(
+      node._layoutPasses - passes,
+      4,
+      'the layout, then the two height passes and the layout again',
+    );
+    assert.ok(node._floorsMeasured > measured, 'the paragraph measured');
+    await root.unmount();
+  } finally {
+    unregisterElement('paragraph');
+  }
+});
+
+test('a column that turns into a row moves the floor to the other axis', async () => {
+  const child = React.createRef();
+  const tree = (direction) =>
+    h(
+      'box',
+      { key: 'c', style: { flexDirection: direction } },
+      h('box', { ref: child }, box({ width: 40, height: 20 })),
+      box({ width: 10, height: 10 }),
+    );
+  const { app, root } = await mount(tree('column'));
+  assert.strictEqual(child.current._floorMinH, 20, 'a floor down the column');
+  assert.strictEqual(child.current._floorMinW, undefined);
+  await rerender(app, root, tree('row'));
+  assert.strictEqual(child.current._floorMinW, 40, 'a floor along the row');
+  assert.strictEqual(child.current._floorMinH, undefined, 'and none down it');
+  assert.strictEqual(child.current.yoga.getMinWidth().value, 40);
+  await root.unmount();
+});
+
+test('a change under a hidden subtree is measured when it is shown', async () => {
+  const wrapper = React.createRef();
+  const tree = (inner, shown) =>
+    h(
+      'box',
+      { key: 'c', style: { height: 60 } },
+      h(
+        'box',
+        { ref: wrapper, style: { display: shown ? 'flex' : 'none' } },
+        box({ height: inner }),
+      ),
+      box({ height: 40 }),
+    );
+  const { app, root } = await mount(tree(20, true));
+  await rerender(app, root, tree(20, false));
+  // the row grows while nobody can see it, then is shown: the floor it is
+  // shown with is the one for the content it has now
+  await rerender(app, root, tree(50, false));
+  await rerender(app, root, tree(50, true));
+  assert.strictEqual(
+    wrapper.current.abs.height,
+    50,
+    'not squeezed into the 60px column',
+  );
+  await root.unmount();
 });

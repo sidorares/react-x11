@@ -13,9 +13,24 @@ import { cssColorStraight } from 'ntk';
 
 const BLACK = [0, 0, 0, 1];
 
+// A colour string is parsed once: a frame over a large tree sets the same
+// few fills thousands of times, and the parse — a regex and four numbers —
+// cost a third of `_applyFill` (measured on the presenter bench's `tiny`
+// cell, 5,000 fills of two colours: 100ms of a 200ms frame). Bounded, and
+// dropped whole rather than evicted, since a palette is a few dozen strings.
+const parsedColors = new Map();
+const PARSED_COLORS_MAX = 256;
+
 function parseColor(value) {
   if (value == null) return BLACK;
-  return cssColorStraight(String(value)) ?? BLACK;
+  const key = typeof value === 'string' ? value : String(value);
+  let parsed = parsedColors.get(key);
+  if (parsed === undefined) {
+    parsed = cssColorStraight(key) ?? BLACK;
+    if (parsedColors.size >= PARSED_COLORS_MAX) parsedColors.clear();
+    parsedColors.set(key, parsed);
+  }
+  return parsed;
 }
 
 class LinearGradient {

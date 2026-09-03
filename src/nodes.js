@@ -950,6 +950,9 @@ function assertWindowSize(props, kind) {
  * pass run with no height on offer the row came out at nothing, taking its
  * leaves down with it. A container in that position is recovered by looking
  * inside it; a leaf has nothing inside, which is what this is for.
+ *
+ * Only the leaves the measurement is going to ask about: the walk goes
+ * through the nodes whose height extent is stale and no others.
  */
 function captureLeafHeights(node, out) {
   let leaf = true;
@@ -957,7 +960,7 @@ function captureLeafHeights(node, out) {
     if (!child.yoga || child.isWindow) continue;
     if (child.style.display === 'none') continue;
     if (child.style.position !== 'absolute') leaf = false;
-    captureLeafHeights(child, out);
+    if (child._floorH === undefined) captureLeafHeights(child, out);
   }
   if (leaf) out.set(node, node.yoga.getComputedHeight());
 }
@@ -995,7 +998,7 @@ function namesOwnFloor(node, axis) {
  * answer, so there is no need to look inside it. Everything that names a
  * floor, plus the two other ways a style can bound itself: a **size**, which
  * a min-content measurement here keeps rather than shrinking past (see
- * `writeContentFloors`), and a **ceiling**, since CSS clamps the content
+ * `writeFloors`), and a **ceiling**, since CSS clamps the content
  * suggestion by the specified `max-*` too.
  */
 function declaresOwnMinimum(node, axis) {
@@ -1029,6 +1032,144 @@ const mainAxisOf = (node) => {
 };
 
 /**
+ * Whether `child` is one the floors are **written on** along `axis`: a flex
+ * item on its container's main axis whose author left the minimum to the
+ * content. The same test `writeFloors` applies, asked ahead of time — it is
+ * what decides whether a stale extent is one anybody will read.
+ */
+function receivesFloor(child, axis) {
+  const parent = child.parent;
+  if (!parent || mainAxisOf(parent) !== axis || !inFlow(child)) return false;
+  const own = axis === 'width' ? 'minWidth' : 'minHeight';
+  return typeof child.style[own] !== 'number';
+}
+
+/**
+ * Find what the last measurement can no longer answer for, before a layout
+ * pass clears the evidence.
+ *
+ * The floors are content, and yoga already keeps the exact record of which
+ * content moved: a style setter that changed something, a child that came
+ * or went, a text that asked to be re-measured all mark their node dirty
+ * and every node above it, and the next `calculateLayout` clears the lot.
+ * So this walks the dirty part of the tree — and only that part, since a
+ * clean node has clean children — and takes the cached extents off every
+ * node it finds (`_floorW`/`_floorH`), which is what "stale" means from
+ * here on. The dirty nodes are listed for `writeFloors`: they are the
+ * nodes whose children's floors can have moved — as is, later, every node
+ * `contentSpan` measures a child of, since a window's natural-size
+ * measurement (`_measure`) clears yoga's record before the first floors
+ * pass, and a scroll pane's rows measured through a clean scroll pane still
+ * need their floors written.
+ *
+ * `found` records whether any stale node is one a floor is written on: if
+ * none is, no measurement is owed on that axis at all, whatever changed —
+ * the extents that moved are ones nobody reads. An extent nobody read
+ * stays unmeasured, on a clean node, for as long as nobody does; it is
+ * asked for at the one moment it can start to matter, which is when its
+ * parent changes (a column that turns into a row), and its parent is dirty
+ * then. So the children of a dirty node are all looked at, and only the
+ * dirty ones are descended into.
+ *
+ * Until the first floors pass has settled both axes (`sweep`), the walk
+ * also goes down through nodes that were never measured, dirty or not: a
+ * window's natural-size measurement (`_measure`) lays the tree out before
+ * the first floors pass and clears yoga's record on the way, and a scroll
+ * pane that names its own minimum receives no floor while the rows inside
+ * it do. After that pass every reachable node has an extent on any axis
+ * that had a floor to write, and the dirty path is the whole story.
+ *
+ * A `display: 'none'` subtree is marked and left: it takes part in no
+ * layout, and a change inside it is still there when it is shown again,
+ * because yoga clears a hidden node's own flag but never its children's.
+ */
+function collectFloorStale(node, stale, found, sweep) {
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow) continue;
+    const dirty = child.yoga.isDirty();
+    if (dirty) {
+      child._floorW = undefined;
+      child._floorH = undefined;
+      // the minimum yoga holds may not be ours any more: a style change on
+      // this node went through `applyLayoutStyle`, which writes the
+      // author's minimum over whatever floor was there
+      child._floorMinW = null;
+      child._floorMinH = null;
+    }
+    if (child.style.display === 'none') continue;
+    if (child._floorW === undefined && receivesFloor(child, 'width')) {
+      found.width = true;
+    }
+    if (child._floorH === undefined && receivesFloor(child, 'height')) {
+      found.height = true;
+    }
+    if (dirty) stale.add(child);
+    else if (
+      !sweep ||
+      (child._floorW !== undefined && child._floorH !== undefined)
+    ) {
+      continue;
+    }
+    collectFloorStale(child, stale, found, sweep);
+  }
+}
+
+/**
+ * After a pass that settled the widths: which of the height floors, each a
+ * height *for a width*, were measured for a width their node no longer has.
+ *
+ * Walks down through every node whose width moved — a clean subtree whose
+ * root is still the width it was measured at holds no surprises, so the
+ * walk stops there — and asks each leaf it reaches the one question that
+ * matters, in JavaScript rather than through a layout pass: is your height
+ * at this width the height you had at the old one? A paragraph that still
+ * fits on its line says no, and so does every unwrapped label in a grid
+ * whose cells just moved a pixel, which is what makes a relayout of a large
+ * tree one pass instead of four. A leaf that wraps differently is marked
+ * stale with everything above it, and `hit.owed` says whether any of those
+ * is a node a floor is written on.
+ *
+ * Widths are compared with a pixel of slack: the measuring passes run with
+ * the pixel grid off and the real one with it on, so the same layout reads
+ * a fraction apart between them.
+ */
+function probeHeightFloors(node, root, hit) {
+  for (const child of node.children) {
+    if (!child.yoga || child.isWindow) continue;
+    if (child.style.display === 'none') continue;
+    const stale = child._floorH === undefined;
+    const width = child.yoga.getComputedWidth();
+    const at = child._floorAtW;
+    if (!stale && at !== undefined && Math.abs(width - at) < 1) continue;
+    if (child._measureFn) {
+      if (
+        !stale &&
+        at !== undefined &&
+        child._heightForWidth(width) !== child._heightForWidth(at)
+      ) {
+        markHeightStale(child, root, hit);
+      }
+    } else {
+      probeHeightFloors(child, root, hit);
+    }
+    // whatever the extent is, it is the extent for this width now — a
+    // stale one is about to be measured here, a clean one was just checked
+    child._floorAtW = width;
+  }
+}
+
+/** A leaf whose height moved takes every extent above it with it. */
+function markHeightStale(node, root, hit) {
+  hit.marked = true;
+  for (let n = node; n && n !== root; n = n.parent) {
+    if (n._floorH === undefined) continue;
+    n._floorH = undefined;
+    root._floorsStale.add(n);
+    if (receivesFloor(n, 'height')) hit.owed = true;
+  }
+}
+
+/**
  * Put the tree in the state a **min-content** measurement means: a node that
  * has said how small it can be is let go all the way down to it, and a node
  * that has not cannot give at all, because what it needs is the thing being
@@ -1038,26 +1179,37 @@ const mainAxisOf = (node) => {
  * own `flexShrink: 0` default. Now that the default is CSS's `1` (#249) the
  * pass has to be told, or every node would shrink to nothing and answer that
  * the content needs no room — which is true of no content anywhere.
+ *
+ * Every child of a node being measured is told, so that the node's own
+ * layout is the one it always was; below a child whose extent is still
+ * good nothing is, since nothing in there is read. `out` collects what was
+ * written so `restoreShrink` can put back exactly that.
  */
-function setMeasuringShrink(node, axis) {
+function setMeasuringShrink(node, axis, out) {
   for (const child of node.children) {
     if (!child.yoga || child.isWindow) continue;
-    child.yoga.setFlexShrink(namesOwnFloor(child, axis) ? 1 : 0);
     // …and not into a `display: 'none'` subtree, which the measurement does
-    // not read and `writeContentFloors` therefore does not walk back through
+    // not read and the floors are not written back through
     if (child.style.display === 'none') continue;
-    setMeasuringShrink(child, axis);
+    const shrink = namesOwnFloor(child, axis) ? 1 : 0;
+    if ((child.style.flexShrink ?? 1) !== shrink) {
+      child.yoga.setFlexShrink(shrink);
+      out.push(child);
+    }
+    if (floorStale(child, axis)) setMeasuringShrink(child, axis, out);
   }
 }
 
 /** …and back to the layout everything else is run from. */
-function restoreShrink(node) {
-  for (const child of node.children) {
-    if (!child.yoga || child.isWindow) continue;
+function restoreShrink(shrunk) {
+  for (const child of shrunk) {
     child.yoga.setFlexShrink(child.style.flexShrink ?? 1);
-    restoreShrink(child);
   }
 }
+
+/** Whether `node`'s extent along `axis` has to be measured again. */
+const floorStale = (node, axis) =>
+  (axis === 'width' ? node._floorW : node._floorH) === undefined;
 
 /**
  * Pin every box under `node` at the width the pass just settled it at, so
@@ -1084,27 +1236,25 @@ function restoreShrink(node) {
  * else the pass is doing, and its children are laid out inside that. It costs
  * nothing either: every leaf is offered the width it was already measured at,
  * so the paragraphs the first pass shaped come back out of the layout cache.
+ *
+ * Pinned as far as the measurement reads, like the shrink: the children of
+ * every node whose extent is being measured, and no further.
  */
-function freezeWidths(node) {
+function freezeWidths(node, out) {
   for (const child of node.children) {
     if (!child.yoga || child.isWindow) continue;
     // as in `setMeasuringShrink`: a `display: 'none'` subtree was not laid
     // out, so there is no width in there to keep
     if (child.style.display === 'none') continue;
     child.yoga.setWidth(child.yoga.getComputedWidth());
-    freezeWidths(child);
+    out.push(child);
+    if (child._floorH === undefined) freezeWidths(child, out);
   }
 }
 
-/** …and back to the width the style asks for. Walks what `freezeWidths`
- *  walked, so a box it never pinned is never written to either. */
-function restoreWidths(node) {
-  for (const child of node.children) {
-    if (!child.yoga || child.isWindow) continue;
-    if (child.style.display === 'none') continue;
-    child.yoga.setWidth(child.style.width);
-    restoreWidths(child);
-  }
+/** …and back to the width the style asks for, on exactly what was pinned. */
+function restoreWidths(frozen) {
+  for (const child of frozen) child.yoga.setWidth(child.style.width);
 }
 
 /**
@@ -1128,16 +1278,23 @@ function restoreWidths(node) {
  * needs it. A container that came out at nothing is recovered by looking
  * inside it; a leaf has nothing inside, so it has to be remembered.
  *
- * `out` collects, for every node on the way, **the extent it contributes to
- * the box around it** — which is exactly that node's automatic minimum size,
- * so one pass and one walk give the whole tree its floors (#249) instead of
- * a measurement per node. The recursion is therefore over all the children,
- * even the ones whose own content does not count towards this one's: a
- * scroll pane contributes nothing to the floor above it and still needs
- * floors written *inside* it, or the column of rows it holds would shrink to
- * the viewport and there would be nothing left to scroll.
+ * What every node contributes to the box around it — which is exactly that
+ * node's automatic minimum size — is written onto the node (`_floorW`,
+ * `_floorH`), so one pass and one walk give the whole tree its floors (#249)
+ * instead of a measurement per node, and so that the next measurement can
+ * **read it back instead of looking again**: a child whose extent is still
+ * there is taken at that number, and nothing under it is visited. The
+ * extent is a function of the subtree alone — its content and its styles —
+ * which is what makes the cache honest: `collectFloorStale` takes it off
+ * every node whose subtree changed, and for a height the width it was
+ * measured at is kept beside it (`_floorAtW`) for `probeHeightFloors` to
+ * check. The recursion is therefore over the stale children only, and
+ * still through the ones whose own content does not count towards this
+ * one's: a scroll pane contributes nothing to the floor above it and still
+ * needs floors written *inside* it, or the column of rows it holds would
+ * shrink to the viewport and there would be nothing left to scroll.
  */
-function contentSpan(node, axis, intrinsic, out) {
+function contentSpan(node, axis, intrinsic, root) {
   const yoga = node.yoga;
   const horizontal = axis === 'width';
   const own = horizontal ? yoga.getComputedWidth() : yoga.getComputedHeight();
@@ -1157,19 +1314,31 @@ function contentSpan(node, axis, intrinsic, out) {
     // by itself, and a <text> span has no box of its own
     if (!child.yoga || child.isWindow) continue;
     if (child.style.display === 'none') continue;
-    const span = contentSpan(child, axis, intrinsic, out);
     const laidOut = horizontal
       ? child.yoga.getComputedWidth()
       : child.yoga.getComputedHeight();
-    // What the child needs from this box. A node that has said how small it
-    // can be is taken at its word — the measuring pass already let it shrink
-    // to exactly that — and anything else is asked what is inside it. Its
-    // laid-out size is deliberately *not* a floor under that answer: nothing
-    // shrank in this pass, so a box that measures its own content is sitting
-    // at its **max**-content size, which is the width a label would like to
-    // be rather than the width it can be squeezed to.
-    const extent = declaresOwnMinimum(child, axis) ? laidOut : span;
-    out?.set(child, extent);
+    let extent = horizontal ? child._floorW : child._floorH;
+    if (extent === undefined) {
+      const span = contentSpan(child, axis, intrinsic, root);
+      // What the child needs from this box. A node that has said how small
+      // it can be is taken at its word — the measuring pass already let it
+      // shrink to exactly that — and anything else is asked what is inside
+      // it. Its laid-out size is deliberately *not* a floor under that
+      // answer: nothing shrank in this pass, so a box that measures its own
+      // content is sitting at its **max**-content size, which is the width
+      // a label would like to be rather than the width it can be squeezed
+      // to.
+      extent = declaresOwnMinimum(child, axis) ? laidOut : span;
+      if (horizontal) child._floorW = extent;
+      else {
+        child._floorH = extent;
+        child._floorAtW = child.yoga.getComputedWidth();
+      }
+      root._floorsMeasured += 1;
+      // a fresh extent is a floor to write, whether or not this node was
+      // dirty: see `collectFloorStale`
+      root._floorsStale.add(node);
+    }
     if (child.style.position === 'absolute') continue;
     const at =
       (horizontal
@@ -1215,9 +1384,8 @@ function contentSpan(node, axis, intrinsic, out) {
 }
 
 /**
- * Write CSS's **automatic minimum size** onto every flex item under `node`:
- * a floor of the extent it needs, along the axis its container lays out on,
- * and restore the `flexShrink` the measurement borrowed on the way past.
+ * Write CSS's **automatic minimum size** onto the flex items in `node`: a
+ * floor of the extent each needs, along the axis its container lays out on.
  *
  * This is the other half of `flexShrink` defaulting to `1` (#249), and
  * neither half is any good without the other. Yoga implements the shrink and
@@ -1230,7 +1398,10 @@ function contentSpan(node, axis, intrinsic, out) {
  *
  * Only the **main** axis, as in CSS: shrinking happens along the axis the
  * container packs on, and on the other one an item is stretched or fits its
- * content either way.
+ * content either way. On the other axis the child gets its style's minimum
+ * back — which is what takes a floor off a child whose container turned
+ * from a column into a row, since the floor it needs now is on the other
+ * axis.
  *
  * Where this deliberately parts company with CSS is a node that named a
  * size: CSS floors that at `min(the size, the content)`, so a `height: 40`
@@ -1242,10 +1413,14 @@ function contentSpan(node, axis, intrinsic, out) {
  * that was named is a size that is kept**, and `minHeight: 0` is how an
  * author says otherwise.
  *
- * `mins` is what every node contributes to the box around it, measured in
- * one pass by `contentSpan`. `floored` collects what was written so the next
- * measurement can take it back off — a floor left in place would be read
- * back as content that cannot give, and could then only ratchet upwards.
+ * One node's children, from the extents on them (`contentSpan`): the
+ * callers run it over every node whose children's extents may have moved,
+ * and nothing else — a floor that did not change is not written again, so a
+ * clean subtree is neither visited nor dirtied. What was written is kept
+ * (`_floorMinW`/`_floorMinH`) so that the next write can tell; a stale
+ * extent writes the style's own minimum, which is how a floor comes off a
+ * node that is about to be measured, and which is why measuring a node
+ * that carries one cannot read it back as content the tree cannot give up.
  *
  * A floor is written **unrounded**, and the measurement it came from ran
  * with the pixel grid off (`measuringExactly`) for the reason given there:
@@ -1260,28 +1435,29 @@ function contentSpan(node, axis, intrinsic, out) {
  * tall (issue #411). Whole pixels cancel exactly, which is why the text
  * measures here answer in them (`TextNode._trim`).
  */
-function writeContentFloors(node, axis, mins, floored) {
+function writeFloors(node, axis) {
+  const horizontal = axis === 'width';
   const axisIsMain = mainAxisOf(node) === axis;
-  const own = axis === 'width' ? 'minWidth' : 'minHeight';
+  const own = horizontal ? 'minWidth' : 'minHeight';
   for (const child of node.children) {
     if (!child.yoga || child.isWindow) continue;
-    child.yoga.setFlexShrink(child.style.flexShrink ?? 1);
-    if (child.style.display === 'none') continue;
+    let floor;
     // A floor of 0 is what yoga does anyway, and an author who named their
     // own `minWidth`/`minHeight` has already answered — overwriting it would
     // put a measurement of ours above a number they wrote.
-    const floor = mins.get(child) ?? 0;
-    if (
-      axisIsMain &&
-      inFlow(child) &&
-      floor > 0 &&
-      typeof child.style[own] !== 'number'
-    ) {
-      if (axis === 'width') child.yoga.setMinWidth(floor);
-      else child.yoga.setMinHeight(floor);
-      floored.add(child);
+    if (axisIsMain && inFlow(child) && typeof child.style[own] !== 'number') {
+      const extent = horizontal ? child._floorW : child._floorH;
+      if (extent > 0) floor = extent;
     }
-    writeContentFloors(child, axis, mins, floored);
+    if ((horizontal ? child._floorMinW : child._floorMinH) === floor) continue;
+    const value = floor ?? child.style[own];
+    if (horizontal) {
+      child.yoga.setMinWidth(value);
+      child._floorMinW = floor;
+    } else {
+      child.yoga.setMinHeight(value);
+      child._floorMinH = floor;
+    }
   }
 }
 
@@ -1436,6 +1612,46 @@ const WINDOW_SEMANTIC_NAMES = new Set([
  * are not: an element that wrote `widthMode === 0` would be pinned to
  * yoga's ABI through us, which is exactly what the seam exists to stop.
  */
+/**
+ * Text smaller than this many logical pixels is painted as a strip in its
+ * ink instead of as glyphs (`TextNode._paintsStrip`). Six is under the
+ * smallest size any UI sets on purpose and over what a zoomed-out view
+ * shrinks its labels to; `createRoot({ textStripBelow })` is the seam.
+ */
+export const TEXT_STRIP_BELOW = 6;
+// The band a strip covers, in ems around the baseline — the x-height and a
+// little of the ascenders above it, the descenders below — and the share of
+// the ink it is painted at, which is roughly how much of that band small
+// text actually inks.
+const STRIP_ABOVE_BASELINE = 0.6;
+const STRIP_BELOW_BASELINE = 0.1;
+const STRIP_COVERAGE = 0.45;
+
+const textStripBelow = new WeakMap();
+
+/** The size under which this connection's text is painted as strips. */
+export function setTextStripBelow(app, below) {
+  if (below === undefined) return;
+  if (typeof below !== 'number' || !(below >= 0)) {
+    throw new Error(
+      `react-x11: createRoot({ textStripBelow: ${JSON.stringify(below)} }) ` +
+        '— a size in logical pixels, or 0 to paint glyphs at every size.',
+    );
+  }
+  textStripBelow.set(app, below);
+}
+
+// `REACT_X11_TEXT_STRIP_BELOW` is the same line for a process that cannot
+// reach `createRoot` — a bench comparing the strip against glyphs, an app
+// run under a harness — read once
+const textStripBelowEnv = Number(process.env.REACT_X11_TEXT_STRIP_BELOW);
+
+const textStripBelowFor = (app) =>
+  textStripBelow.get(app) ??
+  (Number.isFinite(textStripBelowEnv) && textStripBelowEnv >= 0
+    ? textStripBelowEnv
+    : TEXT_STRIP_BELOW);
+
 const MEASURE_MODES = [];
 MEASURE_MODES[Yoga.MEASURE_MODE_UNDEFINED] = 'unconstrained';
 MEASURE_MODES[Yoga.MEASURE_MODE_EXACTLY] = 'exactly';
@@ -1551,6 +1767,20 @@ export class Node {
     // that a second mutation reuses the rect instead of walking the subtree
     // again. Lives exactly as long as membership in `root._reflowed`.
     this._reflowBefore = null;
+    // The automatic minimum size (#249), cached per node: what this node
+    // contributes to the box around it on each axis (`contentSpan`), the
+    // width the height was measured for (`probeHeightFloors`), and the
+    // floor yoga currently holds from us on each axis (`writeFloors`).
+    // `undefined` on an extent means it has to be measured again; `null`
+    // on a written floor means yoga's minimum may not be ours any more.
+    this._floorW = undefined;
+    this._floorH = undefined;
+    this._floorAtW = undefined;
+    this._floorMinW = undefined;
+    this._floorMinH = undefined;
+    // the width mode yoga last measured this leaf in with no height on
+    // offer — the question `_heightForWidth` repeats
+    this._floorMeasureMode = null;
     this.root = null; // owning WindowNode once attached
     this.hidden = false;
     this.destroyed = false;
@@ -2481,6 +2711,24 @@ export class Node {
   }
 
   /**
+   * The height this leaf takes at `width` with nothing bounding its height
+   * — the answer yoga gets from the measuring pass that settles the height
+   * floors, asked directly. `probeHeightFloors` asks it twice, for the width
+   * a leaf was measured at and the one it has now, to find out whether a
+   * relayout that moved the leaf changed what it needs; a paragraph answers
+   * from its layout cache, and the elements whose height is not a function
+   * of their width at all answer at once.
+   */
+  _heightForWidth(width) {
+    return this.measureContent({
+      width,
+      height: Infinity,
+      widthMode: this._floorMeasureMode ?? 'at-most',
+      heightMode: 'unconstrained',
+    })?.height;
+  }
+
+  /**
    * Hand `measureContent` to layout, translated: the modes arrive as words,
    * an axis with no bound arrives as `Infinity` rather than as yoga's null,
    * and what comes back is checked before it can turn a whole tree into
@@ -2488,6 +2736,9 @@ export class Node {
    */
   _useMeasureContent() {
     this._setMeasureFunc((width, widthMode, height, heightMode) => {
+      if (heightMode === Yoga.MEASURE_MODE_UNDEFINED) {
+        this._floorMeasureMode = MEASURE_MODES[widthMode];
+      }
       const size = this.measureContent({
         width: measureOffer(width, widthMode),
         height: measureOffer(height, heightMode),
@@ -5059,7 +5310,7 @@ export class TextNode extends Node {
    * that should have cancelled to zero; a fraction that is not exact in
    * binary leaves a rounding residue there instead, and dividing by it laid
    * the section titles of `examples/configurator` out 5.6 billion pixels
-   * tall. See `writeContentFloors`, which is the other end of it.
+   * tall. See `writeFloors`, which is the other end of it.
    */
   _trim(layout) {
     if (this.style.textBoxTrim !== 'cap-alphabetic') return null;
@@ -5145,7 +5396,58 @@ export class TextNode extends Node {
     const placed = this._placedLayout();
     if (!placed) return;
     this._paintSelection(ctx);
+    if (this._paintsStrip()) {
+      this._paintStrip(ctx, placed);
+      return;
+    }
     placed.layout.draw(ctx, placed.x, placed.y);
+  }
+
+  /**
+   * Whether this paragraph is too small to read, and is painted as a strip
+   * where its lines are instead of as glyphs (`_paintStrip`).
+   *
+   * A zoomed-out view — a minimap, a graph at a tenth of its size, a grid
+   * of five thousand cells — is a screen full of labels nobody can read,
+   * each of which costs a `CTLineDraw` or a glyph-run composite at exactly
+   * the price of a legible one. Below a legible size a label is a smudge
+   * of its ink, and a strip of that ink at the coverage of small text is
+   * the same smudge for one fill. The size is in logical pixels: what is
+   * legible is a physical question, and a 5px label is the same size on a
+   * 2x panel as on a 1x monitor. `textStripBelow` on `createRoot` moves
+   * the line, and `0` keeps glyphs at every size.
+   */
+  _paintsStrip() {
+    const below = textStripBelowFor(this.app);
+    return below > 0 && this.resolvedTextStyle().size / this.scale < below;
+  }
+
+  /**
+   * One rectangle per line, over the band the letters sit in — from a
+   * little above the x-height down past the baseline — in the ink at a
+   * coverage that reads the way small text does: solid ink would be a bar,
+   * and a paragraph is mostly white space at any size.
+   */
+  _paintStrip(ctx, { layout, x, y }) {
+    const lines = layout.lines;
+    if (!lines?.length) return;
+    const style = this.resolvedTextStyle();
+    const em = style.size;
+    const ink = cssColorStraight(style.color);
+    if (!ink) return;
+    const rects = [];
+    for (const line of lines) {
+      if (!(line.width > 0)) continue;
+      rects.push(
+        x + line.x,
+        y + line.baseline - em * STRIP_ABOVE_BASELINE,
+        line.width,
+        em * (STRIP_ABOVE_BASELINE + STRIP_BELOW_BASELINE),
+      );
+    }
+    if (!rects.length) return;
+    ctx.fillStyle = `rgba(${Math.round(ink[0] * 255)}, ${Math.round(ink[1] * 255)}, ${Math.round(ink[2] * 255)}, ${ink[3] * STRIP_COVERAGE})`;
+    ctx.fillRects(rects);
   }
 
   /** The band under the glyphs, when a document selection reaches this
@@ -8574,12 +8876,17 @@ export class WindowNode extends Scrollable(Node) {
     // it moves (see _sendSizeHints for why the size is part of it)
     this._sentHints = null;
     this._sentHintsAt = null;
-    // The automatic minimum size (#249): the nodes carrying a floor this
-    // window measured, whether the floors are still the answer, and the
-    // width the height half of them was measured for.
-    this._floored = new Set();
+    // The automatic minimum size (#249): whether the floors are still the
+    // answer, the width the height half of them was measured for, the nodes
+    // this frame found stale (`collectFloorStale`), and two counters the
+    // tests read — layout passes over the root and nodes measured.
     this._floorsDirty = true;
     this._floorsWidth = null;
+    this._floorsStale = new Set();
+    // whether the first floors pass has run (`collectFloorStale`'s sweep)
+    this._floorsSwept = false;
+    this._floorsMeasured = 0;
+    this._layoutPasses = 0;
     // whether the tree's CONTENT moved since the floors were measured — a
     // resize alone does not, which is what lets a live resize defer them
     this._floorsContentDirty = true;
@@ -8636,7 +8943,19 @@ export class WindowNode extends Scrollable(Node) {
     this.invalidate(true, null, 'direction');
   }
 
-  _measureContentSpans(axis, forWidth, out) {
+  /**
+   * One measuring pass over the tree, read back into the extents of every
+   * node still to be measured (`contentSpan`), and the root's own span
+   * returned — the number a `minWidth="auto"` window sends as its hint.
+   *
+   * `forWidth` is the width the heights are measured for; `probe` says
+   * whether the widths that pass settles are still to be checked against
+   * the ones the height floors were measured at (`probeHeightFloors`) —
+   * they are when nothing has looked yet this frame, and a leaf the probe
+   * finds moved has its floor taken off and the pass run again, since a
+   * floor still on a node being measured would be read back as content.
+   */
+  _measureContentSpans(axis, forWidth, probe = false) {
     const yoga = this.yoga;
     const dir = this._rootDirection;
     // The root carries whatever size the last pass pinned on it, and an
@@ -8644,9 +8963,13 @@ export class WindowNode extends Scrollable(Node) {
     yoga.setWidth(undefined);
     yoga.setHeight(undefined);
     if (axis === 'width') {
-      setMeasuringShrink(this, axis);
+      const shrunk = [];
+      setMeasuringShrink(this, axis, shrunk);
+      this._layoutPasses += 1;
       yoga.calculateLayout(0, undefined, dir);
-      return contentSpan(this, axis, undefined, out);
+      const span = contentSpan(this, axis, null, this);
+      restoreShrink(shrunk);
+      return span;
     }
     // Height takes two passes. The first is the tree at its real width with
     // no bound on the height, which is where every leaf reports the height
@@ -8657,36 +8980,108 @@ export class WindowNode extends Scrollable(Node) {
     // stretches: those are the ones the map above puts back. The widths the
     // first pass settled are held across the second (`freezeWidths`), which
     // is the only thing keeping it a collapse rather than a second opinion.
+    this._layoutPasses += 1;
     yoga.calculateLayout(forWidth, undefined, dir);
+    if (probe && this._probeHeightFloors().marked) {
+      this._writeFloors('height');
+      this._layoutPasses += 1;
+      yoga.calculateLayout(forWidth, undefined, dir);
+    }
     const intrinsic = new Map();
     captureLeafHeights(this, intrinsic);
-    freezeWidths(this);
-    setMeasuringShrink(this, axis);
+    const frozen = [];
+    freezeWidths(this, frozen);
+    const shrunk = [];
+    setMeasuringShrink(this, axis, shrunk);
+    this._layoutPasses += 1;
     yoga.calculateLayout(forWidth, 0, dir);
-    const span = contentSpan(this, axis, intrinsic, out);
-    restoreWidths(this);
+    const span = contentSpan(this, axis, intrinsic, this);
+    restoreWidths(frozen);
+    restoreShrink(shrunk);
+    return span;
+  }
+
+  /**
+   * What the last measurement can no longer answer for, taken off the
+   * nodes and listed (`collectFloorStale`). Run ahead of anything that lays
+   * the tree out, since a pass clears yoga's record of what changed — and
+   * cheap enough to run twice in a frame, because the second walk finds the
+   * marks the first one left.
+   */
+  _collectFloorStale() {
+    const found = { width: false, height: false };
+    this._floorsStale.clear();
+    // the root's own children are written from here too, and its direction
+    // can move like any node's
+    this._floorsStale.add(this);
+    collectFloorStale(this, this._floorsStale, found, !this._floorsSwept);
+    return found;
+  }
+
+  /** The floors on the children of every node found stale, from the extents
+   *  they carry — `writeFloors` for each. */
+  _writeFloors(axis) {
+    for (const node of this._floorsStale) {
+      if (!node.destroyed) writeFloors(node, axis);
+    }
+  }
+
+  /** `probeHeightFloors` over this window's tree. */
+  _probeHeightFloors() {
+    const hit = { marked: false, owed: false };
+    probeHeightFloors(this, this, hit);
+    return hit;
+  }
+
+  /**
+   * Measure the width extents that are stale and write the width floors
+   * from them. The floors on the nodes about to be measured come off first
+   * (a stale extent writes the style's own minimum), which is what keeps a
+   * floor from ratcheting: read back as content, it could only ever grow.
+   */
+  _measureWidthFloors() {
+    this._writeFloors('width');
+    const span = this._measureContentSpans('width');
+    this._writeFloors('width');
+    return span;
+  }
+
+  /** The same for the heights, at `forWidth`. */
+  _measureHeightFloors(forWidth, probe) {
+    this._writeFloors('height');
+    const span = this._measureContentSpans('height', forWidth, probe);
+    this._writeFloors('height');
     return span;
   }
 
   _measureMinimum(axis, forWidth) {
-    // Measured from the styles alone, so the floors this window wrote itself
-    // have to come off first: they were derived from this same measurement,
-    // and left in place they would be read back as content the tree cannot
-    // give up — a floor that could only ever ratchet upwards.
-    this._resetContentFloors();
-    const min = measuringExactly(() =>
-      Math.ceil(this._measureContentSpans(axis, forWidth)),
+    // Measured from the styles alone: the stale nodes' own floors come off
+    // in the measurement, and a clean node's extent was measured the same
+    // way before it was floored.
+    this._collectFloorStale();
+    return measuringExactly(() =>
+      Math.ceil(
+        axis === 'width'
+          ? this._measureWidthFloors()
+          : this._measureHeightFloors(forWidth, true),
+      ),
     );
-    restoreShrink(this);
-    return min;
+  }
+
+  /** The real layout pass: the tree at the window's size, on the pixel grid. */
+  _layoutRoot(width, height) {
+    this._layoutPasses += 1;
+    this.yoga.setWidth(width);
+    this.yoga.setHeight(height);
+    this.yoga.calculateLayout(width, height, this._rootDirection);
   }
 
   /**
    * Give every flex item in this window's tree the floor CSS calls its
    * automatic minimum size, so that `flexShrink`'s default of `1` squeezes a
    * row into the space it has without squeezing its contents out of
-   * existence. See `writeContentFloors` for what that means and why both
-   * halves are needed.
+   * existence, and lay the tree out with them. See `writeFloors` for what
+   * that means and why both halves are needed.
    *
    * Two measurements, in this order because they depend that way round: the
    * widths from a pass with no room on offer at all, then — with those floors
@@ -8695,21 +9090,48 @@ export class WindowNode extends Scrollable(Node) {
    *
    * Nothing about this is per frame: the floors are content, so they survive
    * every frame that did not change any (`_floorsDirty`), which is what keeps
-   * a wheel notch to the one layout pass it always was.
+   * a wheel notch to the one layout pass it always was. And nothing about
+   * it is per node either: every node keeps the extent it was last measured
+   * at, and a measurement re-reads only the nodes whose subtree changed
+   * (`collectFloorStale`), taking the rest at the number they carry. So a
+   * padding change on a container measures the container and nothing
+   * below it, a row that mounts measures itself alone, and a colour change
+   * measures nothing.
+   *
+   * The passes are paid for only where a floor is going to be **written**
+   * from what they find. The width pass runs when a stale node is one on a
+   * row's main axis; and the heights are settled the other way round — the
+   * real layout runs first, `probeHeightFloors` walks the nodes it moved
+   * and asks each leaf whether its height at its new width is the height
+   * it had, and only if one says otherwise (or content changed under a
+   * node a floor is written on) do the two height passes run and the
+   * layout with them. A relayout of a large tree whose labels all still
+   * fit — a panel toggle, a theme switch, a resize that wraps nothing — is
+   * one pass over yoga where it was four.
    */
-  _applyContentFloors(width) {
-    if (!this._floorsDirty && this._floorsWidth === width) return;
-    this._resetContentFloors();
+  _applyContentFloors(width, height) {
+    const found = this._collectFloorStale();
     measuringExactly(() => {
-      const widths = new Map();
-      this._measureContentSpans('width', undefined, widths);
-      writeContentFloors(this, 'width', widths, this._floored);
-      const heights = new Map();
-      this._measureContentSpans('height', width, heights);
-      writeContentFloors(this, 'height', heights, this._floored);
+      if (found.width) this._measureWidthFloors();
+      else this._writeFloors('width');
+      // from the extents on hand; a stale one writes the style's minimum,
+      // which is the floor coming off ahead of its measurement below
+      this._writeFloors('height');
     });
+    let heights = found.height;
+    let probed = false;
+    if (!heights) {
+      this._layoutRoot(width, height);
+      heights = this._probeHeightFloors().owed;
+      probed = true;
+    }
+    if (heights) {
+      measuringExactly(() => this._measureHeightFloors(width, !probed));
+      this._layoutRoot(width, height);
+    }
     this._floorsDirty = false;
     this._floorsContentDirty = false;
+    this._floorsSwept = true;
     this._floorsWidth = width;
   }
 
@@ -8717,16 +9139,17 @@ export class WindowNode extends Scrollable(Node) {
    * Answer a live resize with the floors already in hand, and measure fresh
    * ones once the drag is over.
    *
-   * The floors are half of a relayout on a large tree — three extra layout
+   * The floors were half of a relayout on a large tree — three extra layout
    * passes and their walks, measured at 21 of a 44ms frame on 3,600 nodes
-   * (`npm run bench:presenters -- --scenario=layout`) — and a resize is the
-   * one layout change they cannot follow at input rate: AppKit's resize loop
-   * calls the frame for every pointer move, from inside the event, and the
-   * next move waits for the frame. So a tick of a drag lays the tree out
-   * against the floors the last measurement left, which are exact along the
-   * main axis (a min-content width is content, and the content did not move)
-   * and a frame stale for wrapped text along the other, and the frame after
-   * the release measures once and lays out again — "answer the input, then
+   * (`npm run bench:presenters -- --scenario=layout`) before they were
+   * measured incrementally — and a resize is the one layout change they
+   * cannot follow at input rate: AppKit's resize loop calls the frame for
+   * every pointer move, from inside the event, and the next move waits for
+   * the frame. So a tick of a drag lays the tree out against the floors the
+   * last measurement left, which are exact along the main axis (a
+   * min-content width is content, and the content did not move) and a
+   * frame stale for wrapped text along the other, and the frame after the
+   * release measures once and lays out again — "answer the input, then
    * catch up". Only while the window says it is being resized live
    * (`liveResizing`, the Cocoa window's reading of AppKit's flag; an X
    * window has no such thing and takes the measured path every time), only
@@ -8774,19 +9197,6 @@ export class WindowNode extends Scrollable(Node) {
       this.flush();
     };
     schedule(run);
-  }
-
-  /** Take the measured floors back off, leaving each node with whatever its
-   *  own style says. */
-  _resetContentFloors() {
-    if (!this._floored.size) return;
-    for (const node of this._floored) {
-      if (node.destroyed || !node.yoga) continue;
-      node.yoga.setMinWidth(node.style.minWidth);
-      node.yoga.setMinHeight(node.style.minHeight);
-    }
-    this._floored.clear();
-    this._floorsDirty = true;
   }
 
   /**
@@ -10809,7 +11219,12 @@ export class WindowNode extends Scrollable(Node) {
     // A window that realized after a loop registered has one now
     if (this._loopNodes.size && !this._loopWatch) this._watchLoops();
     this._advanceAnimations(now());
-    if (this.needsLayout) this._refit();
+    if (this.needsLayout) {
+      // before `_refit` lays anything out: a pass clears yoga's record of
+      // which subtrees changed, and the floors are measured from that record
+      this._collectFloorStale();
+      this._refit();
+    }
     const width = this.window.width ?? this._requestedSize?.width ?? 0;
     const height = this.window.height ?? this._requestedSize?.height ?? 0;
     let layoutMoved = false;
@@ -10823,11 +11238,14 @@ export class WindowNode extends Scrollable(Node) {
       // ledger's rect moves with the shift (issue #398).
       this._laidOut = true;
       this._resolveSizeQueries(width, height);
-      if (this._deferContentFloors(width)) this._scheduleFloorsCatchUp();
-      else this._applyContentFloors(width);
-      this.yoga.setWidth(width);
-      this.yoga.setHeight(height);
-      this.yoga.calculateLayout(width, height, this._rootDirection);
+      if (!this._floorsDirty && this._floorsWidth === width) {
+        this._layoutRoot(width, height);
+      } else if (this._deferContentFloors(width)) {
+        this._scheduleFloorsCatchUp();
+        this._layoutRoot(width, height);
+      } else {
+        this._applyContentFloors(width, height);
+      }
       this.abs = { x: 0, y: 0, width, height };
       this._placed = true;
       // the root's rect is written here, not through _assignAbs, so its
