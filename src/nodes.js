@@ -409,7 +409,7 @@ function insetRect(rect, by) {
 }
 
 /** The overlap of two rects, or null when they have none. */
-function intersectRects(a, b) {
+export function intersectRects(a, b) {
   const x = Math.max(a.x, b.x);
   const y = Math.max(a.y, b.y);
   const right = Math.min(a.x + a.width, b.x + b.width);
@@ -552,7 +552,7 @@ function coalesceRects(rects) {
  * neighbours go first and far-apart rects last. That merge can itself overlap a
  * third rect, so the result is coalesced again.
  */
-function addDamageRect(rects, add, cap = MAX_DAMAGE_RECTS) {
+export function addDamageRect(rects, add, cap = MAX_DAMAGE_RECTS) {
   let out = coalesceRects(
     (rects ?? []).concat([
       { x: add.x, y: add.y, width: add.width, height: add.height },
@@ -591,7 +591,7 @@ function addDamageRect(rects, add, cap = MAX_DAMAGE_RECTS) {
  * answers cover every claimed pixel, so this is a cost decision and never a
  * correctness one.
  */
-function damageToPaint(rects) {
+export function damageToPaint(rects) {
   if (rects.length < 2) return rects;
   const box = rectsBounds(rects);
   let sum = 0;

@@ -19,14 +19,19 @@
 //
 // Sibling order is zPosition, assigned from the node's own paintOrder() —
 // no sublayer-list surgery, ever. Dirt arrives on the invalidate channel
-// (`noteInvalidate`): a node means that node, a bare rect means every
-// raster whose ink it touches, null means everything (the same "no bound
+// (`noteInvalidate`): a node means that node, a bare rect means that part
+// of every raster it touches, null means everything (the same "no bound
 // named repaints everything" rule the X11 damage model has), and geometry
 // is re-diffed every frame because comparing four numbers is cheaper than
 // knowing.
 import { cssColorStraight } from 'ntk';
 
-import { Node } from '../nodes.js';
+import {
+  Node,
+  addDamageRect,
+  damageToPaint,
+  intersectRects,
+} from '../nodes.js';
 import { CocoaContext2D } from './context2d.js';
 
 const RASTER_PAD = 2; // antialiasing/italic overhang outside the ink bounds
@@ -284,19 +289,25 @@ function paintSelf(node, ctx) {
   node._paintOutline(ctx);
 }
 
-/** Do two rects share any area? Touching edges do not count. */
-function rectsOverlap(a, b) {
-  return (
-    a.x < b.x + b.width &&
-    b.x < a.x + a.width &&
-    a.y < b.y + b.height &&
-    b.y < a.y + a.height
-  );
-}
-
 // Past this many bare-rect claims in one frame the overlap test costs more
 // than it saves, and the answer is the one a null claim gives: everything.
 const MAX_DIRTY_RECTS = 64;
+
+// The pass list of a raster that repaints in full: one pass, unbounded.
+const FULL_PASS = Object.freeze([null]);
+
+/** A rect grown outward to whole pixels — a pass clears and clips to its
+ * edges, and a fractional edge would antialias the clip into a seam. */
+function wholePixels(rect) {
+  const x = Math.floor(rect.x);
+  const y = Math.floor(rect.y);
+  return {
+    x,
+    y,
+    width: Math.ceil(rect.x + rect.width) - x,
+    height: Math.ceil(rect.y + rect.height) - y,
+  };
+}
 
 const EDGE_PROPS = [
   'borderTopColor',
@@ -461,11 +472,12 @@ export class CocoaLayerPresenter {
       // element's `invalidate(false, rect)` for the box a dragged node
       // moved through, the region `scrollContents` shifts, the strip an
       // animation ticks in — and it cannot name the node it came from
-      // either. The frame re-rasters every raster visual whose ink the
-      // rect touches (the same conservative answer the damage model gives
-      // a rect: whatever draws there repaints); property boxes carry no
-      // raster and re-diff every frame regardless. Copied, because a
-      // caller's rect is very often a live `abs` about to be laid out.
+      // either. The frame repaints that part of every raster visual whose
+      // ink the rect touches (the same conservative answer the damage model
+      // gives a rect: whatever draws there repaints, clipped to it);
+      // property boxes carry no raster and re-diff every frame regardless.
+      // Copied, because a caller's rect is very often a live `abs` about
+      // to be laid out.
       if (this.dirtyRects.length >= MAX_DIRTY_RECTS) {
         this.dirtyAll = true;
       } else {
@@ -492,15 +504,33 @@ export class CocoaLayerPresenter {
     return claims;
   }
 
+  /**
+   * What this frame repaints of the raster covering `rect` for `node`: null
+   * for nothing, `FULL_PASS` for all of it, otherwise the window-space rects
+   * the frame's bare claims cover inside it, shaped exactly as the X11 path
+   * shapes its damage list: whole pixels, disjoint, at most a few of them,
+   * and one box instead of several when the several fill most of it —
+   * because a node painted in two overlapping passes blends translucent ink
+   * over itself, and because each pass is a full replay of the node's paint
+   * that only its own culling makes cheap. A pan's shifted region and the
+   * two strips beside it come out as the one pass they are.
+   */
+  _rasterPasses(node, rect, sizeChanged) {
+    const claims = this._claims;
+    if (sizeChanged || !claims || claims.all || claims.nodes.has(node)) {
+      return FULL_PASS;
+    }
+    let passes = null;
+    for (const claimed of claims.rects) {
+      const hit = intersectRects(wholePixels(claimed), rect);
+      if (hit) passes = addDamageRect(passes, hit);
+    }
+    return passes && damageToPaint(passes);
+  }
+
   /** Does this frame re-raster the visual covering `rect` for `node`? */
   _needsRaster(node, rect) {
-    const claims = this._claims;
-    if (!claims) return true; // outside a frame: nothing is known to be current
-    if (claims.all || claims.nodes.has(node)) return true;
-    for (const claimed of claims.rects) {
-      if (rectsOverlap(claimed, rect)) return true;
-    }
-    return false;
+    return this._rasterPasses(node, rect, false) !== null;
   }
 
   /** The whole frame: one walk, one transaction, property diffs only. */
@@ -858,13 +888,38 @@ export class CocoaLayerPresenter {
       }
       this._dropSvgShapes(visual);
     }
-    if (!sizeChanged && !this._needsRaster(node, rect)) return;
+    const passes = this._rasterPasses(node, rect, sizeChanged);
+    if (!passes) return;
     const ctx = raster.ensure(this, rect.width, rect.height, this.window.scale);
+    // The bitmap is this visual's composition cache, the way the window's
+    // backing store is the surface presenter's: a pass over part of it
+    // clears and clips to that part and leaves the rest as last frame drew
+    // it, and `paintDamage()` names the pass, so an element culls a drag
+    // step or an animation tick exactly as it does on X11 (docs/extending.md,
+    // "Drawing a scene into one node") instead of replaying its whole scene
+    // into a clip that throws almost all of it away. The full pass is the
+    // same loop with nothing to clip.
+    const root = node.root;
     ctx.save();
     try {
-      ctx.clearRect(0, 0, rect.width, rect.height);
       ctx.translate(-rect.x, -rect.y);
-      paintSelf(node, ctx);
+      for (const pass of passes) {
+        const area = pass ?? rect;
+        ctx.save();
+        try {
+          if (pass) {
+            ctx.beginPath();
+            ctx.rect(area.x, area.y, area.width, area.height);
+            ctx.clip();
+          }
+          ctx.clearRect(area.x, area.y, area.width, area.height);
+          if (root) root._paintDamage = pass;
+          paintSelf(node, ctx);
+        } finally {
+          if (root) root._paintDamage = null;
+          ctx.restore();
+        }
+      }
     } finally {
       ctx.restore();
     }

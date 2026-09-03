@@ -1037,11 +1037,18 @@ const PANE_CELL = 28;
 const PANE_GAP = 12;
 const PANE_TINTS = ['#4c6ef5', '#12b886', '#fd7e14', '#be4bdb'];
 
+const rectsTouch = (a, b) =>
+  a.x < b.x + b.width &&
+  b.x < a.x + a.width &&
+  a.y < b.y + b.height &&
+  b.y < a.y + a.height;
+
 function definePane(NodeClass) {
   return class BenchPaneNode extends NodeClass {
     constructor(props, app) {
       super('benchpane', props, app);
       this.offset = 0; // device pixels the scene has moved right
+      this.hot = -1; // the cell a drag is holding, by index
     }
 
     pan(dx) {
@@ -1050,83 +1057,133 @@ function definePane(NodeClass) {
       this.scrollContents(this.contentBox(), dx, 0);
     }
 
+    /** Move the hot cell: the cell it leaves and the cell it lands on are
+     * the two claims — the box a dragged node moved through, and nothing
+     * else about the pane. */
+    poke(tick) {
+      const cells = [...this.cells()];
+      if (!cells.length) return;
+      const from = cells[this.hot];
+      this.hot = (tick * 7) % cells.length;
+      const to = cells[this.hot];
+      for (const c of [from, to]) {
+        if (!c) continue;
+        // the cell plus the edge it draws to the next column, and a pixel
+        // of antialiasing on every side
+        this.invalidate(
+          false,
+          { x: c.x - 1, y: c.y - 1, width: c.pitch + 2, height: c.cell + 2 },
+          'props',
+        );
+      }
+    }
+
+    *cells() {
+      const box = this.contentBox();
+      const s = this.scale;
+      const cell = PANE_CELL * s;
+      const pitch = (PANE_CELL + PANE_GAP) * s;
+      const phase = ((this.offset % pitch) + pitch) % pitch;
+      let row = 0;
+      for (let y = box.y + PANE_GAP * s; y < box.y + box.height; y += pitch) {
+        let col = 0;
+        for (let x = box.x + phase - pitch; x < box.x + box.width; x += pitch) {
+          yield { x, y, width: cell, height: cell, row, col, cell, pitch };
+          col += 1;
+        }
+        row += 1;
+      }
+    }
+
     paint(ctx) {
       super.paint(ctx);
       const box = this.contentBox();
       if (!(box.width > 0 && box.height > 0)) return;
       const damage = this.paintDamage();
       const s = this.scale;
-      const cell = PANE_CELL * s;
-      const pitch = (PANE_CELL + PANE_GAP) * s;
-      const phase = ((this.offset % pitch) + pitch) % pitch;
       ctx.save();
       ctx.beginPath();
       ctx.rect(box.x, box.y, box.width, box.height);
       ctx.clip();
-      let row = 0;
-      for (let y = box.y + PANE_GAP * s; y < box.y + box.height; y += pitch) {
-        let col = 0;
-        for (let x = box.x + phase - pitch; x < box.x + box.width; x += pitch) {
-          const r = { x, y, width: cell, height: cell };
-          col += 1;
-          if (
-            damage &&
-            !(
-              r.x < damage.x + damage.width &&
-              damage.x < r.x + r.width &&
-              r.y < damage.y + damage.height &&
-              damage.y < r.y + r.height
-            )
-          ) {
-            continue;
-          }
-          ctx.fillStyle = PANE_TINTS[(row + col) % PANE_TINTS.length];
-          ctx.fillRect(r.x, r.y, r.width, r.height);
-          ctx.strokeStyle = '#1f2933';
-          ctx.lineWidth = s;
-          ctx.beginPath();
-          ctx.moveTo(r.x + cell, r.y + cell / 2);
-          ctx.lineTo(r.x + pitch, r.y + cell / 2 + cell / 3);
-          ctx.stroke();
+      let index = 0;
+      for (const r of this.cells()) {
+        const hot = index === this.hot;
+        index += 1;
+        // culled against the cell's whole reach: the edge runs to the
+        // next column
+        if (damage && !rectsTouch({ ...r, width: r.pitch }, damage)) {
+          continue;
         }
-        row += 1;
+        ctx.fillStyle = hot
+          ? '#e03131'
+          : PANE_TINTS[(r.row + r.col) % PANE_TINTS.length];
+        ctx.fillRect(r.x, r.y, r.width, r.height);
+        ctx.strokeStyle = '#1f2933';
+        ctx.lineWidth = s;
+        ctx.beginPath();
+        ctx.moveTo(r.x + r.cell, r.y + r.cell / 2);
+        ctx.lineTo(r.x + r.pitch, r.y + r.cell / 2 + r.cell / 3);
+        ctx.stroke();
       }
       ctx.restore();
     }
   };
 }
 
+const paneTree = (title) =>
+  windowOf(
+    [
+      e(
+        'box',
+        { style: { flexGrow: 1, padding: 16, gap: 12 } },
+        e(
+          'text',
+          { style: { color: '#7f8c8d' } },
+          'a label beside the pane — it must not re-raster on a pan',
+        ),
+        e('benchpane', {
+          style: {
+            flexGrow: 1,
+            borderWidth: 1,
+            borderColor: '#c3ccd8',
+            backgroundColor: '#ffffff',
+          },
+        }),
+      ),
+    ],
+    title,
+  );
+
 SCENARIOS.pane = {
   latency: true,
-  tree: () =>
-    windowOf(
-      [
-        e(
-          'box',
-          { style: { flexGrow: 1, padding: 16, gap: 12 } },
-          e(
-            'text',
-            { style: { color: '#7f8c8d' } },
-            'a label beside the pane — it must not re-raster on a pan',
-          ),
-          e('benchpane', {
-            style: {
-              flexGrow: 1,
-              borderWidth: 1,
-              borderColor: '#c3ccd8',
-              backgroundColor: '#ffffff',
-            },
-          }),
-        ),
-      ],
-      'bench pane',
-    ),
+  tree: () => paneTree('bench pane'),
   drive(ctx) {
     const pane = ctx.find((n) => n.kind === 'benchpane');
     if (!pane) return;
     const step = Math.round(2 * (pane.scale || 1));
     ctx.stamp();
     pane.pan(ctx.tick % 120 < 60 ? step : -step); // sweep right, then back
+  },
+};
+
+/**
+ * The drag shape on the same pane: a hot cell moves every tick and the
+ * element claims the cell it left and the cell it landed on — two small
+ * rects, the box a dragged node moved through. The surface presenter
+ * repaints those rects of the window; the layers presenter repaints those
+ * rects of the pane's raster and hands the bitmap back, with
+ * `paintDamage()` letting the element cull, instead of replaying the whole
+ * scene into a clip. Compare `flush` against `pane`, whose claim is the
+ * whole content box.
+ */
+SCENARIOS.drag = {
+  latency: true,
+  tree: () => paneTree('bench drag'),
+  drive(ctx) {
+    const pane = ctx.find((n) => n.kind === 'benchpane');
+    if (!pane) return;
+    ctx.stamp();
+    pane.poke(ctx.tick);
   },
 };
 
