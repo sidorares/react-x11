@@ -129,6 +129,28 @@ export class CocoaPaneWindow {
   // windows need only two because Core Animation latches the front buffer.
   static RING = 3;
 
+  /**
+   * Free the ring now, not when V8 collects the handles — CocoaWindow's
+   * `_releaseBacking`, for three buffers instead of two: a host window
+   * drag resizes the pane a tick at a time, and each tick retires a ring
+   * that the finalizer would have held until a collection happened to run.
+   * The host keeps its own reference to whichever buffer its layer shows,
+   * so the frame on glass survives the free; a present of a retired buffer
+   * still in the channel finds no surface, and the host drops it
+   * (`CocoaPaneHost.present`) — the next present is the full frame on the
+   * new ring anyway. Bridges before 0.4 have no `releaseSurface`; there the
+   * finalizer is still the only owner, and this is the drop it always was.
+   */
+  _releaseRing() {
+    const ring = this._ring;
+    this._ring = null;
+    this._surface = null;
+    if (!ring) return;
+    const release = this._native.releaseSurface;
+    if (typeof release !== 'function') return;
+    for (const s of ring) release.call(this._native, s.handle);
+  }
+
   _ensureSurface() {
     const w = this.width;
     const h = this.height;
@@ -138,6 +160,7 @@ export class CocoaPaneWindow {
       this._surfaceSize?.height !== h
     ) {
       const hadSurface = Boolean(this._ring);
+      this._releaseRing();
       this._ring = [];
       for (let i = 0; i < CocoaPaneWindow.RING; i += 1) {
         const s = this._native.createSurfaceIOSurface(w, h, this.scale, true);
@@ -260,7 +283,6 @@ export class CocoaPaneWindow {
     if (this.destroyed) return;
     this.destroyed = true;
     this.app._unregisterWindow(this);
-    this._ring = null;
-    this._surface = null;
+    this._releaseRing();
   }
 }
