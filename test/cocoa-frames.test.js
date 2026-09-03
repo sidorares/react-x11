@@ -19,11 +19,19 @@
 //     its own;
 //   - an occlusion event holds the frames and the present until the
 //     window is back on glass.
+//
+// And for a pane (the process half of a <Frame>, src/cocoa/panewindow.js
+// and panehost.js):
+//
+//   - a rect that changes the pane's size retires its ring on the spot;
+//   - a present naming a buffer the pane has since retired is dropped by
+//     the host, not thrown — the resize crossed the present in the channel.
 import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
 
 import { CocoaApp } from '../src/cocoa/app.js';
+import { CocoaPaneHost } from '../src/cocoa/panehost.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { createRoot } from '../src/index.js';
 import { setScaleForTests } from '../src/scale.js';
@@ -44,6 +52,7 @@ const h = React.createElement;
  */
 function fakeBridge({ screens } = {}) {
   const calls = [];
+  const released = new Set();
   let seq = 0;
   let backendCb = null;
   const native = {
@@ -120,6 +129,7 @@ function fakeBridge({ screens } = {}) {
     },
     releaseSurface(handle) {
       calls.push(['releaseSurface', handle.id]);
+      released.add(handle.id);
     },
     surfaceSize: (handle) => ({
       width: handle.width,
@@ -127,8 +137,17 @@ function fakeBridge({ screens } = {}) {
       scale: handle.scale,
     }),
     setLayerContentsIOSurface(layer, id) {
+      // IOSurfaceLookup answers only a surface some process still holds:
+      // a released id is the native's throw, verbatim
+      if (released.has(id)) {
+        throw new Error('IOSurfaceLookup: no surface with that id');
+      }
       calls.push(['flip', id]);
     },
+    createLayer: () => ({ layer: ++seq }),
+    addSublayer() {},
+    setLayerProps() {},
+    removeFromSuperlayer() {},
     copySurfaceRegion(src, dst, rects) {
       calls.push(['copy', rects ? rects.length / 4 : 'all']);
     },
@@ -236,7 +255,15 @@ async function mountPane(children, { width = 100, height = 80 } = {}) {
   const flushes = countFlushes(node);
   app._tickFrames();
   const presents = () => sent.filter((m) => m.type === 'pane-present');
-  return { app, wnd, node, flushes, presents, deliver: (m) => onMessage(m) };
+  return {
+    native,
+    app,
+    wnd,
+    node,
+    flushes,
+    presents,
+    deliver: (m) => onMessage(m),
+  };
 }
 
 const box = (style) => h('box', { style });
@@ -725,6 +752,84 @@ test('a pane answers a burst of geometry with one frame, not one per message', a
   deliver({ type: 'pane-rect', width: 140, height: 100 });
   assert.equal(flushes.count, 4);
   assert.equal(presents().length, 3);
+});
+
+test('a rect that changes the pane size retires the ring on the spot, and the last ring with the window', async () => {
+  const { native, app, wnd, presents, deliver } = await mountPane(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  app._presentAll();
+  const made = () => native.of('createSurfaceIOSurface').length;
+  const released = () => native.of('releaseSurface');
+  assert.equal(made(), 3, 'the mount ring');
+  assert.equal(released().length, 0);
+  const before = presents().at(-1).id;
+  // the host window lands on a 1x display: same logical size, half the
+  // pixels — the very rect a monitor move sends
+  deliver({ type: 'pane-rect', width: 100, height: 80, scale: 1 });
+  assert.equal(made(), 6, 'a fresh ring');
+  assert.equal(released().length, 3, 'the old one freed at the rect');
+  assert.deepEqual([wnd.width, wnd.height], [100, 80]);
+  const live = wnd._ring.map((s) => s.handle.id);
+  for (const [, id] of released()) {
+    assert.ok(!live.includes(id), `released a live surface ${id}`);
+  }
+  // …and the frame at the new size, on the new ring, is already presented
+  const after = presents().at(-1);
+  assert.notEqual(after.id, before);
+  assert.ok(live.includes(after.id));
+  assert.deepEqual([after.width, after.height], [100, 80]);
+  // five ticks of a drag: each retires the ring before it
+  for (let i = 1; i <= 5; i += 1) {
+    deliver({ type: 'pane-rect', width: 100 + i * 4, height: 80 + i * 2 });
+  }
+  assert.equal(made(), 21);
+  assert.equal(released().length, 18);
+  wnd.destroy();
+  assert.equal(released().length, 21, 'and the last ring goes with the window');
+  assert.equal(wnd._ring, null);
+  assert.equal(wnd._surface, null);
+});
+
+test('a pane bridge without releaseSurface leaves the retired ring to the finalizer', async () => {
+  const { native, wnd, deliver } = await mountPane(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  delete native.releaseSurface; // the Proxy answers a no-op for it now
+  deliver({ type: 'pane-rect', width: 120, height: 90, scale: 2 });
+  assert.equal(native.of('releaseSurface').length, 0);
+  assert.equal(native.of('createSurfaceIOSurface').length, 6);
+  wnd.destroy();
+});
+
+test('the host drops a present of a buffer the pane has since retired, and shows the next', async () => {
+  // The channel is a queue: the pane presented, the host's pane-rect (a
+  // monitor move during startup — a new scale) crossed it, the pane
+  // rebuilt its ring on the rect and released the old one, and only then
+  // did the host read the present. The id names nothing any more.
+  const { native, app, wnd, presents, deliver } = await mountPane(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  app._presentAll();
+  const host = new CocoaPaneHost(
+    { _native: native },
+    { _layer: { root: 1 }, scale: 2 },
+  );
+  const stale = presents().at(-1);
+  deliver({ type: 'pane-rect', width: 100, height: 80, scale: 1 });
+  const fresh = presents().at(-1);
+  assert.notEqual(fresh.id, stale.id);
+  assert.doesNotThrow(() => host.present(stale.id), 'not the host crash');
+  assert.equal(flips(native), 0, 'and nothing flipped for it');
+  host.present(fresh.id);
+  assert.deepEqual(native.of('flip').at(-1), ['flip', fresh.id]);
+  // any other failure of the flip is still the bug it says it is
+  native.setLayerContentsIOSurface = () => {
+    throw new TypeError('not a layer');
+  };
+  assert.throws(() => host.present(fresh.id), /not a layer/);
+  host.destroy();
+  wnd.destroy();
 });
 
 // --- the wheel ----------------------------------------------------------------------

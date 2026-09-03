@@ -36,10 +36,28 @@ export class CocoaPaneHost {
     });
   }
 
-  /** A pane-present landed: scan out of the named shared surface. */
+  /**
+   * A pane-present landed: scan out of the named shared surface.
+   *
+   * A present names a buffer the pane may since have retired. The channel
+   * is a queue and nothing acknowledges a present, so a pane-rect that
+   * changes the pane's size (or its scale — the host window moved to another
+   * display during startup, which is how this was first hit) can cross a
+   * present already in flight: the pane rebuilds its ring on that rect and
+   * releases the old one (`CocoaPaneWindow._ensureSurface`), and by the
+   * time the host looks the id up the surface is gone. That present is
+   * stale by construction — the pane's full frame on the fresh ring is
+   * queued behind it — so it is dropped, and the layer keeps the frame it
+   * already holds a reference to. Nothing else here throws; any other
+   * error is the bug it says it is.
+   */
   present(iosurfaceId) {
     if (this.destroyed) return;
-    this._native.setLayerContentsIOSurface(this.layer, iosurfaceId);
+    try {
+      this._native.setLayerContentsIOSurface(this.layer, iosurfaceId);
+    } catch (err) {
+      if (!/IOSurfaceLookup/.test(err?.message ?? '')) throw err;
+    }
   }
 
   destroy() {
