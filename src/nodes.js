@@ -250,6 +250,10 @@ const NO_DAMAGE = Symbol('no-damage');
 // against it.
 const DAMAGE_SLOP = 1;
 
+/** Stale bounds are undebuggable, and every other cache here has an escape
+ * hatch — see NO_SCROLL_BLIT and the paint cache's DISABLED. */
+const NO_BOUNDS_CACHE = process.env.REACT_X11_NO_BOUNDS_CACHE === '1';
+
 // While a bounded frame's layout pass runs, every node whose absolute rect
 // comes out different reports its old and new rects here (each already
 // inflated by that node's own paint reach) — which is what lets a layout
@@ -548,13 +552,13 @@ function coalesceRects(rects) {
  * neighbours go first and far-apart rects last. That merge can itself overlap a
  * third rect, so the result is coalesced again.
  */
-function addDamageRect(rects, add) {
+function addDamageRect(rects, add, cap = MAX_DAMAGE_RECTS) {
   let out = coalesceRects(
     (rects ?? []).concat([
       { x: add.x, y: add.y, width: add.width, height: add.height },
     ]),
   );
-  while (out.length > MAX_DAMAGE_RECTS) {
+  while (out.length > cap) {
     let bestI = 0;
     let bestJ = 1;
     let bestWaste = Infinity;
@@ -1762,6 +1766,10 @@ export class Node {
     this.style = this._anim?.size
       ? { ...target, ...this._animatedValues() }
       : target;
+    // The paint reach reads the style now in force — a shadow's spread, an
+    // outline's width — so it is dropped on every swap, here, before the
+    // old-extent claims below measure the new reach against the old one.
+    this._clearPaintBounds();
     // `hitSlop` feeds the cached hit reach and `overflow` decides where its
     // invalidation walks stop, so a swap that changes either clears here —
     // the one funnel every style path goes through. Animation ticks never
@@ -2014,6 +2022,9 @@ export class Node {
   setStyleState(name, on) {
     if (this.states[name] === on) return;
     this.states[name] = on;
+    // the focus ring's reach is read off `:focus-visible` whether or not
+    // the node has a state block of its own (`_outlineExtent`)
+    this._clearPaintBounds();
     if (!this._stateful || this.destroyed) return;
     const next = scaleResolvedStyle(
       resolveComputedStyle(resolveStyleStates(this._baseStyle, this.states)),
@@ -3249,6 +3260,9 @@ export class Node {
    * invalid, whose own clear walked the rest of the way up.
    */
   _clearHitBounds() {
+    // what moves a hit reach moves the paint reach — first, because the
+    // walk below returns from wherever it finds an ancestor already clear
+    this._clearPaintBounds();
     this._hitBoundsCache = null;
     for (let n = this.parent; n; n = n.parent) {
       if (n.clipsChildren() || n._hitBoundsCache === null) return;
@@ -3392,6 +3406,13 @@ export class Node {
     const abs = this.abs;
     abs.x += dx;
     abs.y += dy;
+    // the paint reach rides along the same way — unless it *is* `abs`,
+    // which just moved
+    const p = this._paintBoundsCache;
+    if (p && p !== abs) {
+      p.x += dx;
+      p.y += dy;
+    }
     const b = this._hitBoundsCache;
     if (b) {
       b.left += dx;
@@ -3449,6 +3470,10 @@ export class Node {
     // a layout change may grow what an enclosing scroll pane has to scroll,
     // through a route yoga never sees (issue #405)
     if (layoutChanged) this._markScrollMeasureDirty();
+    // a node that says its appearance changed may have changed how far it
+    // reaches — a shadow, an outline, a scene element's ink — so its cached
+    // paint reach goes with the claim
+    if (damage === this || damage === null) this._clearPaintBounds();
     this.root?.invalidate(layoutChanged, damage, reason);
   }
 
@@ -3682,14 +3707,42 @@ export class Node {
    * almost nothing.
    */
   _subtreeBounds() {
+    // Cached like the hit reach (`_hitBounds`), and for the same reason: a
+    // bounded frame asks every subtree on the way to its rect whether it
+    // reaches in, and answering by walking the subtree made a one-cell
+    // repaint cost the whole tree — a millisecond at four thousand nodes,
+    // five at fourteen thousand, every frame. The cache is dropped up the
+    // chain by whatever changes a reach: a rect assigned by layout, a
+    // child list mutation (`_clearHitBounds`), and every change a node
+    // announces about itself (`invalidate`, `setStyleState`) — so a stale
+    // answer would need a change nobody announced, which is already a
+    // repaint bug.
+    const cached = this._paintBoundsCache;
+    if (cached && !NO_BOUNDS_CACHE) return cached;
     let bounds = this._ownPaintBounds();
-    if (this.clipsChildren()) return bounds;
-    for (const child of this.children) {
-      if (child.isWindow || !child.yoga || child.hidden) continue;
-      if (child.style?.display === 'none') continue;
-      bounds = unionRect(bounds, child._subtreeBounds());
+    if (!this.clipsChildren()) {
+      for (const child of this.children) {
+        if (child.isWindow || !child.yoga || child.hidden) continue;
+        if (child.style?.display === 'none') continue;
+        bounds = unionRect(bounds, child._subtreeBounds());
+      }
     }
+    this._paintBoundsCache = bounds;
     return bounds;
+  }
+
+  /**
+   * This node's paint reach changed: drop the cached union here and up the
+   * chain, stopping where `_clearHitBounds` stops and for the same reasons
+   * — a clipping ancestor's reach is its own rect, and an ancestor already
+   * cleared has cleared the rest of the way up.
+   */
+  _clearPaintBounds() {
+    this._paintBoundsCache = null;
+    for (let n = this.parent; n; n = n.parent) {
+      if (n.clipsChildren() || n._paintBoundsCache === null) return;
+      n._paintBoundsCache = null;
+    }
   }
 
   /**
@@ -8515,6 +8568,10 @@ export class WindowNode extends Scrollable(Node) {
     this._floored = new Set();
     this._floorsDirty = true;
     this._floorsWidth = null;
+    // whether the tree's CONTENT moved since the floors were measured — a
+    // resize alone does not, which is what lets a live resize defer them
+    this._floorsContentDirty = true;
+    this._floorsCatchUp = false;
   }
 
   /**
@@ -8640,7 +8697,71 @@ export class WindowNode extends Scrollable(Node) {
       writeContentFloors(this, 'height', heights, this._floored);
     });
     this._floorsDirty = false;
+    this._floorsContentDirty = false;
     this._floorsWidth = width;
+  }
+
+  /**
+   * Answer a live resize with the floors already in hand, and measure fresh
+   * ones once the drag is over.
+   *
+   * The floors are half of a relayout on a large tree — three extra layout
+   * passes and their walks, measured at 21 of a 44ms frame on 3,600 nodes
+   * (`npm run bench:presenters -- --scenario=layout`) — and a resize is the
+   * one layout change they cannot follow at input rate: AppKit's resize loop
+   * calls the frame for every pointer move, from inside the event, and the
+   * next move waits for the frame. So a tick of a drag lays the tree out
+   * against the floors the last measurement left, which are exact along the
+   * main axis (a min-content width is content, and the content did not move)
+   * and a frame stale for wrapped text along the other, and the frame after
+   * the release measures once and lays out again — "answer the input, then
+   * catch up". Only while the window says it is being resized live
+   * (`liveResizing`, the Cocoa window's reading of AppKit's flag; an X
+   * window has no such thing and takes the measured path every time), only
+   * when the floors exist to reuse, and never over a content change the
+   * floors have not seen — a row that mounted mid-drag has no floor at all,
+   * and no floor is the collapse #249 exists to prevent.
+   */
+  _deferContentFloors(width) {
+    // nothing to measure: `_applyContentFloors` returns at once, and a
+    // catch-up frame would owe nothing
+    if (!this._floorsDirty && this._floorsWidth === width) return false;
+    return (
+      this.window?.liveResizing === true &&
+      this._floorsWidth != null &&
+      !this._floorsContentDirty
+    );
+  }
+
+  /**
+   * The frame a deferred measurement owes: a full relayout with fresh
+   * floors, run on the first frame tick after the live resize ends. One at
+   * a time — a drag is many ticks, and the catch-up waits for the last of
+   * them rather than following each.
+   */
+  _scheduleFloorsCatchUp() {
+    if (this._floorsCatchUp) return;
+    this._floorsCatchUp = true;
+    const schedule =
+      typeof this.window?.requestAnimationFrame === 'function'
+        ? (cb) => this.window.requestAnimationFrame(cb)
+        : (cb) => setImmediate(cb);
+    const run = () => {
+      if (this.destroyed || !this.window) {
+        this._floorsCatchUp = false;
+        return;
+      }
+      // still dragging (a pump tick inside a pause of the drag): wait on
+      if (this.window.liveResizing) {
+        schedule(run);
+        return;
+      }
+      this._floorsCatchUp = false;
+      this._floorsDirty = true;
+      this.invalidate(true, null, 'resize');
+      this.flush();
+    };
+    schedule(run);
   }
 
   /** Take the measured floors back off, leaving each node with whatever its
@@ -10536,6 +10657,9 @@ export class WindowNode extends Scrollable(Node) {
       // offset applied during `absolutize` and leaves every yoga node exactly
       // as it was, at input rate, on the biggest trees in any app.
       if (reason !== 'scroll') this._floorsDirty = true;
+      if (reason !== 'scroll' && reason !== 'resize') {
+        this._floorsContentDirty = true;
+      }
     }
     // A layout change with no bound named repaints everything, because a
     // reflow can move any node and one that moved leaves stale pixels at a
@@ -10627,7 +10751,7 @@ export class WindowNode extends Scrollable(Node) {
       // as a list of rects rather than one box around them all, so two changes
       // at opposite corners of the window no longer repaint everything
       // between them.
-      this._damage = addDamageRect(this._damage, bounds);
+      this._damage = addDamageRect(this._damage, bounds, this._damageRectCap());
     }
     this.needsPaint = true;
     // Recorded before the `_scheduled` gate, not inside it: the debt is
@@ -10687,7 +10811,8 @@ export class WindowNode extends Scrollable(Node) {
       // ledger's rect moves with the shift (issue #398).
       this._laidOut = true;
       this._resolveSizeQueries(width, height);
-      this._applyContentFloors(width);
+      if (this._deferContentFloors(width)) this._scheduleFloorsCatchUp();
+      else this._applyContentFloors(width);
       this.yoga.setWidth(width);
       this.yoga.setHeight(height);
       this.yoga.calculateLayout(width, height, this._rootDirection);
@@ -10696,15 +10821,17 @@ export class WindowNode extends Scrollable(Node) {
       // the root's rect is written here, not through _assignAbs, so its
       // cached hit reach is dropped here too (children bubble their own)
       this._hitBoundsCache = null;
+      this._paintBoundsCache = null;
       // A bounded frame watches the walk: whatever this pass actually moved
       // claims its old and new rects through the sink, and the frame stays
       // a few rects instead of the whole window. An unbounded frame skips
       // the bookkeeping — it repaints everything anyway.
       if (this._damage !== FULL_DAMAGE) {
+        const cap = this._damageRectCap();
         layoutDiffSink = (rect) => {
           if (this._damage === FULL_DAMAGE) return;
           layoutMoved = true;
-          this._damage = addDamageRect(this._damage, rect);
+          this._damage = addDamageRect(this._damage, rect, cap);
         };
       }
       try {
@@ -10736,7 +10863,11 @@ export class WindowNode extends Scrollable(Node) {
         if (sv && !sv._recordBlitClaim(after)) {
           sv._pendingBlitFrom = BLIT_POISONED;
         }
-        this._damage = addDamageRect(this._damage, after);
+        this._damage = addDamageRect(
+          this._damage,
+          after,
+          this._damageRectCap(),
+        );
       }
       this._reflowed.clear();
     } else if (this._reflowed.size) {
@@ -11458,6 +11589,19 @@ export class WindowNode extends Scrollable(Node) {
    * has to clear the flag, so it degrades to a full repaint rather than
    * painting nothing.
    */
+  /**
+   * How many rects a frame's damage may hold before `addDamageRect` merges
+   * the closest pair. Four on X11 (`MAX_DAMAGE_RECTS`), where every pass
+   * costs the server a clip mask; a backend whose pass is a client-side
+   * clip and a culled walk says so on its window (`damageRectCap`) and
+   * keeps more of them — a clock, a graph and a status row ticking in one
+   * frame stay three small rects instead of the box around all three.
+   */
+  _damageRectCap() {
+    const cap = this.window?.damageRectCap;
+    return Number.isInteger(cap) && cap > 0 ? cap : MAX_DAMAGE_RECTS;
+  }
+
   _takeDamage(width, height) {
     const damage = this._damage;
     this._damage = null;

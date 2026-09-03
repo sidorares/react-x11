@@ -29,7 +29,14 @@ import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
 
+// The frame interval: how often a scheduled frame may paint, in ms. 16 is a
+// 60Hz display's period. `createRoot({ cocoa: { frameInterval } })` sets it
+// — 8 on a 120Hz panel paints every refresh — and the honest default is the
+// display's own period, which the bridge does not report yet
+// (NSScreen.maximumFramesPerSecond); until it does, 60Hz is the floor every
+// Mac clears rather than a ceiling half of them hit.
 const RAF_INTERVAL_MS = 16;
+const PUMP_INTERVAL_MS = 8;
 
 export class CocoaApp {
   constructor(native, options = {}) {
@@ -37,8 +44,11 @@ export class CocoaApp {
     this.options = options;
     this._windows = new Map(); // windowNumber -> CocoaWindow
     this._grabWindow = null;
-    this._rafQueue = [];
+    this._rafQueue = []; // [{ cb, wnd }]
     this._rafLast = 0;
+    this._frameInterval = options.cocoa?.frameInterval ?? RAF_INTERVAL_MS;
+    this._pumpInterval = PUMP_INTERVAL_MS;
+    this._geometryFlushQueued = false;
     this._shadowStale = new Set();
     this._pump = null;
     this._closed = false;
@@ -277,8 +287,9 @@ export class CocoaApp {
 
   // --- the pump ------------------------------------------------------------
 
-  start({ pumpInterval = 8 } = {}) {
+  start({ pumpInterval = PUMP_INTERVAL_MS } = {}) {
     if (this._pump) return;
+    this._pumpInterval = pumpInterval;
     const native = this._native;
     // A pane process has no NSApplication to pump — no windows, no events,
     // no dock presence. Its loop is frames and presents only.
@@ -292,6 +303,7 @@ export class CocoaApp {
     native.initApp();
     native.setBackendEventCallback((ev) => this._route(ev));
     this._pump = setInterval(() => {
+      this._endLiveResizes();
       native.pump2(); // flushes the previous tick's CATransaction
       if (this._shadowStale.size) {
         for (const wnd of this._shadowStale) {
@@ -304,21 +316,48 @@ export class CocoaApp {
     }, pumpInterval);
   }
 
-  _requestFrame(cb) {
-    this._rafQueue.push(cb);
+  /**
+   * A pump tick means no modal loop owns the thread, so no window is being
+   * resized live right now: the flag the delegate set on the last tick of a
+   * drag comes off here, ahead of the frames that tick, and the catch-up
+   * frame a deferred layout owes (nodes.js) runs on this very tick.
+   */
+  _endLiveResizes() {
+    for (const wnd of this._windows.values()) wnd.liveResizing = false;
+  }
+
+  _requestFrame(cb, wnd = null) {
+    this._rafQueue.push({ cb, wnd });
     return this._rafQueue.length;
   }
 
   _tickFrames() {
     if (!this._rafQueue.length) return;
-    const now = Date.now();
-    if (now - this._rafLast < RAF_INTERVAL_MS) return;
+    const now = performance.now();
+    // The gate is the interval less half a pump, so a frame lands on the
+    // first pump tick at or after the interval. Gated at exactly one
+    // interval, timer drift put every other frame a tick late — 16ms frames
+    // arriving as 16, 24, 16, 24 — which a 60Hz display shows as a 50fps
+    // stutter, and which the presenter bench measured as 52fps against a
+    // 62.5Hz driver.
+    if (now - this._rafLast < this._frameInterval - this._pumpInterval / 2) {
+      return;
+    }
     this._rafLast = now;
     const queue = this._rafQueue;
     this._rafQueue = [];
-    for (const cb of queue) {
+    for (const entry of queue) {
+      // A window nobody can see owes no frame: its callback waits here until
+      // it is back on glass, and the damage it answers accumulates on the
+      // node — one catch-up frame then, instead of a full paint per tick
+      // into a backing store no one reads. `_visible` is the window's own
+      // rule (mapped, not ordered out, not miniaturized).
+      if (entry.wnd && !entry.wnd._visible()) {
+        this._rafQueue.push(entry);
+        continue;
+      }
       try {
-        cb(now);
+        entry.cb(now);
       } catch (err) {
         queueMicrotask(() => {
           throw err;
@@ -459,6 +498,13 @@ export class CocoaApp {
       smooth: Boolean(ev.precise),
       source: ev.precise ? 'valuator' : 'button',
     });
+    // Painted now, like a press. On X11 the wheel is paced on the frame
+    // clock because ntk coalesces a touchpad's dozens of reports per frame
+    // into one event; AppKit already delivers scroll events at the
+    // display's rate, so answering each one is answering once per refresh
+    // — and answering it on the next frame tick instead was a 15ms median
+    // between the notch and the scroll, most of a refresh period of nothing.
+    this._afterInput();
   }
 
   _routeKey(ev) {
@@ -499,9 +545,18 @@ export class CocoaApp {
     // handler returns, and the pump that would paint it is the thing the
     // modal loop stalled. A second flush queued BEHIND that commit is what
     // lets an open menu resize with the drag instead of on release.
-    queueMicrotask(() => {
-      if (!this._closed) this._afterInput();
-    });
+    //
+    // One, not one per event: inside the modal loop no microtask runs until
+    // the drag ends, so a drag's every tick queued another — and they all
+    // ran on the release, each finding the frame the previous one had just
+    // paid. Coalesced, the release owes at most one flush.
+    if (!this._geometryFlushQueued) {
+      this._geometryFlushQueued = true;
+      queueMicrotask(() => {
+        this._geometryFlushQueued = false;
+        if (!this._closed) this._afterInput();
+      });
+    }
   }
 
   _routeClose(ev) {

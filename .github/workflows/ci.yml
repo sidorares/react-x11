@@ -65,6 +65,32 @@ jobs:
       # No retry here — a hash is exact, so a second run cannot disagree.
       - run: npm run bench:pixels -- --check
 
+  # The Cocoa frame-clock gate, run only when a change can reach it. The
+  # touched runner reads the PR's diff against its base and owes the
+  # presenters bench for hot-path files alone — the paint walk and damage
+  # model, the layout floors, the event dispatch, src/cocoa, the benches and
+  # the dependency manifest — so a docs PR spends nothing here and a
+  # nodes.js PR spends two minutes. What it judges is structural
+  # (scripts/bench/presenters-gate.json): full-window frames, the share of
+  # the window one cell repaints, frames per resize tick, frames painted for
+  # a window nobody can see. Never milliseconds — a shared runner's timings
+  # say nothing, and the table it prints is for the human reading the log.
+  # A push to master runs every scenario, for the trend.
+  bench-cocoa:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # the diff against the PR base is what decides whether to run
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run bench:touched -- --benches=presenters --ci ${{ github.event_name == 'push' && '--all' || format('--base={0}', github.event.pull_request.base.sha) }}
+
   lint:
     runs-on: ubuntu-latest
     steps:

@@ -75,6 +75,15 @@ export class CocoaWindow {
     this._refreshOrigin();
     if (attributes.sizeHints) this.setSizeHints(attributes.sizeHints);
 
+    // How many damage rects a frame may keep before merging them (nodes.js,
+    // MAX_DAMAGE_RECTS is the X11 answer). A pass here costs one CoreGraphics
+    // clip and a culled walk, where an X pass costs the server a clip mask,
+    // so a frame in which a clock, a graph and a status row all ticked keeps
+    // the three small rects instead of the box around them — which on a
+    // large tree was most of the window, painted for three cells' worth of
+    // change.
+    this.damageRectCap = 16;
+
     // The retained layer presenter (docs/macos.md Tier L), behind
     // REACT_X11_COCOA_PRESENTER=layers while the surface path is the
     // measured default. Its two hooks exist only in this mode, so the
@@ -123,6 +132,12 @@ export class CocoaWindow {
     this.x = Math.round(points.x * s);
     this.y = Math.round(points.y * s);
     this._screenOrigin = { x: this.x, y: this.y };
+    // AppKit's inLiveResize, as the delegate reported it: the renderer
+    // answers a live tick with the layout floors it has and measures fresh
+    // ones after the drag (nodes.js, `_deferContentFloors`). Cleared by
+    // the pump (`_endLiveResizes`), because the pump cannot run while the
+    // resize loop owns the thread — a tick of it is the drag being over.
+    if (points.live === true) this.liveResizing = true;
   }
 
   resize(width, height) {
@@ -258,16 +273,17 @@ export class CocoaWindow {
       this._surfaceSize = { width: w, height: h };
       this._surfaceGen++;
       this._flushDamage = 'full';
-      // A replaced backing surface holds nothing: whatever bounded damage
-      // this frame carries, everything else on it would be garbage. Ask for
-      // the full frame — one extra repaint per real resize, correctness for
-      // every pixel outside the damage rect.
-      if (hadSurface) {
-        queueMicrotask(() => {
-          const node = this._reactX11Node;
-          if (node && !node.destroyed) node.invalidate(true, null, 'resize');
-        });
-      }
+      // A replaced backing surface holds nothing but what the flush now
+      // painting puts on it. Whether that is enough is decided when the
+      // flush reports its rects (`noteFrameDamage`) — not here, and not by
+      // queueing a full frame behind this one. That used to be the answer,
+      // and it made every tick of a live resize two full frames: the resize
+      // event's own unbounded repaint, then this one, painting the same
+      // pixels again. Worse, inside AppKit's resize loop no microtask runs
+      // until the drag ends, so a drag of forty ticks queued forty full
+      // frames that all ran on the mouse release — the freeze after a
+      // resize, measured at seconds on a large tree.
+      if (hadSurface) this._freshSurface = true;
     }
     return this._surface;
   }
@@ -279,12 +295,44 @@ export class CocoaWindow {
    */
   noteFrameDamage(rects) {
     if (this._presenter) return;
+    if (this._freshSurface) {
+      this._freshSurface = false;
+      // A full flush painted every pixel of the new surface, and a resize
+      // event's flush is one (nodes.js, the 'resize' listener). A bounded
+      // one left garbage outside its rects: hold the present until the full
+      // frame asked for here lands, so the garbage is never on glass.
+      if (rects) {
+        this._holdPresent = true;
+        const node = this._reactX11Node;
+        if (node && !node.destroyed) node.invalidate(false, null, 'resize');
+      } else {
+        this._holdPresent = false;
+      }
+    } else if (!rects) {
+      this._holdPresent = false;
+    }
     if (this._flushDamage === 'full') return;
     if (!rects) {
       this._flushDamage = 'full';
       return;
     }
     (this._flushDamage ??= []).push(...rects);
+  }
+
+  /**
+   * Whether anyone can see this window: mapped by the renderer, and not
+   * ordered out or miniaturized by the user. A window that fails this owes
+   * no frames — its callbacks wait in the app's queue (`_tickFrames`) and
+   * its last paint stays unpresented until it is back on glass, where one
+   * catch-up frame covers everything that changed in between.
+   *
+   * Occlusion by another application's window is not read here yet: AppKit
+   * reports it through `windowDidChangeOcclusionState`, which the bridge
+   * does not forward. When it does, this is the one place to add it.
+   */
+  _visible() {
+    if (this.destroyed || !this.mapped) return false;
+    return this._native.windowIsVisible(this._h) !== false;
   }
 
   getContext() {
@@ -345,13 +393,16 @@ export class CocoaWindow {
   }
 
   requestAnimationFrame(cb) {
-    return this.app._requestFrame(cb);
+    return this.app._requestFrame(cb, this);
   }
 
   /** Push the backing surface at the WindowServer, if anything drew. */
   present() {
     if (this._presenter) return; // layers upload as they sync
     if (!this._dirty || !this._surface || this.destroyed) return;
+    // …and if anyone would see it. `_dirty` stays set, so the pump asks
+    // again next tick and the frame goes out the moment the window is back.
+    if (this._holdPresent || !this._visible()) return;
     this._dirty = false;
     if (this._chain) {
       const shown = this._chain.back;

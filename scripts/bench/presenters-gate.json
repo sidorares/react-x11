@@ -1,0 +1,32 @@
+{
+  "//": [
+    "The cocoa frame-clock gate: what a frame must and must not do, judged on",
+    "the surface presenter by `npm run bench:presenters -- --check`. Counts",
+    "and shares of the window, never milliseconds — a timing on a shared",
+    "runner says nothing, a full-window repaint for one cell says everything.",
+    "maxDamageShare is the repainted area per painting frame as a fraction of",
+    "the window in device pixels, so it reads the same at 1x and 2x. A rule",
+    "that has to loosen is a decision to record in the PR that loosens it."
+  ],
+  "rules": {
+    "color": { "maxFullPct": 0, "maxDamageShare": 0.03, "minFrames": 30 },
+    "tree": { "maxFullPct": 0, "maxDamageShare": 0.005, "minFrames": 30 },
+    "leaf": { "maxFullPct": 0, "maxDamageShare": 0.005, "minFrames": 30 },
+    "multi": { "maxFullPct": 0, "maxDamageShare": 0.15, "minFrames": 30 },
+    "press": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.01,
+      "minFrames": 30,
+      "minInputs": 20
+    },
+    "scroll": { "maxFullPct": 0, "maxDamageShare": 0.35, "minFrames": 30 },
+    "anim": { "maxFullPct": 0, "minFrames": 30 },
+    "resize": {
+      "maxFlushesPerResize": 1.05,
+      "maxSettleFlushes": 1,
+      "maxSurfacesPerResize": 2
+    },
+    "occluded": { "maxFrames": 0 },
+    "idle": { "maxFrames": 0 }
+  }
+}
