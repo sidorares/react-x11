@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.6.0](https://github.com/sidorares/react-x11/compare/v2.5.0...v2.6.0) (2026-09-03)
+
+
+### Features
+
+* a `scale` prop zooms a subtree, CSS zoom semantics ([#449](https://github.com/sidorares/react-x11/issues/449)) ([#452](https://github.com/sidorares/react-x11/issues/452)) ([ecbb2e0](https://github.com/sidorares/react-x11/commit/ecbb2e08bf06b54acb8f922489013fe8e7ad7524))
+
+
+### Bug Fixes
+
+* **cocoa:** a pane present that names a retired buffer is dropped, not a crash ([#447](https://github.com/sidorares/react-x11/issues/447)) ([cd3f6ef](https://github.com/sidorares/react-x11/commit/cd3f6ef3062b4d746053af89ae2d0780aa051546))
+* **cocoa:** a pane's frame gate folds a burst of geometry into one frame ([#446](https://github.com/sidorares/react-x11/issues/446)) ([b9d81a5](https://github.com/sidorares/react-x11/commit/b9d81a505cec14a562056ff72362987c4b98d7f4))
+* **cocoa:** the layer presenter replays an element's paint override and re-rasters on bare-rect claims ([#448](https://github.com/sidorares/react-x11/issues/448)) ([b7fd7c8](https://github.com/sidorares/react-x11/commit/b7fd7c8d7f7de94022f82e9d49a713df6746f606))
+
+
+### Performance Improvements
+
+* **cocoa:** a bare-rect claim repaints only that part of a raster, and the element sees the pass ([#451](https://github.com/sidorares/react-x11/issues/451)) ([43e6796](https://github.com/sidorares/react-x11/commit/43e6796ce053280d1d86a65236a376b29c8f763e))
+* **cocoa:** incremental content floors, a strip for tiny text, a frame timer between pump ticks ([#450](https://github.com/sidorares/react-x11/issues/450)) ([3093508](https://github.com/sidorares/react-x11/commit/3093508f41feeda91e47faabdc9d9c7c0cc322e6)), closes [#445](https://github.com/sidorares/react-x11/issues/445)
+* **cocoa:** release on the flip, the display's frame rate, occlusion, the paint cache ([#444](https://github.com/sidorares/react-x11/issues/444)) ([60cb080](https://github.com/sidorares/react-x11/commit/60cb080ede93b934d992a18fb85edeb71a1b890f)), closes [#442](https://github.com/sidorares/react-x11/issues/442)
+* **cocoa:** the frame clock, the resize loop and the large tree ([#441](https://github.com/sidorares/react-x11/issues/441)) ([b28023b](https://github.com/sidorares/react-x11/commit/b28023b4c5d447526723b840e754befe3d206f6b))
+
 ## [2.5.0](https://github.com/sidorares/react-x11/compare/v2.4.0...v2.5.0) (2026-09-03)
 
 
