@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.5.0](https://github.com/sidorares/react-x11/compare/v2.4.0...v2.5.0) (2026-09-03)
+
+
+### Features
+
+* **cocoa:** an offscreen Surface through react-x11/ntk ([#439](https://github.com/sidorares/react-x11/issues/439)) ([86fdcbe](https://github.com/sidorares/react-x11/commit/86fdcbeb257b61c5ae4fd5a5ae0c7316412dbbee))
+
 ## [2.4.0](https://github.com/sidorares/react-x11/compare/v2.3.1...v2.4.0) (2026-09-02)
 
 
