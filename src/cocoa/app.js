@@ -24,13 +24,14 @@ import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPaneWindow } from './panewindow.js';
 import { CocoaFontManager } from './fonts.js';
+import { CocoaSurface } from './surface.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
 
 const RAF_INTERVAL_MS = 16;
 
-class CocoaApp {
+export class CocoaApp {
   constructor(native, options = {}) {
     this._native = native;
     this.options = options;
@@ -187,6 +188,17 @@ class CocoaApp {
    */
   createPaneHost(wnd) {
     return new CocoaPaneHost(this, wnd);
+  }
+
+  /**
+   * The offscreen-surface seam `react-x11/ntk`'s `Surface` dispatches on:
+   * ntk's `Surface` contract over a CG bitmap (src/cocoa/surface.js). Its
+   * presence is what makes `new Surface(app, { width, height })` answer a
+   * surface here rather than ntk's pixmap, which needs an X connection — a
+   * backend without the method gets ntk's, so an X app is never asked.
+   */
+  createSurface(options) {
+    return new CocoaSurface(this, options);
   }
 
   /**

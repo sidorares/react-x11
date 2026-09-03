@@ -763,12 +763,25 @@ node's own damage claims, `contentsScale` from the window.
   `Context2D` dialect the consumers exercise — including `fillRects`,
   `drawGlyphs`, `positioned`, `layoutSubtree`, `vw/vh/em` — is part of
   the ctx contract on both backends.
-- `ntk.Surface` offscreen allocation (charts, terminal): the Cocoa app
-  object supplies a `Surface`-compatible bitmap surface (CG bitmap
-  context + drawImage back into a node ctx). The `react-x11/ntk`
-  subpath on this backend serves the _drawing-adjacent_ names
-  (`Surface`, `cssColorStraight`, `decodeImage`, `Image`) from
-  backend-neutral implementations; the X-only names stay X-only.
+- `ntk.Surface` offscreen allocation (charts, terminal, flow): the Cocoa
+  app object supplies one. `app.createSurface(options)` answers ntk's
+  `Surface` contract over a CG bitmap (`src/cocoa/surface.js`, issue
+  #433), and `react-x11/ntk`'s `Surface` asks the app it is handed before
+  falling through to ntk's pixmap, so a component allocates its buffer
+  the same way on both backends. `getContext('2d')` is the CG context,
+  `copyWithin` is one in-place copy of the surviving band (the bridge's
+  `scrollSurface`, ntk#252's exact contract, clamp for clamp), and
+  `ctx.drawImage(surface, …)` is one `CGContextDrawImage`. Sized in
+  device pixels like the window's backing store. Two things differ from
+  ntk and are stated where they live: a bitmap has one graphics state,
+  so a surface has one context for its life (`destroy()` on it is a
+  no-op) and `render()` brackets its callback in save/restore from the
+  identity; and `format: 'a8'` throws — the coverage surfaces the paint
+  cache and the shadows use stay on their X path until a consumer needs
+  them here. The subpath's other drawing-adjacent names
+  (`cssColorStraight`, `decodeImage`, `Image`) are pure JS already;
+  `Image` as a `drawImage` source is not wired on this backend yet, and
+  the X-only names stay X-only.
 - `<svg>`: the declarative vocabulary (`SvgChildNode`) is portable; the
   rasterizer behind it renders through the same CG ctx.
 - A future, deliberate seam — not built until a consumer needs it:
@@ -904,12 +917,19 @@ completion callback 🆕); explicit animations ✅ (+ removal ✅,
 `animationDidStop` callback 🆕).
 
 **Drawing (raster fallback).** A CG bitmap surface object: create at
-size×scale, obtain a canvas2d-compatible context (native-side
-implementation of the ctx verbs the dialect needs — CG covers the
-standard set; `fillRects` → `CGContextFillRects`; `drawGlyphs` →
-`CTFontDrawGlyphs`), read pixels, hand to a layer as contents without a
-copy where possible 🆕. (Alternative: rasterize JS-side and use the
-raw-buffer upload; the API supports both so the choice can be measured.)
+size×scale ✅, a canvas2d-compatible verb set over it ✅ (native-side,
+one call per verb — CG covers the standard set; `fillRects` →
+`CGContextFillRects` ✅; `drawGlyphs` → `CTFontDrawGlyphs` ✅), read and
+write pixels ✅, hand to a layer as contents without a copy ✅
+(`createSurfaceIOSurface` + `setLayerContentsIOSurface`), draw one
+surface into another ✅ (`ctxDrawSurface`), shift a band in place ✅
+(`scrollSurface`), copy rects between same-size surfaces ✅
+(`copySurfaceRegion`). Still 🆕: a pattern fill (`createPattern`, which
+`<Flow>`'s grid tiles ask for), radial gradients, a blend op for
+`PictOp.Src`, and an explicit free (a surface goes with its handle's
+finalizer). The alternative — rasterize JS-side and use the raw-buffer
+upload — stays open; the API supports both so the choice can be
+measured.
 
 **Text.** measure ✅ → full layout object 🆕: build from span list
 (attributed string), report lines/runs/origins, `indexAt`,
@@ -953,6 +973,121 @@ parity) 🆕; `NSStatusItem` (tray; later) 🆕; open/save panels (later)
 key events 🆕; window snapshot ✅; a headless mode statement (CI:
 windowed Aqua sessions on macOS runners are expected to work — verify
 in Phase 1; the mock presenter keeps unit tests off the GUI entirely).
+
+## The split: what the bridge owns, what the renderer owns
+
+Written 2026-09-03 against react-x11 2.4.0 and `@windowkit/appkit`
+0.3.0, when the question came up in the concrete form "if the bridge
+grew a full canvas2d API, could it replace ntk on this backend
+outright?" — with the retained tier's need to reach layers, and two
+more backends on the horizon (Wayland at the canvas2d level, Windows
+with primitives not yet chosen), to be held in the same design. The
+answer is a division of labour, and it is mostly the one the code
+already has.
+
+**What is where today.** The bridge exports 36 `ctx*` verbs over an
+opaque surface handle, 8 surface operations (create, IOSurface-backed
+create and lookup, lock/unlock, size, copy rects between two surfaces,
+scroll within one, hand to a layer), the CoreText natives, the layer
+and transaction natives, windows, pasteboard, menu, controls, screens
+and events — one N-API crossing per verb, no state, no policy. On top
+of it `src/cocoa/` is ~4,500 lines: the canvas-shaped context (the
+JS-visible state and the ntk dialect over the verbs), the text engine,
+the layer presenter, the window with its IOSurface swapchain, the app.
+What the cocoa path reaches ntk for is pure JS — colour parsing, the
+shadow math, `SvgView`'s traversal, the image decoders, fontkit metrics
+behind `openFont` — and no X object is constructed. So "replace ntk"
+is already true in substance: on macOS ntk is a utility library and
+the X implementation of the drawing dialect. The one ntk object a
+consumer still handed the backend was `Surface`, and the fix for that
+is dispatch (issue #433, `react-x11/ntk` asking the app), not a port.
+
+**The dialect is the floor contract, and it lives here.** Every backend
+implements canvas2d plus the ntk extensions — `fillRects`, `drawGlyphs`
+with its run contract, `positioned`, Path2D as an argument to
+fill/stroke/clip, the callback-shaped `getImageData`, `Render.PictOp`
+numbering. That is react-x11's policy: it is what `nodes.js` and every
+registered element paint against, X11 answers it through ntk's XRender
+encoder, Cocoa through `CocoaContext2D` over CG verbs, Wayland will
+through the `'2d-sw'` rasterizer [wayland.md](wayland.md) builds on
+X11 first. The JS class stays in this repository rather than moving
+into the bridge for three reasons. It is the dialect, and a dialect
+defined in three repositories drifts three ways — every context fix
+would become a floor bump, the way #434 cost a `^0.3.0` floor and a
+lock regeneration for two natives. A wrapper that forwards to a **verb
+table** is reusable by any addon that speaks the same verbs, so a
+Windows addon over a Direct2D render target plugs in with no wrapper
+changes at all, where a class inside `@windowkit/appkit` could never be
+reused by Windows or Wayland. And the fake-bridge tests already pin it
+here. The bridge's contribution is exactly the verb table — mechanism —
+and that table is the native-addon contract to standardise:
+`createSurface`/`surfaceSize`/`scrollSurface`/`copySurfaceRegion`/
+`ctxDrawSurface`/`ctxGetImageData`/`ctxPutImageData` and the `ctx*`
+verbs over an opaque handle. Cocoa's is `@windowkit/appkit`'s export
+list as it stands.
+
+**Layers are a ceiling, behind the seam that exists.** The bridge
+speaks two vocabularies, raster (surfaces, verbs, text) and retained
+(layers, transactions, shape and gradient layers, contents), and the
+renderer chooses per window; the node model never learns which. The
+retained presenter needs the raster vocabulary too — its Raster visual
+replays a node's paint into a bitmap and hands the bitmap to a layer —
+so canvas2d is what every backend must provide and layers are what a
+backend may add, behind `noteInvalidate`, `presentFrame` and a null
+`scrollRegion`: three feature-detected hooks, the X11 path
+byte-identical. That is the whole integration surface, and it should
+stay that size. The presenter does not move into the bridge (it
+consumes the node model, which is policy), and there is no third,
+hybrid mode: a node is either properties on a layer or a raster on
+one, decided per node per frame.
+
+**The channel is already node-granular.** `invalidate(layoutChanged,
+node | null, reason)` reaches the presenter as `noteInvalidate(damage,
+layoutChanged, reason)` — which node, what kind — and the X11 painter
+is the one reducing it to rects. The layer presenter today collapses a
+structural `null` into a walk of the whole tree, which is the measured
+~40 ms per frame at ~1,500 nodes (the presenter bench's largest open
+number). That is a presenter-internal fix — dirty-subtree pruning off
+yoga's per-node layout flags and the `_reflowed` set, the same signals
+the X11 path uses to keep layout dirt local — not a new channel. The
+`reason` vocabulary already separates `'scroll'`, which is the
+`bounds.origin` case.
+
+**What is genuinely shared across the coming backends** is the
+client-owned bitmap with double-buffered presentation. The window's
+swapchain (`_ensureSurface`/`present`/`scrollRegion`/`noteFrameDamage`,
+~120 lines) is written over five primitives — create, lock/unlock, copy
+region between two surfaces, scroll within one, present — and a
+Wayland `wl_buffer` pair, where the compositor holds the front buffer
+until `release`, is the same shape (catch-up copy or buffer-age damage,
+[wayland.md](wayland.md)); so is a Windows swap chain or DIB pair. The
+offscreen `Surface` is the same family: written over `createSurface`,
+`surfaceSize`, `scrollSurface` and `ctxDrawSurface` plus the wrapper,
+behind the app seam (`app.createSurface(options)`), so a Wayland app
+implements the seam over a CPU bitmap with its `'2d-sw'` context and
+`copyWithin` is the memmove `scrollSurface` already is. Per backend,
+then: Wayland's context is the JS rasterizer, so the dialect holds by
+construction, and with no retained tier (`wl_subsurface` is too coarse)
+`presentFrame` is absent and the X11 paint path runs verbatim over the
+swapchain; Windows' two candidate primitive sets are exactly the two
+vocabularies — a Direct2D target for the verb table, DirectComposition
+visuals for a presenter — so it starts at the floor with the wrapper
+and the swapchain reused and adds a composition presenter later behind
+the same seam.
+
+**In order, with the priority stated:** the existing two backends, X11
+and Cocoa, become stable and performant before a third is started, so
+the steps that serve them come first. (1) This section: the verb table
+and the surface operations are the native-addon contract. (2) Issue
+#433: `CocoaSurface` over that contract, the `createSurface` seam,
+dispatch in `react-x11/ntk` — landed with this text. (3) The
+presenter's dirty-subtree pruning, ahead of anything below because it
+is the open number on a shipped backend. (4) Moving the context
+wrapper and the swapchain under `src/backend/` with neutral names — when
+a second native backend or Wayland actually starts, and not before: a
+half-renamed tree is worse than either name. (5) Bridge growth stays
+verb-shaped — a pattern fill for `<Flow>`'s grid tiles, radial
+gradients, a blend op for `PictOp.Src` — and never a JS canvas class.
 
 ## Testing
 

@@ -1066,6 +1066,15 @@ buffer, a jump to the far end and a resize all take. It is one `CopyArea`
 inside the pixmap: nothing crosses the wire but the request, the overlap is
 safe, and no exposure events come back.
 
+The same element runs unchanged on the Cocoa backend. `react-x11/ntk`'s
+`Surface` asks the app it is handed for the implementation — ntk's pixmap
+on an X connection, a CG bitmap on a Cocoa app — so the surface above is a
+bitmap there, `copyWithin` is one in-place copy of the band, and
+`drawImage` is one composite, with the element naming neither backend. The
+one thing to know: a bitmap has one graphics state, so `getContext('2d')`
+there answers the same context every time and its `destroy()` is a no-op
+(docs/macos.md "Custom drawing on a layer tree").
+
 Two things it lines up with. The deltas you are handed are already whole
 pixels — the sub-pixel carry described above exists so that a shift is
 always expressible — so an element scrolling this way never has a fraction
@@ -1390,19 +1399,22 @@ not create. Three things it has to do that a GL surface does not:
 
 ## The subpath exports
 
-| subpath             |                                                                                                          |
-| ------------------- | -------------------------------------------------------------------------------------------------------- |
-| `react-x11/host`    | `registerElement`, `unregisterElement`, `registeredElements`, `hostTypes`, `knownElements`, `drawnKinds` |
-| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                         |
-| `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary               |
-| `react-x11/yoga`    | the layout engine — `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed; see below                       |
-| `react-x11/ntk`     | ntk itself, re-exported — `Surface`, `Path2D`, `Image`, `Pixmap`, the font sources, `createClient`       |
-| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                     |
+| subpath             |                                                                                                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `react-x11/host`    | `registerElement`, `unregisterElement`, `registeredElements`, `hostTypes`, `knownElements`, `drawnKinds`                                 |
+| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                                                         |
+| `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary                                               |
+| `react-x11/yoga`    | the layout engine — `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed; see below                                                       |
+| `react-x11/ntk`     | ntk itself, re-exported — `Path2D`, `Image`, `Pixmap`, the font sources, `createClient` — and `Surface`, on whichever backend the app is |
+| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                                                     |
 
 **Reach ntk through `react-x11/ntk`, not a second dependency.** Two copies
 of ntk in one process means two font caches and two glyph atlases, and a
 node built against one cannot be painted by the other — a failure that
-looks like a drawing bug rather than a dependency bug.
+looks like a drawing bug rather than a dependency bug. It is also where a
+drawing-adjacent name gets its backend-neutral answer: `Surface` from here
+is a pixmap on X11 and a CG bitmap on the Cocoa backend, where `Surface`
+from `ntk` is the pixmap only.
 
 **An element does not need the layout engine, and that is deliberate.**
 `measureContent` is handed its constraints in words (`'exactly'`,

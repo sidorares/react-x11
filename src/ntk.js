@@ -21,5 +21,35 @@
 // for one — they were reachable but never declared — wants
 // `@react-x11/components` (`<Markdown>`, `<Formula>`). `SvgView` is still
 // here; a drawing is not a document.
+//
+// One name is not a plain re-export. `Surface` below asks the app it is
+// handed for the implementation, because ntk's own is a pixmap and a
+// Picture — an X connection's — and a component allocates its buffer
+// without knowing which backend it was mounted on. This subpath is where a
+// drawing-adjacent name gets its backend-neutral answer; the X-only names
+// (`createClient`, `Pixmap`, `Picture`, `XEmbedSocket`) stay X-only.
+import { Surface as NtkSurface } from 'ntk';
+
 export * from 'ntk';
 export { default } from 'ntk';
+
+/**
+ * ntk's offscreen `Surface`, on whichever backend `app` is.
+ *
+ * An app that makes its own surfaces answers `createSurface(options)` —
+ * the Cocoa app does, over a CG bitmap (src/cocoa/surface.js) — and an ntk
+ * connection has no such method and gets ntk's pixmap. The result is
+ * whichever implementation answered, not an instance of this class: the
+ * contract is the shape — `width`/`height`, `getContext('2d')`, `render`,
+ * `clear`, `copyWithin`, `destroy`, and `ctx.drawImage(surface, …)` —
+ * (docs/extending.md "Scrolling the pixels, not just the offset"), and
+ * nothing needs `instanceof`.
+ */
+export class Surface {
+  constructor(app, options) {
+    if (typeof app?.createSurface === 'function') {
+      return app.createSurface(options);
+    }
+    return new NtkSurface(app, options);
+  }
+}
