@@ -50,6 +50,7 @@ export class CocoaPaneWindow {
     this._dirty = false;
     this._flushDamage = 'full';
     this._seq = 0;
+    this._presentedAt = -Infinity;
     this._reactX11Node = null;
     app._registerWindow(this);
   }
@@ -98,8 +99,24 @@ export class CocoaPaneWindow {
     return this.app._requestFrame(cb);
   }
 
+  /**
+   * Whether the host may still be showing the frame before the last one —
+   * the gate `flushPendingFrames` (src/frames.js) is written around: a
+   * discrete input paints on the spot only when the last frame has landed,
+   * which is what folds a burst into one paced frame instead of a frame per
+   * event. On X11 the server says when a present was shown; a pane hears
+   * nothing back from the host, which flips the layer on its next pump tick
+   * and has Core Animation scan it out at the following refresh — so a
+   * present counts as in flight for one frame interval. Without a gate here
+   * every message the host queued while the pane was busy was answered
+   * with a full frame of its own: a forty-tick resize of a pane whose frame
+   * costs 300ms stepped through forty sizes for twelve seconds after the
+   * drag had ended, each one the previous surface stretched to the layer.
+   */
   frameInFlight() {
-    return false;
+    return (
+      performance.now() - this._presentedAt < this.app.frameIntervalFor(null)
+    );
   }
 
   // Three buffers, not two. A pane is cross-process: the host keeps
@@ -214,6 +231,7 @@ export class CocoaPaneWindow {
       width: this.width,
       height: this.height,
     });
+    this._presentedAt = performance.now();
     this._shownIndex = this._drawIndex;
     // the next buffer round the ring — two behind what the host will be
     // showing, so it is safe to write even before the host has switched
