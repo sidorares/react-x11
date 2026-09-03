@@ -1018,6 +1018,14 @@ async function main() {
   // the backend ladder: auto (the default), or one by name
   const native = await createRoot({ backend: 'cocoa' });
   await native.unmount();
+  await (
+    await createRoot({
+      backend: 'cocoa',
+      cocoa: { presenter: 'surface', frameInterval: 8, pumpInterval: 4 },
+    })
+  ).unmount();
+  // @ts-expect-error -- not a presenter
+  await createRoot({ cocoa: { presenter: 'metal' } });
   await (await createRoot({ backend: 'auto' })).unmount();
   await (await createRoot({ backend: 'x11', display: ':1' })).unmount();
   // @ts-expect-error -- not a backend

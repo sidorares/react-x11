@@ -168,6 +168,19 @@ desktop appearance switch; there strict mode crashes.
 
 Read once at startup like the switches above, and answers only to `1`.
 
+## `REACT_X11_NO_BOUNDS_CACHE=1`
+
+Disables the cached paint reach. A bounded frame asks every subtree on the
+way to its rect whether it reaches in, and the answer — the node's rect
+unioned with its descendants' — is kept until something that moves it says
+so: a rect assigned by layout, a child list change, a style swap, a state
+flip, a change the node announces about itself. Recomputing it per pass made
+a one-cell repaint cost the whole tree (1.25ms at 3,600 nodes, 0.37ms
+cached). With this set every walk is fresh, so if a node ever goes missing
+from a bounded repaint — culled by a reach nobody updated — this is the
+first thing to try, and a fix that lands here is a change nobody announced
+through `invalidate`. Read once at startup; answers only to `1`.
+
 ## `REACT_X11_NO_TRANSPARENCY=1`
 
 Makes every display answer the way one with no 32-bit visual does:

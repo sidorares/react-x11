@@ -728,6 +728,36 @@ unchanged across the fix.
   change never touched). `--no-isolate` puts them back in one process: ~3x
   faster for a development loop, and coupled again
 
+### Which bench a change owes
+
+A hot path is a short list of files — the paint walk and the damage model
+(`nodes.js`), the layout floors and styles, the paint cache, the event
+dispatch that decides when a frame goes out (`events.js`, `frames.js`),
+`src/cocoa/`, the benches and their baselines, and `package.json`, because
+an ntk bump moves everything under all of them. `npm run bench:touched`
+reads your diff against `origin/master`, matches it against that list
+(`scripts/bench/touched.js` is the list, in one place), and runs the gates
+the matches owe: the X11 protocol and pixel gates for a `nodes.js` change,
+the Cocoa frame-clock gate as well on a mac, nothing for a docs change.
+`--dry` says which without running them. CI does the same on every PR —
+the `bench` job runs the X11 gates unconditionally on Linux, and
+`bench-cocoa` runs the touched runner on a macOS runner, so a change that
+cannot reach a frame costs no runner time there.
+
+The Cocoa gate (`npm run bench:presenters -- --check`,
+`scripts/bench/presenters-gate.json`) is deliberately **structural**:
+full-window frames, the share of the window one cell repaints, frames per
+resize tick, backing surfaces per resize tick, frames painted for a window
+nobody can see. Never milliseconds — a shared runner's timing says nothing,
+while "one cell repainted 60% of the window" is the same finding on every
+machine. The timing table still prints, and the CI job appends it to the
+run's summary for the trend. When a change is _meant_ to move the frame
+clock — a cadence, a deferral, a cache — run the full table on a real
+display (`npm run bench:presenters`, 6s per cell, nothing else running) and
+put the before/after rows in the PR, the way docs/macos.md "Measured"
+records them; and loosen a rule in the same PR only with the number that
+made it necessary.
+
 For a live app rather than the bench scenarios, `REACT_X11_TRACE=summary`
 (or `requests`, or `chrome:/tmp/t.json` for Perfetto) traces the protocol
 with the same splitter, `REACT_X11_DEBUG_PAINT=1` flashes damage rects and
@@ -1192,6 +1222,22 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   `src/styles.js` use the straight parser for exactly that reason. Note that
   opaque colours are identical either way, so a test with `#000000` and
   `#ffffff` cannot tell the two apart.
+- **A subtree's paint reach is cached, and every change to it has to be
+  announced.** `_subtreeBounds()` — the rect a bounded frame culls against,
+  and the one every damage claim is measured from — is computed once and
+  kept on the node (`_paintBoundsCache`), because recomputing it per pass
+  made a one-cell repaint walk the whole tree (1.25ms at 3,600 nodes, 0.37ms
+  cached; `npm run bench:presenters -- --scenario=tree`). It is dropped up
+  the chain by `_assignAbs`, `_childListChanged`, `_retarget` (every style
+  swap), `setStyleState` and `Node.invalidate` — so a node whose reach
+  changes through some new route has to come through one of those, or the
+  frame culls it out of the region it draws in and nothing says why.
+  `REACT_X11_NO_BOUNDS_CACHE=1` is the first aid, and `test/paint-reach.test.js`
+  the fence. The cap on damage rects (`MAX_DAMAGE_RECTS`, four) is the
+  server-side cost of a pass on X11; a backend whose pass is cheaper says so
+  on its window (`damageRectCap`) — the Cocoa window keeps sixteen, which
+  is what turned twelve scattered cell updates from 1.5Mpx of repaint into
+  0.26.
 - **A frame that claims no damage repaints everything**, deliberately — the
   safe default when nothing can say what changed. It also means a test that
   changes one thing cannot demonstrate a missed repaint: with nothing bounding

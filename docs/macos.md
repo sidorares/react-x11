@@ -648,7 +648,13 @@ The frame clock rides the display link: `requestAnimationFrame`
 callbacks fire on link ticks, commits wrap in explicit `CATransaction`s,
 and the "answer the input" early-flush (`flushPendingFrames` on handler
 unwind) maps to committing the transaction before the pump returns to
-AppKit — same policy, new mechanism.
+AppKit — same policy, new mechanism. What runs today is the timer pump
+with a frame interval over it (`frameInterval`, 16ms by default; the gate
+is the interval less half a pump, so a frame lands on the first tick at or
+after it rather than alternating between the tick before and the tick
+after), discrete input and the wheel flushed on the event, and a
+window that is not on glass deferring its frames — see "Measured" below
+for what each of those was worth.
 
 ## Native controls
 
@@ -1088,6 +1094,122 @@ a second native backend or Wayland actually starts, and not before: a
 half-renamed tree is worse than either name. (5) Bridge growth stays
 verb-shaped — a pattern fill for `<Flow>`'s grid tiles, radial
 gradients, a blend op for `PictOp.Src` — and never a JS canvas class.
+
+## Measured: the frame clock and the large tree
+
+Written 2026-09-03 against react-x11 2.5.0 and `@windowkit/appkit` 0.3.0,
+on an M1 Pro at 2x, from the stress scenarios `npm run bench:presenters`
+grew for it — "state update → pixels" and "interaction → pixels" inside a
+tree the size of an application screen (`--cells`, 1,200 labelled boxes:
+3,662 nodes) — and the surface presenter, which is the default. The
+numbers travel as well as any timing does; the ratios are the findings.
+
+**What a frame cost, and what it costs now** (median flush unless said
+otherwise; `cpu` is the process as a share of one core, driver ticks at
+62.5Hz):
+
+| scenario                                  | before                     | after                      |
+| ----------------------------------------- | -------------------------- | -------------------------- |
+| `tree` — one memoized cell per tick       | 1.25ms                     | 0.35ms                     |
+| `tiny` — one of 5,000 cells (14k nodes)   | 7.2ms p95                  | 1.2ms p95                  |
+| `multi` — 12 scattered cells per tick     | 11.9ms, 1,470kpx repainted | 2.8ms, 264kpx              |
+| `press` — down/up, input → flush          | 4.3ms p50 / 10.2 p95       | 2.6ms p50 / 8.7 p95        |
+| `scroll` — wheel notch, input → flush     | 15.2ms p50                 | 1.9ms p50                  |
+| `resize` — a live tick, 40-tick drag      | 71ms, 2 full frames each   | 28ms, 1 frame + 1 catch-up |
+| `occluded` — hidden window, cell per tick | 207 frames, 50% cpu        | 0 frames                   |
+| `layout` — every cell reflows per tick    | 44ms (18fps)               | 44ms — see below           |
+
+Five changes, each fenced by a test:
+
+- **The paint reach is cached** (`Node._paintBoundsCache`, nodes.js). A
+  bounded frame asked every subtree on the way to its rect whether it
+  reached in, and each answer walked the subtree: a one-cell repaint cost
+  the whole tree, linearly. The union is now kept until something that
+  moves it announces itself — layout, a child list change, a style swap, a
+  state flip, `invalidate` — with `REACT_X11_NO_BOUNDS_CACHE=1` as first
+  aid. Shared with X11, and the protocol bench is unchanged by it:
+  `test/paint-reach.test.js`.
+- **The damage rect cap is the backend's** (`window.damageRectCap`). Four
+  rects is what a pass costs the X server; a Cocoa pass is one CoreGraphics
+  clip and a culled walk, so its window keeps sixteen — twelve components
+  ticking at once paint their twelve rects instead of the box around them.
+- **A resize tick is one frame** (`CocoaWindow._freshSurface`,
+  `_routeGeometry`). Replacing the backing surface used to queue a second
+  full frame behind the one already painting it, and the React-half flush
+  was queued per event — and inside AppKit's resize loop no microtask runs
+  until the drag ends, so a forty-tick drag ran eighty full frames on the
+  mouse release: the freeze after a resize. A fresh surface now asks for a
+  frame only when the flush that found it was bounded, and holds the
+  present until that frame lands; the release owes at most one flush.
+  `test/cocoa-frames.test.js`.
+- **A live resize defers the content floors** (`_deferContentFloors`,
+  nodes.js). The floors (#249) are three extra layout passes and their
+  walks — 21 of the 44ms a relayout costs on this tree — and a drag calls
+  the frame from inside every pointer move. A live tick lays out against
+  the floors it has (exact along the main axis, a frame stale for wrapped
+  text across it) and the first pump tick after the release measures once
+  and lays out again: answer the input, then catch up. Only under
+  `liveResizing`, which the Cocoa window reads off AppKit's flag and the
+  pump clears; an X window never sets it. A content change mid-drag takes
+  the measured path.
+- **A window nobody can see owes nothing** (`CocoaWindow._visible`): frames
+  for a window that is ordered out or miniaturized wait in the queue and
+  its present waits with them; one catch-up frame when it is back. Occlusion
+  by another application's window is not read yet — the bridge does not
+  forward `windowDidChangeOcclusionState`, and that is the one place to add
+  it. The frame gate also moved from "one interval since the last frame" to
+  "the first pump tick at or after it", which took a 16/24/16/24ms cadence
+  to a steady 16 (52 → 56fps against the 62.5Hz driver), and the wheel is
+  answered on the event like a press — AppKit already delivers scroll
+  events at the display's rate, so that is once per refresh by
+  construction.
+
+The structural half of these numbers is a gate now:
+`npm run bench:presenters -- --check` judges full-window frames, the share
+of the window a cell repaints, frames per resize tick and frames for a
+hidden window against `scripts/bench/presenters-gate.json`, and
+`npm run bench:touched` runs it — with the X11 gates — only for a change
+that reaches a hot path. CI's `bench-cocoa` job does the same on a macOS
+runner.
+
+**What is left, in order of what it costs:**
+
+1. **A full relayout of a large tree: 44ms at 3,600 nodes, 320ms at
+   14,000.** Half of it is the content floors, a third is yoga through its
+   JS binding (three measuring passes plus the real one, each a full tree
+   of getters and setters across the wasm boundary), the rest is paint —
+   1,200 rounded fills and 1,200 `CTLineDraw`s at about 4µs and 3µs each.
+   The floors are the target: they are measured from scratch on every
+   layout change, and an incremental version — per-subtree content
+   signatures, so a padding change on a container re-measures nothing
+   below it — is the change that would take a panel toggle or a theme
+   switch on a big screen from 18fps to 40. Bounded, not small; it touches
+   the passes `test/content-floors.test.js` pins.
+2. **The swapchain is reallocated per resize tick** — two window-sized
+   IOSurfaces, 20MB at 900x700@2x, freed on GC. Allocation is 0.1ms; the
+   cost is memory (`rss +80MB` over a 40-tick drag) and the GC that
+   eventually returns it. Two fixes, both in the bridge: report native
+   memory to V8 (`napi_adjust_external_memory`) so collection is prompt, or
+   a `releaseSurface` verb so the window frees the old pair on the flip.
+   Over-allocating the chain to a rounded-up size would need
+   `contentsRect` on the layer, which `setLayerProps` does not take yet.
+3. **The frame interval is a guess at the display.** 16ms is right on a
+   60Hz panel and half the rate of a 120Hz one; `createRoot({ cocoa: {
+frameInterval: 8 } })` is the seam, and on this 120Hz panel it is worth
+   taking: `anim` runs at 102fps instead of 51 for 40% of a core instead of
+   36, and hover's input → flush goes from 5.4ms p50 / 18 p95 to 2.8 / 10
+   (`npm run bench:presenters -- --frame=8`). The honest default is the
+   display's own period — `NSScreen.maximumFramesPerSecond`, which
+   `listScreens` should report.
+4. **The paint cache is off on this backend** (`paintCacheFor` gates on an
+   X `Render` extension), so 300 mono icons re-tinted per tick are 300
+   live canvas paints (`icons`: 2.9ms). `CocoaSurface` exists now; wiring
+   the cache over `app.createSurface` (argb only — the a8 coverage entries
+   need a tint in the key here) is the remaining step.
+5. **Nothing is drawn at a level of detail.** `tiny` shapes and draws 5,000
+   five-pixel labels nobody can read. A box smaller than a pixel already
+   costs one fill; text below a legible size could cost one strip. Not
+   started.
 
 ## Testing
 

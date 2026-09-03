@@ -180,6 +180,22 @@ export interface RootOptions {
    * is a backend.
    */
   backend?: 'auto' | 'x11' | 'cocoa';
+  /**
+   * The Cocoa backend's knobs (docs/macos.md). `presenter` picks the frame
+   * path: `'surface'` (the measured default — one bitmap per window, the
+   * X11 paint machinery over an IOSurface swapchain) or `'layers'` (one
+   * CALayer per drawn node, opt-in while it is measured).
+   * `frameInterval` is how often a scheduled frame may paint, in ms —
+   * 16 by default, a 60Hz display's period; 8 paints every refresh of a
+   * 120Hz panel. `pumpInterval` is the AppKit event pump's cadence, in
+   * ms (8 by default), which is the floor under input latency. Ignored
+   * off macOS and when {@link RootOptions.app} is passed.
+   */
+  cocoa?: {
+    presenter?: 'surface' | 'layers';
+    frameInterval?: number;
+    pumpInterval?: number;
+  };
   /** `':1'`, `'host:0.0'`, or a unix socket path. Defaults to `$DISPLAY`. */
   display?: string;
   /**

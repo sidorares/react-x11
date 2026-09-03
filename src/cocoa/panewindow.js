@@ -134,12 +134,9 @@ export class CocoaPaneWindow {
       this._surfaceSize = { width: w, height: h };
       this._surfaceGen++;
       this._flushDamage = 'full';
-      if (hadSurface) {
-        queueMicrotask(() => {
-          const node = this._reactX11Node;
-          if (node && !node.destroyed) node.invalidate(true, null, 'resize');
-        });
-      }
+      // decided when the flush reports its rects — see CocoaWindow's
+      // `_ensureSurface` for why not a queued full frame from here
+      if (hadSurface) this._freshSurface = true;
     }
     return this._surface;
   }
@@ -163,6 +160,20 @@ export class CocoaPaneWindow {
   }
 
   noteFrameDamage(rects) {
+    if (this._freshSurface) {
+      this._freshSurface = false;
+      // a bounded flush onto a fresh ring leaves garbage outside its rects:
+      // one full frame, and no present until it lands (CocoaWindow's rule)
+      if (rects) {
+        this._holdPresent = true;
+        const node = this._reactX11Node;
+        if (node && !node.destroyed) node.invalidate(false, null, 'resize');
+      } else {
+        this._holdPresent = false;
+      }
+    } else if (!rects) {
+      this._holdPresent = false;
+    }
     if (this._flushDamage === 'full') return;
     if (!rects) {
       this._flushDamage = 'full';
@@ -190,6 +201,7 @@ export class CocoaPaneWindow {
   /** Flip and tell the host, instead of touching any layer of our own. */
   present() {
     if (!this._dirty || !this._ring || this.destroyed) return;
+    if (this._holdPresent) return;
     this._dirty = false;
     const shown = this._ring[this._drawIndex];
     this._native.surfaceUnlock(shown.handle);
