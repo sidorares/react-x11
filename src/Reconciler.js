@@ -31,6 +31,7 @@ import {
   flushWindowMaps,
   flushWindowRestacks,
   windowAttributes,
+  setTextStripBelow,
 } from './nodes.js';
 import { hasDropProps } from './dnd.js';
 import { AppProvider } from './appcontext.js';
@@ -789,6 +790,11 @@ export async function createRoot(options = {}) {
   // process, and only `compose: 'system'` or a file of your own reads
   // anything from disk.
   beginCompose(app, rest.compose);
+
+  // Under what size a paragraph is painted as a strip of its ink instead
+  // of as glyphs (nodes.js, `TextNode._paintsStrip`): six logical pixels by
+  // default, 0 for glyphs at every size.
+  setTextStripBelow(app, rest.textStripBelow);
 
   // Whether a subtree coming back out of hiding — a `<Suspense>` boundary
   // resolving, an `<Activity>` shown again — takes the keyboard back with it

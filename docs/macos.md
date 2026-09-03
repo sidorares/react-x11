@@ -651,12 +651,11 @@ unwind) maps to committing the transaction before the pump returns to
 AppKit — same policy, new mechanism. What runs today is the timer pump
 with a frame interval over it (`frameInterval`; by default the period of
 the display each window is on, as `listScreens` reports it — 8.3ms on a
-120Hz panel, 16.7 on a 60Hz monitor — and the gate is the interval less
-half a pump, so a frame lands on the first tick at or after it rather
-than alternating between the tick before and the tick after), discrete
-input and the wheel flushed on the event, and a window that is not on
-glass deferring its frames — see "Measured" below for what each of those
-was worth.
+120Hz panel, 16.7 on a 60Hz monitor — with a frame that falls between
+two pump ticks given a one-shot timer of its own, so the period is the
+display's whatever the pump's cadence), discrete input and the wheel
+flushed on the event, and a window that is not on glass deferring its
+frames — see "Measured" below for what each of those was worth.
 
 ## Native controls
 
@@ -1153,9 +1152,10 @@ Five changes, each fenced by a test:
   present until that frame lands; the release owes at most one flush.
   `test/cocoa-frames.test.js`.
 - **A live resize defers the content floors** (`_deferContentFloors`,
-  nodes.js). The floors (#249) are three extra layout passes and their
-  walks — 21 of the 44ms a relayout costs on this tree — and a drag calls
-  the frame from inside every pointer move. A live tick lays out against
+  nodes.js). The floors (#249) were three extra layout passes and their
+  walks — 21 of the 44ms a relayout cost on this tree, before they were
+  measured incrementally (§"Measured: incremental floors") — and a drag
+  calls the frame from inside every pointer move. A live tick lays out against
   the floors it has (exact along the main axis, a frame stale for wrapped
   text across it) and the first pump tick after the release measures once
   and lays out again: answer the input, then catch up. Only under
@@ -1223,11 +1223,11 @@ renderer's own and are listed at the end.
   window, so a window on the 120Hz panel paints every refresh while one on a
   60Hz monitor paints every other pump tick. What it is worth is the `anim`
   and `hover` rows: twice the frames for half again the CPU, and input →
-  flush halved, on the panel that can show it. One honest limit: the 8ms
-  pump quantizes the cadence, so a 75Hz monitor (13.3ms) paints at 62.5fps
-  — the gate is the interval less half a pump, and 9.3ms falls on the 16ms
-  tick. `pumpInterval` is the seam; the display link (§"Input and the run
-  loop") is the mechanism that would make the period exact.
+  flush halved, on the panel that can show it. One honest limit at the
+  time: the 8ms pump quantized the cadence, so a 75Hz monitor (13.3ms)
+  painted at 62.5fps — the gate was the interval less half a pump, and
+  9.3ms fell on the 16ms tick. The pass below gives such a frame a timer
+  of its own.
 - **A window entirely behind another application's window owes nothing**
   (`CocoaApp._routeOcclusion`, `CocoaWindow._visible`). AppKit's
   `windowDidChangeOcclusionState` arrives as `window-occlusion`; off, the
@@ -1263,27 +1263,78 @@ renderer's own and are listed at the end.
   same burst is one frame at the size it ended on, plus the one the first
   message was answered with. `test/cocoa-frames.test.js`.
 
-**What is left, in order of what it costs:**
+**What was left, in order of what it cost** — the three items of #445,
+measured in the pass below: a full relayout of a large tree (44ms at 3,600
+nodes, half of it the content floors measured from scratch), nothing drawn
+at a level of detail, and the pump quantizing the frame period.
 
-1. **A full relayout of a large tree: 44ms at 3,600 nodes, 320ms at
-   14,000.** Half of it is the content floors, a third is yoga through its
-   JS binding (three measuring passes plus the real one, each a full tree
-   of getters and setters across the wasm boundary), the rest is paint —
-   1,200 rounded fills and 1,200 `CTLineDraw`s at about 4µs and 3µs each.
-   The floors are the target: they are measured from scratch on every
-   layout change, and an incremental version — per-subtree content
-   signatures, so a padding change on a container re-measures nothing
-   below it — is the change that would take a panel toggle or a theme
-   switch on a big screen from 18fps to 40. Bounded, not small; it touches
-   the passes `test/content-floors.test.js` pins.
-2. **Nothing is drawn at a level of detail.** `tiny` shapes and draws 5,000
-   five-pixel labels nobody can read. A box smaller than a pixel already
-   costs one fill; text below a legible size could cost one strip. Not
-   started, and the win is bounded by item 1 for the relayout half.
-3. **The pump quantizes the frame period** (above): a display whose period
-   is not a multiple of 8ms paints at the tick after it. A finer pump costs
-   input polling; the display link costs the run-loop work §"Input and the
-   run loop" describes.
+## Measured: incremental floors, the strip, the frame timer
+
+Written 2026-09-03 against the pass above (react-x11 2.5.0, `@windowkit/appkit`
+0.4.0), same machine, same bench, the surface presenter — the three items
+#445 ranked, in its order.
+
+| what                                                                 | before          | after           |
+| -------------------------------------------------------------------- | --------------- | --------------- |
+| `layout` — 3,662 nodes, the container's padding toggling: fps, flush | 18.4fps, 43.8ms | 34.4fps, 19.9ms |
+| `tiny` — 14,452 nodes, 5px labels: the frame the grid reflows on     | 320ms           | 175ms           |
+| `anim` on a 75Hz monitor                                             | 56.3fps         | 70.4fps         |
+| `anim` on the 120Hz panel                                            | 108–113fps      | 108.6fps        |
+
+- **The floors are measured incrementally** (`collectFloorStale`,
+  `probeHeightFloors`, `contentSpan`, nodes.js). Every node keeps the
+  extent it was last measured at — what it needs from the box around it,
+  on each axis — and a measurement re-reads only the nodes whose subtree
+  changed, taking the rest at the number they carry. Which subtrees
+  changed is yoga's own record: a style setter, a child that came or went
+  and a text that asked to be re-measured all mark their node and every
+  node above it dirty, and the walk goes down that path and no other. So
+  a padding change on a container measures the container and nothing
+  below it, a row that mounts measures itself alone, and a colour change
+  measures nothing. The passes are paid for only where a floor is going
+  to be written from what they find: the width pass runs when content
+  changed under a node on a row's main axis, and the heights are settled
+  the other way round — the real layout runs first, a walk over the nodes
+  it moved asks each leaf, in JavaScript and out of its own layout cache,
+  whether its height at its new width is the height it had, and only if
+  one says otherwise (or content changed under a node a height floor is
+  written on) do the two height passes run and the layout again. On the
+  `layout` cell that is one pass over yoga where it was four, and a walk
+  over two nodes where it was four walks over 3,600: the floors went from
+  22ms of the frame to 6, of which 4 is the one yoga pass. What is left
+  of that frame is paint — 1,200 rounded fills and 1,200 `CTLineDraw`s,
+  about 15ms — and React's own commit. `test/content-floors.test.js`
+  counts the nodes each kind of change measures and the passes it runs.
+- **Text below a legible size is a strip** (`TextNode._paintsStrip`).
+  Under six logical pixels a label is a smudge of its ink, and a
+  rectangle per line over the band the letters sit in, in that ink at the
+  coverage small text has, is the same smudge for one fill instead of a
+  glyph run. Logical pixels, because what is legible is a physical
+  question: a 5px label is the same size on a 2x panel as on a 1x
+  monitor. `createRoot({ textStripBelow })` moves the line and `0` keeps
+  glyphs at every size (`REACT_X11_TEXT_STRIP_BELOW` for a process that
+  cannot reach `createRoot`); the layout is untouched either way — the
+  strip is as wide as the line the shaping settled. What it is worth is honest: on CoreGraphics a `CTLineDraw` of a three-glyph label costs about what a fill does, so the `tiny` cell on the surface presenter is unchanged by it (48–49fps either way) — its reflow frame is the 5,000 rounded cell fills, not the labels; on X11 the strip takes the cell's flush p95 from 86ms to 12ms, the glyph path's periodic expensive frames gone.
+  `test/text-strip.test.js`.
+- **A frame due between two pump ticks gets a timer of its own**
+  (`CocoaApp._armFrameTimer`, `_frameDue`). The gate is now a millisecond
+  under the interval — a timer's drift, no more — and a frame the next
+  tick would be late for is run by a one-shot at the moment it is due,
+  which runs the frame queue and presents; a present commits its own
+  transaction, so nothing waits for the pump. The clock is kept on the
+  display's period rather than on the moment a frame happened to run, so
+  a tick that took a frame a little early or a timer that fired a little
+  late moves nothing. The 75Hz row is what it is worth; the 120Hz panel,
+  whose period the 8ms pump already fit, is unchanged. What the pump
+  alone still does is poll AppKit's events, which `pumpInterval` stays
+  the cadence of; the display link (§"Input and the run loop") would take
+  input latency under it. `test/cocoa-frames.test.js`.
+
+**What is left, in order of what it costs:** the paint of a large tree —
+the fills and the line draws, which only not repainting can take away: a
+paint cache over the cells that did not change, or the layers presenter —
+then yoga's own pass at about a millisecond per thousand nodes, and React's
+commit of a tree that re-renders unmemoized.
 
 ## Testing
 

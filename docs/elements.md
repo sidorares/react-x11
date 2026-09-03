@@ -1132,6 +1132,22 @@ caches nothing. That is the right trade for text being animated and the
 wrong one for a paragraph that never changes, which is why `auto` is the
 default rather than the other way round.
 
+### Tiny text
+
+Text smaller than **6 logical pixels** is painted as a strip of its ink over
+the band its letters sit in, one rectangle per line, instead of as glyphs. A
+zoomed-out view — a minimap, a graph at a tenth of its size, a grid of five
+thousand cells — is a screen of labels nobody can read, each of which would
+cost a glyph run at the price of a legible one; below a legible size a label
+is a smudge of its ink, and the strip is that smudge for one fill. Layout is
+untouched: the text is still shaped, the strip is as wide as the line. The
+size is logical because legibility is physical — a 5px label is the same
+size on a 2x panel as on a 1x monitor.
+
+`createRoot({ textStripBelow })` moves the line, in logical pixels; `0`
+keeps glyphs at every size. `REACT_X11_TEXT_STRIP_BELOW` is the same line
+for a process that cannot reach `createRoot`.
+
 ## Selecting text
 
 _Issue #259._ A label is not selectable, the way `Gtk.Label` is not: a
