@@ -4553,6 +4553,11 @@ export class Node {
   }
 
   _paintChildren(ctx) {
+    // A retained presenter replays a node's `paint` into a visual of that
+    // node's own — its children have visuals of their own, so it sets this
+    // for the duration of the call (src/cocoa/presenter.js, `paintSelf`).
+    // Never set on the X11 or surface paths, where a frame is one walk.
+    if (this._ownPaintOnly) return;
     const order = this.paintOrder();
     if (order.length === 0) return;
     const clip = this.clipsChildren() && this._childrenCanOverflow();

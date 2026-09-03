@@ -19,12 +19,14 @@
 //
 // Sibling order is zPosition, assigned from the node's own paintOrder() —
 // no sublayer-list surgery, ever. Dirt arrives on the invalidate channel
-// (`noteInvalidate`): a node means that node, null means everything (the
-// same "no bound named repaints everything" rule the X11 damage model has),
-// and geometry is re-diffed every frame because comparing four numbers is
-// cheaper than knowing.
+// (`noteInvalidate`): a node means that node, a bare rect means every
+// raster whose ink it touches, null means everything (the same "no bound
+// named repaints everything" rule the X11 damage model has), and geometry
+// is re-diffed every frame because comparing four numbers is cheaper than
+// knowing.
 import { cssColorStraight } from 'ntk';
 
+import { Node } from '../nodes.js';
 import { CocoaContext2D } from './context2d.js';
 
 const RASTER_PAD = 2; // antialiasing/italic overhang outside the ink bounds
@@ -254,14 +256,47 @@ class ShapeRecorder {
   }
 }
 
-/** Paint everything a node draws itself — Node.paint minus the children. */
+/**
+ * Paint everything a node draws itself — Node.paint minus the children.
+ *
+ * An element that overrides `paint` (every drawing element in
+ * @react-x11/components does: `super.paint(ctx)` for the box, then the
+ * scene) has its content nowhere but in that override, so the override is
+ * what a raster replays — with the children held back by `_ownPaintOnly`,
+ * the one presenter-side flag `Node._paintChildren` honours, because they
+ * have visuals of their own. Everything else paints piecewise, which is
+ * what `Node.paint` would do minus the child walk.
+ */
 function paintSelf(node, ctx) {
+  if (node.paint !== Node.prototype.paint) {
+    node._ownPaintOnly = true;
+    try {
+      node.paint(ctx);
+    } finally {
+      node._ownPaintOnly = false;
+    }
+    return;
+  }
   node._paintShadow(ctx);
   node._paintBackground(ctx);
   node.paintContent(ctx);
   node._paintBorder(ctx);
   node._paintOutline(ctx);
 }
+
+/** Do two rects share any area? Touching edges do not count. */
+function rectsOverlap(a, b) {
+  return (
+    a.x < b.x + b.width &&
+    b.x < a.x + a.width &&
+    a.y < b.y + b.height &&
+    b.y < a.y + a.height
+  );
+}
+
+// Past this many bare-rect claims in one frame the overlap test costs more
+// than it saves, and the answer is the one a null claim gives: everything.
+const MAX_DIRTY_RECTS = 64;
 
 const EDGE_PROPS = [
   'borderTopColor',
@@ -393,8 +428,14 @@ export class CocoaLayerPresenter {
     this.visuals = new Map(); // node -> Visual
     this.rasters = new Map(); // node -> RasterState
     this.bars = new Map(); // scroller node -> Map(axis -> { layer, raster })
-    this.dirty = new Set();
+    // Claims since the last frame — taken at the top of `frame()`, the way
+    // the X11 path takes its damage before painting, so a claim made from
+    // inside a paint lands in the next frame instead of being cleared with
+    // this one.
+    this.dirty = new Set(); // nodes
+    this.dirtyRects = []; // bare rects, window coordinates
     this.dirtyAll = true; // first frame rasters everything
+    this._claims = null; // the frame in progress: { all, nodes, rects }
     this.rootVisual = {
       layer: window._layer,
     };
@@ -415,12 +456,58 @@ export class CocoaLayerPresenter {
       // say which node that was. Everything re-rasters; a scroll names its
       // node and stays off this path.
       this.dirtyAll = true;
+    } else if (damage.width > 0 && damage.height > 0) {
+      // A bare rect with no layout behind it is a claim about pixels — an
+      // element's `invalidate(false, rect)` for the box a dragged node
+      // moved through, the region `scrollContents` shifts, the strip an
+      // animation ticks in — and it cannot name the node it came from
+      // either. The frame re-rasters every raster visual whose ink the
+      // rect touches (the same conservative answer the damage model gives
+      // a rect: whatever draws there repaints); property boxes carry no
+      // raster and re-diff every frame regardless. Copied, because a
+      // caller's rect is very often a live `abs` about to be laid out.
+      if (this.dirtyRects.length >= MAX_DIRTY_RECTS) {
+        this.dirtyAll = true;
+      } else {
+        this.dirtyRects.push({
+          x: damage.x,
+          y: damage.y,
+          width: damage.width,
+          height: damage.height,
+        });
+      }
     }
+  }
+
+  /** The claims a frame consumes, cleared for the next one. */
+  _takeClaims() {
+    const claims = {
+      all: this.dirtyAll,
+      nodes: this.dirty,
+      rects: this.dirtyAll ? [] : this.dirtyRects,
+    };
+    this.dirtyAll = false;
+    this.dirty = new Set();
+    this.dirtyRects = [];
+    return claims;
+  }
+
+  /** Does this frame re-raster the visual covering `rect` for `node`? */
+  _needsRaster(node, rect) {
+    const claims = this._claims;
+    if (!claims) return true; // outside a frame: nothing is known to be current
+    if (claims.all || claims.nodes.has(node)) return true;
+    for (const claimed of claims.rects) {
+      if (rectsOverlap(claimed, rect)) return true;
+    }
+    return false;
   }
 
   /** The whole frame: one walk, one transaction, property diffs only. */
   frame(windowNode) {
     const native = this.native;
+    const claims = (this._claims = this._takeClaims());
+    let presented = false;
     native.txBegin({ disableActions: true });
     try {
       this._syncWindowBackground(windowNode);
@@ -441,11 +528,24 @@ export class CocoaLayerPresenter {
           }
         }
       }
+      presented = true;
     } finally {
       native.txCommit();
+      this._claims = null;
+      // a frame that threw half-way presents what it got to; the claims it
+      // was answering are still owed, so the next frame answers them again
+      if (!presented) this._restoreClaims(claims);
     }
-    this.dirty.clear();
-    this.dirtyAll = false;
+  }
+
+  _restoreClaims(claims) {
+    this.dirtyAll ||= claims.all;
+    for (const node of claims.nodes) this.dirty.add(node);
+    if (this.dirtyRects.length + claims.rects.length > MAX_DIRTY_RECTS) {
+      this.dirtyAll = true;
+    } else {
+      this.dirtyRects.push(...claims.rects);
+    }
   }
 
   _dropRaster(node) {
@@ -611,9 +711,8 @@ export class CocoaLayerPresenter {
     const s = this.scale;
     if (
       !sizeChanged &&
-      !this.dirtyAll &&
-      !this.dirty.has(node) &&
-      visual.shapeSignature
+      visual.shapeSignature &&
+      !this._needsRaster(node, rect)
     ) {
       return true; // shapes are current
     }
@@ -759,7 +858,7 @@ export class CocoaLayerPresenter {
       }
       this._dropSvgShapes(visual);
     }
-    if (!this.dirtyAll && !this.dirty.has(node) && !sizeChanged) return;
+    if (!sizeChanged && !this._needsRaster(node, rect)) return;
     const ctx = raster.ensure(this, rect.width, rect.height, this.window.scale);
     ctx.save();
     try {
