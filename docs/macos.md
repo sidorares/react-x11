@@ -808,6 +808,64 @@ on X11 instead of replaying its whole scene into a clip.
   layer-aware visual instead of raster (a chart that wants its series
   as shape layers, say). The raster default means nobody _has_ to.
 
+### Stroking a path with many subpaths
+
+`CGContextStrokePath` is **quadratic in the number of subpaths** in the
+path it is handed. Measured on this machine — closed 13-vertex rings
+scattered over a 1024×1024 surface, a 2px line, one `ctx.stroke()`:
+
+| rings | vertices | one stroke | chunked (what ships) |
+| ----: | -------: | ---------: | -------------------: |
+|   500 |    6,500 |      20 ms |                14 ms |
+| 1,000 |   13,000 |      59 ms |                29 ms |
+| 2,000 |   26,000 |     208 ms |                56 ms |
+| 4,000 |   52,000 |     986 ms |               113 ms |
+
+The subpath count is the driver, not the vertex count: one 26,000-vertex
+subpath strokes in 4ms where two thousand 13-vertex ones take 208. It was
+found rasterizing vector map tiles — a `buildings` layer is one feature of
+a couple of thousand building outlines, accumulated into one path
+(react-x11 issue #456).
+
+So `CocoaContext2D.stroke` splits such a path into several
+`CGContextStrokePath` calls, cut at subpath boundaries — a chunk closes at
+the first `moveTo` past 512 points or 128 subpaths, which is within 5% of
+the best chunk for every shape swept. **The backend picks the size, not the
+caller**, because the right size is a fact about CoreGraphics that no
+caller can know, and because the X11 context wants the exact opposite: there
+a stroke is an a8 coverage mask over the path's bounding box uploaded with
+one `PutImage`, so a bigger path is _fewer_ uploads over the same pixels,
+and batching for one backend pessimizes the other.
+
+Two things are deliberately left whole, both because splitting them would
+be a loss:
+
+- **A hairline** — a device-space width of 1 or less, so `lineWidth` times
+  the CTM's scale. Below that width CoreGraphics strokes through a path
+  that is already linear in the subpath count (the 2,000-ring path above
+  costs 7ms at 1px, whole), and splitting it is a **2× regression**: the
+  per-call setup with nothing to win back.
+- **Anything that composites** — a translucent `strokeStyle`, a
+  `globalAlpha` below 1, a live shadow. Each chunk paints separately, so a
+  pixel that two subpaths' strokes each half cover is inked twice at half
+  coverage rather than once at full, and reads a little lighter. That is
+  the one visible difference chunking can make, and it is confined to the
+  seams where subpaths overlap under an opaque ink, where blending the same
+  colour twice changes only the antialiased fringe. `ctx.strokeChunking =
+false` turns the split off for a caller that needs those seams exact, and
+  `REACT_X11_NO_STROKE_CHUNKING=1` for a whole process.
+
+`fill` is not chunked and cannot be: the winding rule is a property of the
+path as a whole, so a hole in a shape stops being a hole once its ring is
+in a different call.
+
+The path is recorded in JS alongside the native one so a chunk can be
+re-issued — a flat number array, reused across paths. It costs an ordinary
+paint nothing measurable (20,000 rounded-rect fill+strokes: 601ms before,
+597ms after; 20,000 twelve-segment polylines: 113ms before, 116ms after),
+and the record is what puts the whole path back if a `fill`, a `clip` or
+more path building follows a stroke that consumed it. `test/cocoa-stroke-chunking.test.js`.
+
 ## Animations and transforms: the API the model unlocks
 
 The existing declarative vocabulary is the seam: `transition:` and
