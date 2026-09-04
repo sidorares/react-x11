@@ -10,7 +10,12 @@
 import React, { useContext, useMemo, useState } from 'react';
 import { useAppearanceWhen } from '../appearancehooks.js';
 import { EnvValue, registerFrameProvider } from '../frame/env.js';
-import { DarkTheme, DefaultTheme, resolveTheme } from '../palette.js';
+import {
+  DarkTheme,
+  DefaultTheme,
+  paletteFor,
+  resolveTheme,
+} from '../palette.js';
 
 const h = React.createElement;
 
@@ -67,14 +72,15 @@ const FILL = Object.freeze({ flexGrow: 1 });
  * <ThemeProvider value={light} dark={{ background: '#101418' }}>
  * ```
  *
- * The desktop's **accent** is deliberately not adopted on its own: an app in
- * dark mode did not ask for its buttons to change colour, and most portal
- * backends report no accent at all. Take it explicitly where you want it, and
- * keep a fallback:
+ * The desktop's **accent** is part of what a following provider follows: the
+ * base under `value` is the desktop's palette, accent and all, where the
+ * desktop reports one (`paletteFor`). A brand keeps its own colour by naming
+ * it — `value` wins over the base token for token — and a pinned
+ * `colorScheme` follows nothing, the accent included:
  *
  * ```jsx
- * const { accent } = useSystemAppearance();
- * <ThemeProvider value={{ ...brand, accent: accent ?? brand.accent }}>
+ * <ThemeProvider value={{ accent: '#e17055', accentHover: '#c0563a' }}>  // brand accent, desktop scheme
+ * <ThemeProvider value={brand} colorScheme="light">                       // neither
  * ```
  */
 export function ThemeProvider({
@@ -93,16 +99,17 @@ export function ThemeProvider({
   const system = useAppearanceWhen(follows);
   const wantsDark =
     colorScheme === 'dark' || (follows && system.colorScheme === 'dark');
+  // An outer provider is the base; with none, the base is the desktop's
+  // palette when this provider follows it and the scheme's own built-in one
+  // when pinned. So `value` names what this app changes and everything else
+  // keeps following the desktop. `paletteFor` answers with one object per
+  // desktop answer, so the memo below holds across renders.
+  const base =
+    outer ??
+    (follows ? paletteFor(system) : wantsDark ? DarkTheme : DefaultTheme);
   const theme = useMemo(
-    () =>
-      // An outer provider is the base; with none, the base is the scheme's
-      // own built-in palette. So `value` names what this app changes and
-      // everything else keeps following the desktop.
-      resolveTheme(
-        dark && wantsDark ? { ...value, ...dark } : value,
-        outer ?? (wantsDark ? DarkTheme : DefaultTheme),
-      ),
-    [outer, value, dark, wantsDark],
+    () => resolveTheme(dark && wantsDark ? { ...value, ...dark } : value, base),
+    [base, value, dark, wantsDark],
   );
   // A provider that **names** a direction plants it as a style too, so the
   // node tree mirrors along with the widgets: `useTheme().direction` is what
@@ -181,14 +188,14 @@ function planted(children, theme, style) {
  *
  * Identity matters: widgets plant what this returns on their own root node,
  * and a fresh object every render would re-resolve every `$token` beneath it
- * and defeat the resolution cache. Both built-in palettes are module
- * constants, so the unprovided answer is stable too.
+ * and defeat the resolution cache. `paletteFor` answers with one object per
+ * desktop answer, so the unprovided answer is stable too.
  */
 export function useTheme() {
   const provided = useContext(ThemeContext);
   const system = useAppearanceWhen(provided == null);
   if (provided) return provided;
-  return system.colorScheme === 'dark' ? DarkTheme : DefaultTheme;
+  return paletteFor(system);
 }
 
 /**

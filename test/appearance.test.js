@@ -20,6 +20,7 @@ import {
   fromMacOS,
   fromPortal,
   fromXSettings,
+  setAppearanceForTests,
   systemAppearance,
 } from '../src/appearance.js';
 import {
@@ -32,7 +33,7 @@ import {
 import { useSystemAppearance } from '../src/appearancehooks.js';
 import { ThemeProvider, useTheme } from '../src/components/theme.js';
 import { DarkTheme, DefaultTheme } from '../src/palette.js';
-import { tint } from '../src/styles.js';
+import { readableInk, tint } from '../src/styles.js';
 import { _resetBusState, busRefs, closeBus } from '../src/bus.js';
 import {
   act,
@@ -431,9 +432,28 @@ describe('the macOS rung', () => {
       {
         colorScheme: 'dark',
         accent: '#ff5900',
+        accentText: null,
         contrast: 'high',
         reducedMotion: false,
       },
+    );
+  });
+
+  // The ink travels with the fill. AppKit writes white on the orange accent
+  // (2.6:1) and on the pink, where a contrast ratio would choose dark
+  // letters; a palette that took the desktop's fill and chose its own ink
+  // would match neither the desktop nor itself.
+  test('the ink the desktop writes on its accent comes along', () => {
+    const values = fromMacOS(
+      '{"dark":false,"accent":[0.97,0.51,0.106],"accentText":[1,1,1]}',
+    );
+    assert.equal(values.accent, '#f7821b');
+    assert.equal(values.accentText, '#ffffff');
+    // and is checked the way the accent is: a triple in range or nothing
+    assert.equal(
+      fromMacOS('{"dark":false,"accent":[1,0,0],"accentText":"white"}')
+        .accentText,
+      null,
     );
   });
 
@@ -460,6 +480,9 @@ describe('the macOS rung', () => {
   // into a table that has to be maintained by hand.
   test('the watcher reads the frameworks, not defaults', () => {
     assert.match(MACOS_PROGRAM, /NSColor\.controlAccentColor/);
+    assert.match(MACOS_PROGRAM, /alternateSelectedControlTextColor/);
+    // resolved in the desktop's appearance, not the child's default Aqua
+    assert.match(MACOS_PROGRAM, /NSAppearanceNameDarkAqua/);
     assert.match(MACOS_PROGRAM, /accessibilityDisplayShouldReduceMotion/);
     assert.match(MACOS_PROGRAM, /accessibilityDisplayShouldIncreaseContrast/);
     assert.match(MACOS_PROGRAM, /AppleInterfaceStyle/);
@@ -486,6 +509,8 @@ describe('the settings portal', { concurrency: 1, ...needsBroker }, () => {
         assert.deepEqual(values, {
           colorScheme: 'dark',
           accent: '#ed5b00',
+          // the portal names a fill and nothing about what goes on it
+          accentText: null,
           contrast: 'high',
           reducedMotion: true,
           source: 'portal',
@@ -667,6 +692,7 @@ describe('the remembered answer', () => {
         v: 1,
         colorScheme: 'dark',
         accent: null,
+        accentText: null,
         contrast: 'normal',
         reducedMotion: false,
       });
@@ -690,6 +716,9 @@ describe('the remembered answer', () => {
     assert.deepEqual(appearanceSnapshot(), {
       colorScheme: 'dark',
       accent: '#ed5b00',
+      // a file from before the ink was remembered: null, and the palette
+      // picks the ink by contrast until the rung revalidates
+      accentText: null,
       contrast: 'normal',
       reducedMotion: true,
       // not 'xsettings': nothing has been asked, and saying otherwise would
@@ -721,6 +750,7 @@ describe('the remembered answer', () => {
         v: 1,
         colorScheme: 'DARK MODE PLEASE',
         accent: 'url(http://example.com)',
+        accentText: 'white',
         contrast: 42,
         reducedMotion: 'yes',
       }),
@@ -729,6 +759,7 @@ describe('the remembered answer', () => {
     assert.deepEqual(appearanceSnapshot(), {
       colorScheme: 'no-preference',
       accent: null,
+      accentText: null,
       contrast: 'normal',
       reducedMotion: false,
       source: 'cache',
@@ -862,6 +893,94 @@ describe('useSystemAppearance', () => {
       assert.equal(seen.at(-1), 'xsettings:dark:null');
       endXSettings(app);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+// **The accent follows on the same terms as the scheme.** On a desktop that
+// reports one, every control beside the app is already that colour — on the
+// Cocoa backend the app's *own* native bezels are drawn by AppKit in the
+// user's accent, so a blue `<Tabs>` indicator next to an orange checkbox
+// read as a bug. The seams are the ones the scheme has: a brand names its
+// own accent, and a pinned `colorScheme` follows nothing.
+describe('the desktop accent', () => {
+  afterEach(cleanup);
+
+  const ORANGE = {
+    colorScheme: 'dark',
+    accent: '#f7821b',
+    accentText: '#ffffff',
+  };
+
+  const Probe = () => {
+    const theme = useTheme();
+    return React.createElement(
+      'text',
+      null,
+      `${theme.accent}|${theme.accentText}|${theme.hoverBackground}`,
+    );
+  };
+  const shown = () => screen.getByText(/\|/).props.children;
+
+  test('with no provider at all, the widgets and the tokens take it', async () => {
+    const { ctx } = await renderX11(
+      React.createElement(
+        'box',
+        { style: { flexGrow: 1 } },
+        React.createElement('box', {
+          style: { width: 40, height: 40, backgroundColor: '$accent' },
+        }),
+        React.createElement(Probe),
+      ),
+      { fonts: FONTS, colorScheme: 'dark' },
+    );
+    await settle();
+    assert.equal(shown(), `${DarkTheme.accent}|white|${DarkTheme.accent}`);
+    await expectPixel(ctx, 5, 5, DarkTheme.accent, { tolerance: 2 });
+
+    // The desktop's accent changes under a running app — the same event as a
+    // light/dark switch, and both routes have to move: the widget through
+    // `useTheme()`, the `$accent` box through the node tree.
+    await act(async () => {
+      setAppearanceForTests(ORANGE);
+    });
+    await settle();
+    assert.equal(shown(), '#f7821b|#ffffff|#f7821b');
+    await expectPixel(ctx, 5, 5, '#f7821b', { tolerance: 2 });
+  });
+
+  test('a following provider keeps it; a brand or a pin does not', async () => {
+    setAppearanceForTests(ORANGE);
+    const under = (props) =>
+      React.createElement(ThemeProvider, props, React.createElement(Probe));
+    for (const [what, props, want] of [
+      [
+        'following, unnamed',
+        { value: { radius: 9 } },
+        '#f7821b|#ffffff|#f7821b',
+      ],
+      // the brand named its accent and stops there: its ink is re-picked for
+      // the fill it named, and the rest of the family is still the desktop's,
+      // which is what naming one token means everywhere
+      [
+        'a brand',
+        { value: { accent: '#123456' } },
+        `#123456|${readableInk('#123456', [DarkTheme.text, DarkTheme.background])}|#f7821b`,
+      ],
+      [
+        'pinned',
+        { value: { radius: 9 }, colorScheme: 'dark' },
+        `${DarkTheme.accent}|${DarkTheme.accentText}|${DarkTheme.hoverBackground}`,
+      ],
+    ]) {
+      await renderX11(under(props), { fonts: FONTS, colorScheme: 'dark' });
+      // `renderX11` pins the scheme alone; the accent is this test's
+      setAppearanceForTests(ORANGE);
+      await settle();
+      assert.equal(shown(), want, what);
+      await cleanup();
+    }
   });
 });
 

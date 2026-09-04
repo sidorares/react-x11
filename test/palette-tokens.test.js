@@ -19,7 +19,12 @@ import { test } from 'node:test';
 import React from 'react';
 
 import { Checkbox, Select, ThemeProvider, createRoot } from '../src/index.js';
-import { DarkTheme, DefaultTheme, resolveTheme } from '../src/palette.js';
+import {
+  DarkTheme,
+  DefaultTheme,
+  paletteFor,
+  resolveTheme,
+} from '../src/palette.js';
 import { readableInk } from '../src/styles.js';
 import { createMockApp } from './helpers/mock-app.js';
 
@@ -48,6 +53,111 @@ function ratio(a, b) {
   const [x, y] = [luminance(a), luminance(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
+
+// --- the desktop's accent ---------------------------------------------------
+
+// What the built-in palette becomes on a desktop that reports an accent:
+// the accent family and the focus ring move, `info` and the status colours
+// do not, and the steps are taken the way each scheme takes them.
+test('the desktop accent moves the accent family and nothing else', () => {
+  // the pressed step comes back as `rgba(...)` from `stepBeyond`
+  const hex = (c) => {
+    const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c);
+    return m
+      ? '#' +
+          m
+            .slice(1, 4)
+            .map((v) => (+v).toString(16).padStart(2, '0'))
+            .join('')
+      : c;
+  };
+  const lum = (c) => ratio(hex(c), '#000000');
+  for (const [scheme, base] of [
+    ['light', DefaultTheme],
+    ['dark', DarkTheme],
+  ]) {
+    const palette = paletteFor({
+      colorScheme: scheme,
+      accent: '#f7821b',
+      accentText: '#ffffff',
+    });
+    assert.equal(palette.accent, '#f7821b', scheme);
+    assert.equal(palette.hoverBackground, '#f7821b', scheme);
+    // the desktop's ink, not the contrast pick (which is dark on orange)
+    assert.equal(palette.accentText, '#ffffff', scheme);
+    assert.equal(palette.hoverText, '#ffffff', scheme);
+    // the hover sinks into a light ground and lifts off a dark one, and the
+    // press keeps going the same way
+    const direction = scheme === 'dark' ? 1 : -1;
+    assert.ok(
+      Math.sign(lum(palette.accentHover) - lum(palette.accent)) === direction,
+      `${scheme}: hover steps the palette's way`,
+    );
+    assert.ok(
+      Math.sign(lum(palette.accentActive) - lum(palette.accentHover)) ===
+        direction,
+      `${scheme}: the press steps beyond the hover`,
+    );
+    assert.equal(
+      palette.focusRing,
+      scheme === 'dark' ? palette.accentHover : palette.accent,
+      `${scheme}: the focus ring is the accent, lifted on dark`,
+    );
+    assert.equal(palette.borderFocus, palette.focusRing, scheme);
+    for (const token of [...STATUS, 'background', 'surface', 'text']) {
+      assert.equal(palette[token], base[token], `${scheme}: ${token} stays`);
+    }
+    // one object per desktop answer: identity is what the token cache keys on
+    assert.equal(
+      palette,
+      paletteFor({
+        colorScheme: scheme,
+        accent: '#f7821b',
+        accentText: '#ffffff',
+      }),
+    );
+  }
+  // no accent is the built-in palette itself, not a copy of it
+  assert.equal(paletteFor({ colorScheme: 'dark', accent: null }), DarkTheme);
+  assert.equal(
+    paletteFor({ colorScheme: 'light', accent: null }),
+    DefaultTheme,
+  );
+  assert.equal(
+    paletteFor({ colorScheme: 'no-preference', accent: null }),
+    DefaultTheme,
+  );
+});
+
+// The portal names a fill and nothing about what goes on it, so there the
+// ink is the contrast pick — the same rule any theme gets for a fill it
+// names and stops at.
+test('a desktop accent with no ink gets the legible one', () => {
+  for (const [scheme, base] of [
+    ['light', DefaultTheme],
+    ['dark', DarkTheme],
+  ]) {
+    for (const accent of ['#f7821b', '#ffd60a', '#1c3f95']) {
+      const palette = paletteFor({
+        colorScheme: scheme,
+        accent,
+        accentText: null,
+      });
+      assert.equal(
+        palette.accentText,
+        readableInk(accent, [base.text, base.background]),
+        `${scheme} ${accent}`,
+      );
+      assert.ok(
+        ratio(
+          palette.accentText === 'white' ? '#ffffff' : palette.accentText,
+          accent,
+        ) >= 3,
+        `${scheme} ${accent}: readable`,
+      );
+    }
+  }
+});
 
 // --- the status family ------------------------------------------------------
 

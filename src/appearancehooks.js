@@ -69,6 +69,7 @@ export function useAppearanceWhen(enabled) {
  * | --- | --- |
  * | `colorScheme` | `'light'`, `'dark'` or `'no-preference'` |
  * | `accent` | `'#ed5b00'`, or **null** — most backends do not implement it |
+ * | `accentText` | the ink the desktop puts on it — `'#ffffff'` on macOS — or **null** |
  * | `contrast` | `'normal'` or `'high'` |
  * | `reducedMotion` | `true` when the user asked for less animation |
  * | `source` | `'portal'`, `'xsettings'`, `'macos'`, `'cache'`, or null |
@@ -88,8 +89,9 @@ export function useAppearanceWhen(enabled) {
  * const [root] = await Promise.all([createRoot(), systemAppearance()]);
  * ```
  *
- * See `docs/appearance.md`, and `<ThemeProvider dark={…}>` for the case where
- * all you want is for the app to follow the desktop.
+ * The built-in palette already follows both the scheme and the accent, so
+ * an app that only wants to look like it belongs needs none of this — see
+ * `docs/appearance.md`.
  */
 export function useSystemAppearance() {
   return useAppearance(true);

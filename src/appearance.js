@@ -1,6 +1,6 @@
 // What the desktop looks like, as four values an app can render from:
-// light or dark, the accent colour, contrast, and whether the user asked for
-// less motion.
+// light or dark, the accent colour (with the ink the desktop puts on it,
+// where it names one), contrast, and whether the user asked for less motion.
 //
 // ## Why this is a ladder and not a call
 //
@@ -77,6 +77,7 @@ const APPEARANCE_NS = 'org.freedesktop.appearance';
 const NOTHING = Object.freeze({
   colorScheme: 'no-preference',
   accent: null,
+  accentText: null,
   contrast: 'normal',
   reducedMotion: false,
   source: null,
@@ -109,6 +110,7 @@ const watchers = new Set();
 const SAME = (a, b) =>
   a.colorScheme === b.colorScheme &&
   a.accent === b.accent &&
+  a.accentText === b.accentText &&
   a.contrast === b.contrast &&
   a.reducedMotion === b.reducedMotion &&
   a.source === b.source;
@@ -220,6 +222,9 @@ function sanitize(saved) {
       ? saved.colorScheme
       : 'no-preference',
     accent: /^#[0-9a-f]{6}$/i.test(saved?.accent) ? saved.accent : null,
+    accentText: /^#[0-9a-f]{6}$/i.test(saved?.accentText)
+      ? saved.accentText
+      : null,
     contrast: saved?.contrast === 'high' ? 'high' : 'normal',
     reducedMotion: saved?.reducedMotion === true,
   };
@@ -279,6 +284,7 @@ function save(values) {
         v: CACHE_VERSION,
         colorScheme: values.colorScheme,
         accent: values.accent,
+        accentText: values.accentText,
         contrast: values.contrast,
         reducedMotion: values.reducedMotion,
       }),
@@ -343,6 +349,9 @@ export function fromPortal(ns = {}) {
   return {
     colorScheme: schemeFromPortal(ns['color-scheme']),
     accent: accentFromPortal(ns['accent-color']),
+    // The portal names the fill and nothing about what goes on it; the
+    // palette picks the legible ink itself (`resolveTheme`).
+    accentText: null,
     contrast: ns.contrast === 1 ? 'high' : 'normal',
     // version 2 of the interface; on version 1 the key is simply absent and
     // "no" is the right answer
@@ -473,6 +482,7 @@ export function fromXSettings(map) {
     colorScheme: dark ? 'dark' : theme ? 'light' : 'no-preference',
     // XSETTINGS has no accent colour. Not "none set" — no such key exists.
     accent: null,
+    accentText: null,
     contrast: high ? 'high' : 'normal',
     reducedMotion: animations === 0,
   };
@@ -509,23 +519,42 @@ async function xsettingsRung(app) {
  * already resolved, and `NSWorkspace` answers the two accessibility flags
  * directly.
  *
+ * **The ink is read too.** `alternateSelectedControlTextColor` is what AppKit
+ * writes on a control filled with the accent, and it is not what a contrast
+ * ratio would choose: white on the orange accent is 2.6:1, and every native
+ * control does it anyway. A palette that follows the desktop's fill and
+ * picks its own letters for it looks like neither — so the pair travels
+ * together, and `accentText` is null from the sources that have no ink to
+ * name (the portal), where the palette decides by contrast.
+ *
  * Exported so a test can pin the source; it cannot be executed on Linux.
  */
 export const MACOS_PROGRAM = `
 ObjC.import('AppKit');
 var ud = $.NSUserDefaults.standardUserDefaults;
 var ws = $.NSWorkspace.sharedWorkspace;
+function srgb(color) {
+  var c = color.colorUsingColorSpace($.NSColorSpace.sRGBColorSpace);
+  return c.isNil() ? null : [c.redComponent, c.greenComponent, c.blueComponent];
+}
 function read() {
   var style = ud.stringForKey('AppleInterfaceStyle');
+  var dark = !style.isNil() && ObjC.unwrap(style) === 'Dark';
   var accent = null;
+  var accentText = null;
   try {
-    var c = $.NSColor.controlAccentColor.colorUsingColorSpace(
-      $.NSColorSpace.sRGBColorSpace);
-    if (!c.isNil()) accent = [c.redComponent, c.greenComponent, c.blueComponent];
+    // Dynamic colours resolve in the *current* appearance, which in a bare
+    // osascript is Aqua whatever the desktop is in; the ink AppKit puts on
+    // a filled control is allowed to differ between the two.
+    $.NSAppearance.setCurrentAppearance($.NSAppearance.appearanceNamed(
+      dark ? $.NSAppearanceNameDarkAqua : $.NSAppearanceNameAqua));
+    accent = srgb($.NSColor.controlAccentColor);
+    accentText = srgb($.NSColor.alternateSelectedControlTextColor);
   } catch (e) {}
   return JSON.stringify({
-    dark: !style.isNil() && ObjC.unwrap(style) === 'Dark',
+    dark: dark,
     accent: accent,
+    accentText: accentText,
     reducedMotion: !!ws.accessibilityDisplayShouldReduceMotion,
     contrast: !!ws.accessibilityDisplayShouldIncreaseContrast
   });
@@ -558,6 +587,8 @@ export function fromMacOS(line) {
     // is *light* rather than "no preference".
     colorScheme: parsed.dark ? 'dark' : 'light',
     accent: accentFromPortal(parsed.accent),
+    // The same `(r, g, b)` shape as the accent, by construction above
+    accentText: accentFromPortal(parsed.accentText),
     contrast: parsed.contrast ? 'high' : 'normal',
     reducedMotion: Boolean(parsed.reducedMotion),
   };

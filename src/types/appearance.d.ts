@@ -32,6 +32,13 @@ export interface SystemAppearance {
    * own brand colour rather than to grey.
    */
   readonly accent: string | null;
+  /**
+   * The ink the desktop writes on its accent — `'#ffffff'` on macOS, whatever
+   * the accent — or **null** where the source names a fill and nothing about
+   * what goes on it (the portal). The built-in palette uses it as
+   * `accentText`, and picks the legible ink by contrast where it is null.
+   */
+  readonly accentText: string | null;
   readonly contrast: 'normal' | 'high';
   readonly reducedMotion: boolean;
   /**
