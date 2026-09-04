@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.6.1](https://github.com/sidorares/react-x11/compare/v2.6.0...v2.6.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **cocoa:** each monitor publishes its own usable rect ([#453](https://github.com/sidorares/react-x11/issues/453)) ([#454](https://github.com/sidorares/react-x11/issues/454)) ([a29d81c](https://github.com/sidorares/react-x11/commit/a29d81c0ea32af7f9da8ee474f7e6065cd4e4e8f))
+
+
+### Performance Improvements
+
+* **cocoa:** a stroke of many subpaths goes out in chunks ([#456](https://github.com/sidorares/react-x11/issues/456)) ([#457](https://github.com/sidorares/react-x11/issues/457)) ([bf202a3](https://github.com/sidorares/react-x11/commit/bf202a3d69ccd8a6cffd156707f0ea5102c9d716))
+
 ## [2.6.0](https://github.com/sidorares/react-x11/compare/v2.5.0...v2.6.0) (2026-09-03)
 
 
