@@ -1416,6 +1416,37 @@ The strategy mirrors the X11 suite's shape rather than its mechanism:
   for the presenter, not an afterthought — the scroll and transition
   scenarios are the reason Tier L exists, so they are what fences it.
 
+### The swapchain, in pixels
+
+Counting bridge calls is the right shape for a frame clock and the wrong
+one for a fast path whose only observable is the picture. The scroll blit
+is the case: `scrollRegion` shifts a band inside the **back** buffer, the
+frame repaints only the strips the shift exposed, and what carries the
+band into the other buffer is the flip's catch-up copy over the rects
+`noteFrameDamage` collected. A catch-up covering the wrong rects leaves a
+buffer one shift stale, and a pan then smears — a staircase of duplicated
+content at increasing offsets, which is what issue #458 reports.
+
+Two harnesses answer it, and they answer the same question:
+
+- `test/cocoa-scroll-blit.test.js` runs in CI on any OS. Its bridge holds
+  real rasters — a byte per pixel, `ScrollSurface` and `CopySurfaceRegion`
+  written out with the natives' own clamping — and the proof obligation is
+  one line: render the same pane into two windows, delete `scrollRegion`
+  on the second (which is how nodes.js feature-detects a backend without
+  the fast path), and the buffer handed to the layer must hold the picture
+  the repaint painted. Then the frames a pan meets: bursts coalesced into
+  one frame, a frame painted but not presented, a present held or
+  occluded, a resize mid-gesture, and two fuzzers over all of it.
+- `scripts/cocoa-blit-probe.mjs` is the same comparison over the real
+  bridge — CoreGraphics contexts, IOSurfaces, an actual swapchain — for
+  when the question is whether the bridge does what the model says. Not
+  part of the suite (it needs macOS); run it when the swapchain or the
+  bridge's surface verbs change.
+
+Both also count the blits, because two windows that both repainted agree
+about everything and prove nothing.
+
 ## The plan
 
 Each phase has an exit that makes the next safe to start; the first two
