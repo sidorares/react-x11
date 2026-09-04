@@ -93,6 +93,61 @@ const PICT_OP = Object.freeze({ Src: 1, Over: 3 });
 const RENDER = Object.freeze({ PictOp: PICT_OP });
 
 /**
+ * The path, recorded alongside the native one, so `stroke` can re-issue it
+ * in pieces — `CGContextStrokePath` is QUADRATIC in the number of subpaths
+ * in the path it is given (issue #456). Measured here, 13-vertex closed
+ * rings scattered over a 1024x1024 surface at a 2px line, one stroke call:
+ *
+ *    500 rings  20ms | 1000 rings  59ms | 2000 rings 208ms | 4000 rings 986ms
+ *
+ * Splitting the same geometry into strokes of a few hundred subpaths is
+ * linear in it: 14ms, 29ms, 56ms, 113ms. The driver is the subpath count,
+ * not the vertex count — one 26,000-vertex subpath strokes in 4ms where
+ * two thousand 13-vertex ones take 208. The full table, the two shapes
+ * left whole and why, are in docs/macos.md
+ * §"Stroking a path with many subpaths".
+ *
+ * Note the X11 context wants the opposite — there a stroke is an a8
+ * coverage mask over the path's bounding box uploaded with one PutImage,
+ * so a bigger path is fewer uploads over the same pixels. That is why this
+ * lives in the backend: a caller that batches for one backend pessimizes
+ * the other, and it cannot know which it is drawing on.
+ *
+ * The commands are a flat number array — `[op, ...args, op, ...args]` —
+ * reused across paths, so a path build is three pushes into a packed
+ * double array per point next to the napi call it already makes.
+ */
+const P_MOVE = 0;
+const P_LINE = 1;
+const P_CURVE = 2;
+const P_QUAD = 3;
+const P_CLOSE = 4;
+const P_RECT = 5;
+const P_ROUND = 6;
+const P_ARC = 7;
+const P_ELLIPSE = 8;
+/** how many numbers each op carries, and what it costs a chunk's budget */
+const P_ARGS = [2, 2, 6, 4, 0, 4, 8, 6, 4];
+const P_POINTS = [1, 1, 3, 2, 0, 4, 8, 8, 4];
+
+/**
+ * A chunk closes at the first subpath boundary past either budget. Swept
+ * over the shapes above: 512 points is within 5% of the best chunk for
+ * every one of them, and the subpath cap catches the degenerate shape the
+ * point budget misses — thousands of 3- and 4-point subpaths, where 512
+ * points is already 128 strokes' worth of setup.
+ */
+const STROKE_CHUNK_POINTS = 512;
+const STROKE_CHUNK_SUBPATHS = 128;
+
+/**
+ * The off switch, for a process that cannot reach the context — the same
+ * line `ctx.strokeChunking = false` draws, and what a bench comparing the
+ * two sets. Read once.
+ */
+const NO_STROKE_CHUNKING = process.env.REACT_X11_NO_STROKE_CHUNKING === '1';
+
+/**
  * A solid ink for `drawGlyphs` — ntk's `createSolidPicture` answers an
  * XRender picture; here it is the colour itself. Premultiplied 0..1 in, as
  * XRender solids are (the identity for the opaque inks text uses), straight
@@ -136,6 +191,11 @@ export class CocoaContext2D {
       ctm: [1, 0, 0, 1, 0, 0],
     };
     this._onDirty = null;
+    // the recorded path, and whether the native one still matches it (a
+    // chunked stroke leaves only its last chunk behind)
+    this._cmds = [];
+    this._pathStale = false;
+    this._strokeChunking = !NO_STROKE_CHUNKING;
   }
 
   _s() {
@@ -152,6 +212,10 @@ export class CocoaContext2D {
       n.ctxSetGlobalAlpha(surface, st.globalAlpha);
       n.ctxSetLineDash(surface, st.dash, st.dashOffset);
       this._stack.length = 0;
+      // the path went with the surface it was built on; nothing may
+      // replay it onto the new one
+      this._cmds.length = 0;
+      this._pathStale = false;
     }
     return surface;
   }
@@ -216,6 +280,26 @@ export class CocoaContext2D {
       this._state.globalAlpha = value;
       this._native.ctxSetGlobalAlpha(this._s(), value);
     }
+  }
+
+  /**
+   * Whether a stroke of a path with many subpaths may go out as several
+   * `CGContextStrokePath` calls — on by default, because the alternative
+   * is quadratic (see P_MOVE above) and every path small enough for the
+   * difference to be invisible is below the threshold anyway.
+   *
+   * Set it false for a path whose subpaths OVERLAP and whose seams have to
+   * composite exactly: chunked, a pixel the strokes of two subpaths each
+   * half cover is inked twice at half coverage rather than once at full,
+   * and reads a little lighter. `REACT_X11_NO_STROKE_CHUNKING=1` is the
+   * same switch for a whole process.
+   */
+  get strokeChunking() {
+    return this._strokeChunking;
+  }
+
+  set strokeChunking(value) {
+    this._strokeChunking = !!value;
   }
 
   get font() {
@@ -389,20 +473,96 @@ export class CocoaContext2D {
 
   // --- paths ---------------------------------------------------------------
 
+  /**
+   * The surface to build or paint the current path on, with the native
+   * path restored first if a chunked stroke consumed it. Lazy on purpose:
+   * a caller that strokes and then starts a new path — which is every
+   * caller in a paint loop — never pays for the rebuild.
+   */
+  _path() {
+    const surface = this._s();
+    if (this._pathStale) {
+      this._pathStale = false;
+      this._native.ctxBeginPath(surface);
+      this._emit(surface, 0, this._cmds.length);
+    }
+    return surface;
+  }
+
+  /** replay recorded commands `[from, to)` into the native path */
+  _emit(surface, from, to) {
+    const c = this._cmds;
+    const n = this._native;
+    for (let i = from; i < to;) {
+      const op = c[i];
+      const a = i + 1;
+      if (op === P_MOVE) n.ctxMoveTo(surface, c[a], c[a + 1]);
+      else if (op === P_LINE) n.ctxLineTo(surface, c[a], c[a + 1]);
+      else if (op === P_CURVE)
+        n.ctxCurveTo(
+          surface,
+          c[a],
+          c[a + 1],
+          c[a + 2],
+          c[a + 3],
+          c[a + 4],
+          c[a + 5],
+        );
+      else if (op === P_QUAD)
+        n.ctxQuadTo(surface, c[a], c[a + 1], c[a + 2], c[a + 3]);
+      else if (op === P_CLOSE) n.ctxClosePath(surface);
+      else if (op === P_RECT)
+        n.ctxRect(surface, c[a], c[a + 1], c[a + 2], c[a + 3]);
+      else if (op === P_ROUND)
+        n.ctxRoundRect(
+          surface,
+          c[a],
+          c[a + 1],
+          c[a + 2],
+          c[a + 3],
+          c[a + 4],
+          c[a + 5],
+          c[a + 6],
+          c[a + 7],
+        );
+      else if (op === P_ARC)
+        n.ctxArc(
+          surface,
+          c[a],
+          c[a + 1],
+          c[a + 2],
+          c[a + 3],
+          c[a + 4],
+          !!c[a + 5],
+        );
+      else if (op === P_ELLIPSE)
+        n.ctxEllipse(surface, c[a], c[a + 1], c[a + 2], c[a + 3]);
+      i += 1 + P_ARGS[op];
+    }
+  }
+
   beginPath() {
+    this._cmds.length = 0;
+    this._pathStale = false;
     this._native.ctxBeginPath(this._s());
   }
 
   moveTo(x, y) {
-    this._native.ctxMoveTo(this._s(), x, y);
+    const surface = this._path();
+    this._cmds.push(P_MOVE, x, y);
+    this._native.ctxMoveTo(surface, x, y);
   }
 
   lineTo(x, y) {
-    this._native.ctxLineTo(this._s(), x, y);
+    const surface = this._path();
+    this._cmds.push(P_LINE, x, y);
+    this._native.ctxLineTo(surface, x, y);
   }
 
   rect(x, y, w, h) {
-    this._native.ctxRect(this._s(), x, y, w, h);
+    const surface = this._path();
+    this._cmds.push(P_RECT, x, y, w, h);
+    this._native.ctxRect(surface, x, y, w, h);
   }
 
   roundRect(x, y, w, h, radii) {
@@ -413,37 +573,45 @@ export class CocoaContext2D {
     else if (r.length === 3) r = [r[0], r[1], r[2], r[1]];
     const cap = Math.min(Math.abs(w) / 2, Math.abs(h) / 2);
     const clamp = (v) => Math.max(0, Math.min(Number(v) || 0, cap));
-    this._native.ctxRoundRect(
-      this._s(),
-      x,
-      y,
-      w,
-      h,
+    const surface = this._path();
+    const [r0, r1, r2, r3] = [
       clamp(r[0]),
       clamp(r[1]),
       clamp(r[2]),
       clamp(r[3]),
-    );
+    ];
+    this._cmds.push(P_ROUND, x, y, w, h, r0, r1, r2, r3);
+    this._native.ctxRoundRect(surface, x, y, w, h, r0, r1, r2, r3);
   }
 
   arc(x, y, radius, start, end, anticlockwise = false) {
-    this._native.ctxArc(this._s(), x, y, radius, start, end, anticlockwise);
+    const surface = this._path();
+    this._cmds.push(P_ARC, x, y, radius, start, end, anticlockwise ? 1 : 0);
+    this._native.ctxArc(surface, x, y, radius, start, end, anticlockwise);
   }
 
   ellipse(x, y, rx, ry) {
-    this._native.ctxEllipse(this._s(), x, y, rx, ry);
+    const surface = this._path();
+    this._cmds.push(P_ELLIPSE, x, y, rx, ry);
+    this._native.ctxEllipse(surface, x, y, rx, ry);
   }
 
   bezierCurveTo(c1x, c1y, c2x, c2y, x, y) {
-    this._native.ctxCurveTo(this._s(), c1x, c1y, c2x, c2y, x, y);
+    const surface = this._path();
+    this._cmds.push(P_CURVE, c1x, c1y, c2x, c2y, x, y);
+    this._native.ctxCurveTo(surface, c1x, c1y, c2x, c2y, x, y);
   }
 
   quadraticCurveTo(cx, cy, x, y) {
-    this._native.ctxQuadTo(this._s(), cx, cy, x, y);
+    const surface = this._path();
+    this._cmds.push(P_QUAD, cx, cy, x, y);
+    this._native.ctxQuadTo(surface, cx, cy, x, y);
   }
 
   closePath() {
-    this._native.ctxClosePath(this._s());
+    const surface = this._path();
+    this._cmds.push(P_CLOSE);
+    this._native.ctxClosePath(surface);
   }
 
   // --- painting ------------------------------------------------------------
@@ -477,17 +645,87 @@ export class CocoaContext2D {
   _replayPath(path) {
     const cmds = path?._cmds;
     if (!Array.isArray(cmds)) return false;
-    const n = this._native;
-    const s = this._s();
-    n.ctxBeginPath(s);
+    this.beginPath();
     for (const c of cmds) {
-      if (c.type === 'M') n.ctxMoveTo(s, c.x, c.y);
-      else if (c.type === 'L') n.ctxLineTo(s, c.x, c.y);
+      if (c.type === 'M') this.moveTo(c.x, c.y);
+      else if (c.type === 'L') this.lineTo(c.x, c.y);
       else if (c.type === 'C')
-        n.ctxCurveTo(s, c.x1, c.y1, c.x2, c.y2, c.x, c.y);
-      else if (c.type === 'Q') n.ctxQuadTo(s, c.x1, c.y1, c.x, c.y);
-      else if (c.type === 'Z') n.ctxClosePath(s);
+        this.bezierCurveTo(c.x1, c.y1, c.x2, c.y2, c.x, c.y);
+      else if (c.type === 'Q') this.quadraticCurveTo(c.x1, c.y1, c.x, c.y);
+      else if (c.type === 'Z') this.closePath();
     }
+    return true;
+  }
+
+  /**
+   * Whether a stroke of the current path may be split into several
+   * `CGContextStrokePath` calls. Two things say no:
+   *
+   * - A hairline. At or below a device-space width of 1 CoreGraphics
+   *   strokes through a path that is already linear in the subpath count
+   *   — 2,000 rings cost 7ms whole — and splitting it is a 2x LOSS, the
+   *   per-call setup with nothing to win back.
+   * - Anything that composites. Each chunk paints separately, so where two
+   *   subpaths' strokes overlap, a translucent ink, a globalAlpha or a
+   *   shadow blends twice and reads darker where one call blends the union
+   *   once. An opaque ink is exact everywhere the coverage is full, which
+   *   is what the geometry that gets big looks like; what is left is the
+   *   antialiased fringe at those same overlaps, half-covered twice
+   *   instead of covered once, which reads a little lighter — the one
+   *   difference `strokeChunking` exists to turn off.
+   */
+  _chunkableStroke() {
+    if (!this._strokeChunking) return false;
+    const st = this._state;
+    const [a, b, c, d] = st.ctm;
+    const scale = Math.sqrt(Math.abs(a * d - b * c));
+    if (!(st.lineWidth * scale > 1)) return false;
+    if (st.globalAlpha < 1) return false;
+    if (parseColor(st.strokeStyle)[3] < 1) return false;
+    if (st.shadowBlur > 0 && parseColor(st.shadowColor)[3] > 0) return false;
+    return true;
+  }
+
+  /**
+   * Stroke the recorded path as a series of chunks, cut at subpath
+   * boundaries so every chunk carries the `moveTo` its segments start
+   * from. Answers false when there was nothing to split, leaving the
+   * native path untouched for the caller's single stroke.
+   */
+  _strokeChunks(surface) {
+    if (!this._chunkableStroke()) return false;
+    const cmds = this._cmds;
+    const n = this._native;
+    let start = 0;
+    let points = 0;
+    let subpaths = 0;
+    let split = false;
+    for (let i = 0; i < cmds.length;) {
+      const op = cmds[i];
+      if (
+        op === P_MOVE &&
+        i > start &&
+        (points >= STROKE_CHUNK_POINTS || subpaths >= STROKE_CHUNK_SUBPATHS)
+      ) {
+        n.ctxBeginPath(surface);
+        this._emit(surface, start, i);
+        n.ctxStroke(surface);
+        split = true;
+        start = i;
+        points = 0;
+        subpaths = 0;
+      }
+      if (op === P_MOVE) subpaths++;
+      points += P_POINTS[op];
+      i += 1 + P_ARGS[op];
+    }
+    if (!split) return false;
+    n.ctxBeginPath(surface);
+    this._emit(surface, start, cmds.length);
+    n.ctxStroke(surface);
+    // the native path is the last chunk now; _path() puts the whole one
+    // back if anything asks for it
+    this._pathStale = true;
     return true;
   }
 
@@ -495,6 +733,7 @@ export class CocoaContext2D {
     const hasPath = pathOrRule != null && typeof pathOrRule === 'object';
     const rule = hasPath ? maybeRule : pathOrRule;
     if (hasPath && !this._replayPath(pathOrRule)) return;
+    this._path();
     const style = this._state.fillStyle;
     if (style instanceof LinearGradient) {
       const { coords, flat } = style._normalized();
@@ -518,7 +757,14 @@ export class CocoaContext2D {
       return;
     }
     this._applyStroke();
-    this._native.ctxStroke(this._s());
+    // one call per chunk where the path has enough subpaths to be worth it
+    // — see P_MOVE and _chunkableStroke above — and one for everything
+    // else. The chunks are issued from the record, so a stroke that splits
+    // never pays for the restore a previous split owed: `_path()` is asked
+    // for the surface only on the whole-path route.
+    if (!this._strokeChunks(this._s())) {
+      this._native.ctxStroke(this._path());
+    }
     this._dirty();
   }
 
@@ -530,7 +776,7 @@ export class CocoaContext2D {
     ) {
       return;
     }
-    this._native.ctxClip(this._s());
+    this._native.ctxClip(this._path());
   }
 
   fillRect(x, y, w, h) {

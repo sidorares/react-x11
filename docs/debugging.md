@@ -181,6 +181,23 @@ from a bounded repaint — culled by a reach nobody updated — this is the
 first thing to try, and a fix that lands here is a change nobody announced
 through `invalidate`. Read once at startup; answers only to `1`.
 
+## `REACT_X11_NO_STROKE_CHUNKING=1` (macOS)
+
+Makes the Cocoa 2d context hand every stroke to CoreGraphics in one
+`CGContextStrokePath`, instead of splitting a path with many subpaths into
+several — [docs/macos.md](macos.md#stroking-a-path-with-many-subpaths) for
+what the split buys (a 4,000-subpath stroke goes from 986ms to 113ms) and
+the one thing it costs (the antialiased fringe where two subpaths' strokes
+overlap is half-covered twice rather than covered once, and reads a little
+lighter). Set this to compare the two on the same build, or as first aid if
+a drawing that strokes thousands of subpaths ever looks wrong at its seams.
+`ctx.strokeChunking = false` is the same switch for one context. Read once
+at startup, like the switches above, and answers only to `1`.
+
+Nothing on X11 reads it: there a stroke is one coverage mask over the
+path's bounding box, so a bigger path is _fewer_ uploads and the split
+would be a loss.
+
 ## `REACT_X11_NO_TRANSPARENCY=1`
 
 Makes every display answer the way one with no 32-bit visual does:
