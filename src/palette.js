@@ -405,7 +405,10 @@ function mixHex(hex, toward, amount) {
  * The built-in palette with the desktop's accent on it.
  *
  * Only the accent family moves — `accent`, its hover, the menu-row highlight
- * that is the same colour in both built-in palettes, and the focus ring —
+ * (the desktop's own selection shade where it names one: on macOS that is a
+ * darker cut of the accent, and a row lit in the raw accent beside a native
+ * menu reads as too bright; the accent itself otherwise, as in both built-in
+ * palettes), and the focus ring —
  * and the steps are taken the way each palette takes them: the hover sinks
  * into a light ground and lifts off a dark one, and `resolveTheme` derives
  * the press from the pair. `info` stays its own blue, as it does under a
@@ -418,7 +421,7 @@ function mixHex(hex, toward, amount) {
  * `resolveTheme` picks the legible one, as it does for any theme that names
  * a fill and stops there.
  */
-function withDesktopAccent(scheme, accent, ink) {
+function withDesktopAccent(scheme, accent, ink, selection) {
   const dark = scheme.scheme === 'dark';
   const accentHover = dark
     ? mixHex(accent, '#ffffff', 0.2)
@@ -427,7 +430,7 @@ function withDesktopAccent(scheme, accent, ink) {
   const value = {
     accent,
     accentHover,
-    hoverBackground: accent,
+    hoverBackground: selection ?? accent,
     borderFocus: focus,
     focusRing: focus,
   };
@@ -461,13 +464,13 @@ const desktopPalettes = new Map();
  */
 export function paletteFor(appearance) {
   const scheme = appearance.colorScheme === 'dark' ? DarkTheme : DefaultTheme;
-  const { accent, accentText } = appearance;
+  const { accent, accentText, selection } = appearance;
   if (!accent) return scheme;
-  const key = `${scheme.scheme} ${accent} ${accentText ?? ''}`;
+  const key = `${scheme.scheme} ${accent} ${accentText ?? ''} ${selection ?? ''}`;
   let palette = desktopPalettes.get(key);
   if (!palette) {
     if (desktopPalettes.size >= 8) desktopPalettes.clear();
-    palette = withDesktopAccent(scheme, accent, accentText);
+    palette = withDesktopAccent(scheme, accent, accentText, selection);
     desktopPalettes.set(key, palette);
   }
   return palette;

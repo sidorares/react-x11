@@ -19,14 +19,15 @@ something that is not a widget, or a design decision that is not a palette.
 
 ## The four values
 
-|                 |                                                                                |
-| --------------- | ------------------------------------------------------------------------------ |
-| `colorScheme`   | `'light'`, `'dark'` or `'no-preference'`                                       |
-| `accent`        | `'#ed5b00'`, or **null**                                                       |
-| `accentText`    | the ink the desktop writes on its accent — `'#ffffff'` on macOS — or **null**  |
-| `contrast`      | `'normal'` or `'high'`                                                         |
-| `reducedMotion` | `true` when the user asked for less animation                                  |
-| `source`        | which rung answered — `'portal'`, `'xsettings'`, `'macos'`, `'cache'`, or null |
+|                 |                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `colorScheme`   | `'light'`, `'dark'` or `'no-preference'`                                                       |
+| `accent`        | `'#ed5b00'`, or **null**                                                                       |
+| `accentText`    | the ink the desktop writes on its accent — `'#ffffff'` on macOS — or **null**                  |
+| `selection`     | the fill under a selected menu or list row — a darker cut of the accent on macOS — or **null** |
+| `contrast`      | `'normal'` or `'high'`                                                                         |
+| `reducedMotion` | `true` when the user asked for less animation                                                  |
+| `source`        | which rung answered — `'portal'`, `'xsettings'`, `'macos'`, `'cache'`, or null                 |
 
 Two of these are easy to get wrong.
 
@@ -51,6 +52,14 @@ letters on, and every native control does. The portal names a fill and nothing
 about what goes on it, so there it is null and the palette picks the legible
 ink by contrast, as it does for any theme that names a fill and stops there.
 
+`selection` is the third colour a desktop names, and macOS is again the one
+that does: a selected menu row or list row is filled not with the accent but
+with `selectedContentBackgroundColor`, a darker cut of it — same hue,
+lightness 0.54 → 0.40 in dark and 0.45 in light for the orange, hand-tuned per
+accent rather than computed from it. The built-in palette uses it as
+`hoverBackground`; a menu lit in the raw accent beside a native one reads as
+too bright.
+
 ## The first frame
 
 None of this can be known synchronously — the answer is a D-Bus call away —
@@ -74,7 +83,7 @@ run 1   {colorScheme: 'no-preference', accent: null,      source: null}      ←
 run 2   {colorScheme: 'dark',          accent: '#ed5b00', source: 'cache'}   ← 0.1 ms, first render
         {colorScheme: 'dark',          accent: '#ed5b00', source: 'portal'}  ← revalidated
 
-(`accentText`, `contrast` and `reducedMotion` travel with them.)
+(`accentText`, `selection`, `contrast` and `reducedMotion` travel with them.)
 ```
 
 Revalidation costs one re-render even when nothing moved, because `source`
@@ -111,7 +120,8 @@ about colour is dark on a dark desktop and light on a light one, the way a
 GTK or Qt app is, and where the desktop reports an accent — macOS always,
 GNOME 47+ and KDE through the portal — `$accent` and the family around it
 (`accentHover`, the pressed step, `hoverBackground`, the focus ring) are that
-colour. The window background, the widgets and every `$token` in a style all
+colour, and `hoverBackground` is the desktop's own selection shade where it
+names one. The window background, the widgets and every `$token` in a style all
 come from it.
 
 ```jsx
@@ -287,6 +297,7 @@ off along with the other two integrations that talk to the session bus.
 | `colorScheme`   | yes                                  | from the theme name | yes   |
 | `accent`        | yes, where the backend implements it | **no such key**     | yes   |
 | `accentText`    | no — the palette picks by contrast   | no                  | yes   |
+| `selection`     | no — the accent itself               | no                  | yes   |
 | `contrast`      | yes                                  | from the theme name | yes   |
 | `reducedMotion` | version 2 of the interface           | rarely — see below  | yes   |
 
@@ -319,7 +330,8 @@ changes that setting, so "key not found" is the normal answer rather than the
 error case, and `AppleAccentColor` is an index into a table that has to be
 maintained by hand. `NSColor.controlAccentColor` is the colour itself, with
 Multicolor already resolved, `alternateSelectedControlTextColor` is the ink
-AppKit writes on it (resolved in the appearance the desktop is in, since a
+AppKit writes on it, `selectedContentBackgroundColor` is the shade under a
+selected row (both resolved in the appearance the desktop is in, since a
 dynamic colour in a bare `osascript` resolves as Aqua otherwise), and
 `NSWorkspace` answers the two accessibility flags directly. The Cocoa backend
 reads the same child: it is one source for both backends, and the accent it

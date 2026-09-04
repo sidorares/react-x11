@@ -78,6 +78,7 @@ const NOTHING = Object.freeze({
   colorScheme: 'no-preference',
   accent: null,
   accentText: null,
+  selection: null,
   contrast: 'normal',
   reducedMotion: false,
   source: null,
@@ -111,6 +112,7 @@ const SAME = (a, b) =>
   a.colorScheme === b.colorScheme &&
   a.accent === b.accent &&
   a.accentText === b.accentText &&
+  a.selection === b.selection &&
   a.contrast === b.contrast &&
   a.reducedMotion === b.reducedMotion &&
   a.source === b.source;
@@ -217,14 +219,17 @@ const SCHEMES = new Set(['light', 'dark', 'no-preference']);
  * colour is the one thing worth being sure of.
  */
 function sanitize(saved) {
+  // A string, checked as one: `RegExp.test` coerces, and `['#ed5b00']`
+  // would pass the pattern and then reach a style as an array.
+  const hex = (value) =>
+    typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : null;
   return {
     colorScheme: SCHEMES.has(saved?.colorScheme)
       ? saved.colorScheme
       : 'no-preference',
-    accent: /^#[0-9a-f]{6}$/i.test(saved?.accent) ? saved.accent : null,
-    accentText: /^#[0-9a-f]{6}$/i.test(saved?.accentText)
-      ? saved.accentText
-      : null,
+    accent: hex(saved?.accent),
+    accentText: hex(saved?.accentText),
+    selection: hex(saved?.selection),
     contrast: saved?.contrast === 'high' ? 'high' : 'normal',
     reducedMotion: saved?.reducedMotion === true,
   };
@@ -285,6 +290,7 @@ function save(values) {
         colorScheme: values.colorScheme,
         accent: values.accent,
         accentText: values.accentText,
+        selection: values.selection,
         contrast: values.contrast,
         reducedMotion: values.reducedMotion,
       }),
@@ -349,9 +355,11 @@ export function fromPortal(ns = {}) {
   return {
     colorScheme: schemeFromPortal(ns['color-scheme']),
     accent: accentFromPortal(ns['accent-color']),
-    // The portal names the fill and nothing about what goes on it; the
-    // palette picks the legible ink itself (`resolveTheme`).
+    // The portal names the fill and nothing about what goes on it, nor a
+    // second shade for a selected row; the palette picks the legible ink
+    // itself (`resolveTheme`) and highlights with the accent.
     accentText: null,
+    selection: null,
     contrast: ns.contrast === 1 ? 'high' : 'normal',
     // version 2 of the interface; on version 1 the key is simply absent and
     // "no" is the right answer
@@ -483,6 +491,7 @@ export function fromXSettings(map) {
     // XSETTINGS has no accent colour. Not "none set" — no such key exists.
     accent: null,
     accentText: null,
+    selection: null,
     contrast: high ? 'high' : 'normal',
     reducedMotion: animations === 0,
   };
@@ -527,6 +536,13 @@ async function xsettingsRung(app) {
  * together, and `accentText` is null from the sources that have no ink to
  * name (the portal), where the palette decides by contrast.
  *
+ * **And the selection shade.** A selected menu row or list row on macOS is
+ * not filled with the accent but with `selectedContentBackgroundColor`, a
+ * darker cut of it — same hue, lightness 0.54 → 0.40 in dark and 0.45 in
+ * light for the orange, hand-tuned per accent rather than computed. A menu
+ * highlighted in the raw accent beside a native one reads as too bright, so
+ * it is read rather than approximated, and is null where nothing names it.
+ *
  * Exported so a test can pin the source; it cannot be executed on Linux.
  */
 export const MACOS_PROGRAM = `
@@ -542,6 +558,7 @@ function read() {
   var dark = !style.isNil() && ObjC.unwrap(style) === 'Dark';
   var accent = null;
   var accentText = null;
+  var selection = null;
   try {
     // Dynamic colours resolve in the *current* appearance, which in a bare
     // osascript is Aqua whatever the desktop is in; the ink AppKit puts on
@@ -550,11 +567,13 @@ function read() {
       dark ? $.NSAppearanceNameDarkAqua : $.NSAppearanceNameAqua));
     accent = srgb($.NSColor.controlAccentColor);
     accentText = srgb($.NSColor.alternateSelectedControlTextColor);
+    selection = srgb($.NSColor.selectedContentBackgroundColor);
   } catch (e) {}
   return JSON.stringify({
     dark: dark,
     accent: accent,
     accentText: accentText,
+    selection: selection,
     reducedMotion: !!ws.accessibilityDisplayShouldReduceMotion,
     contrast: !!ws.accessibilityDisplayShouldIncreaseContrast
   });
@@ -589,6 +608,7 @@ export function fromMacOS(line) {
     accent: accentFromPortal(parsed.accent),
     // The same `(r, g, b)` shape as the accent, by construction above
     accentText: accentFromPortal(parsed.accentText),
+    selection: accentFromPortal(parsed.selection),
     contrast: parsed.contrast ? 'high' : 'normal',
     reducedMotion: Boolean(parsed.reducedMotion),
   };

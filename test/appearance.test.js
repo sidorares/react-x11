@@ -433,6 +433,7 @@ describe('the macOS rung', () => {
         colorScheme: 'dark',
         accent: '#ff5900',
         accentText: null,
+        selection: null,
         contrast: 'high',
         reducedMotion: false,
       },
@@ -449,6 +450,12 @@ describe('the macOS rung', () => {
     );
     assert.equal(values.accent, '#f7821b');
     assert.equal(values.accentText, '#ffffff');
+    // and the shade under a selected row, which is not the accent
+    assert.equal(
+      fromMacOS('{"dark":true,"accent":[1,0,0],"selection":[0.79,0.38,0.01]}')
+        .selection,
+      '#c96103',
+    );
     // and is checked the way the accent is: a triple in range or nothing
     assert.equal(
       fromMacOS('{"dark":false,"accent":[1,0,0],"accentText":"white"}')
@@ -481,6 +488,7 @@ describe('the macOS rung', () => {
   test('the watcher reads the frameworks, not defaults', () => {
     assert.match(MACOS_PROGRAM, /NSColor\.controlAccentColor/);
     assert.match(MACOS_PROGRAM, /alternateSelectedControlTextColor/);
+    assert.match(MACOS_PROGRAM, /selectedContentBackgroundColor/);
     // resolved in the desktop's appearance, not the child's default Aqua
     assert.match(MACOS_PROGRAM, /NSAppearanceNameDarkAqua/);
     assert.match(MACOS_PROGRAM, /accessibilityDisplayShouldReduceMotion/);
@@ -511,6 +519,7 @@ describe('the settings portal', { concurrency: 1, ...needsBroker }, () => {
           accent: '#ed5b00',
           // the portal names a fill and nothing about what goes on it
           accentText: null,
+          selection: null,
           contrast: 'high',
           reducedMotion: true,
           source: 'portal',
@@ -693,6 +702,7 @@ describe('the remembered answer', () => {
         colorScheme: 'dark',
         accent: null,
         accentText: null,
+        selection: null,
         contrast: 'normal',
         reducedMotion: false,
       });
@@ -719,6 +729,7 @@ describe('the remembered answer', () => {
       // a file from before the ink was remembered: null, and the palette
       // picks the ink by contrast until the rung revalidates
       accentText: null,
+      selection: null,
       contrast: 'normal',
       reducedMotion: true,
       // not 'xsettings': nothing has been asked, and saying otherwise would
@@ -751,6 +762,7 @@ describe('the remembered answer', () => {
         colorScheme: 'DARK MODE PLEASE',
         accent: 'url(http://example.com)',
         accentText: 'white',
+        selection: ['#c96003'],
         contrast: 42,
         reducedMotion: 'yes',
       }),
@@ -760,6 +772,7 @@ describe('the remembered answer', () => {
       colorScheme: 'no-preference',
       accent: null,
       accentText: null,
+      selection: null,
       contrast: 'normal',
       reducedMotion: false,
       source: 'cache',
@@ -907,10 +920,13 @@ describe('useSystemAppearance', () => {
 describe('the desktop accent', () => {
   afterEach(cleanup);
 
+  // what this Mac reports with the orange accent: the fill, AppKit's white
+  // ink on it, and the darker cut it puts under a selected row
   const ORANGE = {
     colorScheme: 'dark',
     accent: '#f7821b',
     accentText: '#ffffff',
+    selection: '#c96003',
   };
 
   const Probe = () => {
@@ -946,7 +962,7 @@ describe('the desktop accent', () => {
       setAppearanceForTests(ORANGE);
     });
     await settle();
-    assert.equal(shown(), '#f7821b|#ffffff|#f7821b');
+    assert.equal(shown(), '#f7821b|#ffffff|#c96003');
     await expectPixel(ctx, 5, 5, '#f7821b', { tolerance: 2 });
   });
 
@@ -958,7 +974,7 @@ describe('the desktop accent', () => {
       [
         'following, unnamed',
         { value: { radius: 9 } },
-        '#f7821b|#ffffff|#f7821b',
+        '#f7821b|#ffffff|#c96003',
       ],
       // the brand named its accent and stops there: its ink is re-picked for
       // the fill it named, and the rest of the family is still the desktop's,
@@ -966,7 +982,7 @@ describe('the desktop accent', () => {
       [
         'a brand',
         { value: { accent: '#123456' } },
-        `#123456|${readableInk('#123456', [DarkTheme.text, DarkTheme.background])}|#f7821b`,
+        `#123456|${readableInk('#123456', [DarkTheme.text, DarkTheme.background])}|#c96003`,
       ],
       [
         'pinned',

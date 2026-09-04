@@ -80,9 +80,19 @@ test('the desktop accent moves the accent family and nothing else', () => {
       colorScheme: scheme,
       accent: '#f7821b',
       accentText: '#ffffff',
+      selection: '#c96003',
     });
     assert.equal(palette.accent, '#f7821b', scheme);
-    assert.equal(palette.hoverBackground, '#f7821b', scheme);
+    // the desktop's own shade under a selected row, not the accent: on macOS
+    // a menu lit in the raw accent beside a native one is too bright
+    assert.equal(palette.hoverBackground, '#c96003', scheme);
+    // and the accent itself where nothing names one
+    assert.equal(
+      paletteFor({ colorScheme: scheme, accent: '#f7821b', selection: null })
+        .hoverBackground,
+      '#f7821b',
+      scheme,
+    );
     // the desktop's ink, not the contrast pick (which is dark on orange)
     assert.equal(palette.accentText, '#ffffff', scheme);
     assert.equal(palette.hoverText, '#ffffff', scheme);
@@ -114,6 +124,7 @@ test('the desktop accent moves the accent family and nothing else', () => {
         colorScheme: scheme,
         accent: '#f7821b',
         accentText: '#ffffff',
+        selection: '#c96003',
       }),
     );
   }

@@ -39,6 +39,13 @@ export interface SystemAppearance {
    * `accentText`, and picks the legible ink by contrast where it is null.
    */
   readonly accentText: string | null;
+  /**
+   * The fill the desktop puts under a selected menu or list row — on macOS
+   * `selectedContentBackgroundColor`, a darker cut of the accent — or
+   * **null** where nothing names one. The built-in palette uses it as
+   * `hoverBackground`, and the accent itself where it is null.
+   */
+  readonly selection: string | null;
   readonly contrast: 'normal' | 'high';
   readonly reducedMotion: boolean;
   /**
