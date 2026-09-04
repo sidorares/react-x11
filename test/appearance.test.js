@@ -617,6 +617,8 @@ describe('the ladder', () => {
       assert.deepEqual(values, {
         colorScheme: 'no-preference',
         accent: null,
+        accentText: null,
+        selection: null,
         contrast: 'normal',
         reducedMotion: false,
         source: null,
