@@ -44,6 +44,7 @@ control are most of what separates one platform's controls from another's:
 | `accent` `accentHover` `accentText`                             | primary buttons, checks, fills       |
 | `hoverBackground` `hoverText`                                   | selected rows, menu highlights       |
 | `surfaceHover` `track` `borderFocus`                            | hover fills, tracks, focus           |
+| `selection` `caret` `link`                                      | selected text, the caret, links      |
 | `danger` `success` `warning` `info` (+`…Text`)                  | what the app says with colour        |
 | `accentActive` `surfaceActive` `textMutedActive` `dangerActive` | the pressed step of each fill        |
 | `radius` `radiusSmall` `borderWidth`                            | control shape                        |
@@ -1024,6 +1025,10 @@ window-centred popups of your own.
 
 Pull-down and right-click menus, both rendered in `<popup>` windows so they
 escape the owner window, both anchored with `useAnchor`.
+
+On the Cocoa backend with native controls, the popups are sized as NSMenu
+sizes its own — 22pt rows, the 13pt menu font — so a context menu sits
+beside the system's like one of them ([macos.md](macos.md#menus-the-global-menu-finally-at-home)).
 
 ```jsx
 import { MenuBar, ContextMenu } from 'react-x11';

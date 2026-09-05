@@ -32,8 +32,6 @@ import { callHandler } from './errors.js';
 import { lastInputTime } from './inputtime.js';
 import { ctrlChordLetter } from './keysyms.js';
 import { codePoints, wordRangeAt } from './textrange.js';
-import { tint } from './styles.js';
-
 // --- who is showing a selection ------------------------------------------
 //
 // One node per app: a `<textinput>`, or the surface below. The registry is
@@ -316,8 +314,7 @@ export class TextSelection {
    * the drag, the keys, and the programmatic `setSelection`.
    */
   apply() {
-    const color =
-      this.node.props.selectionColor ?? tint(this.node.theme.accent, 0.35);
+    const color = this.node.props.selectionColor ?? this.node.theme.selection;
     const next = this.rangesOf(this.ordered());
     let changed = false;
     for (const [node, range] of next) {

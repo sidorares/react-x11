@@ -478,36 +478,36 @@ successor the way wayland.md carries its measurements.
 
 ## Windowing semantics: what maps, what bends, what breaks
 
-| react-x11 today                                    | macOS                                                                                                      | verdict                                                                     |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `<window>`, WM-managed                             | `NSWindow` (titled), delegate events for move/resize/close/focus                                           | maps; the app _can_ place itself (unlike Wayland)                           |
-| `<window x y>` screen position                     | `setFrameOrigin` (flip Y against the screen frame)                                                         | maps                                                                        |
-| auto-sizing (`width: 'auto'`)                      | measure first, then size the window before ordering front — same commit-phase shape as `realize()`         | maps cleanly                                                                |
-| `<popup>` (override-redirect, self-placed)         | borderless non-activating `NSPanel`, `addChildWindow` to the anchor's window, screen-coordinate placement  | maps — `anchor.js` flip/clamp math survives against `NSScreen.visibleFrame` |
-| `<popup grab>` dismissal                           | no pointer grabs; local+global event monitors, or key-window resignation                                   | bends — same UX, different mechanism                                        |
-| `decorations: false`                               | `styleMask: [.borderless]` (or `.fullSizeContentView` for CSD-ish looks)                                   | maps                                                                        |
-| `states`: maximized/fullscreen/minimized/attention | `zoom:`, `toggleFullScreen:`, `miniaturize:`, `requestUserAttention:`; readback via delegate notifications | maps; `sticky`/`below`/`skip_taskbar`/`shaded` have no equivalent           |
-| `alwaysOnTop`                                      | `window.level = .floating`                                                                                 | maps                                                                        |
-| `transientFor`                                     | `addChildWindow:` / sheets                                                                                 | maps for the dialog case                                                    |
-| `wmClass`, `onClientMessage`, size-increment hints | —                                                                                                          | gone; bundle identity lives in Info.plist                                   |
-| `transparent`                                      | `isOpaque = false`, clear background — always composited, no compositor probe needed                       | maps _better_; `useSupports('transparency')` is constant-true               |
-| frame clock (Present + fence + estimator)          | `CADisplayLink` (macOS 14+) / `CVDisplayLink`                                                              | simpler; per-window, refresh-rate-aware                                     |
-| scale ladder (env → XSETTINGS → Xft → RandR)       | `backingScaleFactor` + `windowDidChangeBackingProperties`                                                  | collapses to one authoritative, live source                                 |
-| screens (`useScreens`)                             | `NSScreen.screens` + change notification                                                                   | maps                                                                        |
-| appearance ladder                                  | `NSApp.effectiveAppearance` KVO + `NSColor.controlAccentColor`; accent-change notification                 | upgrades the existing osascript rung                                        |
-| clipboard (selections, INCR, targets)              | `NSPasteboard` (+ lazy providers for the ownership model); no PRIMARY selection                            | maps; `transfer.js` MIME plumbing reusable; INCR dies unmourned             |
-| DnD (XDND)                                         | `NSDraggingSource`/`NSDraggingDestination` on the hosting view                                             | maps; the `dropAccept`/`onDrag*` prop contract holds                        |
-| global menu (D-Bus registrar, in-window fallback)  | `NSApp.mainMenu` — **always present**, delegation never fails                                              | maps _better_; see §Menus                                                   |
-| file dialogs (portal → osascript → drawn)          | `NSOpenPanel`/`NSSavePanel` replace the osascript rung                                                     | upgrades                                                                    |
-| a11y (AT-SPI over D-Bus)                           | `NSAccessibility` protocol, virtual `NSAccessibilityElement` tree fed from the same `a11y.js` model        | maps; the model carries, the bridge is new (the Chromium/Flutter shape)     |
-| idle / keep-awake                                  | `IOPMAssertion` / `NSProcessInfo` activity                                                                 | maps                                                                        |
-| startup notification, `activateWindow`             | `NSApp.activate` + `makeKeyAndOrderFront:`, `NSRunningApplication`; Launch Services owns launch UX         | `activateWindow` **shipped** (`CocoaApp.raiseWindow`); startup dissolves    |
-| URI schemes / single instance (`application.js`)   | Apple Events (`kAEGetURL`) + Launch Services registration; single-instance is the platform default         | maps; same hooks (`onAppOpen`/`onAppActivate`), new plumbing                |
-| tray                                               | `NSStatusItem`                                                                                             | **gained** — X11 has no core tray today                                     |
-| `<glarea>` (GLX / direct CGL)                      | `CAOpenGLLayer`/`NSOpenGLContext` (deprecated but functional), or ANGLE/Metal later                        | bends; ntk's existing `cgl` direct backend is prior art                     |
-| `<foreign>`, XEmbed `<Frame>`, `examples/wm.jsx`   | —                                                                                                          | **gone by design**                                                          |
-| `ssh -X` remoting                                  | —                                                                                                          | X11 backend remains the remote answer                                       |
-| keyboard state (Caps Lock before first key)        | `NSEvent.modifierFlags` (static read + `flagsChanged`)                                                     | maps                                                                        |
+| react-x11 today                                    | macOS                                                                                                      | verdict                                                                          |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `<window>`, WM-managed                             | `NSWindow` (titled), delegate events for move/resize/close/focus                                           | maps; the app _can_ place itself (unlike Wayland)                                |
+| `<window x y>` screen position                     | `setFrameOrigin` (flip Y against the screen frame)                                                         | maps                                                                             |
+| auto-sizing (`width: 'auto'`)                      | measure first, then size the window before ordering front — same commit-phase shape as `realize()`         | maps cleanly                                                                     |
+| `<popup>` (override-redirect, self-placed)         | borderless non-activating `NSPanel`, `addChildWindow` to the anchor's window, screen-coordinate placement  | maps — `anchor.js` flip/clamp math survives against `NSScreen.visibleFrame`      |
+| `<popup grab>` dismissal                           | no pointer grabs; local+global event monitors, or key-window resignation                                   | bends — same UX, different mechanism                                             |
+| `decorations: false`                               | `styleMask: [.borderless]` (or `.fullSizeContentView` for CSD-ish looks)                                   | maps                                                                             |
+| `states`: maximized/fullscreen/minimized/attention | `zoom:`, `toggleFullScreen:`, `miniaturize:`, `requestUserAttention:`; readback via delegate notifications | maps; `sticky`/`below`/`skip_taskbar`/`shaded` have no equivalent                |
+| `alwaysOnTop`                                      | `window.level = .floating`                                                                                 | maps                                                                             |
+| `transientFor`                                     | `addChildWindow:` / sheets                                                                                 | maps for the dialog case                                                         |
+| `wmClass`, `onClientMessage`, size-increment hints | —                                                                                                          | gone; bundle identity lives in Info.plist                                        |
+| `transparent`                                      | `isOpaque = false`, clear background — always composited, no compositor probe needed                       | maps _better_; `useSupports('transparency')` is constant-true                    |
+| frame clock (Present + fence + estimator)          | `CADisplayLink` (macOS 14+) / `CVDisplayLink`                                                              | simpler; per-window, refresh-rate-aware                                          |
+| scale ladder (env → XSETTINGS → Xft → RandR)       | `backingScaleFactor` + `windowDidChangeBackingProperties`                                                  | collapses to one authoritative, live source                                      |
+| screens (`useScreens`)                             | `NSScreen.screens` + change notification                                                                   | maps                                                                             |
+| appearance ladder                                  | `NSApp.effectiveAppearance` KVO + `NSColor.controlAccentColor`; accent-change notification                 | the osascript rung already feeds accent + ink into the palette; in-process later |
+| clipboard (selections, INCR, targets)              | `NSPasteboard` (+ lazy providers for the ownership model); no PRIMARY selection                            | maps; `transfer.js` MIME plumbing reusable; INCR dies unmourned                  |
+| DnD (XDND)                                         | `NSDraggingSource`/`NSDraggingDestination` on the hosting view                                             | maps; the `dropAccept`/`onDrag*` prop contract holds                             |
+| global menu (D-Bus registrar, in-window fallback)  | `NSApp.mainMenu` — **always present**, delegation never fails                                              | maps _better_; see §Menus                                                        |
+| file dialogs (portal → osascript → drawn)          | `NSOpenPanel`/`NSSavePanel` replace the osascript rung                                                     | upgrades                                                                         |
+| a11y (AT-SPI over D-Bus)                           | `NSAccessibility` protocol, virtual `NSAccessibilityElement` tree fed from the same `a11y.js` model        | maps; the model carries, the bridge is new (the Chromium/Flutter shape)          |
+| idle / keep-awake                                  | `IOPMAssertion` / `NSProcessInfo` activity                                                                 | maps                                                                             |
+| startup notification, `activateWindow`             | `NSApp.activate` + `makeKeyAndOrderFront:`, `NSRunningApplication`; Launch Services owns launch UX         | `activateWindow` **shipped** (`CocoaApp.raiseWindow`); startup dissolves         |
+| URI schemes / single instance (`application.js`)   | Apple Events (`kAEGetURL`) + Launch Services registration; single-instance is the platform default         | maps; same hooks (`onAppOpen`/`onAppActivate`), new plumbing                     |
+| tray                                               | `NSStatusItem`                                                                                             | **gained** — X11 has no core tray today                                          |
+| `<glarea>` (GLX / direct CGL)                      | `CAOpenGLLayer`/`NSOpenGLContext` (deprecated but functional), or ANGLE/Metal later                        | bends; ntk's existing `cgl` direct backend is prior art                          |
+| `<foreign>`, XEmbed `<Frame>`, `examples/wm.jsx`   | —                                                                                                          | **gone by design**                                                               |
+| `ssh -X` remoting                                  | —                                                                                                          | X11 backend remains the remote answer                                            |
+| keyboard state (Caps Lock before first key)        | `NSEvent.modifierFlags` (static read + `flagsChanged`)                                                     | maps                                                                             |
 
 The popup row deserves the same sit-down wayland.md gave it, with the
 opposite conclusion: macOS _keeps_ client-side placement, so `anchor.js`
@@ -741,6 +741,15 @@ and apps can branch the way `'shaders'` consumers already do.
 
 ## Menus: the global menu, finally at home
 
+**A popup on this backend is sized as an NSMenu.** Where the backend
+renders native controls, `<ContextMenu>`, a `<MenuBar>`'s dropdowns and a
+`<Select>`'s list take NSMenu's geometry rather than the palette's — 22pt
+rows, 5pt of padding, 11pt separators, the 13pt menu font at regular
+weight, a 5pt highlight radius — read off `NSMenu.size` (`NATIVE_MENU` in
+`components/native.js`). The drawn menu's 30pt rows of 14px medium text
+read as another toolkit's beside the menus the system's own controls open.
+The menu bar itself keeps the drawn metrics: a bar is not an NSMenu.
+
 The Linux global menu was built for exactly this moment: the item
 vocabulary is data (dbusmenu's), `MenuBar` draws the same array it
 exports, and the pure `snapshot`/`diffSnapshots`/`IdAllocator` machinery
@@ -930,6 +939,91 @@ Both wait until the presenter exists; they are listed because "hardware
 composited layers with animation and transformations" is half the reason
 to build Tier L, and the API shape (style props + capability gates)
 should be agreed before someone builds a macOS-only thing.
+
+## Running as an app bundle
+
+A react-x11 process is a `node` (or `bun`) process, and AppKit names, icons
+and identifies an app by the **bundle its executable lives in**: run from the
+shell, the menu bar says "node", the Dock shows the generic icon, and the
+defaults domain — where AppKit remembers window frames and whether a tab
+bar is showing — is `node`'s or `bun`'s, shared with every other script
+that runtime ever ran. `examples/form/` is the example of the fix:
+
+```
+npm run examples:form:app   # builds examples/form/build/Guestbook.app and opens it
+```
+
+[`make-app.sh`](../examples/form/make-app.sh) copies `Info.plist`, renders
+`icon.svg` into an `.icns` with the system's own tools (Quick Look, `sips`,
+`iconutil`), and makes the executable with `bun build --compile`: one Mach-O
+with bun's runtime, the example and react-x11 inside it, at
+`Contents/MacOS/Guestbook`. AppKit takes an app's main bundle from the
+running executable's path, so a real binary there is the whole trick — no
+launcher, nothing to find at launch time.
+
+What a compiled binary cannot contain is the Cocoa bridge's native addon,
+which the backend loads with `require` from a file. The bundle carries it
+as `Contents/Resources/calayers.node`, and the compile entry,
+[`main.js`](../examples/form/main.js), names it through the backend's
+`REACT_X11_CALAYERS_PATH` seam — relative to `process.execPath`, so the
+bundle can be moved — before importing the example. `Info.plist` carries
+the name, the identifier (`com.example.guestbook`), the icon,
+`NSHighResolutionCapable` (without it AppKit renders at 1×) and
+`LSEnvironment` naming the Cocoa backend. Launch Services then reports the
+process as the app:
+
+```
+$ lsappinfo info -only name,bundleid,bundlepath "$(lsappinfo find pid=<pid>)"
+"LSDisplayName"="Guestbook"
+"CFBundleIdentifier"="com.example.guestbook"
+```
+
+(A script can be a bundle's executable too, and there is a way to make
+AppKit take the bundle rather than the interpreter as the main one —
+`#!/usr/bin/env -S CFProcessPath=<this file> bun` sets CoreFoundation's
+process path before the interpreter starts — but the compiled binary needs
+no such trick, and nothing installed on the machine at launch time.)
+
+### Distributing the bundle
+
+What `make-app.sh` builds is a developer's bundle: it runs where it was
+built, and nowhere else without three more steps.
+
+- **Signing.** The binary is unsigned. Gatekeeper lets an unsigned app run
+  from a build directory, but not one that arrived in a download (the
+  quarantine attribute) — for that it wants a Developer ID signature and
+  notarization: `codesign --deep --force --sign "Developer ID Application: …"`
+  then `notarytool submit`. For a copy handed to a colleague, an ad-hoc
+  signature (`codesign --deep --force --sign - Guestbook.app`) and
+  `xattr -dr com.apple.quarantine` on the receiving end are the short
+  path. Sign the addon in `Resources` too; `--deep` finds it.
+- **Architecture.** `bun build --compile` targets one CPU and the bridge's
+  prebuilds are one per CPU; the script builds for the machine it runs on.
+  A universal bundle is two builds and `lipo` — for the executable and for
+  `calayers.node` alike.
+- **Paths.** The compiled binary is self-contained, and `main.js` finds the
+  addon relative to `process.execPath`, so the bundle can be moved, zipped
+  and dragged into `/Applications`. Nothing in it refers to the repo.
+- **Size.** About 70MB, nearly all of it bun's runtime; the example and
+  react-x11 are a few hundred kilobytes of it.
+
+**The tab bar under bun.** Without a bundle, a window opened by `bun` is in
+the `bun` defaults domain, and once anything has turned on the tab bar for
+one of our windows there — View → Show Tab Bar, or a stray shortcut — AppKit
+persists it as
+`NSWindowTabbingShoudShowTabBarKey-NSWindow-CALBackendDelegate-(null)-VT-FS`
+and every window the bridge opens from then on wears a 28pt tab bar. It also
+shifts the content view down by that much, which the bridge's
+`getWindowFrame` does not report (windowkit/appkit#12), so every popup lands
+a bar's height off. Clear it with
+
+```
+defaults delete bun "NSWindowTabbingShoudShowTabBarKey-NSWindow-CALBackendDelegate-(null)-VT-FS"
+```
+
+or run the app as a bundle, whose own domain has never seen the key. The
+durable fix is the bridge's: `tabbingMode = NSWindowTabbingModeDisallowed`
+on every window it opens.
 
 ## Public API: what changes
 

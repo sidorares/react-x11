@@ -19,8 +19,13 @@ import { test } from 'node:test';
 import React from 'react';
 
 import { Checkbox, Select, ThemeProvider, createRoot } from '../src/index.js';
-import { DarkTheme, DefaultTheme, resolveTheme } from '../src/palette.js';
-import { readableInk } from '../src/styles.js';
+import {
+  DarkTheme,
+  DefaultTheme,
+  paletteFor,
+  resolveTheme,
+} from '../src/palette.js';
+import { readableInk, tint } from '../src/styles.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -48,6 +53,191 @@ function ratio(a, b) {
   const [x, y] = [luminance(a), luminance(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
+
+// --- the desktop's accent ---------------------------------------------------
+
+// What the built-in palette becomes on a desktop that reports an accent:
+// the accent family and the focus ring move, `info` and the status colours
+// do not, and the steps are taken the way each scheme takes them.
+test('the desktop accent moves the accent family and nothing else', () => {
+  // the pressed step comes back as `rgba(...)` from `stepBeyond`
+  const hex = (c) => {
+    const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c);
+    return m
+      ? '#' +
+          m
+            .slice(1, 4)
+            .map((v) => (+v).toString(16).padStart(2, '0'))
+            .join('')
+      : c;
+  };
+  const lum = (c) => ratio(hex(c), '#000000');
+  for (const [scheme, base] of [
+    ['light', DefaultTheme],
+    ['dark', DarkTheme],
+  ]) {
+    const palette = paletteFor({
+      colorScheme: scheme,
+      accent: '#f7821b',
+      accentText: '#ffffff',
+      selection: '#c96003',
+    });
+    assert.equal(palette.accent, '#f7821b', scheme);
+    // the desktop's own shade under a selected row, not the accent: on macOS
+    // a menu lit in the raw accent beside a native one is too bright
+    assert.equal(palette.hoverBackground, '#c96003', scheme);
+    // and the accent itself where nothing names one
+    assert.equal(
+      paletteFor({ colorScheme: scheme, accent: '#f7821b', selection: null })
+        .hoverBackground,
+      '#f7821b',
+      scheme,
+    );
+    // the desktop's ink, not the contrast pick (which is dark on orange)
+    assert.equal(palette.accentText, '#ffffff', scheme);
+    assert.equal(palette.hoverText, '#ffffff', scheme);
+    // the hover sinks into a light ground and lifts off a dark one, and the
+    // press keeps going the same way
+    const direction = scheme === 'dark' ? 1 : -1;
+    assert.ok(
+      Math.sign(lum(palette.accentHover) - lum(palette.accent)) === direction,
+      `${scheme}: hover steps the palette's way`,
+    );
+    assert.ok(
+      Math.sign(lum(palette.accentActive) - lum(palette.accentHover)) ===
+        direction,
+      `${scheme}: the press steps beyond the hover`,
+    );
+    assert.equal(
+      palette.focusRing,
+      scheme === 'dark' ? palette.accentHover : palette.accent,
+      `${scheme}: the focus ring is the accent, lifted on dark`,
+    );
+    assert.equal(palette.borderFocus, palette.focusRing, scheme);
+    for (const token of [...STATUS, 'background', 'surface', 'text']) {
+      assert.equal(palette[token], base[token], `${scheme}: ${token} stays`);
+    }
+    // one object per desktop answer: identity is what the token cache keys on
+    assert.equal(
+      palette,
+      paletteFor({
+        colorScheme: scheme,
+        accent: '#f7821b',
+        accentText: '#ffffff',
+        selection: '#c96003',
+      }),
+    );
+  }
+  // no accent is the built-in palette itself, not a copy of it
+  assert.equal(paletteFor({ colorScheme: 'dark', accent: null }), DarkTheme);
+  assert.equal(
+    paletteFor({ colorScheme: 'light', accent: null }),
+    DefaultTheme,
+  );
+  assert.equal(
+    paletteFor({ colorScheme: 'no-preference', accent: null }),
+    DefaultTheme,
+  );
+});
+
+// A desktop that names its whole palette is merged over the scheme's the way
+// a provider's value is: its colours, the scheme's shape, and the inks and
+// pressed steps `resolveTheme` derives for whatever it did not name.
+test('a desktop palette is merged whole over the scheme', () => {
+  const system = {
+    background: '#323232',
+    surface: '#1e1e1e',
+    surfaceHover: '#292929',
+    text: '#e0e0e0',
+    textMuted: '#a3a3a3',
+    border: '#464646',
+    borderFocus: '#266d98',
+    focusRing: '#266d98',
+    track: '#464646',
+    accent: '#007aff',
+    accentHover: '#2ea8ff',
+    accentActive: '#52ccff',
+    accentText: '#ffffff',
+    hoverBackground: '#0059d1',
+    hoverText: '#ffffff',
+    selection: '#89576e',
+    caret: '#f74f9e',
+    link: '#419cff',
+    danger: '#ff453a',
+    dangerHover: '#ff7368',
+    success: '#32d74b',
+    warning: '#ff9f0a',
+    info: '#0a84ff',
+  };
+  const appearance = {
+    colorScheme: 'dark',
+    accent: '#007aff',
+    palette: system,
+  };
+  const palette = paletteFor(appearance);
+  for (const [token, value] of Object.entries(system)) {
+    assert.equal(palette[token], value, token);
+  }
+  // shape from the scheme, inks and presses derived
+  assert.equal(palette.radius, DarkTheme.radius);
+  assert.equal(palette.scheme, 'dark');
+  assert.equal(
+    palette.dangerText,
+    readableInk('#ff453a', ['#e0e0e0', '#323232']),
+  );
+  assert.notEqual(palette.dangerActive, DarkTheme.dangerActive);
+  // one object per answer, and the trio path is not consulted
+  assert.equal(palette, paletteFor(appearance));
+  assert.notEqual(palette, paletteFor({ ...appearance, palette: null }));
+});
+
+// The three tokens the desktop palette added to the vocabulary, and what
+// they are where nothing names them.
+test('selection is a tint of the accent, the caret is the text, links are blue', () => {
+  for (const [name, palette] of Object.entries({ DefaultTheme, DarkTheme })) {
+    assert.equal(palette.selection, tint(palette.accent, 0.35), name);
+    assert.equal(palette.caret, null, name);
+    assert.equal(typeof palette.link, 'string', name);
+  }
+  // a palette that moves the accent moves the tint with it
+  const brand = resolveTheme({ accent: '#e17055' });
+  assert.equal(brand.selection, tint('#e17055', 0.35));
+  // and one that names the selection keeps it
+  assert.equal(
+    resolveTheme({ accent: '#e17055', selection: '#ffe0b2' }).selection,
+    '#ffe0b2',
+  );
+});
+
+// The portal names a fill and nothing about what goes on it, so there the
+// ink is the contrast pick — the same rule any theme gets for a fill it
+// names and stops at.
+test('a desktop accent with no ink gets the legible one', () => {
+  for (const [scheme, base] of [
+    ['light', DefaultTheme],
+    ['dark', DarkTheme],
+  ]) {
+    for (const accent of ['#f7821b', '#ffd60a', '#1c3f95']) {
+      const palette = paletteFor({
+        colorScheme: scheme,
+        accent,
+        accentText: null,
+      });
+      assert.equal(
+        palette.accentText,
+        readableInk(accent, [base.text, base.background]),
+        `${scheme} ${accent}`,
+      );
+      assert.ok(
+        ratio(
+          palette.accentText === 'white' ? '#ffffff' : palette.accentText,
+          accent,
+        ) >= 3,
+        `${scheme} ${accent}: readable`,
+      );
+    }
+  }
+});
 
 // --- the status family ------------------------------------------------------
 

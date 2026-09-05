@@ -151,9 +151,9 @@ function Controls({ appearance, level, setLevel }) {
       <box style={s.row}>
         <Button primary label="Primary" />
         <Button label="Secondary" />
-        {/* The desktop's accent is taken deliberately, never adopted on its
-            own: an app in dark mode did not ask for its buttons to change
-            colour. And it is null on most desktops, so there is a fallback. */}
+        {/* The primary button beside this one is already the desktop's
+            accent — the built-in palette follows it. This one takes the raw
+            value, which is null on most Linux desktops, hence the fallback. */}
         <Button
           label={
             appearance.accent ? 'Desktop accent' : 'Accent fallback (null)'

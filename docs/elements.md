@@ -1223,11 +1223,11 @@ text as well as from the highlight, which is the point of excluding it.
 
 ### The props
 
-| prop                    |                                                                                           |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
-| `selectable`            | `true` starts a surface; `false` opts a subtree out of the one above it                   |
-| `selectionColor`        | the highlight behind selected text (default: a tint of the theme's accent)                |
-| `onSelectionChange(ev)` | `ev.text` is what a copy would put on the clipboard, `ev.isCollapsed` whether it is empty |
+| prop                    |                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `selectable`            | `true` starts a surface; `false` opts a subtree out of the one above it                     |
+| `selectionColor`        | the highlight behind selected text (default: the theme's `selection`, a tint of its accent) |
+| `onSelectionChange(ev)` | `ev.text` is what a copy would put on the clipboard, `ev.isCollapsed` whether it is empty   |
 
 And on the surface's node, through a ref: `selectAll()`, `clearSelection()`,
 `selectedText()`, `setSelection(anchor, focus)` — each end

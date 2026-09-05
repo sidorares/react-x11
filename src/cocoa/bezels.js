@@ -27,6 +27,22 @@ export class BezelStore {
   }
 
   /**
+   * Forget every rendered bezel. The pixels depend on one thing that is not
+   * a parameter of `get`: the desktop's accent, which AppKit reads for
+   * itself when it draws the cell. After the user picks another accent a
+   * cached bezel is the old colour, and its key still matches — so a bezel
+   * whose state happened to change came up in the new accent while the
+   * ones beside it kept the old, until something else redrew them. The
+   * appearance change forgets them all; the next paint renders each again.
+   *
+   * The measured insets and natural sizes stay: geometry is not coloured.
+   */
+  clear() {
+    // the surfaces are freed by their External finalizer
+    this._cache.clear();
+  }
+
+  /**
    * The control's natural size in logical px — the size the bezel is
    * designed at, which layout adopts for the kinds that must not stretch
    * (checkbox, radio, switch). For the stretchable kinds only `height` is
@@ -37,6 +53,21 @@ export class BezelStore {
     return {
       width: Math.round(c.natural.width),
       height: Math.round(c.natural.height),
+    };
+  }
+
+  /**
+   * The translucent rows above and below the bezel's solid body, in logical
+   * px — a push button's drop shadow, mostly. They are part of the natural
+   * box (`natural` measures every inked pixel, so the box is the footprint)
+   * and not part of the control: AppKit centres a title in the cell's body,
+   * and a label centred in the footprint sits half the shadow too low.
+   */
+  shadow(kind, controlSize = 'regular') {
+    const c = this._scan(kind, controlSize, 2);
+    return {
+      top: Math.round(c.body.top),
+      bottom: Math.round(c.body.bottom),
     };
   }
 
@@ -126,13 +157,22 @@ export class BezelStore {
     let y0 = ph;
     let x1 = -1;
     let y1 = -1;
+    // and the solid body inside the footprint: where the bezel is opaque,
+    // which is the control itself rather than its shadow
+    let by0 = ph;
+    let by1 = -1;
     for (let y = 0; y < ph; y++) {
       for (let x = 0; x < pw; x++) {
-        if (buf[(y * pw + x) * 4 + 3] > 8) {
+        const alpha = buf[(y * pw + x) * 4 + 3];
+        if (alpha > 8) {
           if (x < x0) x0 = x;
           if (x > x1) x1 = x;
           if (y < y0) y0 = y;
           if (y > y1) y1 = y;
+        }
+        if (alpha >= 250) {
+          if (y < by0) by0 = y;
+          if (y > by1) by1 = y;
         }
       }
     }
@@ -142,6 +182,12 @@ export class BezelStore {
       y0 = 0;
       x1 = pw - 1;
       y1 = ph - 1;
+    }
+    if (by1 < 0) {
+      // no solid pixel at all (a fully translucent bezel): the body is the
+      // footprint
+      by0 = y0;
+      by1 = y1;
     }
     c = {
       insets: {
@@ -153,6 +199,10 @@ export class BezelStore {
       natural: {
         width: (x1 - x0 + 1) / scale,
         height: (y1 - y0 + 1) / scale,
+      },
+      body: {
+        top: (by0 - y0) / scale,
+        bottom: (y1 - by1) / scale,
       },
     };
     this._canonical.set(key, c);

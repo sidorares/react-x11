@@ -11,19 +11,24 @@ const { colorScheme, accent, contrast, reducedMotion } = useSystemAppearance();
 
 **Most apps never need it.** react-x11's built-in palette already follows the
 desktop, so an app that says nothing about colour is dark on a dark desktop
-and light on a light one — see [following the desktop](#following-the-desktop)
-below. Reach for the hook when you want the values themselves: the accent
-colour, reduced motion, or a design decision that is not a palette.
+and light on a light one, and its buttons, tabs and menu highlights are the
+desktop's accent where the desktop has one — see
+[following the desktop](#following-the-desktop) below. Reach for the hook when
+you want the values themselves: reduced motion, the accent as a colour for
+something that is not a widget, or a design decision that is not a palette.
 
 ## The four values
 
-|                 |                                                                                |
-| --------------- | ------------------------------------------------------------------------------ |
-| `colorScheme`   | `'light'`, `'dark'` or `'no-preference'`                                       |
-| `accent`        | `'#ed5b00'`, or **null**                                                       |
-| `contrast`      | `'normal'` or `'high'`                                                         |
-| `reducedMotion` | `true` when the user asked for less animation                                  |
-| `source`        | which rung answered — `'portal'`, `'xsettings'`, `'macos'`, `'cache'`, or null |
+|                 |                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `colorScheme`   | `'light'`, `'dark'` or `'no-preference'`                                                       |
+| `accent`        | `'#ed5b00'`, or **null**                                                                       |
+| `accentText`    | the ink the desktop writes on its accent — `'#ffffff'` on macOS — or **null**                  |
+| `selection`     | the fill under a selected menu or list row — a darker cut of the accent on macOS — or **null** |
+| `palette`       | the desktop's whole palette as tokens, on macOS — or **null**                                  |
+| `contrast`      | `'normal'` or `'high'`                                                                         |
+| `reducedMotion` | `true` when the user asked for less animation                                                  |
+| `source`        | which rung answered — `'portal'`, `'xsettings'`, `'macos'`, `'cache'`, or null                 |
 
 Two of these are easy to get wrong.
 
@@ -38,8 +43,67 @@ colourless on a desktop that simply did not answer the question looks broken.
 
 ```jsx
 const { accent } = useSystemAppearance();
-<Button style={{ backgroundColor: accent ?? '#2980b9' }} label="Save" />;
+<box style={{ borderColor: accent ?? '#2980b9' }} />;
 ```
+
+`accentText` is the ink the desktop puts on that fill, and it comes from the
+one source that has an opinion: AppKit writes white on every accent a Mac
+offers, including the orange and the pink a contrast ratio would put dark
+letters on, and every native control does. The portal names a fill and nothing
+about what goes on it, so there it is null and the palette picks the legible
+ink by contrast, as it does for any theme that names a fill and stops there.
+
+`selection` is the third colour a desktop names, and macOS is again the one
+that does: a selected menu row or list row is filled not with the accent but
+with `selectedContentBackgroundColor`, a darker cut of it — same hue,
+lightness 0.54 → 0.40 in dark and 0.45 in light for the orange, hand-tuned per
+accent rather than computed from it. The built-in palette uses it as
+`hoverBackground`; a menu lit in the raw accent beside a native one reads as
+too bright.
+
+## The desktop's palette
+
+On macOS the rung reads the rest as well: the semantic colours AppKit paints
+its own windows and controls with, in the appearance the desktop is in. They
+arrive as `palette`, already in react-x11's vocabulary, and the built-in
+palette merges them over the scheme's own the way a `<ThemeProvider>` value
+merges — so an app that says nothing about colour comes up in the desktop's
+greys, inks and status colours, and follows every retune macOS ships.
+
+Two settings drive it, and they are not one colour. **Accent colour** is an
+index into a table of eight, each entry hand-tuned per appearance: the fill,
+the darker cut under a selected row, the focus ring and the pressed steps are
+all separate table entries, not a formula. **Highlight colour** is a free
+sRGB triple that only text selection and the caret read. Everything else is
+fixed per appearance.
+
+| token                          | AppKit source                                              | how                                                     |
+| ------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------- |
+| `background`                   | `windowBackgroundColor`                                    | as is: `#ececec` light, `#323232` dark                  |
+| `surface`                      | `controlBackgroundColor`                                   | as is: white, `#1e1e1e`                                 |
+| `surfaceHover`                 | the second `alternatingContentBackgroundColors`            | composited over `surface`                               |
+| `text`, `textMuted`            | `labelColor`, `secondaryLabelColor`                        | black or white at 85% and 50–55%, over the ground       |
+| `border`                       | `separatorColor`                                           | 10% ink over the ground                                 |
+| `focusRing`, `borderFocus`     | `keyboardFocusIndicatorColor`                              | the 50% ring over the ground                            |
+| `track`                        | `unemphasizedSelectedContentBackgroundColor`               | as is                                                   |
+| `accent`, `accentText`         | `controlAccentColor`, `alternateSelectedControlTextColor`  | as is; the ink is white for all eight                   |
+| `accentHover`, `accentActive`  | the accent with the pressed and deep-pressed effects       | as is — darker in light, lighter in dark                |
+| `hoverBackground`, `hoverText` | `selectedContentBackgroundColor`, the same ink             | as is                                                   |
+| `selection`                    | `selectedTextBackgroundColor`                              | the Highlight colour; dark is each channel less 116/255 |
+| `caret`                        | `textInsertionPointColor`                                  | the accent of the Highlight colour's name               |
+| `link`                         | `linkColor`                                                | as is, never the accent                                 |
+| `danger`, `dangerHover`        | `systemRedColor`, pressed                                  | as is                                                   |
+| `success`, `warning`, `info`   | `systemGreenColor`, `systemOrangeColor`, `systemBlueColor` | orange for warning: yellow fails as letters             |
+
+AppKit's inks are translucent and every token here is a colour, so each is
+flattened over the window ground on the way in. The status inks and the
+pressed steps a table does not name come from `resolveTheme`, as for any
+theme. What this cannot see is desktop tinting: a dark window on macOS is
+`#323232` with a little of the wallpaper in it, and the wallpaper is not in
+any colour AppKit will hand out.
+
+The portal names none of this, so on Linux the built-in palette stands and
+only the accent is taken.
 
 ## The first frame
 
@@ -63,6 +127,8 @@ run 1   {colorScheme: 'no-preference', accent: null,      source: null}      ←
 
 run 2   {colorScheme: 'dark',          accent: '#ed5b00', source: 'cache'}   ← 0.1 ms, first render
         {colorScheme: 'dark',          accent: '#ed5b00', source: 'portal'}  ← revalidated
+
+(`accentText`, `selection`, `contrast` and `reducedMotion` travel with them.)
 ```
 
 Revalidation costs one re-render even when nothing moved, because `source`
@@ -96,8 +162,13 @@ not touch the disk.
 
 react-x11's built-in palette _is_ the desktop's: an app that says nothing
 about colour is dark on a dark desktop and light on a light one, the way a
-GTK or Qt app is. The window background, the widgets and every `$token` in a
-style all come from it.
+GTK or Qt app is, and where the desktop reports an accent — macOS always,
+GNOME 47+ and KDE through the portal — `$accent` and the family around it
+(`accentHover`, the pressed step, `hoverBackground`, the focus ring) are that
+colour, and `hoverBackground` is the desktop's own selection shade where it
+names one. On macOS the whole palette is the desktop's — see
+[the desktop's palette](#the-desktops-palette). The window background, the widgets and every `$token` in a style all
+come from it.
 
 ```jsx
 // this app follows the desktop
@@ -148,14 +219,23 @@ is dark, for a design whose two schemes are not one recolour of the other:
 <ThemeProvider value={{ background: '#fffdf7' }} dark={{ background: '#141210' }}>
 ```
 
-The desktop's **accent colour is deliberately not adopted on its own** — an
-app in dark mode did not ask for its buttons to change colour, and most portal
-backends report no accent at all. Take it where you want it:
+**The accent is followed on the same terms as the scheme.** The reason is
+the one that decided the scheme: an app that says nothing is asking to look
+like it belongs, and on a desktop that has an accent every control beside it is
+already that colour — on the Cocoa backend the app's own native checkboxes and
+default buttons are drawn by AppKit in the user's accent, so a `<Tabs>`
+indicator that stayed blue next to them looked like a bug. A brand keeps its
+own colour by naming it; a following provider's `value` wins over the desktop
+token for token, so name the family rather than the one colour:
 
 ```jsx
-const { accent } = useSystemAppearance();
-<ThemeProvider value={{ ...brand, accent: accent ?? brand.accent }}>
+<ThemeProvider value={{ accent: '#e17055', accentHover: '#c0563a', hoverBackground: '#e17055' }}>
 ```
+
+And a pinned `colorScheme` follows nothing, the accent included. What does
+**not** move with the accent is `info`: a note is blue everywhere, under a
+green accent as under an orange one, and `success`/`warning`/`danger` say what
+they say in any accent.
 
 ### Resizing
 
@@ -262,6 +342,9 @@ off along with the other two integrations that talk to the session bus.
 | --------------- | ------------------------------------ | ------------------- | ----- |
 | `colorScheme`   | yes                                  | from the theme name | yes   |
 | `accent`        | yes, where the backend implements it | **no such key**     | yes   |
+| `accentText`    | no — the palette picks by contrast   | no                  | yes   |
+| `selection`     | no — the accent itself               | no                  | yes   |
+| `palette`       | no                                   | no                  | yes   |
 | `contrast`      | yes                                  | from the theme name | yes   |
 | `reducedMotion` | version 2 of the interface           | rarely — see below  | yes   |
 
@@ -293,5 +376,18 @@ plausible `defaults` keys — `AppleHighlightColor`, `AppleAccentColor`,
 changes that setting, so "key not found" is the normal answer rather than the
 error case, and `AppleAccentColor` is an index into a table that has to be
 maintained by hand. `NSColor.controlAccentColor` is the colour itself, with
-Multicolor already resolved, and `NSWorkspace` answers the two accessibility
-flags directly.
+Multicolor already resolved, `alternateSelectedControlTextColor` is the ink
+AppKit writes on it, `selectedContentBackgroundColor` is the shade under a
+selected row (both resolved in the appearance the desktop is in, since a
+dynamic colour in a bare `osascript` resolves as Aqua otherwise), and
+`NSWorkspace` answers the two accessibility flags directly.
+
+**A process reads the colours once.** `controlAccentColor` is resolved on
+first use and cached for the life of the process: after the user picks another
+accent, the same process still answers the old one, with or without an
+`NSApplication`. So the watcher prints its values once and, on the change
+notifications, exits — and react-x11 spawns another, whose first read is
+fresh. A watcher that re-read in place re-announced the same values, and a
+running app never saw the change. The Cocoa backend
+reads the same child: it is one source for both backends, and the accent it
+reports is the one AppKit draws the native bezels in.

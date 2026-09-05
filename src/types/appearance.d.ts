@@ -3,6 +3,7 @@
  * and reduced motion. See docs/appearance.md.
  */
 
+import type { Theme } from './components.js';
 import type { NtkApp } from './nodes.js';
 
 /**
@@ -32,6 +33,29 @@ export interface SystemAppearance {
    * own brand colour rather than to grey.
    */
   readonly accent: string | null;
+  /**
+   * The ink the desktop writes on its accent — `'#ffffff'` on macOS, whatever
+   * the accent — or **null** where the source names a fill and nothing about
+   * what goes on it (the portal). The built-in palette uses it as
+   * `accentText`, and picks the legible ink by contrast where it is null.
+   */
+  readonly accentText: string | null;
+  /**
+   * The fill the desktop puts under a selected menu or list row — on macOS
+   * `selectedContentBackgroundColor`, a darker cut of the accent — or
+   * **null** where nothing names one. The built-in palette uses it as
+   * `hoverBackground`, and the accent itself where it is null.
+   */
+  readonly selection: string | null;
+  /**
+   * The desktop's whole palette as react-x11 tokens, where the desktop can
+   * name one: on macOS the semantic colours AppKit paints its own windows
+   * and controls with, flattened over the window ground. The built-in
+   * palette merges it over the scheme's own, so an app that says nothing
+   * about colour comes up in the desktop's greys, inks and status colours.
+   * Null from the portal and XSETTINGS, which name no such thing.
+   */
+  readonly palette: Readonly<Partial<Theme>> | null;
   readonly contrast: 'normal' | 'high';
   readonly reducedMotion: boolean;
   /**

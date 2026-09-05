@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- The macOS icon grid: a 824pt rounded square centred in 1024, radius 185 -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f7a24a"/>
+      <stop offset="1" stop-color="#e46a12"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#g)"/>
+  <!-- the guestbook page -->
+  <rect x="292" y="238" width="440" height="548" rx="40" fill="#fff7ee"/>
+  <rect x="352" y="330" width="320" height="28" rx="14" fill="#e8c9ab"/>
+  <rect x="352" y="410" width="320" height="28" rx="14" fill="#e8c9ab"/>
+  <rect x="352" y="490" width="220" height="28" rx="14" fill="#e8c9ab"/>
+  <!-- the signature -->
+  <path d="M372 690 C 420 610, 470 610, 500 690 S 580 770, 640 660" fill="none" stroke="#c9540a" stroke-width="30" stroke-linecap="round"/>
+</svg>

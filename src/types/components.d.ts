@@ -81,6 +81,16 @@ export interface Theme {
   /** The keyboard focus ring every focusable node under this palette draws
    * on `:focus-visible` — read by the renderer, not by the widgets. */
   focusRing: string;
+  /** The highlight behind selected text: a tint of `accent` unless a
+   * palette names it. A desktop that names one — macOS's Highlight colour —
+   * gives an opaque fill here. */
+  selection: string;
+  /** The insertion caret, or `null` for the text's own colour, which is what
+   * a caret is unless the desktop says otherwise. */
+  caret: string | null;
+  /** Ink for a link. Not the accent: a link is blue everywhere, as a note
+   * is. */
+  link: string;
   focusRingWidth: number;
   focusRingOffset: number;
   radius: number;

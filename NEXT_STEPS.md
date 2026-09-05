@@ -853,7 +853,7 @@ The rest of the list is done too:
 `Dialog` (`src/components/Dialog.js`) is the first consumer: a modal in a
 `<popup trapFocus grab>` centred over the owner window, Escape to close,
 `autoFocus` inside to pick the first stop, focus handed back on close —
-demoed by the "Clear" confirmation in `examples/form.jsx`. It does **not**
+demoed by the "Clear" confirmation in `examples/form/index.jsx`. It does **not**
 enforce pointer modality (widgets behind it stay clickable); a full-window
 overlay in the owner window would, and is the obvious follow-up along with
 converting `Menu`/`Select` to the delegated focus path. The original audit

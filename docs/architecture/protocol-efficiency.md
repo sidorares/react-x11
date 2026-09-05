@@ -12,7 +12,7 @@ the bench now prices them._
 
 ## 0. TL;DR
 
-A protocol trace of _hovering a `<Checkbox>`_ in `examples/form.jsx` — a frame
+A protocol trace of _hovering a `<Checkbox>`_ in `examples/form/index.jsx` — a frame
 whose visible result is one 18×18 rounded rectangle changing colour — showed
 ~26 requests per frame, among them a `CreatePixmap` of a **420×380 depth-8
 pixmap created and freed every frame**. The audit attributed every request in

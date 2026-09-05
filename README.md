@@ -100,9 +100,9 @@ three:
 | ------------------------------------------------- | ------------------------------------------------------- |
 | ![dashboard](docs/img/dashboard.png)              | ![tasks](docs/img/tasks.png)                            |
 
-| `examples/form.jsx` — textinput + Select | the open Select menu (a real `<popup>` window) |
-| ---------------------------------------- | ---------------------------------------------- |
-| ![form](docs/img/form.png)               | ![select menu](docs/img/select-menu.png)       |
+| `examples/form/index.jsx` — textinput + Select | the open Select menu (a real `<popup>` window) |
+| ---------------------------------------------- | ---------------------------------------------- |
+| ![form](docs/img/form.png)                     | ![select menu](docs/img/select-menu.png)       |
 
 `examples/viewer3d.jsx` — a model viewer over **indirect GLX**: the GL
 protocol sent over the X connection, geometry compiled into a display list,

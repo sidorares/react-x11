@@ -1,6 +1,6 @@
 // What the desktop looks like, as four values an app can render from:
-// light or dark, the accent colour, contrast, and whether the user asked for
-// less motion.
+// light or dark, the accent colour (with the ink the desktop puts on it,
+// where it names one), contrast, and whether the user asked for less motion.
 //
 // ## Why this is a ladder and not a call
 //
@@ -77,6 +77,9 @@ const APPEARANCE_NS = 'org.freedesktop.appearance';
 const NOTHING = Object.freeze({
   colorScheme: 'no-preference',
   accent: null,
+  accentText: null,
+  selection: null,
+  palette: null,
   contrast: 'normal',
   reducedMotion: false,
   source: null,
@@ -106,9 +109,22 @@ const watchers = new Set();
 // Publishing
 // --------------------------------------------------------------------------
 
+/** Two palettes with the same tokens — or both absent. */
+function samePalette(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
+  );
+}
+
 const SAME = (a, b) =>
   a.colorScheme === b.colorScheme &&
   a.accent === b.accent &&
+  a.accentText === b.accentText &&
+  a.selection === b.selection &&
+  samePalette(a.palette, b.palette) &&
   a.contrast === b.contrast &&
   a.reducedMotion === b.reducedMotion &&
   a.source === b.source;
@@ -215,14 +231,38 @@ const SCHEMES = new Set(['light', 'dark', 'no-preference']);
  * colour is the one thing worth being sure of.
  */
 function sanitize(saved) {
+  // A string, checked as one: `RegExp.test` coerces, and `['#ed5b00']`
+  // would pass the pattern and then reach a style as an array.
+  const hex = (value) =>
+    typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) ? value : null;
   return {
     colorScheme: SCHEMES.has(saved?.colorScheme)
       ? saved.colorScheme
       : 'no-preference',
-    accent: /^#[0-9a-f]{6}$/i.test(saved?.accent) ? saved.accent : null,
+    accent: hex(saved?.accent),
+    accentText: hex(saved?.accentText),
+    selection: hex(saved?.selection),
+    palette: sanitizePalette(saved?.palette, hex),
     contrast: saved?.contrast === 'high' ? 'high' : 'normal',
     reducedMotion: saved?.reducedMotion === true,
   };
+}
+
+/**
+ * A remembered palette is taken whole or not at all: every token named in
+ * `PALETTE_TOKENS` must be a colour, and nothing else is kept. A palette with
+ * a hole would merge over the built-in one and paint a built-in colour next
+ * to the desktop's, which is the one look this whole thing exists to avoid.
+ */
+function sanitizePalette(saved, hex) {
+  if (!saved || typeof saved !== 'object') return null;
+  const palette = {};
+  for (const token of PALETTE_TOKENS) {
+    const value = hex(saved[token]);
+    if (!value) return null;
+    palette[token] = value;
+  }
+  return Object.freeze(palette);
 }
 
 /**
@@ -279,6 +319,9 @@ function save(values) {
         v: CACHE_VERSION,
         colorScheme: values.colorScheme,
         accent: values.accent,
+        accentText: values.accentText,
+        selection: values.selection,
+        palette: values.palette,
         contrast: values.contrast,
         reducedMotion: values.reducedMotion,
       }),
@@ -343,6 +386,12 @@ export function fromPortal(ns = {}) {
   return {
     colorScheme: schemeFromPortal(ns['color-scheme']),
     accent: accentFromPortal(ns['accent-color']),
+    // The portal names the fill and nothing about what goes on it, nor a
+    // second shade for a selected row; the palette picks the legible ink
+    // itself (`resolveTheme`) and highlights with the accent.
+    accentText: null,
+    selection: null,
+    palette: null,
     contrast: ns.contrast === 1 ? 'high' : 'normal',
     // version 2 of the interface; on version 1 the key is simply absent and
     // "no" is the right answer
@@ -473,6 +522,9 @@ export function fromXSettings(map) {
     colorScheme: dark ? 'dark' : theme ? 'light' : 'no-preference',
     // XSETTINGS has no accent colour. Not "none set" — no such key exists.
     accent: null,
+    accentText: null,
+    selection: null,
+    palette: null,
     contrast: high ? 'high' : 'normal',
     reducedMotion: animations === 0,
   };
@@ -509,42 +561,259 @@ async function xsettingsRung(app) {
  * already resolved, and `NSWorkspace` answers the two accessibility flags
  * directly.
  *
+ * **The ink is read too.** `alternateSelectedControlTextColor` is what AppKit
+ * writes on a control filled with the accent, and it is not what a contrast
+ * ratio would choose: white on the orange accent is 2.6:1, and every native
+ * control does it anyway. A palette that follows the desktop's fill and
+ * picks its own letters for it looks like neither — so the pair travels
+ * together, and `accentText` is null from the sources that have no ink to
+ * name (the portal), where the palette decides by contrast.
+ *
+ * **And the selection shade.** A selected menu row or list row on macOS is
+ * not filled with the accent but with `selectedContentBackgroundColor`, a
+ * darker cut of it — same hue, lightness 0.54 → 0.40 in dark and 0.45 in
+ * light for the orange, hand-tuned per accent rather than computed. A menu
+ * highlighted in the raw accent beside a native one reads as too bright, so
+ * it is read rather than approximated, and is null where nothing names it.
+ *
+ * **One process reads the colours once.** `controlAccentColor` and the rest
+ * are resolved on first use and cached for the life of the process — after
+ * the user picks another accent, the same process still answers the old one,
+ * with or without an `NSApplication` (measured on macOS 15: the value does
+ * not move even after `NSSystemColorsDidChangeNotification`). So the program
+ * prints its values once and, on the change notifications, **exits**; the
+ * rung spawns another, whose first read is fresh. A watcher that re-read in
+ * place re-announced the same values, and nothing downstream ever saw a
+ * change — that was the bug.
+ *
+ * And it leaves when its parent has: eight of these were found on one
+ * machine, days old, reparented to launchd by apps that had died without
+ * running their exit handler.
+ *
  * Exported so a test can pin the source; it cannot be executed on Linux.
  */
 export const MACOS_PROGRAM = `
 ObjC.import('AppKit');
 var ud = $.NSUserDefaults.standardUserDefaults;
 var ws = $.NSWorkspace.sharedWorkspace;
+function srgb(color) {
+  var c = color.colorUsingColorSpace($.NSColorSpace.sRGBColorSpace);
+  return c.isNil() ? null
+    : [c.redComponent, c.greenComponent, c.blueComponent, c.alphaComponent];
+}
 function read() {
   var style = ud.stringForKey('AppleInterfaceStyle');
+  var dark = !style.isNil() && ObjC.unwrap(style) === 'Dark';
   var accent = null;
+  var accentText = null;
+  var selection = null;
   try {
-    var c = $.NSColor.controlAccentColor.colorUsingColorSpace(
-      $.NSColorSpace.sRGBColorSpace);
-    if (!c.isNil()) accent = [c.redComponent, c.greenComponent, c.blueComponent];
+    ObjC.import('stdlib');
+    // Dynamic colours resolve in the *current* appearance, which in a bare
+    // osascript is Aqua whatever the desktop is in; the ink AppKit puts on
+    // a filled control is allowed to differ between the two.
+    $.NSAppearance.setCurrentAppearance($.NSAppearance.appearanceNamed(
+      dark ? $.NSAppearanceNameDarkAqua : $.NSAppearanceNameAqua));
+    accent = srgb($.NSColor.controlAccentColor);
+    accentText = srgb($.NSColor.alternateSelectedControlTextColor);
+    selection = srgb($.NSColor.selectedContentBackgroundColor);
+  } catch (e) {}
+  // The rest of the desktop's palette: the semantic colours AppKit paints
+  // its own windows and controls with, in this appearance. Alpha is kept
+  // and composited on the other side, where the ground is known.
+  var colors = null;
+  try {
+    var C = $.NSColor;
+    var A = C.controlAccentColor;
+    var R = C.systemRedColor;
+    var rows = C.alternatingContentBackgroundColors;
+    colors = {
+      windowBackground: srgb(C.windowBackgroundColor),
+      controlBackground: srgb(C.controlBackgroundColor),
+      alternateRow: srgb(rows.objectAtIndex(rows.count > 1 ? 1 : 0)),
+      label: srgb(C.labelColor),
+      secondaryLabel: srgb(C.secondaryLabelColor),
+      separator: srgb(C.separatorColor),
+      focus: srgb(C.keyboardFocusIndicatorColor),
+      unemphasizedSelection: srgb(C.unemphasizedSelectedContentBackgroundColor),
+      accentPressed: srgb(A.colorWithSystemEffect($.NSColorSystemEffectPressed)),
+      accentDeepPressed: srgb(A.colorWithSystemEffect($.NSColorSystemEffectDeepPressed)),
+      textSelection: srgb(C.selectedTextBackgroundColor),
+      caret: srgb(C.textInsertionPointColor),
+      link: srgb(C.linkColor),
+      red: srgb(R),
+      redPressed: srgb(R.colorWithSystemEffect($.NSColorSystemEffectPressed)),
+      green: srgb(C.systemGreenColor),
+      orange: srgb(C.systemOrangeColor),
+      blue: srgb(C.systemBlueColor)
+    };
   } catch (e) {}
   return JSON.stringify({
-    dark: !style.isNil() && ObjC.unwrap(style) === 'Dark',
+    dark: dark,
     accent: accent,
+    accentText: accentText,
+    selection: selection,
+    colors: colors,
     reducedMotion: !!ws.accessibilityDisplayShouldReduceMotion,
     contrast: !!ws.accessibilityDisplayShouldIncreaseContrast
   });
 }
-function emit() { console.log(read()); }
-emit();
+console.log(read());
+// A change is answered by *leaving*: the parent spawns a fresh process and
+// takes its first line. Reading again here would answer the old colours —
+// see the comment above the program.
+function changed() { $.exit(0); }
 var dnc = $.NSDistributedNotificationCenter.defaultCenter;
 ['AppleInterfaceThemeChangedNotification',
  'AppleColorPreferencesChangedNotification'].forEach(function (name) {
   dnc.addObserverForNameObjectQueueUsingBlock(
-    name, $(), $.NSOperationQueue.mainQueue, emit);
+    name, $(), $.NSOperationQueue.mainQueue, changed);
 });
 ws.notificationCenter.addObserverForNameObjectQueueUsingBlock(
   'NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification',
-  $(), $.NSOperationQueue.mainQueue, emit);
+  $(), $.NSOperationQueue.mainQueue, changed);
+// An app that dies without its exit handler (a signal, a crash) leaves this
+// process behind, reparented to launchd, for as long as the machine is up.
+ObjC.import('unistd');
+$.NSTimer.scheduledTimerWithTimeIntervalRepeatsBlock(5, true, function () {
+  if ($.getppid() === 1) $.exit(0);
+});
 $.NSRunLoop.currentRunLoop.run();
 `;
 
-/** One line of the child's output → the four values, or null if it is noise. */
+/**
+ * The tokens a desktop palette names — the colour half of the built-in
+ * palette, less the inks `resolveTheme` derives by contrast. Both the cache
+ * and the macOS parser take a palette whole or not at all, and this is the
+ * list "whole" means.
+ */
+export const PALETTE_TOKENS = Object.freeze([
+  'background',
+  'surface',
+  'surfaceHover',
+  'text',
+  'textMuted',
+  'border',
+  'borderFocus',
+  'focusRing',
+  'track',
+  'accent',
+  'accentHover',
+  'accentActive',
+  'accentText',
+  'hoverBackground',
+  'hoverText',
+  'selection',
+  'caret',
+  'link',
+  'danger',
+  'dangerHover',
+  'success',
+  'warning',
+  'info',
+]);
+
+/** `[r, g, b]` or `[r, g, b, a]` in [0, 1], or null. */
+function channels(value) {
+  if (!Array.isArray(value) || value.length < 3) return null;
+  const c = value.slice(0, 4);
+  if (c.length === 3) c.push(1);
+  return c.every((v) => typeof v === 'number' && v >= 0 && v <= 1) ? c : null;
+}
+
+const toHex = (c) =>
+  '#' +
+  c
+    .slice(0, 3)
+    .map((v) =>
+      Math.round(v * 255)
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('');
+
+/**
+ * AppKit's semantic colours → react-x11's tokens, or null unless every one
+ * of them was read.
+ *
+ * **Alpha is composited here, over the ground it is drawn on.** AppKit's
+ * inks are translucent — `labelColor` is black at 85%, `separatorColor` at
+ * 10% — and every token in this renderer is a colour, so each is flattened
+ * over the window ground. The focus ring is drawn at 50% and gets the same
+ * treatment; a ring over a control is a shade off, and no one can see it.
+ *
+ * The rest is a naming exercise, with two decisions in it. The hover and
+ * pressed steps are AppKit's *pressed* and *deep-pressed* effects, because
+ * AppKit has no hover state for a filled control and its rollover effect
+ * is darker than its pressed one in light mode — a ramp that ran backwards.
+ * And `warning` is the system orange, not the yellow: a warning is read as
+ * letters too, and yellow on white is not.
+ */
+export function paletteFromMacOS(colors) {
+  if (!colors || typeof colors !== 'object') return null;
+  const read = {};
+  for (const name of [
+    'windowBackground',
+    'controlBackground',
+    'alternateRow',
+    'label',
+    'secondaryLabel',
+    'separator',
+    'focus',
+    'unemphasizedSelection',
+    'accentPressed',
+    'accentDeepPressed',
+    'textSelection',
+    'caret',
+    'link',
+    'red',
+    'redPressed',
+    'green',
+    'orange',
+    'blue',
+  ]) {
+    const c = channels(colors[name]);
+    if (!c) return null;
+    read[name] = c;
+  }
+  const over = (c, ground) =>
+    toHex(ground.map((g, i) => c[i] * c[3] + g * (1 - c[3])));
+  const flat = (c) => toHex(c);
+  const ground = read.windowBackground;
+  const accent = colors.accent && channels(colors.accent);
+  const accentText = colors.accentText && channels(colors.accentText);
+  const selection = colors.selection && channels(colors.selection);
+  if (!accent || !accentText || !selection) return null;
+  const ink = flat(accentText);
+  const focus = over(read.focus, ground);
+  return Object.freeze({
+    background: flat(ground),
+    surface: flat(read.controlBackground),
+    surfaceHover: over(read.alternateRow, read.controlBackground),
+    text: over(read.label, ground),
+    textMuted: over(read.secondaryLabel, ground),
+    border: over(read.separator, ground),
+    borderFocus: focus,
+    focusRing: focus,
+    track: flat(read.unemphasizedSelection),
+    accent: flat(accent),
+    accentHover: flat(read.accentPressed),
+    accentActive: flat(read.accentDeepPressed),
+    accentText: ink,
+    hoverBackground: flat(selection),
+    hoverText: ink,
+    selection: flat(read.textSelection),
+    caret: flat(read.caret),
+    link: flat(read.link),
+    danger: flat(read.red),
+    dangerHover: flat(read.redPressed),
+    success: flat(read.green),
+    warning: flat(read.orange),
+    info: flat(read.blue),
+  });
+}
+
+/** One line of the child's output → the values, or null if it is noise. */
 export function fromMacOS(line) {
   let parsed;
   try {
@@ -553,11 +822,25 @@ export function fromMacOS(line) {
     return null;
   }
   if (!parsed || typeof parsed !== 'object') return null;
+  // The palette's accent family is the three values above it, so the parser
+  // sees them together
+  const colors = parsed.colors
+    ? {
+        ...parsed.colors,
+        accent: parsed.accent,
+        accentText: parsed.accentText,
+        selection: parsed.selection,
+      }
+    : null;
   return {
     // macOS always has a definite appearance, so an unset AppleInterfaceStyle
     // is *light* rather than "no preference".
     colorScheme: parsed.dark ? 'dark' : 'light',
     accent: accentFromPortal(parsed.accent),
+    // The same `(r, g, b)` shape as the accent, by construction above
+    accentText: accentFromPortal(parsed.accentText),
+    selection: accentFromPortal(parsed.selection),
+    palette: paletteFromMacOS(colors),
     contrast: parsed.contrast ? 'high' : 'normal',
     reducedMotion: Boolean(parsed.reducedMotion),
   };
@@ -565,36 +848,61 @@ export function fromMacOS(line) {
 
 let child = null;
 
+/** Set while this process is exiting, so a watcher's death is not answered. */
+let closing = false;
+
 /**
- * Spawn the watcher and resolve on its first line — or `false` if it dies,
- * prints nothing usable, or takes more than a few seconds, any of which mean
- * this Mac cannot answer and the ladder is finished.
+ * Test seam, not public: what spawns the watcher. A fake here also lets the
+ * rung run off a Mac, where the real one cannot, so the respawn is tested on
+ * CI rather than on whoever has a Mac.
+ */
+let spawnWatcher = null;
+export function _setMacOSSpawnForTests(fn) {
+  spawnWatcher = fn;
+}
+
+async function spawnProgram() {
+  if (spawnWatcher) return spawnWatcher();
+  const { spawn } = await import('node:child_process');
+  return spawn('osascript', ['-l', 'JavaScript', '-e', MACOS_PROGRAM], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+/** How long after an answered exit the next watcher starts. */
+const RESPAWN_DELAY_MS = 150;
+
+/**
+ * Run one watcher process and resolve on its first usable line — or `false`
+ * if it dies, prints nothing usable, or takes more than a few seconds, any of
+ * which mean this Mac cannot answer and the ladder is finished.
+ *
+ * A watcher that exits *after* answering is a different thing: that is how
+ * the program says the desktop changed (see `MACOS_PROGRAM`), and the next
+ * one is started to read the new values. One that dies before answering is
+ * not replaced — that is osascript failing, and a respawn would loop on it.
  *
  * `console.log` in JXA has gone to stderr in some macOS releases and stdout in
  * others, so both are read. It costs one extra listener to not depend on
  * which.
  */
-async function macosRung() {
-  if (process.platform !== 'darwin' || child) return false;
-  const { spawn } = await import('node:child_process');
-
+async function runWatcher() {
   let proc;
   try {
-    proc = spawn('osascript', ['-l', 'JavaScript', '-e', MACOS_PROGRAM], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    proc = await spawnProgram();
   } catch {
     return false;
   }
   child = proc;
   // Never a reason for the process to stay alive.
-  proc.unref();
+  proc.unref?.();
   proc.stdout.unref?.();
   proc.stderr.unref?.();
   proc.on('error', () => {});
 
   return await new Promise((resolve) => {
     let settled = false;
+    let answered = false;
     const done = (ok) => {
       if (settled) return;
       settled = true;
@@ -618,26 +926,41 @@ async function macosRung() {
         const values = fromMacOS(line);
         if (!values) continue;
         if (settled && owner !== 'macos') return;
+        answered = true;
         publish(values, 'macos');
         done(true);
       }
     };
-    proc.stdout.setEncoding('utf8');
-    proc.stderr.setEncoding('utf8');
+    proc.stdout.setEncoding?.('utf8');
+    proc.stderr.setEncoding?.('utf8');
     proc.stdout.on('data', onData);
     proc.stderr.on('data', onData);
     proc.on('exit', () => {
+      if (child === proc) child = null;
       // Dying after it answered leaves the last value standing, which is more
-      // useful than reverting to the defaults.
-      child = null;
+      // useful than reverting to the defaults — and, while this rung owns the
+      // store, is the cue to read again.
       done(false);
+      if (!answered || owner !== 'macos' || closing || child) return;
+      const again = setTimeout(() => {
+        if (owner === 'macos' && !closing && !child) void runWatcher();
+      }, RESPAWN_DELAY_MS);
+      again.unref?.();
     });
   });
 }
 
+async function macosRung() {
+  if ((process.platform !== 'darwin' && !spawnWatcher) || child) return false;
+  return runWatcher();
+}
+
 // Killed rather than left behind: `unref()` keeps it from holding *this*
 // process open, and nothing keeps it from outliving it.
-process.on('exit', () => child?.kill());
+process.on('exit', () => {
+  closing = true;
+  child?.kill();
+});
 
 // --------------------------------------------------------------------------
 // The ladder

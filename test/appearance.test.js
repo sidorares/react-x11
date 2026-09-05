@@ -7,6 +7,8 @@
 // and `<ThemeProvider>`, and the ladder itself.
 import { test, describe, afterEach, before, after } from 'node:test';
 import assert from 'node:assert';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -15,11 +17,14 @@ import React from 'react';
 
 import {
   MACOS_PROGRAM,
+  PALETTE_TOKENS,
   _resetAppearance,
+  _setMacOSSpawnForTests,
   appearanceSnapshot,
   fromMacOS,
   fromPortal,
   fromXSettings,
+  setAppearanceForTests,
   systemAppearance,
 } from '../src/appearance.js';
 import {
@@ -32,7 +37,7 @@ import {
 import { useSystemAppearance } from '../src/appearancehooks.js';
 import { ThemeProvider, useTheme } from '../src/components/theme.js';
 import { DarkTheme, DefaultTheme } from '../src/palette.js';
-import { tint } from '../src/styles.js';
+import { readableInk, tint } from '../src/styles.js';
 import { _resetBusState, busRefs, closeBus } from '../src/bus.js';
 import {
   act,
@@ -431,9 +436,36 @@ describe('the macOS rung', () => {
       {
         colorScheme: 'dark',
         accent: '#ff5900',
+        accentText: null,
+        selection: null,
+        palette: null,
         contrast: 'high',
         reducedMotion: false,
       },
+    );
+  });
+
+  // The ink travels with the fill. AppKit writes white on the orange accent
+  // (2.6:1) and on the pink, where a contrast ratio would choose dark
+  // letters; a palette that took the desktop's fill and chose its own ink
+  // would match neither the desktop nor itself.
+  test('the ink the desktop writes on its accent comes along', () => {
+    const values = fromMacOS(
+      '{"dark":false,"accent":[0.97,0.51,0.106],"accentText":[1,1,1]}',
+    );
+    assert.equal(values.accent, '#f7821b');
+    assert.equal(values.accentText, '#ffffff');
+    // and the shade under a selected row, which is not the accent
+    assert.equal(
+      fromMacOS('{"dark":true,"accent":[1,0,0],"selection":[0.79,0.38,0.01]}')
+        .selection,
+      '#c96103',
+    );
+    // and is checked the way the accent is: a triple in range or nothing
+    assert.equal(
+      fromMacOS('{"dark":false,"accent":[1,0,0],"accentText":"white"}')
+        .accentText,
+      null,
     );
   });
 
@@ -460,13 +492,186 @@ describe('the macOS rung', () => {
   // into a table that has to be maintained by hand.
   test('the watcher reads the frameworks, not defaults', () => {
     assert.match(MACOS_PROGRAM, /NSColor\.controlAccentColor/);
+    assert.match(MACOS_PROGRAM, /alternateSelectedControlTextColor/);
+    assert.match(MACOS_PROGRAM, /selectedContentBackgroundColor/);
+    // resolved in the desktop's appearance, not the child's default Aqua
+    assert.match(MACOS_PROGRAM, /NSAppearanceNameDarkAqua/);
     assert.match(MACOS_PROGRAM, /accessibilityDisplayShouldReduceMotion/);
     assert.match(MACOS_PROGRAM, /accessibilityDisplayShouldIncreaseContrast/);
     assert.match(MACOS_PROGRAM, /AppleInterfaceStyle/);
     assert.doesNotMatch(MACOS_PROGRAM, /AppleAccentColor|AppleHighlightColor/);
-    // one line per change, on a run loop that does not return
+    // one line, then a run loop that does not return — until a change, which
+    // it answers by leaving (below), or its parent has gone
     assert.match(MACOS_PROGRAM, /AppleInterfaceThemeChangedNotification/);
     assert.match(MACOS_PROGRAM, /NSRunLoop\.currentRunLoop\.run\(\)/);
+    assert.match(MACOS_PROGRAM, /getppid\(\) === 1\) \$\.exit\(0\)/);
+  });
+
+  // **The whole palette, composited.** AppKit's inks are translucent —
+  // `labelColor` is white at 85% on dark — and every token here is a colour,
+  // so each is flattened over the window ground on the way in. The expected
+  // values are worked by hand, so the compositing is checked against
+  // arithmetic rather than against itself.
+  const c = (r, g, b, a = 1) => [r, g, b, a];
+  const COLORS = {
+    windowBackground: c(0.2, 0.2, 0.2),
+    controlBackground: c(0.1, 0.1, 0.1),
+    alternateRow: c(1, 1, 1, 0.05),
+    label: c(1, 1, 1, 0.85),
+    secondaryLabel: c(1, 1, 1, 0.55),
+    separator: c(1, 1, 1, 0.1),
+    focus: c(0, 0.5, 1, 0.5),
+    unemphasizedSelection: c(0.27, 0.27, 0.27),
+    accentPressed: c(0.2, 0.7, 1),
+    accentDeepPressed: c(0.3, 0.8, 1),
+    textSelection: c(0.5, 0.3, 0.4),
+    caret: c(1, 0.3, 0.6),
+    link: c(0.25, 0.6, 1),
+    red: c(1, 0.27, 0.23),
+    redPressed: c(1, 0.45, 0.4),
+    green: c(0.2, 0.84, 0.3),
+    orange: c(1, 0.62, 0.04),
+    blue: c(0.04, 0.52, 1),
+  };
+  const lineWith = (colors) =>
+    JSON.stringify({
+      dark: true,
+      accent: [0, 0.48, 1],
+      accentText: [1, 1, 1],
+      selection: [0, 0.35, 0.82],
+      colors,
+    });
+
+  test('the semantic colours become a palette, flattened over the ground', () => {
+    const { palette } = fromMacOS(lineWith(COLORS));
+    assert.equal(palette.background, '#333333');
+    // 0.85 white over #333333: 51 + 0.85 × 204 = 224
+    assert.equal(palette.text, '#e0e0e0');
+    // 0.55 white: 51 + 0.55 × 204 = 163
+    assert.equal(palette.textMuted, '#a3a3a3');
+    // 0.1 white: 51 + 20 = 71
+    assert.equal(palette.border, '#474747');
+    // the ring at 50% over the ground, not the raw blue
+    assert.equal(palette.focusRing, '#1a5999');
+    assert.equal(palette.borderFocus, palette.focusRing);
+    // 5% white over the control fill (25.5), not over the window ground
+    assert.equal(palette.surfaceHover, '#252525');
+    // the accent family is the three values beside the colours
+    assert.equal(palette.accent, '#007aff');
+    assert.equal(palette.accentText, '#ffffff');
+    assert.equal(palette.hoverBackground, '#0059d1');
+    assert.equal(palette.hoverText, '#ffffff');
+    assert.equal(palette.accentHover, '#33b3ff');
+    assert.equal(palette.accentActive, '#4dccff');
+    assert.equal(palette.caret, '#ff4d99');
+    assert.equal(palette.warning, '#ff9e0a');
+    assert.deepEqual(Object.keys(palette).sort(), [...PALETTE_TOKENS].sort());
+    assert.ok(Object.isFrozen(palette));
+  });
+
+  // A palette with a hole would merge over the built-in one and paint a
+  // built-in colour next to the desktop's — the one look this exists to
+  // avoid. So it is whole or nothing, and nothing leaves the accent trio.
+  test('a palette with a hole is no palette', () => {
+    const { link, ...missing } = COLORS;
+    void link;
+    const values = fromMacOS(lineWith(missing));
+    assert.equal(values.palette, null);
+    assert.equal(values.accent, '#007aff');
+    assert.equal(fromMacOS(lineWith({ ...COLORS, red: 'red' })).palette, null);
+    // a line from before the palette was read at all
+    assert.equal(fromMacOS('{"dark":true,"accent":[1,0,0]}').palette, null);
+  });
+
+  test('the watcher reads the semantic colours too', () => {
+    for (const name of [
+      'windowBackgroundColor',
+      'controlBackgroundColor',
+      'labelColor',
+      'separatorColor',
+      'selectedTextBackgroundColor',
+      'textInsertionPointColor',
+      'NSColorSystemEffectPressed',
+    ]) {
+      assert.match(MACOS_PROGRAM, new RegExp(name));
+    }
+  });
+
+  /**
+   * A stand-in for the osascript child: the streams and events the rung
+   * reads, and nothing else. Real colours cannot be read on CI, and could
+   * not be read *twice* on a Mac either — see the respawn below.
+   */
+  function fakeWatcher(spawned) {
+    const proc = new EventEmitter();
+    proc.stdout = new PassThrough();
+    proc.stderr = new PassThrough();
+    proc.unref = () => {};
+    proc.kill = () => proc.emit('exit', null);
+    spawned.push(proc);
+    return proc;
+  }
+  const pollUntil = async (fn, what) => {
+    for (let i = 0; i < 100; i++) {
+      if (fn()) return;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.fail(`timed out waiting for ${what}`);
+  };
+
+  // **A process reads the colours once.** `controlAccentColor` is cached for
+  // the life of the process that resolved it, so a watcher that re-read on
+  // the change notification re-announced the old values and nothing
+  // downstream ever saw a change. The program leaves instead, and the rung
+  // reads the next one.
+  test('a watcher that leaves after answering is replaced, and the next one is read', async () => {
+    const spawned = [];
+    _setMacOSSpawnForTests(() => fakeWatcher(spawned));
+    try {
+      await withNoBus(async () => {
+        const first = systemAppearance();
+        await pollUntil(() => spawned.length === 1, 'the first watcher');
+        spawned[0].stdout.write(
+          '{"dark":true,"accent":[1,0,0],"accentText":[1,1,1],"selection":[0.5,0,0]}\n',
+        );
+        const values = await first;
+        assert.equal(values.source, 'macos');
+        assert.equal(values.accent, '#ff0000');
+
+        // the desktop changed: the watcher says so by exiting
+        spawned[0].emit('exit', 0);
+        await pollUntil(() => spawned.length === 2, 'the second watcher');
+        spawned[1].stdout.write('{"dark":false,"accent":[0,0,1]}\n');
+        await pollUntil(
+          () => appearanceSnapshot().accent === '#0000ff',
+          'the new accent',
+        );
+        assert.equal(appearanceSnapshot().colorScheme, 'light');
+        assert.equal(appearanceSnapshot().source, 'macos');
+      });
+    } finally {
+      _setMacOSSpawnForTests(null);
+    }
+  });
+
+  // Dying *before* answering is osascript failing, not a change: replacing
+  // that one would loop on whatever is wrong with it.
+  test('a watcher that dies before answering is not replaced', async () => {
+    const spawned = [];
+    _setMacOSSpawnForTests(() => fakeWatcher(spawned));
+    try {
+      await withNoBus(async () => {
+        const first = systemAppearance();
+        await pollUntil(() => spawned.length === 1, 'the first watcher');
+        spawned[0].emit('exit', 1);
+        const values = await first;
+        assert.notEqual(values.source, 'macos');
+        await new Promise((r) => setTimeout(r, 300));
+        assert.equal(spawned.length, 1, 'no second watcher');
+      });
+    } finally {
+      _setMacOSSpawnForTests(null);
+    }
   });
 });
 
@@ -486,6 +691,10 @@ describe('the settings portal', { concurrency: 1, ...needsBroker }, () => {
         assert.deepEqual(values, {
           colorScheme: 'dark',
           accent: '#ed5b00',
+          // the portal names a fill and nothing about what goes on it
+          accentText: null,
+          selection: null,
+          palette: null,
           contrast: 'high',
           reducedMotion: true,
           source: 'portal',
@@ -583,6 +792,9 @@ describe('the ladder', () => {
       assert.deepEqual(values, {
         colorScheme: 'no-preference',
         accent: null,
+        accentText: null,
+        selection: null,
+        palette: null,
         contrast: 'normal',
         reducedMotion: false,
         source: null,
@@ -667,6 +879,9 @@ describe('the remembered answer', () => {
         v: 1,
         colorScheme: 'dark',
         accent: null,
+        accentText: null,
+        selection: null,
+        palette: null,
         contrast: 'normal',
         reducedMotion: false,
       });
@@ -690,6 +905,11 @@ describe('the remembered answer', () => {
     assert.deepEqual(appearanceSnapshot(), {
       colorScheme: 'dark',
       accent: '#ed5b00',
+      // a file from before the ink was remembered: null, and the palette
+      // picks the ink by contrast until the rung revalidates
+      accentText: null,
+      selection: null,
+      palette: null,
       contrast: 'normal',
       reducedMotion: true,
       // not 'xsettings': nothing has been asked, and saying otherwise would
@@ -721,6 +941,8 @@ describe('the remembered answer', () => {
         v: 1,
         colorScheme: 'DARK MODE PLEASE',
         accent: 'url(http://example.com)',
+        accentText: 'white',
+        selection: ['#c96003'],
         contrast: 42,
         reducedMotion: 'yes',
       }),
@@ -729,10 +951,31 @@ describe('the remembered answer', () => {
     assert.deepEqual(appearanceSnapshot(), {
       colorScheme: 'no-preference',
       accent: null,
+      accentText: null,
+      selection: null,
+      palette: null,
       contrast: 'normal',
       reducedMotion: false,
       source: 'cache',
     });
+  });
+
+  test('a remembered palette is taken whole or not at all', async () => {
+    const whole = Object.fromEntries(PALETTE_TOKENS.map((t) => [t, '#123456']));
+    await write(JSON.stringify({ v: 1, colorScheme: 'dark', palette: whole }));
+    _resetAppearance();
+    assert.deepEqual(appearanceSnapshot().palette, whole);
+    for (const broken of [
+      { ...whole, text: 'red' },
+      { ...whole, link: undefined },
+      'not a palette',
+    ]) {
+      await write(
+        JSON.stringify({ v: 1, colorScheme: 'dark', palette: broken }),
+      );
+      _resetAppearance();
+      assert.equal(appearanceSnapshot().palette, null);
+    }
   });
 
   test('unparseable, absent, and from a future version all fall back', async () => {
@@ -862,6 +1105,129 @@ describe('useSystemAppearance', () => {
       assert.equal(seen.at(-1), 'xsettings:dark:null');
       endXSettings(app);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+// **The accent follows on the same terms as the scheme.** On a desktop that
+// reports one, every control beside the app is already that colour — on the
+// Cocoa backend the app's *own* native bezels are drawn by AppKit in the
+// user's accent, so a blue `<Tabs>` indicator next to an orange checkbox
+// read as a bug. The seams are the ones the scheme has: a brand names its
+// own accent, and a pinned `colorScheme` follows nothing.
+describe('the desktop accent', () => {
+  afterEach(cleanup);
+
+  // what this Mac reports with the orange accent: the fill, AppKit's white
+  // ink on it, and the darker cut it puts under a selected row
+  const ORANGE = {
+    colorScheme: 'dark',
+    accent: '#f7821b',
+    accentText: '#ffffff',
+    selection: '#c96003',
+  };
+
+  const Probe = () => {
+    const theme = useTheme();
+    return React.createElement(
+      'text',
+      null,
+      `${theme.accent}|${theme.accentText}|${theme.hoverBackground}`,
+    );
+  };
+  const shown = () => screen.getByText(/\|/).props.children;
+
+  test('with no provider at all, the widgets and the tokens take it', async () => {
+    const { ctx } = await renderX11(
+      React.createElement(
+        'box',
+        { style: { flexGrow: 1 } },
+        React.createElement('box', {
+          style: { width: 40, height: 40, backgroundColor: '$accent' },
+        }),
+        React.createElement(Probe),
+      ),
+      { fonts: FONTS, colorScheme: 'dark' },
+    );
+    await settle();
+    assert.equal(shown(), `${DarkTheme.accent}|white|${DarkTheme.accent}`);
+    await expectPixel(ctx, 5, 5, DarkTheme.accent, { tolerance: 2 });
+
+    // The desktop's accent changes under a running app — the same event as a
+    // light/dark switch, and both routes have to move: the widget through
+    // `useTheme()`, the `$accent` box through the node tree.
+    await act(async () => {
+      setAppearanceForTests(ORANGE);
+    });
+    await settle();
+    assert.equal(shown(), '#f7821b|#ffffff|#c96003');
+    await expectPixel(ctx, 5, 5, '#f7821b', { tolerance: 2 });
+  });
+
+  // **The desktop's whole palette.** On macOS the rung names every colour,
+  // and the window ground — which no style object holds — has to follow it
+  // along with the widgets.
+  test('a desktop palette reaches the window ground and the widgets', async () => {
+    const SYSTEM = Object.fromEntries(
+      PALETTE_TOKENS.map((t) => [t, '#404040']),
+    );
+    Object.assign(SYSTEM, {
+      background: '#323232',
+      text: '#e0e0e0',
+      accent: '#007aff',
+      accentText: '#ffffff',
+      hoverBackground: '#0059d1',
+    });
+    const { ctx } = await renderX11(
+      React.createElement(
+        'box',
+        { style: { flexGrow: 1 } },
+        React.createElement(Probe),
+      ),
+      { fonts: FONTS, colorScheme: 'dark' },
+    );
+    await settle();
+    await expectPixel(ctx, 2, 2, DarkTheme.background, { tolerance: 2 });
+    await act(async () => {
+      setAppearanceForTests({ ...ORANGE, palette: SYSTEM });
+    });
+    await settle();
+    assert.equal(shown(), '#007aff|#ffffff|#0059d1');
+    await expectPixel(ctx, 2, 2, '#323232', { tolerance: 2 });
+  });
+
+  test('a following provider keeps it; a brand or a pin does not', async () => {
+    setAppearanceForTests(ORANGE);
+    const under = (props) =>
+      React.createElement(ThemeProvider, props, React.createElement(Probe));
+    for (const [what, props, want] of [
+      [
+        'following, unnamed',
+        { value: { radius: 9 } },
+        '#f7821b|#ffffff|#c96003',
+      ],
+      // the brand named its accent and stops there: its ink is re-picked for
+      // the fill it named, and the rest of the family is still the desktop's,
+      // which is what naming one token means everywhere
+      [
+        'a brand',
+        { value: { accent: '#123456' } },
+        `#123456|${readableInk('#123456', [DarkTheme.text, DarkTheme.background])}|#c96003`,
+      ],
+      [
+        'pinned',
+        { value: { radius: 9 }, colorScheme: 'dark' },
+        `${DarkTheme.accent}|${DarkTheme.accentText}|${DarkTheme.hoverBackground}`,
+      ],
+    ]) {
+      await renderX11(under(props), { fonts: FONTS, colorScheme: 'dark' });
+      // `renderX11` pins the scheme alone; the accent is this test's
+      setAppearanceForTests(ORANGE);
+      await settle();
+      assert.equal(shown(), want, what);
+      await cleanup();
+    }
   });
 });
 

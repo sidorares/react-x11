@@ -9,11 +9,12 @@
 //
 // **The default follows the desktop.** A react-x11 app that says nothing
 // about colour is dark on a dark desktop and light on a light one, the way a
-// GTK or Qt app is; `<ThemeProvider>` and `colorScheme` are how an app that
-// wants otherwise says so. See docs/appearance.md.
+// GTK or Qt app is, and its accent is the desktop's where the desktop has
+// one; `<ThemeProvider>` and `colorScheme` are how an app that wants
+// otherwise says so. See docs/appearance.md.
 
 import { appearanceSnapshot } from './appearance.js';
-import { readableInk, stepBeyond } from './styles.js';
+import { readableInk, stepBeyond, tint } from './styles.js';
 
 /**
  * The language subtags written right-to-left — CLDR's set, by the language
@@ -171,6 +172,17 @@ export const DefaultTheme = {
   focusRing: '#2980b9',
   focusRingWidth: 2,
   focusRingOffset: 1,
+  // The highlight behind selected text. A *tint* rather than an opaque
+  // fill, so the ink keeps its own contrast on both palettes; derived from
+  // `accent` for any palette that moves the accent and not this. A desktop
+  // that names one (macOS's Highlight colour) gives an opaque fill here.
+  selection: tint('#2980b9', 0.35),
+  // The insertion caret. `null` is the text's own colour, which is what a
+  // caret is unless the desktop says otherwise — macOS draws it in the
+  // Highlight colour's accent.
+  caret: null,
+  // Ink for a link. Not the accent: a link is blue everywhere, as a note is.
+  link: '#1c6ea4',
   // shape
   radius: 4,
   radiusSmall: 3,
@@ -268,6 +280,9 @@ const TEXT_FROM = {
   infoText: 'info',
 };
 
+// The selection tint follows the accent it is a tint of.
+const TINT_FROM = { selection: ['accent', 0.35] };
+
 // And the same for the floating-surface radii, which are a function of the
 // text they wrap: a palette that sets `fontSize` and nothing else still gets
 // menus in proportion to it.
@@ -323,6 +338,11 @@ export function resolveTheme(value, base = DefaultTheme) {
       continue;
     merged[token] = readableInk(merged[fill], [merged.text, merged.background]);
   }
+  for (const [token, [fill, alpha]] of Object.entries(TINT_FROM)) {
+    if (named[token] == null && named[fill] != null) {
+      merged[token] = tint(merged[fill], alpha);
+    }
+  }
   if (named.fontSize != null) {
     for (const [token, from] of Object.entries(RADIUS_FROM_FONT)) {
       if (named[token] == null) merged[token] = from(merged.fontSize);
@@ -377,18 +397,134 @@ export const DarkTheme = resolveTheme({
   hoverText: 'white',
   borderFocus: '#5aa4e6',
   focusRing: '#5aa4e6',
+  link: '#5aa4e6',
 });
+
+/**
+ * `#rrggbb` moved `amount` of the way toward `toward`. The one colour
+ * operation the desktop palette needs, on the one shape the ladder
+ * guarantees an accent has (`sanitize`, `accentFromPortal`).
+ */
+function mixHex(hex, toward, amount) {
+  const channel = (c, i) => parseInt(c.slice(1 + 2 * i, 3 + 2 * i), 16);
+  return (
+    '#' +
+    [0, 1, 2]
+      .map((i) => {
+        const a = channel(hex, i);
+        const b = channel(toward, i);
+        return Math.round(a + (b - a) * amount)
+          .toString(16)
+          .padStart(2, '0');
+      })
+      .join('')
+  );
+}
+
+/**
+ * The built-in palette with the desktop's accent on it.
+ *
+ * Only the accent family moves — `accent`, its hover, the menu-row highlight
+ * (the desktop's own selection shade where it names one: on macOS that is a
+ * darker cut of the accent, and a row lit in the raw accent beside a native
+ * menu reads as too bright; the accent itself otherwise, as in both built-in
+ * palettes), and the focus ring —
+ * and the steps are taken the way each palette takes them: the hover sinks
+ * into a light ground and lifts off a dark one, and `resolveTheme` derives
+ * the press from the pair. `info` stays its own blue, as it does under a
+ * theme with a green accent: a note looks like a note everywhere.
+ *
+ * The ink is the desktop's where the desktop named one — AppKit writes white
+ * on every accent a Mac offers, including the ones a contrast ratio would
+ * put dark letters on, and the point of following the desktop is to look
+ * like the controls beside ours. Where the source has no ink (the portal)
+ * `resolveTheme` picks the legible one, as it does for any theme that names
+ * a fill and stops there.
+ */
+function withDesktopAccent(scheme, accent, ink, selection) {
+  const dark = scheme.scheme === 'dark';
+  const accentHover = dark
+    ? mixHex(accent, '#ffffff', 0.2)
+    : mixHex(accent, '#000000', 0.22);
+  const focus = dark ? accentHover : accent;
+  const value = {
+    accent,
+    accentHover,
+    hoverBackground: selection ?? accent,
+    borderFocus: focus,
+    focusRing: focus,
+  };
+  if (ink) {
+    value.accentText = ink;
+    value.hoverText = ink;
+  }
+  return resolveTheme(value, scheme);
+}
+
+// A desktop that names its whole palette (macOS, through the semantic
+// colours AppKit paints with) is merged over the scheme's built-in one the
+// way a `<ThemeProvider>` value is: every colour it named, and the shape
+// tokens, the derived inks and the pressed steps from `resolveTheme`. Keyed
+// on the palette object itself — the store replaces it, never mutates it.
+const desktopPalettesByObject = new WeakMap();
+function withDesktopPalette(scheme, palette) {
+  let byScheme = desktopPalettesByObject.get(palette);
+  if (!byScheme) {
+    byScheme = new Map();
+    desktopPalettesByObject.set(palette, byScheme);
+  }
+  let resolved = byScheme.get(scheme);
+  if (!resolved) {
+    resolved = resolveTheme(palette, scheme);
+    byScheme.set(scheme, resolved);
+  }
+  return resolved;
+}
+
+// One palette per desktop answer, so the unprovided palette keeps the
+// identity `useTheme()` and the `$token` resolution cache both count on: a
+// fresh object per read would re-resolve every token in the tree on every
+// paint. Bounded because a desktop's accent changes a handful of times in the
+// life of a process, never per frame.
+const desktopPalettes = new Map();
+
+/**
+ * The built-in palette for a desktop that looks like `appearance` — the
+ * scheme's own, with the desktop's accent on it where the desktop named one.
+ *
+ * **The default follows the accent as well as the scheme.** An app that says
+ * nothing about colour is asking to look like it belongs on this desktop, and
+ * on the one that reports an accent every native control beside it is already
+ * that colour — the Cocoa backend draws its bezels with AppKit, so the app's
+ * own checkbox is orange while its `<Tabs>` indicator stayed blue. An app
+ * with a brand names `accent` in its `<ThemeProvider>` and keeps it; a pinned
+ * `colorScheme` follows nothing, the accent included.
+ *
+ * `'no-preference'` means *use your own default*, which is the light one.
+ */
+export function paletteFor(appearance) {
+  const scheme = appearance.colorScheme === 'dark' ? DarkTheme : DefaultTheme;
+  if (appearance.palette) return withDesktopPalette(scheme, appearance.palette);
+  const { accent, accentText, selection } = appearance;
+  if (!accent) return scheme;
+  const key = `${scheme.scheme} ${accent} ${accentText ?? ''} ${selection ?? ''}`;
+  let palette = desktopPalettes.get(key);
+  if (!palette) {
+    if (desktopPalettes.size >= 8) desktopPalettes.clear();
+    palette = withDesktopAccent(scheme, accent, accentText, selection);
+    desktopPalettes.set(key, palette);
+  }
+  return palette;
+}
 
 /**
  * The palette in force where nothing has been said — which is to say, the
  * desktop's.
  *
  * Read synchronously and cheaply: `appearanceSnapshot()` is a frozen object
- * seeded from disk before the first render, so this is a property lookup and
- * a comparison, and it is called from the paint path.
- *
- * `'no-preference'` means *use your own default*, which is the light one.
+ * seeded from disk before the first render, so this is a property lookup, a
+ * comparison and a map hit, and it is called from the paint path.
  */
 export function baseTheme() {
-  return appearanceSnapshot().colorScheme === 'dark' ? DarkTheme : DefaultTheme;
+  return paletteFor(appearanceSnapshot());
 }

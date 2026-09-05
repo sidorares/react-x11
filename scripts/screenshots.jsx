@@ -58,7 +58,7 @@ const { setAppearanceForTests } = await import('../src/appearance.js');
 setAppearanceForTests({});
 const Dashboard = (await import('../examples/dashboard.jsx')).default;
 const Tasks = (await import('../examples/tasks.jsx')).default;
-const Form = (await import('../examples/form.jsx')).default;
+const Form = (await import('../examples/form/index.jsx')).default;
 
 const require = createRequire(import.meta.url);
 const katexFontDir = join(

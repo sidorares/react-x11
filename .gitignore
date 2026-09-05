@@ -11,3 +11,7 @@ test/fixtures/refresh-run-*/
 # framed screenshots are machine-specific (they capture the local WM's
 # decorations), so they are generated on demand rather than committed
 docs/img/framed/
+
+# the built app bundle: a launcher with this machine's paths in it, and a
+# hard link to whatever runtime built it
+examples/form/build/

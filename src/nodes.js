@@ -39,7 +39,6 @@ import {
   resolveHitSlop,
   resolveBorderWidths,
   resolveBorderColors,
-  tint,
 } from './styles.js';
 import {
   blurKernel,
@@ -671,6 +670,11 @@ export function appearanceChanged(app) {
   // started here would reach the connection a tick after it closed and throw
   // out of the frame clock, where nothing is waiting to catch it.
   if (!app || app.X?._closing) return;
+  // A backend that renders native control bezels caches them by every
+  // parameter that changes the pixels — except the desktop's accent, which
+  // the toolkit reads for itself. The repaint below would blit the old
+  // colour back out of that cache, so it is forgotten first.
+  app.nativeBezels?.clear?.();
   for (const node of app._rootChildren ?? []) {
     if (node.destroyed) continue;
     node._themeChanged();
@@ -5458,8 +5462,14 @@ export class TextNode extends Node {
       weight: base.weight,
       style: base.style,
     });
-    const capHeight = font?.metrics?.(base.size)?.capHeight;
-    if (!capHeight) return null; // no metrics: leave the box alone
+    const measured = font?.metrics?.(base.size)?.capHeight;
+    if (!measured) return null; // no metrics: leave the box alone
+    // Whole pixels: the trimmed box's top is the baseline less this, so a
+    // fractional cap height — 9.15px for a 13px face — puts the baseline
+    // between two rows, and the rasteriser lands the letters a row low on
+    // one backend and half-covers two rows on the other. Rounded, the
+    // baseline sits on a pixel wherever the box does.
+    const capHeight = Math.round(measured);
     const shift = halfLeading(layout);
     const firstBaseline = shift + lines[0].baseline;
     const lastBaseline = shift + lines[lines.length - 1].baseline;
@@ -8496,8 +8506,7 @@ export class TextInputNode extends Node {
       // colour does that on both a light and a dark palette. `#b3d4fc`
       // under the dark palette's near-white ink is 1.3:1, which is nothing.
       // Tinting the surface instead leaves the ink's own contrast intact.
-      ctx.fillStyle =
-        this.props.selectionColor ?? tint(this.theme.accent, 0.35);
+      ctx.fillStyle = this.props.selectionColor ?? this.theme.selection;
       // One band per direction run, not one rectangle between the two caret
       // positions: a range is contiguous in logical order and a line is laid
       // out in visual order, so a selection that crosses into an Arabic word
@@ -8520,7 +8529,7 @@ export class TextInputNode extends Node {
     this._paintPreedit(ctx, valueX, textY, style);
 
     if (this._focused && this._caretOn && a === b) {
-      ctx.fillStyle = this.props.caretColor ?? style.color;
+      ctx.fillStyle = this.props.caretColor ?? this.theme.caret ?? style.color;
       ctx.fillRect(
         valueX + caretX,
         markY,
@@ -8887,8 +8896,7 @@ export class TextAreaNode extends TextInputNode {
       // colour does that on both a light and a dark palette. `#b3d4fc`
       // under the dark palette's near-white ink is 1.3:1, which is nothing.
       // Tinting the surface instead leaves the ink's own contrast intact.
-      ctx.fillStyle =
-        this.props.selectionColor ?? tint(this.theme.accent, 0.35);
+      ctx.fillStyle = this.props.selectionColor ?? this.theme.selection;
       // The bands `textRangeRects` reports — one per line and one per
       // direction run inside a line, which is what a selection crossing into
       // an Arabic word actually covers. Two caret positions and a rectangle
