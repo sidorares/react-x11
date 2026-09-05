@@ -5462,8 +5462,14 @@ export class TextNode extends Node {
       weight: base.weight,
       style: base.style,
     });
-    const capHeight = font?.metrics?.(base.size)?.capHeight;
-    if (!capHeight) return null; // no metrics: leave the box alone
+    const measured = font?.metrics?.(base.size)?.capHeight;
+    if (!measured) return null; // no metrics: leave the box alone
+    // Whole pixels: the trimmed box's top is the baseline less this, so a
+    // fractional cap height — 9.15px for a 13px face — puts the baseline
+    // between two rows, and the rasteriser lands the letters a row low on
+    // one backend and half-covers two rows on the other. Rounded, the
+    // baseline sits on a pixel wherever the box does.
+    const capHeight = Math.round(measured);
     const shift = halfLeading(layout);
     const firstBaseline = shift + lines[0].baseline;
     const lastBaseline = shift + lines[lines.length - 1].baseline;

@@ -45,6 +45,27 @@ test('a cleared store renders the bezel again; the geometry it measured stays', 
   assert.deepEqual(store.natural('checkbox'), { width: 44, height: 20 });
 });
 
+// The natural box is every inked pixel, shadow included; the title is placed
+// against the solid body. So the rows that are only shadow are measured
+// too, and a label can be padded off them.
+test('the shadow rows under the body are measured apart from it', () => {
+  const native = fakeNative();
+  // a 20-row frame: row 0 a faint highlight, rows 1..17 solid, 18..19 shadow
+  native.ctxGetImageData = (surface, x, y, w, h) => {
+    const buf = new Uint8Array(w * h * 4);
+    for (let row = 0; row < h; row++) {
+      const alpha = row === 0 ? 40 : row >= h - 2 ? 60 : 255;
+      for (let col = 0; col < w; col++) buf[(row * w + col) * 4 + 3] = alpha;
+    }
+    return buf;
+  };
+  native.measureControl = () => ({ width: 20, height: 10 });
+  const store = new BezelStore(native);
+  // scanned at 2×: one faint row and two shadow rows are 0.5pt and 1pt
+  assert.deepEqual(store.shadow('push'), { top: 1, bottom: 1 });
+  assert.deepEqual(store.natural('push'), { width: 44, height: 10 });
+});
+
 test('an appearance change forgets the bezels before it repaints', () => {
   let cleared = 0;
   const repainted = [];

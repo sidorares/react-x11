@@ -58,6 +58,17 @@ export function bezelNatural(app, kind, controlSize = 'regular') {
   return app?.nativeBezels?.natural(kind, controlSize) ?? null;
 }
 
+/**
+ * The translucent rows above and below the bezel's solid body — a push
+ * button's shadow — as padding, so a label centred in the box is centred in
+ * the control rather than in its footprint. Zero where there is no store.
+ */
+export function bezelShadow(app, kind, controlSize = 'regular') {
+  return (
+    app?.nativeBezels?.shadow?.(kind, controlSize) ?? { top: 0, bottom: 0 }
+  );
+}
+
 /** Absolute fill inside the control's box — where every bezel layer goes. */
 export const ABS_FILL = Object.freeze({
   position: 'absolute',
