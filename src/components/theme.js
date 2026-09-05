@@ -247,6 +247,11 @@ export function useDirection() {
 export function useControl(disabled, onActivate, { styled = false } = {}) {
   const [hover, setHover] = useState(false);
   const [focused, setFocused] = useState(false);
+  // …and whether that focus is the kind that shows: the `:focus-visible`
+  // the focus manager has already decided by the time `onFocus` fires
+  // (Tab lights it, a click does not, except into a text control). A
+  // native control draws its ring for this and not for `focused`.
+  const [focusVisible, setFocusVisible] = useState(false);
   const [pressed, setPressed] = useState(false);
   const activation = {
     focusable: true,
@@ -282,15 +287,20 @@ export function useControl(disabled, onActivate, { styled = false } = {}) {
           },
           onMouseDown: () => setPressed(true),
           onMouseUp: () => setPressed(false),
-          onFocus: () => setFocused(true),
+          onFocus: (ev) => {
+            setFocused(true);
+            setFocusVisible(ev?.target?.states?.[':focus-visible'] === true);
+          },
           onBlur: () => {
             setFocused(false);
+            setFocusVisible(false);
             setPressed(false);
           },
         };
   return {
     hover: !styled && hover && !disabled,
     focused: !styled && focused && !disabled,
+    focusVisible: !styled && focusVisible && !disabled,
     pressed: !styled && pressed && !disabled,
     props,
     // `cursor` is style, so it travels in the style channel — put it first

@@ -8,7 +8,9 @@ import { changeEvent } from './change.js';
 import {
   Bezel,
   CONTROL_FONT_SIZE,
+  NO_ROW_RING,
   bezelNatural,
+  nativeRingStyle,
   useNativeControls,
 } from './native.js';
 import { focusRingStyle, labelContent, useControl, useTheme } from './theme.js';
@@ -72,6 +74,7 @@ export function Radio({ value, children, label, disabled = false, native }) {
   const {
     hover,
     focused,
+    focusVisible,
     pressed,
     props,
     style: controlStyle,
@@ -102,6 +105,7 @@ export function Radio({ value, children, label, disabled = false, native }) {
         style: [
           controlStyle,
           { flexDirection: 'row', alignItems: 'center', gap: 8 },
+          NO_ROW_RING,
         ],
       },
       h(Bezel, {
@@ -112,7 +116,8 @@ export function Radio({ value, children, label, disabled = false, native }) {
         style: {
           width: nat.width,
           height: nat.height,
-          ...focusRingStyle(theme, focused),
+          // a circle: the ring rounds with it
+          ...nativeRingStyle(theme, focusVisible, nat.height / 2),
         },
       }),
       // At the control font size, as the cell's own title is: the bezel is

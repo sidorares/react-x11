@@ -9,7 +9,9 @@ import { Icon } from './Icon.js';
 import {
   Bezel,
   CONTROL_FONT_SIZE,
+  NO_ROW_RING,
   bezelNatural,
+  nativeRingStyle,
   useNativeControls,
 } from './native.js';
 import { focusRingStyle, labelContent, useControl, useTheme } from './theme.js';
@@ -49,6 +51,7 @@ export function Checkbox({
   const {
     hover,
     focused,
+    focusVisible,
     pressed,
     props,
     style: controlStyle,
@@ -74,6 +77,7 @@ export function Checkbox({
         style: [
           controlStyle,
           { flexDirection: 'row', alignItems: 'center', gap: 8 },
+          NO_ROW_RING,
           style,
         ],
       },
@@ -85,7 +89,8 @@ export function Checkbox({
         style: {
           width: nat.width,
           height: nat.height,
-          ...focusRingStyle(theme, focused),
+          // the box's own corners, so the ring rounds as AppKit's does
+          ...nativeRingStyle(theme, focusVisible, 4),
         },
       }),
       // At the control font size, as the cell's own title is: the bezel is

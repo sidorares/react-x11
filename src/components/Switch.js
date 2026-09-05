@@ -9,6 +9,8 @@ import { changeEvent } from './change.js';
 import {
   ABS_FILL,
   Bezel,
+  NO_ROW_RING,
+  nativeRingStyle,
   bezelNatural,
   pressWash,
   useNativeControls,
@@ -116,6 +118,7 @@ export function Switch({
             height: nat.height,
             hitSlop: Math.max(0, (24 - nat.height) / 2),
           },
+          NO_ROW_RING,
           style,
         ],
       },
@@ -123,7 +126,11 @@ export function Switch({
         kind: 'switch',
         state: checked ? 1 : 0,
         enabled: !disabled,
-        style: ABS_FILL,
+        style: [
+          ABS_FILL,
+          // the pill: the ring rounds with it
+          nativeRingStyle(theme, control.focusVisible, nat.height / 2),
+        ],
       }),
       h('box', {
         style: [

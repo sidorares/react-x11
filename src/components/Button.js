@@ -7,6 +7,7 @@ import { useAppOrNull } from '../appcontext.js';
 import {
   ABS_FILL,
   Bezel,
+  NATIVE_RING,
   TITLE_BASELINE,
   bezelNatural,
   bezelShadow,
@@ -115,6 +116,14 @@ export function Button({
             // capitals sat 1pt low beside a native button.
             paddingTop: shadow.top,
             paddingBottom: shadow.bottom + TITLE_BASELINE[controlSize],
+            // The keyboard ring is the renderer's, on this box — shaped by
+            // the bezel's corners and hugging it, as AppKit's is
+            // (`NATIVE_RING`), rather than the palette's offset rectangle.
+            borderRadius: small ? 5 : 6,
+            ':focus-visible': {
+              outlineWidth: NATIVE_RING.width,
+              outlineOffset: NATIVE_RING.offset,
+            },
             color: disabled
               ? theme.textMuted
               : primary
