@@ -232,8 +232,6 @@ function Option({
             color: active ? theme.hoverText : theme.text,
             fontSize: metrics.fontSize,
             fontWeight: selected ? metrics.selectedWeight : metrics.weight,
-            // pinned to the whole-pixel cap band (see nativeTitleStyle)
-            height: metrics.capsBottom ? capBand(metrics.fontSize) : undefined,
           },
         ],
       },

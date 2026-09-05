@@ -19,7 +19,7 @@
 
 import React, { useCallback } from 'react';
 import { useAppOrNull } from '../appcontext.js';
-import { capBand, useTheme } from './theme.js';
+import { useTheme } from './theme.js';
 
 const h = React.createElement;
 
@@ -91,14 +91,14 @@ export const CONTROL_FONT_SIZE = Object.freeze({ regular: 13, small: 11 });
 /**
  * The style of a title placed the way a cell places it: on the bottom of a
  * content box padded by `TITLE_BASELINE` (a cap-trimmed label's bottom edge
- * is its baseline), at the control font size, and sized to the whole-pixel
- * cap band — the trimmed box of a 13px face is 9.15px tall, and a baseline
- * that lands between pixels is rasterised a row low. Only the label goes on
- * the baseline: an icon beside it stays centred, as AppKit centres an image.
+ * is its baseline, and the trim rounds the cap height to a whole pixel, so
+ * the baseline lands on one), at the control font size. Only the label goes
+ * on the baseline: an icon beside it stays centred, as AppKit centres an
+ * image. Not sized to the cap band: a box that tall clips the ascenders —
+ * the l in "Blue" lost its top row.
  */
 export function nativeTitleStyle(controlSize = 'regular') {
-  const fontSize = CONTROL_FONT_SIZE[controlSize];
-  return { alignSelf: 'flex-end', fontSize, height: capBand(fontSize) };
+  return { alignSelf: 'flex-end', fontSize: CONTROL_FONT_SIZE[controlSize] };
 }
 
 /**
