@@ -68,11 +68,19 @@ const itemHeight = (fontSize) => capBand(fontSize) + ITEM_PAD * 2;
 function menuMetrics(theme, native) {
   if (native) {
     const padLeft = NATIVE_MENU.padLeft + NATIVE_MENU.markColumn;
+    const cap = capBand(NATIVE_MENU.fontSize);
     return {
       ...NATIVE_MENU,
       padLeft,
       selectedWeight: 'normal',
       check: true,
+      // Where a row's capitals end, from the row's top: the centred band,
+      // at the whole pixel. Placed there by the row rather than centred by
+      // layout — centring puts the band at 6.5pt, which floors to 6 at 1×
+      // and is exact at 2×, and the menu that opens over the trigger is
+      // aligned on this number, so it has to be the same one at every
+      // scale.
+      capsBottom: Math.floor((NATIVE_MENU.row - cap) / 2) + cap,
       // How far the menu hangs past the trigger: left, so the titles line
       // up (the menu's inset less the trigger's); right, past the arrow
       // capsule, read off the screen at 10pt.
@@ -188,7 +196,10 @@ function Option({
       onClick: () => onPick(option),
       style: {
         height: metrics.row,
-        justifyContent: 'center',
+        justifyContent: metrics.capsBottom ? 'flex-end' : 'center',
+        paddingBottom: metrics.capsBottom
+          ? metrics.row - metrics.capsBottom
+          : 0,
         paddingLeft: metrics.padLeft,
         paddingRight: metrics.padRight,
         // the menus' pill, for the same reason and by the same rule: an
@@ -221,6 +232,8 @@ function Option({
             color: active ? theme.hoverText : theme.text,
             fontSize: metrics.fontSize,
             fontWeight: selected ? metrics.selectedWeight : metrics.weight,
+            // pinned to the whole-pixel cap band (see nativeTitleStyle)
+            height: metrics.capsBottom ? capBand(metrics.fontSize) : undefined,
           },
         ],
       },
@@ -310,12 +323,11 @@ export function Select({
     const shadow = bezelShadow(app, 'popup');
     // Aligned on the *capitals*, which is what the eye lines up: the
     // trigger's sit on the title baseline (`TITLE_BASELINE` above the bezel
-    // body's bottom), a row's are centred in the row — the band laid out at
-    // a whole pixel, as yoga floors the half.
-    const cap = capBand(metrics.fontSize);
+    // body's bottom), a row's on `capsBottom` — both whole pixels, both
+    // placed rather than centred, so the two agree at every scale.
     const triggerCapsBottom =
       triggerHeight - shadow.bottom - TITLE_BASELINE.regular;
-    const rowCapsBottom = Math.floor((metrics.row - cap) / 2) + cap;
+    const rowCapsBottom = metrics.capsBottom;
     const chosen = Math.max(
       0,
       normalized.findIndex((o) => o.value === value),
