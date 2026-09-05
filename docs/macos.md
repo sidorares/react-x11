@@ -915,13 +915,27 @@ sh examples/form/make-app.sh --bun # the same on bun
 
 [`make-app.sh`](../examples/form/make-app.sh) copies `Info.plist`, renders
 `icon.svg` into an `.icns` with the system's own tools (Quick Look, `sips`,
-`iconutil`), hard-links the runtime to `Contents/MacOS/runtime` so that the
-running executable's path is the bundle's, and writes a launcher that hands
-the runtime the example's entry from the repo root — Launch Services passes
-an executable no arguments. `Info.plist` carries the name, the identifier
-(`com.example.guestbook`), the icon, `NSHighResolutionCapable` (without it
-AppKit renders at 1×) and `LSEnvironment` naming the Cocoa backend. Launch
-Services then reports the process as the app:
+`iconutil`), and writes the executable — **a three-line script**, not a
+binary and not a copy of the runtime:
+
+```
+#!/usr/bin/env -S CFProcessPath=/…/Guestbook.app/Contents/MacOS/Guestbook /opt/homebrew/bin/bun
+process.chdir('/…/react-x11');
+import('/…/react-x11/examples/form/index.jsx');
+```
+
+The trick is the first line. AppKit takes an app's main bundle from
+CoreFoundation's idea of the process path, and for a script that is the
+interpreter's — run as a plain `#!/usr/bin/env bun` file, the app is "bun" in
+the menu bar, iconless, in bun's defaults domain. CoreFoundation reads that
+path from `CFProcessPath` in the environment before anything else, and
+`env -S` sets it before the interpreter starts; the process then checks in
+as the bundle. Paths are absolute because a shebang sees no PATH and no cwd,
+and the node build names tsx's loader by file for the same reason.
+`Info.plist` carries the name, the identifier (`com.example.guestbook`), the
+icon, `NSHighResolutionCapable` (without it AppKit renders at 1×) and
+`LSEnvironment` naming the Cocoa backend. Launch Services then reports the
+process as the app:
 
 ```
 $ lsappinfo info -only name,bundleid,bundlepath "$(lsappinfo find pid=<pid>)"
