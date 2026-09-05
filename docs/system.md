@@ -373,7 +373,18 @@ are D-Bus services a third party can wrap without anything from here.
 Notifications and StatusNotifierItem are the two with a claim on core, because
 they are desktop standards rather than one vendor's service — and the tray in
 particular is cheap here, since its menu is [dbusmenu](globalmenu.md), which
-this renderer already speaks.
+this renderer already speaks. Tray tracked in
+[#353](https://github.com/sidorares/react-x11/issues/353) and, for the macOS
+`NSStatusItem` side, [#463](https://github.com/sidorares/react-x11/issues/463).
+
+**A launcher badge, and permission prompts.** An unread count on the icon
+(freedesktop `com.canonical.Unity.LauncherEntry`, one D-Bus signal; macOS
+`dockTile.badgeLabel`) and camera/mic/location authorization (the freedesktop
+device portals; macOS TCC) are both cross-backend integrations with a D-Bus
+half that needs nothing from a native bridge — tracked in
+[#464](https://github.com/sidorares/react-x11/issues/464) and
+[#466](https://github.com/sidorares/react-x11/issues/466). Attention (the taskbar
+urgency / Dock bounce) already exists on X11 as `states: ['demands_attention']`.
 
 **Session lifecycle** — "we are suspending, save now", and "I have unsaved work,
 do not log out yet". The X-native answer (XSMP) is effectively dead and the live

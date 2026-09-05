@@ -501,7 +501,7 @@ successor the way wayland.md carries its measurements.
 | file dialogs (portal → osascript → drawn)          | `NSOpenPanel`/`NSSavePanel` replace the osascript rung                                                     | upgrades                                                                         |
 | a11y (AT-SPI over D-Bus)                           | `NSAccessibility` protocol, virtual `NSAccessibilityElement` tree fed from the same `a11y.js` model        | maps; the model carries, the bridge is new (the Chromium/Flutter shape)          |
 | idle / keep-awake                                  | `IOPMAssertion` / `NSProcessInfo` activity                                                                 | maps                                                                             |
-| startup notification, `activateWindow`             | `NSApp.activate`, `NSRunningApplication`; Launch Services owns launch UX                                   | mostly dissolves                                                                 |
+| startup notification, `activateWindow`             | `NSApp.activate` + `makeKeyAndOrderFront:`, `NSRunningApplication`; Launch Services owns launch UX         | `activateWindow` **shipped** (`CocoaApp.raiseWindow`); startup dissolves         |
 | URI schemes / single instance (`application.js`)   | Apple Events (`kAEGetURL`) + Launch Services registration; single-instance is the platform default         | maps; same hooks (`onAppOpen`/`onAppActivate`), new plumbing                     |
 | tray                                               | `NSStatusItem`                                                                                             | **gained** — X11 has no core tray today                                          |
 | `<glarea>` (GLX / direct CGL)                      | `CAOpenGLLayer`/`NSOpenGLContext` (deprecated but functional), or ANGLE/Metal later                        | bends; ntk's existing `cgl` direct backend is prior art                          |
@@ -514,6 +514,38 @@ opposite conclusion: macOS _keeps_ client-side placement, so `anchor.js`
 stays the single source of truth on this backend — the math that had to
 move into Wayland's positioner stays exactly where it is here, reading
 `NSScreen` geometry instead of Xinerama.
+
+## Desktop integrations: what an app does outside its own windows
+
+The handful of things an app says to the desktop rather than draws — a file
+dialog, a permission prompt, a drag to another app, a tray icon, a Dock badge,
+a raise from a launcher. This is the survey of where each stands on the cocoa
+backend, what already works (including the crude `osascript`/shell rungs that
+need no bridge), and what is blocked on a native addition — each gap has a
+`@windowkit/appkit` ticket for the bridge and a react-x11 ticket for the
+consumer, so the work is tracked rather than rediscovered.
+
+| integration                       | today on cocoa                                                              | the better way (bridge gap)                                           | tickets                                                  |
+| --------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------- |
+| **file open/save**                | works — the `osascript` rung (`docs/filedialog.md`), a separate process     | in-process `NSOpenPanel`/`NSSavePanel`                                | react-x11#461 → windowkit/appkit#14                      |
+| **raise / app switcher**          | **shipped** — `activateWindow()` = `NSApp.activate` + order-front           | —                                                                     | this PR (`CocoaApp.raiseWindow`)                         |
+| **deep links** (`useAppOpen`)     | an app can call `activateWindow` itself; the OS cannot hand it a URL yet    | Apple Events (`kAEGetURL`, open-docs)                                 | react-x11#465 → windowkit/appkit#18                      |
+| **drag & drop** (external)        | absent — DnD is XDND-only; `_initDnd` needs `setProperty` no `NSWindow` has | `NSDraggingSource`/`Destination`                                      | react-x11#462 → windowkit/appkit#16                      |
+| **system tray**                   | absent                                                                      | `NSStatusItem`                                                        | react-x11#463 (macOS half of #353) → windowkit/appkit#17 |
+| **Dock badge / attention / menu** | absent (X11 has `states: ['demands_attention']`; no badge on either)        | `dockTile.badgeLabel`, `requestUserAttention`, `applicationDockMenu`  | react-x11#464 → windowkit/appkit#15                      |
+| **activation policy / app name**  | fixed `.regular`, the process name                                          | `setActivationPolicy`, Dock/menu name                                 | react-x11#464 → windowkit/appkit#15                      |
+| **permissions** (TCC)             | none; crude `open x-apple.systempreferences:` only _directs_ the user       | `AVCaptureDevice`/`CGRequestScreenCaptureAccess`/`AXIsProcessTrusted` | react-x11#466 → windowkit/appkit#19                      |
+
+Two of these have a **freedesktop counterpart worth having in core with no
+bridge at all**, because they are D-Bus like the portal and the global menu
+already are: the Dock badge (`com.canonical.Unity.LauncherEntry`, one signal
+under the app's `.desktop` id) and the permission prompts (the per-device
+portals — `org.freedesktop.portal.Camera`, `.Location`). Both are tracked on
+the react-x11 tickets above so the cross-backend API is designed once.
+
+The pattern for every rung here is `docs/filedialog.md`'s ladder: the desktop's
+own mechanism where there is one, a crude shell-out beneath it, and a typed
+"cannot do this here" at the floor — never a silent no-op.
 
 ## Text: the engine contract
 

@@ -143,6 +143,18 @@ export function activateWindow(target, { timestamp, source } = {}) {
   const app = node?.app ?? node?.root?.app ?? wnd?.app ?? soleApp();
 
   const chosen = wnd ?? (windowIdOf(node) === null ? inferWindow(app) : null);
+
+  // The cocoa backend has no window manager and no `_NET_ACTIVE_WINDOW` to
+  // send — the raise is `NSApp.activate` plus ordering the window front,
+  // which the app object performs (src/cocoa/app.js `raiseWindow`).
+  // Feature-detected so the X11 path below is untouched, and so this stops
+  // reporting the false success the no-op X stub would: on cocoa `app.X` is
+  // a shim whose `InternAtom`/`SendClientMessage` go nowhere yet still let
+  // the code below return `true`.
+  if (app && typeof app.raiseWindow === 'function') {
+    return app.raiseWindow(chosen);
+  }
+
   const xid = windowIdOf(chosen) ?? windowIdOf(node);
   const X = ntkWindowOf(chosen)?.X ?? wnd?.X ?? app?.X;
   const root = X?.display?.screen?.[0]?.root;
