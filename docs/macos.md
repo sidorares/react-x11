@@ -899,6 +899,54 @@ composited layers with animation and transformations" is half the reason
 to build Tier L, and the API shape (style props + capability gates)
 should be agreed before someone builds a macOS-only thing.
 
+## Running as an app bundle
+
+A react-x11 process is a `node` (or `bun`) process, and AppKit names, icons
+and identifies an app by the **bundle its executable lives in**: run from the
+shell, the menu bar says "node", the Dock shows the generic icon, and the
+defaults domain — where AppKit remembers window frames and whether a tab
+bar is showing — is `node`'s or `bun`'s, shared with every other script
+that runtime ever ran. `examples/form/` is the example of the fix:
+
+```
+npm run examples:form:app          # builds examples/form/build/Guestbook.app and opens it
+sh examples/form/make-app.sh --bun # the same on bun
+```
+
+[`make-app.sh`](../examples/form/make-app.sh) copies `Info.plist`, renders
+`icon.svg` into an `.icns` with the system's own tools (Quick Look, `sips`,
+`iconutil`), hard-links the runtime to `Contents/MacOS/runtime` so that the
+running executable's path is the bundle's, and writes a launcher that hands
+the runtime the example's entry from the repo root — Launch Services passes
+an executable no arguments. `Info.plist` carries the name, the identifier
+(`com.example.guestbook`), the icon, `NSHighResolutionCapable` (without it
+AppKit renders at 1×) and `LSEnvironment` naming the Cocoa backend. Launch
+Services then reports the process as the app:
+
+```
+$ lsappinfo info -only name,bundleid,bundlepath "$(lsappinfo find pid=<pid>)"
+"LSDisplayName"="Guestbook"
+"CFBundleIdentifier"="com.example.guestbook"
+```
+
+**The tab bar under bun.** Without a bundle, a window opened by `bun` is in
+the `bun` defaults domain, and once anything has turned on the tab bar for
+one of our windows there — View → Show Tab Bar, or a stray shortcut — AppKit
+persists it as
+`NSWindowTabbingShoudShowTabBarKey-NSWindow-CALBackendDelegate-(null)-VT-FS`
+and every window the bridge opens from then on wears a 28pt tab bar. It also
+shifts the content view down by that much, which the bridge's
+`getWindowFrame` does not report (windowkit/appkit#12), so every popup lands
+a bar's height off. Clear it with
+
+```
+defaults delete bun "NSWindowTabbingShoudShowTabBarKey-NSWindow-CALBackendDelegate-(null)-VT-FS"
+```
+
+or run the app as a bundle, whose own domain has never seen the key. The
+durable fix is the bridge's: `tabbingMode = NSWindowTabbingModeDisallowed`
+on every window it opens.
+
 ## Public API: what changes
 
 Measured against both consumers, the surface holds; the deltas are

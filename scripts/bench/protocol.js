@@ -370,7 +370,7 @@ function iconWall(count, size = 20) {
   );
 }
 
-/** The hover scenario's tree: one row shaped like examples/form.jsx's
+/** The hover scenario's tree: one row shaped like examples/form/index.jsx's
  * checkbox row — label, an 18x18 rounded bordered box whose `:hover` block
  * changes its colours, label. The flip damages exactly the box. */
 function hoverRowWindow() {
@@ -768,7 +768,7 @@ const SCENARIOS = [
     },
   ],
   [
-    // The checkbox-hover frame from examples/form.jsx, reduced to the node
+    // The checkbox-hover frame from examples/form/index.jsx, reduced to the node
     // path it takes: a hover flip marks one rounded, bordered box in a row
     // of labelled widgets, the frame's damage is that box, and the repaint
     // under the damage clip is the window background, the box's fill and

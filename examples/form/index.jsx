@@ -4,7 +4,8 @@
 // is styled by what you picked. "Clear" opens a <Dialog>: a modal popup that
 // traps Tab, closes on Escape, and hands focus back to the button that
 // opened it.
-// Run with: npm run examples:form  (needs an X server / DISPLAY)
+// Run with: npm run examples:form  (needs an X server / DISPLAY), or as a
+// macOS app bundle: npm run examples:form:app — see make-app.sh beside this.
 import React, { useState } from 'react';
 import {
   Button,
@@ -15,7 +16,7 @@ import {
   RadioGroup,
   Select,
   Slider,
-} from '../src/index.js';
+} from '../../src/index.js';
 
 const COLORS = [
   { value: '#2980b9', label: 'Blue' },

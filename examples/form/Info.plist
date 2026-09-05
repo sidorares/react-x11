@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- What the Finder, the Dock and the menu bar call it. -->
+  <key>CFBundleName</key>
+  <string>Guestbook</string>
+  <key>CFBundleDisplayName</key>
+  <string>Guestbook</string>
+  <!-- The identity: the defaults domain, the Launch Services record, what
+       System Events and `open -b` find it by. Its own, so nothing another
+       runtime's domain persisted (a tab bar, a window frame) reaches it. -->
+  <key>CFBundleIdentifier</key>
+  <string>com.example.guestbook</string>
+  <!-- The launcher make-app.sh writes into Contents/MacOS. -->
+  <key>CFBundleExecutable</key>
+  <string>Guestbook</string>
+  <key>CFBundleIconFile</key>
+  <string>Guestbook</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleSignature</key>
+  <string>????</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.utilities</string>
+  <!-- Without this AppKit renders the app at 1x on a Retina display. -->
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+  <key>NSHumanReadableCopyright</key>
+  <string>react-x11 example</string>
+  <!-- The environment the launcher runs under: the Cocoa backend, named
+       rather than detected, so a DISPLAY in the login environment does not
+       send this app to X11. -->
+  <key>LSEnvironment</key>
+  <dict>
+    <key>REACT_X11_BACKEND</key>
+    <string>cocoa</string>
+  </dict>
+</dict>
+</plist>

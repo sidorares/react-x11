@@ -48,7 +48,7 @@ const SCENES = {
   widgets: () => import('../examples/widgets.jsx'),
   dashboard: () => import('../examples/dashboard.jsx'),
   tasks: () => import('../examples/tasks.jsx'),
-  form: () => import('../examples/form.jsx'),
+  form: () => import('../examples/form/index.jsx'),
 };
 
 const wanted = process.argv.slice(2).filter((a) => !a.startsWith('-'));

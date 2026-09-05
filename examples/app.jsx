@@ -6,7 +6,7 @@
 //   Tabs       — one panel visible at a time, arrows to move between them
 //
 // Each panel is imported from the example that owns it, so this file adds a
-// layout and nothing else: examples/form.jsx and friends still run on their
+// layout and nothing else: examples/form/index.jsx and friends still run on their
 // own with `npm run examples:form`.
 // Run with: npm run examples:app  (needs an X server / DISPLAY)
 import React, { useState } from 'react';
@@ -17,7 +17,7 @@ import {
   Table,
   Tabs,
 } from '../src/index.js';
-import { FormPanel } from './form.jsx';
+import { FormPanel } from './form/index.jsx';
 import { WidgetsPanel } from './widgets.jsx';
 import { PasswordPanel } from './password.jsx';
 import { TasksPanel } from './tasks.jsx';
