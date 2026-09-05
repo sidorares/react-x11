@@ -333,6 +333,14 @@ Multicolor already resolved, `alternateSelectedControlTextColor` is the ink
 AppKit writes on it, `selectedContentBackgroundColor` is the shade under a
 selected row (both resolved in the appearance the desktop is in, since a
 dynamic colour in a bare `osascript` resolves as Aqua otherwise), and
-`NSWorkspace` answers the two accessibility flags directly. The Cocoa backend
+`NSWorkspace` answers the two accessibility flags directly.
+
+**A process reads the colours once.** `controlAccentColor` is resolved on
+first use and cached for the life of the process: after the user picks another
+accent, the same process still answers the old one, with or without an
+`NSApplication`. So the watcher prints its values once and, on the change
+notifications, exits — and react-x11 spawns another, whose first read is
+fresh. A watcher that re-read in place re-announced the same values, and a
+running app never saw the change. The Cocoa backend
 reads the same child: it is one source for both backends, and the accent it
 reports is the one AppKit draws the native bezels in.

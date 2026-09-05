@@ -543,6 +543,20 @@ async function xsettingsRung(app) {
  * highlighted in the raw accent beside a native one reads as too bright, so
  * it is read rather than approximated, and is null where nothing names it.
  *
+ * **One process reads the colours once.** `controlAccentColor` and the rest
+ * are resolved on first use and cached for the life of the process — after
+ * the user picks another accent, the same process still answers the old one,
+ * with or without an `NSApplication` (measured on macOS 15: the value does
+ * not move even after `NSSystemColorsDidChangeNotification`). So the program
+ * prints its values once and, on the change notifications, **exits**; the
+ * rung spawns another, whose first read is fresh. A watcher that re-read in
+ * place re-announced the same values, and nothing downstream ever saw a
+ * change — that was the bug.
+ *
+ * And it leaves when its parent has: eight of these were found on one
+ * machine, days old, reparented to launchd by apps that had died without
+ * running their exit handler.
+ *
  * Exported so a test can pin the source; it cannot be executed on Linux.
  */
 export const MACOS_PROGRAM = `
@@ -560,6 +574,7 @@ function read() {
   var accentText = null;
   var selection = null;
   try {
+    ObjC.import('stdlib');
     // Dynamic colours resolve in the *current* appearance, which in a bare
     // osascript is Aqua whatever the desktop is in; the ink AppKit puts on
     // a filled control is allowed to differ between the two.
@@ -578,17 +593,26 @@ function read() {
     contrast: !!ws.accessibilityDisplayShouldIncreaseContrast
   });
 }
-function emit() { console.log(read()); }
-emit();
+console.log(read());
+// A change is answered by *leaving*: the parent spawns a fresh process and
+// takes its first line. Reading again here would answer the old colours —
+// see the comment above the program.
+function changed() { $.exit(0); }
 var dnc = $.NSDistributedNotificationCenter.defaultCenter;
 ['AppleInterfaceThemeChangedNotification',
  'AppleColorPreferencesChangedNotification'].forEach(function (name) {
   dnc.addObserverForNameObjectQueueUsingBlock(
-    name, $(), $.NSOperationQueue.mainQueue, emit);
+    name, $(), $.NSOperationQueue.mainQueue, changed);
 });
 ws.notificationCenter.addObserverForNameObjectQueueUsingBlock(
   'NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification',
-  $(), $.NSOperationQueue.mainQueue, emit);
+  $(), $.NSOperationQueue.mainQueue, changed);
+// An app that dies without its exit handler (a signal, a crash) leaves this
+// process behind, reparented to launchd, for as long as the machine is up.
+ObjC.import('unistd');
+$.NSTimer.scheduledTimerWithTimeIntervalRepeatsBlock(5, true, function () {
+  if ($.getppid() === 1) $.exit(0);
+});
 $.NSRunLoop.currentRunLoop.run();
 `;
 
@@ -616,36 +640,61 @@ export function fromMacOS(line) {
 
 let child = null;
 
+/** Set while this process is exiting, so a watcher's death is not answered. */
+let closing = false;
+
 /**
- * Spawn the watcher and resolve on its first line — or `false` if it dies,
- * prints nothing usable, or takes more than a few seconds, any of which mean
- * this Mac cannot answer and the ladder is finished.
+ * Test seam, not public: what spawns the watcher. A fake here also lets the
+ * rung run off a Mac, where the real one cannot, so the respawn is tested on
+ * CI rather than on whoever has a Mac.
+ */
+let spawnWatcher = null;
+export function _setMacOSSpawnForTests(fn) {
+  spawnWatcher = fn;
+}
+
+async function spawnProgram() {
+  if (spawnWatcher) return spawnWatcher();
+  const { spawn } = await import('node:child_process');
+  return spawn('osascript', ['-l', 'JavaScript', '-e', MACOS_PROGRAM], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}
+
+/** How long after an answered exit the next watcher starts. */
+const RESPAWN_DELAY_MS = 150;
+
+/**
+ * Run one watcher process and resolve on its first usable line — or `false`
+ * if it dies, prints nothing usable, or takes more than a few seconds, any of
+ * which mean this Mac cannot answer and the ladder is finished.
+ *
+ * A watcher that exits *after* answering is a different thing: that is how
+ * the program says the desktop changed (see `MACOS_PROGRAM`), and the next
+ * one is started to read the new values. One that dies before answering is
+ * not replaced — that is osascript failing, and a respawn would loop on it.
  *
  * `console.log` in JXA has gone to stderr in some macOS releases and stdout in
  * others, so both are read. It costs one extra listener to not depend on
  * which.
  */
-async function macosRung() {
-  if (process.platform !== 'darwin' || child) return false;
-  const { spawn } = await import('node:child_process');
-
+async function runWatcher() {
   let proc;
   try {
-    proc = spawn('osascript', ['-l', 'JavaScript', '-e', MACOS_PROGRAM], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    proc = await spawnProgram();
   } catch {
     return false;
   }
   child = proc;
   // Never a reason for the process to stay alive.
-  proc.unref();
+  proc.unref?.();
   proc.stdout.unref?.();
   proc.stderr.unref?.();
   proc.on('error', () => {});
 
   return await new Promise((resolve) => {
     let settled = false;
+    let answered = false;
     const done = (ok) => {
       if (settled) return;
       settled = true;
@@ -669,26 +718,41 @@ async function macosRung() {
         const values = fromMacOS(line);
         if (!values) continue;
         if (settled && owner !== 'macos') return;
+        answered = true;
         publish(values, 'macos');
         done(true);
       }
     };
-    proc.stdout.setEncoding('utf8');
-    proc.stderr.setEncoding('utf8');
+    proc.stdout.setEncoding?.('utf8');
+    proc.stderr.setEncoding?.('utf8');
     proc.stdout.on('data', onData);
     proc.stderr.on('data', onData);
     proc.on('exit', () => {
+      if (child === proc) child = null;
       // Dying after it answered leaves the last value standing, which is more
-      // useful than reverting to the defaults.
-      child = null;
+      // useful than reverting to the defaults — and, while this rung owns the
+      // store, is the cue to read again.
       done(false);
+      if (!answered || owner !== 'macos' || closing || child) return;
+      const again = setTimeout(() => {
+        if (owner === 'macos' && !closing && !child) void runWatcher();
+      }, RESPAWN_DELAY_MS);
+      again.unref?.();
     });
   });
 }
 
+async function macosRung() {
+  if ((process.platform !== 'darwin' && !spawnWatcher) || child) return false;
+  return runWatcher();
+}
+
 // Killed rather than left behind: `unref()` keeps it from holding *this*
 // process open, and nothing keeps it from outliving it.
-process.on('exit', () => child?.kill());
+process.on('exit', () => {
+  closing = true;
+  child?.kill();
+});
 
 // --------------------------------------------------------------------------
 // The ladder

@@ -7,6 +7,8 @@
 // and `<ThemeProvider>`, and the ladder itself.
 import { test, describe, afterEach, before, after } from 'node:test';
 import assert from 'node:assert';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -16,6 +18,7 @@ import React from 'react';
 import {
   MACOS_PROGRAM,
   _resetAppearance,
+  _setMacOSSpawnForTests,
   appearanceSnapshot,
   fromMacOS,
   fromPortal,
@@ -495,9 +498,88 @@ describe('the macOS rung', () => {
     assert.match(MACOS_PROGRAM, /accessibilityDisplayShouldIncreaseContrast/);
     assert.match(MACOS_PROGRAM, /AppleInterfaceStyle/);
     assert.doesNotMatch(MACOS_PROGRAM, /AppleAccentColor|AppleHighlightColor/);
-    // one line per change, on a run loop that does not return
+    // one line, then a run loop that does not return — until a change, which
+    // it answers by leaving (below), or its parent has gone
     assert.match(MACOS_PROGRAM, /AppleInterfaceThemeChangedNotification/);
     assert.match(MACOS_PROGRAM, /NSRunLoop\.currentRunLoop\.run\(\)/);
+    assert.match(MACOS_PROGRAM, /getppid\(\) === 1\) \$\.exit\(0\)/);
+  });
+
+  /**
+   * A stand-in for the osascript child: the streams and events the rung
+   * reads, and nothing else. Real colours cannot be read on CI, and could
+   * not be read *twice* on a Mac either — see the respawn below.
+   */
+  function fakeWatcher(spawned) {
+    const proc = new EventEmitter();
+    proc.stdout = new PassThrough();
+    proc.stderr = new PassThrough();
+    proc.unref = () => {};
+    proc.kill = () => proc.emit('exit', null);
+    spawned.push(proc);
+    return proc;
+  }
+  const pollUntil = async (fn, what) => {
+    for (let i = 0; i < 100; i++) {
+      if (fn()) return;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    assert.fail(`timed out waiting for ${what}`);
+  };
+
+  // **A process reads the colours once.** `controlAccentColor` is cached for
+  // the life of the process that resolved it, so a watcher that re-read on
+  // the change notification re-announced the old values and nothing
+  // downstream ever saw a change. The program leaves instead, and the rung
+  // reads the next one.
+  test('a watcher that leaves after answering is replaced, and the next one is read', async () => {
+    const spawned = [];
+    _setMacOSSpawnForTests(() => fakeWatcher(spawned));
+    try {
+      await withNoBus(async () => {
+        const first = systemAppearance();
+        await pollUntil(() => spawned.length === 1, 'the first watcher');
+        spawned[0].stdout.write(
+          '{"dark":true,"accent":[1,0,0],"accentText":[1,1,1],"selection":[0.5,0,0]}\n',
+        );
+        const values = await first;
+        assert.equal(values.source, 'macos');
+        assert.equal(values.accent, '#ff0000');
+
+        // the desktop changed: the watcher says so by exiting
+        spawned[0].emit('exit', 0);
+        await pollUntil(() => spawned.length === 2, 'the second watcher');
+        spawned[1].stdout.write('{"dark":false,"accent":[0,0,1]}\n');
+        await pollUntil(
+          () => appearanceSnapshot().accent === '#0000ff',
+          'the new accent',
+        );
+        assert.equal(appearanceSnapshot().colorScheme, 'light');
+        assert.equal(appearanceSnapshot().source, 'macos');
+      });
+    } finally {
+      _setMacOSSpawnForTests(null);
+    }
+  });
+
+  // Dying *before* answering is osascript failing, not a change: replacing
+  // that one would loop on whatever is wrong with it.
+  test('a watcher that dies before answering is not replaced', async () => {
+    const spawned = [];
+    _setMacOSSpawnForTests(() => fakeWatcher(spawned));
+    try {
+      await withNoBus(async () => {
+        const first = systemAppearance();
+        await pollUntil(() => spawned.length === 1, 'the first watcher');
+        spawned[0].emit('exit', 1);
+        const values = await first;
+        assert.notEqual(values.source, 'macos');
+        await new Promise((r) => setTimeout(r, 300));
+        assert.equal(spawned.length, 1, 'no second watcher');
+      });
+    } finally {
+      _setMacOSSpawnForTests(null);
+    }
   });
 });
 
