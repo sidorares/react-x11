@@ -11,6 +11,7 @@ import {
   useTheme,
 } from './theme.js';
 import { Icon, iconSize } from './Icon.js';
+import { NATIVE_MENU, useNativeControls } from './native.js';
 import {
   DEFAULT_LABEL_SIZE,
   anchorArea,
@@ -80,6 +81,50 @@ const MENU_PAD = 4;
 // an edge where it meets the desktop behind it, and a theme that draws 2px
 // borders on its *controls* does not mean a 2px outline around every menu.
 const MENU_BORDER = 1;
+
+/**
+ * The geometry of a popup — rows, padding, separator, text — as one
+ * object, so the sizing arithmetic and the layout read one source.
+ *
+ * Two sources: the drawn menu's own numbers, derived from the text size as
+ * they always were, or NSMenu's where the backend renders native controls
+ * (`NATIVE_MENU`): 22pt rows, 5pt of padding, an 11pt separator, the 13pt
+ * menu font at regular weight. A context menu on the Cocoa backend is then
+ * the menu the system's own controls open, beside which the drawn one — 30pt
+ * rows of 14px medium — read as a different toolkit's. The bar keeps its
+ * drawn metrics: a menu bar is not an NSMenu.
+ */
+function menuMetrics(theme, native, fontSize) {
+  if (native) {
+    return {
+      fontSize: NATIVE_MENU.fontSize,
+      weight: NATIVE_MENU.weight,
+      row: NATIVE_MENU.row,
+      pad: NATIVE_MENU.pad,
+      itemPad: NATIVE_MENU.padLeft,
+      separator: NATIVE_MENU.separator,
+      radius: NATIVE_MENU.radius,
+    };
+  }
+  return {
+    fontSize,
+    weight: MENU_TEXT_WEIGHT,
+    row: menuRowHeight(fontSize),
+    pad: MENU_PAD,
+    itemPad: MENU_ITEM_PAD,
+    separator: MENU_SEPARATOR_HEIGHT,
+    radius: rowRadius(theme, MENU_BORDER, MENU_PAD),
+  };
+}
+
+function useMenuMetrics(fontSize) {
+  const theme = useTheme();
+  const native = useNativeControls();
+  return useMemo(
+    () => menuMetrics(theme, native, fontSize),
+    [theme, native, fontSize],
+  );
+}
 
 // A bar item wears the same pill as a row in the menu it opens, so it takes
 // the row's padding rather than numbers of its own: a title packed tighter
@@ -173,13 +218,12 @@ const MENU_SHORTCUT_GAP = 24;
 const MENU_PAGE_ROWS = 10;
 
 /** Total popup height for a menu's items (separators are shorter). */
-function menuListHeight(items, fontSize) {
-  const row = menuRowHeight(fontSize);
+function menuListHeight(items, metrics) {
   const body = visibleItems(items).reduce(
-    (sum, item) => sum + (isSeparator(item) ? MENU_SEPARATOR_HEIGHT : row),
+    (sum, item) => sum + (isSeparator(item) ? metrics.separator : metrics.row),
     0,
   );
-  return body + (MENU_PAD + MENU_BORDER) * 2;
+  return body + (metrics.pad + MENU_BORDER) * 2;
 }
 
 /**
@@ -214,19 +258,19 @@ function menuGutter(items) {
 }
 
 /** Widest label + shortcut, measured, so the popup can be sized up front. */
-function menuListWidth(node, items, fontSize) {
+function menuListWidth(node, items, metrics) {
   let widest = 0;
   for (const item of visibleItems(items)) {
     if (isSeparator(item)) continue;
     const label = measureLabel(node, item.label ?? '', {
-      size: fontSize,
-      weight: MENU_TEXT_WEIGHT,
+      size: metrics.fontSize,
+      weight: metrics.weight,
     }).width;
     const accelerator = formatShortcut(item.shortcut);
     const shortcut = accelerator
       ? measureLabel(node, accelerator, {
-          size: fontSize,
-          weight: MENU_TEXT_WEIGHT,
+          size: metrics.fontSize,
+          weight: metrics.weight,
         }).width + MENU_SHORTCUT_GAP
       : 0;
     widest = Math.max(widest, label + shortcut);
@@ -235,8 +279,8 @@ function menuListWidth(node, items, fontSize) {
     MENU_MIN_WIDTH,
     Math.ceil(widest) +
       menuGutter(items) +
-      (MENU_PAD + MENU_BORDER) * 2 +
-      MENU_ITEM_PAD * 2 +
+      (metrics.pad + MENU_BORDER) * 2 +
+      metrics.itemPad * 2 +
       2,
   );
 }
@@ -393,7 +437,7 @@ function MenuRow({
   onHover,
   onMove,
   onSelect,
-  fontSize,
+  metrics,
   // The width of the level's check column — the same number the popup was
   // sized with, passed down rather than asked of the item, since a row with
   // no mark of its own still keeps the column its neighbours need.
@@ -411,7 +455,7 @@ function MenuRow({
       {
         theme,
         role: 'separator',
-        style: { height: MENU_SEPARATOR_HEIGHT, justifyContent: 'center' },
+        style: { height: metrics.separator, justifyContent: 'center' },
       },
       h('box', { style: { height: 1, backgroundColor: theme.border } }),
     );
@@ -448,16 +492,16 @@ function MenuRow({
       onMouseMove: dim ? undefined : onMove,
       onClick: dim ? undefined : () => onSelect(item),
       style: {
-        height: menuRowHeight(fontSize),
+        height: metrics.row,
         flexDirection: 'row',
         alignItems: 'center',
-        paddingLeft: MENU_ITEM_PAD,
-        paddingRight: MENU_ITEM_PAD,
+        paddingLeft: metrics.itemPad,
+        paddingRight: metrics.itemPad,
         // A pill inside the sheet: the row is inset from the popup edge by
         // the list's padding, and rounded so that its corner and the sheet's
         // share a centre — the two curves are then one shape rather than two
         // that nearly agree.
-        borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
+        borderRadius: metrics.radius,
         // Nothing at rest: the sheet under it is already that colour, and
         // now that the row is rounded, repainting it per row would be a
         // coverage mask drawn to change nothing — with four corners it
@@ -490,11 +534,16 @@ function MenuRow({
           // stand clear, and the row's own padding already spaces the mark.
           style: { width: gutter, alignItems: 'flex-start' },
         },
-        gutterMark(item, { color: rowInk, fontSize }),
+        gutterMark(item, { color: rowInk, fontSize: metrics.fontSize }),
       ),
     h(
       'text',
-      { style: [capTrim, { fontSize, fontWeight: MENU_TEXT_WEIGHT }] },
+      {
+        style: [
+          capTrim,
+          { fontSize: metrics.fontSize, fontWeight: metrics.weight },
+        ],
+      },
       item.label,
     ),
     h('box', { style: { flexGrow: 1 } }),
@@ -508,7 +557,7 @@ function MenuRow({
         {
           style: [
             capTrim,
-            { fontSize, fontWeight: MENU_TEXT_WEIGHT },
+            { fontSize: metrics.fontSize, fontWeight: metrics.weight },
             !active && { color: theme.textMuted },
           ],
         },
@@ -522,7 +571,7 @@ function MenuRow({
         // The capitals of the row, not the gutter's 16px column: a chevron
         // stands as tall as its box, so `MENU_ICON_SIZE` would put an arrow
         // beside the label taller than the label.
-        size: capBand(fontSize),
+        size: capBand(metrics.fontSize),
         // no `color`: the arrow is the row saying it has more behind it, as
         // much a part of the entry as its label, and a muted one reads as a
         // row that is half disabled rather than one with a submenu
@@ -563,6 +612,7 @@ function MenuLevel({
   fontSize,
 }) {
   const theme = useTheme();
+  const metrics = useMenuMetrics(fontSize);
   const items = levelItems(rootItems, path, depth);
   // one answer for the level, so every row indents by the same amount the
   // popup was measured with
@@ -606,13 +656,13 @@ function MenuLevel({
         // continuation six pixels lower than the row itself. Shifting by
         // the inset puts the first item exactly beside the item it came
         // out of, which is where the eye is already looking.
-        alignOffset: -(MENU_BORDER + MENU_PAD),
+        alignOffset: -(MENU_BORDER + metrics.pad),
         offset: SUBMENU_GAP,
-        width: menuListWidth(node, childItems, fontSize),
-        height: menuListHeight(childItems, fontSize),
+        width: menuListWidth(node, childItems, metrics),
+        height: menuListHeight(childItems, metrics),
       }),
     );
-  }, [childOpen, active, depth, fontSize, rect.x, rect.y]);
+  }, [childOpen, active, depth, metrics, rect.x, rect.y]);
 
   // "safe polygon" hover: while a submenu is open, the triangle between the
   // pointer and the submenu's near edge counts as still hovering the parent
@@ -712,7 +762,7 @@ function MenuLevel({
         style: {
           flexGrow: 1,
           flexShrink: 1,
-          padding: MENU_PAD,
+          padding: metrics.pad,
           borderWidth: MENU_BORDER,
           borderColor: theme.border,
           backgroundColor: theme.surface,
@@ -724,7 +774,7 @@ function MenuLevel({
           key: isSeparator(item) ? `sep-${index}` : (item.key ?? item.label),
           item,
           state: rowState(index, active, handedOn),
-          fontSize,
+          metrics,
           gutter,
           nodeRef: index === active ? activeRowRef : undefined,
           onHover: (ev) => hover(index, ev),
@@ -887,6 +937,7 @@ export function ContextMenu({
   const [path, setPath] = useState([]);
   const typeAhead = useTypeAhead();
   const rtl = useDirection() === 'rtl';
+  const metrics = useMenuMetrics(fontSize);
 
   const close = () => {
     setRect(null);
@@ -908,8 +959,8 @@ export function ContextMenu({
   const openAt = (ev) => {
     const node = ref.current;
     if (!node || !items.length) return;
-    const width = menuListWidth(node, items, fontSize);
-    const height = menuListHeight(items, fontSize);
+    const width = menuListWidth(node, items, metrics);
+    const height = menuListHeight(items, metrics);
     const area = anchorArea(node);
     // anchored at the pointer rather than at a widget: clamp by hand, since
     // there is no anchor rect to flip around. Root coordinates are device;
@@ -1006,6 +1057,7 @@ export function MenuBar({
 }) {
   const theme = useTheme();
   const rtl = useDirection() === 'rtl';
+  const metrics = useMenuMetrics(fontSize);
   const [openIndex, setOpenIndex] = useState(-1);
   // The pointer's title, tracked here rather than left to a `:hover` block,
   // because the thing that lights up is no longer the node the pointer is
@@ -1111,8 +1163,8 @@ export function MenuBar({
     const node = refs.current[index];
     const menu = entries[index];
     if (!node || !hasSubmenu(menu)) return;
-    const width = menuListWidth(node, menu.items, fontSize);
-    const height = menuListHeight(menu.items, fontSize);
+    const width = menuListWidth(node, menu.items, metrics);
+    const height = menuListHeight(menu.items, metrics);
     const next = anchorRect(node, { placement: 'bottom', width, height });
     if (!next) return;
     openRef.current = index;
@@ -1159,8 +1211,8 @@ export function MenuBar({
       if (!node || !hasSubmenu(menu)) return null;
       return {
         placement: 'bottom',
-        width: menuListWidth(node, menu.items, fontSize),
-        height: menuListHeight(menu.items, fontSize),
+        width: menuListWidth(node, menu.items, metrics),
+        height: menuListHeight(menu.items, metrics),
       };
     },
     setRect,

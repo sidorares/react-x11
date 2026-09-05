@@ -709,6 +709,15 @@ and apps can branch the way `'shaders'` consumers already do.
 
 ## Menus: the global menu, finally at home
 
+**A popup on this backend is sized as an NSMenu.** Where the backend
+renders native controls, `<ContextMenu>`, a `<MenuBar>`'s dropdowns and a
+`<Select>`'s list take NSMenu's geometry rather than the palette's — 22pt
+rows, 5pt of padding, 11pt separators, the 13pt menu font at regular
+weight, a 5pt highlight radius — read off `NSMenu.size` (`NATIVE_MENU` in
+`components/native.js`). The drawn menu's 30pt rows of 14px medium text
+read as another toolkit's beside the menus the system's own controls open.
+The menu bar itself keeps the drawn metrics: a bar is not an NSMenu.
+
 The Linux global menu was built for exactly this moment: the item
 vocabulary is data (dbusmenu's), `MenuBar` draws the same array it
 exports, and the pure `snapshot`/`diffSnapshots`/`IdAllocator` machinery
@@ -942,6 +951,29 @@ AppKit take the bundle rather than the interpreter as the main one —
 `#!/usr/bin/env -S CFProcessPath=<this file> bun` sets CoreFoundation's
 process path before the interpreter starts — but the compiled binary needs
 no such trick, and nothing installed on the machine at launch time.)
+
+### Distributing the bundle
+
+What `make-app.sh` builds is a developer's bundle: it runs where it was
+built, and nowhere else without three more steps.
+
+- **Signing.** The binary is unsigned. Gatekeeper lets an unsigned app run
+  from a build directory, but not one that arrived in a download (the
+  quarantine attribute) — for that it wants a Developer ID signature and
+  notarization: `codesign --deep --force --sign "Developer ID Application: …"`
+  then `notarytool submit`. For a copy handed to a colleague, an ad-hoc
+  signature (`codesign --deep --force --sign - Guestbook.app`) and
+  `xattr -dr com.apple.quarantine` on the receiving end are the short
+  path. Sign the addon in `Resources` too; `--deep` finds it.
+- **Architecture.** `bun build --compile` targets one CPU and the bridge's
+  prebuilds are one per CPU; the script builds for the machine it runs on.
+  A universal bundle is two builds and `lipo` — for the executable and for
+  `calayers.node` alike.
+- **Paths.** The compiled binary is self-contained, and `main.js` finds the
+  addon relative to `process.execPath`, so the bundle can be moved, zipped
+  and dragged into `/Applications`. Nothing in it refers to the repo.
+- **Size.** About 70MB, nearly all of it bun's runtime; the example and
+  react-x11 are a few hundred kilobytes of it.
 
 **The tab bar under bun.** Without a bundle, a window opened by `bun` is in
 the `bun` defaults domain, and once anything has turned on the tab bar for

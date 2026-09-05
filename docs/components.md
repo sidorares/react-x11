@@ -1026,6 +1026,10 @@ window-centred popups of your own.
 Pull-down and right-click menus, both rendered in `<popup>` windows so they
 escape the owner window, both anchored with `useAnchor`.
 
+On the Cocoa backend with native controls, the popups are sized as NSMenu
+sizes its own — 22pt rows, the 13pt menu font — so a context menu sits
+beside the system's like one of them ([macos.md](macos.md#menus-the-global-menu-finally-at-home)).
+
 ```jsx
 import { MenuBar, ContextMenu } from 'react-x11';
 
