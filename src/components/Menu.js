@@ -89,10 +89,10 @@ const MENU_BORDER = 1;
  * Two sources: the drawn menu's own numbers, derived from the text size as
  * they always were, or NSMenu's where the backend renders native controls
  * (`NATIVE_MENU`): 22pt rows, 5pt of padding, an 11pt separator, the 13pt
- * menu font at regular weight. A context menu on the Cocoa backend is then
- * the menu the system's own controls open, beside which the drawn one — 30pt
- * rows of 14px medium — read as a different toolkit's. The bar keeps its
- * drawn metrics: a menu bar is not an NSMenu.
+ * menu font at regular weight, and no pressed step. A context menu on the
+ * Cocoa backend is then the menu the system's own controls open, beside
+ * which the drawn one — 30pt rows of 14px medium — read as a different
+ * toolkit's. The bar keeps its drawn metrics: a menu bar is not an NSMenu.
  */
 function menuMetrics(theme, native, fontSize) {
   if (native) {
@@ -104,6 +104,7 @@ function menuMetrics(theme, native, fontSize) {
       itemPad: NATIVE_MENU.padLeft,
       separator: NATIVE_MENU.separator,
       radius: NATIVE_MENU.radius,
+      press: false,
     };
   }
   return {
@@ -114,6 +115,8 @@ function menuMetrics(theme, native, fontSize) {
     itemPad: MENU_ITEM_PAD,
     separator: MENU_SEPARATOR_HEIGHT,
     radius: rowRadius(theme, MENU_BORDER, MENU_PAD),
+    // a drawn row steps to `accentActive` while pressed
+    press: true,
   };
 }
 
@@ -526,8 +529,11 @@ function MenuRow({
         // the item is already highlighted by the time it can be pressed, so
         // the press is a further step down rather than a first one — without
         // it the command runs on the release out of a picture that never
-        // changed
-        ...(dim
+        // changed. Not under native controls: NSMenu has no pressed look,
+        // the highlight simply stays, and the palette's pressed step there
+        // is AppKit's deep-pressed cut of the accent — on a dark orange
+        // palette, a yellow no native menu ever shows.
+        ...(dim || !metrics.press
           ? null
           : { ':active': { backgroundColor: theme.accentActive } }),
       },
