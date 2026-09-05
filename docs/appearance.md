@@ -25,6 +25,7 @@ something that is not a widget, or a design decision that is not a palette.
 | `accent`        | `'#ed5b00'`, or **null**                                                                       |
 | `accentText`    | the ink the desktop writes on its accent — `'#ffffff'` on macOS — or **null**                  |
 | `selection`     | the fill under a selected menu or list row — a darker cut of the accent on macOS — or **null** |
+| `palette`       | the desktop's whole palette as tokens, on macOS — or **null**                                  |
 | `contrast`      | `'normal'` or `'high'`                                                                         |
 | `reducedMotion` | `true` when the user asked for less animation                                                  |
 | `source`        | which rung answered — `'portal'`, `'xsettings'`, `'macos'`, `'cache'`, or null                 |
@@ -59,6 +60,50 @@ lightness 0.54 → 0.40 in dark and 0.45 in light for the orange, hand-tuned per
 accent rather than computed from it. The built-in palette uses it as
 `hoverBackground`; a menu lit in the raw accent beside a native one reads as
 too bright.
+
+## The desktop's palette
+
+On macOS the rung reads the rest as well: the semantic colours AppKit paints
+its own windows and controls with, in the appearance the desktop is in. They
+arrive as `palette`, already in react-x11's vocabulary, and the built-in
+palette merges them over the scheme's own the way a `<ThemeProvider>` value
+merges — so an app that says nothing about colour comes up in the desktop's
+greys, inks and status colours, and follows every retune macOS ships.
+
+Two settings drive it, and they are not one colour. **Accent colour** is an
+index into a table of eight, each entry hand-tuned per appearance: the fill,
+the darker cut under a selected row, the focus ring and the pressed steps are
+all separate table entries, not a formula. **Highlight colour** is a free
+sRGB triple that only text selection and the caret read. Everything else is
+fixed per appearance.
+
+| token                          | AppKit source                                              | how                                                     |
+| ------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------- |
+| `background`                   | `windowBackgroundColor`                                    | as is: `#ececec` light, `#323232` dark                  |
+| `surface`                      | `controlBackgroundColor`                                   | as is: white, `#1e1e1e`                                 |
+| `surfaceHover`                 | the second `alternatingContentBackgroundColors`            | composited over `surface`                               |
+| `text`, `textMuted`            | `labelColor`, `secondaryLabelColor`                        | black or white at 85% and 50–55%, over the ground       |
+| `border`                       | `separatorColor`                                           | 10% ink over the ground                                 |
+| `focusRing`, `borderFocus`     | `keyboardFocusIndicatorColor`                              | the 50% ring over the ground                            |
+| `track`                        | `unemphasizedSelectedContentBackgroundColor`               | as is                                                   |
+| `accent`, `accentText`         | `controlAccentColor`, `alternateSelectedControlTextColor`  | as is; the ink is white for all eight                   |
+| `accentHover`, `accentActive`  | the accent with the pressed and deep-pressed effects       | as is — darker in light, lighter in dark                |
+| `hoverBackground`, `hoverText` | `selectedContentBackgroundColor`, the same ink             | as is                                                   |
+| `selection`                    | `selectedTextBackgroundColor`                              | the Highlight colour; dark is each channel less 116/255 |
+| `caret`                        | `textInsertionPointColor`                                  | the accent of the Highlight colour's name               |
+| `link`                         | `linkColor`                                                | as is, never the accent                                 |
+| `danger`, `dangerHover`        | `systemRedColor`, pressed                                  | as is                                                   |
+| `success`, `warning`, `info`   | `systemGreenColor`, `systemOrangeColor`, `systemBlueColor` | orange for warning: yellow fails as letters             |
+
+AppKit's inks are translucent and every token here is a colour, so each is
+flattened over the window ground on the way in. The status inks and the
+pressed steps a table does not name come from `resolveTheme`, as for any
+theme. What this cannot see is desktop tinting: a dark window on macOS is
+`#323232` with a little of the wallpaper in it, and the wallpaper is not in
+any colour AppKit will hand out.
+
+The portal names none of this, so on Linux the built-in palette stands and
+only the accent is taken.
 
 ## The first frame
 
@@ -121,7 +166,8 @@ GTK or Qt app is, and where the desktop reports an accent — macOS always,
 GNOME 47+ and KDE through the portal — `$accent` and the family around it
 (`accentHover`, the pressed step, `hoverBackground`, the focus ring) are that
 colour, and `hoverBackground` is the desktop's own selection shade where it
-names one. The window background, the widgets and every `$token` in a style all
+names one. On macOS the whole palette is the desktop's — see
+[the desktop's palette](#the-desktops-palette). The window background, the widgets and every `$token` in a style all
 come from it.
 
 ```jsx
@@ -298,6 +344,7 @@ off along with the other two integrations that talk to the session bus.
 | `accent`        | yes, where the backend implements it | **no such key**     | yes   |
 | `accentText`    | no — the palette picks by contrast   | no                  | yes   |
 | `selection`     | no — the accent itself               | no                  | yes   |
+| `palette`       | no                                   | no                  | yes   |
 | `contrast`      | yes                                  | from the theme name | yes   |
 | `reducedMotion` | version 2 of the interface           | rarely — see below  | yes   |
 

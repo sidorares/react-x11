@@ -25,7 +25,7 @@ import {
   paletteFor,
   resolveTheme,
 } from '../src/palette.js';
-import { readableInk } from '../src/styles.js';
+import { readableInk, tint } from '../src/styles.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -137,6 +137,75 @@ test('the desktop accent moves the accent family and nothing else', () => {
   assert.equal(
     paletteFor({ colorScheme: 'no-preference', accent: null }),
     DefaultTheme,
+  );
+});
+
+// A desktop that names its whole palette is merged over the scheme's the way
+// a provider's value is: its colours, the scheme's shape, and the inks and
+// pressed steps `resolveTheme` derives for whatever it did not name.
+test('a desktop palette is merged whole over the scheme', () => {
+  const system = {
+    background: '#323232',
+    surface: '#1e1e1e',
+    surfaceHover: '#292929',
+    text: '#e0e0e0',
+    textMuted: '#a3a3a3',
+    border: '#464646',
+    borderFocus: '#266d98',
+    focusRing: '#266d98',
+    track: '#464646',
+    accent: '#007aff',
+    accentHover: '#2ea8ff',
+    accentActive: '#52ccff',
+    accentText: '#ffffff',
+    hoverBackground: '#0059d1',
+    hoverText: '#ffffff',
+    selection: '#89576e',
+    caret: '#f74f9e',
+    link: '#419cff',
+    danger: '#ff453a',
+    dangerHover: '#ff7368',
+    success: '#32d74b',
+    warning: '#ff9f0a',
+    info: '#0a84ff',
+  };
+  const appearance = {
+    colorScheme: 'dark',
+    accent: '#007aff',
+    palette: system,
+  };
+  const palette = paletteFor(appearance);
+  for (const [token, value] of Object.entries(system)) {
+    assert.equal(palette[token], value, token);
+  }
+  // shape from the scheme, inks and presses derived
+  assert.equal(palette.radius, DarkTheme.radius);
+  assert.equal(palette.scheme, 'dark');
+  assert.equal(
+    palette.dangerText,
+    readableInk('#ff453a', ['#e0e0e0', '#323232']),
+  );
+  assert.notEqual(palette.dangerActive, DarkTheme.dangerActive);
+  // one object per answer, and the trio path is not consulted
+  assert.equal(palette, paletteFor(appearance));
+  assert.notEqual(palette, paletteFor({ ...appearance, palette: null }));
+});
+
+// The three tokens the desktop palette added to the vocabulary, and what
+// they are where nothing names them.
+test('selection is a tint of the accent, the caret is the text, links are blue', () => {
+  for (const [name, palette] of Object.entries({ DefaultTheme, DarkTheme })) {
+    assert.equal(palette.selection, tint(palette.accent, 0.35), name);
+    assert.equal(palette.caret, null, name);
+    assert.equal(typeof palette.link, 'string', name);
+  }
+  // a palette that moves the accent moves the tint with it
+  const brand = resolveTheme({ accent: '#e17055' });
+  assert.equal(brand.selection, tint('#e17055', 0.35));
+  // and one that names the selection keeps it
+  assert.equal(
+    resolveTheme({ accent: '#e17055', selection: '#ffe0b2' }).selection,
+    '#ffe0b2',
   );
 });
 

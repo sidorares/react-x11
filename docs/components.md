@@ -44,6 +44,7 @@ control are most of what separates one platform's controls from another's:
 | `accent` `accentHover` `accentText`                             | primary buttons, checks, fills       |
 | `hoverBackground` `hoverText`                                   | selected rows, menu highlights       |
 | `surfaceHover` `track` `borderFocus`                            | hover fills, tracks, focus           |
+| `selection` `caret` `link`                                      | selected text, the caret, links      |
 | `danger` `success` `warning` `info` (+`…Text`)                  | what the app says with colour        |
 | `accentActive` `surfaceActive` `textMutedActive` `dangerActive` | the pressed step of each fill        |
 | `radius` `radiusSmall` `borderWidth`                            | control shape                        |

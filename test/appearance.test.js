@@ -17,6 +17,7 @@ import React from 'react';
 
 import {
   MACOS_PROGRAM,
+  PALETTE_TOKENS,
   _resetAppearance,
   _setMacOSSpawnForTests,
   appearanceSnapshot,
@@ -437,6 +438,7 @@ describe('the macOS rung', () => {
         accent: '#ff5900',
         accentText: null,
         selection: null,
+        palette: null,
         contrast: 'high',
         reducedMotion: false,
       },
@@ -503,6 +505,96 @@ describe('the macOS rung', () => {
     assert.match(MACOS_PROGRAM, /AppleInterfaceThemeChangedNotification/);
     assert.match(MACOS_PROGRAM, /NSRunLoop\.currentRunLoop\.run\(\)/);
     assert.match(MACOS_PROGRAM, /getppid\(\) === 1\) \$\.exit\(0\)/);
+  });
+
+  // **The whole palette, composited.** AppKit's inks are translucent —
+  // `labelColor` is white at 85% on dark — and every token here is a colour,
+  // so each is flattened over the window ground on the way in. The expected
+  // values are worked by hand, so the compositing is checked against
+  // arithmetic rather than against itself.
+  const c = (r, g, b, a = 1) => [r, g, b, a];
+  const COLORS = {
+    windowBackground: c(0.2, 0.2, 0.2),
+    controlBackground: c(0.1, 0.1, 0.1),
+    alternateRow: c(1, 1, 1, 0.05),
+    label: c(1, 1, 1, 0.85),
+    secondaryLabel: c(1, 1, 1, 0.55),
+    separator: c(1, 1, 1, 0.1),
+    focus: c(0, 0.5, 1, 0.5),
+    unemphasizedSelection: c(0.27, 0.27, 0.27),
+    accentPressed: c(0.2, 0.7, 1),
+    accentDeepPressed: c(0.3, 0.8, 1),
+    textSelection: c(0.5, 0.3, 0.4),
+    caret: c(1, 0.3, 0.6),
+    link: c(0.25, 0.6, 1),
+    red: c(1, 0.27, 0.23),
+    redPressed: c(1, 0.45, 0.4),
+    green: c(0.2, 0.84, 0.3),
+    orange: c(1, 0.62, 0.04),
+    blue: c(0.04, 0.52, 1),
+  };
+  const lineWith = (colors) =>
+    JSON.stringify({
+      dark: true,
+      accent: [0, 0.48, 1],
+      accentText: [1, 1, 1],
+      selection: [0, 0.35, 0.82],
+      colors,
+    });
+
+  test('the semantic colours become a palette, flattened over the ground', () => {
+    const { palette } = fromMacOS(lineWith(COLORS));
+    assert.equal(palette.background, '#333333');
+    // 0.85 white over #333333: 51 + 0.85 × 204 = 224
+    assert.equal(palette.text, '#e0e0e0');
+    // 0.55 white: 51 + 0.55 × 204 = 163
+    assert.equal(palette.textMuted, '#a3a3a3');
+    // 0.1 white: 51 + 20 = 71
+    assert.equal(palette.border, '#474747');
+    // the ring at 50% over the ground, not the raw blue
+    assert.equal(palette.focusRing, '#1a5999');
+    assert.equal(palette.borderFocus, palette.focusRing);
+    // 5% white over the control fill (25.5), not over the window ground
+    assert.equal(palette.surfaceHover, '#252525');
+    // the accent family is the three values beside the colours
+    assert.equal(palette.accent, '#007aff');
+    assert.equal(palette.accentText, '#ffffff');
+    assert.equal(palette.hoverBackground, '#0059d1');
+    assert.equal(palette.hoverText, '#ffffff');
+    assert.equal(palette.accentHover, '#33b3ff');
+    assert.equal(palette.accentActive, '#4dccff');
+    assert.equal(palette.caret, '#ff4d99');
+    assert.equal(palette.warning, '#ff9e0a');
+    assert.deepEqual(Object.keys(palette).sort(), [...PALETTE_TOKENS].sort());
+    assert.ok(Object.isFrozen(palette));
+  });
+
+  // A palette with a hole would merge over the built-in one and paint a
+  // built-in colour next to the desktop's — the one look this exists to
+  // avoid. So it is whole or nothing, and nothing leaves the accent trio.
+  test('a palette with a hole is no palette', () => {
+    const { link, ...missing } = COLORS;
+    void link;
+    const values = fromMacOS(lineWith(missing));
+    assert.equal(values.palette, null);
+    assert.equal(values.accent, '#007aff');
+    assert.equal(fromMacOS(lineWith({ ...COLORS, red: 'red' })).palette, null);
+    // a line from before the palette was read at all
+    assert.equal(fromMacOS('{"dark":true,"accent":[1,0,0]}').palette, null);
+  });
+
+  test('the watcher reads the semantic colours too', () => {
+    for (const name of [
+      'windowBackgroundColor',
+      'controlBackgroundColor',
+      'labelColor',
+      'separatorColor',
+      'selectedTextBackgroundColor',
+      'textInsertionPointColor',
+      'NSColorSystemEffectPressed',
+    ]) {
+      assert.match(MACOS_PROGRAM, new RegExp(name));
+    }
   });
 
   /**
@@ -602,6 +694,7 @@ describe('the settings portal', { concurrency: 1, ...needsBroker }, () => {
           // the portal names a fill and nothing about what goes on it
           accentText: null,
           selection: null,
+          palette: null,
           contrast: 'high',
           reducedMotion: true,
           source: 'portal',
@@ -701,6 +794,7 @@ describe('the ladder', () => {
         accent: null,
         accentText: null,
         selection: null,
+        palette: null,
         contrast: 'normal',
         reducedMotion: false,
         source: null,
@@ -787,6 +881,7 @@ describe('the remembered answer', () => {
         accent: null,
         accentText: null,
         selection: null,
+        palette: null,
         contrast: 'normal',
         reducedMotion: false,
       });
@@ -814,6 +909,7 @@ describe('the remembered answer', () => {
       // picks the ink by contrast until the rung revalidates
       accentText: null,
       selection: null,
+      palette: null,
       contrast: 'normal',
       reducedMotion: true,
       // not 'xsettings': nothing has been asked, and saying otherwise would
@@ -857,10 +953,29 @@ describe('the remembered answer', () => {
       accent: null,
       accentText: null,
       selection: null,
+      palette: null,
       contrast: 'normal',
       reducedMotion: false,
       source: 'cache',
     });
+  });
+
+  test('a remembered palette is taken whole or not at all', async () => {
+    const whole = Object.fromEntries(PALETTE_TOKENS.map((t) => [t, '#123456']));
+    await write(JSON.stringify({ v: 1, colorScheme: 'dark', palette: whole }));
+    _resetAppearance();
+    assert.deepEqual(appearanceSnapshot().palette, whole);
+    for (const broken of [
+      { ...whole, text: 'red' },
+      { ...whole, link: undefined },
+      'not a palette',
+    ]) {
+      await write(
+        JSON.stringify({ v: 1, colorScheme: 'dark', palette: broken }),
+      );
+      _resetAppearance();
+      assert.equal(appearanceSnapshot().palette, null);
+    }
   });
 
   test('unparseable, absent, and from a future version all fall back', async () => {
@@ -1048,6 +1163,38 @@ describe('the desktop accent', () => {
     await settle();
     assert.equal(shown(), '#f7821b|#ffffff|#c96003');
     await expectPixel(ctx, 5, 5, '#f7821b', { tolerance: 2 });
+  });
+
+  // **The desktop's whole palette.** On macOS the rung names every colour,
+  // and the window ground — which no style object holds — has to follow it
+  // along with the widgets.
+  test('a desktop palette reaches the window ground and the widgets', async () => {
+    const SYSTEM = Object.fromEntries(
+      PALETTE_TOKENS.map((t) => [t, '#404040']),
+    );
+    Object.assign(SYSTEM, {
+      background: '#323232',
+      text: '#e0e0e0',
+      accent: '#007aff',
+      accentText: '#ffffff',
+      hoverBackground: '#0059d1',
+    });
+    const { ctx } = await renderX11(
+      React.createElement(
+        'box',
+        { style: { flexGrow: 1 } },
+        React.createElement(Probe),
+      ),
+      { fonts: FONTS, colorScheme: 'dark' },
+    );
+    await settle();
+    await expectPixel(ctx, 2, 2, DarkTheme.background, { tolerance: 2 });
+    await act(async () => {
+      setAppearanceForTests({ ...ORANGE, palette: SYSTEM });
+    });
+    await settle();
+    assert.equal(shown(), '#007aff|#ffffff|#0059d1');
+    await expectPixel(ctx, 2, 2, '#323232', { tolerance: 2 });
   });
 
   test('a following provider keeps it; a brand or a pin does not', async () => {

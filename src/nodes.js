@@ -39,7 +39,6 @@ import {
   resolveHitSlop,
   resolveBorderWidths,
   resolveBorderColors,
-  tint,
 } from './styles.js';
 import {
   blurKernel,
@@ -8496,8 +8495,7 @@ export class TextInputNode extends Node {
       // colour does that on both a light and a dark palette. `#b3d4fc`
       // under the dark palette's near-white ink is 1.3:1, which is nothing.
       // Tinting the surface instead leaves the ink's own contrast intact.
-      ctx.fillStyle =
-        this.props.selectionColor ?? tint(this.theme.accent, 0.35);
+      ctx.fillStyle = this.props.selectionColor ?? this.theme.selection;
       // One band per direction run, not one rectangle between the two caret
       // positions: a range is contiguous in logical order and a line is laid
       // out in visual order, so a selection that crosses into an Arabic word
@@ -8520,7 +8518,7 @@ export class TextInputNode extends Node {
     this._paintPreedit(ctx, valueX, textY, style);
 
     if (this._focused && this._caretOn && a === b) {
-      ctx.fillStyle = this.props.caretColor ?? style.color;
+      ctx.fillStyle = this.props.caretColor ?? this.theme.caret ?? style.color;
       ctx.fillRect(
         valueX + caretX,
         markY,
@@ -8887,8 +8885,7 @@ export class TextAreaNode extends TextInputNode {
       // colour does that on both a light and a dark palette. `#b3d4fc`
       // under the dark palette's near-white ink is 1.3:1, which is nothing.
       // Tinting the surface instead leaves the ink's own contrast intact.
-      ctx.fillStyle =
-        this.props.selectionColor ?? tint(this.theme.accent, 0.35);
+      ctx.fillStyle = this.props.selectionColor ?? this.theme.selection;
       // The bands `textRangeRects` reports — one per line and one per
       // direction run inside a line, which is what a selection crossing into
       // an Arabic word actually covers. Two caret positions and a rectangle

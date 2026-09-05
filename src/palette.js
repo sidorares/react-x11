@@ -14,7 +14,7 @@
 // otherwise says so. See docs/appearance.md.
 
 import { appearanceSnapshot } from './appearance.js';
-import { readableInk, stepBeyond } from './styles.js';
+import { readableInk, stepBeyond, tint } from './styles.js';
 
 /**
  * The language subtags written right-to-left — CLDR's set, by the language
@@ -172,6 +172,17 @@ export const DefaultTheme = {
   focusRing: '#2980b9',
   focusRingWidth: 2,
   focusRingOffset: 1,
+  // The highlight behind selected text. A *tint* rather than an opaque
+  // fill, so the ink keeps its own contrast on both palettes; derived from
+  // `accent` for any palette that moves the accent and not this. A desktop
+  // that names one (macOS's Highlight colour) gives an opaque fill here.
+  selection: tint('#2980b9', 0.35),
+  // The insertion caret. `null` is the text's own colour, which is what a
+  // caret is unless the desktop says otherwise — macOS draws it in the
+  // Highlight colour's accent.
+  caret: null,
+  // Ink for a link. Not the accent: a link is blue everywhere, as a note is.
+  link: '#1c6ea4',
   // shape
   radius: 4,
   radiusSmall: 3,
@@ -269,6 +280,9 @@ const TEXT_FROM = {
   infoText: 'info',
 };
 
+// The selection tint follows the accent it is a tint of.
+const TINT_FROM = { selection: ['accent', 0.35] };
+
 // And the same for the floating-surface radii, which are a function of the
 // text they wrap: a palette that sets `fontSize` and nothing else still gets
 // menus in proportion to it.
@@ -324,6 +338,11 @@ export function resolveTheme(value, base = DefaultTheme) {
       continue;
     merged[token] = readableInk(merged[fill], [merged.text, merged.background]);
   }
+  for (const [token, [fill, alpha]] of Object.entries(TINT_FROM)) {
+    if (named[token] == null && named[fill] != null) {
+      merged[token] = tint(merged[fill], alpha);
+    }
+  }
   if (named.fontSize != null) {
     for (const [token, from] of Object.entries(RADIUS_FROM_FONT)) {
       if (named[token] == null) merged[token] = from(merged.fontSize);
@@ -378,6 +397,7 @@ export const DarkTheme = resolveTheme({
   hoverText: 'white',
   borderFocus: '#5aa4e6',
   focusRing: '#5aa4e6',
+  link: '#5aa4e6',
 });
 
 /**
@@ -441,6 +461,26 @@ function withDesktopAccent(scheme, accent, ink, selection) {
   return resolveTheme(value, scheme);
 }
 
+// A desktop that names its whole palette (macOS, through the semantic
+// colours AppKit paints with) is merged over the scheme's built-in one the
+// way a `<ThemeProvider>` value is: every colour it named, and the shape
+// tokens, the derived inks and the pressed steps from `resolveTheme`. Keyed
+// on the palette object itself — the store replaces it, never mutates it.
+const desktopPalettesByObject = new WeakMap();
+function withDesktopPalette(scheme, palette) {
+  let byScheme = desktopPalettesByObject.get(palette);
+  if (!byScheme) {
+    byScheme = new Map();
+    desktopPalettesByObject.set(palette, byScheme);
+  }
+  let resolved = byScheme.get(scheme);
+  if (!resolved) {
+    resolved = resolveTheme(palette, scheme);
+    byScheme.set(scheme, resolved);
+  }
+  return resolved;
+}
+
 // One palette per desktop answer, so the unprovided palette keeps the
 // identity `useTheme()` and the `$token` resolution cache both count on: a
 // fresh object per read would re-resolve every token in the tree on every
@@ -464,6 +504,7 @@ const desktopPalettes = new Map();
  */
 export function paletteFor(appearance) {
   const scheme = appearance.colorScheme === 'dark' ? DarkTheme : DefaultTheme;
+  if (appearance.palette) return withDesktopPalette(scheme, appearance.palette);
   const { accent, accentText, selection } = appearance;
   if (!accent) return scheme;
   const key = `${scheme.scheme} ${accent} ${accentText ?? ''} ${selection ?? ''}`;
