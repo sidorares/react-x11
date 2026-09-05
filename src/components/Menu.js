@@ -455,6 +455,9 @@ function MenuRow({
       {
         theme,
         role: 'separator',
+        // The level hears the pointer arrive here too: it cannot land, so
+        // whatever was lit goes out, as it does in a native menu.
+        onMouseEnter: onHover,
         style: { height: metrics.separator, justifyContent: 'center' },
       },
       h('box', { style: { height: 1, backgroundColor: theme.border } }),
@@ -488,8 +491,13 @@ function MenuRow({
       'aria-expanded': submenu ? state === 'path' : undefined,
       disabled: dim || undefined,
       ref: nodeRef,
-      onMouseEnter: dim ? undefined : onHover,
-      onMouseMove: dim ? undefined : onMove,
+      // A disabled row reports the pointer as any row does; the level
+      // answers by lighting nothing (`hover`). Silence here was the bug: the
+      // pointer crossed onto a disabled row and the row it had left stayed
+      // lit until it reached the next enabled one — a native menu goes dark
+      // the moment the pointer is over anything it cannot choose.
+      onMouseEnter: onHover,
+      onMouseMove: onMove,
       onClick: dim ? undefined : () => onSelect(item),
       style: {
         height: metrics.row,
@@ -689,7 +697,11 @@ function MenuLevel({
     setPath(hasSubmenu(items[index]) ? [...base, -1] : base);
   };
 
-  const hover = (index, ev) => {
+  const hover = (row, ev) => {
+    // Over a row the selection cannot land on — disabled, a separator —
+    // nothing is lit: `-1` is the same "no row" the keyboard's Home starts
+    // from, and the polygon below still holds an open submenu across it.
+    const index = isSelectable(items[row]) ? row : -1;
     const point = screenPoint(ev);
     if (
       index !== active &&
