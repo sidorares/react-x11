@@ -909,31 +909,25 @@ bar is showing — is `node`'s or `bun`'s, shared with every other script
 that runtime ever ran. `examples/form/` is the example of the fix:
 
 ```
-npm run examples:form:app          # builds examples/form/build/Guestbook.app and opens it
-sh examples/form/make-app.sh --bun # the same on bun
+npm run examples:form:app   # builds examples/form/build/Guestbook.app and opens it
 ```
 
 [`make-app.sh`](../examples/form/make-app.sh) copies `Info.plist`, renders
 `icon.svg` into an `.icns` with the system's own tools (Quick Look, `sips`,
-`iconutil`), and writes the executable — **a three-line script**, not a
-binary and not a copy of the runtime:
+`iconutil`), and makes the executable with `bun build --compile`: one Mach-O
+with bun's runtime, the example and react-x11 inside it, at
+`Contents/MacOS/Guestbook`. AppKit takes an app's main bundle from the
+running executable's path, so a real binary there is the whole trick — no
+launcher, nothing to find at launch time.
 
-```
-#!/usr/bin/env -S CFProcessPath=/…/Guestbook.app/Contents/MacOS/Guestbook /opt/homebrew/bin/bun
-process.chdir('/…/react-x11');
-import('/…/react-x11/examples/form/index.jsx');
-```
-
-The trick is the first line. AppKit takes an app's main bundle from
-CoreFoundation's idea of the process path, and for a script that is the
-interpreter's — run as a plain `#!/usr/bin/env bun` file, the app is "bun" in
-the menu bar, iconless, in bun's defaults domain. CoreFoundation reads that
-path from `CFProcessPath` in the environment before anything else, and
-`env -S` sets it before the interpreter starts; the process then checks in
-as the bundle. Paths are absolute because a shebang sees no PATH and no cwd,
-and the node build names tsx's loader by file for the same reason.
-`Info.plist` carries the name, the identifier (`com.example.guestbook`), the
-icon, `NSHighResolutionCapable` (without it AppKit renders at 1×) and
+What a compiled binary cannot contain is the Cocoa bridge's native addon,
+which the backend loads with `require` from a file. The bundle carries it
+as `Contents/Resources/calayers.node`, and the compile entry,
+[`main.js`](../examples/form/main.js), names it through the backend's
+`REACT_X11_CALAYERS_PATH` seam — relative to `process.execPath`, so the
+bundle can be moved — before importing the example. `Info.plist` carries
+the name, the identifier (`com.example.guestbook`), the icon,
+`NSHighResolutionCapable` (without it AppKit renders at 1×) and
 `LSEnvironment` naming the Cocoa backend. Launch Services then reports the
 process as the app:
 
@@ -942,6 +936,12 @@ $ lsappinfo info -only name,bundleid,bundlepath "$(lsappinfo find pid=<pid>)"
 "LSDisplayName"="Guestbook"
 "CFBundleIdentifier"="com.example.guestbook"
 ```
+
+(A script can be a bundle's executable too, and there is a way to make
+AppKit take the bundle rather than the interpreter as the main one —
+`#!/usr/bin/env -S CFProcessPath=<this file> bun` sets CoreFoundation's
+process path before the interpreter starts — but the compiled binary needs
+no such trick, and nothing installed on the machine at launch time.)
 
 **The tab bar under bun.** Without a bundle, a window opened by `bun` is in
 the `bun` defaults domain, and once anything has turned on the tab bar for
