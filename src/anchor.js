@@ -209,6 +209,10 @@ export function anchorRect(node, options = {}) {
     offset: logicalOffset = 2,
     at,
     alignTo,
+    // A popup that covers its own anchor — a native popup button's menu,
+    // which opens with the chosen row over the control — has no other side
+    // to flip to: it is clamped into the screen instead, as AppKit clamps.
+    flip = true,
     direction = node.direction,
   } = options;
   const alignOffset = logicalAlignOffset * s;
@@ -278,6 +282,7 @@ export function anchorRect(node, options = {}) {
     const below = ay + ah + offset;
     const above = ay - height - offset;
     if (
+      flip &&
       side === 'bottom' &&
       bottom != null &&
       below + height > bottom &&
@@ -285,6 +290,7 @@ export function anchorRect(node, options = {}) {
     ) {
       side = 'top';
     } else if (
+      flip &&
       side === 'top' &&
       above < top &&
       (bottom == null || below + height <= bottom)

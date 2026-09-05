@@ -9,6 +9,8 @@ import { Icon } from './Icon.js';
 import {
   ABS_FILL,
   Bezel,
+  NATIVE_MENU,
+  NATIVE_RING,
   TITLE_BASELINE,
   bezelNatural,
   bezelShadow,
@@ -55,6 +57,43 @@ const ITEM_PAD_RIGHT = ITEM_PAD;
 // sized against 14 under a theme that set 18 is a row its own label does not
 // fit in.
 const itemHeight = (fontSize) => capBand(fontSize) + ITEM_PAD * 2;
+
+/**
+ * The menu's geometry: the palette's, or — where the trigger is a native
+ * popup bezel — NSMenu's, so the sheet that drops from it is the one the
+ * bezel promises. The drawn menu marks the chosen option in bold; a native
+ * popup's menu marks it with a check in the column every row reserves, at
+ * regular weight, as the bezel's own menu does.
+ */
+function menuMetrics(theme, native) {
+  if (native) {
+    const padLeft = NATIVE_MENU.padLeft + NATIVE_MENU.markColumn;
+    return {
+      ...NATIVE_MENU,
+      padLeft,
+      selectedWeight: 'normal',
+      check: true,
+      // How far the menu hangs past the trigger: left, so the titles line
+      // up (the menu's inset less the trigger's); right, past the arrow
+      // capsule, read off the screen at 10pt.
+      hang: {
+        left: MENU_BORDER + NATIVE_MENU.pad + padLeft - TRIGGER_PAD_LEFT,
+        right: 10,
+      },
+    };
+  }
+  return {
+    fontSize: theme.fontSize,
+    weight: 'normal',
+    selectedWeight: 'bold',
+    check: false,
+    row: itemHeight(theme.fontSize),
+    pad: MENU_PAD,
+    padLeft: ITEM_PAD_LEFT,
+    padRight: ITEM_PAD_RIGHT,
+    radius: rowRadius(theme, MENU_BORDER, MENU_PAD),
+  };
+}
 // The scrolling pane's own padding, and so the inset between the edge
 // and an option — which is what makes the highlight read as a pill on the
 // menu rather than a band across it, and what the pill's own corner radius
@@ -66,6 +105,10 @@ const MENU_PAD = 4;
 // where it meets the desktop behind it, and a theme that draws 2px borders
 // on its *controls* does not mean a 2px outline around every popup.
 const MENU_BORDER = 1;
+// Where a native popup bezel's title starts, from the trigger's left edge —
+// and so what the menu's own inset is measured against when it opens over
+// the trigger (`menuAnchorOptions`).
+const TRIGGER_PAD_LEFT = 10;
 // the scrollbar is drawn *over* the content rather than insetting it
 // (`nodes.js`, SCROLLBAR_WIDTH), so a menu that scrolls reserves the room
 const SCROLLBAR_WIDTH = 6;
@@ -91,23 +134,28 @@ function normalizeOption(option) {
  * than the screen it has to open on — `anchorRect` can slide a popup left to
  * fit, but nothing can rescue one that is wider than the display.
  */
-function menuWidth(node, options, value, scrolls, fontSize) {
+function menuWidth(node, options, value, scrolls, metrics) {
   let widest = 0;
   for (const option of options) {
     const { width } = measureLabel(node, option.label, {
-      size: fontSize,
-      weight: option.value === value ? 'bold' : 'normal',
+      size: metrics.fontSize,
+      weight: option.value === value ? metrics.selectedWeight : 'normal',
     });
     if (width > widest) widest = width;
   }
   const chrome =
-    (MENU_BORDER + MENU_PAD) * 2 +
-    ITEM_PAD_LEFT +
-    ITEM_PAD_RIGHT +
+    (MENU_BORDER + metrics.pad) * 2 +
+    metrics.padLeft +
+    metrics.padRight +
     (scrolls ? SCROLLBAR_WIDTH : 0);
   // logical throughout: the trigger's rect divided out of device pixels,
   // the measured labels already logical (measureLabel), the area logical
-  const trigger = node.abs.width / node.scale;
+  // A native popup's menu opens over its control and covers all of it,
+  // the arrow capsule included — it hangs out on both sides (`hang`).
+  const trigger =
+    node.abs.width / node.scale +
+    (metrics.hang?.left ?? 0) +
+    (metrics.hang?.right ?? 0);
   const width = Math.max(trigger, Math.ceil(widest) + chrome);
   const area = anchorArea(node);
   return area ? Math.min(width, area.width) : width;
@@ -122,6 +170,7 @@ function Option({
   nodeRef,
   posinset,
   setsize,
+  metrics,
 }) {
   const theme = useTheme();
   // one highlight, shared by pointer and keyboard: hovering moves the
@@ -138,20 +187,31 @@ function Option({
       onMouseEnter: () => onHover?.(),
       onClick: () => onPick(option),
       style: {
-        height: itemHeight(theme.fontSize),
+        height: metrics.row,
         justifyContent: 'center',
-        paddingLeft: ITEM_PAD_LEFT,
-        paddingRight: ITEM_PAD_RIGHT,
+        paddingLeft: metrics.padLeft,
+        paddingRight: metrics.padRight,
         // the menus' pill, for the same reason and by the same rule: an
         // option list and a menu are one surface with rows in it, and two
         // shapes for that would only say the widgets were written apart
-        borderRadius: rowRadius(theme, MENU_BORDER, MENU_PAD),
+        borderRadius: metrics.radius,
         // nothing at rest — the sheet under it is already that colour, and a
         // rounded fill of the same colour is a coverage mask drawn to change
         // nothing, with four corners it deliberately leaves out
         backgroundColor: active ? theme.hoverBackground : 'transparent',
       },
     },
+    // The native menu's check, in the mark column to the left of the title.
+    // Drawn over the row's own left padding — NSMenu's mark sits inside the
+    // highlight, between its edge and the title.
+    metrics.check &&
+      selected &&
+      h(Icon, {
+        name: 'check',
+        size: capBand(metrics.fontSize),
+        color: active ? theme.hoverText : theme.text,
+        style: { position: 'absolute', left: metrics.markLeft },
+      }),
     h(
       'text',
       {
@@ -159,7 +219,8 @@ function Option({
           capTrim,
           {
             color: active ? theme.hoverText : theme.text,
-            fontWeight: selected ? 'bold' : 'normal',
+            fontSize: metrics.fontSize,
+            fontWeight: selected ? metrics.selectedWeight : metrics.weight,
           },
         ],
       },
@@ -215,27 +276,62 @@ export function Select({
 
   const normalized = options.map(normalizeOption);
   const current = normalized.find((o) => o.value === value);
-  // Rows are sized from the palette's text size, because that is the size
-  // the labels inside them come out at.
-  const rowHeight = itemHeight(theme.fontSize);
-  const contentHeight = normalized.length * rowHeight + MENU_PAD * 2;
+  // Rows are sized from the text size the labels inside them come out at:
+  // the palette's, or NSMenu's under a native popup bezel.
+  const metrics = menuMetrics(theme, nativeControls);
+  const rowHeight = metrics.row;
+  const contentHeight = normalized.length * rowHeight + metrics.pad * 2;
   const menuHeight = Math.min(contentHeight, MAX_MENU_HEIGHT);
   const scrolls = contentHeight > MAX_MENU_HEIGHT;
 
   // shared anchoring: also flips the menu above the trigger when there is
   // no room below, and slides it left when the menu is wider than the
   // trigger and would otherwise open off the right edge
-  const menuAnchorOptions = () => ({
-    placement: 'bottom',
-    height: menuHeight + 2,
-    width: menuWidth(
+  // A native popup button does not drop its menu below the control: it
+  // opens the menu *over* it, with the chosen row on top of the control and
+  // the two titles coincident — the menu's mark column hanging out to the
+  // left, the rows above and below it stacked up and down. The menu's
+  // title inset less the trigger's is how far left it starts. No flip: a
+  // menu over its control has no other side, and is clamped into the
+  // screen as AppKit's is.
+  const menuAnchorOptions = () => {
+    const height = menuHeight + 2;
+    const width = menuWidth(
       triggerRef.current,
       normalized,
       value,
       scrolls,
-      theme.fontSize,
-    ),
-  });
+      metrics,
+    );
+    if (!nativeControls) return { placement: 'bottom', height, width };
+    const node = triggerRef.current;
+    const scale = node?.scale ?? 1;
+    const triggerHeight = node ? node.abs.height / scale : 0;
+    const shadow = bezelShadow(app, 'popup');
+    // Aligned on the *capitals*, which is what the eye lines up: the
+    // trigger's sit on the title baseline (`TITLE_BASELINE` above the bezel
+    // body's bottom), a row's are centred in the row — the band laid out at
+    // a whole pixel, as yoga floors the half.
+    const cap = capBand(metrics.fontSize);
+    const triggerCapsBottom =
+      triggerHeight - shadow.bottom - TITLE_BASELINE.regular;
+    const rowCapsBottom = Math.floor((metrics.row - cap) / 2) + cap;
+    const chosen = Math.max(
+      0,
+      normalized.findIndex((o) => o.value === value),
+    );
+    const chosenRowTop = MENU_BORDER + metrics.pad + chosen * metrics.row;
+    const top = triggerCapsBottom - chosenRowTop - rowCapsBottom;
+    return {
+      placement: 'bottom',
+      offset: 0,
+      flip: false,
+      at: { x: 0, y: top, width: node ? node.abs.width / scale : 0, height: 0 },
+      alignOffset: -metrics.hang.left,
+      height,
+      width,
+    };
+  };
 
   const close = () => setOpen(false);
   const openMenu = () => {
@@ -360,7 +456,7 @@ export function Select({
               alignItems: 'center',
               gap: 8,
               height: bezelNatural(app, 'popup').height,
-              paddingLeft: 10,
+              paddingLeft: TRIGGER_PAD_LEFT,
               paddingRight: 26,
               // The title sits where NSPopUpButtonCell puts it — on the
               // same baseline as a push button's, above the body's bottom
@@ -368,6 +464,12 @@ export function Select({
               paddingTop: bezelShadow(app, 'popup').top,
               paddingBottom:
                 bezelShadow(app, 'popup').bottom + TITLE_BASELINE.regular,
+              // the keyboard ring hugs the bezel's corners (see Button)
+              borderRadius: 6,
+              ':focus-visible': {
+                outlineWidth: NATIVE_RING.width,
+                outlineOffset: NATIVE_RING.offset,
+              },
             }
           : {
               cursor: 'pointer',
@@ -499,7 +601,11 @@ export function Select({
               // for a Select; this pane is scrolled by wheel and by the
               // arrow keys the trigger already handles.
               focusable: false,
-              style: { flexGrow: 1, padding: MENU_PAD, overflow: 'scroll' },
+              style: {
+                flexGrow: 1,
+                padding: metrics.pad,
+                overflow: 'scroll',
+              },
             },
             normalized.map((option, index) =>
               h(Option, {
@@ -512,6 +618,7 @@ export function Select({
                 nodeRef: index === activeIndex ? activeRef : undefined,
                 onHover: () => setActiveIndex(index),
                 onPick: pick,
+                metrics,
               }),
             ),
           ),

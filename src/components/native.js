@@ -101,6 +101,62 @@ export function nativeTitleStyle(controlSize = 'regular') {
   return { alignSelf: 'flex-end', fontSize, height: capBand(fontSize) };
 }
 
+/**
+ * NSMenu's geometry, for the menu a native popup bezel opens — read off
+ * `NSMenu.size` on macOS 15 rather than off a screenshot, so it is the
+ * menu's own arithmetic: a row is 22pt, the sheet pads 5pt top and bottom,
+ * a separator is 11pt, and the font is the 13pt menu font at regular
+ * weight. A title starts 13pt in from the edge — 5 to the highlight, 8
+ * inside it, which is the mark column a menu always reserves — and 28.5pt
+ * of chrome stand between a title's width and the menu's. The highlight's
+ * inset is the pad; its radius is the one number here read off the screen.
+ */
+export const NATIVE_MENU = Object.freeze({
+  fontSize: 13,
+  weight: 'normal',
+  row: 22,
+  pad: 5,
+  padLeft: 8,
+  padRight: 10,
+  radius: 5,
+  separator: 11,
+  // A popup button's menu reserves a column for the check that marks the
+  // chosen item, and its titles start that much further in: 38pt of chrome
+  // against the plain menu's 28.5 (`NSPopUpButton.menu.size`). The mark
+  // itself sits 11pt in from the edge, which is 5 inside the row.
+  markColumn: 9,
+  markLeft: 5,
+});
+
+/**
+ * AppKit's focus ring: one band, outside the control, following the
+ * control's own shape — a circle round a radio, a rounded square round a
+ * checkbox, the bezel's corners round a button. Never round the label, and
+ * never two: a native row that lit its keyboard ring round the whole row
+ * *and* the part's ring round the bezel showed a rectangle round the label
+ * beside a rectangle round the control. Width read off the screen (3pt,
+ * hugging the edge); the colour is the palette's ring, which on macOS is
+ * `keyboardFocusIndicatorColor` over the ground.
+ *
+ * Only for focus that shows: a click on a checkbox lights no ring in
+ * AppKit, Tab does — which is `useControl().focusVisible`.
+ */
+export const NATIVE_RING = Object.freeze({ width: 3, offset: 0 });
+
+/** The ring, as style for the bezel node, shaped to `radius`. */
+export function nativeRingStyle(theme, on, radius) {
+  if (!on) return null;
+  return {
+    outlineWidth: NATIVE_RING.width,
+    outlineColor: theme.focusRing,
+    outlineOffset: NATIVE_RING.offset,
+    borderRadius: radius,
+  };
+}
+
+/** The row round a native part opts out of the renderer's own ring. */
+export const NO_ROW_RING = Object.freeze({ outlineWidth: 0 });
+
 /** Absolute fill inside the control's box — where every bezel layer goes. */
 export const ABS_FILL = Object.freeze({
   position: 'absolute',
