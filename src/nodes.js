@@ -670,6 +670,11 @@ export function appearanceChanged(app) {
   // started here would reach the connection a tick after it closed and throw
   // out of the frame clock, where nothing is waiting to catch it.
   if (!app || app.X?._closing) return;
+  // A backend that renders native control bezels caches them by every
+  // parameter that changes the pixels — except the desktop's accent, which
+  // the toolkit reads for itself. The repaint below would blit the old
+  // colour back out of that cache, so it is forgotten first.
+  app.nativeBezels?.clear?.();
   for (const node of app._rootChildren ?? []) {
     if (node.destroyed) continue;
     node._themeChanged();

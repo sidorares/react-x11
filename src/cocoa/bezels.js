@@ -27,6 +27,22 @@ export class BezelStore {
   }
 
   /**
+   * Forget every rendered bezel. The pixels depend on one thing that is not
+   * a parameter of `get`: the desktop's accent, which AppKit reads for
+   * itself when it draws the cell. After the user picks another accent a
+   * cached bezel is the old colour, and its key still matches — so a bezel
+   * whose state happened to change came up in the new accent while the
+   * ones beside it kept the old, until something else redrew them. The
+   * appearance change forgets them all; the next paint renders each again.
+   *
+   * The measured insets and natural sizes stay: geometry is not coloured.
+   */
+  clear() {
+    // the surfaces are freed by their External finalizer
+    this._cache.clear();
+  }
+
+  /**
    * The control's natural size in logical px — the size the bezel is
    * designed at, which layout adopts for the kinds that must not stretch
    * (checkbox, radio, switch). For the stretchable kinds only `height` is
