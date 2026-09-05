@@ -5,7 +5,12 @@
 import React, { useContext, useEffect, useMemo, useRef } from 'react';
 import { useAppOrNull } from '../appcontext.js';
 import { changeEvent } from './change.js';
-import { Bezel, bezelNatural, useNativeControls } from './native.js';
+import {
+  Bezel,
+  CONTROL_FONT_SIZE,
+  bezelNatural,
+  useNativeControls,
+} from './native.js';
 import { focusRingStyle, labelContent, useControl, useTheme } from './theme.js';
 import { XK_DOWN, XK_LEFT, XK_RIGHT, XK_UP } from './keys.js';
 
@@ -110,8 +115,13 @@ export function Radio({ value, children, label, disabled = false, native }) {
           ...focusRingStyle(theme, focused),
         },
       }),
+      // At the control font size, as the cell's own title is: the bezel is
+      // designed beside 13pt, and the palette's 14px read a size too large
+      // next to it. Centred on the box, which is where AppKit centres it
+      // (measured: within a quarter point).
       labelContent(children ?? label, {
         color: disabled ? theme.textMuted : theme.text,
+        fontSize: CONTROL_FONT_SIZE.regular,
       }),
     );
   }

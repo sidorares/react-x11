@@ -19,7 +19,7 @@
 
 import React, { useCallback } from 'react';
 import { useAppOrNull } from '../appcontext.js';
-import { useTheme } from './theme.js';
+import { capBand, useTheme } from './theme.js';
 
 const h = React.createElement;
 
@@ -67,6 +67,38 @@ export function bezelShadow(app, kind, controlSize = 'regular') {
   return (
     app?.nativeBezels?.shadow?.(kind, controlSize) ?? { top: 0, bottom: 0 }
   );
+}
+
+/**
+ * Where NSButtonCell — and NSPopUpButtonCell — put a title: its baseline
+ * this far above the bezel body's bottom edge, at each control size. Not
+ * centred: the capitals ride a little above the middle and the descenders
+ * hang below it. Measured off the cells' own rendering of "Done" and "Blue"
+ * (macOS 15): the capitals sit 4.5pt below the top of a 20pt regular body
+ * and 6pt above its bottom, 4pt and 4pt in a 16pt small one.
+ */
+export const TITLE_BASELINE = Object.freeze({ regular: 6, small: 4 });
+
+/**
+ * The system control font at each size — `NSFont.systemFontSize` and
+ * `smallSystemFontSize` — which every bezel is designed around and the
+ * baseline above was measured with. A native label is set in it rather than
+ * in the palette's size: a 14px title in a small bezel has no room to sit
+ * where the cell's does.
+ */
+export const CONTROL_FONT_SIZE = Object.freeze({ regular: 13, small: 11 });
+
+/**
+ * The style of a title placed the way a cell places it: on the bottom of a
+ * content box padded by `TITLE_BASELINE` (a cap-trimmed label's bottom edge
+ * is its baseline), at the control font size, and sized to the whole-pixel
+ * cap band — the trimmed box of a 13px face is 9.15px tall, and a baseline
+ * that lands between pixels is rasterised a row low. Only the label goes on
+ * the baseline: an icon beside it stays centred, as AppKit centres an image.
+ */
+export function nativeTitleStyle(controlSize = 'regular') {
+  const fontSize = CONTROL_FONT_SIZE[controlSize];
+  return { alignSelf: 'flex-end', fontSize, height: capBand(fontSize) };
 }
 
 /** Absolute fill inside the control's box — where every bezel layer goes. */

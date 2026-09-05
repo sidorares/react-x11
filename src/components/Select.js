@@ -9,7 +9,10 @@ import { Icon } from './Icon.js';
 import {
   ABS_FILL,
   Bezel,
+  TITLE_BASELINE,
   bezelNatural,
+  bezelShadow,
+  nativeTitleStyle,
   pressWash,
   useNativeControls,
 } from './native.js';
@@ -359,6 +362,12 @@ export function Select({
               height: bezelNatural(app, 'popup').height,
               paddingLeft: 10,
               paddingRight: 26,
+              // The title sits where NSPopUpButtonCell puts it — on the
+              // same baseline as a push button's, above the body's bottom
+              // edge, the shadow padded off (see Button).
+              paddingTop: bezelShadow(app, 'popup').top,
+              paddingBottom:
+                bezelShadow(app, 'popup').bottom + TITLE_BASELINE.regular,
             }
           : {
               cursor: 'pointer',
@@ -409,7 +418,13 @@ export function Select({
       }),
     h(
       'text',
-      { style: [capTrim, { color: current ? theme.text : theme.textMuted }] },
+      {
+        style: [
+          capTrim,
+          nativeControls && nativeTitleStyle('regular'),
+          { color: current ? theme.text : theme.textMuted },
+        ],
+      },
       current ? current.label : placeholder,
     ),
     h('box', { style: { flexGrow: 1 } }),

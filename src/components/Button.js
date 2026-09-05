@@ -7,27 +7,19 @@ import { useAppOrNull } from '../appcontext.js';
 import {
   ABS_FILL,
   Bezel,
+  TITLE_BASELINE,
   bezelNatural,
   bezelShadow,
+  nativeTitleStyle,
   pressWash,
   useNativeControls,
 } from './native.js';
-import { capBand, labelContent, useControl, useTheme } from './theme.js';
+import { labelContent, useControl, useTheme } from './theme.js';
 
 const h = React.createElement;
 
 const VARIANTS = ['solid', 'outline', 'ghost'];
 const SIZES = ['medium', 'small'];
-
-// Where NSButtonCell puts a title: its baseline this far above the bezel
-// body's bottom edge, at each control size. Measured off the cell's own
-// rendering of "Done" (macOS 15): the capitals sit 4.5pt below the top of a
-// 20pt regular body and 6pt above its bottom, 4pt and 4pt in a 16pt small
-// one. Native mode only — the drawn control centres its capitals.
-const TITLE_BASELINE = { regular: 6, small: 4 };
-// And the system control font at each size — `NSFont.systemFontSize` and
-// `smallSystemFontSize` — which the baseline above was measured with.
-const CONTROL_FONT_SIZE = { regular: 13, small: 11 };
 
 /**
  * <Button onPress variant size primary disabled …boxProps>label</Button> —
@@ -118,12 +110,9 @@ export function Button({
             paddingLeft: small ? 10 : 14,
             paddingRight: small ? 10 : 14,
             // The natural box is the bezel's footprint, shadow included;
-            // the body is what the title is placed against. And it is
-            // *placed*, not centred: NSButtonCell puts a title's baseline a
-            // fixed distance above the body's bottom edge — measured off
-            // the cell's own rendering — so the capitals ride a little
-            // above the middle and the descenders hang below it. A label
-            // centred by its capitals sat 1pt low beside a native button.
+            // the body is what the title is placed against — and placed,
+            // not centred (`TITLE_BASELINE`). A label centred by its
+            // capitals sat 1pt low beside a native button.
             paddingTop: shadow.top,
             paddingBottom: shadow.bottom + TITLE_BASELINE[controlSize],
             color: disabled
@@ -143,20 +132,7 @@ export function Button({
         isDefault: primary && !disabled,
         style: ABS_FILL,
       }),
-      // A cap-trimmed label's bottom edge is its baseline, so on the bottom
-      // of the content box is on the baseline AppKit uses. Only the label:
-      // an icon beside it stays centred, as AppKit centres an image. And at
-      // AppKit's text size for the control size, not the palette's — the
-      // bezel is designed around it, and a 14px label in a small bezel has
-      // no room to sit where the title does.
-      // Sized to the whole-pixel cap band as well: the trimmed box of a
-      // 13px face is 9.15px tall, and a baseline that lands between pixels
-      // is rasterised a row low.
-      labelContent(children ?? label, {
-        alignSelf: 'flex-end',
-        fontSize: CONTROL_FONT_SIZE[controlSize],
-        height: capBand(CONTROL_FONT_SIZE[controlSize]),
-      }),
+      labelContent(children ?? label, nativeTitleStyle(controlSize)),
       // The press answer. Last child on purpose: `:active` marks the
       // pressed node and its ancestors, and the topmost child is what the
       // press lands on. No hover tint — AppKit buttons have none.
