@@ -294,6 +294,33 @@ export class CocoaApp {
   }
 
   /**
+   * Bring this app and one of its windows to the front — the cocoa answer to
+   * `activateWindow()` (src/activate.js), the raise a deep link's
+   * `useAppOpen`/`useAppActivate` handler performs.
+   *
+   * There is no window manager here and no `_NET_ACTIVE_WINDOW` to send:
+   * `activateApp()` is `NSApp.activate` and `showWindow(h, true)` re-issues
+   * `makeKeyAndOrderFront:`, which is the whole of a raise on this backend.
+   * The X11 path weighs a launch timestamp against focus-stealing
+   * prevention; macOS has no such negotiation from a client, so the
+   * timestamp is not a parameter here.
+   *
+   * `target` is whatever `activate.js` resolved — a `CocoaWindow`, the
+   * `WindowNode` that owns one, or nothing when there is no window to raise.
+   * Returns whether a window was actually raised, matching the X path's
+   * "was the request issued" contract (and so *not* the false success the
+   * no-op `X.SendClientMessage` stub would report).
+   */
+  raiseWindow(target) {
+    if (this._closed) return false;
+    const wnd = target && target._h != null ? target : (target?.window ?? null);
+    if (!wnd || wnd.destroyed || wnd._h == null) return false;
+    this._native.activateApp();
+    this._native.showWindow(wnd._h, true);
+    return true;
+  }
+
+  /**
    * The pane's end of the frame channel (childmain hands it over,
    * feature-detected so the X11 pane path never notices): geometry and
    * input come in, pane-present goes out.
