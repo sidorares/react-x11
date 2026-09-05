@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.7.0](https://github.com/sidorares/react-x11/compare/v2.6.1...v2.7.0) (2026-09-05)
+
+
+### Features
+
+* **cocoa:** activateWindow raises the app; survey the desktop-integration gaps ([#467](https://github.com/sidorares/react-x11/issues/467)) ([aca1966](https://github.com/sidorares/react-x11/commit/aca19662a371a8cfdcefeee4205bc24068ffb402))
+* the built-in palette follows the desktop's accent, and macOS names the ink on it ([#460](https://github.com/sidorares/react-x11/issues/460)) ([c9ce902](https://github.com/sidorares/react-x11/commit/c9ce9022947affb22d7a8b4df86b3639f68a9717))
+
 ## [2.6.1](https://github.com/sidorares/react-x11/compare/v2.6.0...v2.6.1) (2026-09-04)
 
 
