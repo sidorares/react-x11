@@ -277,6 +277,7 @@ npm run examples:dashboard     # context theming, custom hooks, components
 npm run examples:tasks         # useReducer, textinput, scrolling
 npm run examples:menu          # right-click context menu via <popup>
 npm run examples:transparent   # rounded translucent <popup transparent>
+npm run examples:animation     # transitions and loops, and which backend runs them
 npm run examples:form          # <textinput> + Select dropdowns
 npm run examples:datepicker    # Calendar/DatePicker: ranges, blocked days, events
 npm run examples:password      # PasswordInput: the scribble mask, and a custom one

@@ -21,8 +21,11 @@ import {
   screen,
   withFrameClock,
 } from '../src/testing/index.js';
-import { CocoaLayerPresenter } from '../src/cocoa/presenter.js';
 import { CocoaContext2D } from '../src/cocoa/context2d.js';
+import {
+  animatingPresenterFor,
+  presenterFor,
+} from './helpers/layer-presenter.js';
 
 const h = React.createElement;
 
@@ -64,65 +67,6 @@ class SceneNode extends Node {
       this.invalidate(false, this.abs, 'props');
     }
   }
-}
-
-/** A bridge that records every call and answers the few that need a handle. */
-function fakeBridge() {
-  const calls = [];
-  let surfaces = 0;
-  let presentation = null; // what presentationValue answers
-  const native = new Proxy(
-    {},
-    {
-      get(_, name) {
-        if (typeof name !== 'string') return undefined;
-        return (...args) => {
-          calls.push({ name, args });
-          if (name.startsWith('create') && name.endsWith('Layer')) {
-            return { layer: calls.length };
-          }
-          if (name === 'presentationValue') return presentation;
-          if (name === 'createSurface') {
-            return { surface: ++surfaces, width: args[0], height: args[1] };
-          }
-          if (name === 'surfaceSize') {
-            return { width: args[0].width, height: args[0].height };
-          }
-          return undefined;
-        };
-      },
-    },
-  );
-  return {
-    native,
-    calls,
-    setPresentation: (value) => {
-      presentation = value;
-    },
-    /** The arguments after the surface handle, per call of `name`. */
-    argsOf: (name) =>
-      calls.filter((c) => c.name === name).map((c) => c.args.slice(1)),
-    uploads: () => calls.filter((c) => c.name === 'surfaceToLayer').length,
-  };
-}
-
-/** The presenter over a fake cocoa window, wired to the mounted tree's
- * invalidate channel the way src/cocoa/window.js wires it in layers mode. */
-function presenterFor({ windowNode, app }) {
-  const bridge = fakeBridge();
-  const presenter = new CocoaLayerPresenter({
-    _native: bridge.native,
-    scale: 1,
-    app: {
-      fonts: app.fonts,
-      _parseColor: (c) => cssColorStraight(String(c)),
-      _animationEnds: new Map(),
-    },
-    _layer: { layer: 'root' },
-  });
-  windowNode.window.noteInvalidate = (damage, layoutChanged) =>
-    presenter.noteInvalidate(damage, layoutChanged);
-  return { presenter, bridge };
 }
 
 const registered = new Set();
@@ -365,10 +309,7 @@ const plainBox = (style) =>
  *  wires it (src/cocoa/window.js), one frame in. */
 async function mountAnimated(style) {
   const mounted = await renderX11(plainBox(style), { backend: 'mock' });
-  const { presenter, bridge } = presenterFor(mounted);
-  const wnd = mounted.windowNode.window;
-  wnd.animateNode = (node, prop, entry) => presenter.animate(node, prop, entry);
-  wnd.cancelNodeAnimation = (node, prop) => presenter.cancel(node, prop);
+  const { presenter, bridge } = animatingPresenterFor(mounted);
   presenter.frame(mounted.windowNode);
   bridge.calls.length = 0; // mount traffic
   return {
