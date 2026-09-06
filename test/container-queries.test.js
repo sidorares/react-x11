@@ -180,6 +180,36 @@ test('a frame where no answer moves pays no extra pass; a flip pays what the cha
   await queried.x11Root.unmount();
 });
 
+test('a tree with no container queries never enters the settle step', async () => {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 800, height: 300 },
+      h(
+        'box',
+        { style: { flexGrow: 1, padding: 4 } },
+        h('box', { style: s.dot }),
+      ),
+    ),
+  );
+  await tick();
+  const root = nodeOf(app);
+  assert.strictEqual(root._containerQueryNodes.size, 0, 'nothing registered');
+  let rounds = 0;
+  const original = root._resolveContainerQueries;
+  root._resolveContainerQueries = function (...args) {
+    rounds += 1;
+    return original.apply(this, args);
+  };
+  const before = root._layoutPasses;
+  await resize(app, 700);
+  assert.strictEqual(root._layoutPasses - before, 1, 'the resize is one pass');
+  assert.strictEqual(rounds, 0, 'and no round of container resolution ran');
+  await x11Root.unmount();
+});
+
 test('a named query reaches past a nearer unnamed container', async () => {
   const named = createStyles({
     pane: { container: 'pane', width: 600, height: 200 },

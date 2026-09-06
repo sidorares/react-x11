@@ -32,9 +32,10 @@ import {
   isLayoutProp,
   styleUsesTokens,
   resolveTokens,
-  styleHasSizeQueries,
-  styleHasSupportsQueries,
-  styleHasContainerQueries,
+  queryKinds,
+  QUERY_SIZE,
+  QUERY_SUPPORTS,
+  QUERY_CONTAINER,
   containerQueryNames,
   containerAnswers,
   resolveQueries,
@@ -1960,17 +1961,13 @@ export class Node {
     // `null` is "commitMount is still to come", `false` is "it has been and
     // gone", and an Error is one waiting for it
     this._tokenError = null;
-    // `'@container …'` blocks (styles.js): whether the style carries any, the
+    // `'@container …'` blocks (styles.js), on the nodes that carry them and
+    // null on every other node: the style the record was built for, the
     // container names it asks about (`''` for the unnamed ones), the sizes
-    // and the answers the blocks last resolved to, and the pin an
-    // oscillating design is held at — see WindowNode._resolveContainerQueries.
-    // Before `_syncStyle`, which reads and writes them.
-    this._containerQueried = false;
-    this._cqNames = null;
-    this._cqContainers = null;
-    this._cqAnswers = '';
-    this._cqPin = null;
-    this._cqWarned = false;
+    // and answers the blocks last resolved to, and the pin an oscillating
+    // design is held at — see WindowNode._resolveContainerQueries. Before
+    // `_syncStyle`, which reads and writes it.
+    this._cq = null;
     this._syncStyle(props);
     this.yoga = yoga ? createLayoutNode() : null;
     if (this.yoga) {
@@ -2027,7 +2024,8 @@ export class Node {
     this.states[':disabled'] = Boolean(props.disabled);
     // window size queries fold into the base before state blocks, so a
     // `:hover` inside the wide layout still wins over the wide layout
-    const queried = styleHasSizeQueries(this._baseStyle);
+    const kinds = queryKinds(this._baseStyle);
+    const queried = (kinds & QUERY_SIZE) !== 0;
     if (queried !== this._queried) {
       this._queried = queried;
       const root = this.root;
@@ -2043,7 +2041,7 @@ export class Node {
     // assigned, so the first pass has nowhere to register and a "did it
     // change" guard would keep it unregistered forever. Set.add is
     // idempotent and these blocks are rare.
-    const asks = styleHasSupportsQueries(this._baseStyle);
+    const asks = (kinds & QUERY_SUPPORTS) !== 0;
     this._supportsQueried = asks;
     if (this.root?._supportsQueryNodes) {
       if (asks) this.root._supportsQueryNodes.add(this);
@@ -2065,22 +2063,40 @@ export class Node {
     }
     // `@container` blocks keep a third registry: what re-resolves them is a
     // layout pass moving the container they ask about — neither a resize
-    // nor the server's answer. Registered unconditionally, for the reason
-    // the two above are.
-    const asksContainers = styleHasContainerQueries(this._baseStyle);
-    if (asksContainers !== this._containerQueried) {
-      this._containerQueried = asksContainers;
-      this._cqPin = null;
-    }
-    this._cqNames = asksContainers
-      ? containerQueryNames(this._baseStyle)
-      : null;
-    if (this.root?._containerQueryNodes) {
-      if (asksContainers) this.root._containerQueryNodes.add(this);
-      else this.root._containerQueryNodes.delete(this);
+    // nor the server's answer. The record exists only on the nodes that
+    // ask, so every other node pays one bit test here and nothing below.
+    // Insertion registers through `_registerSizeQueries`; this is for a
+    // style that starts or stops asking on a node already in a window.
+    const asksContainers = (kinds & QUERY_CONTAINER) !== 0;
+    let containers = null;
+    if (asksContainers) {
+      const base = this._baseStyle;
+      let cq = this._cq;
+      if (cq === null || cq.style !== base) {
+        if (cq === null) {
+          cq = this._cq = {
+            style: base,
+            names: null,
+            containers: null,
+            answers: '',
+            pin: null,
+            warned: false,
+          };
+        } else {
+          // a different style asks different questions, and a pin held for
+          // the old one is not an answer to the new one
+          cq.style = base;
+          cq.pin = null;
+        }
+        cq.names = containerQueryNames(base);
+      }
+      this.root?._containerQueryNodes?.add(this);
+      containers = this._pinnedContainerSizes();
+    } else if (this._cq !== null) {
+      this._cq = null;
+      this.root?._containerQueryNodes?.delete(this);
     }
     if (queried || asks || asksContainers) {
-      const containers = asksContainers ? this._pinnedContainerSizes() : null;
       this._baseStyle = resolveQueries(this._baseStyle, {
         size: this.root?.querySize ?? null,
         // null before the window is realized, which reads as "not
@@ -2089,8 +2105,8 @@ export class Node {
         containers,
       });
       if (asksContainers) {
-        this._cqContainers = containers;
-        this._cqAnswers = containerAnswers(this._baseStyle, containers);
+        this._cq.containers = containers;
+        this._cq.answers = containerAnswers(this._baseStyle, containers);
       }
     }
     this._stateful = hasStateStyles(this._baseStyle);
@@ -2454,7 +2470,7 @@ export class Node {
     if (this._wantsAttention && this.root?._attentionNodes) {
       this.root._attentionNodes.add(this);
     }
-    if (this._containerQueried && this.root?._containerQueryNodes) {
+    if (this._cq !== null && this.root?._containerQueryNodes) {
       this.root._containerQueryNodes.add(this);
       // it can see the containers above it now — the constructor's
       // resolution had no ancestors to find one in
@@ -2482,7 +2498,7 @@ export class Node {
    * identity `resolveQueries` keeps.
    */
   _containerSizes() {
-    const names = this._cqNames;
+    const names = this._cq?.names;
     if (!names) return null;
     let sizes = null;
     const s = this.scale || 1;
@@ -2513,10 +2529,11 @@ export class Node {
    *  arriving from React does not undo what the layout pass decided. */
   _pinnedContainerSizes() {
     const live = this._containerSizes();
-    const pin = this._cqPin;
+    const cq = this._cq;
+    const pin = cq.pin;
     if (!pin) return live;
     if (pin.key === containersKey(live)) return pin.containers;
-    this._cqPin = null;
+    cq.pin = null;
     return live;
   }
 
@@ -2559,9 +2576,10 @@ export class Node {
   /** Said once per node, in development: a design that cannot settle looks
    *  like a layout bug, and the frame it is pinned at is the only clue. */
   _warnContainerOscillation() {
-    if (this._cqWarned) return;
-    this._cqWarned = true;
-    const asked = [...(this._cqNames ?? [])]
+    const cq = this._cq;
+    if (cq.warned) return;
+    cq.warned = true;
+    const asked = [...(cq.names ?? [])]
       .map((n) => (n === '' ? 'its container' : `"${n}"`))
       .join(', ');
     console.warn(
@@ -2878,7 +2896,7 @@ export class Node {
    * may now match that did not, or the other way round. */
   _sizeQueriesChanged() {
     if (
-      !(this._queried || this._supportsQueried || this._containerQueried) ||
+      !(this._queried || this._supportsQueried || this._cq !== null) ||
       this.destroyed
     ) {
       return;
@@ -9685,9 +9703,11 @@ export class WindowNode extends Scrollable(Node) {
     if (this._resolveSizeQueries(size.width, size.height)) size = measure();
     // …and the container blocks against the arrangement that produced it,
     // so the window is created at the size its content will actually take
-    this._settleContainerQueries(() => {
-      size = measure();
-    });
+    if (this._containerQueryNodes.size !== 0) {
+      this._settleContainerQueries(() => {
+        size = measure();
+      });
+    }
 
     // A cap the content decides is its natural size, never below a floor
     // that was named as a number: `WM_NORMAL_HINTS` with a min above its own
@@ -11267,22 +11287,23 @@ export class WindowNode extends Scrollable(Node) {
         this._containerQueryNodes.delete(node);
         continue;
       }
+      const cq = node._cq;
       const containers = node._containerSizes();
       const key = containersKey(containers);
-      if (node._cqPin) {
-        if (node._cqPin.key === key) continue;
-        node._cqPin = null;
+      if (cq.pin) {
+        if (cq.pin.key === key) continue;
+        cq.pin = null;
       }
       const answers = containerAnswers(node._baseStyle, containers);
-      if (answers === node._cqAnswers) continue;
+      if (answers === cq.answers) continue;
       if (!apply) return true;
       let seen = held.get(node);
       if (seen?.includes(answers)) {
-        node._cqPin = { key, containers: node._cqContainers };
+        cq.pin = { key, containers: cq.containers };
         if (DEV) node._warnContainerOscillation();
         continue;
       }
-      if (!seen) held.set(node, (seen = [node._cqAnswers]));
+      if (!seen) held.set(node, (seen = [cq.answers]));
       seen.push(answers);
       node._sizeQueriesChanged();
       changed = true;
@@ -11672,7 +11693,9 @@ export class WindowNode extends Scrollable(Node) {
       // `@container` blocks are answered by the pass, not before it, and a
       // changed answer is one more pass — before `absolutize`, so the layout
       // diff below sees one arrangement against the last frame's
-      this._settleContainerQueries(() => this._layoutStep(width, height));
+      if (this._containerQueryNodes.size !== 0) {
+        this._settleContainerQueries(() => this._layoutStep(width, height));
+      }
       this.abs = { x: 0, y: 0, width, height };
       this._placed = true;
       // the root's rect is written here, not through _assignAbs, so its

@@ -579,6 +579,29 @@ export const styleHasSupportsQueries = (style) =>
 export const styleHasContainerQueries = (style) =>
   hasQueryOfKind(style, 'container');
 
+/**
+ * Which kinds of `@` block a style carries, in **one** pass over its keys —
+ * a mask of the three below, or 0. What `_syncStyle` asks of every node on
+ * every restyle, so it is asked once rather than once per kind.
+ */
+export const QUERY_SIZE = 1;
+export const QUERY_SUPPORTS = 2;
+export const QUERY_CONTAINER = 4;
+const QUERY_KIND_BITS = {
+  size: QUERY_SIZE,
+  supports: QUERY_SUPPORTS,
+  container: QUERY_CONTAINER,
+};
+export function queryKinds(style) {
+  let kinds = 0;
+  for (const key of Object.keys(style)) {
+    if (!isQuery(key)) continue;
+    const q = parseQuery(key);
+    if (q) kinds |= QUERY_KIND_BITS[q.kind];
+  }
+  return kinds;
+}
+
 /** The container names a style asks about — `''` for the unnamed blocks —
  *  or null when it asks about none. */
 export function containerQueryNames(style) {
