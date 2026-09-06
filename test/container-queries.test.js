@@ -341,6 +341,85 @@ test('a design that cannot settle is pinned, and said once', async () => {
   await x11Root.unmount();
 });
 
+test('a block flipping during a live resize re-measures the floors it changed', async () => {
+  // A pane of fixed height whose cards are rows while it is wide and
+  // columns once it is not. As columns they no longer fit the pane, and
+  // yoga would squeeze them down to whatever `minHeight` floor they carry —
+  // the row's, unless the flip re-measures. `liveResizing` is the Cocoa
+  // window's flag under which floor measurement is deferred during a drag.
+  const live = createStyles({
+    pane: { container: true, flexGrow: 1, padding: 12, gap: 12 },
+    card: {
+      flexDirection: 'column',
+      gap: 10,
+      padding: 12,
+      '@container width >= 400': { flexDirection: 'row' },
+    },
+    thumb: { width: 40, height: 40 },
+    body: { flexGrow: 1, minWidth: 0, gap: 4 },
+    line: { height: 16 },
+    toolbar: { width: 60, height: 20, flexShrink: 0 },
+  });
+  const cardEl = (key) =>
+    h(
+      'box',
+      { key, style: live.card },
+      h('box', { key: 't', style: live.thumb }),
+      h(
+        'box',
+        { key: 'b', style: live.body },
+        h('box', { key: '1', style: live.line }),
+        h('box', { key: '2', style: live.line }),
+      ),
+      h('box', { key: 'x', style: live.toolbar }),
+    );
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 800, height: 300 },
+      h('box', { style: live.pane }, cardEl('a'), cardEl('b'), cardEl('c')),
+    ),
+  );
+  await tick();
+  const cards = nodeOf(app).children[0].children;
+  assert.deepStrictEqual(
+    cards.map((c) => c.abs.height),
+    [64, 64, 64],
+    'rows: 40 tall inside 12 of padding',
+  );
+
+  const wnd = app.windows[0];
+  // a failing assertion must not leave the window mid-drag: the floor
+  // catch-up waits on `liveResizing` and would keep the process alive
+  try {
+    wnd.liveResizing = true;
+    await resize(app, 380);
+    // 12 + 40 + 10 + (16 + 4 + 16) + 10 + 20 + 12, and three of them do not
+    // fit in 300 — so this is only true if the floors were measured afresh
+    assert.deepStrictEqual(
+      cards.map((c) => c.abs.height),
+      [140, 140, 140],
+      'columns at their content height, mid-drag',
+    );
+    assert.deepStrictEqual(
+      cards.map((c) => c.children[1].abs.height),
+      [36, 36, 36],
+      'and the body inside is not squeezed either',
+    );
+  } finally {
+    wnd.liveResizing = false;
+  }
+  await tick();
+  await tick();
+  assert.deepStrictEqual(
+    cards.map((c) => c.abs.height),
+    [140, 140, 140],
+  );
+  await x11Root.unmount();
+});
+
 test('thresholds are in the logical pixels the dependent writes its own lengths in', async () => {
   const scaled = createStyles({
     // 150 logical is 300 device pixels under scale 2

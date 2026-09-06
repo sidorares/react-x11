@@ -2908,7 +2908,19 @@ export class Node {
     this._syncStyle(this.props);
     if (localTextStyleChanged(this.style, before)) this._textContentChanged();
     if (this.yoga && this.style !== before) {
-      applyLayoutStyle(this.yoga, this.style, before);
+      // A block that moved a layout property changed the tree the content
+      // floors were measured from — the debt a style change from React
+      // leaves too (`invalidate`, reason 'props'). It has to be marked as a
+      // *content* change: the live-resize deferral takes a plain
+      // `_floorsDirty` for the drag itself and lays out against the floors
+      // in hand, which are the old arrangement's, and by the time the
+      // catch-up looks the dirty flags are spent and no leaf's height moved
+      // — so the floor of a card that turned from a row into a column would
+      // stay the row's, and yoga would squeeze the column down to it.
+      if (applyLayoutStyle(this.yoga, this.style, before) && this.root) {
+        this.root._floorsDirty = true;
+        this.root._floorsContentDirty = true;
+      }
     }
   }
 
