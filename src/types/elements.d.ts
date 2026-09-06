@@ -23,6 +23,7 @@ import type {
   SubmitEvent,
   SyntheticEvent,
   ViewportEvent,
+  LayoutEvent,
   WheelEvent,
   WindowResizeEvent,
 } from './events.js';
@@ -188,6 +189,15 @@ export interface DrawnProps<T = DrawnNode>
     SelectionProps<T>,
     EventHandlers<T> {
   ref?: Ref<T>;
+  /**
+   * After a layout pass moved or resized this element: `{x, y, width,
+   * height}` in logical pixels, the position within the parent as laid out
+   * — so scrolling does not fire it. Once after the first layout, then only
+   * on change; deferred past the pass, so `setState` in it is safe. The
+   * seam for a decision that is not a style; where it is one, a
+   * `'@container'` block answers in the same frame (docs/styling.md).
+   */
+  onLayout?: (ev: LayoutEvent) => void;
   /**
    * Zoom this subtree, CSS `zoom` rather than a transform: every length
    * under here — and this element's *own* style — is multiplied by it, so

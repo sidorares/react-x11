@@ -346,6 +346,7 @@ function Elements() {
         style={[s.responsive, { overflow: 'scroll' }]}
         onScroll={(ev: ScrollEvent) => void ev.scrollY}
         onViewport={(ev) => void ev.contentHeight}
+        onLayout={(ev) => void (ev.x + ev.y + ev.width + ev.height)}
       >
         <box style={{ height: 800 }} />
       </box>

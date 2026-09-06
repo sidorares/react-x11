@@ -171,11 +171,11 @@ function Card({ item }) {
 }
 
 function Pane({ name, items }) {
-  // `onViewport` is the React-side seam: the same width the blocks compare
-  // against, for a decision that is not a style
+  // `onLayout` is the React-side seam: the same width the blocks compare
+  // against, for a decision that is not a style — here, only a caption
   const [width, setWidth] = useState(null);
   return (
-    <box style={s.pane} onViewport={(v) => setWidth(Math.round(v.width))}>
+    <box style={s.pane} onLayout={(ev) => setWidth(Math.round(ev.width))}>
       <text style={s.paneTitle}>
         {name}
         {width == null ? '' : ` · ${width}px`}

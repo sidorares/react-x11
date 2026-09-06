@@ -96,10 +96,12 @@ produced. On the very first render of a node, that is nothing yet.
 
 What to do instead:
 
-- **Let the element tell you.** `<box onViewport>` fires when the
-  viewport or content size changes, with `width`/`height`/`contentWidth`/
-  `contentHeight`. `<window onResize>` fires when the window is resized.
-  These are the supported way to react to a size.
+- **Let the element tell you.** `onLayout` fires on any element after a
+  layout pass moved or resized it, with `width`/`height` (and `x`/`y`
+  within the parent) in logical pixels — once after the first layout, then
+  on change. `<box onViewport>` adds a scroller's content size, and
+  `<window onResize>` fires when the window is resized. These are the
+  supported way to react to a size.
 - **Read `abs` from a ref in a handler or a later effect**, not during the
   render that created the node.
 - **Take a getter, not a value.** `useWindowId(ref)` and `useAnchor()` return
@@ -109,17 +111,19 @@ What to do instead:
 ```jsx
 const [cols, setCols] = useState(1);
 
-<box
-  style={{ overflow: 'scroll' }}
-  onViewport={({ width }) => setCols(Math.max(1, (width / 200) | 0))}
->
+<box onLayout={({ width }) => setCols(Math.max(1, (width / 200) | 0))}>
   {items.map(…)}
 </box>;
 ```
 
+When what depends on the size is a _style_ rather than a decision about what
+to render, write it as a container query block instead
+([styling.md](styling.md#container-queries)): it applies in the same frame,
+where a state set from `onLayout` re-renders a frame later.
+
 If you are porting a component that measures itself and adjusts, this is the
-part to rewrite. See [elements.md](elements.md) for `onViewport` and
-`onResize`, and [components.md](components.md) for `useAnchor`.
+part to rewrite. See [elements.md](elements.md) for `onLayout`, `onViewport`
+and `onResize`, and [components.md](components.md) for `useAnchor`.
 
 ## What a ref gives you
 
