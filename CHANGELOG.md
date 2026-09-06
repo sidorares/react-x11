@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.7.0](https://github.com/sidorares/react-x11/compare/v2.6.1...v2.7.0) (2026-09-06)
+
+
+### Features
+
+* a badge on the app's icon, attention on cocoa, the Dock menu, and the app's name and activation policy ([#475](https://github.com/sidorares/react-x11/issues/475)) ([0507f27](https://github.com/sidorares/react-x11/commit/0507f27583aa49dbe7d6379d3c293364b213e824))
+* **cocoa:** activateWindow raises the app; survey the desktop-integration gaps ([#467](https://github.com/sidorares/react-x11/issues/467)) ([aca1966](https://github.com/sidorares/react-x11/commit/aca19662a371a8cfdcefeee4205bc24068ffb402))
+* **cocoa:** Apple Events reach useAppOpen/useAppActivate; a quit request is the primary window's close request ([#473](https://github.com/sidorares/react-x11/issues/473)) ([5a68742](https://github.com/sidorares/react-x11/commit/5a687428bc94b33116175eae94383124588603dc))
+* **cocoa:** drag and drop — NSDragging behind the same dropAccept/onDrag*/dragData props ([#479](https://github.com/sidorares/react-x11/issues/479)) ([d49b96d](https://github.com/sidorares/react-x11/commit/d49b96d53927120c077bb24d4585edb5ead04f8a))
+* **cocoa:** native NSOpenPanel/NSSavePanel as the file dialog's top rung, a sheet on the window that asked ([#474](https://github.com/sidorares/react-x11/issues/474)) ([78c1a0a](https://github.com/sidorares/react-x11/commit/78c1a0a5db3e5ce67ee26c51e3125f99460fef6e))
+* **cocoa:** transitions and loops run in the render server on the layer presenter; reduce motion from System Settings ([#472](https://github.com/sidorares/react-x11/issues/472)) ([82c2911](https://github.com/sidorares/react-x11/commit/82c29116466d7f02e247e50d84a8a943d9df4c37))
+* **cocoa:** useTray() — an icon in the system tray over NSStatusItem ([#476](https://github.com/sidorares/react-x11/issues/476)) ([d1fb2e6](https://github.com/sidorares/react-x11/commit/d1fb2e6adb163174af6ce3d170075c730bec5be1))
+* container queries — '[@container](https://github.com/container) [name] width &gt;= 400' style blocks ([#470](https://github.com/sidorares/react-x11/issues/470)) ([cee1d7a](https://github.com/sidorares/react-x11/commit/cee1d7a699ca43f5ceee48e76fe5aa9fe50af5b4))
+* desktop notifications — notify() over the app's centre, the freedesktop daemon, osascript and notify-send ([#478](https://github.com/sidorares/react-x11/issues/478)) ([6f614c7](https://github.com/sidorares/react-x11/commit/6f614c75194a6699b1c7cb56c2687222b125fcfa))
+* **examples:** an animation example, with a frame counter that reads 0 on the layer presenter ([#480](https://github.com/sidorares/react-x11/issues/480)) ([554a785](https://github.com/sidorares/react-x11/commit/554a7853b17d71ad8e9886c918052b71d34e4bdf))
+* onLayout on every drawn element — the rect a layout pass produced ([#471](https://github.com/sidorares/react-x11/issues/471)) ([1894bae](https://github.com/sidorares/react-x11/commit/1894bae4928d9dca2aafdb7d3167a6fa70fb0c3b))
+* permissions — status, request and the Settings pane; macOS TCC on the cocoa backend ([#477](https://github.com/sidorares/react-x11/issues/477)) ([00f32d2](https://github.com/sidorares/react-x11/commit/00f32d210e1e8d960e68d8a451930b64fdaffb58))
+* the built-in palette follows the desktop's accent, and macOS names the ink on it ([#460](https://github.com/sidorares/react-x11/issues/460)) ([c9ce902](https://github.com/sidorares/react-x11/commit/c9ce9022947affb22d7a8b4df86b3639f68a9717))
+
+
+### Bug Fixes
+
+* **cocoa:** a width offer of zero is the min-content question, not an unbounded line ([#481](https://github.com/sidorares/react-x11/issues/481)) ([dd23af8](https://github.com/sidorares/react-x11/commit/dd23af83441ed6e0f8761dc8f92c359582b1be2c))
+
 ## [2.6.1](https://github.com/sidorares/react-x11/compare/v2.6.0...v2.6.1) (2026-09-04)
 
 
