@@ -2,13 +2,18 @@
 //
 // There is no one answer, so this is a ladder, tried in order:
 //
-//   1. **the portal** — `org.freedesktop.portal.FileChooser` over D-Bus. The
+//   1. **the native panel** — `NSOpenPanel`/`NSSavePanel` in this process, on
+//      the cocoa backend (src/cocoa/filepanels.js). A sheet on the window
+//      that asked, with every filter the OS type database knows. Found by
+//      the app the window belongs to offering `filePanels`, never by naming
+//      a backend here.
+//   2. **the portal** — `org.freedesktop.portal.FileChooser` over D-Bus. The
 //      real desktop dialog, with the user's bookmarks and recent files, drawn
 //      by GTK or KDE in another process. What a Linux desktop should get.
-//   2. **`osascript`** — macOS with no portal, which is every XQuartz install
-//      that has not gone out of its way. `choose file` is `NSOpenPanel`, so
-//      the user gets the dialog they know.
-//   3. **the built-in dialog** — a file browser drawn by react-x11 itself.
+//   3. **`osascript`** — macOS on the X11 backend with no portal, which is
+//      every XQuartz install that has not gone out of its way. `choose file`
+//      is `NSOpenPanel`, so the user gets the dialog they know.
+//   4. **the built-in dialog** — a file browser drawn by react-x11 itself.
 //      Reached over ssh, under a bare `startx`, in a container: everywhere
 //      there is a display and nothing else. See `components/FileDialog.js`;
 //      it needs a React tree, so `useFileDialog()` has it and the bare
@@ -24,12 +29,14 @@
 //   process; all you get is logical parenting, through `parent_window`. That
 //   is `transientFor` by another name, and it is why these calls want a window
 //   to point at.
-// - **macOS has no cross-process transient-for at all.** XQuartz windows are
-//   `NSWindow`s owned by X11.app, and `addChildWindow` is same-process only.
-//   So the panel appears over the app but is not attached to it. Application
-//   modality still works, because the caller is awaiting the promise.
+// - **`osascript` has no transient-for at all.** XQuartz windows are
+//   `NSWindow`s owned by X11.app, `addChildWindow` is same-process only, and
+//   the panel belongs to a third process anyway. So it appears over the app
+//   but is not attached to it. Application modality still works, because the
+//   caller is awaiting the promise. The native panel is the one rung on a
+//   Mac that *is* attached — a sheet — which is the whole reason it exists.
 // - **The built-in dialog is ours**, so it is the only rung that can be
-//   modal-and-parented properly — and the only one that has never seen the
+//   modal-and-parented on X11 — and the only one that has never seen the
 //   user's bookmarks.
 
 import {
@@ -45,7 +52,8 @@ import {
   variant,
 } from './portal.js';
 import { sessionBus } from './bus.js';
-import { windowIdOf } from './windowid.js';
+import { liveApps } from './trace-registry.js';
+import { windowIdOf, windowOf } from './windowid.js';
 
 const FILE_CHOOSER = 'org.freedesktop.portal.FileChooser';
 
@@ -60,9 +68,9 @@ const FILE_CHOOSER = 'org.freedesktop.portal.FileChooser';
 export class NoFileDialogError extends Error {
   constructor(cause) {
     super(
-      'react-x11: no file dialog is available — there is no ' +
-        'xdg-desktop-portal on the bus, and this is not macOS. Use ' +
-        'useFileDialog() instead, which draws one, or supply `backend`.',
+      'react-x11: no file dialog is available — no native panel on this ' +
+        'backend, no xdg-desktop-portal on the bus, and this is not macOS. ' +
+        'Use useFileDialog() instead, which draws one, or supply `backend`.',
       { cause },
     );
     this.name = 'NoFileDialogError';
@@ -230,14 +238,32 @@ async function osascriptDialog(kind, opts) {
           if (error.code === 'ENOENT') {
             return reject(new NoFileDialogError(error));
           }
+          // The caller's abort killed the child. From the outside that is a
+          // process that died on a signal, which is not a failure of the
+          // dialog: it is the abort, reported the way the portal rung
+          // reports one.
+          if (opts.signal?.aborted) {
+            return reject(
+              opts.signal.reason ??
+                new PortalCancelledError(RESPONSE_CANCELLED),
+            );
+          }
           // AppleScript reports a cancel as -128, which is an ordinary
           // outcome and must not read as a failure.
           if (/-128/.test(stderr) || /User canceled/i.test(stderr)) {
             return reject(new PortalCancelledError(RESPONSE_CANCELLED));
           }
+          // What osascript said, minus the lines AppKit prints to every
+          // process that puts a window up (IMKClient and friends), which
+          // would otherwise be the whole of the message.
+          const said = stderr
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line && !/\+\[IMK\w+ subclass\]/.test(line))
+            .join(' ');
           return reject(
             new Error(
-              `react-x11: the macOS file dialog failed — ${stderr.trim() || error.message}`,
+              `react-x11: the macOS file dialog failed — ${said || error.message}`,
               { cause: error },
             ),
           );
@@ -267,6 +293,29 @@ function defaultTitle(kind) {
       : 'Open file';
 }
 
+// --------------------------------------------------------------------------
+// Rung 1: the native panel, on the cocoa backend
+// --------------------------------------------------------------------------
+
+/**
+ * The app whose native panels a dialog should use, or null.
+ *
+ * Never a backend check: an app that can show panels says so by carrying
+ * `filePanels` (src/cocoa/app.js), and this asks the app the named window
+ * belongs to. With no window named it asks the connections the renderer is
+ * drawing through — one is the normal case; several with only one of them
+ * still showing a window is the next (a borrowed connection stays
+ * registered after its root unmounts); genuinely several is a real null,
+ * since a panel has to belong to one of them.
+ */
+function panelsApp(wnd) {
+  if (wnd) return wnd.app?.filePanels ? wnd.app : null;
+  const apps = liveApps().filter((app) => app.filePanels);
+  if (apps.length <= 1) return apps[0] ?? null;
+  const showing = apps.filter((app) => (app._rootChildren ?? []).length > 0);
+  return showing.length === 1 ? showing[0] : null;
+}
+
 /**
  * Which rung this machine lands on, without showing anything.
  *
@@ -274,9 +323,10 @@ function defaultTitle(kind) {
  * for the tests. It acquires a bus ref and releases it, so it is cheap to call
  * but not free — cache it if it is on a render path.
  *
- * @returns {Promise<'portal'|'osascript'|'builtin'>}
+ * @returns {Promise<'cocoa'|'portal'|'osascript'|'builtin'>}
  */
 export async function fileDialogBackend() {
+  if (panelsApp(null)) return 'cocoa';
   const ref = await sessionBus();
   if (ref) {
     try {
@@ -297,6 +347,21 @@ export async function fileDialogBackend() {
  */
 export async function runNativeDialog(kind, opts = {}) {
   if (opts.backend === 'builtin') throw new NoFileDialogError();
+
+  const wantCocoa = !opts.backend || opts.backend === 'cocoa';
+  if (wantCocoa) {
+    const wnd = windowOf(opts.parentWindow);
+    const app = panelsApp(wnd);
+    if (app) return await app.filePanels.show(kind, opts, wnd);
+    if (opts.backend === 'cocoa') {
+      throw new NoFileDialogError(
+        new Error(
+          "backend: 'cocoa' — no native file panels here: the window is not " +
+            'on the cocoa backend, or the bridge is older than 0.5.',
+        ),
+      );
+    }
+  }
 
   const wantPortal = !opts.backend || opts.backend === 'portal';
   if (wantPortal) {

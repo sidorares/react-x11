@@ -1328,6 +1328,7 @@ function _Files() {
 
     // The bare functions, for host-side code with no component to hang off.
     const bare: string[] | null = await openFile({ backend: 'builtin' });
+    await openFile({ backend: 'cocoa', parentWindow: null });
     const backend: FileDialogBackend = await fileDialogBackend();
     // @ts-expect-error — not a rung
     await openFile({ backend: 'zenity' });

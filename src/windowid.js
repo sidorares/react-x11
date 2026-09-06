@@ -40,6 +40,29 @@ export function windowIdOf(target) {
 }
 
 /**
+ * The window **object** behind anything `windowIdOf` accepts — ntk's on X11,
+ * the cocoa backend's `CocoaWindow` — or `null`. The same walk, one step
+ * short of the id: a `<window>` ref holds the object itself, a `<window>`
+ * node has it as `window`, a drawn node reaches it through its `root`. A raw
+ * XID resolves to nothing, because the number alone does not say which
+ * connection issued it.
+ *
+ * Not public. The file dialog reaches the app a window belongs to through
+ * it, which is how a call names the backend whose native panel it wants
+ * without ever naming a backend.
+ */
+export function windowOf(target) {
+  if (target == null || typeof target === 'number') return null;
+  if (typeof target === 'object' && 'current' in target && !target.isWindow) {
+    return windowOf(target.current);
+  }
+  if (typeof target.window?.id === 'number') return target.window;
+  if (typeof target.root?.window?.id === 'number') return target.root.window;
+  if (typeof target.id === 'number') return target;
+  return null;
+}
+
+/**
  * `windowIdOf` bound to a ref: returns a **getter**, stable across renders,
  * the same shape `useAnchor` has. It is a getter rather than the id itself
  * because refs attach after the commit that created the window, so a value

@@ -23,6 +23,7 @@ import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPaneWindow } from './panewindow.js';
+import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaWindow } from './window.js';
@@ -88,6 +89,16 @@ export class CocoaApp {
     // real bridge on the machine — the manager's default loads it only when
     // it is built standalone
     this.fonts = new CocoaFontManager(native);
+
+    // Native open/save panels (src/cocoa/filepanels.js). Present exactly
+    // when the bridge has them (>= 0.5), and its presence is what puts the
+    // top rung on src/filedialog.js's ladder for this app — a fake bridge
+    // without `openPanel`, or an older one, leaves the ladder as it was.
+    this.filePanels =
+      typeof native.openPanel === 'function' &&
+      typeof native.savePanel === 'function'
+        ? new CocoaFilePanels(this)
+        : null;
 
     // AppKit-rendered control bezels. Its *presence* is the capability:
     // `useSupports('nativeControls')` and the widget set's `controls:

@@ -25,20 +25,26 @@ export interface AbortSignalLike {
   removeEventListener(type: 'abort', listener: () => void): void;
 }
 
-/** Which rung of the ladder answered — or would. */
-export type FileDialogBackend = 'portal' | 'osascript' | 'builtin';
+/**
+ * Which rung of the ladder answered — or would. `'cocoa'` is the native
+ * `NSOpenPanel`/`NSSavePanel` on the cocoa backend; `'osascript'` is macOS on
+ * the X11 backend.
+ */
+export type FileDialogBackend = 'cocoa' | 'portal' | 'osascript' | 'builtin';
 
 /**
  * One entry in a dialog's type filter.
  *
  * Give `extensions` where you can: they translate to every backend. MIME types
- * reach the portal exactly and macOS not at all — see docs/filedialog.md.
+ * reach the portal and the native macOS panel exactly, and `osascript` not at
+ * all — see docs/filedialog.md.
  */
 export interface FileFilter {
   name: string;
   /** `['png', 'jpg']` — with or without the leading dot. */
   extensions?: string[];
-  /** `['image/png']`. Portal only. */
+  /** `['image/png']`. The portal and the native macOS panel; dropped by
+   * `osascript`. */
   mimeTypes?: string[];
 }
 
@@ -65,11 +71,16 @@ export interface FileDialogOptions {
   acceptLabel?: string;
   /**
    * The window the dialog belongs to. `transientFor` for the built-in dialog,
-   * `parent_window` for the portal; macOS has no cross-process equivalent and
-   * ignores it. Worth the one line — without it the dialog floats.
+   * `parent_window` for the portal, and the window the native macOS panel is
+   * a **sheet** on; `osascript` has no cross-process equivalent and ignores
+   * it. Worth the one line — without it the dialog floats, and on the cocoa
+   * backend a panel with no window is app-modal and blocks the process until
+   * it is dismissed.
    */
   parentWindow?: WindowTarget;
-  /** Abort the dialog. Closes the portal request or kills `osascript`. */
+  /** Abort the dialog. Closes the portal request, dismisses the native
+   * panel, or kills `osascript`; the promise rejects with the signal's
+   * reason. */
   signal?: AbortSignalLike;
   /**
    * Force a rung instead of taking the best available one. The seam for a

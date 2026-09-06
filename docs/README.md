@@ -74,8 +74,9 @@
   actually come forward. Also: why a loopback port is the better answer for a
   login, and the `.desktop` half that is an install step rather than code.
 - [filedialog.md](filedialog.md) — open, save and pick a folder:
-  `useFileDialog()`, the three-rung ladder (the desktop's own portal,
-  `osascript` on macOS, a browser react-x11 draws itself), why cancelling is
+  `useFileDialog()`, the four-rung ladder (a native panel on the cocoa
+  backend, the desktop's own portal, `osascript` under XQuartz, a browser
+  react-x11 draws itself), why cancelling is
   `null` rather than a throw, and the places the backends genuinely differ.
 - [eyedropper.md](eyedropper.md) — sample a colour from the screen:
   `useEyedropper()`/`pickScreenColor()`, the two-rung ladder (the portal's

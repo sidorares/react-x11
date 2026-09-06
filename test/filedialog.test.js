@@ -404,6 +404,60 @@ describe('the osascript rung', () => {
       assert.ok(lines.includes('set out to out & POSIX path of f & linefeed'));
     }
   });
+
+  // The one part of this rung that can run anywhere: the child is faked, so
+  // what is pinned is what react-x11 makes of its exit. An abort kills
+  // osascript, and a process killed on a signal looks like a failure from
+  // the outside — with nothing on stderr but the line AppKit prints to every
+  // process that puts a window up, which is what the error used to say.
+  test('an abort kills osascript and is an abort, not a failed dialog', async () => {
+    const nodeModule = await import('node:module');
+    // the CommonJS exports object: what `await import('node:child_process')`
+    // inside src/filedialog.js re-reads after syncBuiltinESMExports()
+    const cp = nodeModule.createRequire(import.meta.url)('node:child_process');
+    const real = cp.execFile;
+    let killed = 0;
+    // Resolves the moment the dialog actually spawns its child — the abort
+    // listener is attached synchronously right after, so aborting only then
+    // is deterministic. Waiting a fixed number of ticks instead raced the
+    // dynamic `import('node:child_process')` inside osascriptDialog, whose
+    // timing differs by Node version.
+    let spawned;
+    const spawnedGate = new Promise((resolve) => {
+      spawned = resolve;
+    });
+    cp.execFile = (file, args, options, callback) => {
+      spawned();
+      return {
+        kill() {
+          killed++;
+          const err = Object.assign(new Error('killed'), {
+            killed: true,
+            signal: 'SIGTERM',
+          });
+          setImmediate(() =>
+            callback(
+              err,
+              '',
+              '2026-09-05 19:00:20.942 osascript[23786:5] +[IMKClient subclass]: chose IMKClient_Modern\n',
+            ),
+          );
+        },
+      };
+    };
+    nodeModule.syncBuiltinESMExports();
+    try {
+      const ac = new AbortController();
+      const pending = openFile({ backend: 'osascript', signal: ac.signal });
+      await spawnedGate; // the child is spawned; the abort listener is on
+      ac.abort();
+      await assert.rejects(pending, /abort/i);
+      assert.equal(killed, 1, 'the panel was closed');
+    } finally {
+      cp.execFile = real;
+      nodeModule.syncBuiltinESMExports();
+    }
+  });
 });
 
 describe('the built-in dialog', () => {
@@ -697,7 +751,7 @@ describe('the owner window', () => {
 describe('the ladder', () => {
   test('backend selection is reported without showing anything', async () => {
     const backend = await fileDialogBackend();
-    assert.ok(['portal', 'osascript', 'builtin'].includes(backend));
+    assert.ok(['cocoa', 'portal', 'osascript', 'builtin'].includes(backend));
   });
 
   test('no portal and not macOS: a typed rejection, not a crash', async () => {

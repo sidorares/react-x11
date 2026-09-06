@@ -28,14 +28,19 @@ every backend — so the whole error path for a file dialog is one `if`.
 
 ## The ladder
 
-There is no single answer to "show a file dialog" on a machine running X11, so
-this is a ladder and the rung is chosen for you:
+There is no single answer to "show a file dialog" across the machines this
+runs on, so this is a ladder and the rung is chosen for you:
 
-|     |                         |                                                                                                                                                                |
-| --- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **the portal**          | `org.freedesktop.portal.FileChooser` over D-Bus. The desktop's own dialog, drawn by GTK or KDE in another process, with the user's bookmarks and recent files. |
-| 2   | **`osascript`**         | macOS with no portal — which is every XQuartz install that has not gone out of its way. `choose file` _is_ `NSOpenPanel`.                                      |
-| 3   | **the built-in dialog** | A browser react-x11 draws itself. ssh, a bare `startx`, a container: everywhere there is a display and nothing else.                                           |
+|     |                         |                                                                                                                                                                                                  |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1   | **the native panel**    | `NSOpenPanel` / `NSSavePanel` in this process, on the [cocoa backend](macos.md) (`@windowkit/appkit` ≥ 0.5). A **sheet** on the window that asked, with every filter the OS type database knows. |
+| 2   | **the portal**          | `org.freedesktop.portal.FileChooser` over D-Bus. The desktop's own dialog, drawn by GTK or KDE in another process, with the user's bookmarks and recent files.                                   |
+| 3   | **`osascript`**         | macOS on the X11 backend with no portal — which is every XQuartz install that has not gone out of its way. `choose file` _is_ `NSOpenPanel`, in a third process.                                 |
+| 4   | **the built-in dialog** | A browser react-x11 draws itself. ssh, a bare `startx`, a container: everywhere there is a display and nothing else.                                                                             |
+
+The top rung is never chosen by naming a backend: the dialog asks the window
+it belongs to which connection it is on, and an app that can show native
+panels says so. That is what keeps the ladder one ladder as backends join it.
 
 `fileDialogBackend()` reports which one this machine lands on, without showing
 anything — useful for a diagnostics panel, and for a menu that wants to say so.
@@ -120,10 +125,10 @@ where the file list appears inside your window.
 import { openFile, saveFile, selectFolder } from 'react-x11';
 ```
 
-Same options, same results — but they can only reach the portal and
-`osascript`, because a function has nowhere to draw. Where there is neither
-they reject with `NoFileDialogError`, which is a **typed** rejection: the
-signal to show your own UI, not a crash.
+Same options, same results — but they can only reach the native panel, the
+portal and `osascript`, because a function has nowhere to draw. Where there is
+none of those they reject with `NoFileDialogError`, which is a **typed**
+rejection: the signal to show your own UI, not a crash.
 
 Reach for these from host-side code and event-loop glue that has no component
 to hang off. In a component, use the hook.
@@ -133,16 +138,23 @@ to hang off. In a component, use the hook.
 Most of the API is the same everywhere. These are the places it genuinely is
 not, stated here rather than discovered:
 
-- **MIME-type filters do not reach macOS.** `extensions` translate exactly to
-  all three; `mimeTypes` reach the portal and are dropped by `osascript`,
-  because AppleScript's `of type` wants extensions or UTIs and guessing a UTI
-  wrong hides the user's file with no way to get at it. Give `extensions` where
-  you can.
-- **macOS ignores `parentWindow` entirely.** XQuartz windows are `NSWindow`s
-  owned by X11.app, and macOS has no cross-process transient-for —
-  `addChildWindow` is same-process only. The panel appears over the app but is
-  not attached to it. Application modality still works, because your code is
-  awaiting the promise.
+- **MIME-type filters do not reach `osascript`.** `extensions` translate
+  exactly to every rung; `mimeTypes` reach the portal and the native panel
+  (the cocoa backend asks the OS's own type database, so `image/png` is
+  `public.png` there) and are dropped by `osascript`, because AppleScript's
+  `of type` wants extensions or UTIs and guessing a UTI wrong hides the user's
+  file with no way to get at it. Give `extensions` where you can.
+- **`osascript` ignores `parentWindow`; the native panel is a sheet on it.**
+  XQuartz windows are `NSWindow`s owned by X11.app, macOS has no cross-process
+  transient-for, and `osascript` is a third process besides: its panel
+  appears over the app but is not attached to it, and application modality
+  works only because your code is awaiting the promise. On the cocoa backend
+  the panel is a **sheet** on that window, and the app keeps running while it
+  is up. With no window at all — a bare `openFile()` with nothing in
+  `parentWindow` and no tree to infer one from — the native panel is
+  app-modal and **blocks the process**, timers included, until it is
+  dismissed. `useFileDialog()` always names the window, so it never lands
+  there.
 - **The built-in dialog has never seen the user's bookmarks.** It offers the
   filesystem, a filter, hidden files, and a path you can type into. It is
   deliberately not a re-creation of GTK's chooser.
@@ -160,16 +172,18 @@ The interesting configurations, and what each one does:
 
 | where                                                  | rung                                                                                                              |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| macOS, the **cocoa backend**                           | the native panel                                                                                                  |
 | GNOME / KDE / any desktop with xdg-desktop-portal      | portal                                                                                                            |
 | macOS + XQuartz, app running **on the Mac**            | `osascript`                                                                                                       |
 | macOS + XQuartz, app running on a **remote Linux box** | built-in — `osascript` would run on the wrong machine, and the paths it returned would not exist where the app is |
 | ssh, `startx`, a container, CI                         | built-in                                                                                                          |
 | Node 20, where npm skips `dbus-native`                 | built-in on Linux, `osascript` on a Mac                                                                           |
 
-The macOS rung is reached by _not_ finding a portal, so it also covers a Mac
-that has a session bus for other reasons. If you do run a portal shim on a Mac
-(see [issue #111](https://github.com/sidorares/react-x11/issues/111)), it wins,
-which is what you asked for by running it.
+The `osascript` rung is reached by _not_ finding a portal, so it also covers a
+Mac that has a session bus for other reasons. If you do run a portal shim on a
+Mac (see [issue #111](https://github.com/sidorares/react-x11/issues/111)), it
+wins on the X11 backend, which is what you asked for by running it; on the
+cocoa backend the native panel is above it either way.
 
 ## The portal machinery, if you need it directly
 
