@@ -7,17 +7,24 @@
 // the terminal beside the window prints how many frames a second the JS
 // side is painting. That number is the difference between the backends:
 //
-//   On X11, and on the macOS surface presenter, every animation is a frame
-//   this process paints, at the display's rate, for as long as anything
-//   moves. The counter reads ~60, and "Block JS for 2 s" freezes all of it.
+//   On X11 every animation is a frame this process paints, at the
+//   display's rate, for as long as anything moves. The counter reads ~60,
+//   and "Block JS for 2 s" freezes all of it.
 //
-//   On the macOS layer presenter a plain <box>'s colour, border width and
-//   radius are handed to Core Animation (react-x11 #472): the style goes
-//   straight to its target, the render server draws the way there, and no
-//   frame is scheduled for it. Untick "position · text ink · ProgressBar"
-//   and the counter reads 0 while the three tiles keep pulsing; press the
-//   button and they pulse straight through the block.
+//   On macOS a plain <box>'s colour, border width and radius are handed to
+//   Core Animation (react-x11 #472): the style goes straight to its
+//   target, the render server draws the way there, and no frame is
+//   scheduled for it. The surface presenter — the default — does it by
+//   promotion (#483): the three tiles, the chip and the hovered card get a
+//   layer of their own above the window's bitmap for as long as they
+//   animate, and the bitmap keeps the frame for everything else. The layer
+//   presenter has a layer for every box to begin with. Either way, untick
+//   "position · text ink · ProgressBar" and the counter reads 0 while the
+//   three tiles keep pulsing; press the button and they pulse straight
+//   through the block.
 //
+//   REACT_X11_COCOA_PROMOTE=0 npm run examples:animation           # macOS,
+//                                              # every animation on the clock
 //   REACT_X11_COCOA_PRESENTER=layers npm run examples:animation   # macOS
 //   REACT_X11_BACKEND=x11 npm run examples:animation              # XQuartz
 //
@@ -280,8 +287,8 @@ function Loops() {
             <box data-testname="round" style={[s.tile, layer && s.round]} />
           </box>
           <text style={s.hint}>
-            Plain boxes. On the macOS layer presenter these run in the render
-            server and cost no frames; everywhere else, the frame clock.
+            Plain boxes. On macOS these run in the render server and cost no
+            frames; everywhere else, the frame clock.
           </text>
         </box>
 
@@ -391,13 +398,17 @@ if (!process.env.REACT_X11_NO_AUTORUN) {
       onRoot={(node) => {
         if (watcher) return;
         // The window's animation seam exists only where a presenter can take
-        // an animation (src/cocoa/window.js, layers mode); its absence is
-        // every other backend, where the frame clock runs all of it.
-        const offloads = typeof node.window?.animateNode === 'function';
+        // an animation (src/cocoa/window.js: the layer presenter, and the
+        // surface presenter's promotion); its absence is every other
+        // backend, where the frame clock runs all of it.
+        const wnd = node.window;
+        const offloads = typeof wnd?.animateNode === 'function';
         process.stdout.write(
-          offloads
-            ? '\n  layer presenter: the plain-box loops run in the render server\n'
-            : '\n  frame clock: every animation is a frame this process paints\n',
+          !offloads
+            ? '\n  frame clock: every animation is a frame this process paints\n'
+            : wnd._promotion
+              ? '\n  surface presenter: the plain-box loops run in the render server, on layers of their own\n'
+              : '\n  layer presenter: the plain-box loops run in the render server\n',
         );
         // The stress app's frame instrument, silenced — a line per frame is
         // the wrong unit here. Frames per second is the number, and it is

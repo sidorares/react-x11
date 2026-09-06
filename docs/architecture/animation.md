@@ -507,9 +507,15 @@ tests records `addAnimation` calls the same way it records `setLayerProps`.
 
 ### 4.3 The surface presenter, and X11
 
-Nothing to offload: one bitmap per window, painted by the X11 walk. The JS
-loop runs. This design is one more row in the measure-first gate's
-argument for making layers the default; it does not move the gate itself.
+X11 has nothing to offload: one bitmap per window, painted by the X11
+walk, and the JS loop runs. The surface presenter started there too, and
+now takes the same table as §4.2 by **layer promotion** (issue #483,
+docs/macos.md §"Layer promotion"): a plain box with a transition or a loop
+on an offloadable property gets a CALayer of its own above the window's
+bitmap for as long as it animates, where nothing is painted over it, and
+the same `LayerAnimations` books run it in the render server. The bitmap
+keeps the frame for everything else. What this moved in the measure-first
+gate's argument is recorded there, measured.
 
 ### 4.4 Bridge additions (`@windowkit/appkit`)
 

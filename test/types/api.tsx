@@ -1063,6 +1063,7 @@ async function main() {
       backend: 'cocoa',
       cocoa: {
         presenter: 'surface',
+        promote: false,
         frameInterval: 8,
         pumpInterval: 4,
         exitOnQuit: false,

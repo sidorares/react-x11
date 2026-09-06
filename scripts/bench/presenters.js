@@ -24,9 +24,12 @@
 //             that answered it (the "answer the input" number), and → the
 //             end of the present that put it on glass. p50/p95/max.
 //
-//   npm run bench:presenters                    # every scenario, both
+//   npm run bench:presenters                    # every scenario, every
+//                                               # presenter
 //   npm run bench:presenters -- --scenario=cards --seconds=8
 //   npm run bench:presenters -- --columns=surface   # one presenter only
+//                                               # (surface = promotion off,
+//                                               # promoted = on, layers)
 //   npm run bench:presenters -- --x11           # extra column via $DISPLAY
 //   npm run bench:presenters -- --cells=2400    # bigger stress trees
 //   npm run bench:presenters -- --at=200,200    # the window at a point (on
@@ -48,6 +51,14 @@
 // a real application screen — `--cells` boxes, each with a label — because a
 // path that is cheap on twelve nodes and quadratic on a thousand only shows
 // there.
+//
+// The `promoted` column is the surface presenter with layer promotion
+// (src/cocoa/promotion.js, issue #483), which the `surface` column runs
+// with promotion off; `animtree`, `hovertree` and `pananim` are its
+// scenarios — the animated few above a large scene, and a pan under
+// something that animates — and what they have to show is both halves at
+// once: the animation's frames matching `layers`, the flush and the scroll
+// matching `surface`.
 //
 // Comparisons hold within a run (same machine, same session); absolute
 // numbers travel about as well as any timing does — that is, they don't.
@@ -278,6 +289,149 @@ function centreOf(node, scale) {
   ];
 }
 
+/** The `anim` scenario's 48 cards: absolutely placed, a 240ms colour
+ * transition each, the palette rotating every 15 ticks. */
+function fadingCards(tick) {
+  const CARD_W = 130;
+  const CARD_H = 70;
+  const GAP = 12;
+  const PAD = 16;
+  const step = Math.floor(tick / 15);
+  const perRow = Math.max(1, Math.floor((W - 2 * PAD + GAP) / (CARD_W + GAP)));
+  const cards = [];
+  for (let i = 0; i < 48; i += 1) {
+    cards.push(
+      e('box', {
+        key: i,
+        style: {
+          position: 'absolute',
+          left: PAD + (i % perRow) * (CARD_W + GAP),
+          top: PAD + Math.floor(i / perRow) * (CARD_H + GAP),
+          width: CARD_W,
+          height: CARD_H,
+          backgroundColor: HOT[(i + step) % HOT.length],
+          borderRadius: 8,
+          transition: { backgroundColor: 240 },
+        },
+      }),
+    );
+  }
+  return cards;
+}
+
+/** The `scroll` scenario's list: 300 rows in a scroller. */
+function scrollList() {
+  return e(
+    'box',
+    { key: 'list', style: { flexGrow: 1, overflow: 'scroll' } },
+    ...Array.from({ length: 300 }, (_, i) =>
+      e(
+        'box',
+        {
+          key: i,
+          style: {
+            height: 28,
+            paddingLeft: 16,
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: i % 2 ? '#f6f8fb' : '#ffffff',
+          },
+        },
+        e(
+          'text',
+          { style: { color: '#444444' } },
+          `row ${i} — some list content`,
+        ),
+      ),
+    ),
+  );
+}
+
+/**
+ * A toast whose colour transitions every 800ms, from its own timer. A
+ * transition rather than a loop, on purpose: a loop is stopped by the
+ * desktop's reduce-motion switch, which CI's macOS runners have on, and
+ * the scenario is about the pan under an animation, not about which shape
+ * the animation takes. The first change comes a frame after the mount, so
+ * the toast is on its layer before the bench settles; 800ms between
+ * changes is under the second a promoted node waits before coming back,
+ * so it stays there.
+ */
+function PulsingToast() {
+  const [on, setOn] = React.useState(false);
+  React.useEffect(() => {
+    // after the first frame, not before it: a node nobody has seen yet
+    // takes no transition (nodes.js, `_placed`), and a change that lands
+    // before the mount frame would leave the toast in the bitmap until the
+    // next one
+    let timer = setTimeout(function flip() {
+      setOn((v) => !v);
+      timer = setTimeout(flip, 800);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, []);
+  return e(
+    'box',
+    {
+      style: {
+        position: 'absolute',
+        right: 24,
+        bottom: 24,
+        width: 220,
+        height: 44,
+        borderRadius: 10,
+        paddingLeft: 16,
+        justifyContent: 'center',
+        backgroundColor: on ? '#6c5ce7' : '#2d3436',
+        transition: { backgroundColor: 240 },
+      },
+    },
+    e('text', { style: { color: '#ffffff' } }, 'saving…'),
+  );
+}
+
+/** A wheel notch over the scroller, down for 60 ticks and back up. */
+function wheelNotch(ctx) {
+  const { win, stamp } = ctx;
+  const scroller = ctx.find((n) => n.isScroller?.());
+  if (!scroller) return;
+  const x = scroller.abs.x + scroller.abs.width / 2;
+  const y = scroller.abs.y + scroller.abs.height / 2;
+  const down = ctx.tick % 120 < 60; // sweep down, then back up
+  stamp();
+  if (ctx.app._routeWheel && ctx.wnd) {
+    // the bridge's event shape, in points: the same route a real notch
+    // takes, so what the app does with a wheel is in the number
+    const s = ctx.wnd.scale;
+    ctx.app._routeWheel({
+      type: 'wheel',
+      windowNumber: ctx.wnd.windowNumber,
+      x: x / s,
+      y: y / s,
+      gx: (ctx.wnd.x + x) / s,
+      gy: (ctx.wnd.y + y) / s,
+      dx: 0,
+      dy: down ? -3 : 3,
+      precise: false,
+      time: performance.now(),
+    });
+    return;
+  }
+  win.emit('wheel', {
+    name: 'wheel',
+    x,
+    y,
+    rootx: 0,
+    rooty: 0,
+    buttons: 0,
+    deltaX: 0,
+    deltaY: down ? 3 : -3,
+    deltaMode: 'line',
+    smooth: false,
+    source: 'button',
+  });
+}
+
 const SCENARIOS = {
   /** Paint-only bounded change: one 100px box recolours. The layers
    *  presenter should answer with one backgroundColor prop and zero
@@ -466,76 +620,27 @@ const SCENARIOS = {
    *  scenario: the notch goes through the window's event path. */
   scroll: {
     latency: true,
+    tree: () => windowOf([scrollList()], 'bench scroll'),
+    drive: wheelNotch,
+  },
+
+  /** The same pan, under a toast that pulses — a plain box floating over
+   *  the list's corner, a later sibling of the scroller, its colour
+   *  transitioning every 800ms. The case neither presenter serves: on the
+   *  surface presenter a toast over the viewport costs the pan its blit
+   *  (its pixels would be dragged along), and every frame of its fade is a
+   *  frame; the layer presenter's pan is a whole-scene re-raster.
+   *  Promoted, the toast is off the bitmap, so the pan keeps the blit and
+   *  the fades cost nothing — `damage` and `frames` against `ticks` are
+   *  the numbers. */
+  pananim: {
+    latency: true,
     tree: () =>
       windowOf(
-        [
-          e(
-            'box',
-            { style: { flexGrow: 1, overflow: 'scroll' } },
-            ...Array.from({ length: 300 }, (_, i) =>
-              e(
-                'box',
-                {
-                  key: i,
-                  style: {
-                    height: 28,
-                    paddingLeft: 16,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    backgroundColor: i % 2 ? '#f6f8fb' : '#ffffff',
-                  },
-                },
-                e(
-                  'text',
-                  { style: { color: '#444444' } },
-                  `row ${i} — some list content`,
-                ),
-              ),
-            ),
-          ),
-        ],
-        'bench scroll',
+        [scrollList(), e(PulsingToast, { key: 'toast' })],
+        'bench pananim',
       ),
-    drive(ctx) {
-      const { win, stamp } = ctx;
-      const scroller = ctx.find((n) => n.isScroller?.());
-      if (!scroller) return;
-      const x = scroller.abs.x + scroller.abs.width / 2;
-      const y = scroller.abs.y + scroller.abs.height / 2;
-      const down = ctx.tick % 120 < 60; // sweep down, then back up
-      stamp();
-      if (ctx.app._routeWheel && ctx.wnd) {
-        // the bridge's event shape, in points: the same route a real notch
-        // takes, so what the app does with a wheel is in the number
-        const s = ctx.wnd.scale;
-        ctx.app._routeWheel({
-          type: 'wheel',
-          windowNumber: ctx.wnd.windowNumber,
-          x: x / s,
-          y: y / s,
-          gx: (ctx.wnd.x + x) / s,
-          gy: (ctx.wnd.y + y) / s,
-          dx: 0,
-          dy: down ? -3 : 3,
-          precise: false,
-          time: performance.now(),
-        });
-        return;
-      }
-      win.emit('wheel', {
-        name: 'wheel',
-        x,
-        y,
-        rootx: 0,
-        rooty: 0,
-        buttons: 0,
-        deltaX: 0,
-        deltaY: down ? 3 : -3,
-        deltaMode: 'line',
-        smooth: false,
-        source: 'button',
-      });
-    },
+    drive: wheelNotch,
   },
 
   /** Pointer wiggle over a hover-styled grid, through the REAL NSApp event
@@ -891,37 +996,98 @@ const SCENARIOS = {
    *  animation frames run — fps and damage are the animation path's, and
    *  cpu is what a screen of gentle fades costs. */
   anim: {
-    tree: (tick) => {
-      const CARD_W = 130;
-      const CARD_H = 70;
-      const GAP = 12;
-      const PAD = 16;
-      const step = Math.floor(tick / 15);
-      const perRow = Math.max(
-        1,
-        Math.floor((W - 2 * PAD + GAP) / (CARD_W + GAP)),
-      );
-      const cards = [];
-      for (let i = 0; i < 48; i += 1) {
-        cards.push(
-          e('box', {
-            key: i,
-            style: {
-              position: 'absolute',
-              left: PAD + (i % perRow) * (CARD_W + GAP),
-              top: PAD + Math.floor(i / perRow) * (CARD_H + GAP),
-              width: CARD_W,
-              height: CARD_H,
-              backgroundColor: HOT[(i + step) % HOT.length],
-              borderRadius: 8,
-              transition: { backgroundColor: 240 },
-            },
-          }),
-        );
-      }
-      return windowOf(
-        [e('box', { style: { flexGrow: 1 } }, ...cards)],
+    tree: (tick) =>
+      windowOf(
+        [e('box', { style: { flexGrow: 1 } }, ...fadingCards(tick))],
         'bench anim',
+      ),
+  },
+
+  /** The same 48 fading cards floating over the big tree, with a cell of
+   *  the tree recolouring per tick underneath them — the animated few
+   *  above a busy scene, which is what promotion is for: the surface
+   *  presenter repaints every card every frame of every fade, the layer
+   *  presenter pays a visual per node of the tree, and the promoted
+   *  column should pay the tree's one-cell frame plus one frame per
+   *  palette step. `frames` against `ticks` is the number. */
+  animtree: {
+    tree: (tick) =>
+      windowOf(
+        [
+          header(`animtree — ${COLS}x${ROWS} cells under 48 fades`),
+          grid({ hot: hotOne(tick) }),
+          e(
+            'box',
+            {
+              key: 'fades',
+              style: {
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+              },
+            },
+            ...fadingCards(tick),
+          ),
+        ],
+        'bench animtree',
+      ),
+  },
+
+  /** The hover cards in a row above the big tree, the pointer alternating
+   *  between two of them through the NSApp queue: a `:hover` fade of one
+   *  card while a thousand cells sit under it. input→flush is the answer
+   *  to the pointer; `frames` is what the fade cost after it. */
+  hovertree: {
+    latency: true,
+    input: 'native',
+    tree: () =>
+      windowOf(
+        [
+          e(
+            'box',
+            {
+              key: 'cards',
+              style: {
+                padding: 12,
+                flexDirection: 'row',
+                gap: 12,
+                alignItems: 'flex-start',
+              },
+            },
+            ...Array.from({ length: 6 }, (_, i) =>
+              e('box', {
+                key: i,
+                style: {
+                  width: 120,
+                  height: 44,
+                  borderRadius: 8,
+                  backgroundColor: '#ffffff',
+                  borderWidth: 1,
+                  borderColor: '#c3ccd8',
+                  transition: { backgroundColor: 240, borderColor: 240 },
+                  ':hover': {
+                    backgroundColor: '#dbe7f4',
+                    borderColor: '#0984e3',
+                  },
+                },
+              }),
+            ),
+          ),
+          grid({ rows: Math.floor(ROWS / 2) }),
+        ],
+        'bench hovertree',
+      ),
+    drive(ctx) {
+      const cards = ctx.findAll((n) => n.style?.[':hover'] !== undefined);
+      const target = ctx.tick % 2 ? cards[0] : cards[3];
+      if (!target) return;
+      ctx.stamp();
+      ctx.native.postMouseEvent(
+        ctx.wnd._h,
+        'move',
+        ...centreOf(target, ctx.wnd.scale),
       );
     },
   },
@@ -1224,6 +1390,7 @@ async function runChild() {
     uploadPx: 0,
     props: 0,
     layersMade: 0,
+    animations: 0,
     presents: 0,
     presentMs: 0,
     surfaces: 0,
@@ -1262,6 +1429,10 @@ async function runChild() {
     });
     wrap('createLayer', (orig, ...a) => {
       stats.layersMade += 1;
+      return orig(...a);
+    });
+    wrap('addAnimation', (orig, ...a) => {
+      stats.animations += 1;
       return orig(...a);
     });
     // the IOSurface swapchain's present path: a flip plus a damage-sized
@@ -1441,9 +1612,7 @@ async function runChild() {
   const rss1 = process.memoryUsage().rss;
 
   if (SHOTS && wnd) {
-    wnd.snapshot(
-      `/tmp/bench-${name}-${process.env.REACT_X11_COCOA_PRESENTER ?? 'surface'}.png`,
-    );
+    wnd.snapshot(`/tmp/bench-${name}-${columnLabel()}.png`);
   }
 
   const sorted = [...stats.flushMs].sort((a, b) => a - b);
@@ -1481,6 +1650,7 @@ async function runChild() {
     uploadMsPerFrame: frames ? stats.uploadMs / frames : 0,
     propsPerFrame: frames ? stats.props / frames : 0,
     layersMade: stats.layersMade,
+    animations: stats.animations,
     latP50: q(lat, 0.5),
     latP95: q(lat, 0.95),
     latMax: lat.at(-1) ?? null,
@@ -1511,7 +1681,7 @@ function runCell(name, env) {
         ? [
             '--cpu-prof',
             `--cpu-prof-dir=${process.env.PROF_DIR ?? '/tmp'}`,
-            `--cpu-prof-name=${name}-${env.REACT_X11_COCOA_PRESENTER ?? env.REACT_X11_BACKEND ?? 'cell'}.cpuprofile`,
+            `--cpu-prof-name=${name}-${env.REACT_X11_BACKEND ?? columnLabel(env)}.cpuprofile`,
           ]
         : []),
       new URL(import.meta.url).pathname,
@@ -1548,6 +1718,12 @@ function runCell(name, env) {
 // touched, and what a timing on someone else's machine cannot say.
 // ---------------------------------------------------------------------------
 
+/** Which column a cell's environment is: the presenter, and promotion. */
+function columnLabel(env = process.env) {
+  if (env.REACT_X11_COCOA_PRESENTER === 'layers') return 'layers';
+  return env.REACT_X11_COCOA_PROMOTE === '0' ? 'surface' : 'promoted';
+}
+
 const GATE_PATH = new URL('./presenters-gate.json', import.meta.url);
 
 function loadGate() {
@@ -1583,6 +1759,13 @@ function judge(name, r, rules) {
     rule(
       r.frames <= rules.maxFrames,
       `${r.frames} frames (max ${rules.maxFrames})`,
+    );
+  }
+  if (rules.maxFramesPerTick !== undefined) {
+    const per = r.ticks ? r.frames / r.ticks : Infinity;
+    rule(
+      per <= rules.maxFramesPerTick,
+      `${per.toFixed(2)} frames per tick (max ${rules.maxFramesPerTick})`,
     );
   }
   if (rules.minInputs !== undefined) {
@@ -1628,22 +1811,43 @@ if (CHILD) {
   await runChild();
 } else {
   const gate = CHECK ? loadGate() : null;
-  // the gate judges the default presenter over the scenarios it has rules
-  // for; the timing table still prints, for the human reading the log
+  // the gate judges the surface presenter over the scenarios `rules` names
+  // and the promoted column over `promoted`'s; the timing table still
+  // prints, for the human reading the log
+  const gateRules = (label) =>
+    label === 'surface'
+      ? gate?.rules
+      : label === 'promoted'
+        ? gate?.promoted
+        : null;
   const names = ONLY
     ? ONLY.split(',')
     : gate
-      ? Object.keys(gate.rules)
+      ? [
+          ...new Set([
+            ...Object.keys(gate.rules),
+            ...Object.keys(gate.promoted ?? {}),
+          ]),
+        ]
       : Object.keys(SCENARIOS);
   const columnNames = COLUMNS
     ? COLUMNS.split(',')
     : gate
-      ? ['surface']
-      : ['surface', 'layers', ...(WITH_X11 ? ['x11'] : [])];
+      ? ['surface', 'promoted']
+      : ['surface', 'promoted', 'layers', ...(WITH_X11 ? ['x11'] : [])];
   const verdicts = [];
   const summary = [];
+  // `surface` is the frame clock for every animation — promotion off, so the
+  // column keeps meaning what it always did; `promoted` is the default
   const envOf = {
-    surface: { REACT_X11_COCOA_PRESENTER: 'surface' },
+    surface: {
+      REACT_X11_COCOA_PRESENTER: 'surface',
+      REACT_X11_COCOA_PROMOTE: '0',
+    },
+    promoted: {
+      REACT_X11_COCOA_PRESENTER: 'surface',
+      REACT_X11_COCOA_PROMOTE: '1',
+    },
     layers: { REACT_X11_COCOA_PRESENTER: 'layers' },
     x11: { REACT_X11_BACKEND: 'x11' },
   };
@@ -1677,16 +1881,21 @@ if (CHILD) {
         continue;
       }
       const r = runCell(name, env);
+      const rules = gateRules(label)?.[name];
       if (r.error) {
         console.log(`  ${label.padEnd(9)} FAILED: ${r.error}`);
-        if (gate?.rules[name] && label === 'surface') {
-          verdicts.push({ name, ok: false, what: `did not run: ${r.error}` });
+        if (rules) {
+          verdicts.push({
+            name: `${name}/${label}`,
+            ok: false,
+            what: `did not run: ${r.error}`,
+          });
         }
         continue;
       }
-      if (gate?.rules[name] && label === 'surface') {
-        for (const v of judge(name, r, gate.rules[name])) {
-          verdicts.push({ name, ...v });
+      if (rules) {
+        for (const v of judge(name, r, rules)) {
+          verdicts.push({ name: `${name}/${label}`, ...v });
         }
       }
       const upload =
@@ -1707,6 +1916,9 @@ if (CHILD) {
       const notes = [];
       if (r.nodes) notes.push(`${r.nodes} nodes`);
       if (r.frames === 0) notes.push('no frames');
+      else if (r.ticks) notes.push(`${r.frames} frames for ${r.ticks} ticks`);
+      if (r.animations) notes.push(`${r.animations} animations handed to CA`);
+      if (r.layersMade) notes.push(`${r.layersMade} layers made`);
       if (r.presents) notes.push(`${r.presents} presents`);
       if (r.surfaces) {
         notes.push(
@@ -1738,7 +1950,7 @@ if (CHILD) {
   if (gate) {
     console.log('\ngate');
     for (const v of verdicts) {
-      console.log(`  ${v.ok ? 'ok  ' : 'FAIL'} ${v.name.padEnd(9)} ${v.what}`);
+      console.log(`  ${v.ok ? 'ok  ' : 'FAIL'} ${v.name.padEnd(18)} ${v.what}`);
     }
     const failed = verdicts.filter((v) => !v.ok);
     console.log(

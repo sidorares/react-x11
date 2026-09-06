@@ -188,7 +188,17 @@ export interface RootOptions {
    * The Cocoa backend's knobs (docs/macos.md). `presenter` picks the frame
    * path: `'surface'` (the measured default — one bitmap per window, the
    * X11 paint machinery over an IOSurface swapchain) or `'layers'` (one
-   * CALayer per drawn node, opt-in while it is measured).
+   * CALayer per drawn node, opt-in while it is measured). `promote` is the
+   * surface presenter's layer promotion: a plain `<box>` with a transition
+   * or a loop on its colour, border or radius gets a CALayer of its own
+   * above the bitmap for as long as it animates, and the render server
+   * draws the motion — no frames, and it keeps moving while the JS thread
+   * is busy. On by default where the bridge draws a layer's colour and a
+   * rastered one alike (`@windowkit/appkit` >= 0.5.1, which says so with
+   * `colorSpace()`; off on 0.5.0, where the two shades differed); `true`
+   * turns it on regardless, `false` keeps every animation on the frame
+   * clock.
+   * `REACT_X11_COCOA_PROMOTE=1` / `=0` say the same from the environment.
    * `frameInterval` is how often a scheduled frame may paint, in ms. By
    * default each window paces itself on the display it is on — 8.3ms on
    * a 120Hz panel, 16.7 on a 60Hz monitor, the screen's own refresh rate
@@ -208,6 +218,7 @@ export interface RootOptions {
    */
   cocoa?: {
     presenter?: 'surface' | 'layers';
+    promote?: boolean;
     frameInterval?: number;
     pumpInterval?: number;
     appName?: string;

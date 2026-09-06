@@ -9,6 +9,7 @@
 import { CocoaContext2D } from './context2d.js';
 import { CocoaDropTransport, dragSpec } from './dnd.js';
 import { CocoaLayerPresenter } from './presenter.js';
+import { CocoaPromotion } from './promotion.js';
 
 let nextWindowId = 1;
 
@@ -110,6 +111,22 @@ export class CocoaWindow {
         this._presenter.animate(node, prop, entry);
       this.cancelNodeAnimation = (node, prop) =>
         this._presenter.cancel(node, prop);
+    } else if (app._promote) {
+      // Layer promotion (src/cocoa/promotion.js): the surface presenter
+      // keeps the frame, and the nodes that animate get a layer of their
+      // own above it. The same two animation hooks as layers mode; the
+      // invalidate channel, for what the promoted rasters repaint; and the
+      // frame's word in before the paint, where a node is moved onto or off
+      // its layer and the bitmap under it claimed in the same frame.
+      this._promotion = new CocoaPromotion(this);
+      this.animateNode = (node, prop, entry) =>
+        this._promotion.animate(node, prop, entry);
+      this.cancelNodeAnimation = (node, prop) =>
+        this._promotion.cancel(node, prop);
+      this.noteInvalidate = (damage, layoutChanged) =>
+        this._promotion.noteInvalidate(damage, layoutChanged);
+      this.prepareFrame = (root, layoutRan) =>
+        this._promotion.frame(root, layoutRan);
     }
     app._registerWindow(this);
   }
@@ -224,6 +241,7 @@ export class CocoaWindow {
       this.app.cancelAttention(this._attentionRequest);
       this._attentionRequest = null;
     }
+    this._promotion?.destroy();
     this._native.destroyWindow2(this._h);
     this._releaseBacking();
   }

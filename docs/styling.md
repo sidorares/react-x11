@@ -995,12 +995,14 @@ window. The alternative an app would otherwise write, `setInterval` →
 damage heuristics decide, at a cadence unrelated to when the window can
 present.
 
-On the macOS layer presenter a loop — or a transition — on a plain box's
-colour, border width or radius is handed to Core Animation instead and
-costs no frames at all; anything else runs as above
-([macos.md](macos.md#animations-and-transforms-the-api-the-model-unlocks)).
-`examples/animation.jsx` has both shapes side by side, with a frame counter
-in the terminal that shows the difference.
+On macOS a loop — or a transition — on a plain box's colour, border width
+or radius is handed to Core Animation instead and costs no frames at all:
+the layer presenter runs it on the node's own layer, and the surface
+presenter promotes the node to a layer of its own above the window for as
+long as it animates, where nothing is painted over it
+([macos.md](macos.md#layer-promotion-the-animated-few-on-their-own-layers-above-the-surface-presenter)).
+Anything else runs as above. `examples/animation.jsx` has both shapes side
+by side, with a frame counter in the terminal that shows the difference.
 
 **And it stops itself**, which is the whole reason this is core's job. A
 forever-loop keeping a frame clock alive is invisible when it is wrong, so

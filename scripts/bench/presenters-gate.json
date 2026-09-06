@@ -2,32 +2,109 @@
   "//": [
     "The cocoa frame-clock gate: what a frame must and must not do, judged on",
     "the surface presenter by `npm run bench:presenters -- --check`. Counts",
-    "and shares of the window, never milliseconds — a timing on a shared",
+    "and shares of the window, never milliseconds \u2014 a timing on a shared",
     "runner says nothing, a full-window repaint for one cell says everything.",
     "maxDamageShare is the repainted area per painting frame as a fraction of",
     "the window in device pixels, so it reads the same at 1x and 2x. A rule",
-    "that has to loosen is a decision to record in the PR that loosens it."
+    "that has to loosen is a decision to record in the PR that loosens it.",
+    "`promoted` is judged on the promoted column \u2014 the surface presenter with",
+    "layer promotion (src/cocoa/promotion.js): the animations' frames must match",
+    "the layer presenter's and the flush and the scroll the surface's. Frames",
+    "per tick is the animation half (a palette step or a hover flip costs one",
+    "frame, the fades between them none); damage share and full frames are the",
+    "bitmap half; scroll and tree must keep what the surface column keeps."
   ],
   "rules": {
-    "color": { "maxFullPct": 0, "maxDamageShare": 0.03, "minFrames": 30 },
-    "tree": { "maxFullPct": 0, "maxDamageShare": 0.005, "minFrames": 30 },
-    "leaf": { "maxFullPct": 0, "maxDamageShare": 0.005, "minFrames": 30 },
-    "multi": { "maxFullPct": 0, "maxDamageShare": 0.15, "minFrames": 30 },
+    "color": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.03,
+      "minFrames": 30
+    },
+    "tree": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.005,
+      "minFrames": 30
+    },
+    "leaf": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.005,
+      "minFrames": 30
+    },
+    "multi": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.15,
+      "minFrames": 30
+    },
     "press": {
       "maxFullPct": 0,
       "maxDamageShare": 0.01,
       "minFrames": 30,
       "minInputs": 20
     },
-    "scroll": { "maxFullPct": 0, "maxDamageShare": 0.35, "minFrames": 30 },
-    "anim": { "maxFullPct": 0, "minFrames": 30 },
+    "scroll": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.35,
+      "minFrames": 30
+    },
+    "anim": {
+      "maxFullPct": 0,
+      "minFrames": 30
+    },
     "resize": {
       "maxFlushesPerResize": 1.05,
       "maxSettleFlushes": 1,
       "maxSurfacesPerResize": 2
     },
-    "occluded": { "maxFrames": 0 },
-    "covered": { "maxFrames": 0 },
-    "idle": { "maxFrames": 0 }
+    "occluded": {
+      "maxFrames": 0
+    },
+    "covered": {
+      "maxFrames": 0
+    },
+    "idle": {
+      "maxFrames": 0
+    },
+    "animtree": {
+      "maxFullPct": 0,
+      "minFrames": 30
+    },
+    "hovertree": {
+      "maxFullPct": 0,
+      "minFrames": 30,
+      "minInputs": 20
+    }
+  },
+  "promoted": {
+    "anim": {
+      "maxFullPct": 0,
+      "maxFramesPerTick": 0.2,
+      "maxDamageShare": 0.15
+    },
+    "animtree": {
+      "maxFullPct": 0,
+      "maxFramesPerTick": 1.1,
+      "maxDamageShare": 0.02
+    },
+    "hovertree": {
+      "maxFullPct": 0,
+      "maxFramesPerTick": 1.1,
+      "maxDamageShare": 0.005,
+      "minInputs": 20
+    },
+    "pananim": {
+      "maxFullPct": 0,
+      "maxFramesPerTick": 1.1,
+      "maxDamageShare": 0.35
+    },
+    "scroll": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.35,
+      "minFrames": 30
+    },
+    "tree": {
+      "maxFullPct": 0,
+      "maxDamageShare": 0.005,
+      "minFrames": 30
+    }
   }
 }
