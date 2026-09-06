@@ -1913,6 +1913,10 @@ export class Node {
     this._floorMeasureMode = null;
     this.root = null; // owning WindowNode once attached
     this.hidden = false;
+    // Composited on a layer of its own above the window's bitmap, by a
+    // presenter that can (src/cocoa/promotion.js): the paint walk leaves a
+    // hole where it is, and the presenter draws it — the `<glarea>` idiom.
+    this._promoted = false;
     this.destroyed = false;
     // absolute rect within the owning window, filled by absolutize()
     this.abs = { x: 0, y: 0, width: 0, height: 0 };
@@ -2285,10 +2289,11 @@ export class Node {
 
   // --- the presenter's half of an animation ---------------------------------
   //
-  // Three feature-detected hooks on the window (src/cocoa/window.js, layers
-  // mode only): `animateNode(node, prop, entry)` answers true when the
-  // presenter will run the entry itself, `cancelNodeAnimation(node, prop)`
-  // stops what it runs for the property, and the presenter calls back
+  // Two feature-detected hooks on the window (src/cocoa/window.js: the
+  // layer presenter, and the surface presenter's layer promotion —
+  // src/cocoa/promotion.js): `animateNode(node, prop, entry)` answers true
+  // when the presenter will run the entry itself, `cancelNodeAnimation(node,
+  // prop)` stops what it runs for the property, and the presenter calls back
   // through `_offloadEnded` / `_offloadDeclined` below. An entry the
   // presenter took is `offloaded`: it stays in `_anim` — so a retarget, a
   // loop-stop rule and `sameAnimation` all see it — but it contributes no
@@ -5315,6 +5320,7 @@ export class Node {
       ctx.clip();
     }
     for (const child of order) {
+      if (child._promoted) continue; // on a layer of its own: a hole here
       if (child._offscreen()) continue;
       if (child._outsideDamage()) continue;
       child.paint(ctx);
@@ -11552,6 +11558,13 @@ export class WindowNode extends Scrollable(Node) {
       watchDesktopSettings(this.app, () => this._refreshLoops()),
     ];
     this._loopVisibilityChanged();
+    // The window has a presenter now, which it did not when a loop declared
+    // at mount started on the clock (`_setRoot` runs before `realize`):
+    // every loop is asked again here, so one a presenter can take moves
+    // over on the window's first frame rather than at the next swap that
+    // happens to re-resolve its style. Where nothing can take it, the
+    // second look at an unchanged declaration is a no-op.
+    this._refreshLoops();
   }
 
   _unwatchLoops() {
@@ -11725,8 +11738,19 @@ export class WindowNode extends Scrollable(Node) {
     // A retained presenter keeps a per-node diff instead of damage rects,
     // and this is the one channel every change already announces itself on
     // (docs/macos.md §"One renderer, two presenters"). Feature-detected: an
-    // ntk window has no ear here and the X11 path is byte-identical.
-    this.window?.noteInvalidate?.(damage, layoutChanged, reason);
+    // ntk window has no ear here and the X11 path is byte-identical. A
+    // presenter that answers `true` has taken the claim onto a layer of its
+    // own (src/cocoa/promotion.js): the bitmap owes nothing for it, and the
+    // frame that is still owed — for the presenter's half, `prepareFrame` —
+    // paints nothing unless something else claims.
+    const taken =
+      this.window?.noteInvalidate?.(damage, layoutChanged, reason) === true;
+    if (taken && !layoutChanged) {
+      this._damage ??= [];
+      this.needsPaint = true;
+      this._scheduleFrame();
+      return;
+    }
     if (layoutChanged) {
       this.needsLayout = true;
       // The content floors are measured from the tree, so anything that
@@ -11832,6 +11856,11 @@ export class WindowNode extends Scrollable(Node) {
       this._damage = addDamageRect(this._damage, bounds, this._damageRectCap());
     }
     this.needsPaint = true;
+    this._scheduleFrame();
+  }
+
+  /** A frame, on the window's clock. */
+  _scheduleFrame() {
     // Recorded before the `_scheduled` gate, not inside it: the debt is
     // "this window has damage", which a discrete event may pay off early
     // (see frames.js). Tying it to whether a callback is outstanding would
@@ -11959,6 +11988,13 @@ export class WindowNode extends Scrollable(Node) {
       for (const node of this._reflowed) node._reflowBefore = null;
       this._reflowed.clear();
     }
+    // A presenter compositing part of the tree on layers of its own — the
+    // surface presenter's promoted nodes (src/cocoa/promotion.js) — gets
+    // its word in here: after layout, so it sees where everything landed,
+    // and before the damage is taken, so a node it moves onto or off a
+    // layer claims the bitmap under it in this very frame. Feature-detected
+    // like `presentFrame`; an ntk window has no such half.
+    this.window.prepareFrame?.(this, layoutRan);
     // any node this pass laid out may be what an open popup is anchored to
     if (layoutRan) this._notifyAnchorChange();
     // after layout (the claims above included), before the damage is taken:
@@ -12504,6 +12540,11 @@ export class WindowNode extends Scrollable(Node) {
           if (!check(child)) return false;
           continue;
         }
+        // A node on a layer of its own (src/cocoa/promotion.js) has no
+        // pixels in the bitmap the band is cut from, so nothing of it can
+        // be dragged along — a pulsing toast over a list is what promotion
+        // is for, and this is the half of it that keeps the pan a blit.
+        if (child._promoted) continue;
         if (rectsOverlap(child._subtreeBounds(), vp)) return false;
       }
       return true;
@@ -12706,6 +12747,14 @@ export class WindowNode extends Scrollable(Node) {
       this._lastReasons = EMPTY_REASONS;
     }
     if (damage === FULL_DAMAGE || !damage) return null;
+    // an empty list: every claim this frame made was answered on a layer of
+    // its own (`invalidate`, the presenter's `true`), and the bitmap paints
+    // nothing — which is not the same as nothing having been claimed
+    if (damage.length === 0) {
+      this._lastDamageRects = [];
+      this._lastDamage = { x: 0, y: 0, width: 0, height: 0 };
+      return [];
+    }
     const rects = [];
     for (const claimed of damage) {
       const clamped = this._clampDamage(claimed, width, height);

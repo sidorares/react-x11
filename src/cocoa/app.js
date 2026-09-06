@@ -118,6 +118,22 @@ export class CocoaApp {
       options.cocoa?.presenter ??
       process.env.REACT_X11_COCOA_PRESENTER ??
       'surface';
+    // With the surface presenter, whether the nodes that animate get a
+    // layer of their own above the bitmap (src/cocoa/promotion.js). On by
+    // default — an animation the render server runs survives a busy JS
+    // thread, and the bitmap keeps the frame for everything else — where
+    // the bridge draws a layer's colour and a rastered one the same, which
+    // it says with `colorSpace()`: before it (@windowkit/appkit 0.5) a
+    // layer's colour was Generic RGB against sRGB surfaces, and a node
+    // moving between its layer and the bitmap changed shade on the way.
+    // Off (`cocoa.promote: false`, REACT_X11_COCOA_PROMOTE=0) keeps every
+    // animation on the frame clock, which is what the presenter bench's
+    // `surface` column measures; on (`true`, `=1`) is on regardless.
+    const promoteEnv = process.env.REACT_X11_COCOA_PROMOTE;
+    this._promote =
+      options.cocoa?.promote ??
+      (promoteEnv === '1' ||
+        (promoteEnv !== '0' && native.colorSpace?.() === 'sRGB'));
 
     // the app's own bridge, so an app over a fake one (the tests) needs no
     // real bridge on the machine — the manager's default loads it only when

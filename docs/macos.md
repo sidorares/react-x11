@@ -335,11 +335,12 @@ it first:
   natively, which is the fastest possible detector for event/text/input
   contract gaps.
 
-What Tier S cannot do, structurally: offload animation (every transition
-frame is a JS-side repaint + upload), make scrolling cheap (the blit
+What Tier S cannot do, structurally: make scrolling cheap (the blit
 becomes a `memmove` + upload), or exploit retina (2× is 4× the raster
 and 4× the upload). It is a correct port with X11's cost model on
-hardware that offers a better one.
+hardware that offers a better one. Offloading an animation it can — not
+structurally, but for the few nodes that animate, which get a layer of
+their own above the bitmap (§"Layer promotion" below, issue #483).
 
 ### Tier L — layer presenter (retained, the design target)
 
@@ -934,11 +935,12 @@ that sends it attaches an explicit animation carrying the pixels there
 repeating animation and costs no JS frames at all. Everything else — a
 colour on text, a layout property, any node that paints as a raster — stays
 on the frame clock, byte-identical to before; the presenter can only decline,
-never break.
-`examples/animation.jsx` is the demonstration: under
-`REACT_X11_COCOA_PRESENTER=layers` its frame counter reads 0 while the
-plain-box loops keep going, and they keep going through a deliberate two
-second block of the JS thread.
+never break. **The surface presenter takes the same animations** by
+promoting the node to a layer of its own for as long as it animates —
+the next section — so `examples/animation.jsx` is the demonstration on
+either: its frame counter reads 0 while the plain-box loops keep going,
+and they keep going through a deliberate two second block of the JS
+thread.
 
 The three semantics [the design](architecture/animation.md) said to pin:
 
@@ -976,6 +978,164 @@ Both wait until the presenter exists; they are listed because "hardware
 composited layers with animation and transformations" is half the reason
 to build Tier L, and the API shape (style props + capability gates)
 should be agreed before someone builds a macOS-only thing.
+
+## Layer promotion: the animated few on their own layers above the surface presenter
+
+The presenter choice above is all-or-nothing, and for the shape of app
+that most wants the retained tier — a large scene with one or two
+animated elements in it — neither answer was right. `surface` could not
+offload an animation at all: every transition frame was a JS repaint plus
+an upload, and a stalled JS thread stopped the animation dead. `layers`
+offloaded it and paid for the whole rest of the scene: a pan is a
+whole-scene re-raster (`scrollRegion` is nulled in layers mode), and every
+raster visual carries its own bitmap. The hybrid is what browsers call
+**layer promotion**, and it is the surface presenter's default (issue
+#483): keep the bitmap for the scene, and give the handful of nodes that
+actually animate a CALayer of their own above it. `src/cocoa/promotion.js`
+is the whole of it.
+
+**Why it was cheap here.** The mechanism already shipped, for `<glarea>`.
+The surface presenter's pixels are the window root layer's `contents`,
+and a layer's contents draw _below_ its sublayers — so a promoted sublayer
+composites over the bitmap for free, and there was no compositing to
+write. The hole in the 2D raster was already an idiom (`GlAreaNode.paint`
+is empty): a promoted node is skipped by the paint walk (`Node._promoted`),
+so the walk paints what is behind it and nothing else. The animation
+seam was already presenter-agnostic — `animateNode` / `cancelNodeAnimation`
+are feature-detected on the window, and `_offloadDeclined` hands a
+property back to the frame clock whenever a presenter cannot take it — and
+the bookkeeping of what the render server runs was one class
+(`LayerAnimations`, presenter.js) once it was lifted out of the layer
+presenter; the two differ only in which node has a layer.
+
+**What a promoted node is.** A property box — its background, border and
+radius as properties of its layer, the same `propBoxProps` the layer
+presenter sends, which is exactly the vocabulary the render server
+animates. Its children, if it has any, ride the layer as one raster
+sublayer painted by the node's own `_paintChildren` walk (a `Visual` and a
+`RasterState` from the layer presenter, used standalone), repainted for the
+claims that reach into it and for a change in where the children sit —
+the hover card in `examples/animation.jsx` promotes with its two captions.
+A promoted node inside a promoted node leaves a hole in its parent's
+raster and sits on a layer of its own above it; every promoted layer is
+flat on the window root, ordered by paint order. Hit testing never moves:
+the node tree stays the source of truth for input on every presenter, so
+promotion changes pixels and nothing else.
+
+**The policy** is not inferred from the scene, and there is no style prop
+to get wrong: a node is promoted because it has a transition or a loop on
+a property a layer can express — a plain `<box>`'s `backgroundColor`,
+`borderColor`, `borderWidth`, `borderRadius` — for as long as it has one
+and a second after, and returns to the bitmap then. The second is
+`IDLE_GRACE_MS`: a hover card fades in and, a moment later, out; a palette
+step ends one transition and starts the next; a toast pulses again.
+Demoting on the last frame of each cost a layer and a repaint of the hole
+per round trip — the first run of the bench made 96 layers for 48 cards —
+and a second is longer than any such gap. Nothing can promote two hundred
+nodes by mistake, and there is nothing to document on a backend that may
+decline it.
+
+**The hard part is z-order.** A promoted layer sits above _all_ the 2D
+content, so promotion is only correct where nothing paints over the node.
+Browsers answer the general case with overlap testing that cascades
+promotions upward through the stacking context — precisely the machinery
+worth not having. The cheap rule instead: a node is promoted only when
+nothing painted after it in the walk reaches into its bounds — no later
+sibling at any level (a later subtree counts where it puts ink, so a
+layout-only container laid over the node is no overlap, and a later
+subtree that is itself promoted is on a layer above and does not count),
+no ancestor's border ring or focus ring (both are painted after the
+children), no scrollbar — and only when every clipping ancestor holds the
+whole of it, because the layer would not be clipped. All of it is
+answered from `paintOrder()` and the cached paint reach, and the same test
+runs again every frame, later-painted nodes first, so a node that becomes
+overlapped, hidden, clipped or non-plain (a `:hover` that adds a shadow)
+returns to the bitmap in the frame that finds it, the animation handed
+back to the clock. Overlays, toasts, drag ghosts, spinners and floating
+cards pass by construction; a hover fade on a row in the middle of a list
+does not, and stays on the clock. Declining is always safe — the frame
+clock runs the animation exactly as it does with promotion off — and a
+refusal is remembered until the next layout, so the same scene does not
+cost a frame's decline per retarget.
+
+**The frame.** `WindowNode.flush()` gives the presenter its word in after
+layout and before the damage is taken (`window.prepareFrame`, feature-
+detected like `presentFrame`): whatever it moves onto or off a layer
+claims the bitmap under it in that same frame, so a node is never painted
+at its target before a declined animation restarts from its start, and a
+demoted node is back in the bitmap in the frame its layer goes. A
+promoted node's own claims — a retarget, a hover flip, a caption changing
+inside it — are answered on the layer and cost the bitmap nothing: the
+`noteInvalidate` channel the layer presenter listens on answers `true`,
+`WindowNode.invalidate` records a frame with nothing in it for the bitmap,
+and the frame runs the presenter's half and paints no pixel (`hovertree`
+below: 0kpx a frame). The scroll blit's safety gate skips a promoted node
+for the same reason — its pixels are not in the bitmap the band is cut
+from — which is what makes a pan under a pulsing toast a blit
+(`pananim`), on a backend where the toast's per-frame claim used to poison
+every notch.
+
+**What to expect, and how to stop it.** An animation on a plain box
+costs one frame to start and, a second after the last one ends, one to
+come back, and the render server draws every frame between — through a
+busy JS thread, at the display's rate — while the bitmap keeps the frame
+for everything else, the scroll blit included. What it costs is a CALayer
+and, for a node with children, a bitmap the size of their reach, for as
+long as the node animates and the second after.
+`createRoot({ cocoa: { promote: false } })` or `REACT_X11_COCOA_PROMOTE=0`
+keeps every animation on the frame clock, which is what the presenter
+bench's `surface` column measures; `true` / `=1` turns it on regardless
+of the bridge. `test/cocoa-promotion.test.js` pins the contract over the
+fake bridge; `test/animation-example.test.js` walks the example through
+it.
+
+**One thing it found, and the bridge it needs.** A promoted node is the
+same node drawn two ways in turn, and the two had to agree to the pixel
+or every hover would flash. They did not: a layer's `backgroundColor` went
+through `@windowkit/appkit`'s `CGColorCreateGenericRGB` while its surfaces
+are sRGB, so `#dbe7f4` rastered as (219, 231, 244) and composited as
+(228, 236, 245) — paler, on every layer the layer presenter ever set, and
+a colour animation there landed on a model value that did not match its
+own `to`. The bridge fix — `MakeColor` in sRGB, the readback to match,
+and a `colorSpace()` verb that says so — is a line and a verb in
+`@windowkit/appkit`, and ships with the bridge's next release; against it
+the same card differs by at most six units of one channel, in the
+antialiasing. Promotion is on by
+default **only where the bridge answers `'sRGB'`** — on 0.5 it stays off
+unless asked for — so nobody gets the flash for free, and a bridge upgrade
+turns it on.
+
+**Measured**, 2026-09-06, this machine (a 120Hz panel; the window on a
+60Hz monitor where it says 59fps), 4s per cell, `npm run bench:presenters
+-- --scenario=anim,animtree,hovertree,pananim,scroll,tree`; `surface` is
+promotion off, `promoted` on. Frames are what the JS side painted;
+`ticks` are the scenario's own changes (a palette step every 15, a hover
+flip or a wheel notch every one).
+
+| scenario    | column   | frames / ticks | flush avg / p95 | damage a frame     | cpu  | what it says                                       |
+| ----------- | -------- | -------------- | --------------- | ------------------ | ---- | -------------------------------------------------- |
+| `anim`      | surface  | 455 / 235      | 2.17 / 2.51ms   | 2170kpx            | 46%  | every frame of every fade, all 48 cards            |
+|             | promoted | 16 / 241       | 2.80 / 6.92ms   | 136kpx             | 17%  | one frame a palette step; 48 layers, made once     |
+|             | layers   | 16 / 241       | 2.21 / 3.26ms   | —                  | 17%  |                                                    |
+| `animtree`  | surface  | 208 / 120      | 14.58 / 16.97ms | 2031kpx            | 108% | cannot keep up: the fades repaint the grid         |
+|             | promoted | 243 / 243      | 0.91 / 1.87ms   | 13kpx              | 54%  | the grid's one cell a tick; the fades cost nothing |
+|             | layers   | 244 / 244      | 2.75 / 3.75ms   | —                  | 67%  | a visual per node of the grid                      |
+| `hovertree` | surface  | 476 / 242      | 0.28 / 0.38ms   | 43kpx              | 14%  | input→flush p50 2.80ms                             |
+|             | promoted | 242 / 242      | 0.31 / 0.39ms   | 0kpx               | 11%  | p50 2.86ms; the bitmap paints nothing              |
+|             | layers   | 241 / 241      | 1.38 / 1.65ms   | —                  | 22%  | p50 2.75ms                                         |
+| `pananim`   | surface  | 702 / 243      | 0.65 / 1.82ms   | 817kpx, 31% full   | 24%  | the toast's claim poisons every notch's blit       |
+|             | promoted | 219 / 242      | 1.57 / 2.01ms   | 525kpx, 0% full    | 22%  | the blit, exactly `scroll`'s                       |
+|             | layers   | 220 / 243      | 1.89 / 2.28ms   | 2520kpx, 100% full | 17%  | a whole-scene re-raster a notch                    |
+| `scroll`    | promoted | 220 / 243      | 1.45 / 1.86ms   | 525kpx             | 20%  | as surface: 1.49 / 2.01ms, 525kpx, 21%             |
+| `tree`      | promoted | 243 / 243      | 0.47 / 0.65ms   | 4kpx               | 49%  | as surface: 0.42 / 0.57ms, 4kpx, 47%               |
+
+So both halves at once: the animation's frames match `layers`, the flush
+and the scroll match `surface`, and `animtree` and `pananim` beat both.
+The 54% left in `animtree` is the React commit of a 3,700-node tree per
+tick, which `tree` prices at 47% with no animation at all. The gate keeps
+it: `scripts/bench/presenters-gate.json`'s `promoted` rules judge the
+promoted column on frames per tick, full frames and damage share, next to
+the surface column's own.
 
 ## Running as an app bundle
 

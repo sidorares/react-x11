@@ -367,7 +367,7 @@ test('a transition on a plain box runs in the render server: the model, one anim
   // the bridge reports the end: the entry goes, the model was there all along
   m.ends.get(opts.id)({ type: 'animation-end', id: opts.id, finished: true });
   assert.ok(!m.node._anim?.size);
-  assert.strictEqual(m.presenter.liveAnimations.size, 0);
+  assert.strictEqual(m.presenter.animations.live.size, 0);
 });
 
 test('a length retargets additively: the new delta joins the one still running', async () => {
@@ -470,7 +470,7 @@ test('a loop is one repeating animation in the render server, and stops with the
   assert.deepStrictEqual(m.bridge.argsOf('removeAnimation'), [[key]]);
   assert.ok(!m.node._anim?.size);
   m.presenter.frame(m.windowNode);
-  assert.strictEqual(m.presenter.liveAnimations.size, 0);
+  assert.strictEqual(m.presenter.animations.live.size, 0);
 });
 
 test('a layer that turns into a raster hands its loop back to the clock', async () => {
@@ -483,7 +483,7 @@ test('a layer that turns into a raster hands its loop back to the clock', async 
   const entry = m.node._anim.get('backgroundColor');
   assert.ok(entry?.loop && !entry.offloaded, 'the clock has it again');
   assert.ok(m.windowNode._animating.has(m.node));
-  assert.strictEqual(m.presenter.liveAnimations.size, 0);
+  assert.strictEqual(m.presenter.animations.live.size, 0);
 });
 
 test('a transition whose layer turns raster before its frame goes to the clock', async () => {

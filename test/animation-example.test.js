@@ -7,8 +7,9 @@
 // that drifted from the code would be worse than no example, so every one
 // of them is a test.
 //
-// Headless: the in-process X server for the frame-clock half, and the mock
-// harness with the layer presenter over a recording bridge for the offload.
+// Headless: the in-process X server for the frame-clock half, the mock
+// harness with the layer presenter over a recording bridge for the offload,
+// and a CocoaApp over a fake bridge for the surface presenter's promotion.
 import { test, afterEach, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -23,6 +24,7 @@ import {
   withFrameClock,
 } from '../src/testing/index.js';
 import { setDesktopSettingsForTests } from '../src/desktopsettings.js';
+import { fakeCocoaApp, pointerOver } from './helpers/cocoa-bridge.js';
 import { animatingPresenterFor } from './helpers/layer-presenter.js';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
@@ -149,6 +151,86 @@ describe('examples/animation', () => {
     }
   });
 
+  test('on the surface presenter the plain-box loops, the chip and the hovered card get layers of their own, and cost no frames', async () => {
+    const clock = withFrameClock();
+    try {
+      const { app, native } = fakeCocoaApp();
+      const { windowNode } = await mount({ app });
+      const promotion = windowNode.window._promotion;
+      assert.ok(promotion, 'the surface window promotes');
+      await act();
+      const promoted = () =>
+        [...promotion.promoted.keys()]
+          .map((n) => n.props['data-testname'] ?? n.kind)
+          .sort();
+      // declared at mount, the three loops moved over on the first frame
+      assert.deepEqual(promoted(), ['breathe', 'pulse', 'round']);
+      assert.deepEqual(
+        onTheClock(windowNode),
+        ['color', 'start'],
+        'the other column stays on the clock',
+      );
+      const taken = native
+        .of('addAnimation')
+        .map(([, keyPath, opts]) => [keyPath, opts.repeat, opts.autoreverse])
+        .sort();
+      assert.deepEqual(taken, [
+        ['backgroundColor', Infinity, true],
+        ['borderWidth', Infinity, true],
+        ['cornerRadius', Infinity, true],
+      ]);
+      // every promoted layer is a sublayer of the window root, and the
+      // three tiles kept their paint order
+      const rootLayer = windowNode.window._layer;
+      for (const { visual } of promotion.promoted.values()) {
+        assert.equal(visual.layer.parent, rootLayer);
+      }
+
+      // the hover card answers on a layer of its own — text and all
+      const card = screen.getByText('hover, press').parent;
+      pointerOver(app, card);
+      await act();
+      assert.ok(card._promoted, 'promoted for the fade');
+      assert.ok(
+        promotion.promoted.get(card).content,
+        'its two captions ride the layer as one raster',
+      );
+      assert.equal(
+        native
+          .of('addAnimation')
+          .filter(
+            ([layer]) => layer === promotion.promoted.get(card).visual.layer,
+          ).length,
+        2,
+        'backgroundColor and borderColor, in the render server',
+      );
+      assert.ok(!windowNode._animating.has(card));
+
+      // …and the chip, a plain box inside a bordered card: promoted on the
+      // click, above its card's raster
+      const chip = screen.getByTestName('chip');
+      pointerOver(app, chip, { press: true });
+      await act();
+      assert.ok(chip._promoted);
+      assert.deepEqual([...chip._anim.keys()].sort(), [
+        'backgroundColor',
+        'borderColor',
+        'borderRadius',
+        'borderWidth',
+      ]);
+      assert.ok([...chip._anim.values()].every((a) => a.offloaded));
+
+      // untick the clock column, and nothing is left for the frame clock
+      const column = screen.getByRole('checkbox', { name: /position/ });
+      pointerOver(app, column, { press: true, dx: -column.abs.width / 2 + 16 });
+      await act();
+      assert.equal(windowNode._animating.size, 0, 'zero frames a second');
+      assert.ok(promotion.animations.live.size >= 3, 'the tiles, still going');
+    } finally {
+      clock.restore();
+    }
+  });
+
   test('on the layer presenter the plain-box loops cost no frames', async () => {
     const clock = withFrameClock();
     try {
@@ -182,7 +264,7 @@ describe('examples/animation', () => {
       await act();
       assert.equal(windowNode._animating.size, 0, 'zero frames a second');
       assert.equal(
-        presenter.liveAnimations.size,
+        presenter.animations.live.size,
         3,
         'three tiles, still going',
       );
