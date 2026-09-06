@@ -312,13 +312,23 @@ export class CocoaWindow {
    * The source side: hand a DragSession's gesture to an NSDraggingSession
    * (see src/cocoa/dnd.js for what the spec carries). Returns at once; the
    * session reports back as `drag-session-*` events.
+   *
+   * And the pump stops here. AppKit tracks the gesture on this thread, so
+   * `pump2` does not return until the drop and no timer of ours runs in
+   * between — the frame that shows the drag has begun (a `<popup
+   * dragPreview>` mounted by `onDragStart`, a source dimmed by
+   * `:dragging`) has to go out on the way past. Motion is otherwise paced
+   * on the frame clock and not flushed per event (`_routeMotion`); this is
+   * the one motion whose answer has no next tick to wait for.
    */
   beginDrag(session) {
     if (this.destroyed) return null;
-    return this._native.beginDrag(
+    const began = this._native.beginDrag(
       this._h,
       dragSpec(session, this._native, this.scale),
     );
+    this.app._afterInput();
+    return began;
   }
 
   setTransientFor() {

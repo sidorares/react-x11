@@ -440,6 +440,7 @@ return (
     {isDragging && (
       <popup
         dragPreview
+        transparent
         x={position.x + 14}
         y={position.y + 14}
         width={180}
@@ -458,6 +459,14 @@ return (
 `null` otherwise. **`dragPreview` on the `<popup>` is required**: it tells
 the router that this window is the preview, not something under the
 pointer, and without it the drag would immediately land on its own preview.
+
+`transparent` is not required, but a preview usually wants it: the popup is
+a real window, so a card with a `borderRadius` on an opaque one shows the
+window's own ground in the four corners the radius gives up. With it, the
+corners are the desktop, antialiased — and where no compositor is running
+the window falls back to filling itself square, which is what it looked
+like anyway. See
+[`transparent`](elements.md#transparent--rounded-corners-and-translucency).
 
 ## The two transports
 
@@ -513,11 +522,21 @@ Platform notes:
   are UTIs, and react-x11's MIME vocabulary maps onto them through the OS's
   own type database — a private `application/x-myapp-…` travels between two
   react-x11 apps as a `dyn.*` type every process computes alike. Two things
-  differ from X11: the payload is read **at the drop** (the pasteboard is the
+  differ from X11. The payload is read **at the drop** (the pasteboard is the
   source's promise, and it may withdraw it once its session ends), so
-  `getData()` answers from that read; and there is no drag image of your
-  own yet — AppKit's session carries a blank one, and a `<popup dragPreview>`
-  does not follow the pointer there.
+  `getData()` answers from that read. And the gesture runs inside AppKit's
+  own tracking loop, which owns the thread from the threshold to the
+  release: no timer of ours fires and no frame clock ticks in between, so
+  every frame of a drag is painted from the callback that reported it, and
+  every render a drag schedules — a `<popup dragPreview>` following
+  `useDragSource().position`, a `useDropTarget` hint, an insertion marker —
+  is dispatched at discrete priority and landed there. The preview follows
+  the pointer as it does on X11, and because a `<popup>` here is a
+  non-activating panel at the pop-up-menu window level — above every other
+  application's windows, which sit at the normal level — it is what the
+  desktop sees while the pointer is over Finder or a browser. What AppKit's
+  own session carries is still a blank image: the drag has no bitmap of the
+  system's, only the preview you draw.
 - **macOS / XQuartz** — X client to X client works. Dragging from **Finder**
   into an X11 window does not, and never has:
   [XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173). That is the

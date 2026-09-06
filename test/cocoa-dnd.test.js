@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { afterEach, describe, test } from 'node:test';
 import React from 'react';
 
-import { createRoot } from '../src/index.js';
+import { createRoot, useDragSource, useDropTarget } from '../src/index.js';
 import { CocoaApp } from '../src/cocoa/app.js';
 import {
   BASE_DROP_UTIS,
@@ -85,8 +85,10 @@ function fakeNative() {
     windowNumber: (handle) => handle.id,
     windowRootLayer: (handle) => ({ root: handle.id }),
     getWindowFrame: (handle) => ({
-      x: 0,
-      y: 0,
+      // where it was asked for: a popup's position arrives as createWindow2
+      // options and is read back through the frame (`_refreshOrigin`)
+      x: handle.options.x ?? 0,
+      y: handle.options.y ?? 0,
       width: handle.options.width,
       height: handle.options.height,
     }),
@@ -299,6 +301,35 @@ describe('the drop side', () => {
     assert.equal(zone.current.states[':drag-over'], false, 'the path cleared');
   });
 
+  test("a target's own render lands inside the callback, not on the release", async () => {
+    // The other half of #482: a `useDropTarget` label ("drop here") is a
+    // React render, and AppKit's tracking loop has stopped the pump — so it
+    // has to land on the callback that asked the question. `:drag-over` is
+    // the renderer's own and never needed one; this is what it looks like
+    // when the app renders the answer itself. No awaits below, on purpose.
+    const native = fakeNative();
+    const app = appOver(native);
+    const root = await createRoot({ app });
+    roots.push(root);
+    const label = React.createRef();
+    const Zone = () => {
+      const { dropProps, isOver } = useDropTarget({ accept: ['files'] });
+      return h(
+        'box',
+        { ...dropProps, style: { width: 300, height: 200 } },
+        isOver && h('box', { ref: label, style: { width: 80, height: 20 } }),
+      );
+    };
+    root.render(h('window', { width: 300, height: 200 }, h(Zone)));
+    await settle(app);
+    const n = [...app._windows.values()][0].windowNumber;
+
+    native.emit(dragEvent('drag-enter', n, 10, 10));
+    assert.ok(label.current, 'the hint is up while the pointer is over it');
+    native.emit({ type: 'drag-exit', windowNumber: n });
+    assert.equal(label.current, null, 'and gone when it leaves');
+  });
+
   test('a type nothing accepts is refused from dropAccept data alone, and exit clears', async () => {
     const native = fakeNative();
     const app = appOver(native);
@@ -352,6 +383,8 @@ describe('the drag side', () => {
       buttons: 256,
       time: 2,
     });
+  /** the app's first window — the one the tree is rendered into */
+  const wndOf = (app) => [...app._windows.values()][0];
 
   test('crossing the threshold hands the gesture to AppKit with the payload as pasteboard items', async () => {
     const native = fakeNative();
@@ -427,6 +460,74 @@ describe('the drag side', () => {
     assert.equal(source.current.states[':dragging'], false);
     assert.equal(app._activeDrag, null);
     assert.ok(!log.some((l) => l[0] === 'click'));
+  });
+
+  test('the preview follows the pointer while AppKit owns the thread', async () => {
+    // The regression this exists for (#482): once `beginDrag` hands the
+    // gesture over, AppKit tracks it on this thread — `pump2` does not
+    // return until the drop, so no timer, no frame tick and no microtask of
+    // ours runs in between. Every assertion below is therefore made with
+    // **no await and no `_tickFrames`**: what does not reach the screen
+    // inside the callback does not reach it until the gesture is over.
+    const native = fakeNative();
+    const app = appOver(native);
+    const root = await createRoot({ app });
+    roots.push(root);
+    const Draggable = () => {
+      const { dragProps, isDragging, position } = useDragSource({
+        data: { 'text/plain': 'a row' },
+      });
+      return h(
+        React.Fragment,
+        null,
+        h('box', {
+          ...dragProps,
+          style: {
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+          },
+        }),
+        isDragging &&
+          h('popup', {
+            dragPreview: true,
+            x: position.x + 14,
+            y: position.y + 14,
+            width: 90,
+            height: 20,
+          }),
+      );
+    };
+    root.render(h('window', { width: 300, height: 200 }, h(Draggable)));
+    await settle(app);
+    assert.equal(app._windows.size, 1, 'the window, and no preview yet');
+
+    press(wndOf(app), 50, 50);
+    move(wndOf(app), 70, 50); // past the threshold
+    assert.equal(native.of('beginDrag').length, 1, 'AppKit has the gesture');
+    const preview = [...app._windows.values()][1];
+    assert.ok(preview, 'the preview is on screen before AppKit takes over');
+    // press at device (70, 50), scale 2 → screen point 35, plus the offset,
+    // and a popup's x/y prop is logical where a window records device
+    assert.deepEqual([preview.x, preview.y], [(35 + 14) * 2, (25 + 14) * 2]);
+
+    native.emit({ type: 'drag-session-moved', x: 200, y: 60 });
+    assert.deepEqual(
+      [preview.x, preview.y],
+      [(200 + 14) * 2, (60 + 14) * 2],
+      'and it follows the pointer, on the callback that reported it',
+    );
+
+    native.emit({
+      type: 'drag-session-ended',
+      x: 200,
+      y: 60,
+      operation: 'copy',
+      dropped: true,
+    });
+    assert.equal(app._windows.size, 1, 'the release takes it down');
   });
 
   test('a drop on our own window keeps the payload by reference', async () => {
