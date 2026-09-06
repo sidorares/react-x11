@@ -78,6 +78,11 @@
   backend, the desktop's own portal, `osascript` under XQuartz, a browser
   react-x11 draws itself), why cancelling is
   `null` rather than a throw, and the places the backends genuinely differ.
+- [permissions.md](permissions.md) — may the app use the camera, the
+  microphone, the screen, the accessibility APIs: `usePermission()`, the
+  five-word status vocabulary (`'unknown'` is the machine's answer, not the
+  permission's), the cocoa backend's TCC rung and the Settings-pane rung any
+  Mac has, and why Linux answers `'unknown'` until the device portals land.
 - [eyedropper.md](eyedropper.md) — sample a colour from the screen:
   `useEyedropper()`/`pickScreenColor()`, the two-rung ladder (the portal's
   own picker, a crosshair grab on plain X11), the interface `version`

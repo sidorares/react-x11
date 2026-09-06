@@ -13,6 +13,14 @@ export { useAppActivate, useAppOpen } from './apphooks.js';
 export { setBadge } from './launcher.js';
 export { useBadge, useDockMenu } from './launcherhooks.js';
 export { useTray } from './trayhooks.js';
+export {
+  NoPermissionServiceError,
+  openPrivacySettings,
+  permissionBackend,
+  permissionStatus,
+  requestPermission,
+} from './permissions.js';
+export { usePermission } from './permissionhooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';

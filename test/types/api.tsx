@@ -17,6 +17,7 @@ import type { ReloadEvent } from 'react-x11/refresh';
 import type { RefreshOptions } from 'react-x11/refresh/loader';
 import type {
   AbortSignalLike,
+  PermissionStatus,
   BusHandle,
   BusKind,
   BusRef,
@@ -42,6 +43,12 @@ import {
   useBadge,
   useDockMenu,
   useTray,
+  NoPermissionServiceError,
+  openPrivacySettings,
+  permissionBackend,
+  permissionStatus,
+  requestPermission,
+  usePermission,
   Checkbox,
   closeBus,
   Icon,
@@ -1286,6 +1293,19 @@ function _DeepLinks() {
     // @ts-expect-error — an icon is a symbol name or PNG bytes
     useTray({ icon: 42 });
     void tray.available;
+    const status: PermissionStatus = await permissionStatus('camera');
+    await requestPermission('automation', { target: 'com.apple.finder' });
+    const opened: boolean = await openPrivacySettings('full-disk-access');
+    const rung: 'cocoa' | null = permissionBackend();
+    const mic = usePermission('microphone');
+    mic.request().then((s: PermissionStatus) => s);
+    void mic.available;
+    void opened;
+    void rung;
+    void status;
+    void NoPermissionServiceError;
+    // @ts-expect-error — not a kind
+    await permissionStatus('bluetooth');
     activateWindow(0x1a00007, { timestamp: null, source: 2 });
     // @ts-expect-error — EWMH names two source indications
     activateWindow(win, { source: 3 });
