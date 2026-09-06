@@ -1032,7 +1032,12 @@ async function main() {
   await (
     await createRoot({
       backend: 'cocoa',
-      cocoa: { presenter: 'surface', frameInterval: 8, pumpInterval: 4 },
+      cocoa: {
+        presenter: 'surface',
+        frameInterval: 8,
+        pumpInterval: 4,
+        exitOnQuit: false,
+      },
     })
   ).unmount();
   // @ts-expect-error -- not a presenter

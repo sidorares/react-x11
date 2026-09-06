@@ -137,10 +137,11 @@ export class CocoaGlobalMenuExport {
   /** A backend menu-activate event landed on this export. */
   activate(id) {
     if (id === QUIT_ID) {
-      // the same route the close button takes: the app decides what
-      // closing means, exactly as it would for the red light
-      const wnd = this.target?.window ?? [...this.app._windows.values()][0];
-      wnd?.emit('close', { preventDefault() {} });
+      // ⌘Q is a quit request like the Dock's and a logout's: one route for
+      // all of them (`CocoaApp.requestQuit`), which is the primary window's
+      // close request — the app decides what closing means, exactly as it
+      // would for the red light
+      this.app.requestQuit();
       return;
     }
     const item = this.nodes?.get(id)?.item;

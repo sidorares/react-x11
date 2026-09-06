@@ -14,6 +14,7 @@
 // measured upgrade, not the first version.
 import { cssColorStraight } from 'ntk';
 
+import { deliverActivate, deliverOpen } from '../application.js';
 import { flushPendingFrames } from '../frames.js';
 import { setCompositingForTests } from '../compositing.js';
 import { setScreensForTests } from '../screens.js';
@@ -73,6 +74,8 @@ export class CocoaApp {
     // the DragSession whose gesture an NSDraggingSession is tracking; a drop
     // on one of our own windows is routed to its live payload
     this._activeDrag = null;
+    // set by a quit request; read by close() to end the process
+    this._quitting = false;
 
     const screens = native.listScreens();
     this.scale = screens[0]?.scale ?? 1;
@@ -586,6 +589,12 @@ export class CocoaApp {
         return undefined;
       case 'drag-session-ended':
         return this._routeDragEnded(ev);
+      case 'app-open-urls':
+        return this._routeAppOpen(ev);
+      case 'app-reopen':
+        return this._routeAppReopen(ev);
+      case 'app-quit-request':
+        return this.requestQuit();
       case 'animation-end':
         // the presenter that added the animation registered for its id; an
         // id nobody knows is an animation already forgotten (cancelled, or
@@ -814,6 +823,82 @@ export class CocoaApp {
     this._afterInput();
   }
 
+  // --- the application as a whole ------------------------------------------
+  //
+  // What the OS asks the app rather than one of its windows, through the
+  // NSApplicationDelegate the bridge installs (>= 0.5). The bridge decides
+  // nothing — it answers `applicationShouldHandleReopen:` NO and
+  // `applicationShouldTerminate:` Cancel and hands the question over — so
+  // each of these is the renderer's decision, and the decisions are the ones
+  // the freedesktop transport already made (src/application.js): a URL is an
+  // `Open`, a second launch is an `Activate`, and quitting is what closing
+  // the app's primary window means. Anything that arrived before the
+  // callback was installed — the launching Apple Event lands inside
+  // `initApp()` — the bridge holds and replays on the first pump.
+
+  /**
+   * `application:openURLs:` — a URL for a scheme the bundle's `Info.plist`
+   * registers, or a document the Finder handed over as `file://`. Delivered
+   * through the same filter, buffer and replay a D-Bus `Open` takes, so
+   * `useAppOpen` fires the same way here.
+   */
+  _routeAppOpen(ev) {
+    const urls = Array.isArray(ev.urls)
+      ? ev.urls.filter((u) => typeof u === 'string')
+      : [];
+    deliverOpen(urls, {});
+  }
+
+  /**
+   * `applicationShouldHandleReopen:` — the user launched the app again while
+   * it was running (a Dock click, `open -a`). AppKit has already brought
+   * the windows forward by the time this arrives; what a second launch
+   * *means* is the app's, through `useAppActivate`, and `has-visible-windows`
+   * on the context is the one fact the OS adds.
+   */
+  _routeAppReopen(ev) {
+    deliverActivate({ 'has-visible-windows': ev.hasVisibleWindows === true });
+  }
+
+  /**
+   * Quit, from wherever macOS says it: the Dock's Quit, ⌘Q on the app menu, a
+   * logout. One route for all of them, and it is the **primary window's
+   * close request** — `onCloseRequest` where the app wrote one (a "save your
+   * work?" dialog is a veto until it decides), the default otherwise, which
+   * unmounts the tree. Quit means what closing the app's window means on
+   * every desktop, rather than a second, faster exit that skips the same
+   * question.
+   *
+   * With no window to ask — an accessory app between windows — the tree
+   * unmounts directly.
+   *
+   * The bridge has already answered `applicationShouldTerminate:` with
+   * Cancel, so the process outliving the tree is this side's to end: when a
+   * quit request leads to the app closing, `close()` exits the process
+   * (`cocoa.exitOnQuit`, on by default — a Regular-policy process that is
+   * still alive is still in the Dock, and a Dock tile for an app whose
+   * windows are all gone is what a user calls a hang).
+   */
+  requestQuit() {
+    if (this._closed) return;
+    this._quitting = true;
+    const windows = [...this._windows.values()].filter(
+      (w) => !w.destroyed && !w._popup,
+    );
+    const primary =
+      windows.find((w) => w._reactX11Node?._isPrimaryWindow?.()) ??
+      windows[0] ??
+      null;
+    if (primary) {
+      primary.emit('close', { preventDefault() {} });
+    } else {
+      Promise.resolve(this._reactX11Root?.unmount?.()).catch((err) => {
+        this.options?.onXError?.(err);
+      });
+    }
+    this._afterInput();
+  }
+
   // --- teardown ------------------------------------------------------------
 
   close() {
@@ -827,6 +912,14 @@ export class CocoaApp {
     this._cocoaGL = null;
     this._native.setBackendEventCallback(null);
     for (const wnd of [...this._windows.values()]) wnd.destroy();
+    // A quit the app accepted: the tree is down and the connection closed,
+    // and macOS is still waiting on the Cancel the bridge answered with. End
+    // the process on the next turn — after the unmount's own microtasks —
+    // rather than leaving a Dock tile with nothing behind it. `exitOnQuit:
+    // false` is the seam for an embedder that owns the process's lifetime.
+    if (this._quitting && this.options?.cocoa?.exitOnQuit !== false) {
+      setImmediate(() => process.exit(0));
+    }
     return Promise.resolve();
   }
 }

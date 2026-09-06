@@ -347,6 +347,15 @@ function environmentContext() {
  */
 let current = null;
 
+/**
+ * The schemes the registration declared, kept beside it for the transports
+ * that are not the bus: `deliverOpen` filters an Apple Event's URLs by the
+ * same list an `Open` call is filtered by. Recorded on the no-bus path too —
+ * a Mac with no D-Bus still has a registration's *intent*, and that is the
+ * path the cocoa backend takes.
+ */
+let currentSchemes = null;
+
 const openHandlers = new Set();
 const activateHandlers = new Set();
 
@@ -404,6 +413,36 @@ function drainTo(kind, handler) {
       kind === 'open' ? handler(event.uris, event.ctx) : handler(event.ctx),
     );
   }
+}
+
+// --------------------------------------------------------------------------
+// The other transports
+// --------------------------------------------------------------------------
+
+/**
+ * A launch that arrived over a transport other than the bus: the cocoa
+ * backend's Apple Events (src/cocoa/app.js), where the OS hands the app its
+ * URLs through `application:openURLs:` and a Dock click on a running app
+ * through `applicationShouldHandleReopen:`. Same scheme filter, same buffer,
+ * same replay to the first handler — one code path in the app whichever
+ * desktop launched it.
+ *
+ * Not public: a transport calls this, an app subscribes with `onAppOpen`.
+ * `platformData` is whatever that transport knows about the launch. Apple
+ * Events carry no startup id and no timestamp, and the context says so with
+ * nulls rather than inventing them — on that backend the raise needs neither
+ * (`activateWindow` is `NSApp.activate` there).
+ */
+export function deliverOpen(uris, platformData = {}) {
+  const accepted = acceptUris(uris, currentSchemes);
+  if (accepted.length === 0) return;
+  debug(`open from the platform: ${accepted.map(redactUri).join(', ')}`);
+  deliver({ kind: 'open', uris: accepted, ctx: launchContext(platformData) });
+}
+
+/** The platform asked this app to come forward with nothing to open. */
+export function deliverActivate(platformData = {}) {
+  deliver({ kind: 'activate', ctx: launchContext(platformData) });
 }
 
 /**
@@ -541,6 +580,7 @@ export async function registerApplication(options = {}) {
   const appId = checkAppId(options.appId);
   const schemes = checkSchemes(options.schemes);
   const objectPath = objectPathForAppId(appId);
+  currentSchemes = schemes;
 
   if (current) {
     // An app has one identity; two registrations would be two RequestNames and
@@ -742,6 +782,7 @@ export function currentRegistration() {
 /** Test seam, not public: forget every handler, buffer and registration. */
 export function _resetApplicationState() {
   current = null;
+  currentSchemes = null;
   openHandlers.clear();
   activateHandlers.clear();
   buffered = [];

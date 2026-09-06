@@ -314,6 +314,45 @@ The URI is attacker-controlled input from an unauthenticated local caller.
   fragment and any userinfo. Hold your own logging to the same rule — the code
   is _in_ the URI.
 
+## On macOS
+
+The same hooks, a different transport. On the cocoa backend the OS talks to
+the application as a whole through **Apple Events**, and `@windowkit/appkit`
+(≥ 0.5) forwards them as backend events the renderer routes into the very
+same delivery as a D-Bus `Open`:
+
+|                                                    |                                                                                                                     |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `kAEGetURL` — a URL for a scheme the bundle claims | `useAppOpen(uris, ctx)`, filtered by the registration's `schemes` like an `Open`                                    |
+| `kAEOpenDocuments` — a document from the Finder    | `useAppOpen`, as `file://` URLs (`file:` is always allowed)                                                         |
+| `kAEReopenApplication` — a Dock click, `open -a`   | `useAppActivate(ctx)`, with `ctx.platformData['has-visible-windows']`                                               |
+| `kAEQuitApplication` — Dock › Quit, ⌘Q, a logout   | the **primary window's close request**: `onCloseRequest` where there is one, else the default, which closes the app |
+
+Three things differ from the bus, and none of them changes app code:
+
+- **Single instance is the platform default.** Launch Services activates the
+  running app rather than starting a second one, so there is no `secondary`
+  role to exit from; `registerApplication()` resolves `null` on a Mac with no
+  D-Bus (the normal Mac) and its `schemes` still filter what arrives.
+- **`ctx.timestamp` is `null`.** Apple Events carry no startup id, and the
+  raise does not need one: `activateWindow()` there is `NSApp.activate`, which
+  no focus-stealing rule weighs.
+- **Registration is `Info.plist`, not a `.desktop` file** — `CFBundleURLTypes`
+  for the scheme and `CFBundleDocumentTypes` for documents, in an app bundle
+  (see [packaging.md](packaging.md)). A bare `node` process receives nothing
+  from Launch Services, because there is no bundle for it to look up.
+
+Quit is worth a sentence, because macOS asks the app before ending it. The
+bridge answers `applicationShouldTerminate:` with "cancel" and hands the
+question over, so a quit becomes the same close request the red light sends
+to the app's primary window: an `onCloseRequest` that opens a "save your
+work?" dialog has vetoed it until it decides, and one that unmounts has
+accepted it. Once the app has closed on a quit, the process ends
+(`createRoot({ cocoa: { exitOnQuit: false } })` turns that off for an embedder
+that owns the process). One limit to know: because the bridge's answer is
+"cancel" rather than "later", a **logout** is cancelled by macOS the moment it
+asks, and the app then quits on its own — the logout has to be started again.
+
 ## Over ssh
 
 Both mechanisms only work when the browser runs on the **same host as the
