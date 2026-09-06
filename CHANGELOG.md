@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.8.0](https://github.com/sidorares/react-x11/compare/v2.7.0...v2.8.0) (2026-09-06)
+
+
+### Features
+
+* **cocoa:** layer promotion — the animated few on their own layers above the surface presenter ([#485](https://github.com/sidorares/react-x11/issues/485)) ([e45ecab](https://github.com/sidorares/react-x11/commit/e45ecab3ef0171608d9fa51e690684e180c508c1))
+
+
+### Bug Fixes
+
+* **cocoa:** a drag renders from the callback that reports it, so the preview follows the pointer ([#484](https://github.com/sidorares/react-x11/issues/484)) ([cb281ab](https://github.com/sidorares/react-x11/commit/cb281ab706475cbfd26d1c4357172f20b1969c19))
+
 ## [2.7.0](https://github.com/sidorares/react-x11/compare/v2.6.1...v2.7.0) (2026-09-06)
 
 
