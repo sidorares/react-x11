@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.1](https://github.com/sidorares/react-x11/compare/v2.8.0...v2.8.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **cocoa:** a drag preview popup is never a dragging destination, so the drop reaches the window beneath it ([#490](https://github.com/sidorares/react-x11/issues/490)) ([31a3368](https://github.com/sidorares/react-x11/commit/31a336807b1b8eddd6c01ebd69cebf1a4496da01)), closes [#488](https://github.com/sidorares/react-x11/issues/488)
+
 ## [2.8.0](https://github.com/sidorares/react-x11/compare/v2.7.0...v2.8.0) (2026-09-06)
 
 
