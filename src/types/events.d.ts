@@ -335,6 +335,20 @@ export interface ScrollEvent {
   viewportHeight: number;
 }
 
+/**
+ * `onLayout` on any drawn element: the rect a layout pass gave it, in its
+ * own logical pixels — `x`/`y` the position **within the parent as laid
+ * out**, which scrolling does not move. Reported after the first layout and
+ * then only when it changes, deferred past the pass so state set from it is
+ * safe. See docs/react-features.md#measuring-a-node.
+ */
+export interface LayoutEvent {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** `<box onViewport>` — fired from layout, not from scrolling. */
 export interface ViewportEvent {
   width: number;

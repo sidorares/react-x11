@@ -137,6 +137,16 @@ stay inside it, focus is restored when it unmounts), `disabled` (never
 focusable, and the trigger for a `:disabled` style block), and the event
 handlers listed in [events.md](events.md).
 
+`onLayout` is the one handler that reports layout rather than input: after a
+layout pass moved or resized the element it gets `{x, y, width, height}` in
+logical pixels — the position within the parent _as laid out_, so a scroll
+does not fire it — once after the first layout and then only when something
+changed. It arrives after the pass, so state set from it is safe. It is how
+a component reacts to its size when the reaction is not a style
+([react-features.md](react-features.md#measuring-a-node)); where it is one,
+a `'@container'` block answers in the same frame
+([styling.md](styling.md#container-queries)).
+
 Every element also takes `role` and the `aria-*` props — the web's
 accessibility vocabulary, read by the built-in AT-SPI bridge so screen
 readers see the tree. They are inert where no assistive technology is
@@ -1005,7 +1015,9 @@ pixels, and so is an arrow key ([events.md](events.md#wheel)).
 list nobody has scrolled yet. That is what a virtualized list needs before
 it can decide how many rows are worth building: layout runs on the frame
 clock, after the commit that mounted the node, so an effect cannot read the
-size off the ref. `Table` is built on it.
+size off the ref. `Table` is built on it. `onLayout`
+([Interaction props](#interaction-props)) is the same signal on any element;
+`onViewport` adds the content size a scroller measures.
 
 `scrollIntoView(node)` scrolls the minimum amount that makes a descendant
 node fully visible, and is safe to call from an effect right after that

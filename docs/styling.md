@@ -1137,6 +1137,12 @@ threshold (a scroll, a hover, a resize between two breakpoints) pays one
 size read per container and nothing else. A frame where one does pays what
 the same change would have cost had React made it.
 
+When what depends on the size is not a style — how many rows to build, which
+component to render — the same size reaches React through `onLayout` on any
+element ([react-features.md](react-features.md#measuring-a-node)). It
+arrives after the pass, so the reaction lands a frame later than a block
+would; that is the reason to write a style as a block where one can.
+
 ### A block must not move the size it asks about
 
 CSS makes this impossible by construction: `container-type: inline-size` is

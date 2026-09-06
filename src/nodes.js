@@ -4012,9 +4012,56 @@ export class Node {
       this.yoga.getComputedWidth(),
       this.yoga.getComputedHeight(),
     );
+    if (this.props.onLayout) this._reportLayout();
     for (const child of this.children) {
       if (!child.isWindow) child.absolutize(this.abs.x, this.abs.y);
     }
+  }
+
+  /**
+   * `onLayout`: the rect a layout pass gave this node, reported when it
+   * changed — React Native's contract, and the seam for a decision that is
+   * not a style (docs/react-features.md): how many columns to build, which
+   * component to render. Where the decision *is* a style, a container
+   * query answers it in the same frame instead (docs/styling.md).
+   *
+   * `x`/`y` are the position **within the parent as laid out** — yoga's
+   * answer, which a scroll does not move — rather than the window
+   * coordinates `abs` holds: a list scrolling under the pointer must not
+   * re-render every row on every notch. Logical pixels, this node's own,
+   * the same division `measure()` makes.
+   *
+   * Deferred, like `onViewport`: this runs inside the layout pass, and a
+   * `setState` from the handler would re-enter it. One report per frame,
+   * because `absolutize` runs once, after the container blocks have
+   * settled — a card whose block changed its height reports the height it
+   * ended the frame at, not the one it had between passes.
+   */
+  _reportLayout() {
+    const s = this.scale;
+    const next = {
+      x: this.yoga.getComputedLeft() / s,
+      y: this.yoga.getComputedTop() / s,
+      width: this.abs.width / s,
+      height: this.abs.height / s,
+    };
+    const last = this._lastLayout;
+    if (
+      last &&
+      last.x === next.x &&
+      last.y === next.y &&
+      last.width === next.width &&
+      last.height === next.height
+    ) {
+      return;
+    }
+    this._lastLayout = next;
+    setImmediate(() => {
+      // the handler as it is *now*: React may have re-rendered in between
+      const notify = this.props.onLayout;
+      if (this.destroyed || !notify) return;
+      callHandler(this, 'onLayout', notify, next);
+    });
   }
 
   /**
@@ -6364,6 +6411,7 @@ export const Scrollable = (Base) =>
         this.yoga.getComputedWidth(),
         this.yoga.getComputedHeight(),
       );
+      if (this.props.onLayout) this._reportLayout();
       this._absolutizeChildren(this.abs.x, this.abs.y);
     }
 
