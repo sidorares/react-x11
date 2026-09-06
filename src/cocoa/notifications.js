@@ -54,7 +54,22 @@ export class CocoaNotifications {
     return s?.available === true;
   }
 
-  /** Ask once; the system remembers, and so does this. */
+  /**
+   * Ask once; the system remembers, and so does this.
+   *
+   * Three answers, not two. `granted` and `denied` are the obvious pair, and
+   * `unasked` is the one that matters: a falsy `granted` does **not** mean
+   * the user said no. A bundle Launch Services has never registered — an
+   * ad-hoc signature in a temp directory, say — gets no prompt at all, and
+   * the request comes back refused with the status still `notDetermined`.
+   * Calling that a refusal would tell the user they declined something they
+   * were never shown, and would stop a ladder that has every right to carry
+   * on: nobody has turned anything off. So the status is read again
+   * afterwards, and it is the system, not the boolean, that says which
+   * happened.
+   *
+   * @returns {Promise<'granted'|'denied'|'unasked'>}
+   */
   async _authorize() {
     if (this._authorized != null) return this._authorized;
     const s = await this.settings();
@@ -62,23 +77,37 @@ export class CocoaNotifications {
       s.authorizationStatus === 'authorized' ||
       s.authorizationStatus === 'provisional'
     ) {
-      this._authorized = true;
-      return true;
+      this._authorized = 'granted';
+      return this._authorized;
     }
     if (s.authorizationStatus === 'denied') {
-      this._authorized = false;
-      return false;
+      this._authorized = 'denied';
+      return this._authorized;
     }
-    this._authorized = await new Promise((resolve) => {
+    const granted = await new Promise((resolve) => {
       try {
         this._native.requestNotificationAuthorization(
           ['alert', 'sound', 'badge'],
-          (granted) => resolve(Boolean(granted)),
+          (ok) => resolve(Boolean(ok)),
         );
       } catch {
         resolve(false);
       }
     });
+    if (granted) {
+      this._authorized = 'granted';
+      return this._authorized;
+    }
+    // Refused — by the user, or by a system that never asked one. The prompt
+    // moves the status off `notDetermined`; nothing else does.
+    this._settings = null;
+    const after = await this.settings();
+    if (after.authorizationStatus === 'notDetermined') {
+      // Not cached: a later post, from a bundle the system has since
+      // registered, deserves the prompt this one never got.
+      return 'unasked';
+    }
+    this._authorized = 'denied';
     return this._authorized;
   }
 
@@ -113,8 +142,16 @@ export class CocoaNotifications {
     return props;
   }
 
+  /**
+   * Post, if the user has allowed it.
+   *
+   * `null` rather than a throw when the centre could not ask (see
+   * `_authorize`): the ladder reads that as "this rung cannot serve" and
+   * moves on. A real refusal still throws, because it is an answer.
+   */
   async post(options) {
-    if (!(await this._authorize())) {
+    const auth = await this._authorize();
+    if (auth === 'denied') {
       const err = new Error(
         'react-x11: notifications are not allowed for this app — the user ' +
           'declined them in System Settings › Notifications.',
@@ -122,6 +159,7 @@ export class CocoaNotifications {
       err.name = 'NotificationsDeniedError';
       throw err;
     }
+    if (auth !== 'granted') return null;
     const handle = new CocoaHandle(this, options);
     await handle._post({});
     return handle;

@@ -500,9 +500,19 @@ export async function notify(options = {}) {
   if (want('cocoa')) {
     const centre = centreFor(options);
     if (centre && (await centre.available())) {
-      return centre.post(options);
-    }
-    if (backend === 'cocoa') {
+      const handle = await centre.post(options);
+      if (handle) return handle;
+      // The bundle is right and the centre is there, but the system never
+      // put the prompt in front of anybody, so nobody declined: not the
+      // refusal above, and no reason to stop. The ladder moves on.
+      if (backend === 'cocoa') {
+        throw new NoNotificationServiceError(
+          "backend: 'cocoa' — the centre could not ask for authorization " +
+            '(the status is still notDetermined). A bundle macOS has not ' +
+            'registered never gets the prompt (docs/notifications.md).',
+        );
+      }
+    } else if (backend === 'cocoa') {
       throw new NoNotificationServiceError(
         "backend: 'cocoa' — no notification centre here: the tree is not " +
           'on the cocoa backend, the bridge is older than 0.5, or this ' +

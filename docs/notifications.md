@@ -102,6 +102,16 @@ app's notifications has said something, and `notify()` rejects with the
 platform's error (`NotificationsDeniedError`) rather than posting through
 `osascript` by a side door.
 
+**A refusal is an answer; a prompt nobody saw is not.** The two look identical
+from the call — the authorization request comes back refused either way — so
+the rung reads the status again afterwards, because only a prompt moves it off
+`notDetermined`. A bundle macOS has not registered (an ad-hoc signature in a
+temp directory is the usual way to meet this) never gets the prompt, and
+reporting that as a denial would tell the user they declined something they
+were never shown. Nobody has turned anything off, so the ladder carries on to
+`osascript`; only `backend: 'cocoa'` turns it into an error, and that one says
+`notDetermined` rather than blaming the user.
+
 Which is why an app that counts progress should ask before it decides. `examples/notify.jsx` (`npm run examples:notify`) is a download manager built around exactly that: it posts one banner and updates it in place where the rung can, and on `osascript` or `notify-send` stays quiet and posts once at the end, because posting per step there would be four banners for one download.
 
 ## The bundle, on macOS

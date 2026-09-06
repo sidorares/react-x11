@@ -252,9 +252,15 @@ function fakeNative({
   available = true,
   authorization = 'notDetermined',
   grant = true,
+  // What the system does to the status when it refuses the request. The real
+  // one moves it to 'denied' when the user answers the prompt, and leaves it
+  // at 'notDetermined' when there was no prompt to answer (an unregistered
+  // bundle) — the two the rung has to tell apart.
+  statusAfterRefusal = 'denied',
 } = {}) {
   let cb = null;
   let seq = 0;
+  let status = authorization;
   const base = {
     calls: [],
     of: (name) =>
@@ -271,13 +277,15 @@ function fakeNative({
       setImmediate(() =>
         done(
           available
-            ? { available: true, authorizationStatus: authorization }
+            ? { available: true, authorizationStatus: status }
             : { available: false, bundleIdentifier: null, reason: 'bare' },
         ),
       );
     },
     requestNotificationAuthorization(options, done) {
       base.calls.push(['requestNotificationAuthorization', options]);
+      if (grant) status = 'authorized';
+      else status = statusAfterRefusal;
       setImmediate(() => done(grant, null));
     },
     setNotificationCategories(categories) {
@@ -435,6 +443,48 @@ describe('the cocoa centre', () => {
       (err) => err.name === 'NotificationsDeniedError',
     );
     assert.equal(await notificationBackend({ app }), 'cocoa');
+  });
+
+  test('answering the prompt with no is a refusal, and is reported', async () => {
+    // the user was asked and said no: the system moves the status to denied
+    const native = fakeNative({ grant: false, statusAfterRefusal: 'denied' });
+    const app = appOver(native);
+    await assert.rejects(
+      () => notify({ app, summary: 'x' }),
+      (err) => err.name === 'NotificationsDeniedError',
+    );
+  });
+
+  test('a prompt that never appeared is not a refusal — the ladder moves on', async () => {
+    // An unregistered bundle gets no prompt: the request comes back refused
+    // with the status still notDetermined. Nobody declined anything, so
+    // claiming a denial would be a lie and stopping would be wrong.
+    const native = fakeNative({
+      grant: false,
+      statusAfterRefusal: 'notDetermined',
+    });
+    const app = appOver(native);
+
+    await withNoBus(async () => {
+      // withNoBus puts us on a Linux box, so the rung below is notify-send
+      await withFakeChild({ 'notify-send': '7' }, async () => {
+        const handle = await notify({ app, summary: 'x', body: 'y' });
+        assert.equal(handle.backend, 'notify-send', 'it fell through, quietly');
+      });
+    });
+    assert.deepEqual(
+      native.of('postNotification'),
+      [],
+      'nothing was posted on the centre',
+    );
+
+    // and asking for that rung by name says why, rather than reporting a refusal
+    await assert.rejects(
+      () => notify({ app, backend: 'cocoa', summary: 'x' }),
+      (err) =>
+        err.name === 'NoNotificationServiceError' &&
+        /notDetermined/.test(err.message),
+    );
   });
 
   test('a bare process — no bundle — is unavailable, and the ladder moves on', async () => {
