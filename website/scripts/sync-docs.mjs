@@ -193,6 +193,7 @@ const ORDER = [
   'filedialog.md',
   'eyedropper.md',
   'permissions.md',
+  'notifications.md',
   'appearance.md',
   'system.md',
   'remote.md',

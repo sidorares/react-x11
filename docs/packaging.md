@@ -1,15 +1,16 @@
 # Packaging and distribution
 
-Four ways to ship a react-x11 app, cheapest first. Every recipe here was
+Five ways to ship a react-x11 app, cheapest first. Every recipe here was
 run; where something does not work, the reason is measured rather than
 guessed.
 
-| tier                            | works                      | cost                           |
-| ------------------------------- | -------------------------- | ------------------------------ |
-| 1. plain `npm install`          | yes                        | a `node_modules` on the target |
-| 2. a single `.mjs`              | yes, with one esbuild flag | one file, ~7 MB                |
-| 3. Node single executable (SEA) | yes, as CommonJS           | one file, ~142 MB              |
-| 4. AppImage / `.deb`            | yes, wrapping tier 1 or 2  | packaging metadata             |
+| tier                            | works                      | cost                            |
+| ------------------------------- | -------------------------- | ------------------------------- |
+| 1. plain `npm install`          | yes                        | a `node_modules` on the target  |
+| 2. a single `.mjs`              | yes, with one esbuild flag | one file, ~7 MB                 |
+| 3. Node single executable (SEA) | yes, as CommonJS           | one file, ~142 MB               |
+| 4. AppImage / `.deb`            | yes, wrapping tier 1 or 2  | packaging metadata              |
+| 5. a macOS `.app`               | yes, wrapping tier 1 or 2  | a plist, and a signing identity |
 
 ## Tier 1 — `npm install`
 
@@ -156,6 +157,89 @@ metadata rather than anything about JavaScript.
 Nothing here is react-x11-specific — any Node desktop app packages the same
 way — which is why this section is short rather than absent.
 
+## Tier 5 — a macOS `.app`
+
+The cocoa backend's counterpart to tier 4, and the same shape: a wrapper
+around tier 1 or tier 2 whose content is metadata. It matters more than it
+looks, because several integrations are not features you enable but things
+macOS grants **a bundle** and refuses a loose executable — the notification
+centre first among them ([notifications.md](notifications.md)).
+
+```sh
+APP=Downloads.app
+mkdir -p $APP/Contents/MacOS
+cp "$(command -v node)" $APP/Contents/MacOS/Downloads   # a copy, not a script
+cat > $APP/Contents/Info.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Downloads</string>
+  <key>CFBundleExecutable</key><string>Downloads</string>
+  <key>CFBundleIdentifier</key><string>com.example.downloads</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+
+codesign --force --sign - $APP          # ad-hoc; see the signature note below
+$APP/Contents/MacOS/Downloads app.mjs   # or app.cjs from tier 3
+```
+
+**The executable must be the real binary, in `Contents/MacOS/`.** A shell
+script that execs node from elsewhere does not work: `NSBundle.mainBundle` is
+resolved from the running executable's own path, so the bundle the system
+sees would be node's location, not yours. Copy the binary in (or ship a tier
+3 SEA, which is one file and wants to live there anyway).
+
+What the bundle changes, measured with the same script run both ways:
+
+|                                           | inside the `.app`       | bare `node`        |
+| ----------------------------------------- | ----------------------- | ------------------ |
+| `notificationSettings().bundleIdentifier` | `com.example.downloads` | `null`             |
+| the notification centre                   | `available: true`       | `available: false` |
+| `notificationBackend()`                   | `'cocoa'`               | `'osascript'`      |
+
+Everything that keys off a bundle id follows the first column: the app's own
+name in the menu bar rather than "node", a Dock tile that is yours to badge
+([desktop.md](desktop.md)), `activationPolicy` meaning something, and URL
+schemes and document types you can declare in the same plist and receive as
+Apple Events ([uri-schemes.md](uri-schemes.md)).
+
+### The signature is the part that bites
+
+An **ad-hoc signature (`--sign -`) is enough to be a bundle, and not enough to
+post a notification.** With one, the centre reports `available: true` and
+every authorization request fails with `UNErrorDomain` code 1
+(`notificationsNotAllowed`) — the prompt never appears, the status stays
+`notDetermined`, and `usernotificationsd` logs nothing at all, so the system
+never registered the app as a notification client. Measured here as not the
+cause: registering with `lsregister -f`, launching through `open -a` instead
+of exec'ing the binary, `activationPolicy: 'regular'` with a real window on
+screen, and re-signing with the hardened runtime and node's own entitlements.
+None of them move it.
+
+The remaining variable is the identity itself — a real Apple Development or
+Developer ID certificate, which a free Apple ID gets you through Xcode:
+
+```sh
+security find-identity -v -p codesigning        # pick one
+codesign --force --sign "Apple Development: you@example.com (TEAMID)" $APP
+```
+
+That is the documented requirement and the untested one, because the machine
+this page was measured on has no signing identity. If you have a certificate
+and it still refuses, that is worth an issue rather than a workaround.
+
+Until then the ladder does the right thing on its own: `notify()` falls
+through to `osascript`, which delivers real banners attributed to Script
+Editor, and `useNotifier().backend` says `osascript` so an app can tell the
+difference ([notifications.md](notifications.md)). Nothing else about the
+bundle depends on the certificate.
+
 ## Checklist
 
 - Pick the format deliberately: `--format=esm` (tier 2, needs the banner) or
@@ -164,6 +248,8 @@ way — which is why this section is short rather than absent.
 - Do not ship `.Xauthority`, and do not bake `DISPLAY` into an image —
   [security.md](security.md).
 - Set `wmClass` and match it in `StartupWMClass`.
+- On macOS, ship a `.app` (tier 5) rather than a bare executable, and sign it
+  with a real identity if you want the notification centre.
 - Test on a display you did not develop on. Fonts are the usual surprise:
   family resolution goes through `fc-match`, so `sans-serif` is a different
   face on the target ([remote.md](remote.md#the-other-x-servers), issue #86).

@@ -18,6 +18,9 @@ import type { RefreshOptions } from 'react-x11/refresh/loader';
 import type {
   AbortSignalLike,
   PermissionStatus,
+  NotificationBackend,
+  NotificationCloseReason,
+  NotificationHandle,
   BusHandle,
   BusKind,
   BusRef,
@@ -49,6 +52,10 @@ import {
   permissionStatus,
   requestPermission,
   usePermission,
+  NoNotificationServiceError,
+  notificationBackend,
+  notify,
+  useNotifier,
   Checkbox,
   closeBus,
   Icon,
@@ -1306,6 +1313,26 @@ function _DeepLinks() {
     void NoPermissionServiceError;
     // @ts-expect-error — not a kind
     await permissionStatus('bluetooth');
+    const banner: NotificationHandle = await notify({
+      summary: 'Export finished',
+      body: 'report.pdf',
+      urgency: 'normal',
+      actions: [{ key: 'open', label: 'Open' }],
+      onAction: (key: string) => void key,
+      onClose: (reason: NotificationCloseReason) => void reason,
+    });
+    await banner.update({ body: 'opened' });
+    await banner.close();
+    const notifRung: NotificationBackend | null = await notificationBackend();
+    const notifier = useNotifier({ urgency: 'low' });
+    void notifier.available;
+    void notifier.backend;
+    void notifRung;
+    void NoNotificationServiceError;
+    // @ts-expect-error — a summary is required
+    await notify({ body: 'no summary' });
+    // @ts-expect-error — not an urgency
+    await notify({ summary: 'x', urgency: 'loud' });
     activateWindow(0x1a00007, { timestamp: null, source: 2 });
     // @ts-expect-error — EWMH names two source indications
     activateWindow(win, { source: 3 });

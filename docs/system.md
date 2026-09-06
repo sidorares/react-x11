@@ -373,14 +373,15 @@ netlink, and the honest version of the API would be a hint rather than a fact �
 a failed request is always the better truth than a flag that says the link is
 up. Not ruled out; not built.
 
-**Battery, brightness, volume, media keys, notifications, a tray icon.** These
-are D-Bus services a third party can wrap without anything from here.
-Notifications and StatusNotifierItem are the two with a claim on core, because
-they are desktop standards rather than one vendor's service — and the tray in
-particular is cheap here, since its menu is [dbusmenu](globalmenu.md), which
-this renderer already speaks. On the cocoa backend the tray is here —
-[`useTray()`](desktop.md), over `NSStatusItem` — and the freedesktop half
-is tracked in [#353](https://github.com/sidorares/react-x11/issues/353).
+**Battery, brightness, volume, media keys.** These are D-Bus services a third
+party can wrap without anything from here. Two things once on this list — the
+two desktop standards with a claim on core — are now built: **notifications**
+([notifications.md](notifications.md)), and the **tray**, whose menu is
+[dbusmenu](globalmenu.md) this renderer already speaks — on the cocoa backend
+[`useTray()`](desktop.md) over `NSStatusItem`
+([#463](https://github.com/sidorares/react-x11/issues/463)), with the
+freedesktop StatusNotifierItem half still tracked in
+[#353](https://github.com/sidorares/react-x11/issues/353).
 
 **A launcher badge, and permission prompts.** An unread count on the icon
 (freedesktop `com.canonical.Unity.LauncherEntry`, one D-Bus signal; macOS
