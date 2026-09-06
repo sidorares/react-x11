@@ -10,6 +10,8 @@ export {
   registerApplication,
 } from './application.js';
 export { useAppActivate, useAppOpen } from './apphooks.js';
+export { setBadge } from './launcher.js';
+export { useBadge, useDockMenu } from './launcherhooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';

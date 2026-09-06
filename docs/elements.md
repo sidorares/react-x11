@@ -540,7 +540,11 @@ a dialog wants a handler:
 `skip_pager`, `hidden`, `fullscreen`, `above`, `below`, `demands_attention`,
 `focused`. `fullscreen` and `alwaysOnTop` are boolean sugar for the two
 everyone reaches for — `fullscreen` and `above` — and they union with
-`states` rather than competing with it.
+`states` rather than competing with it. On the [cocoa backend](macos.md)
+`demands_attention` is the one with a verb today — it bounces the Dock icon
+until the app is activated, and stops when the state is removed
+([desktop.md](desktop.md)); the rest are inert there until the bridge grows
+zoom, miniaturize and fullscreen.
 
 ```jsx
 <window

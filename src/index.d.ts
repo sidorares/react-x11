@@ -25,6 +25,7 @@ export * from './types/screencolor.js';
 export * from './types/appearance.js';
 export * from './types/fonts.js';
 export * from './types/system.js';
+export * from './types/launcher.js';
 
 /**
  * The XID of the X11 window a ref points at, or `null` if there is not one
@@ -191,17 +192,23 @@ export interface RootOptions {
    * as the bridge reports it, 16 where the OS cannot say. A number here
    * applies to every window instead. `pumpInterval` is the AppKit event
    * pump's cadence, in ms (8 by default), which is the floor under input
-   * latency. `exitOnQuit` (default `true`) ends the process once a quit
-   * request — the Dock's Quit, ⌘Q, a logout — has closed the app: the
-   * request routes through the primary window's close request first, so
-   * `onCloseRequest` there is where an app intercepts it; `false` is for an
-   * embedder that owns the process's lifetime. Ignored off macOS and when
-   * {@link RootOptions.app} is passed.
+   * latency. `appName` is what the Dock, ⌘-Tab and the app menu print for
+   * an unbundled process (a bundle's Info.plist wins); `activationPolicy`
+   * is `'regular'` (a Dock tile, a ⌘-Tab entry — the default),
+   * `'accessory'` (a menu-bar app: windows but no tile) or `'prohibited'`,
+   * fixed before the app finishes launching. `exitOnQuit` (default `true`)
+   * ends the process once a quit request — the Dock's Quit, ⌘Q, a logout —
+   * has closed the app: the request routes through the primary window's
+   * close request first, so `onCloseRequest` there is where an app
+   * intercepts it; `false` is for an embedder that owns the process's
+   * lifetime. Ignored off macOS and when {@link RootOptions.app} is passed.
    */
   cocoa?: {
     presenter?: 'surface' | 'layers';
     frameInterval?: number;
     pumpInterval?: number;
+    appName?: string;
+    activationPolicy?: 'regular' | 'accessory' | 'prohibited';
     exitOnQuit?: boolean;
   };
   /**

@@ -51,6 +51,41 @@ function keyEquivalent(shortcut) {
   return { key: key.toLowerCase(), modifiers: modifiers || FLAG_COMMAND };
 }
 
+/**
+ * A dbusmenu snapshot (`snapshot()`'s `Map<id, node>`) as the bridge's menu
+ * item spec — the vocabulary `setMainMenu`, `setDockMenu` and a status
+ * item's menu all take, so the menu bar, the Dock menu and the tray are one
+ * builder. `ids` defaults to the root's children.
+ */
+export function menuItemsSpec(nodes, ids = nodes.get(ROOT_ID).childIds) {
+  return ids.map((id) => {
+    const node = nodes.get(id);
+    const props = node.props;
+    const out = { id };
+    if (props.type === 'separator') {
+      out.separator = true;
+      if (props.visible === false) out.hidden = true;
+      return out;
+    }
+    out.title = String(props.label ?? '');
+    if (props.enabled === false) out.enabled = false;
+    if (props.visible === false) out.hidden = true;
+    if (props['toggle-state'] === 1) out.checked = true;
+    // the serialisable icon pair (menuitem.js): the name is read in the
+    // platform's icon theme — SF Symbols here, freedesktop on a Linux panel
+    // — and the bytes are the literal-pixel fallback
+    if (props['icon-name']) out.iconName = props['icon-name'];
+    if (props['icon-data']) out.iconData = props['icon-data'];
+    const key = keyEquivalent(props.shortcut);
+    if (key) {
+      out.key = key.key;
+      out.modifiers = key.modifiers;
+    }
+    if (node.childIds.length) out.items = menuItemsSpec(nodes, node.childIds);
+    return out;
+  });
+}
+
 export class CocoaGlobalMenuExport {
   constructor(app, { getMenus, onSelect, onAboutToShow, target, onChange }) {
     this.app = app;
@@ -93,35 +128,7 @@ export class CocoaGlobalMenuExport {
    * `activate` like every real item.
    */
   _spec() {
-    const itemsOf = (ids) =>
-      ids.map((id) => {
-        const node = this.nodes.get(id);
-        const props = node.props;
-        const out = { id };
-        if (props.type === 'separator') {
-          out.separator = true;
-          if (props.visible === false) out.hidden = true;
-          return out;
-        }
-        out.title = String(props.label ?? '');
-        if (props.enabled === false) out.enabled = false;
-        if (props.visible === false) out.hidden = true;
-        if (props['toggle-state'] === 1) out.checked = true;
-        // the serialisable icon pair (menuitem.js): the name is read in
-        // the platform's icon theme — SF Symbols here, freedesktop on a
-        // Linux panel — and the bytes are the literal-pixel fallback
-        if (props['icon-name']) out.iconName = props['icon-name'];
-        if (props['icon-data']) out.iconData = props['icon-data'];
-        const key = keyEquivalent(props.shortcut);
-        if (key) {
-          out.key = key.key;
-          out.modifiers = key.modifiers;
-        }
-        if (node.childIds.length) out.items = itemsOf(node.childIds);
-        return out;
-      });
-    const root = this.nodes.get(ROOT_ID);
-    const menus = itemsOf(root.childIds).map((menu) => ({
+    const menus = menuItemsSpec(this.nodes).map((menu) => ({
       title: menu.title ?? '',
       items: menu.items ?? [],
     }));
