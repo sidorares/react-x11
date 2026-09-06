@@ -995,6 +995,11 @@ window. The alternative an app would otherwise write, `setInterval` →
 damage heuristics decide, at a cadence unrelated to when the window can
 present.
 
+On the macOS layer presenter a loop — or a transition — on a plain box's
+colour, border width or radius is handed to Core Animation instead and
+costs no frames at all; anything else runs as above
+([macos.md](macos.md#animations-and-transforms-the-api-the-model-unlocks)).
+
 **And it stops itself**, which is the whole reason this is core's job. A
 forever-loop keeping a frame clock alive is invisible when it is wrong, so
 every way of going off the screen is wired to it:

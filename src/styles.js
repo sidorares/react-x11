@@ -788,6 +788,23 @@ const EASINGS = {
 
 export const EASING_NAMES = Object.freeze(Object.keys(EASINGS));
 
+/**
+ * The same curves as cubic-bezier control points, for a presenter whose
+ * render server evaluates them itself (src/cocoa/presenter.js). The two
+ * evaluators have to agree on one declaration, and they do: each polynomial
+ * above and its bezier twin differ by at most 0.01 over the unit interval
+ * (test/style.test.js pins it). Core Animation's *named* curves are not
+ * these — its `easeOut` is (0, 0, 0.58, 1), 0.22 away from `ease` at
+ * t = 0.35 — which is why the presenter sends points rather than names. A
+ * new easing lands in both tables or in neither.
+ */
+export const EASING_CONTROL_POINTS = Object.freeze({
+  linear: Object.freeze([0, 0, 1, 1]),
+  'ease-in': Object.freeze([0.32, 0, 0.67, 0]),
+  'ease-out': Object.freeze([0.33, 1, 0.68, 1]),
+  'ease-in-out': Object.freeze([0.65, 0, 0.35, 1]),
+});
+
 /** A value that is still a `$token` reference, or mentions one. */
 const unresolvedValue = (v) => isToken(v) || mentionsToken(v);
 
@@ -1119,6 +1136,8 @@ export function tint(color, alpha) {
 // ease-out cubic: fast to start, settles gently — the shape almost every UI
 // toolkit defaults to for state changes
 export const ease = (t) => 1 - (1 - t) ** 3;
+/** …and the same curve as control points, for the presenter (above). */
+export const TRANSITION_CONTROL_POINTS = EASING_CONTROL_POINTS['ease-out'];
 
 /**
  * Theme tokens. A style value of `'$name'` resolves against the nearest

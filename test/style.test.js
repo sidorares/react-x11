@@ -1235,3 +1235,48 @@ test('a popup written under a theme does not trip the no-theme warning', async (
 
   await x11Root.unmount();
 });
+
+test("each named easing is its cubic-bezier twin, and the transition curve is not CA's named one", async () => {
+  const {
+    EASING_CONTROL_POINTS,
+    TRANSITION_CONTROL_POINTS,
+    animationsOf,
+    ease,
+  } = await import('../src/styles.js');
+  // cubic-bezier(x1, y1, x2, y2) at x, the way a browser (or the render
+  // server) evaluates it: solve the x polynomial for t, then read y
+  const bezier = (x1, y1, x2, y2) => {
+    const poly = (a1, a2, t) =>
+      ((1 - 3 * a2 + 3 * a1) * t * t + (3 * a2 - 6 * a1) * t + 3 * a1) * t;
+    return (x) => {
+      let lo = 0;
+      let hi = 1;
+      let t = x;
+      for (let i = 0; i < 40; i++) {
+        t = (lo + hi) / 2;
+        if (poly(x1, x2, t) < x) lo = t;
+        else hi = t;
+      }
+      return poly(y1, y2, t);
+    };
+  };
+  const apart = (f, g) => {
+    let max = 0;
+    for (let i = 0; i <= 200; i++) {
+      const t = i / 200;
+      max = Math.max(max, Math.abs(f(t) - g(t)));
+    }
+    return max;
+  };
+  for (const [name, points] of Object.entries(EASING_CONTROL_POINTS)) {
+    const [spec] = animationsOf({
+      left: 0,
+      animation: { left: { to: 1, duration: 1000, easing: name } },
+    });
+    assert.ok(apart(spec.ease, bezier(...points)) < 0.01, name);
+  }
+  assert.ok(apart(ease, bezier(...TRANSITION_CONTROL_POINTS)) < 0.01);
+  // Core Animation's named easeOut is (0, 0, 0.58, 1): a different curve,
+  // which is why the presenter sends points rather than a name
+  assert.ok(apart(ease, bezier(0, 0, 0.58, 1)) > 0.2);
+});

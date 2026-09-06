@@ -234,9 +234,11 @@ export interface DesktopSettings {
   readonly doubleClickDistance: number;
   /** How far a press moves before it is a drag rather than a click. */
   readonly dragThreshold: number;
-  /** `'xsettings'`, or null where no settings daemon answered and these are
-   *  the renderer's own defaults. */
-  readonly source: 'xsettings' | 'test' | null;
+  /** `'xsettings'`; `'macos'` on the Cocoa backend, where only `animations`
+   *  comes from the system (reduce motion) and the rest are the defaults; or
+   *  null where no settings daemon answered and these are the renderer's own
+   *  defaults. */
+  readonly source: 'xsettings' | 'macos' | 'test' | null;
 }
 
 /**

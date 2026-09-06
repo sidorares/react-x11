@@ -93,16 +93,22 @@ export class CocoaWindow {
 
     // The retained layer presenter (docs/macos.md Tier L), behind
     // REACT_X11_COCOA_PRESENTER=layers while the surface path is the
-    // measured default. Its two hooks exist only in this mode, so the
-    // feature detection in nodes.js keeps the surface path byte-identical;
-    // the scroll blit is shadowed off because a layer frame has no backing
-    // bitmap to blit.
+    // measured default. Its hooks exist only in this mode, so the feature
+    // detection in nodes.js keeps the surface path byte-identical; the
+    // scroll blit is shadowed off because a layer frame has no backing
+    // bitmap to blit. The last two are the animation seam: a transition or
+    // a loop the presenter takes runs in the render server and schedules no
+    // frames here (docs/architecture/animation.md §4).
     if (app._presenterMode === 'layers') {
       this._presenter = new CocoaLayerPresenter(this);
       this.presentFrame = (windowNode) => this._presenter.frame(windowNode);
       this.noteInvalidate = (damage, layoutChanged) =>
         this._presenter.noteInvalidate(damage, layoutChanged);
       this.scrollRegion = null;
+      this.animateNode = (node, prop, entry) =>
+        this._presenter.animate(node, prop, entry);
+      this.cancelNodeAnimation = (node, prop) =>
+        this._presenter.cancel(node, prop);
     }
     app._registerWindow(this);
   }
