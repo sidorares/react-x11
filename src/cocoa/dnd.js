@@ -44,6 +44,7 @@
 // identifier for a MIME type no declared type claims is computed alike by
 // every process — how `application/x-myapp-…` travels between two react-x11
 // apps) and back (`pasteboardTypeInfo`).
+import { runWithPriority, DiscreteEventPriority } from '../priority.js';
 import {
   TEXT_TARGETS,
   TYPE_GROUPS,
@@ -254,6 +255,15 @@ export class CocoaDropTransport {
     this.session = session;
     this.node = node;
     this._registered = null;
+    // AppKit tracks the whole drag on this thread: the pump does not return
+    // until the drop, so nothing an enter/over dispatch schedules — a
+    // `useDropTarget` lighting its "drop here" label, any handler's
+    // `setState` — has a frame tick or a microtask to land on. Discrete is
+    // the one lane the app can land by hand from inside the callback
+    // (src/cocoa/app.js `_afterInput`), which is where the answer to
+    // AppKit's question is painted. The renderer's own `:drag-over` needs
+    // none of this and never did.
+    session.hoverPriority = DiscreteEventPriority;
     this.refreshTypes();
   }
 
@@ -326,7 +336,8 @@ export class CocoaDropTransport {
 
   _leave(ev) {
     const drag = this._local(ev);
-    this.session.localLeave();
+    // the leaving half of the same stream, in the same lane as the enter
+    runWithPriority(DiscreteEventPriority, () => this.session.localLeave());
     if (drag) drag.accepted = false;
   }
 

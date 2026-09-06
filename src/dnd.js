@@ -258,6 +258,13 @@ export class DropSession {
     // FIFO gate: messages queue behind atom interning and XdndEnter's
     // async type-list resolution, so a Position never overtakes its Enter.
     this._chain = Promise.resolve();
+    // The lane an enter/over dispatch schedules its renders in. Continuous
+    // by default, because a drag hovering is a stream like the pointer's
+    // own and the frame clock paces it. A transport whose backend *stops*
+    // that clock for the duration of the drag raises it — the cocoa one
+    // does (src/cocoa/dnd.js), because inside AppKit's tracking loop a
+    // render scheduled for the next frame lands after the drop.
+    this.hoverPriority = ContinuousEventPriority;
     this._reset();
   }
 
@@ -470,7 +477,7 @@ export class DropSession {
       action: this.requestedAction,
       freeze: false,
     };
-    runWithPriority(ContinuousEventPriority, () => {
+    runWithPriority(this.hoverPriority, () => {
       this._updateDragPath(path, native);
       // onDragOver may override the declarative answer, synchronously —
       // same latency budget as any event handler, no render awaited
@@ -1258,20 +1265,6 @@ export class DragSession {
       Array.isArray(actions) && actions.length > 0 ? actions : ['copy'];
     this.currentAction = this.actions[0];
     this._resolved = new Map();
-    const ev = this.node.events.dispatch('DragStart', source, native, {
-      types: this.types,
-      action: this.currentAction,
-      source: 'internal',
-      screenX: (native.rootx ?? native.x) / this.node.events.scale,
-      screenY: (native.rooty ?? native.y) / this.node.events.scale,
-    });
-    if (ev.defaultPrevented) {
-      this._reset();
-      return false;
-    }
-    this.phase = 'dragging';
-    source.setStyleState(':dragging', true);
-    this._setCursor('grab');
     // A backend with a drag session of its own (the cocoa backend's
     // NSDraggingSession, src/cocoa/dnd.js) takes the gesture from here:
     // the pointer's motion and release stop arriving and come back as
@@ -1279,7 +1272,34 @@ export class DragSession {
     // comes through that window's destination events, routed to this
     // session's live payload by `app._activeDrag`.
     const wnd = this.node.window;
-    if (typeof wnd?.beginDrag === 'function') {
+    const nativeSession = typeof wnd?.beginDrag === 'function';
+    // …and it owns the thread for the *whole* gesture, so anything this
+    // dispatch schedules for later has no later: the `<popup dragPreview>`
+    // an `onDragStart` setState renders would otherwise be created after
+    // the drop. Discrete priority puts the update in the one lane a
+    // backend can land by hand from inside a callback (`flushSyncWork`,
+    // src/cocoa/app.js `_afterInput`). Where the frame clock keeps running,
+    // the motion this arrived on is paced like any other and the update
+    // keeps the priority the dispatcher gave it.
+    const startEvent = () =>
+      this.node.events.dispatch('DragStart', source, native, {
+        types: this.types,
+        action: this.currentAction,
+        source: 'internal',
+        screenX: (native.rootx ?? native.x) / this.node.events.scale,
+        screenY: (native.rooty ?? native.y) / this.node.events.scale,
+      });
+    const ev = nativeSession
+      ? runWithPriority(DiscreteEventPriority, startEvent)
+      : startEvent();
+    if (ev.defaultPrevented) {
+      this._reset();
+      return false;
+    }
+    this.phase = 'dragging';
+    source.setStyleState(':dragging', true);
+    this._setCursor('grab');
+    if (nativeSession) {
       this._nativeSession = true;
       this.app._activeDrag = this;
       try {
@@ -1295,7 +1315,12 @@ export class DragSession {
   }
 
   /** `drag-session-moved` on a native session: the source's `onDrag`, in
-   * global device pixels, with whether a window of ours has accepted. */
+   * global device pixels, with whether a window of ours has accepted.
+   *
+   * Discrete priority, like the start: this is the only news of the gesture
+   * that arrives while the native session owns the thread, so the render it
+   * schedules has to be landable from inside the callback. A preview that
+   * follows the pointer is exactly a render per position. */
   nativeMoved(ev) {
     if (this.phase !== 'dragging' || !this._nativeSession) return;
     const s = this.node.scale;
@@ -1312,18 +1337,20 @@ export class DragSession {
     };
     const source = this.source;
     if (source && !source.destroyed && source.props.onDrag) {
-      callHandler(
-        source,
-        'onDrag',
-        source.props.onDrag,
-        this.node.events._makeEvent('drag', native, source, {
-          types: this.types,
-          action: this.currentAction,
-          source: this.localSession ? 'internal' : 'external',
-          accepted: this.accepted,
-          screenX: rootX / this.node.events.scale,
-          screenY: rootY / this.node.events.scale,
-        }),
+      runWithPriority(DiscreteEventPriority, () =>
+        callHandler(
+          source,
+          'onDrag',
+          source.props.onDrag,
+          this.node.events._makeEvent('drag', native, source, {
+            types: this.types,
+            action: this.currentAction,
+            source: this.localSession ? 'internal' : 'external',
+            accepted: this.accepted,
+            screenX: rootX / this.node.events.scale,
+            screenY: rootY / this.node.events.scale,
+          }),
+        ),
       );
     }
   }
@@ -1343,10 +1370,20 @@ export class DragSession {
     const rootY = Math.round((ev.y ?? 0) * s);
     const operation =
       ev.operation && ev.operation !== 'none' ? ev.operation : null;
-    this._end(
-      { x: rootX - origin.x, y: rootY - origin.y, rootx: rootX, rooty: rootY },
-      ev.dropped ? operation : null,
-      Boolean(ev.dropped),
+    // the release, and the last callback before the thread comes back:
+    // `onDragEnd` takes the preview down, and that is a discrete answer to
+    // the button like any other
+    runWithPriority(DiscreteEventPriority, () =>
+      this._end(
+        {
+          x: rootX - origin.x,
+          y: rootY - origin.y,
+          rootx: rootX,
+          rooty: rootY,
+        },
+        ev.dropped ? operation : null,
+        Boolean(ev.dropped),
+      ),
     );
   }
 

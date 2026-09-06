@@ -16,6 +16,7 @@ import { cssColorStraight } from 'ntk';
 
 import { deliverActivate, deliverOpen } from '../application.js';
 import { flushPendingFrames } from '../frames.js';
+import { flushSyncWork } from '../priority.js';
 import { setCompositingForTests } from '../compositing.js';
 import { setScreensForTests } from '../screens.js';
 import { setScaleForTests } from '../scale.js';
@@ -638,9 +639,21 @@ export class CocoaApp {
     for (const wnd of this._windows.values()) wnd.present();
   }
 
-  /** After any synchronously dispatched input: paint the response now (the
-   * same early flush a discrete event gets on X11) and put it on glass. */
+  /**
+   * After any synchronously dispatched input: land React's half of the
+   * response, paint it (the same early flush a discrete event gets on X11 —
+   * `discrete` in events.js) and put it on glass.
+   *
+   * `flushSyncWork` is not belt and braces. A discrete-priority update is
+   * committed on a **microtask**, and a microtask does not run until the
+   * call that dispatched the event returns to Node — which, inside one of
+   * AppKit's modal loops (a live resize, menu tracking, a dragging
+   * session), is after the whole gesture. Without it a handler's own
+   * `setState` reaches the screen when the gesture ends, and the gesture is
+   * exactly when it was worth showing.
+   */
   _afterInput() {
+    flushSyncWork();
     flushPendingFrames();
     this._presentAll();
   }
@@ -694,10 +707,14 @@ export class CocoaApp {
       case 'drag-perform':
         return this._routeDrop(ev);
       case 'drag-session-began':
+        // `draggingSession:willBeginAtPoint:`, dispatched from inside
+        // `beginDrag` — before the `onDragStart` handler's own render has
+        // been asked for, so there is nothing to flush yet. The frame that
+        // shows the drag beginning goes out from `CocoaWindow.beginDrag`,
+        // on the way back past it.
         return undefined;
       case 'drag-session-moved':
-        this._activeDrag?.nativeMoved(ev);
-        return undefined;
+        return this._routeDragMoved(ev);
       case 'drag-session-ended':
         return this._routeDragEnded(ev);
       case 'app-open-urls':
@@ -910,6 +927,20 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
     wnd._dropTransport?.handle(ev);
+    this._afterInput();
+  }
+
+  /**
+   * `draggingSession:movedToPoint:` — the source's own view of the gesture,
+   * and the only thing that arrives while AppKit tracks it: the pointer's
+   * `mousemove` stops, `pump2` does not return until the drop, and no timer
+   * or microtask of ours runs in between. So the frame belongs to the
+   * callback, like the destination's (`_routeDrop`) — that is what lets a
+   * `<popup dragPreview>` follow the pointer, and an `onDrag` that moves an
+   * insertion marker move it during the drag rather than on the release.
+   */
+  _routeDragMoved(ev) {
+    this._activeDrag?.nativeMoved(ev);
     this._afterInput();
   }
 
