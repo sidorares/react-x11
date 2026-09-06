@@ -269,6 +269,9 @@ export class DropSession {
     this.path = [];
     // what an `ask` source offered, read once per drag (see _readAskOffer)
     this._askOffer = null;
+    // driven through the local entry points (a DragSession here, or a
+    // backend's own drop machinery) rather than the XDND wire
+    this._viaLocal = false;
     this.accepted = null;
     this.acceptedAction = 'copy';
     this.requestedAction = 'copy';
@@ -491,7 +494,13 @@ export class DropSession {
   // back as a return value instead of an XdndStatus.
 
   localOver(rootX, rootY, offer, time) {
-    this._source = 'internal';
+    // `offer.source` is what the handlers see: 'internal' for a DragSession
+    // in this process, 'external' when a backend's own drop machinery drives
+    // these same entry points for another application's drag (src/cocoa/
+    // dnd.js) — the path diffing and the dispatch are one implementation
+    // either way
+    this._source = offer.source ?? 'internal';
+    this._viaLocal = true;
     this.sourceWid = 0;
     this.types = offer.types;
     this.requestedAction = offer.action;
@@ -500,10 +509,11 @@ export class DropSession {
   }
 
   localLeave() {
-    if (this._source !== 'internal') return;
+    if (!this._viaLocal) return;
     discrete(() => this._clearPath())();
     this.accepted = null;
     this.lastPoint = null;
+    this._viaLocal = false;
     this._source = 'external';
   }
 
@@ -512,7 +522,7 @@ export class DropSession {
    * from the caller's point of view — `onDragEnd` follows immediately,
    * like the DOM's dragend after drop. */
   localDrop(offer, extras, time) {
-    this._source = 'internal';
+    this._source = offer.source ?? 'internal';
     this.types = offer.types;
     const point = this.lastPoint;
     const accepted = this.accepted;
@@ -555,6 +565,7 @@ export class DropSession {
     })();
     this.accepted = null;
     this.lastPoint = null;
+    this._viaLocal = false;
     this._source = 'external';
     return {
       handled: outcome.accept,
@@ -1186,6 +1197,7 @@ export class DragSession {
     this._atoms = null;
     this._cursor = null;
     this.ext = null;
+    this._nativeSession = false;
   }
 
   /** The pressed node (or an ancestor) is draggable: remember where, and
@@ -1219,6 +1231,7 @@ export class DragSession {
   /** Every mousemove while armed or dragging. Returns true when the drag
    * consumed the motion — the caller then skips hover and mousemove. */
   motion(native) {
+    if (this._nativeSession) return true;
     if (this.phase === 'armed') {
       const moved =
         Math.abs(native.x - this.press.x) + Math.abs(native.y - this.press.y);
@@ -1259,7 +1272,82 @@ export class DragSession {
     this.phase = 'dragging';
     source.setStyleState(':dragging', true);
     this._setCursor('grab');
+    // A backend with a drag session of its own (the cocoa backend's
+    // NSDraggingSession, src/cocoa/dnd.js) takes the gesture from here:
+    // the pointer's motion and release stop arriving and come back as
+    // `nativeMoved`/`nativeEnded`, and a drop on one of our own windows
+    // comes through that window's destination events, routed to this
+    // session's live payload by `app._activeDrag`.
+    const wnd = this.node.window;
+    if (typeof wnd?.beginDrag === 'function') {
+      this._nativeSession = true;
+      this.app._activeDrag = this;
+      try {
+        wnd.beginDrag(this);
+      } catch (err) {
+        this._nativeSession = false;
+        this.app._activeDrag = null;
+        this._reset();
+        throw err;
+      }
+    }
     return true;
+  }
+
+  /** `drag-session-moved` on a native session: the source's `onDrag`, in
+   * global device pixels, with whether a window of ours has accepted. */
+  nativeMoved(ev) {
+    if (this.phase !== 'dragging' || !this._nativeSession) return;
+    const s = this.node.scale;
+    const origin = this.node.window?._screenOrigin ?? { x: 0, y: 0 };
+    const rootX = Math.round(ev.x * s);
+    const rootY = Math.round(ev.y * s);
+    const native = {
+      x: rootX - origin.x,
+      y: rootY - origin.y,
+      rootx: rootX,
+      rooty: rootY,
+      buttons: 256,
+      time: 0,
+    };
+    const source = this.source;
+    if (source && !source.destroyed && source.props.onDrag) {
+      callHandler(
+        source,
+        'onDrag',
+        source.props.onDrag,
+        this.node.events._makeEvent('drag', native, source, {
+          types: this.types,
+          action: this.currentAction,
+          source: this.localSession ? 'internal' : 'external',
+          accepted: this.accepted,
+          screenX: rootX / this.node.events.scale,
+          screenY: rootY / this.node.events.scale,
+        }),
+      );
+    }
+  }
+
+  /** `drag-session-ended`: the release, with what the destination did. */
+  nativeEnded(ev) {
+    if (!this._nativeSession) return;
+    this._nativeSession = false;
+    if (this.app._activeDrag === this) this.app._activeDrag = null;
+    if (this.phase !== 'dragging') return this._reset();
+    const source = this.source;
+    source?.setStyleState?.(':dragging', false);
+    this.localSession?.localLeave();
+    const s = this.node.scale;
+    const origin = this.node.window?._screenOrigin ?? { x: 0, y: 0 };
+    const rootX = Math.round((ev.x ?? 0) * s);
+    const rootY = Math.round((ev.y ?? 0) * s);
+    const operation =
+      ev.operation && ev.operation !== 'none' ? ev.operation : null;
+    this._end(
+      { x: rootX - origin.x, y: rootY - origin.y, rootx: rootX, rooty: rootY },
+      ev.dropped ? operation : null,
+      Boolean(ev.dropped),
+    );
   }
 
   /** dragData values resolve once per drag: thunks are called on first
@@ -1354,6 +1442,7 @@ export class DragSession {
   /** Button release. Returns true when a drag ran (the caller suppresses
    * mouseup/click, like the DOM after a drag gesture). */
   release(native) {
+    if (this._nativeSession) return true;
     if (this.phase !== 'dragging') {
       this._reset();
       return false;

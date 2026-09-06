@@ -7,6 +7,7 @@
 // _screenOrigin. The divide-by-scale into Cocoa points happens against the
 // native layer and nowhere above it.
 import { CocoaContext2D } from './context2d.js';
+import { CocoaDropTransport, dragSpec } from './dnd.js';
 import { CocoaLayerPresenter } from './presenter.js';
 
 let nextWindowId = 1;
@@ -217,6 +218,7 @@ export class CocoaWindow {
     this.destroyed = true;
     this.mapped = false;
     this.app._unregisterWindow(this);
+    this._dropTransport = null;
     this._native.destroyWindow2(this._h);
     this._releaseBacking();
   }
@@ -245,6 +247,46 @@ export class CocoaWindow {
   setWindowType() {}
 
   setActions() {}
+
+  // --- drag and drop (src/cocoa/dnd.js) ------------------------------------
+
+  /**
+   * The drop side: nodes.js hands over the window's DropSession at realize
+   * (`_initDnd`), and from then on the app routes this window's `drag-*`
+   * events into it. Its presence on the window is what tells nodes.js the
+   * backend has drop machinery of its own.
+   */
+  attachDropTransport(session, node) {
+    this._dropTransport = new CocoaDropTransport(this, session, node);
+  }
+
+  /** A `dropAccept` came or went under this window: re-register the types. */
+  dropTargetsChanged() {
+    this._dropTransport?.refreshTypes();
+  }
+
+  registerDropTypes(types) {
+    if (this.destroyed) return;
+    this._native.registerDropTypes(this._h, types);
+  }
+
+  setDropResponse(response) {
+    if (this.destroyed) return;
+    this._native.setDropResponse(this._h, response);
+  }
+
+  /**
+   * The source side: hand a DragSession's gesture to an NSDraggingSession
+   * (see src/cocoa/dnd.js for what the spec carries). Returns at once; the
+   * session reports back as `drag-session-*` events.
+   */
+  beginDrag(session) {
+    if (this.destroyed) return null;
+    return this._native.beginDrag(
+      this._h,
+      dragSpec(session, this._native, this.scale),
+    );
+  }
 
   setTransientFor() {
     // addChildWindow attachment comes with the layer presenter phase; a
