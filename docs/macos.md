@@ -568,7 +568,18 @@ implements it over CoreText:
   attribute ranges — the nested-`<text>` model transfers directly).
 - **Metrics for yoga**: the same framesetter answers `measureContent`,
   so measure and render cannot disagree. Whole-pixel answers, per the
-  yoga content-floor rules.
+  yoga content-floor rules. **A width offer of zero is the min-content
+  question**, not a degenerate layout — it is how yoga measures the floor
+  under `minWidth: 'auto'` — and CoreText cannot be asked it directly: its
+  breaker makes progress whatever width it is given, so a paragraph offered
+  zero (or a pixel) comes back broken _inside_ its words. So the engine
+  breaks the text itself, at the UAX#14 opportunities of the same
+  `linebreak` package ntk wraps with, and has CoreText shape and measure the
+  result — one unbreakable run per line, whose widest is the longest word.
+  Both backends therefore agree on where a line may break and on what a
+  `<text>` in a flex item is allowed to shrink to
+  (`brokenAtEveryOpportunity`, src/cocoa/fonts.js;
+  test/cocoa-text-floor.test.js).
 - **Carets/hit/selection**: `CTLineGetStringIndexForPosition`,
   `CTLineGetOffsetForStringIndex`, line origins → `indexAt`,
   `caretPosition`, `rangeBands` — the `<textinput>`/selection surface,

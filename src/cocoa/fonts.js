@@ -25,6 +25,7 @@
 import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
 
+import LineBreaker from 'linebreak';
 import { cssColorStraight, Font } from 'ntk';
 
 import { loadNative } from './native.js';
@@ -142,6 +143,78 @@ class CocoaTextLayout {
   caretPosition(cp) {
     return this._native.layoutCaret(this._handle, this._cuOf(cp));
   }
+}
+
+/**
+ * What a break at the end of a run consumes: the trailing whitespace ntk's
+ * tokenizer strips — a line's width never counts it, on either engine — and
+ * a hard line break, which is an opportunity the text already spells out and
+ * must not become a second one (an empty line in the measurement).
+ */
+const RUN_TAIL = /[ \t\u00a0]*(?:\r\n|[\n\r\u2028\u2029])?[ \t\u00a0]*$/;
+
+/**
+ * The same spans with a hard break at every UAX#14 line-break opportunity,
+ * and the whitespace each break consumes dropped: one unbreakable run per
+ * line. Laid out with no width bound, the widest line is then the longest
+ * word — which is the answer to "how narrow can you be?", CSS's min-content.
+ *
+ * **Why the text is broken here rather than by asking CoreText for a narrow
+ * line.** CoreText's line breaker must make progress whatever width it is
+ * given, so a paragraph offered zero (or a pixel) comes back broken *inside*
+ * its words: the caption in examples/animation.jsx measures 61 lines and 13px
+ * wide, a floor of one character. A floor under the longest word is worse
+ * than no floor at all — it lets a flex column shrink to where the text has
+ * nowhere left to wrap. Breaking the text here asks CoreText only to shape
+ * and measure, which is the half of it that has no opinion.
+ *
+ * The opportunities come from the `linebreak` package **ntk breaks its own
+ * lines with**, so the two engines agree on where a line may break and a
+ * tree measures the same on both backends.
+ */
+function brokenAtEveryOpportunity(spans) {
+  const text = spans.map((span) => span.text).join('');
+  if (!text) return spans;
+  // Each run is [start, end) with its trailing whitespace trimmed off, so a
+  // line is as wide as its ink — the same measurement ntk reports, which
+  // strips the trailing run too.
+  const runs = [];
+  const breaker = new LineBreaker(text);
+  let start = 0;
+  for (let bk = breaker.nextBreak(); bk; bk = breaker.nextBreak()) {
+    const run = text.slice(start, bk.position);
+    runs.push([start, bk.position - (RUN_TAIL.exec(run)?.[0].length ?? 0)]);
+    start = bk.position;
+  }
+  if (start < text.length) runs.push([start, text.length]);
+  if (runs.length < 2) return spans; // one run: nothing may break anyway
+
+  // Where each span sits in that text, so a run can be cut out of the spans
+  // it crosses — a break between two `<text>` children of different sizes is
+  // an ordinary opportunity, and the two sides keep their own faces.
+  const placed = [];
+  let at = 0;
+  for (const span of spans) {
+    placed.push({ span, start: at, end: (at += span.text.length) });
+  }
+  const out = [];
+  let previous = spans[0];
+  runs.forEach(([from, to], i) => {
+    // The separator carries the attributes of the span before it: the native
+    // needs a font on every span, and a newline draws nothing.
+    if (i > 0) out.push({ ...previous, text: '\n' });
+    for (const p of placed) {
+      const a = Math.max(from, p.start);
+      const b = Math.min(to, p.end);
+      if (b <= a) continue;
+      previous = p.span;
+      out.push({
+        ...p.span,
+        text: p.span.text.slice(a - p.start, b - p.start),
+      });
+    }
+  });
+  return out;
 }
 
 const ALIGN_FLUSH = { left: 0, center: 0.5, right: 1 };
@@ -809,8 +882,19 @@ export class CocoaFontManager {
         ...(color == null ? {} : { color: parseColor(color) }),
       });
     }
+    // A width offer of zero is a question, not a degenerate layout: yoga
+    // asks it to find the node's min-content floor (`minWidth: 'auto'`,
+    // nodes.js). It used to fall into the `undefined` below and answer
+    // max-content — the whole paragraph on one line — so a `<text>` in a
+    // flex item held its container open at its longest line and two equal
+    // columns came out 823px and 34px wide. `brokenAtEveryOpportunity` is
+    // the answer instead.
+    const minContent = Number.isFinite(maxWidth) && maxWidth <= 0;
+    const laid = minContent
+      ? brokenAtEveryOpportunity(nativeSpans)
+      : nativeSpans;
     const raw = this._native.createLayout({
-      spans: nativeSpans,
+      spans: laid,
       maxWidth:
         Number.isFinite(maxWidth) && maxWidth > 0 ? maxWidth : undefined,
       align: flushFor(align, direction),
@@ -819,7 +903,14 @@ export class CocoaFontManager {
       ellipsis: overflow === 'ellipsis',
       rtl: direction === 'rtl',
     });
-    const layout = new CocoaTextLayout(this._native, raw, text);
+    // the text the native actually laid out: a min-content measurement's
+    // line and run ranges are indices into the broken text, and the two have
+    // to agree for `indexAt`/`caretPosition` to mean anything at all
+    const layout = new CocoaTextLayout(
+      this._native,
+      raw,
+      minContent ? laid.map((span) => span.text).join('') : text,
+    );
     layout._contextInk = contextInk;
     this._layouts.set(signature, layout);
     if (this._layouts.size > 64) {
