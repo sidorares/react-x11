@@ -658,6 +658,12 @@ test('an explicit frameInterval applies to every window, whatever its display', 
   assert.equal(app.frameIntervalFor(null), 8);
 });
 
+// The clock tests name the moment a tick happens (`_tickFrames(now)`): what
+// the tick decides is then arithmetic on `now`, and a shared runner that
+// stalls for a few milliseconds between two lines of a test — which it does
+// — moves nothing. What stays in real time is the timer itself: that it
+// fires, and that it stands down.
+
 test('two windows keep two clocks: the one on the faster display paints while the other waits', async () => {
   const {
     app,
@@ -678,14 +684,15 @@ test('two windows keep two clocks: the one on the faster display paints while th
   slow.requestAnimationFrame(() => (slowRan += 1));
   // 9ms since either last painted: past the 120Hz gate (8.3 - 1), short
   // of the 60Hz one (16.7 - 1)
-  fast._rafLast = performance.now() - 9;
-  slow._rafLast = performance.now() - 9;
-  app._tickFrames();
+  const now = performance.now();
+  fast._rafLast = now - 9;
+  slow._rafLast = now - 9;
+  app._tickFrames(now);
   assert.equal(fastRan, 2, 'every frame the fast window queued');
   assert.equal(slowRan, 0);
   assert.equal(app._rafQueue.length, 1, 'the slow one waits');
-  slow._rafLast = performance.now() - 16;
-  app._tickFrames();
+  slow._rafLast = now - 16;
+  app._tickFrames(now);
   assert.equal(slowRan, 1);
   assert.equal(app._rafQueue.length, 0);
   clearTimeout(app._frameTimer);
@@ -704,22 +711,27 @@ test('a frame a tick just missed lands a moment later, not a tick later', async 
   // a tick that arrives 10ms after the last frame is too early, and the
   // next tick, at 18, would be two milliseconds late: the frame gets a
   // timer of its own for the five that remain
-  app._rafLast = performance.now() - 10;
-  app._tickFrames();
+  const now = performance.now();
+  app._rafLast = now - 10;
+  app._tickFrames(now);
   assert.equal(ran, 0);
   assert.ok(app._frameTimer, 'a timer');
-  let wait = app._frameTimerAt - performance.now();
-  assert.ok(wait > 4 && wait <= 6, `due in ${wait}ms`);
+  assert.ok(
+    Math.abs(app._frameTimerAt - (now + 5)) < 1e-9,
+    `due in ${app._frameTimerAt - now}ms`,
+  );
   // 13ms is the tick that straddles it: gated at the interval, timer drift
   // used to push this frame to the tick after, 24ms out — and gated at
   // half a pump it was taken early. The timer is re-armed for the two
   // milliseconds that remain.
-  app._rafLast = performance.now() - 13;
-  app._tickFrames();
+  app._rafLast = now - 13;
+  app._tickFrames(now);
   assert.equal(ran, 0, 'not on this tick');
   assert.ok(app._frameTimer, 'but on the timer');
-  wait = app._frameTimerAt - performance.now();
-  assert.ok(wait > 0 && wait <= 3, `due in ${wait}ms`);
+  assert.ok(
+    Math.abs(app._frameTimerAt - (now + 2)) < 1e-9,
+    `due in ${app._frameTimerAt - now}ms`,
+  );
   await new Promise((resolve) => setTimeout(resolve, 6));
   assert.equal(ran, 1, 'which ran it');
   assert.equal(app._frameTimer, null);
@@ -733,14 +745,19 @@ test('a display whose period is not a multiple of the pump paints at its own per
   app._pumpInterval = 8;
   let ran = 0;
   app._requestFrame(() => (ran += 1));
-  const last = performance.now() - 8;
+  const now = performance.now();
+  const last = now - 8;
   app._rafLast = last;
-  app._tickFrames();
+  app._tickFrames(now);
   assert.equal(ran, 0, 'the first tick is too early');
   assert.ok(app._frameTimer, 'and the frame is owed a timer');
-  const wait = app._frameTimerAt - performance.now();
-  assert.ok(wait > 3 && wait <= 6, `due in ${wait}ms — the 5.3 that remain`);
-  await new Promise((resolve) => setTimeout(resolve, 9));
+  // for the 5.3 that remain, less the millisecond of slack under the gate
+  assert.ok(
+    Math.abs(app._frameTimerAt - (last + 1000 / 75 - 1)) < 1e-9,
+    `due in ${app._frameTimerAt - now}ms`,
+  );
+  // the timer's tick, a little after the moment it was due, ran it
+  app._tickFrames(app._frameTimerAt + 0.5);
   assert.equal(ran, 1);
   // the clock kept the display's period: the next frame is due one
   // interval after the last was, not one after the moment this one ran
@@ -748,6 +765,9 @@ test('a display whose period is not a multiple of the pump paints at its own per
     Math.abs(app._rafLast - (last + 1000 / 75)) < 1e-9,
     `${app._rafLast - last}`,
   );
+  // and the timer, when it fires, finds nothing owed and stands down
+  await new Promise((resolve) => setTimeout(resolve, 9));
+  assert.equal(app._frameTimer, null);
 });
 
 test('a frame that arrives more than an interval late re-anchors the clock', async () => {
@@ -755,11 +775,11 @@ test('a frame that arrives more than an interval late re-anchors the clock', asy
   app._frameInterval = 16;
   let ran = 0;
   app._requestFrame(() => (ran += 1));
-  app._rafLast = performance.now() - 100;
-  const before = performance.now();
-  app._tickFrames();
+  const now = performance.now();
+  app._rafLast = now - 100;
+  app._tickFrames(now);
   assert.equal(ran, 1);
-  assert.ok(app._rafLast >= before, 'stamped now, owing nothing for the gap');
+  assert.equal(app._rafLast, now, 'stamped now, owing nothing for the gap');
   assert.equal(app._frameTimer, null);
 });
 
@@ -768,8 +788,9 @@ test('closing the app drops the timer a frame was owed', async () => {
   app._frameInterval = 16;
   app._pumpInterval = 8;
   app._requestFrame(() => {});
-  app._rafLast = performance.now() - 13;
-  app._tickFrames();
+  const now = performance.now();
+  app._rafLast = now - 13;
+  app._tickFrames(now);
   assert.ok(app._frameTimer);
   await app.close();
   assert.equal(app._frameTimer, null);

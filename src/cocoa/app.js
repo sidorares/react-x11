@@ -612,9 +612,15 @@ export class CocoaApp {
     );
   }
 
-  _tickFrames() {
+  /**
+   * Run every frame that is due at `now`. The pump tick and the frame
+   * timer read the clock; a test names the moment, so that what a tick
+   * decides is a fact about that moment and not about how long the test
+   * took to ask — a shared runner stalls for milliseconds between two
+   * lines.
+   */
+  _tickFrames(now = performance.now()) {
     if (!this._rafQueue.length) return;
-    const now = performance.now();
     // Each window keeps its own clock, so a window on a 120Hz panel paints
     // every refresh while one on a 60Hz monitor paints every other pump
     // tick. Decided once per clock per tick: every frame a window queued
