@@ -23,6 +23,7 @@
     "examples:tasks": "tsx examples/tasks.jsx",
     "examples:tasks:hot": "node --enable-source-maps --import react-x11/refresh/register examples/tasks-hot.jsx",
     "examples:menu": "tsx examples/menu.jsx",
+    "examples:notify": "tsx examples/notify.jsx",
     "examples:monitor": "tsx examples/monitor.jsx",
     "examples:attention": "tsx examples/attention.jsx",
     "examples:badge": "tsx examples/badge.jsx",
