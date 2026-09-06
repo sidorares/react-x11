@@ -347,6 +347,49 @@ function scrollList() {
   );
 }
 
+/**
+ * A toast whose colour transitions every 800ms, from its own timer. A
+ * transition rather than a loop, on purpose: a loop is stopped by the
+ * desktop's reduce-motion switch, which CI's macOS runners have on, and
+ * the scenario is about the pan under an animation, not about which shape
+ * the animation takes. The first change comes a frame after the mount, so
+ * the toast is on its layer before the bench settles; 800ms between
+ * changes is under the second a promoted node waits before coming back,
+ * so it stays there.
+ */
+function PulsingToast() {
+  const [on, setOn] = React.useState(false);
+  React.useEffect(() => {
+    // after the first frame, not before it: a node nobody has seen yet
+    // takes no transition (nodes.js, `_placed`), and a change that lands
+    // before the mount frame would leave the toast in the bitmap until the
+    // next one
+    let timer = setTimeout(function flip() {
+      setOn((v) => !v);
+      timer = setTimeout(flip, 800);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, []);
+  return e(
+    'box',
+    {
+      style: {
+        position: 'absolute',
+        right: 24,
+        bottom: 24,
+        width: 220,
+        height: 44,
+        borderRadius: 10,
+        paddingLeft: 16,
+        justifyContent: 'center',
+        backgroundColor: on ? '#6c5ce7' : '#2d3436',
+        transition: { backgroundColor: 240 },
+      },
+    },
+    e('text', { style: { color: '#ffffff' } }, 'saving…'),
+  );
+}
+
 /** A wheel notch over the scroller, down for 60 ticks and back up. */
 function wheelNotch(ctx) {
   const { win, stamp } = ctx;
@@ -581,45 +624,20 @@ const SCENARIOS = {
     drive: wheelNotch,
   },
 
-  /** The same pan, under a toast that pulses — a loop on a plain box
-   *  floating over the list's corner, a later sibling of the scroller. The
-   *  case neither presenter serves: the surface presenter's loop keeps the
-   *  frame clock at the display's rate whether the wheel turns or not, and
-   *  the layer presenter's pan is a whole-scene re-raster. Promoted, the
-   *  toast costs nothing and the pan keeps the blit — `frames` against
-   *  `ticks`, and `damage`, are the numbers. */
+  /** The same pan, under a toast that pulses — a plain box floating over
+   *  the list's corner, a later sibling of the scroller, its colour
+   *  transitioning every 800ms. The case neither presenter serves: on the
+   *  surface presenter a toast over the viewport costs the pan its blit
+   *  (its pixels would be dragged along), and every frame of its fade is a
+   *  frame; the layer presenter's pan is a whole-scene re-raster.
+   *  Promoted, the toast is off the bitmap, so the pan keeps the blit and
+   *  the fades cost nothing — `damage` and `frames` against `ticks` are
+   *  the numbers. */
   pananim: {
     latency: true,
     tree: () =>
       windowOf(
-        [
-          scrollList(),
-          e(
-            'box',
-            {
-              key: 'toast',
-              style: {
-                position: 'absolute',
-                right: 24,
-                bottom: 24,
-                width: 220,
-                height: 44,
-                borderRadius: 10,
-                paddingLeft: 16,
-                justifyContent: 'center',
-                backgroundColor: '#2d3436',
-                animation: {
-                  backgroundColor: {
-                    to: '#6c5ce7',
-                    duration: 900,
-                    alternate: true,
-                  },
-                },
-              },
-            },
-            e('text', { style: { color: '#ffffff' } }, 'saving…'),
-          ),
-        ],
+        [scrollList(), e(PulsingToast, { key: 'toast' })],
         'bench pananim',
       ),
     drive: wheelNotch,

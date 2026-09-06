@@ -78,7 +78,7 @@
     "anim": {
       "maxFullPct": 0,
       "maxFramesPerTick": 0.2,
-      "maxDamageShare": 0.1
+      "maxDamageShare": 0.15
     },
     "animtree": {
       "maxFullPct": 0,
