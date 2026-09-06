@@ -32,8 +32,12 @@ import {
   isLayoutProp,
   styleUsesTokens,
   resolveTokens,
-  styleHasSizeQueries,
-  styleHasSupportsQueries,
+  queryKinds,
+  QUERY_SIZE,
+  QUERY_SUPPORTS,
+  QUERY_CONTAINER,
+  containerQueryNames,
+  containerAnswers,
   resolveQueries,
   DEFAULT_FOCUS_RING,
   resolveHitSlop,
@@ -722,6 +726,22 @@ function shadowExtentOf(style, scale = 1) {
 }
 
 const DEV = process.env.NODE_ENV !== 'production';
+
+/** How many extra layout passes a flush spends settling `@container` blocks
+ *  before it takes the layout it has — see `_settleContainerQueries`. */
+const CONTAINER_QUERY_PASSES = 3;
+
+/** The sizes a node's container blocks were resolved against, as one
+ *  comparable string — what a pinned node is held at. */
+function containersKey(containers) {
+  if (!containers) return '';
+  let key = '';
+  for (const name of Object.keys(containers)) {
+    const c = containers[name];
+    key += `${name}:${c.width}x${c.height};`;
+  }
+  return key;
+}
 
 // Connections already told they have no 32-bit visual (`_argbAttributes`).
 const warnedNoArgb = new WeakSet();
@@ -1942,6 +1962,13 @@ export class Node {
     // `null` is "commitMount is still to come", `false` is "it has been and
     // gone", and an Error is one waiting for it
     this._tokenError = null;
+    // `'@container …'` blocks (styles.js), on the nodes that carry them and
+    // null on every other node: the style the record was built for, the
+    // container names it asks about (`''` for the unnamed ones), the sizes
+    // and answers the blocks last resolved to, and the pin an oscillating
+    // design is held at — see WindowNode._resolveContainerQueries. Before
+    // `_syncStyle`, which reads and writes it.
+    this._cq = null;
     this._syncStyle(props);
     this.yoga = yoga ? createLayoutNode() : null;
     if (this.yoga) {
@@ -1998,7 +2025,8 @@ export class Node {
     this.states[':disabled'] = Boolean(props.disabled);
     // window size queries fold into the base before state blocks, so a
     // `:hover` inside the wide layout still wins over the wide layout
-    const queried = styleHasSizeQueries(this._baseStyle);
+    const kinds = queryKinds(this._baseStyle);
+    const queried = (kinds & QUERY_SIZE) !== 0;
     if (queried !== this._queried) {
       this._queried = queried;
       const root = this.root;
@@ -2014,7 +2042,7 @@ export class Node {
     // assigned, so the first pass has nowhere to register and a "did it
     // change" guard would keep it unregistered forever. Set.add is
     // idempotent and these blocks are rare.
-    const asks = styleHasSupportsQueries(this._baseStyle);
+    const asks = (kinds & QUERY_SUPPORTS) !== 0;
     this._supportsQueried = asks;
     if (this.root?._supportsQueryNodes) {
       if (asks) this.root._supportsQueryNodes.add(this);
@@ -2034,13 +2062,53 @@ export class Node {
       if (wantsAttention) this.root._attentionNodes.add(this);
       else this.root._attentionNodes.delete(this);
     }
-    if (queried || asks) {
+    // `@container` blocks keep a third registry: what re-resolves them is a
+    // layout pass moving the container they ask about — neither a resize
+    // nor the server's answer. The record exists only on the nodes that
+    // ask, so every other node pays one bit test here and nothing below.
+    // Insertion registers through `_registerSizeQueries`; this is for a
+    // style that starts or stops asking on a node already in a window.
+    const asksContainers = (kinds & QUERY_CONTAINER) !== 0;
+    let containers = null;
+    if (asksContainers) {
+      const base = this._baseStyle;
+      let cq = this._cq;
+      if (cq === null || cq.style !== base) {
+        if (cq === null) {
+          cq = this._cq = {
+            style: base,
+            names: null,
+            containers: null,
+            answers: '',
+            pin: null,
+            warned: false,
+          };
+        } else {
+          // a different style asks different questions, and a pin held for
+          // the old one is not an answer to the new one
+          cq.style = base;
+          cq.pin = null;
+        }
+        cq.names = containerQueryNames(base);
+      }
+      this.root?._containerQueryNodes?.add(this);
+      containers = this._pinnedContainerSizes();
+    } else if (this._cq !== null) {
+      this._cq = null;
+      this.root?._containerQueryNodes?.delete(this);
+    }
+    if (queried || asks || asksContainers) {
       this._baseStyle = resolveQueries(this._baseStyle, {
         size: this.root?.querySize ?? null,
         // null before the window is realized, which reads as "not
         // supported" — the fallback design is the one that works everywhere
         supports: this.root?.capabilities ?? null,
+        containers,
       });
+      if (asksContainers) {
+        this._cq.containers = containers;
+        this._cq.answers = containerAnswers(this._baseStyle, containers);
+      }
     }
     this._stateful = hasStateStyles(this._baseStyle);
     // The scale multiplies *after* every merge — state blocks, queries,
@@ -2505,9 +2573,127 @@ export class Node {
     if (this._wantsAttention && this.root?._attentionNodes) {
       this.root._attentionNodes.add(this);
     }
+    if (this._cq !== null && this.root?._containerQueryNodes) {
+      this.root._containerQueryNodes.add(this);
+      // it can see the containers above it now — the constructor's
+      // resolution had no ancestors to find one in
+      this._sizeQueriesChanged();
+    }
     for (const child of this.children) {
       if (!child.isWindow) child._registerSizeQueries();
     }
+  }
+
+  /**
+   * The sizes this node's `@container` blocks resolve against: for each name
+   * the style asks about, the nearest ancestor declaring it, in this node's
+   * **logical** pixels — the unit the threshold beside `width: 400` was
+   * written in, so the two numbers mean the same thing. Yoga's computed
+   * size rather than `abs`: inside a flush, `abs` is still the previous
+   * frame's.
+   *
+   * A container that has not been laid out yet contributes nothing, so its
+   * blocks do not apply — the way a capability block does not before the
+   * window exists: the fallback design is the one that works everywhere.
+   * "Laid out" is `_placed` between frames and every attached node while
+   * the window is settling a pass it just ran (`_cqFresh`); a fresh yoga
+   * node answers NaN. Null when no container is known, which is the
+   * identity `resolveQueries` keeps.
+   */
+  _containerSizes() {
+    const names = this._cq?.names;
+    if (!names) return null;
+    let sizes = null;
+    const s = this.scale || 1;
+    const fresh = Boolean(this.root?._cqFresh);
+    for (const name of names) {
+      const c = this._containerFor(name);
+      if (!c) {
+        // In a window and nothing above declares one: a forgotten
+        // declaration, not a component rendered outside its context — that
+        // is what the *named* form is for, and a missing name applies
+        // nothing quietly. `root` rather than `parent`: React builds a
+        // subtree bottom-up, so a node can have a parent and no window yet,
+        // and the container it will find is further up.
+        if (DEV && name === '' && this.root) this._noContainer();
+        continue;
+      }
+      if (!c.yoga || !(fresh || c._placed)) continue;
+      const width = c.yoga.getComputedWidth() / s;
+      const height = c.yoga.getComputedHeight() / s;
+      if (!Number.isFinite(width) || !Number.isFinite(height)) continue;
+      (sizes ??= {})[name] = { width, height };
+    }
+    return sizes;
+  }
+
+  /** `_containerSizes()`, unless this node is pinned at the sizes it is
+   *  looking at — then the sizes its held answer came from, so a restyle
+   *  arriving from React does not undo what the layout pass decided. */
+  _pinnedContainerSizes() {
+    const live = this._containerSizes();
+    const cq = this._cq;
+    const pin = cq.pin;
+    if (!pin) return live;
+    if (pin.key === containersKey(live)) return pin.containers;
+    cq.pin = null;
+    return live;
+  }
+
+  /**
+   * The nearest ancestor whose style declares `container` — any container
+   * for the unnamed query (`''`), the one carrying `name` otherwise, however
+   * many nearer containers that reaches past. A window ends the walk after
+   * offering itself, and a window asks nothing: a `<popup>` inside a
+   * container is a root of its own and asks its own window with `@width`.
+   *
+   * Walked rather than cached: it is a dozen property reads per dependent
+   * per layout pass, and a cache would have to follow every insert, every
+   * reorder and every `container` value that changes above.
+   */
+  _containerFor(name) {
+    if (this.isWindow) return null;
+    for (let n = this.parent; n; n = n.parent) {
+      const c = n.style?.container;
+      if (name === '' ? c === true || typeof c === 'string' : c === name) {
+        return n;
+      }
+      if (n.isWindow) break;
+    }
+    return null;
+  }
+
+  _noContainer() {
+    this._tokenProblem(
+      [
+        `react-x11: <${this.kind}> has an "@container" block and no ` +
+          'container above it — declare one with `container: true` in an ' +
+          "ancestor's style (or name it and ask for it by name), or ask " +
+          'the window with "@width"',
+      ],
+      true,
+      'The block does not apply and the app carries on',
+    );
+  }
+
+  /** Said once per node, in development: a design that cannot settle looks
+   *  like a layout bug, and the frame it is pinned at is the only clue. */
+  _warnContainerOscillation() {
+    const cq = this._cq;
+    if (cq.warned) return;
+    cq.warned = true;
+    const asked = [...(cq.names ?? [])]
+      .map((n) => (n === '' ? 'its container' : `"${n}"`))
+      .join(', ');
+    console.warn(
+      `react-x11: the "@container" blocks on <${this.kind}> cannot settle: ` +
+        `a block that matches at one size of ${asked} changes that size to ` +
+        'one where it no longer matches, and back. A container query must ' +
+        'not move the size it asks about — give the container a size of its ' +
+        'own, or minWidth: 0 and a flexBasis so its content cannot grow it. ' +
+        'The current answer is held until the container moves for another ' +
+        'reason (docs/styling.md#container-queries).',
+    );
   }
 
   /** Style names this element claims as its own semantics (see WindowNode).
@@ -2793,12 +2979,14 @@ export class Node {
    * swallow the error instead of raising it late. Those throw at once, like
    * the keyed reorder they resemble.
    */
-  _tokenProblem(problems, mounting) {
+  _tokenProblem(problems, mounting, consequence = undefined) {
     if (!STRICT_TOKENS) {
       // every one of them: two misspellings in a style are two things to
       // fix, and a report that named only the first would send someone back
       // for a second run to find the second
-      for (const message of problems) reportStyleError(this, message);
+      for (const message of problems) {
+        reportStyleError(this, message, consequence);
+      }
       return;
     }
     const error = new Error(problems[0]);
@@ -2806,10 +2994,16 @@ export class Node {
     else throw error;
   }
 
-  /** The owning window resized: re-resolve, since a query block may now
-   * match that did not, or the other way round. */
+  /** The owning window resized, the server's answer moved, or a layout pass
+   * moved a container this node asks about: re-resolve, since a query block
+   * may now match that did not, or the other way round. */
   _sizeQueriesChanged() {
-    if (!(this._queried || this._supportsQueried) || this.destroyed) return;
+    if (
+      !(this._queried || this._supportsQueried || this._cq !== null) ||
+      this.destroyed
+    ) {
+      return;
+    }
     const before = this.style;
     // a query block may name `fontSize`, and `_syncStyle` → `_retarget` is
     // what pushes that into the subtree; only the node-local text props are
@@ -2817,7 +3011,19 @@ export class Node {
     this._syncStyle(this.props);
     if (localTextStyleChanged(this.style, before)) this._textContentChanged();
     if (this.yoga && this.style !== before) {
-      applyLayoutStyle(this.yoga, this.style, before);
+      // A block that moved a layout property changed the tree the content
+      // floors were measured from — the debt a style change from React
+      // leaves too (`invalidate`, reason 'props'). It has to be marked as a
+      // *content* change: the live-resize deferral takes a plain
+      // `_floorsDirty` for the drag itself and lays out against the floors
+      // in hand, which are the old arrangement's, and by the time the
+      // catch-up looks the dirty flags are spent and no leaf's height moved
+      // — so the floor of a card that turned from a row into a column would
+      // stay the row's, and yoga would squeeze the column down to it.
+      if (applyLayoutStyle(this.yoga, this.style, before) && this.root) {
+        this.root._floorsDirty = true;
+        this.root._floorsContentDirty = true;
+      }
     }
   }
 
@@ -9108,6 +9314,12 @@ export class WindowNode extends Scrollable(Node) {
     // nodes with `@supports` blocks, re-resolved when the server's answer
     // changes rather than on every layout
     this._supportsQueryNodes = new Set();
+    // nodes with `@container` blocks, re-resolved after every layout pass
+    // against the containers they ask about — see _resolveContainerQueries.
+    // `_cqFresh` is true while a pass this window just ran is being settled,
+    // when every attached node has a computed size to offer
+    this._containerQueryNodes = new Set();
+    this._cqFresh = false;
     // nodes whose child list changed and whose own size is pinned: their new
     // arrangement is only measurable once layout has run (see
     // Node._childListChanged)
@@ -9604,6 +9816,13 @@ export class WindowNode extends Scrollable(Node) {
 
     let size = measure();
     if (this._resolveSizeQueries(size.width, size.height)) size = measure();
+    // …and the container blocks against the arrangement that produced it,
+    // so the window is created at the size its content will actually take
+    if (this._containerQueryNodes.size !== 0) {
+      this._settleContainerQueries(() => {
+        size = measure();
+      });
+    }
 
     // A cap the content decides is its natural size, never below a floor
     // that was named as a number: `WM_NORMAL_HINTS` with a min above its own
@@ -11154,6 +11373,105 @@ export class WindowNode extends Scrollable(Node) {
     return true;
   }
 
+  /** One layout pass at the window's size, with the content floors it
+   *  needs: fresh ones when something changed them, the ones in hand during
+   *  a live resize, none when nothing moved them. */
+  _layoutStep(width, height) {
+    if (!this._floorsDirty && this._floorsWidth === width) {
+      this._layoutRoot(width, height);
+    } else if (this._deferContentFloors(width)) {
+      this._scheduleFloorsCatchUp();
+      this._layoutRoot(width, height);
+    } else {
+      this._applyContentFloors(width, height);
+    }
+  }
+
+  /**
+   * Resolve the `@container` blocks against the layout just produced, and
+   * lay out again while an answer moves — a container's size is what a pass
+   * *produces*, so it can only be asked about afterwards, and a block that
+   * changed may carry layout properties. `relayout` is whatever pass the
+   * caller runs: `_layoutStep` in a flush, `measure()` while an auto-sized
+   * window is working out how big to be.
+   *
+   * Bounded. Two passes settle the common case (a block that matches at the
+   * width the content took), and nested containers can honestly need a
+   * third — an outer answer moving an inner container past one of its own
+   * thresholds — so the cap is a small fixed number rather than "once".
+   * What it must not do is chase a design no size satisfies; that is
+   * detected per node inside `_resolveContainerQueries`, and pinned.
+   */
+  _settleContainerQueries(relayout) {
+    if (this._containerQueryNodes.size === 0) return;
+    const held = new Map();
+    this._cqFresh = true;
+    try {
+      for (let pass = 0; pass < CONTAINER_QUERY_PASSES; pass++) {
+        if (!this._resolveContainerQueries(held)) return;
+        relayout();
+      }
+      if (DEV && this._resolveContainerQueries(held, false)) {
+        console.warn(
+          'react-x11: "@container" blocks did not settle in ' +
+            `${CONTAINER_QUERY_PASSES} layout passes; the last one stands. ` +
+            'More than two nested containers, each changing the next, is ' +
+            'the shape that gets here (docs/styling.md#container-queries).',
+        );
+      }
+    } finally {
+      this._cqFresh = false;
+    }
+  }
+
+  /**
+   * One round of the above: every dependent whose blocks answer differently
+   * against the containers as they are now is re-resolved, and the caller
+   * hears whether any was. With `apply` false it only answers.
+   *
+   * `held` is what each node has answered so far this frame. A node that
+   * comes back to an answer it already held is a design that oscillates —
+   * the block moves the size it asks about, which CSS forbids by
+   * construction (size containment) and yoga cannot — so it is **pinned**:
+   * the answer it has stands, and stays until the container's size moves
+   * for some other reason. Without the pin the next frame would find the
+   * other answer, apply it, get the other size, and strobe on every layout.
+   */
+  _resolveContainerQueries(held, apply = true) {
+    let changed = false;
+    for (const node of [...this._containerQueryNodes]) {
+      if (node.destroyed) {
+        this._containerQueryNodes.delete(node);
+        continue;
+      }
+      const cq = node._cq;
+      const containers = node._containerSizes();
+      const key = containersKey(containers);
+      if (cq.pin) {
+        if (cq.pin.key === key) continue;
+        cq.pin = null;
+      }
+      const answers = containerAnswers(node._baseStyle, containers);
+      if (answers === cq.answers) continue;
+      if (!apply) return true;
+      let seen = held.get(node);
+      if (seen?.includes(answers)) {
+        cq.pin = { key, containers: cq.containers };
+        if (DEV) node._warnContainerOscillation();
+        continue;
+      }
+      if (!seen) held.set(node, (seen = [cq.answers]));
+      seen.push(answers);
+      node._sizeQueriesChanged();
+      changed = true;
+    }
+    // a block may carry layout properties, so the floors measured from the
+    // styles it is replacing are not the answer any more — the same debt a
+    // window query leaves (`_resolveSizeQueries`)
+    if (changed) this._floorsDirty = true;
+    return changed;
+  }
+
   /**
    * A node in this window has a loop declared on it. Registration is what
    * makes the window watch its own visibility — and only then: a
@@ -11528,13 +11846,12 @@ export class WindowNode extends Scrollable(Node) {
       // ledger's rect moves with the shift (issue #398).
       this._laidOut = true;
       this._resolveSizeQueries(width, height);
-      if (!this._floorsDirty && this._floorsWidth === width) {
-        this._layoutRoot(width, height);
-      } else if (this._deferContentFloors(width)) {
-        this._scheduleFloorsCatchUp();
-        this._layoutRoot(width, height);
-      } else {
-        this._applyContentFloors(width, height);
+      this._layoutStep(width, height);
+      // `@container` blocks are answered by the pass, not before it, and a
+      // changed answer is one more pass — before `absolutize`, so the layout
+      // diff below sees one arrangement against the last frame's
+      if (this._containerQueryNodes.size !== 0) {
+        this._settleContainerQueries(() => this._layoutStep(width, height));
       }
       this.abs = { x: 0, y: 0, width, height };
       this._placed = true;

@@ -145,6 +145,77 @@ test('a state block inside the matched size still wins', async () => {
   await x11Root.unmount();
 });
 
+test('a block flipping during a live resize re-measures the floors it changed', async () => {
+  // the same path a container block takes (test/container-queries.test.js):
+  // cards that turn from rows into columns mid-drag no longer fit their
+  // pane, and would be squeezed to the row's height floor unless the flip
+  // is treated as the content change it is
+  const live = createStyles({
+    pane: { flexGrow: 1, padding: 12, gap: 12 },
+    card: {
+      flexDirection: 'column',
+      gap: 10,
+      padding: 12,
+      '@width >= 600': { flexDirection: 'row' },
+    },
+    thumb: { width: 40, height: 40 },
+    body: { flexGrow: 1, minWidth: 0, gap: 4 },
+    line: { height: 16 },
+    toolbar: { width: 60, height: 20, flexShrink: 0 },
+  });
+  const cardEl = (key) =>
+    h(
+      'box',
+      { key, style: live.card },
+      h('box', { key: 't', style: live.thumb }),
+      h(
+        'box',
+        { key: 'b', style: live.body },
+        h('box', { key: '1', style: live.line }),
+        h('box', { key: '2', style: live.line }),
+      ),
+      h('box', { key: 'x', style: live.toolbar }),
+    );
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  x11Root.render(
+    h(
+      'window',
+      { width: 800, height: 300 },
+      h('box', { style: live.pane }, cardEl('a'), cardEl('b'), cardEl('c')),
+    ),
+  );
+  await tick();
+  const cards = nodeOf(app).children[0].children;
+  assert.deepStrictEqual(
+    cards.map((c) => c.abs.height),
+    [64, 64, 64],
+  );
+  const wnd = app.windows[0];
+  // a failing assertion must not leave the window mid-drag: the floor
+  // catch-up waits on `liveResizing` and would keep the process alive
+  try {
+    wnd.liveResizing = true;
+    wnd.width = 380;
+    wnd.emit('resize', { width: 380, height: 300 });
+    await tick();
+    assert.deepStrictEqual(
+      cards.map((c) => c.abs.height),
+      [140, 140, 140],
+      'columns at their content height, mid-drag',
+    );
+  } finally {
+    wnd.liveResizing = false;
+  }
+  await tick();
+  await tick();
+  assert.deepStrictEqual(
+    cards.map((c) => c.abs.height),
+    [140, 140, 140],
+  );
+  await x11Root.unmount();
+});
+
 test('a node mounted after a resize matches the size the window is now', async () => {
   const app = createMockApp();
   const x11Root = await createRoot({ app });

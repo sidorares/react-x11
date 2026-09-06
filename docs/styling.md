@@ -9,7 +9,7 @@ unrecognised prop used to be.
 One namespace per kind of thing, and no name in both:
 
 - **`style`** — everything CSS has a concept for: layout, paint, text,
-  `cursor`, `overflow`, `zIndex`, `pointerEvents`.
+  `cursor`, `overflow`, `zIndex`, `pointerEvents`, `container`.
 - **props** — everything else: `title`, window geometry and size hints,
   `resizable`, `wmClass`, `windowType`, `grab`, `value`, `src`, `focusable`,
   `tabIndex`, `disabled`, handlers. The 3D elements keep flat property props
@@ -1056,6 +1056,113 @@ only when the size actually changed.
 A malformed query is an error rather than a key that silently never
 matches.
 
+## Container queries
+
+`'@container width >= 400'` asks about the box a node is inside rather than
+the window it is in — CSS's `@container`, for the case a window query cannot
+tell apart: the same card in a 220px sidebar and in a 600px pane, in one
+900px window.
+
+```jsx
+const s = createStyles({
+  pane: { container: true, flexGrow: 1, minWidth: 0, overflow: 'scroll' },
+  card: {
+    flexDirection: 'column',
+    gap: 8,
+    '@container width >= 400': { flexDirection: 'row', gap: 16 },
+  },
+});
+
+<box style={s.pane}>
+  <box style={s.card}>…</box>
+</box>;
+```
+
+A container is declared with the **`container` style property** — CSS's
+`container-type` and `container-name` in one — and a block answers to the
+**nearest ancestor that declares one**. Wrapping the card in another `<box>`
+for a border changes nothing: the parent is not the container, the declared
+ancestor is, which is what lets a component be put anywhere and still get
+the answer its author meant. The declaration changes nothing about the
+container itself; it is neither layout nor paint, only what the blocks under
+it resolve against. Being a style property, it can be set from inside a
+query block — a box that is a container only in the wide layout — and
+`false` takes a declaration back from earlier in a style array.
+
+`width` and `height`, with `>=`, `<=`, `>` or `<`, in the logical pixels the
+dependent's own lengths are written in. Blocks that match are merged in
+declaration order with the other query blocks, before the state blocks.
+
+### Named containers
+
+`container: 'pane'` names the container, and `'@container pane width >= 300'`
+asks for it by name — **reaching past** any nearer container. A card that is
+a container for its own contents does not capture a query a label inside it
+meant for the pane:
+
+```jsx
+const s = createStyles({
+  pane: { container: 'pane', flexGrow: 1, minWidth: 0, overflow: 'scroll' },
+  card: {
+    container: true, // the card's contents ask about the card…
+    '@container width >= 380': { flexDirection: 'row' }, // …and the card asks the pane
+  },
+  detail: { '@container width < 220': { display: 'none' } }, // the card
+  label: {
+    display: 'none',
+    '@container pane width >= 300': { display: 'flex' }, // the pane, past the card
+  },
+});
+```
+
+`examples/container-queries.jsx` is that design in full: one `<Card>` in a
+sidebar and in a main pane, both panes named `pane`, so the labels come and
+go with whichever pane a card is in.
+
+A name nothing above carries makes the block **not apply, quietly** — that
+is what lets one component render inside and outside a `sidebar`. An
+**unnamed** query with no container above it is reported in development,
+the way an unknown token is: the window already has a spelling (`'@width'`),
+so the only thing a silent fallback to it could hide is a forgotten
+declaration. `REACT_X11_STRICT_TOKENS=1` makes the report a throw.
+
+### When it is answered, and what it costs
+
+Like a size query, a container block **may set layout properties**, and for
+the same reason: it is only ever re-evaluated inside a layout pass. Unlike
+one, it cannot be answered _before_ the pass — a container's size is what
+the pass produces — so the blocks are resolved after it, and the tree is laid
+out once more when an answer moved. A frame where no answer crosses a
+threshold (a scroll, a hover, a resize between two breakpoints) pays one
+size read per container and nothing else. A frame where one does pays what
+the same change would have cost had React made it.
+
+### A block must not move the size it asks about
+
+CSS makes this impossible by construction: `container-type: inline-size` is
+size containment, the container is sized as if it had no content, and
+nothing a descendant does can move it. Yoga has no containment, so here it is
+a rule, and breaking it is detected rather than prevented. A block that
+grows the container past the very threshold that turned it on — and shrinks
+it back when it turns off — has no size that satisfies it. The renderer
+notices (the node comes back to an answer it already held this frame),
+**holds the answer it has**, and says so once in development, naming the
+node. The answer stays held until the container's size moves for some other
+reason.
+
+The way to stay clear of it is also what makes a good container: a size that
+does not come from the content below it.
+
+|                                                  |                                                                   |
+| ------------------------------------------------ | ----------------------------------------------------------------- |
+| an explicit `width` / `height`                   | fixed, whatever is inside                                         |
+| a flex item with `minWidth: 0` and a `flexBasis` | the parent distributes it; `flex: 1` is both in one               |
+| `overflow: 'scroll'`                             | **the natural container**: content overflows rather than grows it |
+
+The common responsive pattern — less content when narrow, more when wide —
+is monotone and settles on the first re-layout; a warning means the design
+genuinely contradicts itself.
+
 ## Capability queries
 
 `'@supports transparency'` is to `@supports` what the size queries are to
@@ -1115,6 +1222,15 @@ can be looked at without stopping the compositor for the whole session. See
 
 - **`':hover'`, not `_hover`.** The CSS spelling costs a pair of quotes and
   buys transfer from every other styling system.
+- **Declared containers, not the parent.** `'@container'` answers to the
+  nearest ancestor that _declares_ itself one, never to whatever happens to
+  be the parent: a wrapper `<box>` added for a border must not change a
+  component's answer. CSS spent a decade on element queries before shipping
+  container queries with exactly this requirement. Nor is a scroller a
+  container without saying so — it is the ideal one to declare, but the
+  presence of one between a node and its container must not silently change
+  which box answers. And there is no self query: a node's own size deciding
+  its own layout is the cycle containment exists to forbid.
 - **Inherited properties, no relational selectors.** `color` and the font
   properties travel down the tree; nothing matches a rule against it. So
   there is no `:hover > child`, no sibling combinator and no Tailwind-style
@@ -1137,7 +1253,9 @@ way it does not apply to an `<input type>` in the DOM. They report
 
 ## Next
 
-`opacity` (needs offscreen composition — see NEXT_STEPS §3), a `boxShadow`
-that a `<popup>` can cast (the window needs a translucent margin around
-itself first — see [elements.md](elements.md) on `transparent` popups), and
-per-node container queries if the window-level ones prove too coarse.
+`opacity` (needs offscreen composition — see NEXT_STEPS §3), and a
+`boxShadow` that a `<popup>` can cast (the window needs a translucent margin
+around itself first — see [elements.md](elements.md) on `transparent`
+popups). Container queries shipped; the design record, with the targeting
+forms considered and the cost measured, is
+[architecture/container-queries.md](architecture/container-queries.md).

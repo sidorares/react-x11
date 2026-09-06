@@ -17,6 +17,7 @@ export {
   resolveTokens,
   styleHasSizeQueries,
   styleHasSupportsQueries,
+  styleHasContainerQueries,
   resolveSizeQueries,
   resolveQueries,
   interpolate,

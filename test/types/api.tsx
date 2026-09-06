@@ -152,6 +152,16 @@ const s = createStyles({
     flexDirection: 'column',
     '@width >= 600': { flexDirection: 'row', gap: 24 },
   },
+  // container queries: the box the node is inside, nearest or by name; the
+  // container declares itself with a style property, and may set layout
+  pane: { container: 'sidebar', flexGrow: 1, minWidth: 0 },
+  adaptive: {
+    container: true,
+    flexDirection: 'column',
+    '@container width >= 400': { flexDirection: 'row', gap: 16 },
+    '@container sidebar height < 300': { display: 'none' },
+    '@supports transparency': { backgroundColor: 'rgba(0, 0, 0, 0.5)' },
+  },
   perProperty: { transition: { backgroundColor: 200, left: 120 } },
   // issue #352: the looping sibling of `transition`. `from` is optional —
   // it defaults to what the style declares, which is also where the

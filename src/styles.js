@@ -449,6 +449,12 @@ const STYLE_PROPS = new Set([
   // layout nor paint — the one thing it must never do is grow the visuals,
   // since the whole point is a 24px target under a 16px control.
   'hitSlop',
+  // Declares this node a container that the `'@container …'` blocks below
+  // it ask about — CSS's `container-type` and `container-name` in one
+  // property: `true` answers the unnamed queries, a name answers those and
+  // the ones that say it. Neither layout nor paint: it changes nothing about
+  // this node, only what the blocks under it resolve against.
+  'container',
 ]);
 
 export const isStyleProp = (name) => STYLE_PROPS.has(name);
@@ -479,6 +485,25 @@ const isState = (key) => key.charCodeAt(0) === 58; /* ':' */
 const SIZE_QUERY = /^@(width|height)\s*(>=|<=|>|<)\s*(\d+(?:\.\d+)?)$/;
 
 /**
+ * Container queries: `'@container width >= 400'`, or
+ * `'@container sidebar width >= 400'` naming the container. Where a size
+ * query asks about the window, this asks about the box the node is inside
+ * — the nearest ancestor whose style declares `container` (any container
+ * for the unnamed form; for the named form, the one carrying that name,
+ * however many nearer containers it has to reach past).
+ *
+ * The same operators and the same logical pixels as a size query, and the
+ * same licence: a container block may set layout properties. It differs in
+ * *when* it is answered — a container's size is what a layout pass
+ * produces, not what one starts from, so the blocks are resolved after the
+ * pass and the tree laid out once more if an answer moved
+ * (nodes.js, `_resolveContainerQueries`).
+ */
+const CONTAINER_QUERY =
+  /^@container(?:\s+([A-Za-z_][\w-]*))?\s+(width|height)\s*(>=|<=|>|<)\s*(\d+(?:\.\d+)?)$/;
+const CONTAINER_NAME = /^[A-Za-z_][\w-]*$/;
+
+/**
  * Capability queries: `'@supports transparency'`. Where a size query asks
  * about the window, this asks about the *server* — what will actually be
  * shown if the style asks for it.
@@ -499,12 +524,23 @@ function parseQuery(key) {
   let q = parsedQueries.get(key);
   if (q === undefined) {
     const size = SIZE_QUERY.exec(key);
-    const supports = size ? null : SUPPORTS_QUERY.exec(key);
+    const container = size ? null : CONTAINER_QUERY.exec(key);
+    const supports = size || container ? null : SUPPORTS_QUERY.exec(key);
     q = size
       ? { kind: 'size', axis: size[1], op: size[2], value: Number(size[3]) }
-      : supports
-        ? { kind: 'supports', feature: supports[1] }
-        : null;
+      : container
+        ? {
+            kind: 'container',
+            // `''` is the unnamed query, and the key the nearest container
+            // of any name answers under
+            name: container[1] ?? '',
+            axis: container[2],
+            op: container[3],
+            value: Number(container[4]),
+          }
+        : supports
+          ? { kind: 'supports', feature: supports[1] }
+          : null;
     parsedQueries.set(key, q);
   }
   return q;
@@ -539,6 +575,69 @@ export const styleHasSizeQueries = (style) => hasQueryOfKind(style, 'size');
 export const styleHasSupportsQueries = (style) =>
   hasQueryOfKind(style, 'supports');
 
+/** Re-resolved after a layout pass moved a container the style asks about. */
+export const styleHasContainerQueries = (style) =>
+  hasQueryOfKind(style, 'container');
+
+/**
+ * Which kinds of `@` block a style carries, in **one** pass over its keys —
+ * a mask of the three below, or 0. What `_syncStyle` asks of every node on
+ * every restyle, so it is asked once rather than once per kind.
+ */
+export const QUERY_SIZE = 1;
+export const QUERY_SUPPORTS = 2;
+export const QUERY_CONTAINER = 4;
+const QUERY_KIND_BITS = {
+  size: QUERY_SIZE,
+  supports: QUERY_SUPPORTS,
+  container: QUERY_CONTAINER,
+};
+export function queryKinds(style) {
+  let kinds = 0;
+  for (const key of Object.keys(style)) {
+    if (!isQuery(key)) continue;
+    const q = parseQuery(key);
+    if (q) kinds |= QUERY_KIND_BITS[q.kind];
+  }
+  return kinds;
+}
+
+/** The container names a style asks about — `''` for the unnamed blocks —
+ *  or null when it asks about none. */
+export function containerQueryNames(style) {
+  let names = null;
+  for (const key of Object.keys(style)) {
+    if (!isQuery(key)) continue;
+    const q = parseQuery(key);
+    if (q?.kind === 'container') (names ??= new Set()).add(q.name);
+  }
+  return names;
+}
+
+/**
+ * Which of a style's container blocks match, as one string with a character
+ * per block in declaration order. What a node remembers between layout
+ * passes so a re-resolution runs only when an answer actually moved, and
+ * what the oscillation check compares (nodes.js `_resolveContainerQueries`).
+ */
+export function containerAnswers(style, containers) {
+  let out = '';
+  for (const key of Object.keys(style)) {
+    if (!isQuery(key)) continue;
+    const q = parseQuery(key);
+    if (q?.kind !== 'container') continue;
+    out += containers && sizeMatches(q, containers[q.name]) ? '1' : '0';
+  }
+  return out;
+}
+
+/** A style value is a container declaration: `true`, a name, or `false` to
+ *  take one back from a style earlier in the array. */
+export const isContainerDeclaration = (value) =>
+  value === true ||
+  value === false ||
+  (typeof value === 'string' && CONTAINER_NAME.test(value));
+
 /**
  * Merge the query blocks that match, in declaration order, over the base.
  * Size and capability blocks resolve in one pass so that ordering between
@@ -558,21 +657,37 @@ export function resolveSizeQueries(style, size) {
   return size ? resolveQueries(style, { size }) : style;
 }
 
-export function resolveQueries(style, { size = null, supports = null } = {}) {
+export function resolveQueries(
+  style,
+  { size = null, supports = null, containers = null } = {},
+) {
   let out = style;
   for (const key of Object.keys(style)) {
     if (!isQuery(key)) continue;
     const q = parseQuery(key);
-    if (!q) continue;
-    const hit =
-      q.kind === 'size'
-        ? size && sizeMatches(q, size)
-        : Boolean(supports?.[q.feature]);
-    if (!hit) continue;
+    if (!q || !queryMatches(q, size, supports, containers)) continue;
     if (out === style) out = { ...style };
     Object.assign(out, style[key]);
   }
   return out;
+}
+
+/**
+ * `containers` maps a container name (`''` for the unnamed query) to that
+ * container's size in the node's logical pixels; a name it does not hold is
+ * a container the node has not got — above it, or laid out yet — and the
+ * block does not apply. That is the rule that lets one component render
+ * inside and outside a `sidebar` container with the same style.
+ */
+function queryMatches(q, size, supports, containers) {
+  switch (q.kind) {
+    case 'size':
+      return Boolean(size) && sizeMatches(q, size);
+    case 'container':
+      return Boolean(containers) && sizeMatches(q, containers[q.name]);
+    default:
+      return Boolean(supports?.[q.feature]);
+  }
 }
 
 /**
@@ -605,7 +720,9 @@ function validateStyle(style, where) {
       if (!parseQuery(key)) {
         throw new Error(
           `react-x11: bad query "${key}" in ${where} (expected a size query ` +
-            'like "@width >= 600", or a capability query like ' +
+            'like "@width >= 600", a container query like ' +
+            '"@container width >= 400" or "@container sidebar width >= 400", ' +
+            'or a capability query like ' +
             `"@supports ${SUPPORTS_FEATURES.join('" / "@supports ')}")`,
         );
       }
@@ -641,6 +758,13 @@ function validateStyle(style, where) {
     // anything wrong, it simply never moves.
     if (key === 'animation') animationsOf(style, where);
     validateValue(key, style[key], where);
+    if (key === 'container' && !isContainerDeclaration(style[key])) {
+      throw new Error(
+        `react-x11: invalid container ${JSON.stringify(style[key])} in ` +
+          `${where} (expected true, or a name like 'sidebar' — letters, ` +
+          "digits, '_' and '-', not starting with a digit)",
+      );
+    }
     if (key === 'flex' && !isFlexShorthand(style[key])) {
       throw new Error(
         `react-x11: invalid flex ${JSON.stringify(style[key])} in ${where} ` +
@@ -671,10 +795,13 @@ export function flattenStyle(style, into) {
   // hoisted style across renders
   if (!into) return style;
   for (const key of Object.keys(style)) {
-    // a state block merges with one already collected rather than replacing
-    // it, so [{':hover': {color}}, {':hover': {backgroundColor}}] keeps both
+    // a state or query block merges with one already collected rather than
+    // replacing it, so [{':hover': {color}}, {':hover': {backgroundColor}}]
+    // keeps both — and so does the same '@width >= 600' key written twice
     into[key] =
-      isState(key) && into[key] ? { ...into[key], ...style[key] } : style[key];
+      (isState(key) || isQuery(key)) && into[key]
+        ? { ...into[key], ...style[key] }
+        : style[key];
   }
   return into;
 }
