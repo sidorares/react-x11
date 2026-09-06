@@ -534,9 +534,14 @@ Platform notes:
   the pointer as it does on X11, and because a `<popup>` here is a
   non-activating panel at the pop-up-menu window level — above every other
   application's windows, which sit at the normal level — it is what the
-  desktop sees while the pointer is over Finder or a browser. What AppKit's
-  own session carries is still a blank image: the drag has no bitmap of the
-  system's, only the preview you draw.
+  desktop sees while the pointer is over Finder or a browser. It is also
+  the first window AppKit would find when the pointer comes back over one
+  of yours, so a `<popup dragPreview>` registers no pasteboard types at
+  all: AppKit routes a drag only to a window registered for a type it
+  carries, and looks past the preview to the window beneath — the same
+  exclusion the router makes on X11, made where AppKit can see it. What
+  AppKit's own session carries is still a blank image: the drag has no
+  bitmap of the system's, only the preview you draw.
 - **macOS / XQuartz** — X client to X client works. Dragging from **Finder**
   into an X11 window does not, and never has:
   [XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173). That is the
@@ -604,7 +609,9 @@ For anyone watching the wire, or debugging against another toolkit:
 - `XdndAware` (version 5) is written on every **top-level** window
   unconditionally at realize time. Child windows — `<glarea>`, a nested
   `<window>` — never advertise, per XDND v3+; drags over them arrive at the
-  top-level and are routed down in JavaScript.
+  top-level and are routed down in JavaScript. A `<popup dragPreview>`
+  never advertises either: it follows the pointer, and a window that is
+  never under it has nothing to accept.
 - A window with **no drop targets mounted** answers with a refusal covering
   the whole window, so a well-behaved source stops asking while the pointer
   stays inside it. What an app that never uses drag and drop still pays:

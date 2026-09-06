@@ -10473,8 +10473,18 @@ export class WindowNode extends Scrollable(Node) {
    * and advertising lazily would race sources that cache the window list
    * at drag start. A window with no registered drop targets answers "not
    * accepting" once per entry instead (DropSession).
+   *
+   * The one exception is a `<popup dragPreview>`. It follows the pointer,
+   * so for the whole gesture it is the frontmost window under it, and it
+   * must never be what the drag is over. Where react-x11 picks the target
+   * itself (src/dnd.js `topLevelAt`) it is skipped by name; where the OS
+   * picks — AppKit routes a drag to the frontmost window registered for a
+   * type it carries, and looks past one that registered none — the only
+   * way to say so is to register nothing (#488). So a preview gets none of
+   * this: no session, no registry entry, no property.
    */
   _initDnd() {
+    if (this.props.dragPreview) return;
     const wnd = this.window;
     const X = this.app?.X;
     // A backend with drop machinery of its own (the cocoa backend's
