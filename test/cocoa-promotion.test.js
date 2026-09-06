@@ -548,8 +548,8 @@ test('promotion is on by default where the bridge draws layer and raster colours
   try {
     const srgb = fakeCocoaBridge();
     assert.equal(new CocoaApp(srgb)._promote, true);
-    // @windowkit/appkit 0.5 has no colorSpace verb: a layer's colour was a
-    // different shade from the same colour rastered, and a node moving
+    // @windowkit/appkit 0.5.0 has no colorSpace verb: a layer's colour was
+    // a different shade from the same colour rastered, and a node moving
     // between the two would show it
     const older = new Proxy(srgb, {
       get: (t, k) => (k === 'colorSpace' ? undefined : t[k]),

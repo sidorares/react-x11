@@ -194,9 +194,10 @@ export interface RootOptions {
    * above the bitmap for as long as it animates, and the render server
    * draws the motion — no frames, and it keeps moving while the JS thread
    * is busy. On by default where the bridge draws a layer's colour and a
-   * rastered one alike (`@windowkit/appkit` with `colorSpace()`; off on
-   * 0.5, where the two shades differed); `true` turns it on regardless,
-   * `false` keeps every animation on the frame clock.
+   * rastered one alike (`@windowkit/appkit` >= 0.5.1, which says so with
+   * `colorSpace()`; off on 0.5.0, where the two shades differed); `true`
+   * turns it on regardless, `false` keeps every animation on the frame
+   * clock.
    * `REACT_X11_COCOA_PROMOTE=1` / `=0` say the same from the environment.
    * `frameInterval` is how often a scheduled frame may paint, in ms. By
    * default each window paces itself on the display it is on — 8.3ms on

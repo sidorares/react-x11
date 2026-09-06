@@ -123,9 +123,10 @@ export class CocoaApp {
     // default — an animation the render server runs survives a busy JS
     // thread, and the bitmap keeps the frame for everything else — where
     // the bridge draws a layer's colour and a rastered one the same, which
-    // it says with `colorSpace()`: before it (@windowkit/appkit 0.5) a
-    // layer's colour was Generic RGB against sRGB surfaces, and a node
-    // moving between its layer and the bitmap changed shade on the way.
+    // it says with `colorSpace()` (@windowkit/appkit >= 0.5.1, the range
+    // package.json asks for): before it a layer's colour was Generic RGB
+    // against sRGB surfaces, and a node moving between its layer and the
+    // bitmap changed shade on the way.
     // Off (`cocoa.promote: false`, REACT_X11_COCOA_PROMOTE=0) keeps every
     // animation on the frame clock, which is what the presenter bench's
     // `surface` column measures; on (`true`, `=1`) is on regardless.

@@ -1098,11 +1098,12 @@ are sRGB, so `#dbe7f4` rastered as (219, 231, 244) and composited as
 a colour animation there landed on a model value that did not match its
 own `to`. [windowkit/appkit#33](https://github.com/windowkit/appkit/pull/33)
 makes every colour crossing the bridge sRGB and adds `colorSpace()` to
-say so; against it the same card differs by at most six units of one
-channel, in the antialiasing. Promotion is on by
-default **only where the bridge answers `'sRGB'`** — on 0.5 it stays off
-unless asked for — so nobody gets the flash for free, and a bridge upgrade
-turns it on.
+say so, and shipped as `@windowkit/appkit` 0.5.1, the range this package
+asks for; against it the same card differs by at most six units of one
+channel, in the antialiasing. Promotion is on by default **only where the
+bridge answers `'sRGB'`** — on 0.5.0 it stays off unless asked for — so
+nobody gets the flash for free, and the bridge upgrade is what turned it
+on.
 
 **Measured**, 2026-09-06, this machine (a 120Hz panel; the window on a
 60Hz monitor where it says 59fps), 4s per cell, `npm run bench:presenters
