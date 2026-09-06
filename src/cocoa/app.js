@@ -24,6 +24,7 @@ import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
 import { CocoaDockMenu } from './dock.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaStatusItem } from './statusitem.js';
+import { CocoaNotifications } from './notifications.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPermissions } from './permissions.js';
 import { CocoaPaneWindow } from './panewindow.js';
@@ -147,6 +148,15 @@ export class CocoaApp {
       typeof native.authorizationStatus === 'function' &&
       typeof native.requestAuthorization === 'function'
         ? new CocoaPermissions(native)
+        : null;
+
+    // The notification centre (src/cocoa/notifications.js). Present exactly
+    // when the bridge has it (>= 0.5); whether it can *deliver* — a bundle
+    // id — is its own `available()`, the second gate the ladder asks.
+    this.notifications =
+      typeof native.postNotification === 'function' &&
+      typeof native.notificationSettings === 'function'
+        ? new CocoaNotifications(this)
         : null;
 
     // The GL policy, glbackend.js's shape. No GLX exists here, so the
@@ -696,6 +706,10 @@ export class CocoaApp {
         return this._routeAppReopen(ev);
       case 'app-quit-request':
         return this.requestQuit();
+      case 'notification-action':
+      case 'notification-dismissed':
+        this.notifications?.route(ev);
+        return this._afterInput();
       case 'animation-end':
         // the presenter that added the animation registered for its id; an
         // id nobody knows is an animation already forgotten (cancelled, or

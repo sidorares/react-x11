@@ -21,6 +21,12 @@ export {
   requestPermission,
 } from './permissions.js';
 export { usePermission } from './permissionhooks.js';
+export {
+  NoNotificationServiceError,
+  notificationBackend,
+  notify,
+} from './notifications.js';
+export { useNotifier } from './notificationhooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';

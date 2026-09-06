@@ -83,6 +83,11 @@
   five-word status vocabulary (`'unknown'` is the machine's answer, not the
   permission's), the cocoa backend's TCC rung and the Settings-pane rung any
   Mac has, and why Linux answers `'unknown'` until the device portals land.
+- [notifications.md](notifications.md) — a banner outside the app's own
+  windows: `notify()` and `useNotifier()`, the four-rung ladder (the cocoa
+  backend's notification centre, `org.freedesktop.Notifications`,
+  `osascript`, `notify-send`), updating a banner in place, what the user
+  did with it, and why the shell-out rungs cannot report back.
 - [eyedropper.md](eyedropper.md) — sample a colour from the screen:
   `useEyedropper()`/`pickScreenColor()`, the two-rung ladder (the portal's
   own picker, a crosshair grab on plain X11), the interface `version`
