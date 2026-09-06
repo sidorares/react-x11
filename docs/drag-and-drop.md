@@ -440,6 +440,7 @@ return (
     {isDragging && (
       <popup
         dragPreview
+        transparent
         x={position.x + 14}
         y={position.y + 14}
         width={180}
@@ -458,6 +459,14 @@ return (
 `null` otherwise. **`dragPreview` on the `<popup>` is required**: it tells
 the router that this window is the preview, not something under the
 pointer, and without it the drag would immediately land on its own preview.
+
+`transparent` is not required, but a preview usually wants it: the popup is
+a real window, so a card with a `borderRadius` on an opaque one shows the
+window's own ground in the four corners the radius gives up. With it, the
+corners are the desktop, antialiased — and where no compositor is running
+the window falls back to filling itself square, which is what it looked
+like anyway. See
+[`transparent`](elements.md#transparent--rounded-corners-and-translucency).
 
 ## The two transports
 

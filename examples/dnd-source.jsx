@@ -15,7 +15,10 @@
 //     serialisation), and 'move' removes the card from the shelf.
 //   - useDragSource: `isDragging` + `position` drive a live drag preview in
 //     a `<popup dragPreview>` following the pointer — a React tree, not a
-//     bitmap — and a `:dragging` style block dims the source card.
+//     bitmap — and a `:dragging` style block dims the source card. The
+//     preview popup is `transparent` so the card's rounded corners are the
+//     preview's own: an opaque window would show its ground in the four
+//     corners the radius gives up.
 import React, { useState } from 'react';
 import { createRoot, createStyles, useDragSource } from '../src/index.js';
 
@@ -50,6 +53,7 @@ function Card({ file, onMoved }) {
       {isDragging && (
         <popup
           dragPreview
+          transparent
           x={position.x + 14}
           y={position.y + 14}
           width={180}
