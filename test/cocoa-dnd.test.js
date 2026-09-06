@@ -530,6 +530,115 @@ describe('the drag side', () => {
     assert.equal(app._windows.size, 1, 'the release takes it down');
   });
 
+  test('the preview is never a dragging destination, so the drop reaches the window beneath it', async () => {
+    // The regression this exists for (#488). On this backend AppKit picks
+    // the destination, and the preview — a panel at the pop-up-menu level
+    // following the pointer — is the frontmost window under it for the
+    // whole gesture. Registered, it would be the one asked, refuse (its
+    // tree has no `dropAccept`) and take the drop with it; the list
+    // beneath would never hear of the drag. AppKit routes a drag only to
+    // views registered for a type it carries and looks past a window with
+    // none, so the preview registers nothing — the same exclusion the X11
+    // router makes in `topLevelAt`, made where AppKit can see it.
+    const native = fakeNative();
+    const app = appOver(native);
+    const root = await createRoot({ app });
+    roots.push(root);
+    const log = [];
+    const row = { id: 1 };
+    const Row = () => {
+      const { dragProps, isDragging, position } = useDragSource({
+        data: { 'application/x-demo-row': row },
+        actions: ['move'],
+      });
+      return h(
+        React.Fragment,
+        null,
+        h('box', {
+          ...dragProps,
+          style: {
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: 100,
+            height: 100,
+          },
+        }),
+        isDragging &&
+          h(
+            'popup',
+            {
+              dragPreview: true,
+              x: position.x + 14,
+              y: position.y + 14,
+              width: 90,
+              height: 20,
+            },
+            h('box', { style: { width: 90, height: 20 } }),
+          ),
+      );
+    };
+    root.render(
+      h(
+        'window',
+        { width: 400, height: 200 },
+        h(Row),
+        h('box', {
+          dropAccept: ['application/x-demo-row'],
+          onDragOver: (e) => e.accept('move'),
+          onDrop: (e) => log.push(['drop', e.items['application/x-demo-row']]),
+          style: {
+            position: 'absolute',
+            left: 200,
+            top: 0,
+            width: 150,
+            height: 150,
+          },
+        }),
+      ),
+    );
+    await settle(app);
+    const list = wndOf(app);
+    press(list, 50, 50);
+    move(list, 70, 50); // past the threshold
+    assert.equal(native.of('beginDrag').length, 1, 'AppKit has the gesture');
+    const preview = [...app._windows.values()][1];
+    assert.ok(preview, 'the preview is up');
+
+    // what AppKit sees: the list is a destination, the preview is not
+    const registered = native.of('registerDropTypes').map(([id]) => id);
+    assert.ok(registered.includes(list.windowNumber), 'the list registered');
+    assert.ok(
+      !registered.includes(preview.windowNumber),
+      'the preview registered no types',
+    );
+    assert.equal(preview._dropTransport, undefined, 'and has no drop side');
+
+    // so the drag comes back over the list, through the preview
+    const local = {
+      local: true,
+      sourceWindowNumber: list.windowNumber,
+      types: [],
+      operations: ['move'],
+    };
+    native.emit(dragEvent('drag-enter', list.windowNumber, 250, 30, local));
+    assert.deepEqual(native.of('setDropResponse').at(-1)[1], {
+      accept: true,
+      operation: 'move',
+    });
+    native.emit(dragEvent('drag-perform', list.windowNumber, 250, 30, local));
+    await tick();
+    assert.deepEqual(log, [['drop', row]], 'the list was told');
+    native.emit({
+      type: 'drag-session-ended',
+      x: 250,
+      y: 30,
+      operation: 'move',
+      dropped: true,
+    });
+    assert.equal(app._windows.size, 1, 'the release takes the preview down');
+  });
+
   test('a drop on our own window keeps the payload by reference', async () => {
     const native = fakeNative();
     const app = appOver(native);
