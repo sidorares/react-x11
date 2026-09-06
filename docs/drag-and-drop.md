@@ -477,6 +477,15 @@ promoted to XDND; come back and it demotes again. Reorderable lists, trees
 and kanban boards therefore cost nothing on the wire, while the _same_
 component can also be dropped into GIMP.
 
+On the [cocoa backend](macos.md) the external transport is AppKit's own —
+`NSDraggingSource` and `NSDraggingDestination` on every window — and the
+switch is drawn differently: once your press crosses the threshold, AppKit
+tracks the gesture everywhere, and a drop on one of your own windows comes
+back through that window's destination with the payload still by reference
+(`e.source === 'internal'`, `e.items` live), so the table above holds. What
+another application reads is the pasteboard, where a `dragData` thunk is a
+promise the system asks for only when a consumer actually reads that type.
+
 ## Interoperating with other applications
 
 What arrives from the desktop, and what to accept for it:
@@ -497,10 +506,23 @@ Platform notes:
 - **Linux / XWayland** — works both directions, including to and from
   native Wayland applications, which is what makes this worth having on a
   modern desktop.
+- **macOS, the cocoa backend** — works both directions with the desktop:
+  files from the Finder arrive as `['files']` (each file is a pasteboard
+  item of one `public.file-url`; they become one `text/uri-list`), text from
+  any app as `['text']`, a URL from Safari as `['uris']`. Pasteboard types
+  are UTIs, and react-x11's MIME vocabulary maps onto them through the OS's
+  own type database — a private `application/x-myapp-…` travels between two
+  react-x11 apps as a `dyn.*` type every process computes alike. Two things
+  differ from X11: the payload is read **at the drop** (the pasteboard is the
+  source's promise, and it may withdraw it once its session ends), so
+  `getData()` answers from that read; and there is no drag image of your
+  own yet — AppKit's session carries a blank one, and a `<popup dragPreview>`
+  does not follow the pointer there.
 - **macOS / XQuartz** — X client to X client works. Dragging from **Finder**
   into an X11 window does not, and never has:
   [XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173). That is the
-  X server's gap, not react-x11's; test against another X client.
+  X server's gap, not react-x11's; test against another X client — or run
+  the cocoa backend, which has the Finder.
 - **Over `ssh -X`** — each pointer position during an external drag costs a
   few round trips while resolving the foreign window under the cursor, so a
   drag feels heavier on a link than a click does. In-app drags cost

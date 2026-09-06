@@ -82,6 +82,7 @@ import {
   registerTopLevel,
   XDND_VERSION,
 } from './dnd.js';
+import { TYPE_GROUPS } from './transfer.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
 import { createClientMessages } from './clientmessage.js';
 import {
@@ -10203,6 +10204,16 @@ export class WindowNode extends Scrollable(Node) {
   _initDnd() {
     const wnd = this.window;
     const X = this.app?.X;
+    // A backend with drop machinery of its own (the cocoa backend's
+    // NSDraggingDestination, src/cocoa/dnd.js): the same DropSession, driven
+    // through its local entry points by the window's transport instead of
+    // by XDND ClientMessages. No property to write, nothing to intern.
+    if (typeof wnd?.attachDropTransport === 'function') {
+      this._dnd = new DropSession(this);
+      registerTopLevel(this);
+      wnd.attachDropTransport(this._dnd, this);
+      return;
+    }
     if (
       !X ||
       typeof X.InternAtom !== 'function' ||
@@ -10247,11 +10258,43 @@ export class WindowNode extends Scrollable(Node) {
    * their top-level's count, since that is where the messages arrive. */
   _registerDropTarget(node) {
     (this._dropTargets ??= new Set()).add(node);
+    this._dndTopLevel()?.window?.dropTargetsChanged?.();
   }
 
   _forgetDropTarget(node) {
     this._dropTargets?.delete(node);
     this._dndOwner()?.forget(node);
+    this._dndTopLevel()?.window?.dropTargetsChanged?.();
+  }
+
+  /** The top-level whose drop session — and transport — this window's
+   * targets roll up into. */
+  _dndTopLevel() {
+    let node = this;
+    while (node && !node._dnd) node = node.parent?.root;
+    return node ?? null;
+  }
+
+  /** The concrete type names every `dropAccept` under this top-level asks
+   * for — what a backend that registers its accepted types up front (the
+   * cocoa backend) adds to its base set. Groups and predicates name none. */
+  _dndConcreteTypes() {
+    const out = new Set();
+    const walk = (wn) => {
+      for (const node of wn._dropTargets ?? []) {
+        const accept = node.props.dropAccept;
+        for (const entry of Array.isArray(accept) ? accept : []) {
+          if (typeof entry === 'string' && !(entry in TYPE_GROUPS)) {
+            out.add(entry);
+          }
+        }
+      }
+      for (const child of wn.children) {
+        if (child.isWindow && !child.isPopup) walk(child);
+      }
+    };
+    walk(this);
+    return [...out];
   }
 
   _dndTargetCount() {

@@ -69,6 +69,9 @@ export class CocoaApp {
     this._shadowStale = new Set();
     this._pump = null;
     this._closed = false;
+    // the DragSession whose gesture an NSDraggingSession is tracking; a drop
+    // on one of our own windows is routed to its live payload
+    this._activeDrag = null;
 
     const screens = native.listScreens();
     this.scale = screens[0]?.scale ?? 1;
@@ -560,6 +563,18 @@ export class CocoaApp {
         return this._afterInput();
       case 'accessibility-display-changed':
         return this._routeAccessibility(ev);
+      case 'drag-enter':
+      case 'drag-over':
+      case 'drag-exit':
+      case 'drag-perform':
+        return this._routeDrop(ev);
+      case 'drag-session-began':
+        return undefined;
+      case 'drag-session-moved':
+        this._activeDrag?.nativeMoved(ev);
+        return undefined;
+      case 'drag-session-ended':
+        return this._routeDragEnded(ev);
       case 'animation-end':
         // the presenter that added the animation registered for its id; an
         // id nobody knows is an animation already forgotten (cancelled, or
@@ -748,6 +763,27 @@ export class CocoaApp {
   watchAccessibilityDisplay(fn) {
     this._a11yListeners.add(fn);
     return () => this._a11yListeners.delete(fn);
+  }
+
+  /**
+   * AppKit's four destination questions, answered inside the callback: the
+   * window's transport (src/cocoa/dnd.js) drives its DropSession and sets
+   * the response before this returns. A frame is flushed on the way out,
+   * like a click's — `:drag-over` is a repaint.
+   */
+  _routeDrop(ev) {
+    const wnd = this._window(ev);
+    if (!wnd || wnd.destroyed) return;
+    wnd._dropTransport?.handle(ev);
+    this._afterInput();
+  }
+
+  /** The release of a drag AppKit was tracking for us. */
+  _routeDragEnded(ev) {
+    const drag = this._activeDrag;
+    this._activeDrag = null;
+    drag?.nativeEnded(ev);
+    this._afterInput();
   }
 
   _routeClose(ev) {
