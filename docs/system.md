@@ -394,4 +394,7 @@ urgency / Dock bounce) already exists on X11 as `states: ['demands_attention']`.
 **Session lifecycle** — "we are suspending, save now", and "I have unsaved work,
 do not log out yet". The X-native answer (XSMP) is effectively dead and the live
 one is logind. The shape worth having is probably not a system hook but a
-`useBeforeQuit()` that unifies it with `<window onCloseRequest>`.
+`useBeforeQuit()` that unifies it with `<window onCloseRequest>`. On the cocoa
+backend the second half already lands there: a quit request from the Dock,
+⌘Q or a logout is routed to the primary window's `onCloseRequest`
+([uri-schemes.md](uri-schemes.md), "On macOS").

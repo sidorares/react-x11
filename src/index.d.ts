@@ -191,12 +191,18 @@ export interface RootOptions {
    * as the bridge reports it, 16 where the OS cannot say. A number here
    * applies to every window instead. `pumpInterval` is the AppKit event
    * pump's cadence, in ms (8 by default), which is the floor under input
-   * latency. Ignored off macOS and when {@link RootOptions.app} is passed.
+   * latency. `exitOnQuit` (default `true`) ends the process once a quit
+   * request — the Dock's Quit, ⌘Q, a logout — has closed the app: the
+   * request routes through the primary window's close request first, so
+   * `onCloseRequest` there is where an app intercepts it; `false` is for an
+   * embedder that owns the process's lifetime. Ignored off macOS and when
+   * {@link RootOptions.app} is passed.
    */
   cocoa?: {
     presenter?: 'surface' | 'layers';
     frameInterval?: number;
     pumpInterval?: number;
+    exitOnQuit?: boolean;
   };
   /**
    * The size, in logical pixels, under which a `<text>` is painted as a
