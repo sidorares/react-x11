@@ -912,14 +912,35 @@ more path building follows a stroke that consumed it. `test/cocoa-stroke-chunkin
 The existing declarative vocabulary is the seam: `transition:` and
 `animation:` in styles. On X11 they run on the frame clock (JS
 interpolation, repaint per frame — including the premultiplied-lerp
-rule). The Cocoa presenter maps the same declarations to
-`CATransaction`/`CABasicAnimation` on the affected layer properties, and
-the render server interpolates. Semantics to pin when this lands
-(Phase 5): timing-function parity, transition-interrupt behavior
-(CA's additive animations vs. the JS loop's retargeting), and the
-completion moment `onStatesChange`-style code can observe. Until then,
-the JS frame loop works on Cocoa too — correctness first, offload as the
-measured upgrade.
+rule), and so do they on the surface presenter. **The layer presenter
+hands them to the render server** where the node's own layer expresses
+the property — a plain `<box>`'s `backgroundColor`, `borderColor`,
+`borderWidth` and `borderRadius` — and schedules no frames for them: the
+style goes to its target, which is the layer's model value, and the frame
+that sends it attaches an explicit animation carrying the pixels there
+(`CocoaLayerPresenter.animate`, `@windowkit/appkit` >= 0.5). A loop is one
+repeating animation and costs no JS frames at all. Everything else — a
+colour on text, a layout property, any node that paints as a raster — stays
+on the frame clock, byte-identical to before; the presenter can only decline,
+never break.
+
+The three semantics [the design](architecture/animation.md) said to pin:
+
+- **Timing parity** is control points, not names. `transition`'s ease-out
+  is cubic-bezier(0.33, 1, 0.68, 1) to within 0.003 and the loop easings
+  map the same way (`EASING_CONTROL_POINTS`, styles.js), where CA's named
+  `easeOut` is a different curve — test/style.test.js pins both facts.
+- **Interruption**: a length retargets _additively_ — the model goes to the
+  new target and a delta animation `(old − new) → 0` joins the one still
+  running — so a change of mind mid-flight is continuous with nothing read
+  back; a colour cannot be additive and restarts from the presentation
+  value the bridge reports.
+- **Completion** is the bridge's `animation-end` event, so the node model
+  drops the entry when the render server says so, not when a timer guesses.
+
+Not offloaded yet, in the order they would pay: `opacity` and transforms
+(they do not exist as style properties — the design's §3.4), an absolutely
+positioned node's offsets as `position`, and `boxShadow`'s components.
 
 Two style capabilities currently rejected everywhere become cheap on
 layers and are proposed as **capability-gated additions** rather than

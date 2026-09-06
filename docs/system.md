@@ -308,8 +308,13 @@ miss: a moving thing on screen is what some people cannot read past, which is
 why the desktop offers the switch at all. **Draw the caret solid rather than not
 at all** — that is what the built-in controls do.
 
-[XSETTINGS](appearance.md#what-each-rung-can-actually-answer) is the only source; there is no portal
-interface for any of this. On a desktop with no settings daemon — a bare
+[XSETTINGS](appearance.md#what-each-rung-can-actually-answer) is the only source on X11; there is no
+portal interface for any of this. On the macOS backend the one of these the
+system publishes is read from it: **Reduce motion** (System Settings ›
+Accessibility › Display) arrives as `animations: false` with
+`source: 'macos'`, live — flipping the switch stops a spinner that is already
+going round — and the other fields keep the defaults there, since macOS has
+no equivalent to hand over. On a desktop with no settings daemon — a bare
 `startx`, most window managers, XQuartz — `source` is null and the numbers above
 are this renderer's own defaults. They are deliberately not GTK's, which blinks
 on a 1200ms cycle and drags at 8px: the point is to follow a desktop that

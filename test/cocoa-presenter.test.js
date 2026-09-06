@@ -15,7 +15,12 @@ import { cssColorStraight } from 'ntk';
 
 import { registerElement, unregisterElement } from '../src/host.js';
 import { Node } from '../src/node.js';
-import { renderX11, cleanup, screen } from '../src/testing/index.js';
+import {
+  renderX11,
+  cleanup,
+  screen,
+  withFrameClock,
+} from '../src/testing/index.js';
 import { CocoaLayerPresenter } from '../src/cocoa/presenter.js';
 import { CocoaContext2D } from '../src/cocoa/context2d.js';
 
@@ -65,6 +70,7 @@ class SceneNode extends Node {
 function fakeBridge() {
   const calls = [];
   let surfaces = 0;
+  let presentation = null; // what presentationValue answers
   const native = new Proxy(
     {},
     {
@@ -75,6 +81,7 @@ function fakeBridge() {
           if (name.startsWith('create') && name.endsWith('Layer')) {
             return { layer: calls.length };
           }
+          if (name === 'presentationValue') return presentation;
           if (name === 'createSurface') {
             return { surface: ++surfaces, width: args[0], height: args[1] };
           }
@@ -89,6 +96,9 @@ function fakeBridge() {
   return {
     native,
     calls,
+    setPresentation: (value) => {
+      presentation = value;
+    },
     /** The arguments after the surface handle, per call of `name`. */
     argsOf: (name) =>
       calls.filter((c) => c.name === name).map((c) => c.args.slice(1)),
@@ -103,7 +113,11 @@ function presenterFor({ windowNode, app }) {
   const presenter = new CocoaLayerPresenter({
     _native: bridge.native,
     scale: 1,
-    app: { fonts: app.fonts, _parseColor: (c) => cssColorStraight(String(c)) },
+    app: {
+      fonts: app.fonts,
+      _parseColor: (c) => cssColorStraight(String(c)),
+      _animationEnds: new Map(),
+    },
     _layer: { layer: 'root' },
   });
   windowNode.window.noteInvalidate = (damage, layoutChanged) =>
@@ -330,4 +344,231 @@ test('a claim made from inside a frame lands in the next one', async () => {
   );
   presenter.frame(windowNode);
   assert.strictEqual(outer.rasters, 2);
+});
+
+// --- animations the render server runs --------------------------------------
+//
+// The presenter's half of docs/architecture/animation.md §4: a transition or
+// a loop on a property the node's own layer expresses goes to the bridge as
+// an explicit animation — control points for the curve, additive for a
+// length, from the presentation value for a colour — and schedules no
+// frames; what the layer cannot express stays on the frame clock, exactly as
+// before. The bridge is the recording fake, so what is pinned is the call
+// that goes out and the node model's bookkeeping around it.
+
+const plainBox = (style) =>
+  h('box', {
+    style: { width: 120, height: 60, backgroundColor: '#ff0000', ...style },
+  });
+
+/** A plain box over the presenter, its window wired the way layers mode
+ *  wires it (src/cocoa/window.js), one frame in. */
+async function mountAnimated(style) {
+  const mounted = await renderX11(plainBox(style), { backend: 'mock' });
+  const { presenter, bridge } = presenterFor(mounted);
+  const wnd = mounted.windowNode.window;
+  wnd.animateNode = (node, prop, entry) => presenter.animate(node, prop, entry);
+  wnd.cancelNodeAnimation = (node, prop) => presenter.cancel(node, prop);
+  presenter.frame(mounted.windowNode);
+  bridge.calls.length = 0; // mount traffic
+  return {
+    ...mounted,
+    presenter,
+    bridge,
+    node: mounted.windowNode.children[0],
+    ends: presenter.window.app._animationEnds,
+    rerender: (next) => mounted.rerender(plainBox(next)),
+  };
+}
+
+const fade = { transition: { backgroundColor: 120 } };
+const pulse = {
+  animation: {
+    backgroundColor: { to: '#00ff00', duration: 900, alternate: true },
+  },
+};
+const sentBackgrounds = (bridge) =>
+  bridge
+    .argsOf('setLayerProps')
+    .flatMap(([p]) => (p.backgroundColor ? [p.backgroundColor] : []));
+
+test('a transition on a plain box runs in the render server: the model, one animation, no frames', async () => {
+  const m = await mountAnimated(fade);
+  await m.rerender({ ...fade, backgroundColor: '#0000ff' });
+  const entry = m.node._anim.get('backgroundColor');
+  assert.ok(entry?.offloaded, 'the presenter took it');
+  assert.strictEqual(m.windowNode._animating.size, 0, 'no frame clock for it');
+  assert.strictEqual(
+    m.node.style.backgroundColor,
+    '#0000ff',
+    'the style is the model value, not the start',
+  );
+
+  m.presenter.frame(m.windowNode);
+  assert.deepStrictEqual(sentBackgrounds(m.bridge).at(-1), [0, 0, 1, 1]);
+  const anims = m.bridge.argsOf('addAnimation');
+  assert.strictEqual(anims.length, 1);
+  const [keyPath, opts, key] = anims[0];
+  assert.strictEqual(keyPath, 'backgroundColor');
+  assert.deepStrictEqual(opts.from, [1, 0, 0, 1]);
+  assert.deepStrictEqual(opts.to, [0, 0, 1, 1]);
+  assert.strictEqual(opts.duration, 0.12);
+  assert.deepStrictEqual(opts.timing, [0.33, 1, 0.68, 1], 'control points');
+  assert.strictEqual(typeof opts.id, 'string');
+  assert.ok(key.startsWith('backgroundColor:'));
+  m.presenter.frame(m.windowNode);
+  assert.strictEqual(
+    m.bridge.argsOf('addAnimation').length,
+    1,
+    'attached once',
+  );
+
+  // the bridge reports the end: the entry goes, the model was there all along
+  m.ends.get(opts.id)({ type: 'animation-end', id: opts.id, finished: true });
+  assert.ok(!m.node._anim?.size);
+  assert.strictEqual(m.presenter.liveAnimations.size, 0);
+});
+
+test('a length retargets additively: the new delta joins the one still running', async () => {
+  const edge = { borderColor: '#000000', transition: { borderWidth: 100 } };
+  const m = await mountAnimated({ ...edge, borderWidth: 2 });
+  await m.rerender({ ...edge, borderWidth: 6 });
+  m.presenter.frame(m.windowNode);
+  await m.rerender({ ...edge, borderWidth: 3 });
+  m.presenter.frame(m.windowNode);
+  const anims = m.bridge.argsOf('addAnimation');
+  assert.deepStrictEqual(
+    anims.map(([kp, o]) => [kp, o.from, o.to, o.additive]),
+    [
+      ['borderWidth', -4, 0, true],
+      ['borderWidth', 3, 0, true],
+    ],
+  );
+  assert.notStrictEqual(anims[0][2], anims[1][2], 'distinct keys');
+  assert.strictEqual(
+    m.bridge.argsOf('removeAnimation').length,
+    0,
+    'the first keeps running and sums with the second',
+  );
+  m.ends.get(anims[0][1].id)({ finished: true });
+  assert.ok(
+    m.node._anim.get('borderWidth')?.offloaded,
+    'the older one ending leaves the newer in place',
+  );
+  m.ends.get(anims[1][1].id)({ finished: true });
+  assert.ok(!m.node._anim?.size);
+});
+
+test('a colour retargets from where the pixels are, replacing the one before it', async () => {
+  const m = await mountAnimated(fade);
+  await m.rerender({ ...fade, backgroundColor: '#0000ff' });
+  m.presenter.frame(m.windowNode);
+  const [, , firstKey] = m.bridge.argsOf('addAnimation')[0];
+  m.bridge.setPresentation([0.5, 0, 0.5, 1]); // mid-flight, as the bridge reports it
+  await m.rerender({ ...fade, backgroundColor: '#00ff00' });
+  m.presenter.frame(m.windowNode);
+  const anims = m.bridge.argsOf('addAnimation');
+  assert.strictEqual(anims.length, 2);
+  assert.deepStrictEqual(anims[1][1].from, [0.5, 0, 0.5, 1]);
+  assert.deepStrictEqual(anims[1][1].to, [0, 1, 0, 1]);
+  assert.deepStrictEqual(m.bridge.argsOf('removeAnimation'), [[firstKey]]);
+});
+
+test('what the layer cannot express stays on the frame clock', async () => {
+  const clock = withFrameClock();
+  try {
+    // a per-edge border makes the box a raster: its background is in the bitmap
+    const raster = { borderTopWidth: 1, borderColor: '#000000', ...fade };
+    const m = await mountAnimated(raster);
+    await m.rerender({ ...raster, backgroundColor: '#0000ff' });
+    assert.ok(m.windowNode._animating.has(m.node), 'the clock runs it');
+    assert.ok(!m.node._anim.get('backgroundColor').offloaded);
+    assert.deepStrictEqual(
+      cssColorStraight(m.node.style.backgroundColor),
+      [1, 0, 0, 1],
+      'from the start, as the clock always did',
+    );
+    m.presenter.frame(m.windowNode);
+    assert.strictEqual(m.bridge.argsOf('addAnimation').length, 0);
+  } finally {
+    clock.restore();
+  }
+});
+
+test('a loop is one repeating animation in the render server, and stops with the node', async () => {
+  const m = await mountAnimated(pulse);
+  // declared at mount it started on the clock, before the presenter was
+  // wired; the next swap with the same declaration moves it over
+  await m.rerender(pulse);
+  const entry = m.node._anim.get('backgroundColor');
+  assert.ok(entry?.loop && entry.offloaded);
+  assert.strictEqual(m.windowNode._animating.size, 0);
+  assert.strictEqual(
+    m.node.style.backgroundColor,
+    '#ff0000',
+    'the model rests at the declared value',
+  );
+  m.presenter.frame(m.windowNode);
+  const [[keyPath, opts, key]] = m.bridge.argsOf('addAnimation');
+  assert.strictEqual(keyPath, 'backgroundColor');
+  assert.deepStrictEqual(
+    [
+      opts.from,
+      opts.to,
+      opts.repeat,
+      opts.autoreverse,
+      opts.timing,
+      opts.duration,
+    ],
+    [[1, 0, 0, 1], [0, 1, 0, 1], Infinity, true, [0, 0, 1, 1], 0.9],
+  );
+  m.presenter.frame(m.windowNode);
+  assert.strictEqual(m.bridge.argsOf('addAnimation').length, 1, 'phase kept');
+
+  await m.rerender({ ...pulse, display: 'none' });
+  assert.deepStrictEqual(m.bridge.argsOf('removeAnimation'), [[key]]);
+  assert.ok(!m.node._anim?.size);
+  m.presenter.frame(m.windowNode);
+  assert.strictEqual(m.presenter.liveAnimations.size, 0);
+});
+
+test('a layer that turns into a raster hands its loop back to the clock', async () => {
+  const m = await mountAnimated(pulse);
+  await m.rerender(pulse);
+  m.presenter.frame(m.windowNode);
+  assert.strictEqual(m.bridge.argsOf('addAnimation').length, 1);
+  await m.rerender({ ...pulse, borderTopWidth: 1, borderColor: '#000000' });
+  m.presenter.frame(m.windowNode);
+  const entry = m.node._anim.get('backgroundColor');
+  assert.ok(entry?.loop && !entry.offloaded, 'the clock has it again');
+  assert.ok(m.windowNode._animating.has(m.node));
+  assert.strictEqual(m.presenter.liveAnimations.size, 0);
+});
+
+test('a transition whose layer turns raster before its frame goes to the clock', async () => {
+  const clock = withFrameClock();
+  try {
+    const m = await mountAnimated(fade);
+    await m.rerender({ ...fade, backgroundColor: '#0000ff' });
+    assert.ok(m.node._anim.get('backgroundColor').offloaded);
+    // a second swap before the frame: the target now paints as a raster
+    await m.rerender({
+      ...fade,
+      backgroundColor: '#0000ff',
+      borderTopWidth: 1,
+      borderColor: '#000000',
+    });
+    m.presenter.frame(m.windowNode);
+    const entry = m.node._anim.get('backgroundColor');
+    assert.ok(entry && !entry.offloaded);
+    assert.ok(m.windowNode._animating.has(m.node));
+    assert.strictEqual(
+      m.node.style.backgroundColor,
+      '#ff0000',
+      'from the declared start',
+    );
+    assert.strictEqual(m.bridge.argsOf('addAnimation').length, 0);
+  } finally {
+    clock.restore();
+  }
 });

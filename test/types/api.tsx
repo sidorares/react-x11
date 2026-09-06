@@ -1446,6 +1446,10 @@ function _System() {
 
   const feel: DesktopSettings = useDesktopSettings();
   const blinkFor: number = feel.caretBlink ? feel.caretBlinkMs : 0;
+  // where the numbers came from: a settings daemon, the macOS accessibility
+  // panel (reduce motion only), a test, or nobody
+  const feelSource: 'xsettings' | 'macos' | 'test' | null = feel.source;
+  void feelSource;
   void [
     feel.doubleClickMs,
     feel.doubleClickDistance,

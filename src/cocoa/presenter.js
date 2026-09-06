@@ -32,6 +32,7 @@ import {
   damageToPaint,
   intersectRects,
 } from '../nodes.js';
+import { EASING_CONTROL_POINTS, TRANSITION_CONTROL_POINTS } from '../styles.js';
 import { CocoaContext2D } from './context2d.js';
 
 const RASTER_PAD = 2; // antialiasing/italic overhang outside the ink bounds
@@ -324,9 +325,8 @@ const EDGE_PROPS = [
   'borderEndWidth',
 ];
 
-function stylePaintsPlain(node) {
+function stylePaintsPlain(node, style = node.style ?? {}) {
   if (node.kind !== 'box') return false;
-  const style = node.style ?? {};
   if (style.backgroundImage || style.boxShadow || style.outlineWidth) {
     return false;
   }
@@ -338,6 +338,26 @@ function stylePaintsPlain(node) {
     return false;
   return uniformRadius(style.borderRadius) !== null;
 }
+
+/**
+ * Style property → the key path on a PropBox's own layer, for the
+ * animations the presenter takes off the frame clock and hands to the
+ * render server (docs/architecture/animation.md §4.2). Only what the layer
+ * expresses as a property of itself qualifies: a colour on `<text>` is a
+ * re-raster per frame, a layout property moves the siblings, and both stay
+ * on the JS loop. `scaled` values go out in points, as `_syncPropBox`
+ * sends them.
+ */
+const ANIMATED_KEY_PATHS = Object.freeze({
+  backgroundColor: { keyPath: 'backgroundColor', colour: true },
+  borderColor: { keyPath: 'borderColor', colour: true },
+  borderWidth: { keyPath: 'borderWidth', scaled: true },
+  borderRadius: { keyPath: 'cornerRadius', scaled: true },
+});
+
+// the ids the bridge reports an animation's end under: unique per process,
+// looked up per app (`_animationEnds`)
+let animationSeq = 0;
 
 function uniformRadius(radius) {
   if (radius === undefined) return 0;
@@ -439,6 +459,10 @@ export class CocoaLayerPresenter {
     this.visuals = new Map(); // node -> Visual
     this.rasters = new Map(); // node -> RasterState
     this.bars = new Map(); // scroller node -> Map(axis -> { layer, raster })
+    // animations taken off the frame clock: accepted and waiting for the
+    // frame that attaches them, and running in the render server
+    this.pendingAnimations = new Map(); // node -> Map(prop -> entry)
+    this.liveAnimations = new Map(); // node -> Map(id -> { prop, key, entry })
     // Claims since the last frame — taken at the top of `frame()`, the way
     // the X11 path takes its damage before painting, so a claim made from
     // inside a paint lands in the next frame instead of being cleared with
@@ -548,6 +572,7 @@ export class CocoaLayerPresenter {
           visual.destroy();
           this.visuals.delete(node);
           this._dropRaster(node);
+          this._dropAnimations(node, false);
           const bars = this.bars.get(node);
           if (bars) {
             for (const entry of bars.values()) {
@@ -612,7 +637,13 @@ export class CocoaLayerPresenter {
     if (visual && visual.isRaster !== wantsRaster) {
       visual.destroy();
       this._dropRaster(node);
+      // a layer that turns into a raster takes its animations with it; the
+      // frame clock can still run them over the bitmap
+      if (wantsRaster) this._dropAnimations(node, true);
       visual = null;
+    }
+    if (wantsRaster && this.pendingAnimations.has(node)) {
+      this._dropAnimations(node, true);
     }
     if (!visual) {
       visual = new Visual(this, node);
@@ -728,6 +759,163 @@ export class CocoaLayerPresenter {
           ])
         : [0, 0, 0, 0],
     });
+    // after the model value went out, inside the same transaction
+    this._applyAnimations(node, visual);
+  }
+
+  // --- animations the render server runs -----------------------------------
+  //
+  // The node model keeps deciding what is animating and when it ends
+  // (nodes.js `_retarget` / `_updateLoops`); what moves here is who
+  // interpolates. Taken means the node's style goes to its target — the
+  // layer's model value, sent by the next frame's property diff — and that
+  // frame attaches an explicit animation carrying the pixels there; no frame
+  // after it is scheduled for the property, and a loop costs no JS frames at
+  // all. Declined means the frame clock runs it exactly as before, so
+  // nothing here is load-bearing for correctness.
+
+  /**
+   * Take `prop`'s animation for `node`, or decline. Decided against the
+   * *target* style: a `:hover` that adds a shadow turns the node into a
+   * raster in the same swap that starts a fade, and a raster's background
+   * is in its bitmap, not on its layer.
+   */
+  animate(node, prop, entry) {
+    const map = ANIMATED_KEY_PATHS[prop];
+    if (!map || !stylePaintsPlain(node, node._targetStyle ?? node.style)) {
+      return false;
+    }
+    if (this._value(map, entry.from) == null) return false;
+    if (this._value(map, entry.to) == null) return false;
+    let pending = this.pendingAnimations.get(node);
+    if (!pending) this.pendingAnimations.set(node, (pending = new Map()));
+    pending.set(prop, entry);
+    return true;
+  }
+
+  /** Stop what runs for `prop` on `node`: a loop the window lost sight of,
+   *  a declaration that changed, a transition the clock takes back. */
+  cancel(node, prop) {
+    this.pendingAnimations.get(node)?.delete(prop);
+    this._removeLive(node, prop);
+  }
+
+  _ends() {
+    const app = this.window.app;
+    return (app._animationEnds ??= new Map());
+  }
+
+  /** A style value as the layer takes it — a colour as components, a
+   *  length in points — or null for one the layer cannot animate. */
+  _value(map, value) {
+    if (map.colour) {
+      return typeof value === 'string'
+        ? (this.window.app._parseColor(value) ?? null)
+        : null;
+    }
+    return typeof value === 'number'
+      ? value / (map.scaled ? this.scale : 1)
+      : null;
+  }
+
+  /** The frame's half: attach what `animate` accepted, after the model
+   *  value went out, inside the same transaction. */
+  _applyAnimations(node, visual) {
+    const pending = this.pendingAnimations.get(node);
+    if (!pending) return;
+    this.pendingAnimations.delete(node);
+    for (const [prop, entry] of pending) {
+      const map = ANIMATED_KEY_PATHS[prop];
+      const id = `rx${++animationSeq}`;
+      const key = `${prop}:${id}`;
+      const opts = { duration: entry.duration / 1000, id };
+      if (entry.loop) {
+        // a loop replaces whatever ran for the property: its declaration
+        // changed, and a loop restarts from the top when it does
+        this._removeLive(node, prop);
+        opts.from = this._value(map, entry.from);
+        opts.to = this._value(map, entry.to);
+        opts.timing = EASING_CONTROL_POINTS[entry.easing];
+        opts.repeat = Infinity;
+        opts.autoreverse = entry.alternate;
+      } else if (map.colour) {
+        // From where the pixels are — which is what "an interrupted
+        // transition reverses from where it got to" means here. A colour
+        // cannot be additive, so the one before it is replaced.
+        this._removeLive(node, prop);
+        const shown = this.native.presentationValue?.(
+          visual.layer,
+          map.keyPath,
+        );
+        opts.from = Array.isArray(shown) ? shown : this._value(map, entry.from);
+        opts.to = this._value(map, entry.to);
+        opts.timing = TRANSITION_CONTROL_POINTS;
+      } else {
+        // Additive: a delta over the model value, (old − new) → 0, and the
+        // ones before it keep running and sum. Continuity on a retarget with
+        // nothing read back, however many are in flight.
+        opts.from = this._value(map, entry.from) - this._value(map, entry.to);
+        opts.to = 0;
+        opts.additive = true;
+        opts.timing = TRANSITION_CONTROL_POINTS;
+      }
+      this.native.addAnimation(visual.layer, map.keyPath, opts, key);
+      // looked up after the removals above, which may have pruned the map
+      let live = this.liveAnimations.get(node);
+      if (!live) this.liveAnimations.set(node, (live = new Map()));
+      live.set(id, { prop, key, entry });
+      this._ends().set(id, (ev) => this._animationEnded(node, id, ev));
+    }
+  }
+
+  /** Every animation running for `prop` on `node`, off the layer and out
+   *  of the books. */
+  _removeLive(node, prop) {
+    const live = this.liveAnimations.get(node);
+    if (!live) return;
+    const visual = this.visuals.get(node);
+    for (const [id, run] of live) {
+      if (run.prop !== prop) continue;
+      live.delete(id);
+      this._ends().delete(id);
+      if (visual) this.native.removeAnimation(visual.layer, run.key);
+    }
+    if (live.size === 0) this.liveAnimations.delete(node);
+  }
+
+  /** The bridge's `animation-end` for one of ours — it ran out, or CA
+   *  dropped it. An older additive one ending changes nothing: the node
+   *  checks the entry is still the one it holds. */
+  _animationEnded(node, id) {
+    this._ends().delete(id);
+    const live = this.liveAnimations.get(node);
+    const run = live?.get(id);
+    if (!run) return;
+    live.delete(id);
+    if (live.size === 0) this.liveAnimations.delete(node);
+    node._offloadEnded(run.prop, run.entry);
+  }
+
+  /** The layer is going — the visual is destroyed, or turns into a raster —
+   *  and every animation on it goes with it. What was still waiting for a
+   *  frame goes back to the frame clock when the node stays (`reclaim`);
+   *  what was running is over, and the model shows. */
+  _dropAnimations(node, reclaim) {
+    const pending = this.pendingAnimations.get(node);
+    if (pending) {
+      this.pendingAnimations.delete(node);
+      for (const [prop, entry] of pending) {
+        if (reclaim) node._offloadDeclined(prop, entry);
+        else node._offloadEnded(prop, entry);
+      }
+    }
+    const live = this.liveAnimations.get(node);
+    if (!live) return;
+    this.liveAnimations.delete(node);
+    for (const [id, run] of live) {
+      this._ends().delete(id);
+      node._offloadEnded(run.prop, run.entry);
+    }
   }
 
   /**

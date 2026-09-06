@@ -55,6 +55,12 @@ export class CocoaApp {
     // window paces itself on its own display (`frameIntervalFor`)
     this._frameInterval = options.cocoa?.frameInterval ?? null;
     this._pumpInterval = PUMP_INTERVAL_MS;
+    // src/desktopsettings.js's subscribers to the accessibility display
+    // options — "reduce motion" — which arrive as a backend event
+    this._a11yListeners = new Set();
+    // the layer presenter's animations, by the id the bridge reports their
+    // end under (`animation-end`, src/cocoa/presenter.js)
+    this._animationEnds = new Map();
     // the one-shot that runs a frame due between two pump ticks, and when
     // it is due (`_armFrameTimer`)
     this._frameTimer = null;
@@ -552,6 +558,13 @@ export class CocoaApp {
       case 'menu-activate':
         this._activeGlobalMenu?.activate(ev.id);
         return this._afterInput();
+      case 'accessibility-display-changed':
+        return this._routeAccessibility(ev);
+      case 'animation-end':
+        // the presenter that added the animation registered for its id; an
+        // id nobody knows is an animation already forgotten (cancelled, or
+        // its layer dropped), and the bridge's report is just late
+        return this._animationEnds.get(ev.id)?.(ev);
       default:
         return undefined;
     }
@@ -714,6 +727,27 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
     wnd._occluded = ev.visible === false;
+  }
+
+  _routeAccessibility(ev) {
+    for (const fn of [...this._a11yListeners]) fn(ev);
+  }
+
+  /**
+   * System Settings › Accessibility › Display, as the bridge reports it —
+   * `{ reduceMotion, reduceTransparency, increaseContrast,
+   * differentiateWithoutColor, invertColors }` — or null over a bridge (or
+   * a test fake) that does not answer. The seam src/desktopsettings.js reads
+   * "reduce motion" through; `watchAccessibilityDisplay` is its other half.
+   */
+  accessibilityDisplayOptions() {
+    return this._native.accessibilityDisplayOptions?.() ?? null;
+  }
+
+  /** Subscribe to the options changing while the app runs. */
+  watchAccessibilityDisplay(fn) {
+    this._a11yListeners.add(fn);
+    return () => this._a11yListeners.delete(fn);
   }
 
   _routeClose(ev) {

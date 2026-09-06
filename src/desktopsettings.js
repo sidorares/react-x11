@@ -17,7 +17,11 @@
 // XQuartz — the defaults below stand.
 //
 // So this reads the map `xsettings.js` already maintains, rather than
-// standing up a source of its own.
+// standing up a source of its own. The one exception is macOS, which has no
+// XSETTINGS and answers exactly one of these — "reduce motion", through
+// `NSWorkspace` — so the Cocoa app exposes that behind a two-method seam
+// (`accessibilityDisplayOptions`, `watchAccessibilityDisplay`) and this
+// module reads it the way it reads the map: synchronously, cached, live.
 //
 // ## Two of these are read synchronously, which is what shapes the module
 //
@@ -85,6 +89,22 @@ function positive(map, key) {
  * conversion, and forgetting to is a caret that blinks at half speed and
  * looks broken rather than wrong.
  */
+/**
+ * macOS's accessibility display options → the settings. Only `animations`
+ * comes from the system there: it is the one of these macOS publishes at all
+ * (System Settings › Accessibility › Display › Reduce motion, which the
+ * bridge reads from `NSWorkspace`), and the rest keep this renderer's
+ * defaults rather than being guessed from something that is not them. Pure,
+ * and exported for the test.
+ */
+export function fromMacOS(options) {
+  return Object.freeze({
+    ...DEFAULTS,
+    animations: options?.reduceMotion !== true,
+    source: 'macos',
+  });
+}
+
 export function fromXSettings(map) {
   if (!map) return DEFAULTS;
   const cycle = positive(map, 'Net/CursorBlinkTime');
@@ -126,7 +146,9 @@ export function desktopSettings(app) {
   const session = sessions.get(app);
   if (!session) return DEFAULTS;
   if (!session.snapshot) {
-    session.snapshot = fromXSettings(xsettings(app));
+    session.snapshot = session.macos
+      ? fromMacOS(app.accessibilityDisplayOptions())
+      : fromXSettings(xsettings(app));
   }
   return session.snapshot;
 }
@@ -141,6 +163,16 @@ export function beginDesktopSettings(app) {
   if (sessions.has(app)) return;
   const session = { snapshot: null, listeners: new Set(), stop: null };
   sessions.set(app, session);
+  // The Cocoa app: the answer is synchronous from the start, and the change
+  // arrives as a backend event rather than a property on a selection owner.
+  if (typeof app?.accessibilityDisplayOptions === 'function') {
+    session.macos = true;
+    session.stop = app.watchAccessibilityDisplay?.(() => {
+      session.snapshot = null;
+      notify(session);
+    });
+    return;
+  }
   beginXSettings(app).then(
     () => {
       if (!sessions.has(app)) return;

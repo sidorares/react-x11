@@ -2089,7 +2089,7 @@ export class Node {
         const duration = transitionFor(target, prop);
         if (duration <= 0) continue;
         if (interpolate(from, to, 0.5) === null) continue; // no midpoint: snap
-        (this._anim ??= new Map()).set(prop, {
+        const entry = {
           from,
           to,
           duration,
@@ -2098,8 +2098,23 @@ export class Node {
           // be seconds old — and the first tick would then find the
           // transition already over and jump straight to the end
           start: now(),
-        });
-        this.root?._startAnimating(this);
+        };
+        const previous = this._anim?.get(prop);
+        (this._anim ??= new Map()).set(prop, entry);
+        // A presenter that can run it in the render server takes it here:
+        // the node's style then goes straight to the target — the layer's
+        // model value — and the one frame that sends it carries the
+        // animation with it (src/cocoa/presenter.js). Declined, or with no
+        // such presenter, the window's frame clock runs it as it always has.
+        if (this._offload(prop, entry)) {
+          entry.offloaded = true;
+          this.root?.invalidate(false, damageForAnimation(this), 'animation');
+        } else {
+          // …and one the presenter had must not keep running underneath the
+          // values the clock is about to write
+          if (previous?.offloaded) this._cancelOffload(prop, previous);
+          this.root?._startAnimating(this);
+        }
       }
     }
     // After the transitions, before the style is assembled: a loop that just
@@ -2191,8 +2206,75 @@ export class Node {
 
   _animatedValues() {
     const values = {};
-    for (const [prop, a] of this._anim) values[prop] = a.value ?? a.from;
+    for (const [prop, a] of this._anim) {
+      // an offloaded property shows its target: the render server draws the
+      // motion over the model value, and the model is the style
+      if (!a.offloaded) values[prop] = a.value ?? a.from;
+    }
     return values;
+  }
+
+  // --- the presenter's half of an animation ---------------------------------
+  //
+  // Three feature-detected hooks on the window (src/cocoa/window.js, layers
+  // mode only): `animateNode(node, prop, entry)` answers true when the
+  // presenter will run the entry itself, `cancelNodeAnimation(node, prop)`
+  // stops what it runs for the property, and the presenter calls back
+  // through `_offloadEnded` / `_offloadDeclined` below. An entry the
+  // presenter took is `offloaded`: it stays in `_anim` — so a retarget, a
+  // loop-stop rule and `sameAnimation` all see it — but it contributes no
+  // value to the style, is skipped by the tick, and keeps the node out of the
+  // window's animating set. The X11 path has none of these hooks and is
+  // byte-identical (docs/architecture/animation.md §4).
+
+  _offload(prop, entry) {
+    const wnd = this.root?.window;
+    if (typeof wnd?.animateNode !== 'function') return false;
+    return wnd.animateNode(this, prop, entry) === true;
+  }
+
+  _cancelOffload(prop, entry) {
+    if (!entry?.offloaded) return;
+    this.root?.window?.cancelNodeAnimation?.(this, prop);
+  }
+
+  /** The presenter is done with `entry` — it ran out, or its layer went.
+   *  A transition is over either way (the model is the target). A loop
+   *  never ends on its own, so a loop that comes back this way lost its
+   *  layer, and the frame clock takes it over rather than letting it stop. */
+  _offloadEnded(prop, entry) {
+    if (this._anim?.get(prop) !== entry) return;
+    if (entry.loop && !this.destroyed) {
+      this._offloadDeclined(prop, entry);
+      return;
+    }
+    this._anim.delete(prop);
+    if (!this._anim.size) this.root?._animating.delete(this);
+  }
+
+  /** The presenter could not run `entry` after all — the node turned into a
+   *  raster between the swap and the frame. The frame clock takes it from
+   *  the top; the property's declared start is where the pixels still are. */
+  _offloadDeclined(prop, entry) {
+    if (this._anim?.get(prop) !== entry || this.destroyed) return;
+    entry.offloaded = false;
+    entry.start = now();
+    this.style = { ...this._targetStyle, ...this._animatedValues() };
+    this.root?._startAnimating(this);
+  }
+
+  /** Keep the frame clock running only for what the clock itself animates;
+   *  an offloaded-only node needs one frame — the one that sends the model
+   *  and the animation — and not a loop of them. */
+  _scheduleAnimationFrames() {
+    for (const a of this._anim?.values() ?? []) {
+      if (!a.offloaded) {
+        this.root?._startAnimating(this);
+        return;
+      }
+    }
+    this.root?._animating.delete(this);
+    this.root?.invalidate(false, damageForAnimation(this), 'animation');
   }
 
   /**
@@ -2241,6 +2323,7 @@ export class Node {
         if (!a.loop) continue;
         if (running && specs.some((spec) => spec.prop === prop)) continue;
         anim.delete(prop);
+        this._cancelOffload(prop, a);
         changed = true;
         if (isLayoutProp(prop)) layoutTouched = true;
       }
@@ -2253,13 +2336,28 @@ export class Node {
         // spinner that jumps back to the start whenever anything above it
         // re-rendered — which is the frame after every state change in the
         // app.
-        if (current?.loop && sameAnimation(current, spec)) continue;
-        (this._anim ??= new Map()).set(spec.prop, {
+        if (current?.loop && sameAnimation(current, spec)) {
+          // A loop the clock started before the window had a presenter —
+          // one declared at mount runs from `_setRoot`, before `realize` —
+          // moves over the first time a presenter can take it. Its phase is
+          // the render server's from here, which is what a restart costs.
+          if (!current.offloaded && this._offload(spec.prop, current)) {
+            current.offloaded = true;
+            changed = true;
+          }
+          continue;
+        }
+        // a changed declaration, or a transition the loop takes over from:
+        // whatever the presenter ran for the property stops first
+        if (current?.offloaded) this._cancelOffload(spec.prop, current);
+        const entry = {
           ...spec,
           loop: true,
           start: now(),
           value: animationValueAt(spec, 0),
-        });
+        };
+        (this._anim ??= new Map()).set(spec.prop, entry);
+        if (this._offload(spec.prop, entry)) entry.offloaded = true;
         changed = true;
         if (isLayoutProp(spec.prop)) layoutTouched = true;
       }
@@ -2273,7 +2371,7 @@ export class Node {
     // a stop has to leave the frame clock idle, and a tick is exactly what
     // there may never be another of.
     if (!this._anim?.size) this.root?._animating.delete(this);
-    if (running) this.root?._startAnimating(this);
+    if (running) this._scheduleAnimationFrames();
     if (!write) return true;
     if (layoutTouched && this.yoga) {
       applyLayoutStyle(this.yoga, this.style, before);
@@ -2320,19 +2418,23 @@ export class Node {
   _tickAnimations(now) {
     if (!this._anim?.size) return false;
     let layoutChanged = false;
+    let ticking = 0; // entries the clock runs, as against the presenter's
     const before = this.style;
     for (const [prop, a] of this._anim) {
+      if (a.offloaded) continue;
       if (a.loop) {
         // No end to test for and no rounding to accumulate: the phase is a
         // modulo of the elapsed time, so a bar that has been going for an
         // hour is exactly where the clock says.
         a.value = animationValueAt(a, now - a.start);
         if (isLayoutProp(prop)) layoutChanged = true;
+        ticking++;
         continue;
       }
       const t = a.duration > 0 ? Math.min(1, (now - a.start) / a.duration) : 1;
       a.value = t >= 1 ? a.to : (interpolate(a.from, a.to, ease(t)) ?? a.to);
       if (t >= 1) this._anim.delete(prop);
+      else ticking++;
       if (isLayoutProp(prop)) layoutChanged = true;
     }
     this.style = this._anim.size
@@ -2355,7 +2457,7 @@ export class Node {
     // it *per frame*: a transitioned `color` is a new ink every frame, for
     // this node and for everything inheriting from it.
     if (inheritedTextChanged(this.style, before)) this._retextSubtree();
-    return this._anim.size > 0;
+    return ticking > 0;
   }
 
   /**
