@@ -23,6 +23,7 @@ import { BezelStore } from './bezels.js';
 import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
 import { CocoaDockMenu } from './dock.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
+import { CocoaStatusItem } from './statusitem.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPaneWindow } from './panewindow.js';
 import { CocoaFilePanels } from './filepanels.js';
@@ -105,6 +106,9 @@ export class CocoaApp {
 
     // The Dock menu (src/cocoa/dock.js), installed by `useDockMenu`.
     this._dockMenu = new CocoaDockMenu(this);
+    // The tray items (src/cocoa/statusitem.js), by the bridge's handle —
+    // which is what a click event names them by.
+    this._statusItems = new Map();
 
     // 'surface' (the measured default) or 'layers' — the retained CALayer
     // presenter, opt-in while docs/macos.md's measure-first gate is open.
@@ -397,6 +401,31 @@ export class CocoaApp {
     this._native.cancelUserAttention(requestId);
   }
 
+  // --- the tray --------------------------------------------------------------
+
+  /**
+   * An `NSStatusItem` — `useTray()`'s mechanism, found by this method's
+   * presence (the X11 backend has none, and the hook says so). Returns the
+   * item; `remove()` on it is the whole of its teardown.
+   */
+  createStatusItem(options) {
+    const item = new CocoaStatusItem(this, options);
+    this._statusItems.set(item.handle, item);
+    const remove = item.remove.bind(item);
+    item.remove = () => {
+      this._statusItems.delete(item.handle);
+      remove();
+    };
+    return item;
+  }
+
+  /** A `menu-activate` tagged `status`: the item whose menu owns the id. */
+  _routeStatusMenu(id) {
+    for (const item of this._statusItems.values()) {
+      if (item.owns(id)) return item.activate(id);
+    }
+  }
+
   /**
    * The pane's end of the frame channel (childmain hands it over,
    * feature-detected so the X11 pane path never notices): geometry and
@@ -631,7 +660,11 @@ export class CocoaApp {
         // Dock menu and the menu bar allocate ids independently. Absent on
         // an older bridge, where only the bar exists.
         if (ev.menu === 'dock') this._dockMenu.activate(ev.id);
+        else if (ev.menu === 'status') this._routeStatusMenu(ev.id);
         else this._activeGlobalMenu?.activate(ev.id);
+        return this._afterInput();
+      case 'status-item-click':
+        this._statusItems.get(ev.statusItem)?.click(ev);
         return this._afterInput();
       case 'accessibility-display-changed':
         return this._routeAccessibility(ev);

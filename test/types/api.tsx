@@ -41,6 +41,7 @@ import {
   setBadge,
   useBadge,
   useDockMenu,
+  useTray,
   Checkbox,
   closeBus,
   Icon,
@@ -1274,6 +1275,16 @@ function _DeepLinks() {
     useBadge(badged ? 2 : 0);
     useDockMenu([{ label: 'New', onSelect: () => {} }, { type: 'separator' }]);
     useDockMenu(null);
+    const tray: { available: boolean } = useTray({
+      icon: 'bell.badge',
+      tooltip: 'Notifications',
+      menu: [{ label: 'Open', onSelect: () => {} }],
+    });
+    useTray({ title: '3', onClick: (ev) => void ev.x, template: false });
+    useTray(null);
+    // @ts-expect-error — an icon is a symbol name or PNG bytes
+    useTray({ icon: 42 });
+    void tray.available;
     activateWindow(0x1a00007, { timestamp: null, source: 2 });
     // @ts-expect-error — EWMH names two source indications
     activateWindow(win, { source: 3 });

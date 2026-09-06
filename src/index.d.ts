@@ -26,6 +26,7 @@ export * from './types/appearance.js';
 export * from './types/fonts.js';
 export * from './types/system.js';
 export * from './types/launcher.js';
+export * from './types/tray.js';
 
 /**
  * The XID of the X11 window a ref points at, or `null` if there is not one

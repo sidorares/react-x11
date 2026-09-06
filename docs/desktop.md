@@ -247,6 +247,46 @@ already have flashed its icon — so it is a root option rather than a hook.
 `appName` renames LaunchServices' record of an unbundled process; a bundle's
 `Info.plist` wins, as it should.
 
+## The tray
+
+```jsx
+import { useTray } from 'react-x11';
+
+const { available } = useTray({
+  icon: 'bell.badge', // an SF Symbol name, or the bytes of a PNG
+  tooltip: 'Notifications',
+  menu: [
+    { label: 'Open', onSelect: open },
+    { type: 'separator' },
+    { label: 'Quit', onSelect: quit },
+  ],
+});
+```
+
+An icon in the system tray for as long as the component is mounted. With
+`menu` a click opens it — the same `items` vocabulary as `MenuBar` and the
+Dock menu, so the three menus an app puts on the desktop are one authoring
+model. Without one, `onClick` gets the button and the item's screen rect,
+which is where to anchor a popup of your own. `title` shows text beside the
+icon or alone; `visible`, `tooltip` and the rest follow their values while
+mounted, and the item is removed on unmount. `null` means no item.
+
+A PNG icon is drawn as a **template** — its shape in the bar's ink, so it
+follows light and dark the way a symbol does; `template: false` keeps its
+colours. Several trays coexist: each is its own item.
+
+**On the cocoa backend** this is `NSStatusItem`, the menu-bar extra. A
+menu-bar app that wants no Dock tile pairs it with
+`createRoot({ cocoa: { activationPolicy: 'accessory' } })` above.
+
+**On X11 it is inert**, and says so: `available` is `false` and the hook
+warns once in development. The freedesktop tray is StatusNotifierItem over
+D-Bus, whose menu is the [dbusmenu](globalmenu.md) this renderer already
+speaks — that half is
+[#353](https://github.com/sidorares/react-x11/issues/353)'s open question,
+and `available` is the seam that keeps an app's tray feature behind the
+answer until it lands.
+
 ## Turning the desktop off
 
 Three things react-x11 turns on for you reach the **session bus**, and none

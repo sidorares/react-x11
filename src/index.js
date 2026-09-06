@@ -12,6 +12,7 @@ export {
 export { useAppActivate, useAppOpen } from './apphooks.js';
 export { setBadge } from './launcher.js';
 export { useBadge, useDockMenu } from './launcherhooks.js';
+export { useTray } from './trayhooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';
