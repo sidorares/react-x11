@@ -348,6 +348,10 @@ export interface WindowProps
    *
    * Applied before the window is mapped, which is the only way to open
    * already fullscreen rather than flashing at the normal size first.
+   *
+   * On the cocoa backend `demands_attention` bounces the Dock icon until
+   * the app is activated and is cancelled when the state is removed; the
+   * other names have no verb in the bridge yet and resolve to nothing.
    */
   states?: WindowStateName[];
   /** Sugar for `states={['fullscreen']}`; they union. */

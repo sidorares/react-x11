@@ -21,6 +21,7 @@ import { setScreensForTests } from '../screens.js';
 import { setScaleForTests } from '../scale.js';
 import { BezelStore } from './bezels.js';
 import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
+import { CocoaDockMenu } from './dock.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPaneWindow } from './panewindow.js';
@@ -77,9 +78,33 @@ export class CocoaApp {
     // set by a quit request; read by close() to end the process
     this._quitting = false;
 
+    // The activation policy has to be fixed before the app finishes
+    // launching — a Regular launch registers a Dock tile, so an agent app
+    // that switched afterwards would already have flashed its icon — and
+    // `listScreens` below is the first native call that launches it. So the
+    // policy goes first, through `initApp`'s option (bridge >= 0.5), and
+    // only when the root asked for one: a bridge without the option, or a
+    // fake, is left alone.
+    const policy = options.cocoa?.activationPolicy;
+    if (policy != null && typeof native.initApp === 'function') {
+      native.initApp({ activationPolicy: policy });
+    }
+
     const screens = native.listScreens();
     this.scale = screens[0]?.scale ?? 1;
     this._screens = screens;
+
+    // The name the Dock, ⌘-Tab and the menu bar print. An unbundled
+    // process is registered with LaunchServices under its executable —
+    // `node` — and this renames that record; a bundle's Info.plist wins
+    // (the bridge answers false and leaves it).
+    const appName = options.cocoa?.appName;
+    if (appName != null && typeof native.setAppName === 'function') {
+      native.setAppName(String(appName));
+    }
+
+    // The Dock menu (src/cocoa/dock.js), installed by `useDockMenu`.
+    this._dockMenu = new CocoaDockMenu(this);
 
     // 'surface' (the measured default) or 'layers' — the retained CALayer
     // presenter, opt-in while docs/macos.md's measure-first gate is open.
@@ -343,6 +368,35 @@ export class CocoaApp {
     return true;
   }
 
+  // --- the Dock tile ---------------------------------------------------------
+
+  /**
+   * The badge on the Dock tile — `setBadge()`'s first rung (src/launcher.js),
+   * which finds it by this method's presence. `null` clears.
+   */
+  setDockBadge(label) {
+    this._native.setDockBadge(label == null ? null : String(label));
+  }
+
+  /** The menu behind a right-click on the Dock icon — `useDockMenu()`. */
+  setDockMenu(items) {
+    this._dockMenu.update(items);
+  }
+
+  /**
+   * Bounce the Dock icon until the app is activated — the cocoa answer to a
+   * window's `demands_attention` state (src/cocoa/window.js `setWmState`).
+   * AppKit ignores the request while the app is already active, which is
+   * the same outcome a window manager gives a focused window's urgency.
+   */
+  requestAttention() {
+    return this._native.requestUserAttention('critical');
+  }
+
+  cancelAttention(requestId) {
+    this._native.cancelUserAttention(requestId);
+  }
+
   /**
    * The pane's end of the frame channel (childmain hands it over,
    * feature-detected so the X11 pane path never notices): geometry and
@@ -573,7 +627,11 @@ export class CocoaApp {
       case 'window-occlusion':
         return this._routeOcclusion(ev);
       case 'menu-activate':
-        this._activeGlobalMenu?.activate(ev.id);
+        // `menu` says which tree the id belongs to (bridge >= 0.5): the
+        // Dock menu and the menu bar allocate ids independently. Absent on
+        // an older bridge, where only the bar exists.
+        if (ev.menu === 'dock') this._dockMenu.activate(ev.id);
+        else this._activeGlobalMenu?.activate(ev.id);
         return this._afterInput();
       case 'accessibility-display-changed':
         return this._routeAccessibility(ev);

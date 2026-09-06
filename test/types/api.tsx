@@ -38,6 +38,9 @@ import {
   Button,
   BusUnavailableError,
   activateWindow,
+  setBadge,
+  useBadge,
+  useDockMenu,
   Checkbox,
   closeBus,
   Icon,
@@ -1265,6 +1268,12 @@ function _DeepLinks() {
     stop();
 
     const issued: boolean = activateWindow();
+    const badged: boolean = await setBadge(3);
+    await setBadge('•', { app: undefined });
+    await setBadge(null);
+    useBadge(badged ? 2 : 0);
+    useDockMenu([{ label: 'New', onSelect: () => {} }, { type: 'separator' }]);
+    useDockMenu(null);
     activateWindow(0x1a00007, { timestamp: null, source: 2 });
     // @ts-expect-error — EWMH names two source indications
     activateWindow(win, { source: 3 });

@@ -219,6 +219,11 @@ export class CocoaWindow {
     this.mapped = false;
     this.app._unregisterWindow(this);
     this._dropTransport = null;
+    // a bounce nobody can answer any more
+    if (this._attentionRequest != null) {
+      this.app.cancelAttention(this._attentionRequest);
+      this._attentionRequest = null;
+    }
     this._native.destroyWindow2(this._h);
     this._releaseBacking();
   }
@@ -247,6 +252,34 @@ export class CocoaWindow {
   setWindowType() {}
 
   setActions() {}
+
+  /**
+   * `_NET_WM_STATE` requests, as far as this backend has verbs for them:
+   * `demands_attention` is the Dock bounce (`requestUserAttention`), held
+   * until the state is removed or the window goes. Every other name resolves
+   * `false` — ntk's own contract for a state the server cannot honour —
+   * because the bridge has no zoom/miniaturize/fullscreen verbs yet
+   * (windowkit/appkit#15 scoped them out); nodes.js swallows the false.
+   */
+  setWmState(names, action = 'add') {
+    const list = Array.isArray(names) ? names : [names];
+    let honoured = true;
+    for (const name of list) {
+      if (name !== 'demands_attention') {
+        honoured = false;
+        continue;
+      }
+      const held = this._attentionRequest != null;
+      const wants = action === 'add' || (action === 'toggle' && !held);
+      if (wants && !held && !this.destroyed) {
+        this._attentionRequest = this.app.requestAttention();
+      } else if (!wants && held) {
+        this.app.cancelAttention(this._attentionRequest);
+        this._attentionRequest = null;
+      }
+    }
+    return Promise.resolve(honoured);
+  }
 
   // --- drag and drop (src/cocoa/dnd.js) ------------------------------------
 

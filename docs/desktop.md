@@ -1,9 +1,11 @@
 # Desktop integration
 
 What an app has to tell the desktop about itself, beyond drawing. Today that
-is startup notification, which is on by default and has nothing to call, what
-a password field has to do to be reachable by the desktop's password managers,
-and the one switch that turns off everything here that talks over D-Bus.
+is startup notification, which is on by default and has nothing to call; the
+launcher's view of the app — a badge on its icon, a bounce for attention, the
+Dock's menu; what a password field has to do to be reachable by the desktop's
+password managers; and the one switch that turns off everything here that
+talks over D-Bus.
 
 The menu bar is the other half of this and has a page of its own —
 [globalmenu.md](globalmenu.md) — because on a desktop that shows application
@@ -154,6 +156,96 @@ it. On X11 that is the pre-existing no-isolation story rather than a new
 exposure — see [security.md](security.md) — but it is the reason the
 messages carry the id the launcher gave us and nothing invented, and the
 reason the variable's value is never logged.
+
+## The launcher: a badge, attention, and the Dock menu
+
+The one thing an app says to the desktop that the user reads without opening
+it is the mark on its icon — an unread count on the Dock tile, a dot on the
+taskbar entry. Three things live here, and they are on both backends only
+where both have a mechanism:
+
+|                   | Linux                                                                                              | macOS (cocoa backend)                                |
+| ----------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| a **badge**       | `com.canonical.Unity.LauncherEntry` — KDE, elementary, Cairo-Dock listen; GNOME needs an extension | `NSDockTile.badgeLabel`                              |
+| **attention**     | `states={['demands_attention']}` — the urgency the taskbar blinks for                              | the same prop: the Dock icon bounces until activated |
+| the **Dock menu** | desktop actions in the `.desktop` file — an install step                                           | `useDockMenu(items)`                                 |
+
+### The badge
+
+```jsx
+import { setBadge, useBadge } from 'react-x11';
+
+useBadge(unread); // a count: 3 shows "3", 0 clears
+await setBadge(null); // the imperative twin, for code with no component
+```
+
+A badge is a **count**, because that is the one shape both desktops agree
+on: a number shows on both. A string (`'•'`, `'!'`) shows on macOS, where the
+tile takes any label, and is a visible count of nothing on Linux, where the
+protocol has no text field — pass one only where the Mac is the audience.
+`0`, `null` and `''` all clear it. `useBadge` clears on unmount; `setBadge`
+resolves to whether a launcher was told and never rejects for anything about
+the machine.
+
+On Linux the count travels as one D-Bus signal, `LauncherEntry.Update`,
+attributed to the app by `application://<appId>.desktop` — so it needs the
+identity [`registerApplication({ appId })`](uri-schemes.md) establishes and
+a `.desktop` file of that name, or the launcher has nothing to pin the
+count to and `setBadge` resolves `false`. The entry stays on the bus while
+a badge is shown and is released when it is cleared. A launcher that starts
+after the badge was set will not see it until the next `setBadge`; the
+protocol has no query.
+
+### Attention
+
+Nothing new to call: `<window states={['demands_attention']}>` is the
+existing request, and on the cocoa backend it is
+`NSApp.requestUserAttention` — the Dock icon bounces until the user
+activates the app, and stops when the prop drops the state or the window
+goes away. AppKit ignores the request while the app is already active, which
+is the same outcome a window manager gives a focused window's urgency hint.
+The other `states` names are inert on that backend until the bridge grows
+zoom, miniaturize and fullscreen.
+
+### The Dock menu
+
+```jsx
+useDockMenu([
+  { label: 'New Window', onSelect: openWindow },
+  { type: 'separator' },
+  {
+    label: 'Recent',
+    items: recent.map((r) => ({ label: r.name, onSelect: () => open(r) })),
+  },
+]);
+```
+
+The same `items` vocabulary `MenuBar` and `ContextMenu` take ([menuitem
+names](globalmenu.md)), so one authoring model covers the window's menu, the
+panel's, the tray's and the Dock's. Installed while the component is mounted,
+replaced when `items` changes, taken down on unmount. Inert off the cocoa
+backend, with a development note the first time: the freedesktop counterpart
+— `Actions=` in the `.desktop` file — is an install step, not runtime code.
+
+### The app's presence
+
+Two things the Dock and the ⌘-Tab switcher show that a bare `node` process
+gets wrong, as root options on the cocoa backend:
+
+```js
+await createRoot({
+  cocoa: {
+    appName: 'Notes', // what the Dock, ⌘-Tab and the app menu print (was "node")
+    activationPolicy: 'regular', // 'accessory' for a menu-bar app: no tile, no ⌘-Tab entry
+  },
+});
+```
+
+`activationPolicy` is fixed before the app finishes launching — a Regular
+launch registers a Dock tile, and an agent app that switched afterwards would
+already have flashed its icon — so it is a root option rather than a hook.
+`appName` renames LaunchServices' record of an unbundled process; a bundle's
+`Info.plist` wins, as it should.
 
 ## Turning the desktop off
 
