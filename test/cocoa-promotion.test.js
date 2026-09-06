@@ -316,6 +316,48 @@ test('a later sibling reaching into the node keeps it on the clock, until the la
   }
 });
 
+test('REACT_X11_DEBUG_PROMOTION=1 says what was promoted, and what stood in the way of what was not', async () => {
+  const env = process.env.REACT_X11_DEBUG_PROMOTION;
+  const log = console.log;
+  const lines = [];
+  process.env.REACT_X11_DEBUG_PROMOTION = '1';
+  console.log = (...args) => lines.push(args.join(' '));
+  try {
+    const over = at(30, 15, 40, 20, { backgroundColor: '#00ff00' });
+    const m = await mountCocoa([
+      kbox('a', fade),
+      kbox('b', over),
+      kbox('c', pulse),
+    ]);
+    m.frame();
+    await m.render([
+      kbox('a', { ...fade, backgroundColor: '#0000ff' }),
+      kbox('b', over),
+      kbox('c', pulse),
+    ]);
+    m.frame();
+    assert.ok(
+      lines.some(
+        (l) =>
+          l === 'react-x11: promoted <box 80x40@20,20> for backgroundColor',
+      ),
+      `the loop's promotion is named: ${lines.join(' | ')}`,
+    );
+    assert.ok(
+      lines.some(
+        (l) =>
+          l ===
+          'react-x11: declined <box 80x40@20,20>: painted over by <box 80x40@60,30>',
+      ),
+      `the decline names what is in the way: ${lines.join(' | ')}`,
+    );
+  } finally {
+    console.log = log;
+    if (env === undefined) delete process.env.REACT_X11_DEBUG_PROMOTION;
+    else process.env.REACT_X11_DEBUG_PROMOTION = env;
+  }
+});
+
 test('a later subtree only counts where it puts ink: a layout-only box over the node is no overlap', async () => {
   const m = await mountCocoa([
     kbox('a', fade),

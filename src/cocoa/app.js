@@ -131,11 +131,21 @@ export class CocoaApp {
     // animation on the frame clock, which is what the presenter bench's
     // `surface` column measures; on (`true`, `=1`) is on regardless.
     const promoteEnv = process.env.REACT_X11_COCOA_PROMOTE;
+    const bridgeSRGB = native.colorSpace?.() === 'sRGB';
     this._promote =
       options.cocoa?.promote ??
-      (promoteEnv === '1' ||
-        (promoteEnv !== '0' && native.colorSpace?.() === 'sRGB'));
-
+      (promoteEnv === '1' || (promoteEnv !== '0' && bridgeSRGB));
+    if (process.env.REACT_X11_DEBUG_PROMOTION === '1') {
+      console.log(
+        this._promote
+          ? 'react-x11: layer promotion is on'
+          : `react-x11: layer promotion is off — ${
+              options.cocoa?.promote === false || promoteEnv === '0'
+                ? 'switched off'
+                : "the bridge does not answer colorSpace() 'sRGB' (@windowkit/appkit before 0.5.1); REACT_X11_COCOA_PROMOTE=1 turns it on regardless"
+            }`,
+      );
+    }
     // the app's own bridge, so an app over a fake one (the tests) needs no
     // real bridge on the machine — the manager's default loads it only when
     // it is built standalone

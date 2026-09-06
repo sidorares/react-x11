@@ -1085,9 +1085,16 @@ long as the node animates and the second after.
 `createRoot({ cocoa: { promote: false } })` or `REACT_X11_COCOA_PROMOTE=0`
 keeps every animation on the frame clock, which is what the presenter
 bench's `surface` column measures; `true` / `=1` turns it on regardless
-of the bridge. `test/cocoa-promotion.test.js` pins the contract over the
-fake bridge; `test/animation-example.test.js` walks the example through
-it.
+of the bridge. **To see it**, `REACT_X11_DEBUG_PROMOTION=1` prints a line
+per decision — whether promotion is on at all and why not, each node
+promoted and for which properties, each one taken back and why, and each
+one declined with what stood in its way (`painted over by <text "…">`,
+`under the border of <box>`, `clipped by <box>`), which is the answer to
+"why is my card still on the clock?". `examples/animation.jsx`'s frame
+counter is the other witness: 0 frames a second while the tiles pulse,
+and they pulse through its two-second block of the JS thread.
+`test/cocoa-promotion.test.js` pins the contract over the fake bridge;
+`test/animation-example.test.js` walks the example through it.
 
 **One thing it found, and the bridge it needs.** A promoted node is the
 same node drawn two ways in turn, and the two had to agree to the pixel

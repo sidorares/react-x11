@@ -23,6 +23,11 @@
 //   three tiles keep pulsing; press the button and they pulse straight
 //   through the block.
 //
+//   REACT_X11_DEBUG_PROMOTION=1 npm run examples:animation        # macOS:
+//                                    # which node got a layer, which did not
+//                                    # and what was in its way; whether
+//                                    # promotion is on at all (it needs
+//                                    # @windowkit/appkit >= 0.5.1)
 //   REACT_X11_COCOA_PROMOTE=0 npm run examples:animation           # macOS,
 //                                              # every animation on the clock
 //   REACT_X11_COCOA_PRESENTER=layers npm run examples:animation   # macOS

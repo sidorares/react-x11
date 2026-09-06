@@ -50,6 +50,29 @@ import {
 
 const ORIGIN = Object.freeze({ x: 0, y: 0 });
 
+// REACT_X11_DEBUG_PROMOTION=1: a line per decision — a node promoted, one
+// taken back and why, one declined and what was in the way. The z-order
+// rule is the one thing here a reader cannot see from a style, and "why
+// is my card on the clock?" is answered by exactly this. Read at each
+// decision rather than once (the way nodes.js reads REACT_X11_DEBUG_PAINT):
+// decisions are rare where paints are per frame, and a test can flip it.
+const debug = () => process.env.REACT_X11_DEBUG_PROMOTION === '1';
+
+/** A node the way a debug line names it: its kind, and the test name or
+ * the first few words of its text when it has one. */
+function describe(node) {
+  const name = node.props?.['data-testname'];
+  if (name) return `<${node.kind} ${name}>`;
+  const text = node.children?.find((c) => c.kind === 'text')?.props?.children;
+  if (typeof text === 'string') {
+    return `<${node.kind} "${text.length > 24 ? text.slice(0, 24) + '…' : text}">`;
+  }
+  const a = node.abs;
+  return a
+    ? `<${node.kind} ${a.width}x${a.height}@${a.x},${a.y}>`
+    : `<${node.kind}>`;
+}
+
 // How long a node that has stopped animating keeps its layer. A hover card
 // fades in and, a moment later, out; a palette step ends one transition and
 // starts the next; a toast pulses again. Demoting on the last frame of each
@@ -368,7 +391,12 @@ export class CocoaPromotion {
       const keyed = this._inPaintOrder([...this.promoted.keys()]);
       for (let i = keyed.length - 1; i >= 0; i--) {
         const { node, key } = keyed[i];
-        if (!this._mayStay(node, key)) this._demote(node, root, true);
+        const why = this._stayBlocker(node, key);
+        if (why) {
+          if (debug())
+            console.log(`react-x11: demoted ${describe(node)}: ${why}`);
+          this._demote(node, root, true);
+        }
       }
       if (this.candidates.size) {
         const candidates = this._inPaintOrder([...this.candidates]);
@@ -376,9 +404,16 @@ export class CocoaPromotion {
         for (let i = candidates.length - 1; i >= 0; i--) {
           const { node, key } = candidates[i];
           if (this.promoted.has(node) || !this.animations.has(node)) continue;
-          if (key && promotableNode(node) && this._clear(node)) {
+          const why = !key
+            ? 'not in the paint walk'
+            : !promotableNode(node)
+              ? 'not a plain box'
+              : this._blocker(node);
+          if (!why) {
             this._promote(node, root);
           } else {
+            if (debug())
+              console.log(`react-x11: declined ${describe(node)}: ${why}`);
             this.denied.set(node, this.layoutGen);
             this.animations.drop(node, true);
           }
@@ -393,13 +428,22 @@ export class CocoaPromotion {
     }
   }
 
-  _mayStay(node, key) {
-    if (!key || !promotableNode(node)) return false;
-    if (this.releasing.has(node)) return false; // its grace ran out
-    return this._clear(node);
+  /** Why a promoted node has to come back — null while it may stay. */
+  _stayBlocker(node, key) {
+    if (node.destroyed) return 'unmounted';
+    if (!key) return 'not in the paint walk';
+    if (!promotableNode(node)) return 'not a plain box any more';
+    if (this.releasing.has(node)) return 'still for a second'; // its grace ran out
+    return this._blocker(node);
   }
 
   _promote(node, root) {
+    if (debug()) {
+      const props = [...(this.animations.pending.get(node)?.keys() ?? [])];
+      console.log(
+        `react-x11: promoted ${describe(node)} for ${props.join(', ')}`,
+      );
+    }
     const visual = new Visual(this, node);
     visual.attach(this.rootVisual);
     this.promoted.set(node, {
@@ -481,23 +525,25 @@ export class CocoaPromotion {
   }
 
   /**
-   * Is nothing painted over this node, and is all of it visible? Walked up
-   * the chain: at every level, what the parent paints after the child on
-   * the way to this node — later siblings, then the parent's own border and
-   * ring, then its bars — must keep out of the node's reach, and the
-   * parent's clip, if it has one, must hold the whole of it.
+   * What is painted over this node, or clips it — null when nothing is.
+   * Walked up the chain: at every level, what the parent paints after the
+   * child on the way to this node — later siblings, then the parent's own
+   * border and ring, then its bars — must keep out of the node's reach,
+   * and the parent's clip, if it has one, must hold the whole of it. The
+   * answer names the first thing in the way, for the debug line.
    */
-  _clear(node) {
+  _blocker(node) {
     // the exact reach, not `paintBounds()`: that one carries the damage
     // model's pixel of slop, and a section laid out flush under a card
     // would read as reaching into it
     const bounds = node._subtreeBounds();
     for (let n = node; !n.isWindow; n = n.parent) {
       const parent = n.parent;
-      if (!parent) return false;
+      if (!parent) return 'not attached to a window';
       const order = parent.paintOrder();
       for (let j = order.indexOf(n) + 1; j < order.length; j++) {
-        if (this._reaches(order[j], bounds)) return false;
+        const ink = this._reaches(order[j], bounds);
+        if (ink) return `painted over by ${describe(ink)}`;
       }
       if (!parent.isWindow) {
         const border = borderReach(parent);
@@ -505,13 +551,14 @@ export class CocoaPromotion {
           border > 0 &&
           !containsRect(insetRect(parent.abs, border), bounds)
         ) {
-          return false;
+          return `under the border of ${describe(parent)}`;
         }
         const ring = paintsOutline(parent);
         if (ring) {
           const inside = Math.max(0, ring.width / 2 - ring.offset) + 1;
-          if (!containsRect(insetRect(parent.abs, inside), bounds))
-            return false;
+          if (!containsRect(insetRect(parent.abs, inside), bounds)) {
+            return `under the focus ring of ${describe(parent)}`;
+          }
         }
         if (parent.clipsChildren?.()) {
           const radius = parent.style?.borderRadius;
@@ -519,37 +566,45 @@ export class CocoaPromotion {
             typeof radius === 'number' && radius > 0
               ? insetRect(parent.abs, radius)
               : parent.abs;
-          if (!containsRect(clip, bounds)) return false;
+          if (!containsRect(clip, bounds)) {
+            return `clipped by ${describe(parent)}`;
+          }
         }
       }
       if (typeof parent._scrollbars === 'function') {
         for (const bar of parent._scrollbars()) {
           if (rectsOverlap(scrollbarStrip(bar, this.scale), bounds)) {
-            return false;
+            return `under a scrollbar of ${describe(parent)}`;
           }
         }
       }
     }
-    return true;
+    return null;
+  }
+
+  /** Is nothing painted over this node, and is all of it visible? */
+  _clear(node) {
+    return this._blocker(node) === null;
   }
 
   /**
-   * Does anything in `n`'s subtree put ink inside `rect`? A promoted
-   * subtree does not: it is on a layer of its own, above this one since it
-   * is painted later. A subtree whose reach misses the rect is answered
-   * from the cached reach without a walk.
+   * The node in `n`'s subtree that puts ink inside `rect`, or null. A
+   * promoted subtree puts none: it is on a layer of its own, above this
+   * one since it is painted later. A subtree whose reach misses the rect
+   * is answered from the cached reach without a walk.
    */
   _reaches(n, rect) {
-    if (!rectsOverlap(n._subtreeBounds(), rect)) return false;
-    if (this.promoted.has(n)) return false;
+    if (!rectsOverlap(n._subtreeBounds(), rect)) return null;
+    if (this.promoted.has(n)) return null;
     if (paintsSomething(n) && rectsOverlap(n._ownPaintBounds(), rect)) {
-      return true;
+      return n;
     }
-    if (n.kind === 'text') return true; // its spans are its own ink
+    if (n.kind === 'text') return n; // its spans are its own ink
     for (const child of n.paintOrder()) {
-      if (this._reaches(child, rect)) return true;
+      const ink = this._reaches(child, rect);
+      if (ink) return ink;
     }
-    return false;
+    return null;
   }
 
   // --- what the layer shows ----------------------------------------------------
