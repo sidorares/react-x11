@@ -25,6 +25,7 @@ import { CocoaDockMenu } from './dock.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaStatusItem } from './statusitem.js';
 import { CocoaPaneHost } from './panehost.js';
+import { CocoaPermissions } from './permissions.js';
 import { CocoaPaneWindow } from './panewindow.js';
 import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
@@ -138,6 +139,15 @@ export class CocoaApp {
     // (X11, the headless mock) draws the themed controls with no further
     // branching.
     this.nativeBezels = new BezelStore(native);
+
+    // macOS privacy authorizations (src/cocoa/permissions.js). Present
+    // exactly when the bridge has them (>= 0.5), and its presence is the
+    // rung src/permissions.js finds for this app.
+    this.permissions =
+      typeof native.authorizationStatus === 'function' &&
+      typeof native.requestAuthorization === 'function'
+        ? new CocoaPermissions(native)
+        : null;
 
     // The GL policy, glbackend.js's shape. No GLX exists here, so the
     // default is 'auto' (the direct backend where the runtime loads);
