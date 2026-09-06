@@ -102,6 +102,8 @@ app's notifications has said something, and `notify()` rejects with the
 platform's error (`NotificationsDeniedError`) rather than posting through
 `osascript` by a side door.
 
+Which is why an app that counts progress should ask before it decides. `examples/notify.jsx` (`npm run examples:notify`) is a download manager built around exactly that: it posts one banner and updates it in place where the rung can, and on `osascript` or `notify-send` stays quiet and posts once at the end, because posting per step there would be four banners for one download.
+
 ## The bundle, on macOS
 
 `UNUserNotificationCenter` attributes every banner to an app bundle — a
