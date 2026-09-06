@@ -270,6 +270,7 @@ explore them:
 npm run examples:simple        # hello world (JSX via tsx)
 npm run examples:app           # the showcase: Tabs + SplitPane hosting the rest
 npm run examples:theming       # three themes x light/dark, and a size query
+npm run examples:container-queries  # one card, two panes: '@container', and a named one
 npm run examples:simple-nojsx  # the same, plain node — no build step
 npm run examples:xeyes         # canvas drawing + hooks
 npm run examples:dashboard     # context theming, custom hooks, components

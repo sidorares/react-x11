@@ -310,6 +310,16 @@ export interface StyleProperties extends LayoutStyle, PaintStyle, TextStyle {
    * a 16px control can have a 24px target without the layout moving.
    */
   hitSlop?: HitSlop;
+  /**
+   * Declares this node a container for the `'@container …'` blocks below it
+   * — CSS's `container-type` and `container-name` in one property. `true`
+   * answers the unnamed queries; a name answers those and the ones that say
+   * it, so `'@container sidebar width >= 400'` reaches past any nearer
+   * container to the one called `sidebar`. `false` takes back a declaration
+   * from earlier in a style array. Changes nothing about this node itself.
+   * See docs/styling.md#container-queries.
+   */
+  container?: boolean | string;
 }
 
 /**
@@ -361,6 +371,21 @@ export type Animation = { [K in keyof StyleProperties]?: AnimationSpec };
  */
 export type SizeQuery = `@${'width' | 'height'} ${string}`;
 
+/**
+ * A container query — `'@container width >= 400'`, or
+ * `'@container sidebar width >= 400'` naming the container: what a style
+ * can ask about the box it is inside rather than the window it is in. The
+ * container is the nearest ancestor whose style declares `container` (for
+ * the named form, the nearest carrying that name). Like a size query it may
+ * set layout properties; unlike one it is answered *after* the layout pass,
+ * since a container's size is what the pass produces.
+ */
+export type ContainerQuery = `@container ${string}`;
+
+/** A capability query — `'@supports transparency'`: what a style can ask
+ *  about the server. */
+export type SupportsQuery = `@supports ${string}`;
+
 /** The named blocks a style may carry, beside its own properties. */
 export interface StyleBlocks {
   transition?: Transition;
@@ -401,10 +426,13 @@ export interface StyleBlocks {
 
 /**
  * A style: the properties themselves, the state blocks, and any number of
- * size-query blocks keyed `'@width >= 600'`.
+ * query blocks keyed `'@width >= 600'`, `'@container width >= 400'` or
+ * `'@supports transparency'`.
  */
 export type Style = StyleProperties &
-  StyleBlocks & { [K in SizeQuery]?: StyleProperties };
+  StyleBlocks & {
+    [K in SizeQuery | ContainerQuery | SupportsQuery]?: StyleProperties;
+  };
 
 /**
  * What a `style` prop accepts: an object, or a nested array of them with

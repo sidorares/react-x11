@@ -87,15 +87,18 @@ const reportedStyleErrors = new WeakMap();
  * run or a supervisor still counts this as a failure. `REACT_X11_STRICT_TOKENS=1`
  * restores the throw.
  */
-export function reportStyleError(node, message) {
+export function reportStyleError(
+  node,
+  message,
+  consequence = 'The property is dropped and the app carries on',
+) {
   const seen = reportedStyleErrors.get(node);
   if (seen?.has(message)) return;
   if (seen) seen.add(message);
   else reportedStyleErrors.set(node, new Set([message]));
   const owner = ownerName(node);
   console.error(
-    `${message}${owner ? ` — in ${owner}` : ''}. ` +
-      'The property is dropped and the app carries on; set ' +
+    `${message}${owner ? ` — in ${owner}` : ''}. ${consequence}; set ` +
       'REACT_X11_STRICT_TOKENS=1 to make this throw instead.',
   );
   markFailed();

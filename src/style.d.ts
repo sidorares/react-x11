@@ -58,21 +58,27 @@ export function styleHasSizeQueries(style: StyleProperties): boolean;
 /** Does the style carry a `'@supports …'` block? Those are re-resolved when
  *  the server's answer changes, not when the window is laid out. */
 export function styleHasSupportsQueries(style: StyleProperties): boolean;
+/** Does the style carry a `'@container …'` block? Those are re-resolved after
+ *  a layout pass moved the container they ask about. */
+export function styleHasContainerQueries(style: StyleProperties): boolean;
 /** `resolveQueries` with only the size half — the shape this had before
  *  capability blocks existed. */
 export function resolveSizeQueries(
   style: StyleProperties,
   size: { width: number; height: number },
 ): StyleProperties;
-/** Merge every matching `@` block — size and capability alike — in
- *  declaration order. `supports` maps feature name to whether the window can
- *  actually do it; a missing map matches nothing, which is the safe way
- *  round. */
+/** Merge every matching `@` block — size, container and capability alike —
+ *  in declaration order. `supports` maps feature name to whether the window
+ *  can actually do it; `containers` maps a container name (`''` for the
+ *  unnamed query) to that container's size in the node's logical pixels. A
+ *  missing map, or a name it does not hold, matches nothing, which is the
+ *  safe way round. */
 export function resolveQueries(
   style: StyleProperties,
   context?: {
     size?: { width: number; height: number } | null;
     supports?: Record<string, boolean> | null;
+    containers?: Record<string, { width: number; height: number }> | null;
   },
 ): StyleProperties;
 
