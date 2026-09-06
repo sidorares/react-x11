@@ -923,6 +923,10 @@ repeating animation and costs no JS frames at all. Everything else — a
 colour on text, a layout property, any node that paints as a raster — stays
 on the frame clock, byte-identical to before; the presenter can only decline,
 never break.
+`examples/animation.jsx` is the demonstration: under
+`REACT_X11_COCOA_PRESENTER=layers` its frame counter reads 0 while the
+plain-box loops keep going, and they keep going through a deliberate two
+second block of the JS thread.
 
 The three semantics [the design](architecture/animation.md) said to pin:
 
