@@ -1096,11 +1096,10 @@ through `@windowkit/appkit`'s `CGColorCreateGenericRGB` while its surfaces
 are sRGB, so `#dbe7f4` rastered as (219, 231, 244) and composited as
 (228, 236, 245) — paler, on every layer the layer presenter ever set, and
 a colour animation there landed on a model value that did not match its
-own `to`. The bridge fix — `MakeColor` in sRGB, the readback to match,
-and a `colorSpace()` verb that says so — is a line and a verb in
-`@windowkit/appkit`, and ships with the bridge's next release; against it
-the same card differs by at most six units of one channel, in the
-antialiasing. Promotion is on by
+own `to`. [windowkit/appkit#33](https://github.com/windowkit/appkit/pull/33)
+makes every colour crossing the bridge sRGB and adds `colorSpace()` to
+say so; against it the same card differs by at most six units of one
+channel, in the antialiasing. Promotion is on by
 default **only where the bridge answers `'sRGB'`** — on 0.5 it stays off
 unless asked for — so nobody gets the flash for free, and a bridge upgrade
 turns it on.
