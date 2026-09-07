@@ -85,12 +85,22 @@ const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
 /**
  * The Render ops text draws with, numbered as XRender numbers them so a
  * caller's `ctx.Render?.PictOp?.Over ?? 3` reads the same on both
- * backends. Every op draws as Over here: the bridge composites glyph
- * coverage with the context's fill and offers no blend-mode switch, and
- * for the opaque inks text uses Src and Over agree.
+ * backends. The `op` a `drawGlyphs` call names is ignored here: the bridge
+ * composites glyph coverage with the context's fill through the context's
+ * own blend mode — `globalCompositeOperation`, below — and for the opaque
+ * inks text uses Src and Over agree.
  */
 const PICT_OP = Object.freeze({ Src: 1, Over: 3 });
 const RENDER = Object.freeze({ PictOp: PICT_OP });
+
+/**
+ * `_state.clip` when the clip in force is not one this class can name — a
+ * rounded corner, a glyph, an arc, or a rect under a rotation. Null means
+ * nothing is clipped and a rect means that rect, in surface pixels; this
+ * means "there is one and I cannot tell you where", which is the answer
+ * that turns the memcpy blit off (see `_blit`).
+ */
+const NON_RECT = Symbol('non-rectangular clip');
 
 /**
  * The path, recorded alongside the native one, so `stroke` can re-issue it
@@ -189,7 +199,18 @@ export class CocoaContext2D {
       shadowOffsetY: 0,
       shadowColor: 'rgba(0,0,0,0)',
       ctm: [1, 0, 0, 1, 0, 0],
+      gco: 'source-over',
+      // null: nothing clipped. A rect (surface pixels): that rect. NON_RECT:
+      // a clip this class cannot name.
+      clip: null,
     };
+    // What this bridge can do, asked once. Both verbs arrived together in
+    // @windowkit/appkit 0.7.0, and anything older is a bridge that draws
+    // every composite as `source-over` through a CGImage — so the property
+    // refuses what it cannot honour rather than lying about it, and the
+    // blit path is simply never taken.
+    this._blendModes = typeof native.ctxSetBlendMode === 'function';
+    this._blits = typeof native.blitSurface === 'function';
     this._onDirty = null;
     // the recorded path, and whether the native one still matches it (a
     // chunked stroke leaves only its last chunk behind)
@@ -211,6 +232,13 @@ export class CocoaContext2D {
       n.ctxSetLineJoin(surface, st.lineJoin);
       n.ctxSetGlobalAlpha(surface, st.globalAlpha);
       n.ctxSetLineDash(surface, st.dash, st.dashOffset);
+      // a fresh surface is already at source-over, so only a context
+      // holding another op has anything to say
+      if (this._blendModes && st.gco !== 'source-over') {
+        n.ctxSetBlendMode(surface, st.gco);
+      }
+      // a fresh surface is unclipped, whatever the old one had in force
+      st.clip = null;
       this._stack.length = 0;
       // the path went with the surface it was built on; nothing may
       // replay it onto the new one
@@ -280,6 +308,47 @@ export class CocoaContext2D {
       this._state.globalAlpha = value;
       this._native.ctxSetGlobalAlpha(this._s(), value);
     }
+  }
+
+  get globalCompositeOperation() {
+    return this._state.gco;
+  }
+
+  /**
+   * The vocabulary is the **bridge's**, not a table kept here: the names are
+   * canvas's own, `ctxSetBlendMode` answers false for one it does not have,
+   * and that answer is what decides whether the assignment sticks. So this
+   * class never goes stale against a bridge that grows an op, and never
+   * claims one it would not actually draw.
+   *
+   * Which makes the detection a caller writes canvas's own — an unknown
+   * value is *ignored* there too, leaving the op in force — so the way to
+   * ask is to assign and read back:
+   *
+   *     ctx.globalCompositeOperation = 'copy';
+   *     if (ctx.globalCompositeOperation === 'copy') { ... }
+   *
+   * A bridge with no `ctxSetBlendMode` at all — @windowkit/appkit before
+   * 0.7.0 — draws everything as source-over, so source-over is the one
+   * value that sticks on it. That is exactly true rather than a fallback.
+   *
+   * One divergence from a browser, shared with ntk and so the same on both
+   * backends: an op applies inside what the draw covers, not across the
+   * whole surface. A browser's `copy` clears everything the drawing missed;
+   * `kCGBlendModeCopy` and XRender's `Src` both leave it alone.
+   */
+  set globalCompositeOperation(value) {
+    if (typeof value !== 'string') return;
+    if (!this._blendModes) {
+      if (value === 'source-over') this._state.gco = value;
+      return;
+    }
+    // false is the bridge saying it left its own mode alone; anything else
+    // means the mode is now `value`, and the two must not drift — a JS state
+    // ahead of the native one would take the memcpy path in `_blit` for a
+    // composite the fallback draw would have blended.
+    if (this._native.ctxSetBlendMode(this._s(), value) === false) return;
+    this._state.gco = value;
   }
 
   /**
@@ -776,7 +845,68 @@ export class CocoaContext2D {
     ) {
       return;
     }
+    this._state.clip = this._clipAfter();
     this._native.ctxClip(this._path());
+  }
+
+  /**
+   * The current path as a whole-pixel rect in surface coordinates, or null
+   * for anything else. CoreGraphics owns the real clip and this is only a
+   * shadow of it, kept for the one caller that draws *around* the context —
+   * `_blit`, whose memcpy cannot see a CGContext's clip at all.
+   *
+   * So the answer has to be exact, never merely close: a rect that does not
+   * land on whole pixels is refused rather than rounded, because rounding
+   * out would copy pixels the clip excludes and rounding in would leave a
+   * seam of whatever the destination held. The clips a paint pass actually
+   * sets — the damage rect, a scroll viewport, a square-cornered `overflow`
+   * — are whole pixels under a translate, and those are the ones this
+   * recognises.
+   */
+  _pathRect() {
+    const cmds = this._cmds;
+    if (cmds.length !== 5 || cmds[0] !== P_RECT) return null;
+    const [, x, y, w, h] = cmds;
+    const [a, b, c, d, e, f] = this._state.ctm;
+    if (b !== 0 || c !== 0) return null; // rotated or skewed: not a rect here
+    const x0 = a * x + e;
+    const y0 = d * y + f;
+    const x1 = a * (x + w) + e;
+    const y1 = d * (y + h) + f;
+    const rect = {
+      x: Math.min(x0, x1),
+      y: Math.min(y0, y1),
+      width: Math.abs(x1 - x0),
+      height: Math.abs(y1 - y0),
+    };
+    for (const v of [rect.x, rect.y, rect.width, rect.height]) {
+      if (!Number.isInteger(v)) return null;
+    }
+    return rect;
+  }
+
+  /** The clip `clip()` is about to leave in force: the current one
+   *  intersected with the path, or NON_RECT as soon as either is one. */
+  _clipAfter() {
+    const current = this._state.clip;
+    if (current === NON_RECT) return NON_RECT;
+    const rect = this._pathRect();
+    if (!rect) return NON_RECT;
+    if (!current) return rect;
+    const x = Math.max(current.x, rect.x);
+    const y = Math.max(current.y, rect.y);
+    return {
+      x,
+      y,
+      width: Math.max(
+        0,
+        Math.min(current.x + current.width, rect.x + rect.width) - x,
+      ),
+      height: Math.max(
+        0,
+        Math.min(current.y + current.height, rect.y + rect.height) - y,
+      ),
+    };
   }
 
   fillRect(x, y, w, h) {
@@ -843,8 +973,94 @@ export class CocoaContext2D {
       dw = sw;
       dh = sh;
     }
-    this._native.ctxDrawSurface(this._s(), src, sx, sy, sw, sh, dx, dy, dw, dh);
+    if (!this._blit(src, sx, sy, sw, sh, dx, dy, dw, dh)) {
+      this._native.ctxDrawSurface(
+        this._s(),
+        src,
+        sx,
+        sy,
+        sw,
+        sh,
+        dx,
+        dy,
+        dw,
+        dh,
+      );
+    }
     this._dirty();
+  }
+
+  /**
+   * `drawImage` as a row memcpy, for the one shape where a copy is all it
+   * ever was: a surface composited into another at a translate, whole
+   * pixels, same size in as out, under `globalCompositeOperation = 'copy'`.
+   * Answers false for everything else, and the caller draws.
+   *
+   * That shape is what an element with a surface of its own presents every
+   * frame — a terminal's grid, a retained scene — and the CoreGraphics
+   * route to it is `CGBitmapContextCreateImage` of the whole source plus
+   * `CGContextDrawImage`: 1.7ms of a 6ms frame for a 125x45 terminal, where
+   * the memcpy is 1.0 (sidorares/react-x11-components#69 §6). The saving is
+   * per frame rather than per flood, which is why the frame pacer (#497)
+   * had to land first for it to be worth anything.
+   *
+   * Every condition below is a way the memcpy would differ from the draw,
+   * and a difference is a bug rather than a slower frame — so each is a
+   * refusal, never a fixup:
+   *
+   * - **the op.** Only `copy` writes the source over the destination
+   *   without reading it. `source-over` is a blend, and blending is what
+   *   CoreGraphics is for.
+   * - **the transform.** A pure translate at whole pixels. A scale or a
+   *   rotation resamples; a fractional offset resamples too (surfaces are
+   *   created with `kCGInterpolationMedium`).
+   * - **`globalAlpha`, and a shadow.** Both are things `CGContextDrawImage`
+   *   does to the source on its way down that a memcpy does not do at all.
+   * - **the clip.** A memcpy cannot see a CGContext's clip, so the rect it
+   *   copies is intersected with the one this class tracked — and a clip it
+   *   could not track (NON_RECT) means it does not know, so it draws.
+   * - **the same surface twice.** Overlapping memcpy rows have no defined
+   *   result. The check here is on the handle; the bridge's is on the
+   *   backing store, which also catches two handles onto one bitmap — the
+   *   two ends of a shared IOSurface — and throws rather than corrupting it.
+   */
+  _blit(src, sx, sy, sw, sh, dx, dy, dw, dh) {
+    if (!this._blits) return false;
+    const st = this._state;
+    if (st.gco !== 'copy') return false;
+    if (st.clip === NON_RECT) return false;
+    if (st.globalAlpha < 1) return false;
+    if (st.shadowBlur > 0 && parseColor(st.shadowColor)[3] > 0) return false;
+    if (sw !== dw || sh !== dh) return false;
+    const [a, b, c, d, e, f] = st.ctm;
+    if (a !== 1 || b !== 0 || c !== 0 || d !== 1) return false;
+    const x = dx + e;
+    const y = dy + f;
+    if (
+      !Number.isInteger(x) ||
+      !Number.isInteger(y) ||
+      !Number.isInteger(sx) ||
+      !Number.isInteger(sy) ||
+      !Number.isInteger(sw) ||
+      !Number.isInteger(sh)
+    ) {
+      return false;
+    }
+    const dst = this._s();
+    if (dst === src) return false;
+    const clip = st.clip;
+    this._native.blitSurface(
+      src,
+      sx,
+      sy,
+      sw,
+      sh,
+      dst,
+      x,
+      y,
+      clip ? [clip.x, clip.y, clip.width, clip.height] : null,
+    );
+    return true;
   }
 
   /**

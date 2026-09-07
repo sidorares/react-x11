@@ -1079,6 +1079,29 @@ one thing to know: a bitmap has one graphics state, so `getContext('2d')`
 there answers the same context every time and its `destroy()` is a no-op
 (docs/macos.md "Custom drawing on a layer tree").
 
+If the surface is **opaque** — every pixel of it written, which a terminal's
+grid or a tiled scene is — say so, and the present stops blending:
+
+```js
+paintContent(ctx) {
+  const box = this.contentBox();
+  ctx.globalCompositeOperation = 'copy';
+  ctx.drawImage(this.surface, box.x, box.y);
+  ctx.globalCompositeOperation = 'source-over';
+}
+```
+
+`copy` is canvas's "replace these pixels, do not read what is under them",
+and it means the same thing on both backends: XRender's `PictOp.Src` on
+X11, and on Cocoa a row memcpy in place of the CGImage the blend would
+otherwise be built from — a 125x45 terminal grid composites in 0.42ms
+rather than 1.37 (docs/macos.md "Compositing a surface at a translate").
+Set it back, or set it inside a `save`/`restore` pair: it is context state,
+and the context is the window's. It is only right for a surface with no
+transparency to show through, and it is refused rather than approximated by
+a backend that cannot draw it — assign it and read the property back if you
+want to know which you got.
+
 Two things it lines up with. The deltas you are handed are already whole
 pixels — the sub-pixel carry described above exists so that a shift is
 always expressible — so an element scrolling this way never has a fraction
