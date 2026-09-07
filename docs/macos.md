@@ -943,6 +943,79 @@ paint nothing measurable (20,000 rounded-rect fill+strokes: 601ms before,
 and the record is what puts the whole path back if a `fill`, a `clip` or
 more path building follows a stroke that consumed it. `test/cocoa-stroke-chunking.test.js`.
 
+### Compositing a surface at a translate
+
+An element that owns a surface presents it every frame: the terminal's
+grid, a retained scene, anything that rasters once and shows the result
+many times. `ctx.drawImage(surface, x, y)` is how it says so, and on this
+backend that was `CGBitmapContextCreateImage` of the whole source plus
+`CGContextDrawImage` — a CGImage built and a blend run, every frame, for
+pixels that were only ever going to be copied. In
+sidorares/react-x11-components#69 §6's profile it is 1.7ms of a 6ms
+`<Terminal backend="vt">` frame, the second-largest line after the cell
+background fills.
+
+The context takes canvas's own way of saying "do not blend, replace" —
+
+```js
+ctx.globalCompositeOperation = 'copy';
+ctx.drawImage(surface, x, y);
+```
+
+— and, where that is all it is, sends the composite as a row memcpy
+(`blitSurface`) instead. `scripts/cocoa-composite-probe.mjs` prices the
+two routes against the real bridge; on an M1 Pro, 200 composites a cell:
+
+| source          | destination       | CGImage draw |  memcpy |
+| --------------- | ----------------- | -----------: | ------: |
+| 125×45 grid @2x | the whole surface |       1.37ms |  0.42ms |
+| 125×45 grid @2x | a third of it     |       0.36ms |  0.14ms |
+| 125×45 grid @2x | one row's damage  |      0.033ms | 0.012ms |
+| 80×24 grid @2x  | the whole surface |       0.35ms |  0.18ms |
+
+`globalCompositeOperation` itself is `ctxSetBlendMode`, and the vocabulary
+is the **bridge's** rather than a table kept on this side: the names are
+canvas's own, and the verb answers whether the mode is now the one asked
+for. So this backend never goes stale against a bridge that grows an op,
+and never claims one it would not draw. 0.7.0 knows the whole canvas set
+— the Porter-Duff ops ntk maps to XRender's, plus the separable and
+non-separable blend modes CoreGraphics has and XRender does not, which a
+caller reaching for `multiply` should know are macOS-only until ntk grows
+them. Two things about it are worth knowing. A bridge without the verb —
+anything before 0.7.0 — **refuses** everything but `source-over` rather
+than accepting it and drawing something else, so the detection a caller
+writes is canvas's own: assign, then read the property back. An op
+applies inside what the draw covers rather than across the whole surface —
+a browser's `copy` clears everything the drawing missed, where
+`kCGBlendModeCopy` and XRender's `Src` both leave it alone, so the two
+backends agree with each other and differ from a browser together. And the
+`op` argument a `drawGlyphs` call carries is still ignored; text composites
+through the context's mode like everything else.
+
+The blit is an optimization and never a difference, so every way the
+memcpy would not be exactly what the draw produces turns it off and the
+draw happens: an op other than `copy`, a transform that is not a
+whole-pixel translate, a `globalAlpha` below 1, a live shadow, a
+destination size that differs from the source's, a fractional source
+rect, and a surface composited into itself.
+
+The clip is the interesting one. A memcpy cannot see a CGContext's clip,
+and a paint pass is clipped to its damage rect — so the context tracks
+the clip **as a rect** beside the CTM it already tracked, and hands it to
+the verb. It tracks only what it can state exactly: a single `rect` path
+under an axis-aligned transform landing on whole pixels. A rounded
+corner, an arc, a polygon, two rects, a half-pixel edge or a rotation all
+resolve to "there is a clip and I cannot name it", which turns the blit
+off until a `restore()` pops back past it. The clips a paint pass
+actually sets — the damage rect, a square-cornered `overflow` — are the
+ones it recognises.
+
+`test/cocoa-composite.test.js` pins both halves: the decisions over a
+fake bridge — including a bridge with neither verb and one whose
+vocabulary is smaller, which is what the feature detection is for — in
+CI, and, where the real bridge loads, that the blit and the draw are
+pixel-identical.
+
 ## Animations and transforms: the API the model unlocks
 
 The existing declarative vocabulary is the seam: `transition:` and
@@ -1347,10 +1420,13 @@ write pixels ✅, hand to a layer as contents without a copy ✅
 (`createSurfaceIOSurface` + `setLayerContentsIOSurface`), draw one
 surface into another ✅ (`ctxDrawSurface`), shift a band in place ✅
 (`scrollSurface`), copy rects between same-size surfaces ✅
-(`copySurfaceRegion`). Still 🆕: a pattern fill (`createPattern`, which
-`<Flow>`'s grid tiles ask for), radial gradients, a blend op for
-`PictOp.Src`, and an explicit free (a surface goes with its handle's
-finalizer). The alternative — rasterize JS-side and use the raw-buffer
+(`copySurfaceRegion`), the blend mode a `globalCompositeOperation` sets ✅
+(`ctxSetBlendMode`, 0.7.0) and a row memcpy between surfaces of any two
+sizes ✅ (`blitSurface`, 0.7.0 — issue #498; the context feature-detects
+both, so an older bridge draws every composite as a CGImage under
+source-over). Still 🆕: a pattern fill (`createPattern`,
+which `<Flow>`'s grid tiles ask for), radial gradients, and an explicit
+free (a surface goes with its handle's finalizer). The alternative — rasterize JS-side and use the raw-buffer
 upload — stays open; the API supports both so the choice can be
 measured.
 

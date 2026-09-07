@@ -275,6 +275,17 @@ function pixelBridge() {
       );
     },
     ctxSetLineWidth() {},
+    // The blend mode is modelled only as far as this raster goes: `normal`
+    // is what it already draws, and anything else would change the picture
+    // in a way it cannot, so it is unmodelled the way the proxy below means
+    // it. It has to be *present* either way — the context feature-detects
+    // it by name, and a probe that throws is a bridge nobody can hold.
+    ctxSetBlendMode(s, mode) {
+      if (mode !== 'source-over') {
+        throw new Error(`pixelBridge: unmodelled blend mode ${mode}`);
+      }
+      return true;
+    },
     ctxSetLineCap() {},
     ctxSetLineJoin() {},
     ctxSetGlobalAlpha() {},
