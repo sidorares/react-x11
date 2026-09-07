@@ -531,15 +531,18 @@ describe('the drag side', () => {
   });
 
   test('the preview is never a dragging destination, so the drop reaches the window beneath it', async () => {
-    // The regression this exists for (#488). On this backend AppKit picks
-    // the destination, and the preview — a panel at the pop-up-menu level
-    // following the pointer — is the frontmost window under it for the
-    // whole gesture. Registered, it would be the one asked, refuse (its
-    // tree has no `dropAccept`) and take the drop with it; the list
-    // beneath would never hear of the drag. AppKit routes a drag only to
-    // views registered for a type it carries and looks past a window with
-    // none, so the preview registers nothing — the same exclusion the X11
-    // router makes in `topLevelAt`, made where AppKit can see it.
+    // The regression this exists for (#488). On this backend the window
+    // server picks the window under the pointer, and the preview — a panel
+    // at the pop-up-menu level following the pointer — is that window for
+    // the whole gesture. Registered, it would be the one asked, refuse (its
+    // tree has no `dropAccept`) and take the drop with it; unregistered, it
+    // is still the one found and the drag has no destination at all — the
+    // list beneath never hears of it either way, which is what 2.8.1
+    // shipped and the issue was reopened for. So the preview is made
+    // transparent to the pointer (`ignoresMouseEvents`, the bridge's
+    // window-server exclusion) and registers nothing, having nothing to
+    // accept with — the exclusion the X11 router makes in `topLevelAt`,
+    // made where the window server can see it.
     const native = fakeNative();
     const app = appOver(native);
     const root = await createRoot({ app });
@@ -613,6 +616,18 @@ describe('the drag side', () => {
       'the preview registered no types',
     );
     assert.equal(preview._dropTransport, undefined, 'and has no drop side');
+    // and what the window server sees: the preview is transparent to the
+    // pointer, the list takes it
+    assert.equal(
+      preview._h.options.ignoresMouseEvents,
+      true,
+      'the preview was created transparent to the pointer',
+    );
+    assert.equal(
+      list._h.options.ignoresMouseEvents,
+      undefined,
+      'the list takes the pointer',
+    );
 
     // so the drag comes back over the list, through the preview
     const local = {

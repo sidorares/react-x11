@@ -436,11 +436,12 @@ export interface WindowProps
   xi2?: boolean | 'auto';
   /**
    * Mark this window as a drag preview: the drag router never treats it as
-   * the window under the pointer, and it is never a drop destination — on
-   * the cocoa backend, where AppKit picks the destination, that is what
-   * lets a drop reach the window beneath it. A `<popup dragPreview>` can
-   * therefore follow the pointer without swallowing its own drag. Read when
-   * the window is created. See `useDragSource`.
+   * the window under the pointer, it is never a drop destination, and on
+   * the cocoa backend — where the window server picks the window under the
+   * pointer — it is made transparent to the pointer, so a drop reaches the
+   * window beneath it. A `<popup dragPreview>` can therefore follow the
+   * pointer without swallowing its own drag. Read when the window is
+   * created. See `useDragSource`.
    */
   dragPreview?: boolean;
   /**

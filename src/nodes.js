@@ -10477,11 +10477,13 @@ export class WindowNode extends Scrollable(Node) {
    * The one exception is a `<popup dragPreview>`. It follows the pointer,
    * so for the whole gesture it is the frontmost window under it, and it
    * must never be what the drag is over. Where react-x11 picks the target
-   * itself (src/dnd.js `topLevelAt`) it is skipped by name; where the OS
-   * picks — AppKit routes a drag to the frontmost window registered for a
-   * type it carries, and looks past one that registered none — the only
-   * way to say so is to register nothing (#488). So a preview gets none of
-   * this: no session, no registry entry, no property.
+   * itself (src/dnd.js `topLevelAt`) it is skipped by name. Where the OS
+   * picks, registering nothing is not enough: AppKit finds the window
+   * under the pointer first and does not look past one with no dragged
+   * types — the drag then has no destination at all — so the cocoa window
+   * is made transparent to the pointer instead (src/cocoa/window.js,
+   * `ignoresMouseEvents`, #488). A preview still gets none of this: no
+   * session, no registry entry, no property, nothing to refuse with.
    */
   _initDnd() {
     if (this.props.dragPreview) return;
