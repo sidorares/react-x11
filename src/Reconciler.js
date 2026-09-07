@@ -33,6 +33,7 @@ import {
   windowAttributes,
   setTextStripBelow,
 } from './nodes.js';
+import { setFrameRateDefault } from './pacing.js';
 import { hasDropProps } from './dnd.js';
 import { AppProvider } from './appcontext.js';
 import {
@@ -795,6 +796,12 @@ export async function createRoot(options = {}) {
   // of as glyphs (nodes.js, `TextNode._paintsStrip`): six logical pixels by
   // default, 0 for glyphs at every size.
   setTextStripBelow(app, rest.textStripBelow);
+
+  // How this root's windows pace their frames when their content changes
+  // faster than the display refreshes (src/pacing.js): `'display'` — every
+  // frame the clock gives — unless the root says otherwise; a window's own
+  // `frameRate` prop wins over this, and REACT_X11_FRAME_RATE over both.
+  setFrameRateDefault(app, rest.frameRate);
 
   // Whether a subtree coming back out of hiding — a `<Suspense>` boundary
   // resolving, an `<Activity>` shown again — takes the keyboard back with it

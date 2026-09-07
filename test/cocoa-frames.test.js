@@ -783,6 +783,91 @@ test('a frame that arrives more than an interval late re-anchors the clock', asy
   assert.equal(app._frameTimer, null);
 });
 
+test('a frame requested between ticks gets its timer while the pump runs', async () => {
+  const { app } = await mount(box({ flexGrow: 1 }));
+  app._frameInterval = 16;
+  app._pumpInterval = 8;
+  // no pump: a request waits for a tick, as every hand-driven test relies on
+  let ran = 0;
+  const now = performance.now();
+  app._rafLast = now - 13;
+  app._requestFrame(() => (ran += 1));
+  assert.equal(app._frameTimer, null, 'nothing armed without a pump');
+  app._tickFrames(now);
+  assert.equal(ran, 0);
+  clearTimeout(app._frameTimer);
+  app._frameTimer = null;
+  app._rafQueue.length = 0;
+  // the pump running: the same request arms the one-shot at the moment
+  // the clock is due — two milliseconds out — rather than waiting up to a
+  // pump interval for a tick to look at it
+  app._pump = setInterval(() => {}, 1e6);
+  try {
+    app._rafLast = performance.now() - 13;
+    app._requestFrame(() => (ran += 1));
+    assert.ok(app._frameTimer, 'a timer');
+    assert.ok(
+      app._frameTimerAt - performance.now() < 3.5,
+      `due in ${app._frameTimerAt - performance.now()}ms`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    assert.equal(ran, 1, 'which ran it');
+    // a clock already due gets a millisecond, not a tick
+    app._rafLast = performance.now() - 100;
+    app._requestFrame(() => (ran += 1));
+    assert.ok(app._frameTimer);
+    assert.ok(app._frameTimerAt - performance.now() <= 1.5);
+    await new Promise((resolve) => setTimeout(resolve, 6));
+    assert.equal(ran, 2);
+    // a second request into a queue that already has one arms nothing more
+    app._rafLast = performance.now() - 13;
+    app._requestFrame(() => (ran += 1));
+    const at = app._frameTimerAt;
+    app._requestFrame(() => (ran += 1));
+    assert.equal(app._frameTimerAt, at, 'the one timer stands');
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    assert.equal(ran, 4);
+    // and a clock due after the next tick is left to the tick
+    app._rafLast = performance.now();
+    app._requestFrame(() => (ran += 1));
+    assert.equal(app._frameTimer, null, 'the tick decides');
+  } finally {
+    clearInterval(app._pump);
+    app._pump = null;
+    if (app._frameTimer) clearTimeout(app._frameTimer);
+    app._frameTimer = null;
+  }
+});
+
+test('the present reports its cost to the window node', async () => {
+  const { app, wnd, node } = await mount(
+    box({ flexGrow: 1, backgroundColor: '#3498db' }),
+  );
+  const charged = [];
+  node._notePresentCost = (ms) => charged.push(ms);
+  // the mount frame's present
+  app._presentAll();
+  assert.equal(charged.length, 1, 'one present, one report');
+  assert.ok(charged[0] >= 0);
+  // nothing drew: nothing presented, nothing reported
+  app._presentAll();
+  assert.equal(charged.length, 1);
+  // a frame that drew, presented
+  node.invalidate(false, node.children[0], 'content');
+  node.flush();
+  app._presentAll();
+  assert.equal(charged.length, 2);
+  // …and one nobody can see is held, so it costs nothing yet
+  wnd._occluded = true;
+  node.invalidate(false, node.children[0], 'content');
+  node.flush();
+  app._presentAll();
+  assert.equal(charged.length, 2, 'held, not presented');
+  wnd._occluded = false;
+  app._presentAll();
+  assert.equal(charged.length, 3, 'presented once the window is back');
+});
+
 test('closing the app drops the timer a frame was owed', async () => {
   const { app } = await mount(box({ flexGrow: 1 }));
   app._frameInterval = 16;

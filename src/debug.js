@@ -399,7 +399,7 @@ function createSession({ sink, path }) {
       }
     },
 
-    frame({ rects, reasons, start, end, landed }) {
+    frame({ rects, reasons, start, end, landed, waited }) {
       frames += 1;
       const full = !rects;
       const area = full
@@ -421,7 +421,12 @@ function createSession({ sink, path }) {
         // timings cannot show. Either way it is paint-vs-everything-else.
         const wait =
           typeof landed === 'number' ? ` landed=${landed.toFixed(1)}ms` : '';
-        line(`frame ${frames}: ${where}${why}${wait}`);
+        // How long the frame pacer held this frame's claim before letting
+        // the clock have it (src/pacing.js) — only under an adaptive
+        // `frameRate`, and only for a frame that was held, so the default
+        // path's lines are the lines they always were.
+        const held = waited > 0 ? ` waited=${waited.toFixed(1)}ms` : '';
+        line(`frame ${frames}: ${where}${why}${wait}${held}`);
       }
       record({
         name: 'frame',
@@ -437,6 +442,7 @@ function createSession({ sink, path }) {
           area,
           reasons: reasons ?? [],
           landedMs: typeof landed === 'number' ? +landed.toFixed(2) : undefined,
+          waitedMs: waited > 0 ? +waited.toFixed(2) : undefined,
         },
       });
     },

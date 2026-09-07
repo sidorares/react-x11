@@ -32,6 +32,8 @@
 //                                               # promoted = on, layers)
 //   npm run bench:presenters -- --x11           # extra column via $DISPLAY
 //   npm run bench:presenters -- --cells=2400    # bigger stress trees
+//   npm run bench:presenters -- --scenario=stream --frame-rate=adaptive
+//                                               # the flood, under the pacer
 //   npm run bench:presenters -- --at=200,200    # the window at a point (on
 //                                               # the screen whose rate you
 //                                               # mean to measure)
@@ -83,6 +85,10 @@ const CELLS = Number(flag('cells', 1200));
 const COLUMNS = flag('columns', null);
 const SIZE = flag('size', '900x700');
 const FRAME = flag('frame', null); // cocoa frame interval, ms
+// --frame-rate=display|adaptive|throughput|<fps>: the frame pacer's policy
+// for the root (docs/elements.md "frameRate"), what the `stream` scenario
+// is for; every other scenario runs at the default unless told otherwise
+const FRAME_RATE = flag('frame-rate', null);
 // --at=x,y: where to put the window, in points, top-left global — on a
 // desk with a 120Hz panel and a 75Hz monitor the default frame interval is
 // the display's, so which screen the window lands on is part of the result
@@ -432,7 +438,38 @@ function wheelNotch(ctx) {
   });
 }
 
+let streamTimer = null;
+
 const SCENARIOS = {
+  /** A flood: a window-sized element whose content changes faster than
+   *  the display refreshes — a terminal under `cat`, a chart on a socket,
+   *  a simulation. A timer claims it every 2ms, standing in for the
+   *  producer; every claim repaints the whole box (`defineStreamPane`, a
+   *  few milliseconds of CoreGraphics at 2x). With the default `frameRate`
+   *  the clock paints every refresh and the thread paints screens nobody
+   *  reads; `--frame-rate=adaptive` is the pacer (docs/elements.md
+   *  "frameRate"). Read fps and cpu against `claims/s` — how often the
+   *  producer got the thread — and the pacer's own counters in the notes. */
+  stream: {
+    tree: () =>
+      windowOf([
+        header('stream — a window-sized element claiming every 2ms'),
+        e('streampane', { key: 'pane', style: { flexGrow: 1 } }),
+      ]),
+    setup(ctx) {
+      const pane = ctx.find((n) => n.kind === 'streampane');
+      ctx.extra.claims = 0;
+      ctx.extra.pacing = pane.root._pacer.stats;
+      if (streamTimer) clearInterval(streamTimer);
+      streamTimer = setInterval(() => {
+        pane.tick += 1;
+        pane.invalidate(false, pane.contentBox(), 'content');
+        ctx.extra.claims += 1;
+      }, 2);
+    },
+    // the timer is the flood; the tick re-renders nothing
+    drive() {},
+  },
   /** Paint-only bounded change: one 100px box recolours. The layers
    *  presenter should answer with one backgroundColor prop and zero
    *  rasters; the surface presenter with a bounded repaint plus a
@@ -1209,6 +1246,48 @@ const rectsTouch = (a, b) =>
   a.y < b.y + b.height &&
   b.y < a.y + a.height;
 
+/**
+ * The `stream` scenario's element: a window-sized pane that repaints its
+ * whole box on every claim — a 120×40 grid of cell fills, two colours, the
+ * pattern shifted by a tick so every cell changes — the shape of a
+ * terminal under a flood, or a chart redrawn per sample. It answers
+ * `opaqueRect()`, as such an element should, so the fills under it are
+ * skipped; what is left is its own full-area pass, which is the cost the
+ * pacer prices.
+ */
+function defineStreamPane(NodeClass) {
+  return class StreamPaneNode extends NodeClass {
+    constructor(props, app) {
+      super('streampane', props, app);
+      this.tick = 0;
+    }
+
+    opaqueRect() {
+      return this.contentBox();
+    }
+
+    paintContent(ctx) {
+      const { x, y, width, height } = this.contentBox();
+      const cols = 120;
+      const rows = 40;
+      const cw = width / cols;
+      const ch = height / rows;
+      const lit = [];
+      const dark = [];
+      for (let r = 0; r < rows; r += 1) {
+        for (let c = 0; c < cols; c += 1) {
+          const cell = (r * cols + c + this.tick) % 3 === 0 ? lit : dark;
+          cell.push(x + c * cw, y + r * ch, cw, ch);
+        }
+      }
+      ctx.fillStyle = '#1e1e2e';
+      ctx.fillRects(dark);
+      ctx.fillStyle = '#89b4fa';
+      ctx.fillRects(lit);
+    }
+  };
+}
+
 function definePane(NodeClass) {
   return class BenchPaneNode extends NodeClass {
     constructor(props, app) {
@@ -1373,9 +1452,20 @@ async function runChild() {
   const { Icon } = await import('../../src/components/Icon.js');
   const store = makeStore(COLS * ROWS);
   const deps = { Icon, store };
-  const root = await createRoot(
-    FRAME ? { cocoa: { frameInterval: Number(FRAME) } } : {},
-  );
+  const StreamPaneNode = defineStreamPane(Node);
+  registerElement('streampane', {
+    create: (props, app) => new StreamPaneNode(props, app),
+  });
+  const root = await createRoot({
+    ...(FRAME ? { cocoa: { frameInterval: Number(FRAME) } } : {}),
+    ...(FRAME_RATE
+      ? {
+          frameRate: Number.isFinite(Number(FRAME_RATE))
+            ? Number(FRAME_RATE)
+            : FRAME_RATE,
+        }
+      : {}),
+  });
   const app = root.app;
   const cocoa = Boolean(app._native);
 
@@ -1627,7 +1717,10 @@ async function runChild() {
     scale: win?.scale ?? 1,
     frames,
     fps: frames / elapsed,
+    // the flush's share of wall time — what the frame pacer budgets
+    flushPct: (100 * sum(sorted)) / (elapsed * 1000),
     ticks: tick,
+    elapsed,
     flushAvg: sorted.length ? sum(sorted) / sorted.length : null,
     flushP95: q(sorted, 0.95),
     flushMax: sorted.at(-1) ?? null,
@@ -1691,6 +1784,7 @@ function runCell(name, env) {
       `--cells=${CELLS}`,
       `--size=${SIZE}`,
       ...(FRAME ? [`--frame=${FRAME}`] : []),
+      ...(FRAME_RATE ? [`--frame-rate=${FRAME_RATE}`] : []),
       ...(AT ? [`--at=${AT}`] : []),
       ...(SHOTS ? ['--shots'] : []),
     ],
@@ -1933,6 +2027,14 @@ if (CHILD) {
       if (Math.abs(r.rssMb) >= 8)
         notes.push(`rss ${r.rssMb > 0 ? '+' : ''}${r.rssMb.toFixed(0)}MB`);
       const x = r.extra ?? {};
+      if (x.pacing) {
+        const p = x.pacing;
+        notes.push(
+          `frameRate ${p.mode}: paint ${r.flushPct.toFixed(0)}% of wall, ` +
+            `${p.frames} frames, ${p.deferred} held (last wait ${p.lastWaitMs.toFixed(1)}ms, ` +
+            `last cost ${p.lastCostMs.toFixed(1)}ms); ${Math.round(x.claims / r.elapsed)} claims/s`,
+        );
+      }
       if (x.resizes) {
         notes.push(
           `${x.resizes} resizes: ${(x.resizeMs / x.resizes).toFixed(1)}ms avg, ${x.resizeMax.toFixed(1)}ms max, ` +

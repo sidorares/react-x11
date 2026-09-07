@@ -17,6 +17,7 @@ import type { ReloadEvent } from 'react-x11/refresh';
 import type { RefreshOptions } from 'react-x11/refresh/loader';
 import type {
   AbortSignalLike,
+  FrameRate,
   PermissionStatus,
   NotificationBackend,
   NotificationCloseReason,
@@ -556,6 +557,21 @@ const _xi2Eager = <window xi2 />;
 const _xi2Never = <window xi2={false} />;
 // @ts-expect-error — 'auto' is the only string the selection understands
 const _xi2Bogus = <window xi2="lazy" />;
+// frameRate: a preset, a ceiling, or the three numbers — on a window, a
+// popup and a GL surface alike (docs/elements.md "frameRate")
+const _paceDefault = <window frameRate="display" />;
+const _paceAdaptive = <window frameRate="adaptive" />;
+const _paceThroughput = <popup frameRate="throughput" />;
+const _paceCap = <window frameRate={60} />;
+const _paceNumbers = <window frameRate={{ budget: 0.25, minFps: 20 }} />;
+const _paceCeilingOnly = <window frameRate={{ maxFps: 30 }} />;
+const _paceScene = <glarea frameRate="display" onDraw={() => {}} />;
+const _paceValue: FrameRate = { budget: 0.1, minFps: 10, maxFps: 30 };
+void _paceValue;
+// @ts-expect-error — not a preset
+const _paceBogus = <window frameRate="fast" />;
+// @ts-expect-error — the three numbers are budget, minFps and maxFps
+const _paceUnknown = <window frameRate={{ fps: 60 }} />;
 
 // --- popups ----------------------------------------------------------------
 
@@ -1072,6 +1088,13 @@ async function main() {
   ).unmount();
   // @ts-expect-error -- not a presenter
   await createRoot({ cocoa: { presenter: 'metal' } });
+  // the pacing default for every window of a root, both backends
+  await (await createRoot({ frameRate: 'adaptive' })).unmount();
+  await (
+    await createRoot({ frameRate: { budget: 0.2, minFps: 15 } })
+  ).unmount();
+  // @ts-expect-error -- a preset name, a number or the three numbers
+  await createRoot({ frameRate: true });
   await (await createRoot({ backend: 'auto' })).unmount();
   await (await createRoot({ backend: 'x11', display: ':1' })).unmount();
   // @ts-expect-error -- not a backend

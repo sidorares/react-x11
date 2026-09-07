@@ -698,9 +698,26 @@ with a frame interval over it (`frameInterval`; by default the period of
 the display each window is on, as `listScreens` reports it — 8.3ms on a
 120Hz panel, 16.7 on a 60Hz monitor — with a frame that falls between
 two pump ticks given a one-shot timer of its own, so the period is the
-display's whatever the pump's cadence), discrete input and the wheel
-flushed on the event, and a window that is not on glass deferring its
-frames — see "Measured" below for what each of those was worth.
+display's whatever the pump's cadence — and, since the frame pacer, a
+frame asked for between two ticks armed on the spot rather than looked at
+by the next tick), discrete input and the wheel flushed on the event, and
+a window that is not on glass deferring its frames — see "Measured" below
+for what each of those was worth.
+
+What the clock cannot know is whether a frame is worth painting. It has no
+fence: the X11 frame waits for the server to consume the last one, and a
+window fed off an input path — a streaming terminal — self-paces to what
+the server can composite; here the "server" is CoreGraphics on the JS
+thread and the frame is due whenever the display is, so the same window
+paints every refresh and the thread paints screens nobody reads. That is
+`frameRate`'s job ([elements.md](elements.md#framerate--pacing-the-frames-under-a-flood),
+[architecture/frame-pacing.md](architecture/frame-pacing.md)): a window
+under `'adaptive'` holds a claim while its recent frames have spent more
+than their share of the thread, priced by what the flush _and the present_
+cost — `CocoaWindow.present` reports the flip and its catch-up copy back
+to the node, because a damage-sized memcpy per frame is a millisecond the
+flush never saw. Off by default; `cocoa: { frameInterval }` stays the
+clock's own cap over everything on it.
 
 ## Native controls
 
@@ -1720,6 +1737,34 @@ the fills and the line draws, which only not repainting can take away: a
 paint cache over the cells that did not change, or the layers presenter —
 then yoga's own pass at about a millisecond per thousand nodes, and React's
 commit of a tree that re-renders unmemoized.
+
+## Measured: the flood, under the frame pacer
+
+Written 2026-09-07 against react-x11 2.8.3 and `@windowkit/appkit` 0.6.0,
+same machine, the surface presenter, `npm run bench:presenters --
+--scenario=stream --columns=surface`: a window-sized element repainting its
+whole box on every claim, claimed every 2ms by a timer standing in for a
+producer — the shape of a terminal under `cat`. The rows are `--frame-rate`
+([elements.md](elements.md#framerate--pacing-the-frames-under-a-flood)).
+
+| `--frame-rate` |   fps | paint share of wall | cpu | producer: claims/s |
+| -------------- | ----: | ------------------: | --: | -----------------: |
+| `display`      | 120.0 |                 58% | 72% |                244 |
+| `adaptive`     |  36.1 |                 21% | 27% |                529 |
+| `30`           |  29.7 |                 19% | 24% |                539 |
+| `throughput`   |   8.8 |                  9% | 13% |                592 |
+
+The default paints every refresh and starves its producer of half its
+ticks; `'adaptive'` holds paint at the budget and gives the producer all of
+them. The design and the rest of the numbers are in
+[architecture/frame-pacing.md](architecture/frame-pacing.md). Two things
+here are the backend's own: `CocoaWindow.present` reports the flip and its
+catch-up copy to the node, so the frame is priced by what the thread
+spent and not just by the flush; and `CocoaApp._requestFrame` arms the
+frame timer for a request that arrives between two pump ticks, so a held
+claim lands at its wait rather than at its wait rounded up to the pump.
+The structural gate is unchanged: every rule holds at the default, which
+is what every scenario but `stream` runs at.
 
 ## Testing
 

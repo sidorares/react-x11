@@ -193,6 +193,7 @@ A real X11 window; the flex, paint and event root for its subtree.
 | `theme`                     | palette that `$token` style values resolve against, for this subtree                                                                                                                                    |
 | `embeddable`                | created but never self-mapped: the window waits for an embedder ([`<foreign>`](embedding.md) on the other side), which maps it after the reparent. What a [`<Frame>`](frame.md) pane's root window sets |
 | `hidden`                    | realized and laid out, never mapped while true (below)                                                                                                                                                  |
+| `frameRate`                 | how the window paces its frames under a stream of changes: `'display'` (the default), `'adaptive'`, `'throughput'`, a ceiling in fps, or `{ budget, minFps, maxFps }` (below)                           |
 
 Windows may be nested inside other windows (real X11 child windows).
 **Ref**: the live ntk `Window` — `getContext('2d')`,
@@ -360,6 +361,87 @@ On a `<popup>` the pair of unmap/map is the whole story. On a managed
 `<window>` an unmap is ICCCM's _withdraw_ — the window manager forgets the
 window, and the re-map is a fresh `MapRequest`, so a WM may frame or place
 it anew and `states` are re-declared rather than remembered.
+
+### `frameRate` — pacing the frames under a flood
+
+```jsx
+<window frameRate="adaptive">…</window>
+```
+
+By default a window paints every frame the clock gives it: on X11 as often
+as the server keeps up, on macOS at the display's own rate. That is right
+for a UI that answers input — a keystroke, a hover, a scroll — where every
+frame is one someone is waiting for. It is wrong for a window whose content
+changes faster than anyone can read it: a terminal under `cat`, a chart fed
+by a socket, a simulation ticking as fast as it can. On a 120Hz panel such a
+window paints 120 times a second, and where a frame costs a few
+milliseconds of the JS thread — full-window CoreGraphics passes on macOS —
+most of that thread goes to painting screens nobody sees, and the producer
+gets what is left. Measured on a streaming terminal, that was a flood four
+times slower on macOS than under XQuartz on the same machine, and the whole
+difference was frame count times per-frame cost.
+
+`frameRate` prices frames in CPU time rather than counting them. A window
+under `'adaptive'` keeps a budget: painting may take a quarter of the wall
+time while the window is busy. Credit accrues at that rate, a frame spends
+what it measurably cost — the flush, and on macOS the present — and a claim
+that finds the window in debt waits for the credit to reach zero, and no
+longer. Four things follow, and they are what the tests pin:
+
+- **Idle is immediate.** A quiet window has a full bucket, so the first
+  claim after a pause — a keystroke, a click — paints on the next tick,
+  whatever the last frame cost.
+- **Cheap is unthrottled.** A frame that costs less than the credit it
+  accrued leaves the bucket where it was. A blit-scrolled list keeps the
+  display's rate: its frames are memmoves and a strip.
+- **A rare expensive frame is free.** The bucket holds a burst — 50ms of
+  paint, the floor's interval — so the one relayout in a scroll costs
+  credit, the credit refills, and nothing waited. Only a _stream_ of
+  expensive frames drains it, and then each waits `cost × (1/budget − 1)`:
+  a 6ms frame is followed by 18ms of the thread for everything else.
+- **A flood that ends is un-throttled at once.** The debt is never more than
+  one frame's cost, so the prompt that appears when the flood stops waits
+  for that and nothing more.
+
+Two more numbers bound the rule. `minFps` is the floor: whatever the debt,
+the screen is never more than `1000 / minFps` ms behind the last paint — a
+promise about staleness, not a rate, since a single frame can take longer.
+`maxFps` is a ceiling on top of the display's, cheap frames included — the
+knob every terminal already has.
+
+| value                        | `budget` | `minFps` | `maxFps` | when                                                                                   |
+| ---------------------------- | -------: | -------: | -------: | -------------------------------------------------------------------------------------- |
+| `'display'` (the default)    |        1 |     none |     none | a UI answering input: every frame the clock gives, after React's own batching          |
+| `'adaptive'`                 |     0.25 |       20 |     none | a window fed off an input path: a terminal, a live chart, a scene that streams         |
+| `'throughput'`               |      0.1 |       10 |       30 | output matters more than the display: the screen may lag by up to 100ms during a flood |
+| a number, `60`               |        1 |     none |       60 | a ceiling and nothing else — the fixed cap                                             |
+| `{ budget, minFps, maxFps }` |          |          |          | the three numbers, any subset; the ones left out are `'display'`'s                     |
+
+A budget below 1 with no `minFps` warns in development: after an expensive
+frame the next may wait three times its cost with nothing to bound it, and
+`{ budget, minFps: 20 }` is what `'adaptive'` does.
+
+Three sources, in order of precedence: **`REACT_X11_FRAME_RATE`** in the
+environment (`adaptive`, `display`, `throughput` or a number) overrides
+everything, the way `REACT_X11_BACKEND` does, so an A/B run and a field
+diagnosis need no code change; then **the prop**; then
+**`createRoot({ frameRate })`**, the default for every window of that root;
+then `'display'`. A `<popup>` paces itself the same way, from its own prop.
+A [`<glarea>`](#glarea) takes the window's policy for its own frames unless
+it names one.
+
+What the pacer does not do. It never changes what a frame paints: a held
+claim's damage accumulates on the window exactly as it does between two
+ticks of the clock, and the frame that follows paints all of it. It never
+holds the answer to an input: a click or a key paints the window at once
+(the early flush in [events.md](events.md)), held claims included, and the
+debt is paid then. And it prices the JS thread's time only — on X11 the
+server's work is fenced by the frame clock already, so the pacer rarely
+holds a frame there; where a backend has backpressure of its own, the
+pacer is inert. `REACT_X11_TRACE=requests` prints `waited=` on every frame
+the pacer held ([debugging.md](debugging.md)), and
+[architecture/frame-pacing.md](architecture/frame-pacing.md) is the design
+record, with the measurements.
 
 ### `onResize` fires for moves
 
@@ -1756,6 +1838,13 @@ enabled (`+iglx` / `AllowIndirectGLX` — off by default on many).
 - `clearColor` — CSS colour or `[r, g, b, a]` floats (default black).
 - `frameLoop` — `'demand'` (default) redraws on prop, size and expose
   changes only; `'always'` renders continuously on ntk's frame clock.
+- `frameRate` — how those frames are paced when they are expensive: the
+  same values as [`<window frameRate>`](#framerate--pacing-the-frames-under-a-flood),
+  priced by what `onDraw` and the swap cost the JS thread. Defaults to the
+  owning window's, so a `<window frameRate="adaptive">` paces the scene in
+  it too; name `'display'` here for a scene that wants every frame while the
+  window around it streams. A `frameLoop` of `'always'` under `'adaptive'`
+  is a loop at the budget rather than at the display.
 - `glx` — a visual spec for ntk's `chooseGLXConfig`, e.g.
   `{ DEPTH_SIZE: 24 }`. One query per app, shared by every `<glarea>`.
 - `onError(err)` — no GL surface (no GLX, no matching visual). Without a

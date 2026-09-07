@@ -537,8 +537,25 @@ export class CocoaApp {
     for (const wnd of this._windows.values()) wnd.liveResizing = false;
   }
 
+  /**
+   * `requestAnimationFrame`, for a window or for the app's own clock. A
+   * frame asked for between two pump ticks used to wait for the next tick
+   * to look at it — up to a pump interval on top of whatever the clock
+   * owed. Now, while the pump runs, the first request into an empty queue
+   * arms the same one-shot a tick arms for a frame it just missed
+   * (`_armFrameTimer`), at the moment the clock is due; a request for a
+   * clock due after the next tick leaves it to the tick, as before. What
+   * a frame is and how many there are does not change — the clock still
+   * gates every one — only when it is looked at, which is what makes a
+   * paced claim (src/pacing.js) land at its wait rather than at its wait
+   * rounded up to the pump.
+   */
   _requestFrame(cb, wnd = null) {
     this._rafQueue.push({ cb, wnd });
+    if (this._pump && this._rafQueue.length === 1) {
+      const now = performance.now();
+      this._armFrameTimer(Math.max(1, this._frameWait(wnd ?? this, now)), now);
+    }
     return this._rafQueue.length;
   }
 
