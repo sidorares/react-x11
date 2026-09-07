@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.2](https://github.com/sidorares/react-x11/compare/v2.8.1...v2.8.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* **cocoa:** a drag preview is transparent to the pointer, which is what lets the drop reach the window beneath it ([#492](https://github.com/sidorares/react-x11/issues/492)) ([ea8e57e](https://github.com/sidorares/react-x11/commit/ea8e57e7937b21b8107692fe275220d9a473c532))
+
 ## [2.8.1](https://github.com/sidorares/react-x11/compare/v2.8.0...v2.8.1) (2026-09-06)
 
 
