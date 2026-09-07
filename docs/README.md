@@ -8,6 +8,13 @@
   design record behind `frameRate`: why a window fed off an input path
   paints screens nobody sees, the token bucket over paint time that holds
   it to a budget, where it lives on both backends, and what it measured.
+- [architecture/element-layer-contents.md](architecture/element-layer-contents.md)
+  — the design record for the other half of a streaming element's frame on
+  macOS: why an element with a retained surface pays a composite and the
+  window swapchain's catch-up copy to move pixels it already has, what the
+  platform does with an element-owned IOSurface (spiked in pixels), and the
+  presentable `Surface` plus `presentedSurface()` policy that would remove
+  both. Not built.
 - [styling.md](styling.md) — the `style` prop: layout and paint properties,
   `:hover`/`:focus`/`:active`/`:disabled` blocks, transitions, theme tokens,
   window size and container queries, `createStyles`, and
