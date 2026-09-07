@@ -871,7 +871,13 @@ on X11 instead of replaying its whole scene into a clip.
   them here. The subpath's other drawing-adjacent names
   (`cssColorStraight`, `decodeImage`, `Image`) are pure JS already;
   `Image` as a `drawImage` source is not wired on this backend yet, and
-  the X-only names stay X-only.
+  the X-only names stay X-only. An element that composites such a surface
+  over its box on **every** frame — a terminal, a chart on a socket — pays
+  that composite and the window swapchain's catch-up copy behind it to move
+  pixels it already has; making the element's surface its own layer instead,
+  the way `<glarea>` and layer promotion already do, is designed in
+  [architecture/element-layer-contents.md](architecture/element-layer-contents.md)
+  (#499) and not built.
 - `<svg>`: the declarative vocabulary (`SvgChildNode`) is portable; the
   rasterizer behind it renders through the same CG ctx.
 - A future, deliberate seam — not built until a consumer needs it:
