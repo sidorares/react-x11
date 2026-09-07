@@ -250,9 +250,9 @@ that has drawn children; the machinery is there when a consumer appears.
 `CocoaPromotion` is the owner: same candidate set, same z-order test, same
 per-frame re-decision, same demote-and-claim-the-hole. Four honest changes:
 
-- **`promotableNode` gates on `plainBox(node)`** — literally `node.paint ===
-BoxNode.prototype.paint`, "not an element with a paint of its own, whose
-  content exists nowhere but in that override". A presenting element _is_
+- **`promotableNode` gates on `plainBox(node)`** — an identity test on
+  `node.paint`, "not an element with a paint of its own, whose content
+  exists nowhere but in that override". A presenting element _is_
   that, and is safe for the opposite reason: its content exists nowhere but
   in its surface, and the surface is on the layer. So the test grows a
   second acceptance path — a node whose ink is defined to be its presented
