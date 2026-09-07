@@ -1,7 +1,7 @@
 # Video: decoding a stream, capturing one, and putting the frames on the screen
 
 _Design record, 2026-09-08. Written against master at bf48860 (react-x11
-2.9.0, ntk ^8.7.0, `@windowkit/appkit` ^0.7.0, node-x11 4.1.0). **Nothing
+2.9.0, ntk ^8.7.0, `@windowkit/appkit` ^0.7.0, node-x11 4.2.0). **Nothing
 is implemented with this document.** §7 is the shape the implementing PR
 takes, §9 is the spike every number here came from, and §10 says what it
 would cost. Camera capture is §3.5: the same Cocoa stack one step shorter,
@@ -57,12 +57,14 @@ it runs into on X11 is the one
   XQuartz (§2.5). That is the argument for Xv, which would push 3.1MB of
   `420v` instead of 7.9MB of BGRA _and_ have the server do the colour
   conversion and the scale.
-- **What is missing to try it:** node-x11 ships
-  [`lib/ext/xv.js`](https://github.com/sidorares/node-x11/blob/master/lib/ext/xv.js)
-  with the discovery-and-control half of Xv and **no way to move a pixel** —
-  minor opcodes 0–4 and 12–16 are there, 5–11 and 17–19 are not. Adding
-  `XvQueryImageAttributes` (17), `XvPutImage` (18) and `XvShmPutImage`
-  (19) is bounded wire code against a stable spec, and is filed upstream.
+- **The Xv rung is unblocked.** node-x11 shipped only the
+  discovery-and-control half of Xv when this document was started;
+  [#295](https://github.com/sidorares/node-x11/pull/295) added
+  `QueryImageAttributes` (17), `PutImage` (18), `ShmPutImage` (19),
+  `StopVideo` (9) and the two notify selectors, closing
+  [#294](https://github.com/sidorares/node-x11/issues/294), and it is
+  **published as 4.2.0**. ntk's `^4.0.1` already admits it, so no ntk
+  release is needed — only a lockfile refresh (§2.4).
 
 ## 1. The asymmetry, stated once
 
@@ -184,40 +186,61 @@ its pixels cannot be read back through the X path.
 
 ### 2.4 What node-x11 has
 
-`lib/ext/xv.js` in node-x11 4.1.0 implements the half of Xv that asks
-questions and none of the half that answers with pixels. Verified against
-the file:
+Until 2026-09-07 `lib/ext/xv.js` implemented the half of Xv that asks
+questions and none of the half that answers with pixels: you could
+enumerate adaptors, grab a port, list its formats and set its brightness,
+and then had no way to show it a frame. It also already registered event
+parsers for `XvVideoNotify` and `XvPortNotify` that nothing could
+subscribe to.
 
-| Xv minor opcode                                 | in node-x11 4.1.0 |
-| ----------------------------------------------- | ----------------- |
-| 0 `QueryExtension` (version)                    | yes               |
-| 1 `QueryAdaptors`                               | yes               |
-| 2 `QueryEncodings`                              | yes               |
-| 3 `GrabPort` / 4 `UngrabPort`                   | yes               |
-| 5–8 `PutVideo`/`PutStill`/`GetVideo`/`GetStill` | **no**            |
-| 9 `StopVideo`                                   | **no**            |
-| 10 `SelectVideoNotify`                          | **no**            |
-| 11 `SelectPortNotify`                           | **no**            |
-| 12 `QueryBestSize`                              | yes               |
-| 13–15 port attributes                           | yes               |
-| 16 `ListImageFormats`                           | yes               |
-| 17 `QueryImageAttributes`                       | **no**            |
-| 18 `PutImage`                                   | **no**            |
-| 19 `ShmPutImage`                                | **no**            |
+**That gap is closed on master.**
+[sidorares/node-x11#294](https://github.com/sidorares/node-x11/issues/294)
+was fixed by
+[#295](https://github.com/sidorares/node-x11/pull/295), which added the
+image path and the notify selectors:
 
-Two consequences. The obvious one: you can enumerate adaptors, grab a
-port, list its formats and set its brightness, and then have no way to
-show it a frame. The quieter one: the file **already registers event
-parsers** for `XvVideoNotify` and `XvPortNotify`, and opcodes 10 and 11
-are how you would subscribe — so those parsers are currently unreachable.
+| Xv minor opcode                                 | 4.1.0 | 4.2.0   |
+| ----------------------------------------------- | ----- | ------- |
+| 0–4 version, adaptors, encodings, port grab     | yes   | yes     |
+| 5–8 `PutVideo`/`PutStill`/`GetVideo`/`GetStill` | no    | no      |
+| 9 `StopVideo`                                   | no    | **yes** |
+| 10 `SelectVideoNotify` / 11 `SelectPortNotify`  | no    | **yes** |
+| 12–16 best size, port attributes, image formats | yes   | yes     |
+| 17 `QueryImageAttributes`                       | no    | **yes** |
+| 18 `PutImage`                                   | no    | **yes** |
+| 19 `ShmPutImage`                                | no    | **yes** |
 
-The three that matter for video are bounded, well-specified wire code
-against a spec that has not moved in decades: `PutImage` is a 40-byte
-header plus the padded payload, `ShmPutImage` is 52 bytes and no payload,
-`QueryImageAttributes` is a 16-byte request whose reply carries
-`num_planes`, `data_size`, and then the pitch and offset arrays that tell
-you how to lay out the planes you are about to send. Filed upstream as
-[sidorares/node-x11#294](https://github.com/sidorares/node-x11/issues/294).
+5–8 remain absent on purpose — they are the capture-card half of the
+extension, as dead as XvMC, and §3.5's answer to "where do camera frames
+come from" is not Xv.
+
+Two things about the merged implementation that change what this document
+can assume:
+
+- **`PutImage` refuses a frame the connection cannot carry**, rather than
+  sending it and having the server drop the connection over a bad request
+  length. That is the right behaviour and it makes a limit explicit: the
+  40-byte header plus a padded payload has to fit `max_request_length`,
+  which without BIG-REQUESTS is 256KB. A 1080p `I420` frame is 3.1MB, so
+  **`PutImage` alone cannot carry an HD frame on a connection without
+  BIG-REQUESTS**, and will say so instead of failing mysteriously.
+- **`ShmPutImage` sidesteps that entirely**, because its 52 bytes carry a
+  `SHMSEG` and no payload. So for HD it is not an optimisation over
+  `PutImage`; it is the path.
+
+**It is released**, as node-x11 4.2.0, and verified from the published
+tarball rather than from the registry's listing. Two things follow for
+this project, and the second is the one that usually gets missed:
+
+- **No ntk release is needed.** `x11` is not a direct dependency of
+  react-x11; it arrives through ntk, whose range is `^4.0.1` and therefore
+  already admits 4.2.0. This is the rare cross-repo feature that does not
+  need the middle repo to cut a version.
+- **The lockfile still pins 4.1.0**, so `npm ci` — which is what CI runs —
+  installs a node-x11 with none of this until the lock is refreshed
+  (`npm update x11 --package-lock-only`; the range did not change, so a
+  plain `npm install --package-lock-only` no-ops). That refresh belongs to
+  whichever PR first depends on the Xv rung, not to this document.
 
 ### 2.5 Measured: what the naive path costs
 
@@ -240,8 +263,9 @@ shape of the problem, and it prices the alternatives:
   push**, before SHM.
 - SHM removes the socket copy; ntk's own figure is ~2× on uploads.
 - Xv does both _and_ moves the colour conversion and the scale off our
-  CPU, which is why it is worth the upstream request even though the
-  extension is absent on XQuartz.
+  CPU — which is why it was worth the upstream request even though the
+  extension is absent on XQuartz, and why §2.4's landing changes the
+  sequencing rather than just the wish list.
 
 ## 3. Cocoa
 
@@ -488,7 +512,7 @@ element already has, fed by whichever transport §2.3 the build has.
 | the layer, Cocoa              | `src/cocoa/promotion.js` (a second kind of candidate) and a new `src/cocoa/video.js`, in the shape of `src/cocoa/glarea.js` |
 | the accessor                  | `src/node.d.ts`, `test/types/extend.tsx`                                                                                    |
 | the frame sink, both backends | ntk `Surface` + `drawImage`, unchanged                                                                                      |
-| Xv, if it happens             | node-x11 `lib/ext/xv.js` upstream, then a thin ntk wrapper                                                                  |
+| Xv                            | shipped in node-x11 4.2.0 `lib/ext/xv.js`; what remains here is a thin ntk wrapper and the port/format negotiation          |
 | bridge verbs                  | `@windowkit/appkit` — see §7                                                                                                |
 | docs                          | a section in [elements.md](../elements.md) and the ladder in [macos.md](../macos.md); this file is the record they point at |
 
@@ -522,21 +546,21 @@ element already has, fed by whichever transport §2.3 the build has.
 
 ## 7. Decisions the implementing PR has to make, and the suggested answer
 
-| question                  | suggested answer                                                                                                                                                       |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the seam                  | `presentedLayer()`, not `presentedSurface()` — a presentable `Surface` and a video layer are two kinds of one thing, and #499 has not shipped yet                      |
-| the element's primitive   | a frame sink: the node takes decoded frames, on both backends                                                                                                          |
-| the Cocoa convenience     | a source prop that AVFoundation handles end to end, documented Cocoa-only, refused with a clear error on X11 rather than silently blank                                |
-| pixel format on Cocoa     | YUV through AV verbs. Not BGRA through `setLayerContentsIOSurface`: measured at 2.1× the decode on playback and 2.67× the process CPU on capture, for the same picture |
-| bridge verbs              | `createVideoLayer`, `enqueueSampleBuffer`, `flushVideoLayer`, and the synchroniser's rate/timebase — an appkit release, unlike #499 which needs none                   |
-| the first thing to verify | that the render server scans out a YUV surface on screen (§3.4). If it does, rung 3 becomes viable as a fallback and the verb count drops                              |
-| the frame clock           | a video layer CA drives is **not** priced by the [pacer](frame-pacing.md) — it costs the frame nothing. A JS-fed frame sink is, exactly like any other claim           |
-| X11 v1                    | SHM `PutImage` of frames the application supplies, through the existing `Surface`. Xv second, once node-x11 has the three requests; DRI3/Present as the real answer    |
-| Xv fallback               | mandatory, not optional: `QueryAdaptors` answering none is the XQuartz case and must be a clean decline to the SHM path                                                |
-| colour                    | carry the pixel buffer's YCbCr matrix, transfer function and primaries; set `layer.colorspace` explicitly. The Generic-RGB default has bitten this backend before      |
-| tests                     | the fake bridge for what reaches the natives, the real one for pixels; on X11, that the element paints identically with and without any acceleration                   |
-| camera, if it follows     | a separate `<camera>` element on the same seam — device selection and session lifecycle are its own problem, and §3.5 says the permission half needs nothing new       |
-| a camera element's tests  | not `render(in:)` on the preview layer, which is blank for reasons unrelated to correctness — an `AVCaptureVideoDataOutput` tap, or on-screen capture                  |
+| question                  | suggested answer                                                                                                                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the seam                  | `presentedLayer()`, not `presentedSurface()` — a presentable `Surface` and a video layer are two kinds of one thing, and #499 has not shipped yet                                                       |
+| the element's primitive   | a frame sink: the node takes decoded frames, on both backends                                                                                                                                           |
+| the Cocoa convenience     | a source prop that AVFoundation handles end to end, documented Cocoa-only, refused with a clear error on X11 rather than silently blank                                                                 |
+| pixel format on Cocoa     | YUV through AV verbs. Not BGRA through `setLayerContentsIOSurface`: measured at 2.1× the decode on playback and 2.67× the process CPU on capture, for the same picture                                  |
+| bridge verbs              | `createVideoLayer`, `enqueueSampleBuffer`, `flushVideoLayer`, and the synchroniser's rate/timebase — an appkit release, unlike #499 which needs none                                                    |
+| the first thing to verify | that the render server scans out a YUV surface on screen (§3.4). If it does, rung 3 becomes viable as a fallback and the verb count drops                                                               |
+| the frame clock           | a video layer CA drives is **not** priced by the [pacer](frame-pacing.md) — it costs the frame nothing. A JS-fed frame sink is, exactly like any other claim                                            |
+| X11 v1                    | SHM `PutImage` of frames the application supplies, through the existing `Surface`. Xv second — node-x11 4.2.0 has the requests, so this is now a lockfile refresh away; DRI3/Present as the real answer |
+| Xv fallback               | mandatory, not optional: `QueryAdaptors` answering none is the XQuartz case and must be a clean decline to the SHM path                                                                                 |
+| colour                    | carry the pixel buffer's YCbCr matrix, transfer function and primaries; set `layer.colorspace` explicitly. The Generic-RGB default has bitten this backend before                                       |
+| tests                     | the fake bridge for what reaches the natives, the real one for pixels; on X11, that the element paints identically with and without any acceleration                                                    |
+| camera, if it follows     | a separate `<camera>` element on the same seam — device selection and session lifecycle are its own problem, and §3.5 says the permission half needs nothing new                                        |
+| a camera element's tests  | not `render(in:)` on the preview layer, which is blank for reasons unrelated to correctness — an `AVCaptureVideoDataOutput` tap, or on-screen capture                                                   |
 
 ## 8. Sequencing
 
@@ -553,9 +577,18 @@ anything:
    promotion candidate. Needs an appkit release, and should not start
    until §3.4's on-screen question is answered.
 
-Upstream, in parallel and on its own clock:
-[node-x11#294](https://github.com/sidorares/node-x11/issues/294) for the
-three Xv requests, which unblocks the Xv rung whenever it lands.
+Upstream is no longer the long pole at all: the three Xv requests
+([#294](https://github.com/sidorares/node-x11/issues/294) →
+[#295](https://github.com/sidorares/node-x11/pull/295)) shipped in
+node-x11 4.2.0, with `StopVideo` and both notify selectors alongside them,
+and ntk's range already admits it. So the Xv rung becomes a fourth piece,
+gated on nothing but someone doing it:
+
+4. **The Xv rung.** A lockfile refresh, an ntk wrapper over the new
+   requests, port and format negotiation, and `ShmPutImage` as the HD path
+   since `PutImage` cannot carry a 1080p frame without BIG-REQUESTS
+   (§2.4). A clean decline where `QueryAdaptors` answers none, which is
+   every Mac — so this rung cannot be developed on one.
 
 ## 9. The spike
 
