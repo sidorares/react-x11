@@ -68,6 +68,16 @@ export class CocoaWindow {
       attributes.visual !== undefined || attributes.transparent;
     this._transparentWindow = Boolean(transparent);
     if (transparent) options.opaque = false;
+    // A `<popup dragPreview>` follows the pointer, so for the whole gesture
+    // it is the window the window server finds under it — and AppKit does
+    // not look past a window that registered no dragged types: the drag
+    // simply has no destination, and the window beneath never hears of it.
+    // Transparent to the pointer, the preview is passed over and the hit
+    // reaches what it covers (#488; @windowkit/appkit >= 0.6.0, an older
+    // bridge ignores the option). The drop side is excluded separately:
+    // nodes.js `_initDnd` gives a preview no DropSession and registers
+    // nothing.
+    if (attributes.dragPreview) options.ignoresMouseEvents = true;
     // The root layer's background is the "what newly exposed area shows"
     // attribute an X window has — worth seeding on an opaque window so a
     // resize flashes the right colour. On a transparent one it would sit

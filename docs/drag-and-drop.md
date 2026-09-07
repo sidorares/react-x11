@@ -535,13 +535,17 @@ Platform notes:
   non-activating panel at the pop-up-menu window level — above every other
   application's windows, which sit at the normal level — it is what the
   desktop sees while the pointer is over Finder or a browser. It is also
-  the first window AppKit would find when the pointer comes back over one
-  of yours, so a `<popup dragPreview>` registers no pasteboard types at
-  all: AppKit routes a drag only to a window registered for a type it
-  carries, and looks past the preview to the window beneath — the same
-  exclusion the router makes on X11, made where AppKit can see it. What
-  AppKit's own session carries is still a blank image: the drag has no
-  bitmap of the system's, only the preview you draw.
+  the first window the window server finds when the pointer comes back
+  over one of yours, and AppKit does not look past it: a window with no
+  dragged types registered is still the one found, the drag then has no
+  destination, and the window beneath never hears of it. So the popup is
+  made transparent to the pointer — `dragPreview` sets the bridge's
+  `ignoresMouseEvents` (@windowkit/appkit 0.6.0) — and the hit passes
+  through it to the window it covers: the same exclusion the router makes
+  on X11, made where the window server can see it. It registers no
+  pasteboard types either, having nothing to accept with. What AppKit's own
+  session carries is still a blank image: the drag has no bitmap of the
+  system's, only the preview you draw.
 - **macOS / XQuartz** — X client to X client works. Dragging from **Finder**
   into an X11 window does not, and never has:
   [XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173). That is the
