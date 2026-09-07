@@ -465,6 +465,30 @@ test('a new policy starts from a full bucket; the same one again is a no-op', ()
   assert.equal(pacer.stats.mode, 'display');
 });
 
+test('a new clock starts the pacer afresh in its own time', () => {
+  const late = fakeClock(600000); // ten minutes into a suite
+  const pacer = new FramePacer(ADAPTIVE, late);
+  stream(pacer, late, { n: 30, cost: 6 });
+  assert.ok(pacer.wait() > 0, 'in debt on the old clock');
+  const clock = fakeClock(1000);
+  pacer.clock = clock;
+  assert.equal(pacer.clock, clock);
+  // a full bucket, no last frame: the rule's timestamps are all the new
+  // clock's, so credit accrues from its first millisecond
+  assert.equal(pacer.wait(), 0);
+  const waits = stream(pacer, clock, { n: 60, cost: 6 });
+  assert.equal(waits[0], 0, 'the burst is back');
+  for (const w of waits.slice(-10)) assert.ok(Math.abs(w - 18) < 1e-6, `${w}`);
+  // and a ceiling measured from a frame on the old clock does not hold
+  // the first frame on the new one for ten minutes
+  const capped = new FramePacer(resolveFrameRate(30), late);
+  capped.began();
+  late.advance(1);
+  capped.ended();
+  capped.clock = fakeClock(1000);
+  assert.equal(capped.wait(), 0);
+});
+
 test('charge extends the last frame — the present on Cocoa', () => {
   const clock = fakeClock();
   const pacer = new FramePacer(ADAPTIVE, clock);

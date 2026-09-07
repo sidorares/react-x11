@@ -289,7 +289,7 @@ export class FramePacer {
     policy = FRAME_RATE_PRESETS[DEFAULT_FRAME_RATE],
     clock = realClock,
   ) {
-    this.clock = clock;
+    this._clock = clock;
     this.policy = null;
     this._timer = null;
     this._startedAt = null;
@@ -328,15 +328,37 @@ export class FramePacer {
     this._burst = Number.isFinite(this._maxWait)
       ? this._maxWait
       : DEFAULT_BURST_MS;
-    this._credit = this._burst;
-    this._creditAt = this.clock.now();
-    this._lastStart = -Infinity;
-    this._lastEnd = -Infinity;
+    this._reset();
     const s = this.stats;
     s.mode = policy.mode;
     s.budget = policy.budget;
     s.minFps = policy.minFps;
     s.maxFps = policy.maxFps;
+  }
+
+  /** A full bucket, and no frame yet, as of the clock's now. */
+  _reset() {
+    this._credit = this._burst;
+    this._creditAt = this._clock.now();
+    this._lastStart = -Infinity;
+    this._lastEnd = -Infinity;
+  }
+
+  get clock() {
+    return this._clock;
+  }
+
+  /**
+   * A new clock starts the pacer afresh in that clock's time. Every
+   * timestamp the rule keeps — when credit last accrued, when the last
+   * frame started and ended — is in the old clock's terms, and a test that
+   * hands over a fake clock mid-life would otherwise wait for it to catch
+   * up with `performance.now()` before any credit accrued: minutes into a
+   * suite on a slow runner, which is exactly where it was found.
+   */
+  set clock(value) {
+    this._clock = value;
+    this._reset();
   }
 
   /** Whether this policy can ever hold a frame. `'display'` cannot, and
