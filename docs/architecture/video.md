@@ -1,10 +1,11 @@
-# Video: decoding a stream, and putting its frames on the screen
+# Video: decoding a stream, capturing one, and putting the frames on the screen
 
 _Design record, 2026-09-08. Written against master at bf48860 (react-x11
 2.9.0, ntk ^8.7.0, `@windowkit/appkit` ^0.7.0, node-x11 4.1.0). **Nothing
 is implemented with this document.** §7 is the shape the implementing PR
 takes, §9 is the spike every number here came from, and §10 says what it
-would cost. The mechanism it extends is
+would cost. Camera capture is §3.5: the same Cocoa stack one step shorter,
+measured with the camera live. The mechanism it extends is
 [element-owned layer contents](element-layer-contents.md); the constraint
 it runs into on X11 is the one
 [protocol efficiency](protocol-efficiency.md) measures everywhere else._
@@ -36,14 +37,20 @@ it runs into on X11 is the one
   **disappears**, because AVFoundation owns the buffer rotation. That is
   an argument for stating the seam as "a node contributes a layer" rather
   than "a node contributes a presentable `Surface`".
-- **The trap that decides the Cocoa design.** A decoder hands back
-  biplanar `420v`, not BGRA. `CALayer` _accepts_ a `420v` IOSurface as
+- **The trap that decides the Cocoa design.** Both a decoder and a camera
+  hand back YUV, not BGRA. `CALayer` _accepts_ a YUV IOSurface as
   `contents` — assignment succeeds, `contents` is non-nil — and rasterizes
-  **nothing** (0/4096 px, against BGRA and CGImage controls that both give
-  4096/4096; §3.4). Asking VideoToolbox for BGRA instead costs **2.1× the
-  decode** and 2.6× the memory. So the "free" path through the existing
-  `setLayerContentsIOSurface` verb is not free, and the bridge should grow
-  AV verbs rather than route video through the swapchain's pixel format.
+  **nothing**: 0/4096 px for a decoded biplanar `420v` frame and 0/4096
+  for a captured packed `2vuy` one, against BGRA and CGImage controls that
+  both give 4096/4096 (§3.4). Converting to BGRA instead costs **2.1× the
+  decode** on playback and **2.67× the process CPU** on capture. So the
+  "free" path through the existing `setLayerContentsIOSurface` verb is not
+  free on either, and the bridge should grow AV verbs rather than route
+  frames through the swapchain's pixel format.
+- **Capture is the same stack one step shorter** (§3.5), and its hardest
+  part is already shipped: `camera` and `microphone` are first-class kinds
+  in [permissions.md](../permissions.md), on `AVCaptureDevice` underneath.
+  Device discovery needs no authorization at all; only frames are gated.
 - **The X11 number that sets the budget.** A 1920×1080 depth-24 frame
   through core `PutImage` costs **33.19ms** median with a round trip
   (238 MiB/s) — a 30fps ceiling with nothing left over, measured on
@@ -311,7 +318,7 @@ lives.
 was offered headless, with `status` rendering and no error — so the
 enqueue path does not require a window to be validated in a test.
 
-### 3.4 The `420v` trap, which decides the design
+### 3.4 The YUV-surface trap, which decides the design
 
 A hardware decoder's natural output is `420v` — bi-planar 8-bit
 video-range YCbCr, two planes, 3.1MB for 1080p. Our swapchain surfaces are
@@ -320,18 +327,24 @@ existing `setLayerContentsIOSurface` verb and be done in an afternoon.
 
 Measured, that silently produces an empty box:
 
-| layer `contents`           | accepted | rasterized (`render(in:)`) |
-| -------------------------- | -------- | -------------------------- |
-| `420v` IOSurface, 2 planes | yes      | **0 / 4096 px**            |
-| BGRA IOSurface — control   | yes      | 4096 / 4096 px             |
-| `CGImage` — control        | yes      | 4096 / 4096 px             |
+| layer `contents`                    | accepted | rasterized (`render(in:)`) |
+| ----------------------------------- | -------- | -------------------------- |
+| `420v` IOSurface, 2 planes, decoded | yes      | **0 / 4096 px**            |
+| `2vuy` IOSurface, 1 plane, captured | yes      | **0 / 4096 px**            |
+| BGRA IOSurface — control            | yes      | 4096 / 4096 px             |
+| `CGImage` — control                 | yes      | 4096 / 4096 px             |
 
 The controls are the point. `CALayer.render(in:)` is a CPU path that does
 not handle everything, so a lone blank result would prove nothing — but a
 BGRA IOSurface of exactly the shape `src/cocoa/surface.js` ships today
-renders fully through the same probe, and so does a `CGImage`. The
-biplanar surface is accepted, reports non-nil `contents`, and draws
-nothing.
+renders fully through the same probe, and so does a `CGImage`. The YUV
+surfaces are accepted, report non-nil `contents`, and draw nothing.
+
+And it is **not a biplanar problem**. The second row is a live camera
+frame in `2vuy` — packed 4:2:2, a single plane, an entirely different
+layout — and it behaves identically. The rule to carry is that a
+`CALayer` takes any YUV IOSurface without complaint and rasterizes none
+of them; only BGRA works on this path.
 
 Three ways out, priced:
 
@@ -349,10 +362,89 @@ rather than that video is routed through the swapchain's pixel format. The
 cheapest-looking path is measurably the most expensive one.
 
 One caveat stated plainly: this measures the path that can be measured
-headless. Whether the **render server** scans out a biplanar surface
-on screen is not settled by it, and that is the very first thing the
-implementing PR should check — because the failure mode is silent, and a
-silent failure on a path that reports success is the expensive kind.
+headless. Whether the **render server** scans out a YUV surface on screen
+is not settled by it, and that is the very first thing the implementing PR
+should check — because the failure mode is silent, and a silent failure on
+a path that reports success is the expensive kind.
+
+### 3.5 Capture: the same stack, one step shorter
+
+A webcam is the same set of API calls with the decode removed.
+`AVCaptureSession` delivers `CMSampleBuffer`s carrying IOSurface-backed
+`CVPixelBuffer`s — the same objects a `VTDecompressionSession` produces —
+and `AVCaptureVideoPreviewLayer` is a `CALayer`, so rung 1 of §3.2 serves a
+camera exactly as it serves a file, and §4's element applies unchanged.
+
+Three things separate capture from playback, and only one of them is work.
+
+**The permission half is already built.** `camera` and `microphone` are
+first-class kinds in [permissions.md](../permissions.md) —
+`usePermission('camera')`, `permissionStatus`, `requestPermission`,
+`openPrivacySettings` — translated in `src/cocoa/permissions.js` onto the
+bridge's `authorizationStatus`/`requestAuthorization` verbs, which are
+`AVCaptureDevice`'s underneath. A capture element does not need to touch
+TCC at all.
+
+**Discovery needs no authorization.** `AVCaptureDevice.DiscoverySession`
+enumerates cameras and microphones, names included, while the status is
+still `notDetermined` — no prompt, no indicator light. A device picker can
+be built and rendered before consent; only the frames are gated. Worth
+knowing in both directions: it is convenient for a settings UI, and it
+means a device list is not private information the OS is withholding.
+
+**The conversion is not free, and this is the finding.** A camera's native
+delivery is YUV — `2vuy` at the 720p preset here, though the device
+advertises `420v` in its format list, so the delivered format is the
+session's business and not the device's. Asking the output for BGRA
+instead is one line
+(`videoSettings = [kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA]`)
+and is the conventional capture configuration. Measured, 1280×720, 60
+frames per configuration, camera live:
+
+| output configuration | delivered | process CPU   | delivery interval | our callback |
+| -------------------- | --------- | ------------- | ----------------- | ------------ |
+| native, no settings  | `2vuy`    | 4.16ms/frame  | 33.5ms            | 0.054ms      |
+| `videoSettings` BGRA | `BGRA`    | 11.12ms/frame | 33.0ms            | 0.095ms      |
+
+**+6.96ms per frame, 2.67×** — if anything a worse penalty than forcing
+BGRA out of the decoder (§3.4), and charged to our own process rather than
+to the camera daemon. At 720p30 that is a fifth of a frame budget spent on
+colour conversion.
+
+Two qualifications, both of which matter for how the number is read. The
+absolute per-frame figures amortize one-time session setup over 60 frames
+and are therefore inflated; the **delta** is the trustworthy part. And the
+cost is not in the delivery callback, which barely moved — it is on
+another thread of our process, so it does not stall frame delivery, and
+both configurations held their 33ms interval. It burns a core rather than
+dropping frames, which is precisely the kind of cost the frame pacer
+cannot see.
+
+So capture reaches the same conclusion as playback by the same route: hand
+the session to `AVCaptureVideoPreviewLayer` and let AVFoundation own the
+pixels. Converting to BGRA so that the existing `setLayerContentsIOSurface`
+verb can be reused is the expensive way to save a bridge verb.
+
+**What the tests cannot do.** A running `AVCaptureVideoPreviewLayer` with a
+live connection rasterized 0/4096 through `layer.render(in:)`. Unlike
+§3.4's result this is _not_ evidence of a blank layer — a preview layer's
+contents are managed by the render server out of process, and the
+plain-`CALayer` BGRA control proves the probe works — but it does settle a
+testing question: preview-layer pixels cannot be asserted through
+`render(in:)`, so a capture element's pixel tests need on-screen capture or
+a parallel `AVCaptureVideoDataOutput` tap.
+
+**One packaging finding, because it will cost someone an afternoon.** A
+correctly signed `.app` carrying `NSCameraUsageDescription` and a
+`CFBundleIdentifier`, executed directly from a shell, answered
+`requestAccess` with `granted = false` while `authorizationStatus` stayed
+`notDetermined` — a refusal that never prompted. Launched through
+LaunchServices (`open`), so that the app is its own responsible process,
+the same binary prompted and was granted. This is the same shape as the
+notification rung's trap in [packaging.md](../packaging.md), and the same
+rule applies: **a falsy grant with the status still `notDetermined` is not
+a denial**, and code that reads it as one tells the user they declined
+something they were never asked.
 
 ## 4. The element both backends share
 
@@ -416,9 +508,12 @@ element already has, fed by whichever transport §2.3 the build has.
   entirely absent on the other. Anything the element exposes that only
   works on Cocoa must be documented as Cocoa-only, in the way
   [macos.md](../macos.md) documents the rest of the backend's asymmetries.
-- **Camera capture.** `AVCaptureVideoPreviewLayer` is one more rung on the
-  same ladder, but it is a TCC-gated privilege
-  ([permissions.md](../permissions.md)) and a separate feature.
+- **Camera capture, as a shipped element.** The mechanism is not separate
+  — it is §3.5, measured, and its permission half is already built — but
+  the element is: a `<camera>` node wants device selection, a running or
+  stopped state, and a torn-down session when it unmounts, none of which a
+  `<video>` node needs. Same seam, different element, and worth doing after
+  rather than with.
 - **Reading a video node's pixels.** Like `<glarea>`, a layer-backed video
   node is not in the window's bitmap, so a screenshot through the X path
   cannot see it. Whether `snapshotWindow` on Cocoa composites sublayers is
@@ -427,19 +522,21 @@ element already has, fed by whichever transport §2.3 the build has.
 
 ## 7. Decisions the implementing PR has to make, and the suggested answer
 
-| question                  | suggested answer                                                                                                                                                    |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the seam                  | `presentedLayer()`, not `presentedSurface()` — a presentable `Surface` and a video layer are two kinds of one thing, and #499 has not shipped yet                   |
-| the element's primitive   | a frame sink: the node takes decoded frames, on both backends                                                                                                       |
-| the Cocoa convenience     | a source prop that AVFoundation handles end to end, documented Cocoa-only, refused with a clear error on X11 rather than silently blank                             |
-| pixel format on Cocoa     | `420v` through AV verbs. Not BGRA through `setLayerContentsIOSurface`: measured at 2.1× the decode and 2.6× the memory, for the same picture                        |
-| bridge verbs              | `createVideoLayer`, `enqueueSampleBuffer`, `flushVideoLayer`, and the synchroniser's rate/timebase — an appkit release, unlike #499 which needs none                |
-| the first thing to verify | that the render server scans out a biplanar surface on screen (§3.4). If it does, rung 3 becomes viable as a fallback and the verb count drops                      |
-| the frame clock           | a video layer CA drives is **not** priced by the [pacer](frame-pacing.md) — it costs the frame nothing. A JS-fed frame sink is, exactly like any other claim        |
-| X11 v1                    | SHM `PutImage` of frames the application supplies, through the existing `Surface`. Xv second, once node-x11 has the three requests; DRI3/Present as the real answer |
-| Xv fallback               | mandatory, not optional: `QueryAdaptors` answering none is the XQuartz case and must be a clean decline to the SHM path                                             |
-| colour                    | carry the pixel buffer's YCbCr matrix, transfer function and primaries; set `layer.colorspace` explicitly. The Generic-RGB default has bitten this backend before   |
-| tests                     | the fake bridge for what reaches the natives, the real one for pixels; on X11, that the element paints identically with and without any acceleration                |
+| question                  | suggested answer                                                                                                                                                       |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the seam                  | `presentedLayer()`, not `presentedSurface()` — a presentable `Surface` and a video layer are two kinds of one thing, and #499 has not shipped yet                      |
+| the element's primitive   | a frame sink: the node takes decoded frames, on both backends                                                                                                          |
+| the Cocoa convenience     | a source prop that AVFoundation handles end to end, documented Cocoa-only, refused with a clear error on X11 rather than silently blank                                |
+| pixel format on Cocoa     | YUV through AV verbs. Not BGRA through `setLayerContentsIOSurface`: measured at 2.1× the decode on playback and 2.67× the process CPU on capture, for the same picture |
+| bridge verbs              | `createVideoLayer`, `enqueueSampleBuffer`, `flushVideoLayer`, and the synchroniser's rate/timebase — an appkit release, unlike #499 which needs none                   |
+| the first thing to verify | that the render server scans out a YUV surface on screen (§3.4). If it does, rung 3 becomes viable as a fallback and the verb count drops                              |
+| the frame clock           | a video layer CA drives is **not** priced by the [pacer](frame-pacing.md) — it costs the frame nothing. A JS-fed frame sink is, exactly like any other claim           |
+| X11 v1                    | SHM `PutImage` of frames the application supplies, through the existing `Surface`. Xv second, once node-x11 has the three requests; DRI3/Present as the real answer    |
+| Xv fallback               | mandatory, not optional: `QueryAdaptors` answering none is the XQuartz case and must be a clean decline to the SHM path                                                |
+| colour                    | carry the pixel buffer's YCbCr matrix, transfer function and primaries; set `layer.colorspace` explicitly. The Generic-RGB default has bitten this backend before      |
+| tests                     | the fake bridge for what reaches the natives, the real one for pixels; on X11, that the element paints identically with and without any acceleration                   |
+| camera, if it follows     | a separate `<camera>` element on the same seam — device selection and session lifecycle are its own problem, and §3.5 says the permission half needs nothing new       |
+| a camera element's tests  | not `render(in:)` on the preview layer, which is blank for reasons unrelated to correctness — an `AVCaptureVideoDataOutput` tap, or on-screen capture                  |
 
 ## 8. Sequencing
 
@@ -479,6 +576,15 @@ reproduced in `scripts/spikes/` by the implementing PR; the shapes are:
 - **X11.** Create an offscreen pixmap, push a 1920×1080 depth-24 image
   with core `PutImage`, and follow each with a `GetInputFocus` round trip
   so the median is the server's real cost and not the socket buffer's.
+- **Capture.** Run an `AVCaptureSession` at 1280×720 for 60 frames twice,
+  once with the output's `videoSettings` left alone and once set to BGRA,
+  taking `getrusage` around each run — the conversion is on another thread
+  of the process, so it shows in process CPU and not in the delegate
+  callback, and measuring the callback alone would have missed all of it.
+  It must run from a bundle launched through LaunchServices, or the
+  authorization request never prompts. Frames are reduced to a single mean
+  per frame and nothing of their content is retained; a spike that points a
+  camera at somebody should not be able to keep what it saw.
 
 The controls are the part worth keeping. The `420v` result is only
 meaningful because BGRA and `CGImage` go through the same probe and come

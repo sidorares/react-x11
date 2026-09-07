@@ -19,9 +19,10 @@
   video: why no X11 extension decodes anything and the one that did is
   dead, what a decoded frame costs through core `PutImage` and what Xv
   would change, the VideoToolbox and Core Animation ladder on macOS
-  measured end to end, the biplanar-surface trap that decides the Cocoa
-  design, and why a `<video>` element is one element with two very
-  different insides. Not built.
+  measured end to end, the YUV-surface trap that decides the Cocoa design
+  on both playback and capture, what a webcam actually costs, and why a
+  `<video>` element is one element with two very different insides. Not
+  built.
 - [styling.md](styling.md) — the `style` prop: layout and paint properties,
   `:hover`/`:focus`/`:active`/`:disabled` blocks, transitions, theme tokens,
   window size and container queries, `createStyles`, and
