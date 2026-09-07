@@ -9,7 +9,7 @@
 
 import type { ReactNode, RefObject } from 'react';
 import type { DrawnNode, NtkApp, NtkWindow } from './types/nodes.js';
-import type { ReactX11Elements } from './types/elements.js';
+import type { FrameRate, ReactX11Elements } from './types/elements.js';
 
 export * from './types/style.js';
 export * from './types/events.js';
@@ -232,6 +232,15 @@ export interface RootOptions {
    * run each. 6 by default; 0 paints glyphs at every size.
    */
   textStripBelow?: number;
+  /**
+   * How this root's windows pace their frames when their content changes
+   * faster than the display refreshes — the default for every `<window>`
+   * and `<glarea>` that names no `frameRate` of its own. `'display'` (every
+   * frame the clock gives) unless said otherwise; `'adaptive'` holds paints
+   * to a quarter of the time under a flood. `REACT_X11_FRAME_RATE` overrides
+   * it, and the props, from the environment. See {@link FrameRate}.
+   */
+  frameRate?: FrameRate;
   /** `':1'`, `'host:0.0'`, or a unix socket path. Defaults to `$DISPLAY`. */
   display?: string;
   /**

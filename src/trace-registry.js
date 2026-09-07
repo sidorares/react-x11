@@ -51,9 +51,10 @@ export function onApp(fn) {
  * of an unset hook is one property read — which is the whole design: the
  * frame loop must not pay for a tracer nobody started.
  *
- *  - `frame({ root, rects, reasons, start, end })` — after a window painted.
- *    `rects` is the damage list, null for a full repaint; times come from
- *    `performance.now()`.
+ *  - `frame({ root, rects, reasons, start, end, landed, waited })` — after
+ *    a window painted. `rects` is the damage list, null for a full repaint;
+ *    times come from `performance.now()`; `waited` is how long the frame
+ *    pacer held the claim, 0 when it did not (src/pacing.js).
  *  - `commitStart()` / `commitEnd()` — around a React commit.
  */
 export const hooks = {

@@ -24,7 +24,9 @@ import type {
   A11ySceneAction,
   A11ySceneItem,
   A11yTextState,
+  Context2D,
   MeasureConstraints,
+  PaintCachePlan,
   TextStyle,
 } from '../../src/node.js';
 import type { Rect } from '../../src/types/nodes.js';
@@ -78,12 +80,71 @@ declare module '../../src/jsx-runtime.js' {
   }
 }
 
+// The drawing contract is declared, not `unknown` (#496's typing gaps): a
+// retained-surface element writes against the context both backends
+// implement, answers for the rect it covers, and caches its content — and
+// every one of those is checked.
+class SurfacePaneNode extends Node {
+  constructor(props: Record<string, unknown>, app: never) {
+    super('surfacepane', props, app);
+  }
+
+  paintContent(ctx: Context2D): void {
+    const { x, y, width, height } = this.contentBox();
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x, y, width, height);
+    ctx.fillRects([x, y, 4, 4, x + 8, y, 4, 4]);
+    ctx.fillRects([
+      [x, y, 4, 4],
+      [x + 8, y, 4, 4],
+    ]);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.beginPath();
+    ctx.roundRect(0, 0, width, height, 4);
+    ctx.clip();
+    ctx.font = '13px sans-serif';
+    const measured: number = ctx.measureText('ab').width;
+    ctx.fillText('ab', measured, 0);
+    const gradient = ctx.createLinearGradient(0, 0, width, 0);
+    gradient.addColorStop(0, '#fff');
+    ctx.fillStyle = gradient;
+    ctx.fill('evenodd');
+    ctx.drawImage(null, 0, 0);
+    ctx.drawImage(null, 0, 0, width, height);
+    ctx.drawImage(null, 0, 0, 8, 8, 0, 0, width, height);
+    const pixels = ctx.createImageData(4, 4);
+    pixels.data[0] = 255;
+    ctx.putImageData(pixels, x, y);
+    // X11 only, so it is asked for rather than assumed
+    if ('globalCompositeOperation' in ctx)
+      ctx.globalCompositeOperation = 'copy';
+    ctx.restore();
+    // @ts-expect-error — not on both backends; ntk's own surface is
+    ctx.drawGlyphs();
+  }
+
+  opaqueRect(): Rect | null {
+    return this.contentBox();
+  }
+
+  paintCachePlan(_ctx: Context2D): PaintCachePlan | null {
+    const { x, y, width, height } = this.contentBox();
+    return { key: `pane:${width}x${height}`, x, y, width, height };
+  }
+
+  paintCached(ctx: Context2D, box: Rect, ink?: string): void {
+    ctx.fillStyle = ink ?? '#fff';
+    ctx.fillRect(0, 0, box.width, box.height);
+  }
+}
+
 class SparklineNode extends Node {
   constructor(props: Record<string, unknown>, app: never) {
     super('sparkline', props, app);
   }
 
-  paint(ctx: unknown): void {
+  paint(ctx: Context2D): void {
     super.paint(ctx);
     // the subclass surface docs/extending.md promises
     const _rect: number = this.abs.width;
@@ -517,7 +578,7 @@ class LogViewNode extends Node {
     ];
   }
 
-  paint(ctx: unknown): void {
+  paint(ctx: Context2D): void {
     super.paint(ctx);
     const range = this.selectionRange;
     if (!range) return;

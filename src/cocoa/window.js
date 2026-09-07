@@ -574,13 +574,28 @@ export class CocoaWindow {
     return this.app._requestFrame(cb, this);
   }
 
-  /** Push the backing surface at the WindowServer, if anything drew. */
+  /**
+   * Push the backing surface at the WindowServer, if anything drew — and
+   * tell the window node what it cost. The flip is cheap; the catch-up
+   * copy behind it is a damage-sized memcpy, and on a window whose every
+   * frame repaints most of itself that is a millisecond of the JS thread
+   * per frame that the flush never saw. The frame pacer prices the frame
+   * by the thread's time, so the present reports in (src/pacing.js,
+   * `WindowNode._notePresentCost`).
+   */
   present() {
-    if (this._presenter) return; // layers upload as they sync
-    if (!this._dirty || !this._surface || this.destroyed) return;
+    const started = performance.now();
+    if (!this._presentNow()) return;
+    this._reactX11Node?._notePresentCost?.(performance.now() - started);
+  }
+
+  /** The present itself: true when a frame reached the layer. */
+  _presentNow() {
+    if (this._presenter) return false; // layers upload as they sync
+    if (!this._dirty || !this._surface || this.destroyed) return false;
     // …and if anyone would see it. `_dirty` stays set, so the pump asks
     // again next tick and the frame goes out the moment the window is back.
-    if (this._holdPresent || !this._visible()) return;
+    if (this._holdPresent || !this._visible()) return false;
     this._dirty = false;
     if (this._chain) {
       const shown = this._chain.back;
@@ -608,7 +623,7 @@ export class CocoaWindow {
             ]),
       );
       if (this._transparentWindow) this.app._shadowStale.add(this);
-      return;
+      return true;
     }
     this._native.surfaceToLayer(this._surface, this._layer);
     // AppKit derives a transparent window's shadow from the content's
@@ -619,6 +634,7 @@ export class CocoaWindow {
     // the frame BEFORE this one and keeps the square rim for menus that
     // paint once and are only hovered after.
     if (this._transparentWindow) this.app._shadowStale.add(this);
+    return true;
   }
 
   snapshot(path) {

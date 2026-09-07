@@ -311,3 +311,100 @@ test('a wheel over the surface is a synthetic Wheel at the <glarea>', async () =
     await app.close();
   }
 });
+
+test('a <glarea> paces its frames by the window it is in, or by its own frameRate', async () => {
+  const { app } = await createGlApp();
+  const x11Root = await createRoot({ app });
+  try {
+    let drawn = 0;
+    const instance = await render(
+      h(
+        'window',
+        { width: 320, height: 240, frameRate: 'adaptive' },
+        h('glarea', {
+          key: 'gl',
+          frameLoop: 'always',
+          onDraw: () => {
+            drawn += 1;
+          },
+          style: { flexGrow: 1 },
+        }),
+      ),
+      x11Root,
+    );
+    await waitFor(() => drawn > 0, 'the first frame');
+    const node = instance._reactX11Node;
+    const area = node.children[0];
+    assert.equal(area.kind, 'glarea');
+    // no frameRate of its own: the window's policy is the surface's
+    assert.equal(area._pacer.policy.mode, 'adaptive');
+    assert.equal(area._pacer.stats.budget, 0.25);
+    // the loop runs on the child window's clock; a frame is priced by what
+    // onDraw and the swap cost this thread, and a cheap scene never waits
+    await waitFor(() => drawn > 5, 'the loop');
+    assert.equal(area._pacer.stats.deferred, 0);
+    assert.ok(area._pacer.stats.frames >= 5);
+    // an expensive scene is held: the pacer's clock, moved by the draw
+    // (8ms of GL encoding a frame) and by the waits it asks for — the
+    // real wait is a short real timer, so the loop keeps going
+    let t = 5000;
+    const waits = [];
+    area._pacer.clock = {
+      now: () => t,
+      after(ms, fn) {
+        waits.push(ms);
+        const timer = setTimeout(() => {
+          t += ms;
+          fn();
+        }, 1);
+        return () => clearTimeout(timer);
+      },
+    };
+    const before = drawn;
+    const onDraw = () => {
+      drawn += 1;
+      t += 8;
+    };
+    x11Root.render(
+      h(
+        'window',
+        { width: 320, height: 240, frameRate: 'adaptive' },
+        h('glarea', {
+          key: 'gl',
+          frameLoop: 'always',
+          onDraw,
+          style: { flexGrow: 1 },
+        }),
+      ),
+    );
+    await waitFor(() => drawn > before + 12, 'a dozen expensive frames');
+    assert.ok(area._pacer.stats.deferred > 0, 'held');
+    // three times the cost, once the burst is spent
+    assert.ok(Math.abs(waits.at(-1) - 24) < 1e-6, `waited ${waits.at(-1)}`);
+    assert.ok(
+      waits.every((w) => w <= 24 + 1e-6),
+      `never more than that: ${waits.slice(-3)}`,
+    );
+    // its own frameRate wins over the window's
+    x11Root.render(
+      h(
+        'window',
+        { width: 320, height: 240, frameRate: 'adaptive' },
+        h('glarea', {
+          key: 'gl',
+          frameLoop: 'always',
+          frameRate: 'display',
+          onDraw,
+          style: { flexGrow: 1 },
+        }),
+      ),
+    );
+    await waitFor(() => area._pacer.policy.mode === 'display', 'its own');
+    assert.equal(area._pacer.active, false);
+    await x11Root.unmount();
+    await settle(app);
+    assert.equal(area._pacer.deferring, false, 'a wait dies with the node');
+  } finally {
+    await app.close();
+  }
+});

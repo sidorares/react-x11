@@ -11,6 +11,7 @@ import { cssColorStraight } from 'ntk';
 export { directGLFailure, hasDirectGL } from './glbackend.js';
 
 import { Node } from './nodes.js';
+import { FramePacer, resolveFrameRate } from './pacing.js';
 
 // One visual query per (app, spec): GetFBConfigs is a round trip and every
 // <glarea> in an app wants the same answer.
@@ -99,6 +100,9 @@ const px = (v) => Math.max(1, Math.round(v || 0));
  * - `clearColor` — CSS colour or `[r, g, b, a]` floats (default black).
  * - `frameLoop` — `'demand'` (default: redraw on prop/size/expose changes)
  *   or `'always'` (drive ntk's frame clock continuously).
+ * - `frameRate` — how the frames are paced when they are expensive
+ *   (src/pacing.js): a preset, a cap, or the three numbers, the same
+ *   vocabulary as `<window frameRate>`. Defaults to the owning window's.
  * - `glx` — a `chooseGLXConfig` spec, e.g. `{ DEPTH_SIZE: 24 }`.
  *
  * The X child window is stacked above everything drawn in the parent, so 2D
@@ -114,10 +118,34 @@ export class GlAreaNode extends Node {
     this._frameScheduled = false;
     this._created = false;
     this._pointerDirty = true;
+    // The frame pacer (src/pacing.js), the surface's own: a scene's frames
+    // are drawn on a clock of their own, and what one costs — `onDraw` and
+    // the swap, on this thread — is what decides whether the next may
+    // start at once. The policy is this element's `frameRate`, else the
+    // owning window's, read at each request so a change on either follows.
+    this._pacer = new FramePacer();
+    this._ownPolicy = null;
+    this._syncFramePolicy();
   }
 
   get isGlArea() {
     return true;
+  }
+
+  /** The policy this surface paces by: its own prop, else the window's. */
+  _framePolicy() {
+    if (this.props.frameRate !== undefined && this.props.frameRate !== null) {
+      return this._ownPolicy;
+    }
+    return this.root?._framePolicy ?? this._pacer.policy;
+  }
+
+  _syncFramePolicy() {
+    const value = this.props.frameRate;
+    this._ownPolicy =
+      value === undefined || value === null
+        ? null
+        : resolveFrameRate(value, '<glarea frameRate>');
   }
 
   _setRoot(root) {
@@ -275,8 +303,21 @@ export class GlAreaNode extends Node {
     this.requestFrame();
   }
 
-  /** Draw one frame on the child window's next frame tick. */
+  /**
+   * Draw one frame on the child window's next frame tick — after whatever
+   * wait the pacer asks for (src/pacing.js). Off by default it answers
+   * "now"; under an adaptive policy a scene whose frames cost more than
+   * their share of the thread is held between them, and a `frameLoop` of
+   * `'always'` becomes a loop at the budget rather than at the display.
+   */
   requestFrame() {
+    if (!this.window || this.destroyed || this._frameScheduled) return;
+    this._pacer.configure(this._framePolicy());
+    if (this._pacer.defer(() => this._requestFrameNow())) return;
+    this._requestFrameNow();
+  }
+
+  _requestFrameNow() {
     if (!this.window || this.destroyed || this._frameScheduled) return;
     this._frameScheduled = true;
     const schedule =
@@ -290,13 +331,28 @@ export class GlAreaNode extends Node {
   }
 
   _drawFrame() {
+    const pacer = this._pacer;
+    pacer.began();
+    let drawn = false;
+    try {
+      drawn = this._drawFrameNow();
+    } finally {
+      pacer.ended(undefined, drawn);
+    }
+    // after the frame is priced, so the loop's next frame is judged by
+    // this one rather than by the one before
+    if (drawn && this.props.frameLoop === 'always') this.requestFrame();
+  }
+
+  /** The frame itself; true when it drew. */
+  _drawFrameNow() {
     const gl = this.gl;
-    if (!gl || this.destroyed) return;
+    if (!gl || this.destroyed) return false;
     const direct = gl.backend === 'direct';
     // On the direct backend every buffer may still be held by the display,
     // and drawing into one before it comes back would paint what is on
     // screen. `onFrameAvailable` asks for this frame again when one frees.
-    if (direct && gl.canRender && !gl.canRender()) return;
+    if (direct && gl.canRender && !gl.canRender()) return false;
     // binds this surface — the GPU context is shared between every <glarea>
     // on the connection — and picks up a resize
     gl.makeCurrent?.();
@@ -325,7 +381,7 @@ export class GlAreaNode extends Node {
     }
     this.props.onDraw?.(gl, info);
     gl.SwapBuffers();
-    if (this.props.frameLoop === 'always') this.requestFrame();
+    return true;
   }
 
   /**
@@ -357,7 +413,9 @@ export class GlAreaNode extends Node {
   }
 
   applyProps(newProps, oldProps) {
+    const before = oldProps ?? this.props;
     super.applyProps(newProps, oldProps);
+    if (newProps.frameRate !== before.frameRate) this._syncFramePolicy();
     // onDraw/clearColor are read at frame time, so any update is a new frame
     this.requestFrame();
   }
@@ -375,6 +433,7 @@ export class GlAreaNode extends Node {
   destroySubtree() {
     if (this.destroyed) return;
     super.destroySubtree();
+    this._pacer.cancel();
     this.gl?.destroy?.();
     this.gl = null;
     this.window?.destroy?.();

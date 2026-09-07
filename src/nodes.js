@@ -88,6 +88,7 @@ import {
 } from './dnd.js';
 import { TYPE_GROUPS } from './transfer.js';
 import { addPendingFrame, clearPendingFrame } from './frames.js';
+import { FramePacer, resolveFramePolicy } from './pacing.js';
 import { createClientMessages } from './clientmessage.js';
 import {
   argbVisual,
@@ -411,6 +412,17 @@ function insetRect(rect, by) {
     width: rect.width - 2 * by,
     height: rect.height - 2 * by,
   };
+}
+
+/** The whole pixels inside `rect` — a fractional edge left out — or null
+ * when none are. */
+function innerPixels(rect) {
+  const x = Math.ceil(rect.x);
+  const y = Math.ceil(rect.y);
+  const right = Math.floor(rect.x + rect.width);
+  const bottom = Math.floor(rect.y + rect.height);
+  if (right <= x || bottom <= y) return null;
+  return { x, y, width: right - x, height: bottom - y };
 }
 
 /** The overlap of two rects, or null when they have none. */
@@ -3501,6 +3513,7 @@ export class Node {
     // next tick, so a spinner that unmounts leaves the clock idle even if
     // nothing else ever asks for a frame
     this.root?._animating.delete(this);
+    this.root?._opaqueNodes?.delete(this);
     // a surface that goes away takes its selection with it, and the app-wide
     // claim on being the one showing one goes with it too
     this._textSelection?.destroy();
@@ -3510,7 +3523,11 @@ export class Node {
 
   _setRoot(root) {
     if (this.root === root) return;
+    // an element answering `opaqueRect()` is one the window asks per pass
+    const opaque = this.opaqueRect !== Node.prototype.opaqueRect;
+    if (opaque) this.root?._opaqueNodes?.delete(this);
     this.root = root;
+    if (opaque) root?._opaqueNodes?.add(this);
     // A node is styled in its constructor, before it has a window — so this
     // is where a loop declared by the very first style finds a frame clock
     // to run on.
@@ -4259,6 +4276,32 @@ export class Node {
   }
 
   /**
+   * The rect this element writes opaque pixels over on every paint — in
+   * window coordinates like `abs`, in whole pixels — or null, the default,
+   * which promises nothing.
+   *
+   * What it buys: a pass that lies inside it is painted without the fills
+   * that would be under it — the window's background, this node's own and
+   * every ancestor's — because not one of those pixels survives. On the
+   * Cocoa backend those fills are full-area CoreGraphics passes, and for a
+   * streaming terminal they were a fifth of the frame; on X11 they are
+   * composites the server ran for nothing. An element with a retained
+   * surface it draws whole — a terminal, a media frame, a chart — answers
+   * with the rect it covers, and claims its damage as a **rect inside it**
+   * rather than as the node: a node claim is inflated by a pixel of slop,
+   * which is outside the rect and so never covered.
+   *
+   * The promise is the element's to keep: every pixel of the rect, alpha
+   * one, on every paint of this node, whatever the props. A translucent
+   * element, or one that draws a background only sometimes, answers null.
+   * The answer is read at paint time, so it may follow `contentBox()`, and
+   * a fractional edge is not opaque — core takes the whole pixels inside.
+   */
+  opaqueRect() {
+    return null;
+  }
+
+  /**
    * "The pixels in `rect` moved by (dx, dy); the rest of it is new" — the
    * public form of the dance `<box overflow="scroll">` has been doing since
    * issue #138, for an element with a viewport of its own (issue #303).
@@ -4915,6 +4958,9 @@ export class Node {
   }
 
   _paintBackground(ctx) {
+    // under an element that covers this pass with opaque pixels, this fill
+    // is never seen (`WindowNode._coverFor`)
+    if (this.root?._coverChain?.has(this)) return;
     const { backgroundColor, borderRadius = 0 } = this.style;
     const fill = (style) => {
       ctx.fillStyle = style;
@@ -9343,6 +9389,22 @@ export class WindowNode extends Scrollable(Node) {
     this.needsLayout = true;
     this.needsPaint = true;
     this._scheduled = false;
+    // The frame pacer (src/pacing.js): whether a claim waits before its
+    // frame is scheduled, priced by what the last frames cost. Off unless
+    // the `frameRate` prop, the root's default or the environment says
+    // otherwise — resolved again whenever the prop changes.
+    this._pacer = new FramePacer();
+    this._framePolicy = null;
+    this._syncFramePolicy();
+    // a claim raised by the frame on itself is scheduled once the frame is
+    // over and its cost is known (`flush`)
+    this._inFlush = false;
+    this._claimAfterFlush = false;
+    // the nodes answering `opaqueRect()`, and — during a paint pass one of
+    // them covers — that node with its ancestors, whose fills are skipped
+    // (`_coverFor`, `Node._paintBackground`)
+    this._opaqueNodes = new Set();
+    this._coverChain = null;
     // Nodes that want the `attention` event (ntk#37) — an
     // `unstable_onAttention` prop,
     // an `:attention` block, or both. Built before the EventManager so the
@@ -11212,6 +11274,7 @@ export class WindowNode extends Scrollable(Node) {
     if (this.destroyed) return;
     this.destroyed = true;
     clearPendingFrame(this);
+    this._pacer.cancel();
     this._unwatchCompositing?.();
     this._unwatchCompositing = null;
     // before endWindowState below, which is the session this is subscribed to
@@ -11252,6 +11315,7 @@ export class WindowNode extends Scrollable(Node) {
     if (Boolean(newProps.trapFocus) !== Boolean(before.trapFocus)) {
       this._syncFocusScope();
     }
+    if (newProps.frameRate !== before.frameRate) this._syncFramePolicy();
     // a <window onDrop> is a whole-window dropzone; same edge as Node
     if (hasDropProps(newProps) !== hasDropProps(before)) {
       if (hasDropProps(newProps)) this._registerDropTarget(this);
@@ -11871,16 +11935,40 @@ export class WindowNode extends Scrollable(Node) {
     this._scheduleFrame();
   }
 
-  /** A frame, on the window's clock. */
+  /**
+   * A frame, on the window's clock — after whatever wait the pacer asks
+   * for (src/pacing.js). Off by default, the pacer answers "now" for one
+   * property read; under an adaptive policy a claim that finds the window
+   * in debt for its last frames is held on a one-shot, and every claim
+   * until then folds into it. Nothing here changes what the frame paints:
+   * the damage accumulates on the node exactly as it does between two
+   * ticks of the clock.
+   */
   _scheduleFrame() {
-    // Recorded before the `_scheduled` gate, not inside it: the debt is
-    // "this window has damage", which a discrete event may pay off early
-    // (see frames.js). Tying it to whether a callback is outstanding would
-    // hide the second of two clicks a few milliseconds apart — the first
-    // one's frame is still scheduled, so this returns here, and the early
-    // flush would find nothing to paint.
+    // Recorded before either gate, not inside them: the debt is "this
+    // window has damage", which a discrete event may pay off early (see
+    // frames.js). Tying it to whether a callback is outstanding would hide
+    // the second of two clicks a few milliseconds apart — the first one's
+    // frame is still scheduled, so this returns here, and the early flush
+    // would find nothing to paint. A held claim is a debt too: the early
+    // flush paints it, and `flush` stands the wait down.
     addPendingFrame(this);
+    // A claim the frame raises on itself — an animation stepping, a
+    // container query settling, a promotion moving a node — is answered
+    // once the frame is over, so the pacer prices the frame that raised it
+    // and not the one before.
+    if (this._inFlush) {
+      this._claimAfterFlush = true;
+      return;
+    }
     if (this._scheduled) return;
+    if (this._pacer.defer(() => this._requestFrame())) return;
+    this._requestFrame();
+  }
+
+  /** The callback on the window's clock. */
+  _requestFrame() {
+    if (this._scheduled || this.destroyed || !this.window) return;
     this._scheduled = true;
     const schedule =
       typeof this.window.requestAnimationFrame === 'function'
@@ -11892,12 +11980,68 @@ export class WindowNode extends Scrollable(Node) {
     });
   }
 
+  /**
+   * The policy this window paces its frames by: the environment, then the
+   * `frameRate` prop, then the root's `createRoot({ frameRate })`, then
+   * `'display'` (src/pacing.js). A bad value throws here — at mount or at
+   * the prop change — naming the value and the choices.
+   */
+  _syncFramePolicy() {
+    const policy = resolveFramePolicy(
+      this.props.frameRate,
+      this.app,
+      `<${this.kind} frameRate>`,
+    );
+    this._framePolicy = policy;
+    this._pacer.configure(policy);
+  }
+
+  /**
+   * The backend's half of a frame's cost, where it has one: the Cocoa
+   * present — the swapchain flip and its catch-up copy — runs after the
+   * flush returns, on the same thread, and is part of what the frame cost
+   * (src/cocoa/window.js reports it). An ntk window's present is one
+   * request, and reports nothing.
+   */
+  _notePresentCost(ms) {
+    this._pacer.charge(ms);
+  }
+
+  /**
+   * A frame: layout if owed, then the paint passes — or the presenter's
+   * frame — then the backend's word. Runs on the window's clock through
+   * `_scheduleFrame`, and early, synchronously, for a discrete input
+   * (frames.js). Every route lands here, so this is where a frame is
+   * priced: the pacer brackets the work, and what it cost is what the
+   * next claim is judged against (src/pacing.js).
+   */
   flush() {
     // Whatever this frame turns out to owe, it is this call's to pay — and
     // a window that returns below because it is destroyed or unrealized
     // owes nothing at all.
     clearPendingFrame(this);
+    // …and a wait the pacer had armed for it has nothing left to wait for:
+    // whichever route got here first pays the same debt.
+    this._pacer.cancel();
     if (this.destroyed || !this.yoga || !this.window) return;
+    const pacer = this._pacer;
+    pacer.began();
+    this._inFlush = true;
+    let painted = false;
+    try {
+      painted = this._flushFrame();
+    } finally {
+      this._inFlush = false;
+      pacer.ended(undefined, painted);
+      if (this._claimAfterFlush) {
+        this._claimAfterFlush = false;
+        if (!this.destroyed) this._scheduleFrame();
+      }
+    }
+  }
+
+  /** The frame itself. True when it painted or presented something. */
+  _flushFrame() {
     // A frame is scheduled a tick before it is painted, and the connection
     // can go in between: an app closing its own client, a server exit, a
     // test closing the app it lent the root. Nothing unmounts the tree on
@@ -11905,7 +12049,7 @@ export class WindowNode extends Scrollable(Node) {
     // socket, and the first request it makes throws out of the frame clock
     // where there is nothing waiting to catch it. There is no screen left to
     // paint to, so this owes nothing either.
-    if (this.app?.X?._closing) return;
+    if (this.app?.X?._closing) return false;
     // a transientFor whose owner was not realized yet at commit time. The
     // frame after the mount is the first moment refs have attached, so the
     // common "two <window>s in one tree" case resolves here rather than
@@ -12016,7 +12160,7 @@ export class WindowNode extends Scrollable(Node) {
     // …and the next commit's claims name the arrangement this frame leaves
     // behind again, from before whatever scroll comes with them
     this._laidOut = false;
-    if (!this.needsPaint) return;
+    if (!this.needsPaint) return false;
     this.needsPaint = false;
     const damage = this._takeDamage(width, height);
     if (debugPaint === 'full' && !damage && width > 0 && height > 0) {
@@ -12040,9 +12184,9 @@ export class WindowNode extends Scrollable(Node) {
     if (typeof this.window.presentFrame === 'function') {
       this.window.presentFrame(this, damage);
       this.app._reactX11Startup?.painted();
-      return;
+      return true;
     }
-    if (typeof this.window.getContext !== 'function') return; // headless mock
+    if (typeof this.window.getContext !== 'function') return false; // headless mock
     // ntk getContext creates a fresh context (with window-event
     // subscriptions) on every call — cache one per window
     const ctx = (this._ctx ??= this.window.getContext('2d'));
@@ -12082,6 +12226,8 @@ export class WindowNode extends Scrollable(Node) {
         // server work separate cleanly in a trace only when both are in it —
         // a slow virtualized GPU shows up here, not in `end`.
         landed: this.window.frameLatency,
+        // how long the pacer held this frame's claim, ms; 0 when it did not
+        waited: this._pacer.pendingWait,
       });
     }
     // A frame that actually painted, which is the moment the app is up
@@ -12089,6 +12235,7 @@ export class WindowNode extends Scrollable(Node) {
     // session clears itself off the app — which is the same bargain the
     // trace hook above makes with the frame loop.
     this.app._reactX11Startup?.painted();
+    return true;
   }
 
   /**
@@ -12564,8 +12711,50 @@ export class WindowNode extends Scrollable(Node) {
     return check(this);
   }
 
+  /**
+   * The node whose `opaqueRect()` holds the whole of `rect`, or null: the
+   * pass needs no fill under that node. Whole pixels only — a fractional
+   * edge is antialiased, and an antialiased pixel is not opaque. A clipping
+   * ancestor shrinks the answer to what reaches the surface, a rounded one
+   * by its radius all round, since the corner squares are exactly the
+   * pixels a rounded clip gives up. A handful of nodes answer at all, so
+   * this is a few rect tests per pass.
+   */
+  _coverFor(rect) {
+    const nodes = this._opaqueNodes;
+    if (nodes.size === 0) return null;
+    for (const node of nodes) {
+      if (node.destroyed || node.hidden || node._promoted) continue;
+      if (node.style?.display === 'none' || !(node.abs?.width > 0)) continue;
+      let cover = node.opaqueRect();
+      if (!cover) continue;
+      cover = innerPixels(cover);
+      for (let n = node.parent; cover && n && n !== this; n = n.parent) {
+        if (n.hidden || n.style?.display === 'none') {
+          cover = null;
+          break;
+        }
+        if (n.clipsChildren()) {
+          const radius = n.style?.borderRadius ?? 0;
+          cover = intersectRects(
+            cover,
+            radius > 0 ? insetRect(n.abs, radius) : n.abs,
+          );
+        }
+      }
+      if (cover && rectContains(cover, rect)) return node;
+    }
+    return null;
+  }
+
   /** Repaint one damage rect, or the whole window when `damage` is null. */
   _paintRegion(ctx, damage, width, height) {
+    // An element that covers the pass with opaque pixels (`Node.opaqueRect`)
+    // makes every fill under it wasted work — the clear, the window's
+    // background, the node's own and its ancestors'. The first two are
+    // skipped here; `_paintBackground` skips the chain's while
+    // `_coverChain` names it.
+    const cover = this._coverFor(damage ?? { x: 0, y: 0, width, height });
     // A transparent window erases where an opaque one paints over. Its
     // backing store holds premultiplied ARGB, and compositing a translucent
     // background onto the previous frame would compound towards opaque
@@ -12578,7 +12767,7 @@ export class WindowNode extends Scrollable(Node) {
     // `transparencyEffective`, not `_transparent`: an ARGB window with
     // nothing compositing it must not clear, because the server would show
     // those zeroed pixels as black rather than as the desktop.
-    if (this.transparencyEffective) {
+    if (this.transparencyEffective && !cover) {
       if (damage) {
         ctx.clearRect(damage.x, damage.y, damage.width, damage.height);
       } else {
@@ -12600,7 +12789,12 @@ export class WindowNode extends Scrollable(Node) {
       ctx.rect(damage.x, damage.y, damage.width, damage.height);
       ctx.clip();
     }
-    this._paintWindowBackground(ctx, damage, width, height);
+    if (!cover) this._paintWindowBackground(ctx, damage, width, height);
+    if (cover) {
+      const chain = new Set();
+      for (let n = cover; n; n = n.parent) chain.add(n);
+      this._coverChain = chain;
+    }
     this._paintDamage = damage;
     try {
       this._paintChildren(ctx);
@@ -12644,6 +12838,7 @@ export class WindowNode extends Scrollable(Node) {
       }
     } finally {
       this._paintDamage = null;
+      this._coverChain = null;
       if (damage) ctx.restore();
     }
   }

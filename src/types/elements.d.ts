@@ -278,6 +278,47 @@ export type WindowType =
   | 'desktop'
   | (string & {});
 
+/**
+ * How a window paces its frames when its content changes faster than the
+ * display refreshes — a terminal under a flood, a chart on a socket, a
+ * simulation. Priced in CPU time, not counted in updates: a frame costs
+ * what the flush (and on macOS the present) took of this thread, and a
+ * claim waits only while recent frames have spent more than their share.
+ * A scroll that is mostly blits keeps the display's rate; only a stream of
+ * expensive frames earns a wait (docs/elements.md "frameRate").
+ *
+ * - `'display'` — every frame the clock gives, after React's own
+ *   batching. **The default.**
+ * - `'adaptive'` — paints stay under a quarter of the time while busy, and
+ *   the screen is never more than 50ms behind (a 20fps floor). Idle claims
+ *   and cheap frames never wait.
+ * - `'throughput'` — a tenth, a 10fps floor and a 30fps ceiling: fewer,
+ *   later frames for a window whose output matters more than its display.
+ * - a number — a ceiling in frames per second, nothing else.
+ * - `{ budget, minFps, maxFps }` — the three numbers the presets are made
+ *   of, any subset; the rest are `'display'`'s (so name a `minFps` with a
+ *   `budget` below 1).
+ *
+ * `createRoot({ frameRate })` sets the default for every window of a root,
+ * and `REACT_X11_FRAME_RATE` overrides both from the environment.
+ */
+export type FrameRate =
+  | 'display'
+  | 'adaptive'
+  | 'throughput'
+  | number
+  | {
+      /** Share of wall time paints may take while busy, above 0 and at
+       * most 1. */
+      budget?: number;
+      /** The floor: the screen is never more than `1000 / minFps` ms behind
+       * the last paint. 0 for none. */
+      minFps?: number;
+      /** A ceiling in frames per second, cheap frames included. 0 for
+       * none. */
+      maxFps?: number;
+    };
+
 export interface WindowProps
   extends
     CommonProps,
@@ -289,6 +330,10 @@ export interface WindowProps
   ref?: Ref<NtkWindow>;
   /** Window title (UTF-8, via `WM_NAME` + `_NET_WM_NAME`). */
   title?: string;
+  /** How this window paces its frames under a stream of changes — see
+   * {@link FrameRate}. `'display'` unless the root or the environment says
+   * otherwise. A `<popup>` paces itself the same way. */
+  frameRate?: FrameRate;
   /**
    * Created but never self-mapped: this window is waiting to be embedded
    * (XEmbed / `<foreign>` on the other side), and from the reparent on,
@@ -865,6 +910,15 @@ export interface GlAreaProps extends DrawnProps<DrawnNode> {
   clearColor?: Color | [number, number, number, number];
   /** `'demand'` (default) redraws on change; `'always'` runs continuously. */
   frameLoop?: FrameLoop;
+  /**
+   * How the surface's frames are paced when they are expensive — the same
+   * vocabulary as {@link WindowProps.frameRate}, priced by what `onDraw`
+   * and the swap cost this thread. Defaults to the owning window's, so a
+   * `<window frameRate="adaptive">` paces the scene inside it too; set it
+   * here for a scene that wants every frame (`'display'`) while the window
+   * around it streams, or the other way round.
+   */
+  frameRate?: FrameRate;
   /** Visual spec for ntk's `chooseGLXConfig`, e.g. `{ DEPTH_SIZE: 24 }`. */
   glx?: Record<string, unknown>;
   /** Runs once, with the context current: one-time state, uploads, lists. */

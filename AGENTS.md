@@ -87,6 +87,21 @@ no override-redirect staging (issue #4).
   a node. **Never import `yoga-layout`'s default entry** — it is a
   top-level await, and one import costs every app the single-executable
   build (docs/packaging.md); `test/yoga.test.js` enforces this.
+- `src/pacing.js` — frame pacing: `frameRate`'s policies and the token
+  bucket over paint time behind them (docs/architecture/frame-pacing.md).
+  Pure — no node, no backend, a clock it is handed — and off by default:
+  `'display'` answers every claim with "now" for one property read, and a
+  streaming window opts into `'adaptive'`. It sits **above** both frame
+  clocks (`WindowNode._scheduleFrame`, `GlAreaNode.requestFrame` delay the
+  `requestAnimationFrame` request; the clock still gates the frame), and it
+  prices the JS thread's time — the flush, plus the Cocoa present, which
+  reports its cost back — never the server's, which the X11 fence already
+  paces. Three things are easy to undo: a claim raised _during_ a flush is
+  scheduled after it, so the frame that raised it is the one priced; the
+  discrete-input flush pays a held claim's debt and stands its wait down,
+  so answering an input is never held; and a wait under a millisecond is
+  carried as debt rather than armed, so a cheap frame after a flood lands
+  on the tick it always would have.
 - `src/anchor.js` — where a `<popup>` goes: `anchorRect` and the screen
   area it flips and clamps against. Core rather than widget code because
   **both** callers need it and only one is a widget — a `<popup anchor>`

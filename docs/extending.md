@@ -111,6 +111,7 @@ that only draws needs a constructor and a `paint`. What you may override:
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `paint(ctx)`                   | draw. Call `super.paint(ctx)` first for background, border and clip, then draw inside `this.abs`.            |
 | `paintContent(ctx)`            | draw _between_ the background and the children — where the built-ins draw, and what a scroller needs (below) |
+| `opaqueRect()`                 | the rect you cover with opaque pixels on every paint, so a pass inside it skips the fills under you (below)  |
 | `applyProps(next, prev)`       | props changed. Call `super.applyProps(next, prev)`; invalidate if you cache anything derived.                |
 | `paintChanged(next, prev)`     | did anything you draw change? Only for an element that claims its own damage (below)                         |
 | `measureContent(constraints)`  | your content has a size of its own (below). Leaves only — an element that measures has no children.          |
@@ -1316,6 +1317,45 @@ drawing it live, the shift you want is
 [`copyWithin`](#scrolling-the-pixels-not-just-the-offset) on that surface —
 same idea, one layer in.
 
+### An element that covers its box
+
+A terminal, a media frame, a chart with a retained surface: an element that
+composites a bitmap of its own over its whole content box, every paint,
+leaves nothing of what was painted under it. Core does not know that. A
+pass inside the element still fills the window's background, the
+background of every ancestor and the element's own before `paintContent`
+composites the bitmap over all three — composites the server ran for
+nothing on X11, and on macOS full-area CoreGraphics passes that were a
+fifth of a streaming terminal's frame.
+
+`opaqueRect()` is the element's word for it:
+
+```js
+class TerminalNode extends Node {
+  opaqueRect() {
+    return this.contentBox(); // every pixel of it, alpha one, every paint
+  }
+
+  _screenChanged() {
+    // a rect inside the answer, not the node: a node claim is inflated by
+    // a pixel of slop, which is outside the rect and so never covered
+    this.invalidate(false, this.contentBox(), 'content');
+  }
+}
+```
+
+A pass that lies inside the answer is painted without the fills that would
+be under it — the window's background, this node's own and every
+ancestor's. Whole pixels only, window coordinates like `abs`: a fractional
+edge is antialiased and an antialiased pixel is not opaque, so core takes
+the whole pixels inside what you answer. A clipping ancestor shrinks the
+cover to what reaches the surface, a rounded one by its radius all round.
+The promise is yours to keep — every pixel, alpha one, on every paint,
+whatever the props — and an element that is translucent, or paints a
+background only sometimes, answers `null`, the default. The answer is read
+per pass, so it may follow `contentBox()`, and it costs nothing on a pass
+it does not cover.
+
 ### Drawing once instead of every frame
 
 A drawing that does not change between frames does not have to be redrawn
@@ -1476,3 +1516,11 @@ declare module 'react-x11/jsx-runtime' {
 
 `test/types/extend.tsx` in this repo compiles exactly that, so the story
 stays true as the declarations move.
+
+The drawing side is declared too. `Context2D` from `react-x11/node` is the
+canvas-shaped subset **both** backends implement — ntk's context over
+XRender and the cocoa backend's over CoreGraphics — so `paintContent(ctx:
+Context2D)` type-checks every call an element makes, and a member only one
+backend has is optional there (`globalCompositeOperation`, X11 only) or
+absent. `paintCachePlan`, `paintCached`, `opaqueRect` and the rest of the
+contract above are on the class, with `PaintCachePlan` for the plan.

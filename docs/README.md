@@ -4,6 +4,10 @@
   `<box>`, `<text>`, `<textinput>`, `<textarea>`, `<image>`, `<canvas>`,
   `<svg>`, `<foreign>`, their props and refs — including
   [selecting read-only text](elements.md#selecting-text) with `selectable`.
+- [architecture/frame-pacing.md](architecture/frame-pacing.md) — the
+  design record behind `frameRate`: why a window fed off an input path
+  paints screens nobody sees, the token bucket over paint time that holds
+  it to a budget, where it lives on both backends, and what it measured.
 - [styling.md](styling.md) — the `style` prop: layout and paint properties,
   `:hover`/`:focus`/`:active`/`:disabled` blocks, transitions, theme tokens,
   window size and container queries, `createStyles`, and

@@ -47,7 +47,11 @@ REACT_X11_TRACE=summary npm run examples:dashboard
   it is a server round trip, and a paint that builds in 0.3ms
   against 20ms there _is_ a server-side problem (software-fallback RENDER
   ops, a virtualized GPU) rather than a renderer one.
-  `npm run bench:frames` reports the same split as a summary.
+  `npm run bench:frames` reports the same split as a summary. A frame the
+  frame pacer held ([elements.md](elements.md#framerate--pacing-the-frames-under-a-flood))
+  carries `waited=18.0ms` — how long the claim waited before the clock got
+  it; a frame that was not held carries nothing, so the default's lines are
+  the lines they always were.
 - `chrome:/tmp/trace.json` — [Chrome Trace Event
   JSON](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU),
   written at exit. Open it in Perfetto or `about:tracing`: React commits

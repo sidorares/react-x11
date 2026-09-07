@@ -25,8 +25,178 @@ import type {
   WheelEvent,
 } from './types/events.js';
 
-/** ntk's 2d context. Typed loosely — it is ntk's API, not ours. */
-export type Context2D = unknown;
+/** A gradient, as `createLinearGradient` answers with. */
+export interface CanvasGradientLike {
+  addColorStop(offset: number, color: string): void;
+}
+
+/** An RGBA pixel block, as `createImageData` answers with. */
+export interface ImageDataLike {
+  readonly data: Uint8ClampedArray;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * The 2d context a node paints into — the canvas-shaped subset **both**
+ * backends implement: ntk's `RenderingContext2D` over XRender on X11, and
+ * `CocoaContext2D` over CoreGraphics on macOS. Declared as the contract an
+ * element may rely on rather than as either class: what is here is on
+ * both, and a member one backend has and the other does not is optional
+ * here or absent. Coordinates are device pixels in the owning window's
+ * space — `abs`, `contentBox()` — unless a transform says otherwise.
+ * Anything ntk documents beyond this is reachable at runtime and is
+ * ntk's to change.
+ */
+export interface Context2D {
+  fillStyle: string | CanvasGradientLike;
+  strokeStyle: string | CanvasGradientLike;
+  lineWidth: number;
+  lineCap: 'butt' | 'round' | 'square';
+  lineJoin: 'miter' | 'round' | 'bevel';
+  globalAlpha: number;
+  /** A CSS font shorthand, `'13px sans-serif'`. */
+  font: string;
+  shadowBlur: number;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  shadowColor: string;
+  /**
+   * X11 only: XRender's compositing operator — `'source-over'` (the
+   * default), `'copy'`, and the rest ntk documents. Absent on the cocoa
+   * backend, whose bridge has no blend-mode verb yet; test for it with
+   * `'globalCompositeOperation' in ctx`.
+   */
+  globalCompositeOperation?: string;
+  save(): void;
+  restore(): void;
+  translate(x: number, y: number): void;
+  scale(x: number, y: number): void;
+  rotate(angle: number): void;
+  transform(
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+  ): void;
+  setTransform(
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+  ): void;
+  resetTransform(): void;
+  getTransform(): {
+    a: number;
+    b: number;
+    c: number;
+    d: number;
+    e: number;
+    f: number;
+  };
+  setLineDash(segments: number[]): void;
+  getLineDash(): number[];
+  beginPath(): void;
+  closePath(): void;
+  moveTo(x: number, y: number): void;
+  lineTo(x: number, y: number): void;
+  bezierCurveTo(
+    cp1x: number,
+    cp1y: number,
+    cp2x: number,
+    cp2y: number,
+    x: number,
+    y: number,
+  ): void;
+  quadraticCurveTo(cpx: number, cpy: number, x: number, y: number): void;
+  arc(
+    x: number,
+    y: number,
+    radius: number,
+    startAngle: number,
+    endAngle: number,
+    anticlockwise?: boolean,
+  ): void;
+  rect(x: number, y: number, width: number, height: number): void;
+  roundRect(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    radii: number | number[],
+  ): void;
+  fill(fillRule?: 'nonzero' | 'evenodd'): void;
+  stroke(): void;
+  clip(fillRule?: 'nonzero' | 'evenodd'): void;
+  fillRect(x: number, y: number, width: number, height: number): void;
+  /** Many rectangles in one operation — one request on X11, one
+   * CoreGraphics call on macOS. `[x, y, w, h]` quadruples, flat or nested. */
+  fillRects(rects: number[] | number[][]): void;
+  strokeRect(x: number, y: number, width: number, height: number): void;
+  clearRect(x: number, y: number, width: number, height: number): void;
+  fillText(text: string, x: number, y: number): void;
+  measureText(text: string): { width: number; [key: string]: unknown };
+  /**
+   * Composite an offscreen `Surface` (`react-x11/ntk`) — whole at a point,
+   * whole into a rect, or a source rect of it into a destination rect: the
+   * canvas overloads. One composite either way.
+   */
+  drawImage(image: unknown, dx: number, dy: number): void;
+  drawImage(
+    image: unknown,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number,
+  ): void;
+  drawImage(
+    image: unknown,
+    sx: number,
+    sy: number,
+    sw: number,
+    sh: number,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number,
+  ): void;
+  createLinearGradient(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+  ): CanvasGradientLike;
+  createImageData(width: number, height: number): ImageDataLike;
+  /** Raw pixels, straight RGBA, written transform- and clip-free — the
+   * canvas contract (docs/elements.md "<canvas>"). */
+  putImageData(data: ImageDataLike, x: number, y: number): void;
+}
+
+/**
+ * What `paintCachePlan` answers with: draw this node's content once into a
+ * surface under `key`, and composite that until the key changes
+ * (docs/extending.md "Drawing once instead of every frame").
+ */
+export interface PaintCachePlan {
+  /** Identity: the same key must mean the same pixels. Name every input
+   * `paintCached` reads. */
+  key: string;
+  /** Where the surface goes, in device pixels — window coordinates. */
+  x: number;
+  y: number;
+  /** Its size, in device pixels. */
+  width: number;
+  height: number;
+  /** `'argb32'` (the default), or `'a8'` for coverage tinted at composite
+   * time — one rendered copy per key serves every ink. */
+  format?: 'argb32' | 'a8';
+  /** The colour an `'a8'` surface is painted through. */
+  tint?: string;
+}
 
 /** How an axis is bounded when layout asks an element for its size.
  * `'exactly'` — the style decided this axis; `'at-most'` — that many pixels
@@ -284,6 +454,48 @@ export declare class Node {
   /** Draw. A subclass calls `super.paint(ctx)` first, for the background,
    * border and clip, then draws inside `this.abs`. */
   paint(ctx: Context2D): void;
+  /**
+   * Draw between the background and the children — where every built-in
+   * draws, and the seam to override rather than `paint`: `paint` draws the
+   * background, then this, then the children, the border and the focus
+   * ring, and a scroller's bars, and an element that overrides `paint`
+   * has to keep all of that in the right order itself. Draws inside
+   * `contentBox()`; the clip is already set. The default draws nothing.
+   */
+  paintContent(ctx: Context2D): void;
+  /**
+   * The paint-cache protocol, with `paintCached`: implement both or
+   * neither. Answer a plan to have this frame's content drawn once into a
+   * surface under `plan.key` and composited from it until the key changes,
+   * or `null` to opt out this frame — the right answer whenever the paint
+   * depends on something the key cannot see (a caret, a hover, anything
+   * animating). The key is the whole correctness surface.
+   */
+  paintCachePlan?(ctx: Context2D): PaintCachePlan | null;
+  /**
+   * Draw the content the plan named, at the **origin of `box`** — surface
+   * coordinates, not `this.abs`. `ink` is the colour a mono drawing (one
+   * that asked for `'a8'`) must paint in: white where the surface is
+   * coverage and the tint arrives at composite time, the tint itself on a
+   * backend without coverage surfaces. A multi-colour drawing ignores it.
+   * `paintDamage()` is null in here: a cached copy is drawn whole.
+   */
+  paintCached?(ctx: Context2D, box: Rect, ink?: string): void;
+  /**
+   * The rect this element writes opaque pixels over on every paint — in
+   * window coordinates like `abs`, whole pixels — or `null`, the default,
+   * which promises nothing.
+   *
+   * A pass that lies inside it is painted without the fills that would be
+   * under it: the window's background, this node's own and every
+   * ancestor's. That is what an element with a retained surface it draws
+   * whole — a terminal, a media frame, a chart — answers with, and it then
+   * claims its damage as a **rect inside the answer** rather than as the
+   * node, which is inflated by a pixel of slop and so never covered. The
+   * promise is the element's to keep: every pixel, alpha one, on every
+   * paint, whatever the props. A translucent element answers `null`.
+   */
+  opaqueRect(): Rect | null;
   /**
    * The rect this paint pass is repainting, or null when it is repainting
    * the whole window — and null outside a paint, which means the same
