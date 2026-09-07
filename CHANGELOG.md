@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.3](https://github.com/sidorares/react-x11/compare/v2.8.2...v2.8.3) (2026-09-07)
+
+
+### Bug Fixes
+
+* **cocoa:** a refused drop ends on the release — the drag session slides back nothing, instead of animating for a second first ([#495](https://github.com/sidorares/react-x11/issues/495)) ([853e75b](https://github.com/sidorares/react-x11/commit/853e75ba55f00a460c5cde04087a687e713b3584)), closes [#494](https://github.com/sidorares/react-x11/issues/494)
+
 ## [2.8.2](https://github.com/sidorares/react-x11/compare/v2.8.1...v2.8.2) (2026-09-07)
 
 
