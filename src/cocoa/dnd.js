@@ -208,6 +208,19 @@ const wire = (value) =>
  * first item under its UTI, thunks as promises the bridge asks `provide`
  * to keep. The files thunk alone resolves now, because the items cannot
  * be counted without it.
+ *
+ * No image, and so no slide-back. The picture of the drag is the app's own
+ * `<popup dragPreview>`; what the system session carries is a blank 1×1.
+ * Left at AppKit's default, a refused or cancelled drop plays
+ * `animatesToStartingPositionsOnCancelOrFail`'s slide home **before**
+ * `draggingSession:endedAtPoint:operation:` — the callback that is
+ * `drag-session-ended`, which `onDragEnd` and the preview's unmount wait
+ * on — so the button was up for about a second with the gesture still
+ * open and the preview frozen where the pointer let go, while AppKit
+ * animated nothing back to the press (#494). Off, the release ends the
+ * gesture the moment it happens, as on X11, and the return is the app's
+ * to animate from `onDragEnd`. Not a seam: there is no system image for
+ * a caller to want slid back.
  */
 export function dragSpec(session, native, scale) {
   const types = session.types;
@@ -241,6 +254,7 @@ export function dragSpec(session, native, scale) {
     y: session.press.y / scale,
     items,
     operations: session.actions,
+    slideBack: false,
     provide: (uti) => wire(session._resolve(reverse.get(uti) ?? uti)),
   };
 }
