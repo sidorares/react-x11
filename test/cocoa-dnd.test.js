@@ -654,6 +654,44 @@ describe('the drag side', () => {
     assert.equal(app._windows.size, 1, 'the release takes the preview down');
   });
 
+  test('a refused drop ends on the release: the session is told to slide nothing back', async () => {
+    // The regression this exists for (#494). The spec hands AppKit no
+    // image — the picture of the drag is the app's own `<popup
+    // dragPreview>` — yet left at its default the session's
+    // `animatesToStartingPositionsOnCancelOrFail` plays its slide home
+    // *before* `draggingSession:endedAtPoint:operation:`, the callback
+    // `drag-session-ended` is. A drop nothing took therefore reached
+    // `onDragEnd` about a second after the button came up, the preview
+    // frozen where the pointer let go, while AppKit animated a blank 1×1
+    // back to the press. The spec turns it off: the release is the end of
+    // the gesture, as on X11, and the return is the app's to draw.
+    const native = fakeNative();
+    const app = appOver(native);
+    const root = await createRoot({ app });
+    roots.push(root);
+    root.render(
+      h(
+        'window',
+        { width: 300, height: 200 },
+        h('box', {
+          draggable: true,
+          dragData: { 'text/plain': 'a row' },
+          style: { width: 100, height: 100 },
+        }),
+      ),
+    );
+    await settle(app);
+    const wnd = wndOf(app);
+    press(wnd, 50, 50);
+    move(wnd, 70, 50); // past the threshold
+    const [[, spec]] = native.of('beginDrag');
+    assert.equal(spec.slideBack, false, "nothing of the system's to slide");
+    assert.ok(
+      !('image' in spec) && !('surface' in spec),
+      'and indeed no image was handed over',
+    );
+  });
+
   test('a drop on our own window keeps the payload by reference', async () => {
     const native = fakeNative();
     const app = appOver(native);

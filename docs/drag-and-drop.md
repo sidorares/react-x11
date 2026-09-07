@@ -545,7 +545,13 @@ Platform notes:
   on X11, made where the window server can see it. It registers no
   pasteboard types either, having nothing to accept with. What AppKit's own
   session carries is still a blank image: the drag has no bitmap of the
-  system's, only the preview you draw.
+  system's, only the preview you draw. For the same reason the session's
+  slide-back is off: left on, AppKit animates that blank image home over
+  about a second _before_ it reports the release, so a drop nothing took
+  reached `onDragEnd` — and the preview stayed frozen where the pointer let
+  go — only after a pause spent animating nothing. The release ends the
+  gesture the moment it happens, as on X11, and a return animation is the
+  app's to draw from `onDragEnd`.
 - **macOS / XQuartz** — X client to X client works. Dragging from **Finder**
   into an X11 window does not, and never has:
   [XQuartz#173](https://github.com/XQuartz/XQuartz/issues/173). That is the
