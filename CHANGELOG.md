@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.9.0](https://github.com/sidorares/react-x11/compare/v2.8.3...v2.9.0) (2026-09-07)
+
+
+### Features
+
+* **cocoa:** globalCompositeOperation on the 2d context, and a row memcpy for a surface composited at a translate ([#501](https://github.com/sidorares/react-x11/issues/501)) ([3941bcd](https://github.com/sidorares/react-x11/commit/3941bcd6e4e5cbb6696d392660faafd4ccfb2fbe)), closes [#498](https://github.com/sidorares/react-x11/issues/498)
+* frame pacing — a CPU-time budget over a window's frames, opt-in per window, glarea or root, on both backends ([#497](https://github.com/sidorares/react-x11/issues/497)) ([7e95217](https://github.com/sidorares/react-x11/commit/7e95217f1e349f31d1125ccf4038400cb398ca29))
+
 ## [2.8.3](https://github.com/sidorares/react-x11/compare/v2.8.2...v2.8.3) (2026-09-07)
 
 
