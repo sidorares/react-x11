@@ -118,20 +118,25 @@ What the CommonJS format costs you, in your own code:
   to fail the build. esbuild names the file and line, so this is a
   five-second fix rather than a mystery.
 - **`import.meta.url` is `undefined`.** Anything resolving paths through it
-  needs `process.execPath` or a literal. react-x11 guards its own uses on
-  the X11 path (the version string DevTools shows falls back rather than
-  throwing) but not yet on the cocoa one: `src/cocoa/native.js` calls
-  `createRequire(import.meta.url)` when that backend loads, and
-  `createRequire(undefined)` throws `ERR_INVALID_ARG_VALUE`. Until that is
-  fixed in code, `--define:import.meta.url='"file:///dev/null"'` at build
-  time is the workaround ([tier 5](#developer-id-or-the-app-store) has the
-  whole recipe); check your app for the same pattern.
-- **Runtime module loading is out.** Inside a SEA, `require()` _and_
-  `import()` resolve **built-in modules only** — a `data:` or `file:` URL
-  import fails with `ERR_UNKNOWN_BUILTIN_MODULE`. A bundle has nothing left
-  to resolve, so this only bites if you meant to load something later. It
-  also closes the obvious workaround for the old ESM problem: you cannot
-  carry an ESM bundle as a SEA asset and import it.
+  needs `process.execPath` or a literal. react-x11 guards its own uses (the
+  version string DevTools shows falls back rather than throwing, and the
+  cocoa backend's addon loader is built from `process.execPath` when there
+  is no module URL — see the cocoa note below); check your app for the same
+  pattern. Two features cannot be guarded, because what they resolve through
+  it has to exist on disk: `<Frame>` forks a child entry, and
+  click-to-component opens your source. Neither works in a SEA, and each
+  fails when first used rather than at startup: a pane hands its `fallback`
+  a `spawn`-phase `ERR_INVALID_URL` (and is an empty box without one), and
+  `createRoot()` with `REACT_X11_CLICK_TO_COMPONENT` set rejects with
+  `ERR_INVALID_ARG_TYPE`. Both measured on the SEA below.
+- **Runtime module loading is out.** Inside a SEA, the embedded main's
+  `require()` _and_ `import()` resolve **built-in modules only** — a `data:`
+  or `file:` URL import fails with `ERR_UNKNOWN_BUILTIN_MODULE`. A bundle has
+  nothing left to resolve, so this only bites if you meant to load something
+  later. It also closes the obvious workaround for the old ESM problem: you
+  cannot carry an ESM bundle as a SEA asset and import it. The one door left
+  open is `createRequire(process.execPath)` from `node:module` — a full
+  CommonJS loader rooted at the executable, and how the cocoa addon gets in.
 - **Assets are not files.** `sea.getAsset()` reads what the config's
   `assets` map embedded; fonts are the usual case, and `StaticFontSource`
   takes bytes directly ([ntk's fonts guide][ntk-fonts]).
@@ -139,6 +144,27 @@ What the CommonJS format costs you, in your own code:
 On macOS the binary must be re-signed before it runs
 (`codesign --remove-signature myapp && codesign --sign - myapp`); on Linux
 nothing extra. Measured on Node 26.
+
+**The cocoa backend works in a SEA, with the addon beside the binary.** The
+native bridge is a `.node` file: the blob cannot carry it and the embedded
+main's `require()` cannot load it, so react-x11 loads it through
+`createRequire(process.execPath)` — the loader Node's SEA documentation
+prescribes — which resolves from the executable's own directory. Either
+point `REACT_X11_CALAYERS_PATH` at the addon (the `@windowkit/appkit`
+package directory or its `calayers.node` prebuild, the way
+`examples/form/main.js` names it inside a compiled bundle), or ship
+`node_modules/@windowkit/appkit` next to the executable and let the bare
+name resolve. With neither, the error is the backend's usual one, naming
+both attempts. Verified with a `createRoot({ backend: 'cocoa' })` app built
+by the recipe above: it mounts a window on the Core Animation backend all
+three ways, and the sandboxed store build in
+[tier 5](#developer-id-or-the-app-store) — this recipe inside a bundle —
+ran without the define it used to need. Earlier releases made that loader
+at import time, from
+`import.meta.url`, and every cocoa SEA died with `ERR_INVALID_ARG_VALUE`
+before the backend could say what it was loading; on a release you cannot
+move off, `--define:import.meta.url='"file:///dev/null"'` at bundle time is
+the workaround, and `test/cocoa-native.test.js` keeps the fix.
 
 [ntk-fonts]: https://github.com/sidorares/ntk/blob/master/docs/fonts.md
 
@@ -308,12 +334,11 @@ SEA carries its main. (The sandbox also moves the working directory into
 the container — `ProbeNode probe.mjs` with a relative path failed with
 `MODULE_NOT_FOUND` at `~/Library/Containers/…/Data/probe.mjs`, an absolute
 one ran — and a SEA has no path to get wrong.) Its build is tier 3's, with
-two esbuild defines that the form example needs today:
+one esbuild define that the form example needs today:
 
 ```sh
 esbuild sea-main.js --bundle --platform=node --format=cjs --jsx=automatic --outfile=app.cjs \
-  --define:process.env.REACT_X11_NO_AUTORUN='"1"' \
-  --define:import.meta.url='"file:///dev/null"'
+  --define:process.env.REACT_X11_NO_AUTORUN='"1"'
 node --build-sea sea.json   # { "main": "app.cjs", "output": "Guestbook", "disableExperimentalSEAWarning": true }
 ```
 
@@ -348,13 +373,15 @@ node --build-sea sea.json   # { "main": "app.cjs", "output": "Guestbook", "disab
   });
   ```
 
-- **`import.meta.url`.** esbuild's `cjs` output leaves `import.meta`
-  empty, and `src/cocoa/native.js` calls `createRequire(import.meta.url)`
-  when the cocoa backend loads — `createRequire(undefined)` throws
-  `ERR_INVALID_ARG_VALUE`. Any string URL satisfies it; the addon is then
-  found through `REACT_X11_CALAYERS_PATH`, an absolute path, so the base
-  is never used. Fixing that in react-x11 is a separate task; once it
-  lands, drop this define.
+- **`import.meta.url` needs no define any more.** This recipe used to
+  carry a second one, `--define:import.meta.url='"file:///dev/null"'`,
+  because the cocoa backend's addon loader was made from `import.meta.url`
+  at import and a SEA has none. The loader is now made from
+  `process.execPath` when the URL is missing
+  ([tier 3](#tier-3--node-single-executable)), and the addon is found
+  through `REACT_X11_CALAYERS_PATH` as before. On a react-x11 whose
+  `src/cocoa/native.js` still calls `createRequire(import.meta.url)` at
+  module scope, put the define back.
 
 The bundle is then tier 5's — the plist, the SEA at
 `Contents/MacOS/Guestbook`, `calayers.node` in `Contents/Resources` — and
@@ -476,8 +503,6 @@ Two things would delete the rest of the friction here:
   node's SEA and bun is a Developer ID runtime only.
 
 ESM support for a SEA's embedded main would be welcome in Node, but it is no
-longer load-bearing: tier 3 works as CommonJS. What is load-bearing, and
-local: `src/cocoa/native.js`'s `createRequire(import.meta.url)`, which a SEA
-cannot evaluate — the second define in tier 5 until it is fixed.
+longer load-bearing: tier 3 works as CommonJS.
 
 [x11-246]: https://github.com/sidorares/node-x11/issues/246
