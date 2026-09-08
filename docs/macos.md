@@ -537,6 +537,7 @@ consumer, so the work is tracked rather than rediscovered.
 | **activation policy / app name**  | **shipped** — `createRoot({ cocoa: { activationPolicy, appName } })`                                                                          | — (bridge 0.5)                                      | react-x11#464 → windowkit/appkit#15 (done)                      |
 | **permissions** (TCC)             | **shipped** — `usePermission()`/`requestPermission()` over the bridge; `openPrivacySettings` on any Mac                                       | — (bridge 0.5); Linux portals are #466's other half | react-x11#466 → windowkit/appkit#19 (done)                      |
 | **notifications**                 | **shipped** — `notify()` over `UNUserNotificationCenter` in a bundle, `osascript` for a bare `node`; `org.freedesktop.Notifications` on Linux | — (bridge 0.5)                                      | react-x11#469 → windowkit/appkit#26 (done)                      |
+| **calendar** (EventKit)           | **shipped** — `useDesktopCalendarEvents()` over `EKEventStore`, an `osascript` child under XQuartz; Evolution Data Server on Linux            | — (bridge 0.8)                                      | react-x11#504 → windowkit/appkit#39, #40 (done); writes are #41 |
 
 Two of these have a **freedesktop counterpart worth having in core with no
 bridge at all**, because they are D-Bus like the portal and the global menu

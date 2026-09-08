@@ -29,6 +29,7 @@ export * from './types/launcher.js';
 export * from './types/tray.js';
 export * from './types/permissions.js';
 export * from './types/notifications.js';
+export * from './types/desktopcalendar.js';
 
 /**
  * The XID of the X11 window a ref points at, or `null` if there is not one

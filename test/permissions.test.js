@@ -101,18 +101,21 @@ afterEach(async () => {
 });
 
 describe('the vocabulary', () => {
-  test('Apple’s four words become the ladder’s, and anything else is unknown', () => {
+  test('Apple’s words become the ladder’s, and anything else is unknown', () => {
     assert.equal(statusFromBridge('authorized'), 'granted');
     assert.equal(statusFromBridge('denied'), 'denied');
     assert.equal(statusFromBridge('restricted'), 'restricted');
     assert.equal(statusFromBridge('notDetermined'), 'prompt');
+    // macOS 14's partial EventKit grant, kept as its own word: a grant to a
+    // writer and a refusal to a reader (docs/desktop-calendar.md)
+    assert.equal(statusFromBridge('writeOnly'), 'write-only');
     assert.equal(statusFromBridge('surprise'), 'unknown');
   });
 
   test('a kind that is not one is a TypeError, not a machine answer', async () => {
     await assert.rejects(() => permissionStatus('bluetooth'), TypeError);
     await assert.rejects(() => requestPermission('bluetooth'), TypeError);
-    assert.equal(PERMISSION_KINDS.length, 7);
+    assert.equal(PERMISSION_KINDS.length, 9);
   });
 
   test('the Settings deep link, per pane and for the Privacy pane itself', () => {

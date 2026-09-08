@@ -23,18 +23,24 @@
 //
 // ## Two things the vocabulary decides
 //
-// - A status is one of five words. `'granted'`, `'denied'` and
+// - A status is one of six words. `'granted'`, `'denied'` and
 //   `'restricted'` (MDM or parental controls: the user cannot grant it) are
 //   the platform's; `'prompt'` is "not decided yet — a request would ask";
 //   `'unknown'` is "nothing here can say", which is a fact about the machine
 //   rather than about the permission, and the reason a query never throws.
+//   `'write-only'` is the sixth and the odd one: macOS 14's partial grant
+//   for `calendars` and `reminders`, where the app may save an item it
+//   cannot read. It crosses as its own word rather than being flattened
+//   into one of the other two, because it is a grant to a writer and a
+//   refusal to a reader and only the caller knows which it is.
 // - A request answers with the status **after** the user has, never with a
 //   bare boolean, because `'restricted'` and `'denied'` want different UI —
 //   one is a Settings switch the user can flip, the other is not.
 
 import { liveApps } from './trace-registry.js';
 
-/** The kinds a status can be asked for. `automation` wants `{ target }`. */
+/** The kinds a status can be asked for. `automation` wants `{ target }`;
+ *  `calendars` takes `{ access: 'write-only' }` for the narrower grant. */
 export const PERMISSION_KINDS = Object.freeze([
   'camera',
   'microphone',
@@ -43,6 +49,8 @@ export const PERMISSION_KINDS = Object.freeze([
   'input-monitoring',
   'automation',
   'location',
+  'calendars',
+  'reminders',
 ]);
 
 /** The Settings panes, the kinds above plus the two that have no API at all
@@ -55,6 +63,8 @@ const SETTINGS_PANES = Object.freeze({
   'input-monitoring': 'Privacy_ListenEvent',
   automation: 'Privacy_Automation',
   location: 'Privacy_LocationServices',
+  calendars: 'Privacy_Calendars',
+  reminders: 'Privacy_Reminders',
   'files-and-folders': 'Privacy_FilesAndFolders',
   'full-disk-access': 'Privacy_AllFiles',
 });

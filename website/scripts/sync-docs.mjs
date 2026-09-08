@@ -194,6 +194,7 @@ const ORDER = [
   'eyedropper.md',
   'permissions.md',
   'notifications.md',
+  'desktop-calendar.md',
   'appearance.md',
   'system.md',
   'remote.md',

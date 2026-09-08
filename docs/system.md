@@ -383,6 +383,14 @@ two desktop standards with a claim on core — are now built: **notifications**
 freedesktop StatusNotifierItem half still tracked in
 [#353](https://github.com/sidorares/react-x11/issues/353).
 
+**The user's calendar.** Their real events, from the accounts the desktop
+already holds — EventKit on macOS, Evolution Data Server on a freedesktop
+session — are [desktop-calendar.md](desktop-calendar.md):
+`useDesktopCalendarEvents()`, keyed the way a calendar grid asks. It is not a
+system _setting_, which is why it is its own page rather than a hook here,
+but it is the same kind of thing as the rest of this one: something the
+desktop knows that an app would otherwise ask the user to type in again.
+
 **A launcher badge, and permission prompts.** An unread count on the icon
 (freedesktop `com.canonical.Unity.LauncherEntry`, one D-Bus signal; macOS
 `dockTile.badgeLabel`) and camera/mic/location authorization (the freedesktop

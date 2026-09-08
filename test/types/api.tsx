@@ -22,6 +22,13 @@ import type {
   NotificationBackend,
   NotificationCloseReason,
   NotificationHandle,
+  CalendarBackend,
+  CalendarChange,
+  DesktopCalendar,
+  DesktopCalendarInfo,
+  DesktopCalendarStatus,
+  DesktopEvent,
+  EventsResult,
   BusHandle,
   BusKind,
   BusRef,
@@ -57,6 +64,13 @@ import {
   notificationBackend,
   notify,
   useNotifier,
+  CalendarAccessError,
+  NoCalendarServiceError,
+  byDay,
+  calendarBackend,
+  dayKey,
+  desktopCalendar,
+  useDesktopCalendarEvents,
   Checkbox,
   closeBus,
   Icon,
@@ -1331,6 +1345,11 @@ function _DeepLinks() {
     const mic = usePermission('microphone');
     mic.request().then((s: PermissionStatus) => s);
     void mic.available;
+    const calendarGrant = usePermission('calendars', { access: 'write-only' });
+    const granted: PermissionStatus = calendarGrant.status;
+    void granted;
+    // @ts-expect-error — the two levels are the only ones
+    usePermission('calendars', { access: 'read-only' });
     void opened;
     void rung;
     void status;
@@ -1348,6 +1367,43 @@ function _DeepLinks() {
     await banner.update({ body: 'opened' });
     await banner.close();
     const notifRung: NotificationBackend | null = await notificationBackend();
+
+    // --- the desktop's calendar ---------------------------------------
+    const rungHere: CalendarBackend | null = await calendarBackend();
+    void rungHere;
+    const desktop: DesktopCalendar | null = await desktopCalendar();
+    if (desktop) {
+      const found: DesktopCalendarInfo[] = await desktop.listCalendars();
+      const result: EventsResult = await desktop.eventsBetween(
+        new Date(),
+        new Date(),
+        { calendars: found },
+      );
+      const days: Map<string, DesktopEvent[]> = byDay(result.events);
+      void days.get(dayKey(new Date()));
+      const stop = await desktop.watch(
+        new Date(),
+        new Date(),
+        (change: CalendarChange) => void change.kind,
+      );
+      await stop();
+      const grant: PermissionStatus = await desktop.access();
+      void grant;
+      await desktop.close();
+    }
+    const week = useDesktopCalendarEvents({
+      from: new Date(),
+      to: new Date(),
+      watch: true,
+    });
+    const state: DesktopCalendarStatus = week.status;
+    void state;
+    void week.byDay.get('2026-09-08');
+    void week.openSettings();
+    void CalendarAccessError;
+    void NoCalendarServiceError;
+    // @ts-expect-error — a range is two dates, and both are required
+    useDesktopCalendarEvents({ from: new Date() });
     const notifier = useNotifier({ urgency: 'low' });
     void notifier.available;
     void notifier.backend;

@@ -56,21 +56,24 @@ type PermissionKind =
   | 'accessibility'
   | 'input-monitoring'
   | 'automation'
-  | 'location';
+  | 'location'
+  | 'calendars'
+  | 'reminders';
 
 type PermissionStatus =
-  'granted' | 'denied' | 'restricted' | 'prompt' | 'unknown';
+  'granted' | 'denied' | 'restricted' | 'prompt' | 'write-only' | 'unknown';
 ```
 
-A status is one of five words, and two of them are not the platform's:
+A status is one of six words, and two of them are not the platform's:
 
-|                |                                                                                                                |
-| -------------- | -------------------------------------------------------------------------------------------------------------- |
-| `'granted'`    | use it                                                                                                         |
-| `'denied'`     | the user said no; `openPrivacySettings()` is the way back                                                      |
-| `'restricted'` | MDM or parental controls — the user **cannot** grant it, so no Settings button                                 |
-| `'prompt'`     | not decided yet — `request()` would ask                                                                        |
-| `'unknown'`    | nothing here can say. A fact about the machine, not the permission, and the reason a status query never throws |
+|                |                                                                                                                                                                                                                                  |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `'granted'`    | use it                                                                                                                                                                                                                           |
+| `'denied'`     | the user said no; `openPrivacySettings()` is the way back                                                                                                                                                                        |
+| `'restricted'` | MDM or parental controls — the user **cannot** grant it, so no Settings button                                                                                                                                                   |
+| `'prompt'`     | not decided yet — `request()` would ask                                                                                                                                                                                          |
+| `'write-only'` | macOS 14's partial grant for `calendars` and `reminders`: the app may **save** an item it cannot read. A grant to a writer and a refusal to a reader, so it crosses as its own word rather than being flattened into one of them |
+| `'unknown'`    | nothing here can say. A fact about the machine, not the permission, and the reason a status query never throws                                                                                                                   |
 
 A request answers with the **status after the user answered**, never a bare
 boolean, because `'denied'` and `'restricted'` want different UI.
@@ -110,24 +113,29 @@ permissionBackend(); // 'cocoa' | null, synchronously
 Not every kind has a prompt of its own, and the shape of the request follows
 the framework's:
 
-| kind                   | status                | the "prompt"                                                                                                            |
-| ---------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `camera`, `microphone` | all five              | the system's in-process dialog; the answer arrives when the user clicks                                                 |
-| `screen-recording`     | never `'prompt'`      | the system's go-to-Settings dialog, shown once; the request resolves at once, and a new grant needs a **restart**       |
-| `accessibility`        | never `'prompt'`      | the go-to-Settings dialog; resolves at once, and the grant applies live                                                 |
-| `input-monitoring`     | `'prompt'` while open | posts the prompt and resolves at once                                                                                   |
-| `automation`           | per **target**        | `{ target: 'com.apple.finder' }` — the bundle id of a **running** app, or the call throws; asking blocks until answered |
-| `location`             | all five              | `requestWhenInUseAuthorization`, answered through the run loop                                                          |
-| `files-and-folders`    | —                     | no API: reading the folder _is_ the prompt and `EPERM` the denial; `openPrivacySettings` reaches the pane               |
-| `full-disk-access`     | —                     | no API; `openPrivacySettings('full-disk-access')`                                                                       |
+| kind                   | status                | the "prompt"                                                                                                                                        |
+| ---------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `camera`, `microphone` | all five              | the system's in-process dialog; the answer arrives when the user clicks                                                                             |
+| `screen-recording`     | never `'prompt'`      | the system's go-to-Settings dialog, shown once; the request resolves at once, and a new grant needs a **restart**                                   |
+| `accessibility`        | never `'prompt'`      | the go-to-Settings dialog; resolves at once, and the grant applies live                                                                             |
+| `input-monitoring`     | `'prompt'` while open | posts the prompt and resolves at once                                                                                                               |
+| `automation`           | per **target**        | `{ target: 'com.apple.finder' }` — the bundle id of a **running** app, or the call throws; asking blocks until answered                             |
+| `location`             | all five              | `requestWhenInUseAuthorization`, answered through the run loop                                                                                      |
+| `calendars`            | plus `'write-only'`   | EventKit's own prompt. `{ access: 'write-only' }` asks the narrower one; the grant is what [desktop-calendar.md](desktop-calendar.md) reads through |
+| `reminders`            | plus `'write-only'`   | the same store, a separate grant. `{ access: 'write-only' }` is a `TypeError` here: reminders have no such grant                                    |
+| `files-and-folders`    | —                     | no API: reading the folder _is_ the prompt and `EPERM` the denial; `openPrivacySettings` reaches the pane                                           |
+| `full-disk-access`     | —                     | no API; `openPrivacySettings('full-disk-access')`                                                                                                   |
 
 **Attribution is the thing to know.** A bare `node` process is attributed to
 its _responsible process_ — the terminal, an IDE — or to `node` itself, and
 prompts with no usage-description strings. A bundled app must carry the keys
 (`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`,
-`NSLocationUsageDescription`, `NSAppleEventsUsageDescription`) in its
-`Info.plist` — without them the request never prompts, or TCC ends the
-process. See [packaging.md](packaging.md).
+`NSLocationUsageDescription`, `NSAppleEventsUsageDescription`,
+`NSCalendarsFullAccessUsageDescription`,
+`NSCalendarsWriteOnlyAccessUsageDescription`,
+`NSRemindersFullAccessUsageDescription`) in its `Info.plist` — without them
+the request never prompts, or TCC ends the process. See
+[packaging.md](packaging.md).
 
 ## What differs between the rungs
 

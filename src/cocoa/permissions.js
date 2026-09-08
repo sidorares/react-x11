@@ -13,23 +13,32 @@
 // bundled app must carry the usage-description keys
 // (`NSCameraUsageDescription` and friends) or a request never prompts.
 
-/** Apple's four words as the ladder's. */
+/** Apple's words as the ladder's. `writeOnly` is macOS 14's partial grant
+ *  for EventKit — a grant to a writer, a refusal to a reader — and stays its
+ *  own word for exactly that reason. */
 const STATUS = Object.freeze({
   authorized: 'granted',
   denied: 'denied',
   restricted: 'restricted',
   notDetermined: 'prompt',
+  writeOnly: 'write-only',
 });
 
 export function statusFromBridge(status) {
   return STATUS[status] ?? 'unknown';
 }
 
-/** The bridge's options for a kind: `automation` carries its target. */
+/** The bridge's options for a kind: `automation` carries its target, and
+ *  `calendars` the level being asked for (`reminders` has no write-only
+ *  grant, and the bridge refuses one with a TypeError). */
 function bridgeOptions(kind, options = {}) {
-  return kind === 'automation' && options.target != null
-    ? { target: String(options.target) }
-    : undefined;
+  if (kind === 'automation' && options.target != null) {
+    return { target: String(options.target) };
+  }
+  if (kind === 'calendars' && options.access != null) {
+    return { access: String(options.access) };
+  }
+  return undefined;
 }
 
 export class CocoaPermissions {

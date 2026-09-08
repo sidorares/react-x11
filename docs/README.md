@@ -107,6 +107,11 @@
   backend's notification centre, `org.freedesktop.Notifications`,
   `osascript`, `notify-send`), updating a banner in place, what the user
   did with it, and why the shell-out rungs cannot report back.
+- [desktop-calendar.md](desktop-calendar.md) — the user's real events, with
+  no credential and no OAuth: `useDesktopCalendarEvents()`, the three-rung
+  ladder (EventKit through the bridge, EventKit through an `osascript` child,
+  Evolution Data Server over the bus), why `end` is exclusive everywhere, and
+  why `'denied'` and `'unavailable'` are different words.
 - [eyedropper.md](eyedropper.md) — sample a colour from the screen:
   `useEyedropper()`/`pickScreenColor()`, the two-rung ladder (the portal's
   own picker, a crosshair grab on plain X11), the interface `version`
