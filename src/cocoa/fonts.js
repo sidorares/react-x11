@@ -217,6 +217,58 @@ function brokenAtEveryOpportunity(spans) {
   return out;
 }
 
+/** What a paragraph ends in when it did not fit. A face without the mark
+ *  gets a substituted one from CoreText, where ntk falls back to three
+ *  dots of its own — a difference only a face missing U+2026 can show. */
+const ELLIPSIS = '\u2026';
+
+/**
+ * The broken spans as a paragraph that **elides**: the first `maxLines - 1`
+ * lines, then a line that is only the ellipsis — set in the font of the run
+ * the cut fell in, as ntk sets it.
+ *
+ * This is the min-content floor of a paragraph that ends in a `…`. It is not
+ * the same question as a wrapping one's: a paragraph that may wrap has to be
+ * at least its longest word, because there is nowhere else for that word to
+ * go, while one that elides has somewhere — an offer narrower than its text
+ * is answered by cutting the text, so the width it *needs* is the mark that
+ * says so. ntk answers exactly that (a `<text textWrap="nowrap"
+ * textOverflow="ellipsis">` measures 30.472 at an offer of zero, which is
+ * the width of `…` in the same face, to the third decimal), and the two
+ * engines are supposed to measure a tree the same way.
+ *
+ * The cut is made here rather than by the native for a reason worth
+ * keeping: eliding is a question about a width, and the min-content probe
+ * has none to give. Asked to elide with no bound, CoreText keeps the line
+ * count but puts everything that was over it back on the last line — a
+ * `<Select>` caption floored at 472.5 against a max-content of 506.9, which
+ * pinned every eliding label on this backend at its full width and made it
+ * overflow sideways rather than give way — react-x11 #512.
+ */
+function cappedToEllipsis(broken, maxLines) {
+  // A cap below one keeps one, as `_maxLines` does: nothing renders no
+  // paragraph at all, and a floor of zero is not a measurement.
+  const cap = Math.max(1, Math.floor(maxLines));
+  const lines = [[]];
+  for (const span of broken) {
+    if (span.text === '\n') lines.push([]);
+    else lines.at(-1).push(span);
+  }
+  // Nothing over the cap is nothing to stand for: a paragraph that fits in
+  // its lines is measured as the lines, ellipsis or not.
+  if (lines.length <= cap) return broken;
+
+  const cut = lines[cap - 1]?.[0] ?? broken[0];
+  const out = [];
+  for (const line of lines.slice(0, cap - 1)) {
+    if (out.length) out.push({ ...out.at(-1), text: '\n' });
+    out.push(...line);
+  }
+  if (out.length) out.push({ ...out.at(-1), text: '\n' });
+  out.push({ ...cut, text: ELLIPSIS });
+  return out;
+}
+
 const ALIGN_FLUSH = { left: 0, center: 0.5, right: 1 };
 
 function flushFor(align, direction) {
@@ -890,17 +942,28 @@ export class CocoaFontManager {
     // columns came out 823px and 34px wide. `brokenAtEveryOpportunity` is
     // the answer instead.
     const minContent = Number.isFinite(maxWidth) && maxWidth <= 0;
-    const laid = minContent
-      ? brokenAtEveryOpportunity(nativeSpans)
-      : nativeSpans;
+    // Whether this paragraph is one that ends in a `…`. Both halves: ntk
+    // elides off the line *count*, so an ellipsis with nothing to cap can
+    // never fire (nodes.js `_maxLines`), and neither can this.
+    const elides = overflow === 'ellipsis' && Number.isFinite(maxLines);
+    // An eliding paragraph's floor is the mark, not its longest word, and
+    // it is cut here because the native cannot cut without a width to cut
+    // to — see `cappedToEllipsis`. The cap and the ellipsis are in the text
+    // that comes back, so the request carries neither.
+    const probe = minContent && elides && nativeSpans.length > 0;
+    const laid = probe
+      ? cappedToEllipsis(brokenAtEveryOpportunity(nativeSpans), maxLines)
+      : minContent
+        ? brokenAtEveryOpportunity(nativeSpans)
+        : nativeSpans;
     const raw = this._native.createLayout({
       spans: laid,
       maxWidth:
         Number.isFinite(maxWidth) && maxWidth > 0 ? maxWidth : undefined,
       align: flushFor(align, direction),
       lineHeight: typeof lineHeight === 'number' ? lineHeight : undefined,
-      maxLines: Number.isFinite(maxLines) ? maxLines : undefined,
-      ellipsis: overflow === 'ellipsis',
+      maxLines: probe || !Number.isFinite(maxLines) ? undefined : maxLines,
+      ellipsis: !probe && overflow === 'ellipsis',
       rtl: direction === 'rtl',
     });
     // the text the native actually laid out: a min-content measurement's

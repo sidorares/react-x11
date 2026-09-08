@@ -60,6 +60,25 @@ const ITEM_PAD_RIGHT = ITEM_PAD;
 // fit in.
 const itemHeight = (fontSize) => capBand(fontSize) + ITEM_PAD * 2;
 
+// A caption is one line. `<text>` wraps by default — right for a paragraph,
+// wrong for the value a control is showing: a trigger is a fixed height (the
+// bezel's own, in native mode), so a caption too long for the box wrapped to
+// a second line and drew it *outside* the control, above the bezel. The rows
+// of the menu are the same shape for the same reason: `metrics.row` tall,
+// whatever is in them.
+//
+// A `…` rather than a clip, because the width is not the label's to
+// negotiate — a dropdown is as wide as the form made it — so the honest
+// answer to a caption that does not fit is to say that it did not, which is
+// what NSPopUpButtonCell does with a title too long for its cell. It is
+// also what makes the label *give way*: an eliding `nowrap` floors at the
+// mark it would end in, where a clipping one keeps its full width and
+// pushes whatever contains it wider (nodes.js, `_wrapWidth`).
+const ONE_LINE = Object.freeze({
+  textWrap: 'nowrap',
+  textOverflow: 'ellipsis',
+});
+
 /**
  * The menu's geometry: the palette's, or — where the trigger is a native
  * popup bezel — NSMenu's, so the sheet that drops from it is the one the
@@ -230,6 +249,7 @@ function Option({
       {
         style: [
           capTrim,
+          ONE_LINE,
           {
             color: active ? theme.hoverText : theme.text,
             fontSize: metrics.fontSize,
@@ -543,6 +563,7 @@ export function Select({
       {
         style: [
           capTrim,
+          ONE_LINE,
           nativeControls && nativeTitleStyle('regular'),
           { color: current ? theme.text : theme.textMuted },
         ],
