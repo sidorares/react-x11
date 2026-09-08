@@ -783,14 +783,44 @@ function watch() {
 
 function request(id) {
   var s = eventStore();
-  var done = function () { emit({ id: id, ok: statusWord() }); };
-  // macOS 14 split the one request in two; before it there was only the
-  // entity-type form.
-  if (typeof s.requestFullAccessToEventsWithCompletion === 'function') {
-    s.requestFullAccessToEventsWithCompletion(done);
-  } else {
-    s.requestAccessToEntityTypeCompletion($.EKEntityTypeEvent, done);
+  var answered = false;
+  var reply = function () {
+    if (answered) return;
+    answered = true;
+    emit({ id: id, ok: statusWord() });
+  };
+  // The completion is asked for and answered on if it ever comes — but it is
+  // never waited on. **Measured on macOS 15.2: an osascript process is never
+  // called back**, not even when the grant is already held, so a rung that
+  // waited for it would hang forever on its first read. The status is what
+  // the caller wanted anyway, and it is the one thing that cannot be lost.
+  try {
+    // macOS 14 split the one request in two; before it there was only the
+    // entity-type form.
+    if (typeof s.requestFullAccessToEventsWithCompletion === 'function') {
+      s.requestFullAccessToEventsWithCompletion(reply);
+    } else {
+      s.requestAccessToEntityTypeCompletion($.EKEntityTypeEvent, reply);
+    }
+  } catch (e) {
+    // whatever the framework refused, the poll below still answers
   }
+  // So the answer is the status, watched until it stops being undecided.
+  // The deadline is for the case that has no dialog at all: TCC declines to
+  // ask for a platform binary, and for a responsible app whose hardened
+  // runtime lacks com.apple.security.personal-information.calendars — and
+  // then nothing will ever change. 'prompt' is the honest answer there, and
+  // the JS side does not remember it, so a later read asks again.
+  var waited = 0;
+  $.NSTimer.scheduledTimerWithTimeIntervalRepeatsBlock(0.25, true,
+    function (timer) {
+      waited += 0.25;
+      if (answered) { timer.invalidate; return; }
+      if (statusWord() !== 'prompt' || waited >= 30) {
+        timer.invalidate;
+        reply();
+      }
+    });
 }
 
 function handle(msg) {
@@ -1320,6 +1350,11 @@ export class DesktopCalendar {
       });
     }
     const status = await this._asked;
+    // An undecided answer is not an answer: it means the request was made
+    // and nothing came back — TCC declining to ask (see the JXA program's
+    // `request`). Remembering it would keep a whole session behind a
+    // decision the user may make in Settings a moment later.
+    if (status === 'prompt') this._asked = null;
     if (status !== 'granted' && status !== 'unknown') {
       throw new CalendarAccessError(status);
     }

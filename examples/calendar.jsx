@@ -44,10 +44,13 @@ import {
 const DIM = '$textMuted';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Midnight on the Monday of the week `offset` weeks from this one. */
-function weekStart(offset) {
-  const now = new Date();
-  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+/** Midnight on the Monday of the week `offset` weeks from `today`'s. */
+function weekStart(today, offset) {
+  const monday = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
   monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7) + offset * 7);
   return monday;
 }
@@ -90,9 +93,12 @@ function Day({ date, events }) {
   );
 }
 
-function App() {
+/** `today` is a seam, not a prop an app would pass: the week on screen is
+ *  this week, and a test needs one that does not move (AGENTS.md's sensible
+ *  default with a seam). */
+export default function App({ today = new Date() }) {
   const [offset, setOffset] = useState(0);
-  const from = weekStart(offset);
+  const from = weekStart(today, offset);
   const to = new Date(from.getTime() + 7 * DAY_MS);
 
   const { byDay, calendars, errors, status, backend, openSettings, refresh } =

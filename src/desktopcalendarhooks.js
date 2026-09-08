@@ -174,10 +174,13 @@ export function useDesktopCalendarEvents(options) {
         setError(err instanceof Error ? err : new Error(String(err)));
         setEvents(NO_EVENTS);
         // The user's refusal and the machine's silence are different words:
-        // one has a Settings switch behind it and the other does not.
-        setStatus(
-          err instanceof CalendarAccessError ? 'denied' : 'unavailable',
-        );
+        // one has a Settings switch behind it and the other does not. A
+        // request that came back still undecided is the machine's — TCC
+        // would not even ask — so it is 'unavailable', not a refusal the
+        // user could take back.
+        const refused =
+          err instanceof CalendarAccessError && err.status !== 'prompt';
+        setStatus(refused ? 'denied' : 'unavailable');
       }
     })();
 

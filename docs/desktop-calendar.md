@@ -176,16 +176,35 @@ tell the two apart.
 
 ### Attribution, and what raises the prompt
 
-TCC attributes a prompt to the **responsible process**: a bare `node` is
-attributed to its responsible process (the terminal, an IDE) or to `node`
-itself, and an `osascript` child is attributed to `osascript` — not to the
-app that spawned it, which is why the second rung's grant is shared with
-every other script on that Mac that has asked. A bundled app is attributed to
-itself and must carry `NSCalendarsFullAccessUsageDescription` (and
-`NSCalendarsWriteOnlyAccessUsageDescription` where it asks for the narrower
-grant) or the request never prompts. See [packaging.md](packaging.md).
+**The grant does not belong to `osascript`.** It belongs to whatever owns the
+process tree. Measured on macOS 15.2 by raising the prompt for real through
+the second rung and reading `tccd`'s own record of it
+(`log show --predicate 'subsystem == "com.apple.TCC"'`), the attribution is
+three processes, not one:
 
-Measured on macOS 15.2, with the grant undecided:
+```
+AUTHREQ_ATTRIBUTION: service=kTCCServiceCalendar
+  responsible = the app that owns the tree   (Terminal, iTerm, the IDE — here
+                                              com.anthropic.claude-code)
+  accessing   = com.apple.osascript          (/usr/bin/osascript — the child)
+  requesting  = com.apple.calaccessd         (CalendarDaemon, doing the check)
+```
+
+`responsible` is what TCC keys the decision on and what the dialog names, so:
+
+- The second rung's grant is **shared with everything that terminal or IDE
+  runs** — not with every `osascript` on the Mac, and not with this app
+  alone. Two react-x11 apps started from the same terminal share one answer;
+  the same app launched from Finder asks again.
+- A bare `node` on the bridge rung lands in the same place: attributed to its
+  responsible process, or to `node` itself where it has none.
+- **A bundled app is its own responsible process**, which is the only way to
+  get a prompt that names the app and a grant that is the app's — and it must
+  carry `NSCalendarsFullAccessUsageDescription` (plus
+  `NSCalendarsWriteOnlyAccessUsageDescription` where it asks for the narrower
+  grant) or the request never prompts. See [packaging.md](packaging.md).
+
+Also measured on macOS 15.2, with the grant undecided:
 
 - `EKEventStore.authorizationStatusForEntityType` answers from an unbundled
   process with **no prompt** — a status read is always safe.
@@ -211,13 +230,13 @@ const {
 } = useDesktopCalendarEvents({ from, to, calendars?, watch?, enabled? });
 ```
 
-| `status`        |                                                                          |
-| --------------- | ------------------------------------------------------------------------ |
-| `'idle'`        | `enabled: false` — nothing has been asked, including the grant           |
-| `'loading'`     | a read is in flight; the first one may be showing the system's prompt    |
-| `'ready'`       | `events` is this range                                                   |
-| `'denied'`      | the user's answer. `openSettings()` is the way back                      |
-| `'unavailable'` | the machine's answer: no rung. Hide the feature rather than reporting it |
+| `status`        |                                                                                                                        |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `'idle'`        | `enabled: false` — nothing has been asked, including the grant                                                         |
+| `'loading'`     | a read is in flight; the first one may be showing the system's prompt                                                  |
+| `'ready'`       | `events` is this range                                                                                                 |
+| `'denied'`      | the user's answer. `openSettings()` is the way back                                                                    |
+| `'unavailable'` | the machine's answer: no rung — or a request TCC would not even ask (above). Hide the feature rather than reporting it |
 
 `errors` is none of those: calendars that would not answer while others did.
 One unreachable CalDAV server must not blank a whole month of the user's own
