@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.1](https://github.com/sidorares/react-x11/compare/v2.9.0...v2.9.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **cocoa:** load the native bridge without import.meta.url, which a SEA bundle lacks ([#506](https://github.com/sidorares/react-x11/issues/506)) ([0362b11](https://github.com/sidorares/react-x11/commit/0362b1139d0ee461c0d2cf63ceb862102c8188f0))
+
 ## [2.9.0](https://github.com/sidorares/react-x11/compare/v2.8.3...v2.9.0) (2026-09-07)
 
 
