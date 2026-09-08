@@ -92,9 +92,14 @@ export class NoCalendarServiceError extends Error {
  * `status` is the permission vocabulary (docs/permissions.md): `'denied'`,
  * `'restricted'` (MDM or parental controls), `'write-only'` (macOS 14's
  * partial grant — a real grant to a writer, a refusal to a reader), or
- * `'unknown'`. Separate from {@link NoCalendarServiceError} on purpose:
- * this one is the user's answer, and the user can change it —
- * `openPrivacySettings('calendars')` puts them in front of the switch.
+ * `'prompt'` where the request was made and nothing came back, which is TCC
+ * declining to ask rather than the user declining to allow. `'unknown'` is
+ * not among them: where nothing can say, the read is allowed to try and
+ * whatever it hits is the answer.
+ *
+ * Separate from {@link NoCalendarServiceError} on purpose: this one is
+ * about a decision, and a decision can be changed —
+ * `openPrivacySettings('calendars')` puts the user in front of the switch.
  */
 export class CalendarAccessError extends Error {
   constructor(status, cause) {

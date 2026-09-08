@@ -87,8 +87,10 @@ export declare class NoCalendarServiceError extends Error {
 }
 
 /**
- * The user has not allowed this app to read their calendars — their answer,
- * not the machine's, and one `openPrivacySettings('calendars')` can change.
+ * The app may not read the calendars. `status` says why: `'denied'` and
+ * `'restricted'` and `'write-only'` are decisions, and `'prompt'` is a
+ * request that came back with nothing — TCC declining to ask, which the
+ * hook reports as `'unavailable'` rather than as a refusal.
  */
 export declare class CalendarAccessError extends Error {
   readonly name: 'CalendarAccessError';
