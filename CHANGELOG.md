@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.2](https://github.com/sidorares/react-x11/compare/v2.9.1...v2.9.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **components:** a native control keeps AppKit's height in a taller box ([#511](https://github.com/sidorares/react-x11/issues/511)) ([78d527e](https://github.com/sidorares/react-x11/commit/78d527e3c4aa412d686d92b77120fe43da2e6586))
+
 ## [2.9.1](https://github.com/sidorares/react-x11/compare/v2.9.0...v2.9.1) (2026-09-08)
 
 
