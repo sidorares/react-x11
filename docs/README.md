@@ -141,8 +141,9 @@
 - [security.md](security.md) — the threat model, plainly: X11 has no
   isolation between clients, `$XAUTHORITY` is a password, and what
   react-x11 does and does not defend against.
-- [packaging.md](packaging.md) — four ways to ship an app, with the two
-  esbuild flags that are load-bearing and the one tier that does not work.
+- [packaging.md](packaging.md) — five ways to ship an app, the esbuild flags
+  that are load-bearing, and the two macOS distribution tracks: Developer ID
+  takes node or bun, the App Store's sandbox takes node only.
 - [devtools.md](devtools.md) — React DevTools integration and other
   debugging aids.
 - [debugging.md](debugging.md) — runtime diagnostics: protocol tracing

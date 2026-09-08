@@ -1284,12 +1284,52 @@ built, and nowhere else without three more steps.
 
 - **Signing.** The binary is unsigned. Gatekeeper lets an unsigned app run
   from a build directory, but not one that arrived in a download (the
-  quarantine attribute) — for that it wants a Developer ID signature and
-  notarization: `codesign --deep --force --sign "Developer ID Application: …"`
-  then `notarytool submit`. For a copy handed to a colleague, an ad-hoc
-  signature (`codesign --deep --force --sign - Guestbook.app`) and
+  quarantine attribute) — for that it wants a Developer ID signature with
+  the hardened runtime, then notarization. Sign **inside-out, and not
+  with `--deep`**: Apple DTS says not to use it ("Signing a Mac Product
+  For Distribution" and "Creating distribution-signed code for Mac",
+  forums threads 128166 and 701514) and to sign nested code first, with
+  entitlements on the main executable only. So: the addon in `Resources`,
+  without entitlements, then the app with them:
+
+  ```sh
+  ID="Developer ID Application: NAME (TEAMID)"
+  codesign --force --timestamp --sign "$ID" Guestbook.app/Contents/Resources/calayers.node
+  codesign --force --timestamp --options runtime --entitlements bun.plist \
+    --sign "$ID" Guestbook.app
+  ditto -c -k --keepParent Guestbook.app Guestbook.zip
+  xcrun notarytool submit Guestbook.zip --keychain-profile notary --wait
+  xcrun stapler staple Guestbook.app
+  ```
+
+  `bun.plist` is the five entitlements from Bun's "Code signing on macOS"
+  (`allow-jit`, `allow-unsigned-executable-memory`,
+  `disable-executable-page-protection`, `allow-dyld-environment-variables`,
+  `disable-library-validation`). For a copy handed to a colleague, the
+  same two `codesign` lines with `--sign -` and
   `xattr -dr com.apple.quarantine` on the receiving end are the short
-  path. Sign the addon in `Resources` too; `--deep` finds it.
+  path. The machine this was written on has no signing identity: the
+  ad-hoc steps were run, the Developer ID ones are Apple's documentation —
+  [packaging.md](packaging.md#developer-id-or-the-app-store) keeps the
+  line between the two.
+
+- **The Mac App Store is a different bundle.** The store requires App
+  Sandbox, and a `bun build --compile` binary does not start under it.
+  Measured 2026-09-08 (macOS 15.2, bun 1.4.0): this bundle re-signed with
+  only `com.apple.security.app-sandbox` dies every time — `SIGTRAP` in
+  `_libsecinit_appsandbox` for the bare binary, `SIGABRT` in HIServices'
+  `_RegisterApplication` inside the bundle, after the kernel logs
+  `Sandbox: Guestbook deny(1) mach-lookup com.apple.coreservices.launchservicesd`
+  (oven-sh/bun#15661, open). The same example as a node single executable
+  (`node --build-sea`, node 26) in this bundle's shape — same plist, same
+  `calayers.node` in `Resources` — runs sandboxed, launched by `open`,
+  registered with Launch Services, in its own container, with no sandbox
+  denial logged. So a store build is packaging.md's tier 3 inside its
+  tier 5, signed with "Apple Distribution", packaged with `productbuild`
+  and uploaded with Transporter; the recipe, the two esbuild defines the
+  form example needs today, and what was and was not run are in
+  [packaging.md](packaging.md#developer-id-or-the-app-store). Bun stays
+  fine for Developer ID, which needs no sandbox.
 - **Architecture.** `bun build --compile` targets one CPU and the bridge's
   prebuilds are one per CPU; the script builds for the machine it runs on.
   A universal bundle is two builds and `lipo` — for the executable and for
@@ -1298,7 +1338,8 @@ built, and nowhere else without three more steps.
   addon relative to `process.execPath`, so the bundle can be moved, zipped
   and dragged into `/Applications`. Nothing in it refers to the repo.
 - **Size.** About 70MB, nearly all of it bun's runtime; the example and
-  react-x11 are a few hundred kilobytes of it.
+  react-x11 are a few hundred kilobytes of it. The node SEA of the same
+  example, the store shape, is 142MB.
 
 **The tab bar under bun.** Without a bundle, a window opened by `bun` is in
 the `bun` defaults domain, and once anything has turned on the tab bar for
@@ -1963,6 +2004,9 @@ run against today's renderer with no core changes.
    portability bites in practice.
 6. **Bun on the Cocoa backend** — N-API under Bun is expected to work;
    verify early (Phase 1) since single-file packaging is a stated goal.
+   Answered in two halves: `make-app.sh` is that single file and it runs,
+   and it cannot be the App Store one — a bun binary does not start under
+   App Sandbox (§Distributing the bundle), so that build is node's SEA.
 7. **`@react-x11/components` on Cocoa** — the seven registered elements
    should light up via the raster path untouched; the X-only corners
    (tray-host, embed, media-player embedding, `serverTime`) need
@@ -1984,6 +2028,13 @@ run against today's renderer with no core changes.
   `CADisplayLink` (macOS 14+).
 - libuv — "Embedding libuv in other event loops" (the run-loop drain's
   recipe, pointed at AppKit).
+- Distribution: Apple, "App Sandbox" (the store requirement) and "Porting
+  just-in-time compilers to Apple silicon" (`allow-jit` matters only under
+  the hardened runtime); Apple DTS on the forums, "Signing a Mac Product
+  For Distribution" (thread 128166) and "Creating distribution-signed code
+  for Mac" (701514) — inside-out signing, no `--deep`; Bun, "Code signing
+  on macOS" in the executables guide; Node, `tools/osx-entitlements.plist`;
+  oven-sh/bun#15661 for bun under App Sandbox.
 - WebKit/Gecko form-control rendering via offscreen `NSCell` drawing —
   the native-bezel technique the POC reproduces.
 - `node-calayers` POC — `~/tmp/node-calayers` (to be published; §"the

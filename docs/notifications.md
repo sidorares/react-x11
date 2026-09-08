@@ -123,7 +123,7 @@ reports `available: false`; `notify()` then takes the `osascript` rung, whose
 banners are Script Editor's. To get the real thing, run as a bundle: the
 executable in `Name.app/Contents/MacOS/`, an `Info.plist` that names it and
 carries `CFBundleIdentifier`, and a signature
-(`codesign --force --deep --sign - Name.app` is enough locally). See
+(`codesign --force --sign - Name.app` is enough locally). See
 [packaging.md](packaging.md).
 
 ## `useNotifier()`
