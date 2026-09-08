@@ -582,7 +582,17 @@ implements it over CoreText:
   Both backends therefore agree on where a line may break and on what a
   `<text>` in a flex item is allowed to shrink to
   (`brokenAtEveryOpportunity`, src/cocoa/fonts.js;
-  test/cocoa-text-floor.test.js).
+  test/cocoa-text-floor.test.js). **A paragraph that elides is asked a
+  different question**, and the engine answers it here too: it has somewhere
+  to put the text it cannot show, so its floor is the `…` it would end in
+  rather than its longest word. Eliding needs a width, which the zero offer
+  is not, so the cap and the cut are made in the text — the first
+  `maxLines - 1` broken lines and then the mark, in the face of the run the
+  cut fell in — and CoreText is asked for neither
+  (`cappedToEllipsis`). Left to elide unbounded it keeps the line count and
+  puts everything over it back on the last line, which floored every
+  `textOverflow: 'ellipsis'` label at max-content and made it overflow
+  sideways rather than give way.
 - **Carets/hit/selection**: `CTLineGetStringIndexForPosition`,
   `CTLineGetOffsetForStringIndex`, line origins → `indexAt`,
   `caretPosition`, `rangeBands` — the `<textinput>`/selection surface,

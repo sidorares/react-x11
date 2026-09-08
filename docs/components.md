@@ -644,6 +644,15 @@ Behavior: the menu opens on the **press** — Space and Enter toggle it too;
 Escape, focus loss, or picking closes it; the option list scrolls when taller
 than 220px; the trigger participates in Tab traversal.
 
+**A caption is one line.** The trigger is as wide as the form made it and the
+value in it can be any length, so a caption with no room left ends in a `…`
+rather than wrapping to a second line — which there is no height for: the
+trigger is one row of label, and under a native popup bezel it is AppKit's
+own fixed height, so the wrapped line drew outside the control. The menu is
+sized to its longest option rather than to the trigger, so its rows are
+whole; where the screen is narrower than that longest label and the sheet is
+clamped to it, they end in a `…` too.
+
 The menu is the **same surface a menu is**: an ARGB popup rounded at
 `radiusPopup` with a hairline border where the display composites, and the
 active option is the same pill at `radiusPopupItem`, inset from the sheet's
