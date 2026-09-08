@@ -11,9 +11,26 @@
 // is CommonJS + a .node binary, so `createRequire` is the honest loader.
 import { createRequire } from 'node:module';
 
-const require = createRequire(import.meta.url);
-
 const PACKAGE = '@windowkit/appkit';
+
+// The loader is made on first use, and from the executable when there is
+// no module URL to make it from. A bundle built for Node's single-executable
+// format (docs/packaging.md, tier 3) is CommonJS, and esbuild leaves
+// `import.meta` an empty object in that output — so a module-scope
+// `createRequire(import.meta.url)` threw ERR_INVALID_ARG_VALUE the moment
+// the backend loaded, in every cocoa app shipped as a SEA, before this
+// could say what it was trying to load. `createRequire(process.execPath)`
+// is the loader Node's SEA docs prescribe (the embedded main's `__filename`
+// *is* the executable), and it answers both specs below: an absolute
+// REACT_X11_CALAYERS_PATH resolves from anywhere, and the bare package name
+// resolves through a `node_modules` beside the binary. Made lazily, a
+// loader that cannot be made at all is reported by the error at the bottom
+// rather than by a throw at import.
+let require = null;
+function load(spec) {
+  require ??= createRequire(import.meta.url ?? process.execPath);
+  return require(spec);
+}
 
 let cached = null;
 
@@ -30,7 +47,7 @@ export function loadNative() {
   const path = process.env.REACT_X11_CALAYERS_PATH;
   for (const spec of [path, PACKAGE].filter(Boolean)) {
     try {
-      const mod = require(spec);
+      const mod = load(spec);
       // the package's index.js exports the raw addon as `native`; a direct
       // path to a built checkout may be the addon itself
       cached = mod.native ?? mod;
