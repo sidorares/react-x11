@@ -12,7 +12,9 @@ export type PermissionKind =
   | 'accessibility'
   | 'input-monitoring'
   | 'automation'
-  | 'location';
+  | 'location'
+  | 'calendars'
+  | 'reminders';
 
 /** The panes `openPrivacySettings` reaches: every kind, plus the two with no
  * API because reading the folder is the prompt. */
@@ -23,10 +25,12 @@ export type PrivacyPane =
  * `'granted'`, `'denied'` and `'restricted'` (MDM or parental controls — the
  * user cannot grant it) are the platform's; `'prompt'` is not decided yet, a
  * request would ask; `'unknown'` is "nothing here can say", a fact about the
- * machine rather than the permission.
+ * machine rather than the permission. `'write-only'` is macOS 14's partial
+ * grant for `calendars`/`reminders`: a grant to a writer, a refusal to a
+ * reader, and only the caller knows which it is.
  */
 export type PermissionStatus =
-  'granted' | 'denied' | 'restricted' | 'prompt' | 'unknown';
+  'granted' | 'denied' | 'restricted' | 'prompt' | 'write-only' | 'unknown';
 
 export interface PermissionOptions {
   /** The connection whose backend to ask, when there are several. */
@@ -34,6 +38,10 @@ export interface PermissionOptions {
   /** `automation` only: the bundle id of the app to send Apple Events to.
    * Only a running target has an answer. */
   target?: string;
+  /** `calendars` only: which grant to ask for. `'write-only'` is macOS 14's
+   * narrower prompt — the app may save events it cannot read. `reminders`
+   * has no such grant and refuses one. */
+  access?: 'full' | 'write-only';
 }
 
 /**
@@ -96,5 +104,5 @@ export interface Permission {
 /** A permission for a component: the status as render state. */
 export declare function usePermission(
   kind: PermissionKind,
-  options?: Pick<PermissionOptions, 'target'>,
+  options?: Pick<PermissionOptions, 'target' | 'access'>,
 ): Permission;

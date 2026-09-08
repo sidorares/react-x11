@@ -42,30 +42,33 @@ import {
 export function usePermission(kind, options = {}) {
   const app = useAppOrNull();
   const target = options.target;
+  // `calendars` only: which level to ask for. Part of the effect keys
+  // because asking for a narrower grant is asking a different question.
+  const access = options.access;
   const available = permissionBackend({ app }) !== null;
   const [status, setStatus] = useState('unknown');
   const inflight = useRef(null);
 
   const refresh = useCallback(async () => {
-    const next = await permissionStatus(kind, { app, target });
+    const next = await permissionStatus(kind, { app, target, access });
     setStatus(next);
     return next;
-  }, [kind, app, target]);
+  }, [kind, app, target, access]);
 
   useEffect(() => {
     let alive = true;
-    permissionStatus(kind, { app, target }).then(
+    permissionStatus(kind, { app, target, access }).then(
       (next) => alive && setStatus(next),
       () => alive && setStatus('unknown'),
     );
     return () => {
       alive = false;
     };
-  }, [kind, app, target]);
+  }, [kind, app, target, access]);
 
   const request = useCallback(() => {
     if (inflight.current) return inflight.current;
-    const run = requestPermission(kind, { app, target })
+    const run = requestPermission(kind, { app, target, access })
       .then((next) => {
         setStatus(next);
         return next;
@@ -75,7 +78,7 @@ export function usePermission(kind, options = {}) {
       });
     inflight.current = run;
     return run;
-  }, [kind, app, target]);
+  }, [kind, app, target, access]);
 
   const openSettings = useCallback(
     () => openPrivacySettings(kind, { app }),

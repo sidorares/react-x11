@@ -27,6 +27,15 @@ export {
   notify,
 } from './notifications.js';
 export { useNotifier } from './notificationhooks.js';
+export {
+  CalendarAccessError,
+  NoCalendarServiceError,
+  byDay,
+  calendarBackend,
+  dayKey,
+  desktopCalendar,
+} from './desktopcalendar.js';
+export { useDesktopCalendarEvents } from './desktopcalendarhooks.js';
 export { parseUriList } from './transfer.js';
 export { useApp, useClipboard, useSupports } from './appcontext.js';
 export { BusUnavailableError, closeBus, sessionBus, systemBus } from './bus.js';

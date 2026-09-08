@@ -25,6 +25,7 @@ import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
 import { CocoaDockMenu } from './dock.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaStatusItem } from './statusitem.js';
+import { CocoaCalendars } from './calendar.js';
 import { CocoaNotifications } from './notifications.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPermissions } from './permissions.js';
@@ -175,6 +176,17 @@ export class CocoaApp {
       typeof native.postNotification === 'function' &&
       typeof native.notificationSettings === 'function'
         ? new CocoaNotifications(this)
+        : null;
+
+    // EventKit (src/cocoa/calendar.js). Present exactly when the bridge has
+    // it (>= 0.8), and its presence is the top rung of
+    // src/desktopcalendar.js's ladder for this app — an older bridge leaves
+    // the ladder to find `osascript` instead, which answers the same
+    // questions out of the same framework.
+    this.calendars =
+      typeof native.calendars === 'function' &&
+      typeof native.eventsBetween === 'function'
+        ? new CocoaCalendars(this)
         : null;
 
     // The GL policy, glbackend.js's shape. No GLX exists here, so the
@@ -766,6 +778,12 @@ export class CocoaApp {
       case 'notification-action':
       case 'notification-dismissed':
         this.notifications?.route(ev);
+        return this._afterInput();
+      case 'calendar-store-changed':
+        // EventKit's own notification, which names nothing that changed. A
+        // watcher's answer is to query again, and that query's result is a
+        // render, so the frame goes out the way an input's does.
+        this.calendars?.route(ev);
         return this._afterInput();
       case 'animation-end':
         // the presenter that added the animation registered for its id; an
