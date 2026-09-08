@@ -102,6 +102,47 @@ export function nativeTitleStyle(controlSize = 'regular') {
 }
 
 /**
+ * The **footprint** a native control sits in: the box the caller's style
+ * sizes, with the control — bezel, title and press wash, one unit at
+ * AppKit's own metrics — centred inside it.
+ *
+ * Two boxes rather than one, because the title is *placed* and not centred:
+ * it rides `TITLE_BASELINE` above the bezel body's bottom edge, and that is
+ * only where the cell puts it while the box is exactly `bezelNatural` tall.
+ * The caller's style is applied last and flex stretches a box regardless, so
+ * it was not always: `style={{ height: 44 }}`, a `height: '100%'` in a taller
+ * parent and a bare `flexGrow: 1` each made the box taller, and the two
+ * halves — the bezel absolutely filling it, the title glued to its bottom —
+ * came apart, the label landing below the control it names (issue #510). The
+ * drawn path never had this, because it centres its label: a stretched drawn
+ * control is merely roomy, where a stretched native one was broken.
+ *
+ * So the height a caller can move belongs to a box the control sits in, and
+ * the control keeps AppKit's. The default here is exactly today's box — an
+ * untouched control lays out as it always did, and the explicit height still
+ * resists a row's align-stretch — and the caller's style, applied after it,
+ * moves the footprint alone. The control stretches across it (align-stretch,
+ * the default), so a footprint given a width is a bezel that wide.
+ *
+ * The control, not the footprint, stays the *control*: the role, the
+ * handlers, the focus ring and the ref go on it, so a press in the slack
+ * above a 22pt popup in a 46pt hole does nothing at all — as it does in
+ * AppKit — rather than firing a button with no visible answer to the press.
+ */
+export function nativeFootprintStyle(nat) {
+  return { height: nat.height, justifyContent: 'center' };
+}
+
+/**
+ * The rest of what a native control's own box says about its size: nothing
+ * shrinks it. A squashed bezel is as wrong as a stretched one, and a
+ * footprint shorter than the control is a caller asking for something the
+ * cell's metrics cannot answer — so it overflows, visibly, rather than
+ * quietly drawing a title where the bezel is not.
+ */
+export const NATIVE_BAND = Object.freeze({ flexShrink: 0 });
+
+/**
  * NSMenu's geometry, for the menu a native popup bezel opens — read off
  * `NSMenu.size` on macOS 15 rather than off a screenshot, so it is the
  * menu's own arithmetic: a row is 22pt, the sheet pads 5pt top and bottom,

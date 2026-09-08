@@ -752,6 +752,15 @@ Wiring, shaped as theme policy rather than per-widget forks:
   native variant renders a bezel-image node sized by the cell's natural
   metrics. Hover/press/focus continue to drive it — pressed bezels are
   re-keyed images, and the press state still lands on the press frame.
+- A native control is **two boxes**: the footprint the caller's `style`
+  sizes, and the control itself — bezel, title and press wash — at AppKit's
+  metrics, centred in it. One box could not be both, because a cell's title
+  is _placed_ against the bezel's bottom edge rather than centred in the
+  box, and a `height`, a `flexGrow` or a parent's align-stretch moved the
+  box without moving the bezel the system draws at one size: the label
+  ended up below the control it names (#510). The role, the handlers, the
+  focus ring and the ref stay on the control, so the slack around it is
+  slack — a press there does nothing, as it does in AppKit.
 - The palette gains a macOS system theme whose tokens read semantic
   `NSColor`s (accent, text, separators) so _drawn_ content — cards,
   tables, custom widgets — sits harmoniously beside native bezels, and

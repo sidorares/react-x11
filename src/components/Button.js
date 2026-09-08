@@ -7,10 +7,12 @@ import { useAppOrNull } from '../appcontext.js';
 import {
   ABS_FILL,
   Bezel,
+  NATIVE_BAND,
   NATIVE_RING,
   TITLE_BASELINE,
   bezelNatural,
   bezelShadow,
+  nativeFootprintStyle,
   nativeTitleStyle,
   pressWash,
   useNativeControls,
@@ -94,64 +96,73 @@ export function Button({
       'box',
       {
         theme,
-        role: 'button',
-        ...props,
-        ...boxProps,
-        style: [
-          controlStyle,
-          {
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: small ? 6 : 8,
-            // AppKit's metrics, not the palette's: a native bezel is
-            // designed at its own height, and stretching it is what this
-            // mode exists to avoid. Width still follows the label.
-            height: nat.height,
-            paddingLeft: small ? 10 : 14,
-            paddingRight: small ? 10 : 14,
-            // The natural box is the bezel's footprint, shadow included;
-            // the body is what the title is placed against — and placed,
-            // not centred (`TITLE_BASELINE`). A label centred by its
-            // capitals sat 1pt low beside a native button.
-            paddingTop: shadow.top,
-            paddingBottom: shadow.bottom + TITLE_BASELINE[controlSize],
-            // The keyboard ring is the renderer's, on this box — shaped by
-            // the bezel's corners and hugging it, as AppKit's is
-            // (`NATIVE_RING`), rather than the palette's offset rectangle.
-            borderRadius: small ? 5 : 6,
-            ':focus-visible': {
-              outlineWidth: NATIVE_RING.width,
-              outlineOffset: NATIVE_RING.offset,
-            },
-            color: disabled
-              ? theme.textMuted
-              : primary
-                ? theme.accentText
-                : theme.text,
-          },
-          style,
-        ],
+        // The footprint the caller's style sizes; the button below keeps
+        // AppKit's height inside it, centred (`nativeFootprintStyle`).
+        style: [nativeFootprintStyle(nat), style],
       },
-      h(Bezel, {
-        kind: 'push',
-        controlSize,
-        enabled: !disabled,
-        // the Return-key accent fill is AppKit's own "default button"
-        isDefault: primary && !disabled,
-        style: ABS_FILL,
-      }),
-      labelContent(children ?? label, nativeTitleStyle(controlSize)),
-      // The press answer. Last child on purpose: `:active` marks the
-      // pressed node and its ancestors, and the topmost child is what the
-      // press lands on. No hover tint — AppKit buttons have none.
-      h('box', {
-        style: [
-          ABS_FILL,
-          { borderRadius: small ? 5 : 6 },
-          !disabled && { ':active': { backgroundColor: pressWash(theme) } },
-        ],
-      }),
+      h(
+        'box',
+        {
+          theme,
+          role: 'button',
+          ...props,
+          ...boxProps,
+          style: [
+            controlStyle,
+            NATIVE_BAND,
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: small ? 6 : 8,
+              // AppKit's metrics, not the palette's: a native bezel is
+              // designed at its own height, and stretching it is what this
+              // mode exists to avoid. Width still follows the label.
+              height: nat.height,
+              paddingLeft: small ? 10 : 14,
+              paddingRight: small ? 10 : 14,
+              // The natural box is the bezel's footprint, shadow included;
+              // the body is what the title is placed against — and placed,
+              // not centred (`TITLE_BASELINE`). A label centred by its
+              // capitals sat 1pt low beside a native button.
+              paddingTop: shadow.top,
+              paddingBottom: shadow.bottom + TITLE_BASELINE[controlSize],
+              // The keyboard ring is the renderer's, on this box — shaped by
+              // the bezel's corners and hugging it, as AppKit's is
+              // (`NATIVE_RING`), rather than the palette's offset rectangle.
+              borderRadius: small ? 5 : 6,
+              ':focus-visible': {
+                outlineWidth: NATIVE_RING.width,
+                outlineOffset: NATIVE_RING.offset,
+              },
+              color: disabled
+                ? theme.textMuted
+                : primary
+                  ? theme.accentText
+                  : theme.text,
+            },
+          ],
+        },
+        h(Bezel, {
+          kind: 'push',
+          controlSize,
+          enabled: !disabled,
+          // the Return-key accent fill is AppKit's own "default button"
+          isDefault: primary && !disabled,
+          style: ABS_FILL,
+        }),
+        labelContent(children ?? label, nativeTitleStyle(controlSize)),
+        // The press answer. Last child on purpose: `:active` marks the
+        // pressed node and its ancestors, and the topmost child is what the
+        // press lands on. No hover tint — AppKit buttons have none.
+        h('box', {
+          style: [
+            ABS_FILL,
+            { borderRadius: small ? 5 : 6 },
+            !disabled && { ':active': { backgroundColor: pressWash(theme) } },
+          ],
+        }),
+      ),
     );
   }
   const background = !solid

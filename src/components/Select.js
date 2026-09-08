@@ -9,11 +9,13 @@ import { Icon } from './Icon.js';
 import {
   ABS_FILL,
   Bezel,
+  NATIVE_BAND,
   NATIVE_MENU,
   NATIVE_RING,
   TITLE_BASELINE,
   bezelNatural,
   bezelShadow,
+  nativeFootprintStyle,
   nativeTitleStyle,
   pressWash,
   useNativeControls,
@@ -438,7 +440,11 @@ export function Select({
     if (open) scrollRef.current?.scrollIntoView(activeRef.current);
   }, [open, activeIndex]);
 
-  return h(
+  // AppKit's own popup metrics, which the trigger below is laid out at —
+  // and only the trigger: the footprint it sits in is the caller's to size.
+  const nat = nativeControls ? bezelNatural(app, 'popup') : null;
+
+  const trigger = h(
     'box',
     {
       theme,
@@ -465,7 +471,8 @@ export function Select({
               flexDirection: 'row',
               alignItems: 'center',
               gap: 8,
-              height: bezelNatural(app, 'popup').height,
+              ...NATIVE_BAND,
+              height: nat.height,
               paddingLeft: TRIGGER_PAD_LEFT,
               paddingRight: 26,
               // The title sits where NSPopUpButtonCell puts it — on the
@@ -515,7 +522,10 @@ export function Select({
             ':hover': { backgroundColor: theme.surfaceHover },
             ':active': { backgroundColor: theme.surfaceActive },
           },
-        style,
+        // The caller's style, on the trigger where the trigger is the whole
+        // control. Under a native bezel it sizes the footprint below instead
+        // and the trigger keeps AppKit's height (`nativeFootprintStyle`).
+        !nativeControls && style,
       ],
     },
     // `pressed` while the menu is down: AppKit's popup answers being open
@@ -635,4 +645,11 @@ export function Select({
         ),
       ),
   );
+
+  // The bezel and its title are one unit at NSPopUpButton's height; the box
+  // around them is what a `height`, a `flexGrow` or a parent's align-stretch
+  // is free to make taller, with the control centred in it (issue #510).
+  return nativeControls
+    ? h('box', { theme, style: [nativeFootprintStyle(nat), style] }, trigger)
+    : trigger;
 }
