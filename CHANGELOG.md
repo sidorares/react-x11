@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.1](https://github.com/sidorares/react-x11/compare/v2.10.0...v2.10.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **select:** a caption is one line, elided rather than wrapped ([#512](https://github.com/sidorares/react-x11/issues/512)) ([d382232](https://github.com/sidorares/react-x11/commit/d382232cd5c7e1677e8111ec258864be3d662680))
+
 ## [2.9.2](https://github.com/sidorares/react-x11/compare/v2.9.1...v2.9.2) (2026-09-08)
 
 
