@@ -43,8 +43,10 @@ import { PERMISSION_KINDS, privacySettingsUrl } from '../src/permissions.js';
 import { setCompositingForTests } from '../src/compositing.js';
 import { setScaleForTests } from '../src/scale.js';
 import { setScreensForTests } from '../src/screens.js';
+import { _resetBusState } from '../src/bus.js';
+import { _resetServiceCache } from '../src/portal.js';
 import { fakeEds, NOTIFY_INITIAL } from './helpers/fake-eds.js';
-import { transportAvailable, withBus } from './helpers/with-bus.js';
+import { transportAvailable, withBus, withNoBus } from './helpers/with-bus.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 2));
@@ -805,11 +807,15 @@ describe('the osascript rung', () => {
       setImmediate(() => child.kill());
       return child;
     });
-    assert.equal(await desktopCalendar({}), null);
-    await assert.rejects(
-      () => desktopCalendar({ required: true }),
-      NoCalendarServiceError,
-    );
+    // The fall-through reaches the EDS rung, which dials the session bus —
+    // so this runs inside the helper that puts that back afterwards.
+    await withNoBus(async () => {
+      assert.equal(await desktopCalendar({}), null);
+      await assert.rejects(
+        () => desktopCalendar({ required: true }),
+        NoCalendarServiceError,
+      );
+    });
   });
 });
 
@@ -851,6 +857,12 @@ const UTC_AUGUST = [
 /** A broker, a fake EDS on it, and a handle pinned to that rung. */
 async function withEds(options, fn) {
   await withBus(async (address) => {
+    // The shared connection is process-wide and `withBus` points the
+    // environment at the broker without touching it, so anything dialled
+    // earlier is still what `sessionBus()` would hand back. Dropping it here
+    // is what makes these tests independent of what ran before them.
+    _resetBusState();
+    _resetServiceCache();
     const eds = await fakeEds(address, options);
     await asLinux(async () => {
       const cal = await desktopCalendar({ backend: 'eds' });
@@ -1017,25 +1029,23 @@ describe('the ladder', () => {
   });
 
   test('a machine with nothing answers null, and only asks to throw', async () => {
-    await asLinux(async () => {
+    // `withNoBus` rather than a hand-rolled env swap: dialling a bus that is
+    // not there leaves the shared connection in a state the *next* test
+    // inherits, and putting the environment back does not undo that. It is
+    // what the helper's teardown exists for, and CI is where a suite that
+    // forgot it fails (the EDS rung, first test, nothing on the bus).
+    await withNoBus(async () => {
       // no bridge in the tree, not a Mac, and no EDS on the bus
-      const saved = process.env.DBUS_SESSION_BUS_ADDRESS;
-      process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/nonexistent/no-bus';
-      try {
-        assert.equal(await calendarBackend(), null);
-        assert.equal(await desktopCalendar(), null);
-        await assert.rejects(
-          () => desktopCalendar({ required: true }),
-          (err) => {
-            assert.ok(err instanceof NoCalendarServiceError);
-            assert.match(err.message, /calendarBackend/);
-            return true;
-          },
-        );
-      } finally {
-        if (saved === undefined) delete process.env.DBUS_SESSION_BUS_ADDRESS;
-        else process.env.DBUS_SESSION_BUS_ADDRESS = saved;
-      }
+      assert.equal(await calendarBackend(), null);
+      assert.equal(await desktopCalendar(), null);
+      await assert.rejects(
+        () => desktopCalendar({ required: true }),
+        (err) => {
+          assert.ok(err instanceof NoCalendarServiceError);
+          assert.match(err.message, /calendarBackend/);
+          return true;
+        },
+      );
     });
   });
 });
@@ -1106,21 +1116,14 @@ describe('useDesktopCalendarEvents', () => {
     assert.ok(denied().error instanceof CalendarAccessError);
     assert.equal(denied().backend, 'cocoa', 'there is a rung; it said no');
 
-    await asLinux(async () => {
-      const saved = process.env.DBUS_SESSION_BUS_ADDRESS;
-      process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/nonexistent/no-bus';
-      try {
-        const none = await mount(appOver(fakeNative({ hasCalendars: false })), {
-          from: AUGUST[0],
-          to: AUGUST[1],
-        });
-        await until(() => none().status === 'unavailable', 'no rung at all');
-        assert.equal(none().backend, null);
-        assert.deepEqual(none().events, []);
-      } finally {
-        if (saved === undefined) delete process.env.DBUS_SESSION_BUS_ADDRESS;
-        else process.env.DBUS_SESSION_BUS_ADDRESS = saved;
-      }
+    await withNoBus(async () => {
+      const none = await mount(appOver(fakeNative({ hasCalendars: false })), {
+        from: AUGUST[0],
+        to: AUGUST[1],
+      });
+      await until(() => none().status === 'unavailable', 'no rung at all');
+      assert.equal(none().backend, null);
+      assert.deepEqual(none().events, []);
     });
   });
 

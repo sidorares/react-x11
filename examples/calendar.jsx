@@ -104,17 +104,22 @@ export default function App({ today = new Date() }) {
   const { byDay, calendars, errors, status, backend, openSettings, refresh } =
     useDesktopCalendarEvents({ from, to, watch: true });
 
+  // Keyed on the timestamp, not the `Date`: `from` is a new object every
+  // render, and a memo keyed on it would rebuild the week every paint —
+  // the same mistake the hook's own `from`/`to` are shaped to survive.
+  const fromMs = from.getTime();
   const days = useMemo(
     () =>
       Array.from({ length: 7 }, (_, i) => {
+        const at = new Date(fromMs);
         const date = new Date(
-          from.getFullYear(),
-          from.getMonth(),
-          from.getDate() + i,
+          at.getFullYear(),
+          at.getMonth(),
+          at.getDate() + i,
         );
         return { date, events: byDay.get(dayKey(date)) ?? [] };
       }),
-    [byDay, from],
+    [byDay, fromMs],
   );
 
   return (
