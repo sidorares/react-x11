@@ -408,6 +408,17 @@ their own so an override wins by position, and forward any remaining props
 to the host box. `Radio` is the exception: it takes only the props listed
 below, and the group around it carries the layout.
 
+Under a **native bezel** — the Cocoa backend
+([macos.md](macos.md#native-controls)) — `style` sizes the box the control
+_sits in_ rather than the control itself. A `<Button>` or a `<Select>` keeps
+AppKit's own height and is centred in whatever footprint the layout gives it,
+so `style={{ height: 44 }}`, a `height: '100%'` in a taller parent or a
+`flexGrow: 1` leave a 22pt control in a 44pt slot instead of stretching a
+bezel the system draws at one size. The slack around it is not part of the
+control: a press up there does nothing, as it does in AppKit. Drawn controls
+stretch as they always have — their chrome is drawn to the box and their
+label is centred in it, so a stretched drawn control is merely roomy.
+
 ```jsx
 import { Button, Checkbox, RadioGroup, Radio, Switch, ProgressBar } from 'react-x11';
 
