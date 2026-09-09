@@ -111,6 +111,14 @@ export function createStorage(persist) {
  */
 export async function prepare() {
   try {
+    // Each hook's source location is read off a stack captured at the hook
+    // dispatch, and V8 keeps ten frames — fewer than a loader leaves
+    // between the hook and its call site. Under `tsx` (which every
+    // `npm run examples:*` uses) that costs about ten frames, so the call
+    // site falls off the end, `hookSource` comes back null, and DevTools
+    // shows the element's hooks with no names and no source lines.
+    // Upwards only: an app that asked for more keeps it.
+    if (Error.stackTraceLimit < 50) Error.stackTraceLimit = 50;
     // react-devtools-core's backend bundle expects browser-ish globals
     global.self ??= global;
     global.window ??= global;

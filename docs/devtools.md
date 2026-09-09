@@ -198,6 +198,25 @@ Notes for maintainers:
 - `localStorage`/`sessionStorage` are **defined** on the global rather than
   assigned: reading `global.localStorage` first is what makes node print
   its `--localstorage-file` warning on every DevTools run.
+- **Hook names and sources need a deeper stack than V8 keeps.** React reads
+  each hook's location — and the custom-hook nesting the names come from —
+  off a stack captured at the hook dispatch, and `Error.stackTraceLimit` is
+  10 by default. A loader leaves frames of its own between the hook and its
+  call site (`tsx`, which every `npm run examples:*` goes through, costs
+  about ten), so the identifying frames fall off the end: `hookSource`
+  comes back `{fileName: null, lineNumber: null, …}`, the frontend logs
+  "Hook source code location not found", and the element shows its hooks
+  with no names and no source lines (#514). `prepare()` raises the limit to
+  50 when the bridge is enabled, and only upwards, so an app that asked for
+  more keeps it. `test/devtools-hooks.test.js` squeezes the budget and
+  asserts the names and sources still come back over the bridge.
+- **Selecting a component with hooks can blank the DevTools window.** That
+  is the standalone app's own renderer process aborting, upstream of
+  anything the host sends: it happens with every hook source complete, and
+  under runtimes with no loader at all. Turning ⚙ → Components → "Always
+  parse hook names for the selected element" off makes it intermittent
+  rather than reliable; restarting `npx react-devtools` reconnects to the
+  app, which is unaffected.
 - `test/devtools.test.js` drives the real backend over a socket for all of
   the above; the fake-agent tests in `test/smoke.test.js` prove the drawing
   but not that the backend still asks for it.
