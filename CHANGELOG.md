@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.2](https://github.com/sidorares/react-x11/compare/v2.10.1...v2.10.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* **devtools:** raise the frame budget hook sources are read off ([#515](https://github.com/sidorares/react-x11/issues/515)) ([e80670d](https://github.com/sidorares/react-x11/commit/e80670d09b1b4cfeb57c3b7ecb054953ffeea996)), closes [#514](https://github.com/sidorares/react-x11/issues/514)
+
 ## [2.10.1](https://github.com/sidorares/react-x11/compare/v2.10.0...v2.10.1) (2026-09-08)
 
 
