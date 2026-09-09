@@ -16,52 +16,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { WebSocketServer } from 'ws';
 import React from 'react';
 import { createMockApp } from './helpers/mock-app.js';
+import { fakeDevTools, unrefFurtherTimers } from './helpers/fake-devtools.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** The DevTools frontend, near enough: a socket that records what the app
- * says and can say things back. The bridge batches, so everything here
- * waits for an event rather than assuming it has arrived. */
-async function fakeDevTools() {
-  const server = new WebSocketServer({ port: 0 });
-  await new Promise((resolve) => server.on('listening', resolve));
-  const received = [];
-  let socket = null;
-  const connected = new Promise((resolve) => {
-    server.on('connection', (ws) => {
-      socket = ws;
-      ws.on('message', (data) => received.push(JSON.parse(data.toString())));
-      resolve(ws);
-    });
-  });
-  return {
-    port: server.address().port,
-    connected,
-    received,
-    send: (event, payload) => socket.send(JSON.stringify({ event, payload })),
-    async waitFor(event, timeout = 5000) {
-      const deadline = Date.now() + timeout;
-      for (;;) {
-        const hit = received.find((m) => m.event === event);
-        if (hit) return hit;
-        if (Date.now() > deadline) {
-          throw new Error(
-            `timed out waiting for "${event}"; saw ` +
-              [...new Set(received.map((m) => m.event))].join(', '),
-          );
-        }
-        await sleep(20);
-      }
-    },
-    async close() {
-      socket?.close();
-      await new Promise((resolve) => server.close(resolve));
-    },
-  };
-}
 
 test('the DevTools backend drives the overlays, the picker and the style editor', async (t) => {
   const devtools = await fakeDevTools();
@@ -74,16 +33,7 @@ test('the DevTools backend drives the overlays, the picker and the style editor'
     delete process.env.REACT_X11_DEVTOOLS;
     delete process.env.REACT_X11_DEVTOOLS_PORT;
     delete process.env.REACT_X11_DEVTOOLS_STATE;
-    // A backend whose socket closes reconnects forever (handleClose ->
-    // scheduleRetry), which is what an app wants and what would keep this
-    // process alive after the last assertion. Every timer from here on is
-    // unref'd, so the retries continue without being a reason to stay up.
-    const realSetTimeout = global.setTimeout;
-    global.setTimeout = (fn, ms, ...rest) => {
-      const timer = realSetTimeout(fn, ms, ...rest);
-      timer.unref?.();
-      return timer;
-    };
+    unrefFurtherTimers();
     await devtools.close();
     await fs.rm(stateDir, { recursive: true, force: true });
   });
