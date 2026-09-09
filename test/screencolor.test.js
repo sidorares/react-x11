@@ -226,16 +226,64 @@ describe('the portal rung', { ...needsBroker }, () => {
   });
 });
 
+/** An app the ladder can see the rung through: an `X` that answers the three
+ *  requests the rung is built out of. Reachability, not validity — whether
+ *  the server behind it grabs is the pick's business, not the probe's. */
+const connectable = () => ({
+  X: {
+    AllocID() {},
+    GrabPointer() {},
+    GetImage() {},
+  },
+});
+
+/** The other shape an app can have: the cocoa backend's `X` stub, near
+ *  enough — an escape hatch for the modules that keep one, and not one
+ *  request of the rung (src/cocoa/app.js). The headless mock's `X` is this
+ *  same stub, which is what `backend: 'mock'` renders the hook against. */
+const cocoaShaped = () => ({
+  X: {
+    display: { screen: [{ root: 1 }] },
+    keycode2keysyms: {},
+    InternAtom(onlyIfExists, name, cb) {
+      cb(null, 1000);
+    },
+    ConfigureWindow() {},
+    SendClientMessage() {},
+    on() {},
+    emit() {},
+  },
+});
+
 describe('screenColorBackend', () => {
   test('no bus and no connection is null; a connection is the x11 rung', async () => {
     await withNoBus(async () => {
       assert.equal(await screenColorBackend(), null);
-      // Reachability, not validity: any connection object makes the fallback
-      // answerable. The pick itself is what exercises it.
-      assert.equal(await screenColorBackend({ app: { X: {} } }), 'x11');
+      assert.equal(await screenColorBackend({ app: connectable() }), 'x11');
       assert.equal(
-        await screenColorBackend({ app: { X: {} }, backend: 'portal' }),
+        await screenColorBackend({ app: connectable(), backend: 'portal' }),
         null,
+      );
+    });
+  });
+
+  test('an app whose X cannot grab is no rung at all — the cocoa backend', async () => {
+    await withNoBus(async () => {
+      // This answered 'x11' until the gate below it became the rung's own
+      // requests: the eyedropper button appeared on macOS and its first
+      // press threw `X.AllocID is not a function` out of the pick.
+      const app = cocoaShaped();
+      assert.equal(await screenColorBackend({ app }), null);
+      assert.equal(await screenColorBackend({ app, backend: 'x11' }), null);
+      await assert.rejects(
+        () => pickScreenColor({ app }),
+        (err) => {
+          // Typed, so a caller hides its button instead of crashing — the
+          // NoFileDialogError rule, which is the whole point of the floor.
+          assert.ok(err instanceof NoScreenColorError);
+          assert.match(err.message, /not render through an X connection/);
+          return true;
+        },
       );
     });
   });
@@ -250,7 +298,7 @@ describe('screenColorBackend', () => {
           assert.equal(await screenColorBackend(), 'portal');
           // Forcing the rung skips the probe entirely.
           assert.equal(
-            await screenColorBackend({ app: { X: {} }, backend: 'x11' }),
+            await screenColorBackend({ app: connectable(), backend: 'x11' }),
             'x11',
           );
         } finally {
@@ -267,7 +315,7 @@ describe('screenColorBackend', () => {
       await withBus(async (address) => {
         const portal = await fakePortal(address); // FileChooser only
         try {
-          assert.equal(await screenColorBackend({ app: { X: {} } }), 'x11');
+          assert.equal(await screenColorBackend({ app: connectable() }), 'x11');
           assert.equal(await screenColorBackend(), null);
         } finally {
           await portal.stop();
@@ -565,5 +613,35 @@ describe('useEyedropper', () => {
       await new Promise((r) => setTimeout(r, 30));
     });
     assert.equal(eyedropper.picking, false);
+  });
+
+  test('a tree whose connection cannot grab is not supported', async () => {
+    // The mock app's `X` is the cocoa backend's stub (src/testing/mock-app.js
+    // and src/cocoa/app.js are deliberately the same shape), so this is the
+    // macOS answer without a Mac: the ladder runs out, `supported` stays
+    // false, and a picker leaves its eyedropper button undrawn rather than
+    // drawing one that throws.
+    let eyedropper;
+    function Probe() {
+      eyedropper = useEyedropper();
+      return React.createElement('box', { style: { flex: 1 } });
+    }
+    await withNoBus(async () => {
+      await renderX11(
+        React.createElement(
+          'window',
+          { width: 200, height: 120 },
+          React.createElement(Probe),
+        ),
+        { backend: 'mock', wrap: false },
+      );
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 30));
+      });
+    });
+    assert.equal(eyedropper.supported, false);
+    // And the pick a test or a keyboard shortcut can still reach rejects
+    // typed rather than throwing a TypeError from inside the promise.
+    await assert.rejects(() => eyedropper.pick(), NoScreenColorError);
   });
 });

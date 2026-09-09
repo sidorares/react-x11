@@ -20,6 +20,16 @@
 // component wants (`picking`, `supported`, the owner window) over the same
 // two.
 //
+// Which means the ladder really can run out, and where it does the floor has
+// to be the typed rejection rather than a crash. The cocoa backend is that
+// place today: its `app.X` is a stub with just enough on it for the modules
+// that keep an X escape hatch to no-op (src/cocoa/app.js), so an app object
+// is not by itself a connection that can grab a pointer and read a root
+// window. Rung 2 is gated on the requests it is built out of, not on there
+// being an app — the feature-detection rule `requireExtension()` already
+// follows — and macOS's own sampler (`NSColorSampler`) is a bridge gap, not
+// a rung this file can reach (docs/macos.md).
+//
 // ## The grab is the dangerous part
 //
 // An application that leaks a pointer grab leaves a desktop that has stopped
@@ -539,9 +549,59 @@ function appOf(target) {
   return target.app ?? target.window?.app ?? target.root?.window?.app ?? null;
 }
 
-/** The connection a pick would use, or null. */
+/** The app a pick would use, or null. Not yet: a *connection*. */
 function appFor(opts) {
   return opts.app ?? appOf(opts.parentWindow);
+}
+
+/**
+ * Can this app run the X11 rung — is its `X` a connection at all?
+ *
+ * The cocoa backend hands the renderer an app whose `X` is a stub
+ * (src/cocoa/app.js): `InternAtom` and `on` so the modules with an X escape
+ * hatch no-op cleanly, and nothing else. Reaching the rung through it used
+ * to throw `X.AllocID is not a function` out of the promise — a crash where
+ * the ladder's whole contract is a typed "not here", and one an app cannot
+ * hide a button on.
+ *
+ * So the gate is the three requests the rung is actually built out of, asked
+ * of the object rather than of `process.platform` or the backend's name:
+ * `requireExtension()`'s rule, and the one that keeps the next backend from
+ * landing here by default too.
+ */
+function canGrabOn(app) {
+  const X = app?.X;
+  return (
+    typeof X?.AllocID === 'function' &&
+    typeof X?.GrabPointer === 'function' &&
+    typeof X?.GetImage === 'function'
+  );
+}
+
+/**
+ * Why the X11 rung is out of reach, for the typed rejection — an app that
+ * cannot grab and no app at all are different mistakes with different
+ * fixes, and only one of them is the caller's.
+ */
+function noX11Reason(app, backend) {
+  if (app) {
+    return (
+      'this tree does not render through an X connection — a cocoa-backend ' +
+      'app, for instance, whose `X` cannot grab the pointer or read a root ' +
+      'window. macOS has a system sampler of its own (NSColorSampler) but ' +
+      'the bridge does not expose it yet, so there is no rung here: ' +
+      '`useEyedropper().supported` is false, which is the signal to leave ' +
+      'the eyedropper button undrawn (docs/macos.md).'
+    );
+  }
+  if (backend === 'x11') {
+    return (
+      "backend: 'x11' needs a connection to grab on. Pass `app` (from " +
+      'createRoot() or useApp()), or a `parentWindow` that points at a ' +
+      'mounted window.'
+    );
+  }
+  return undefined;
 }
 
 /**
@@ -551,7 +611,8 @@ function appFor(opts) {
  * the interface's `version` property, because `hasService()` cannot see
  * which interfaces a portal's backends actually provide (XFCE's provides no
  * Screenshot at all). `'x11'` needs a connection to answer with, so pass
- * `app` (or a `parentWindow` that resolves to one); without either the
+ * `app` (or a `parentWindow` that resolves to one) — and one that can
+ * actually grab, which a cocoa-backend app cannot. Without either the
  * fallback is unreachable and the honest answer is `null`.
  *
  * Acquires a bus reference and releases it, so it is cheap but not free —
@@ -572,7 +633,7 @@ export async function screenColorBackend(options = {}) {
     }
     if (backend === 'portal') return null;
   }
-  return appFor(options) ? 'x11' : null;
+  return canGrabOn(appFor(options)) ? 'x11' : null;
 }
 
 async function runPick(opts) {
@@ -598,14 +659,8 @@ async function runPick(opts) {
   }
 
   const app = appFor(opts);
-  if (app) return x11Pick(opts, app);
-  throw new NoScreenColorError(
-    opts.backend === 'x11'
-      ? "backend: 'x11' needs a connection to grab on. Pass `app` (from " +
-          'createRoot() or useApp()), or a `parentWindow` that points at a ' +
-          'mounted window.'
-      : undefined,
-  );
+  if (canGrabOn(app)) return x11Pick(opts, app);
+  throw new NoScreenColorError(noX11Reason(app, opts.backend));
 }
 
 /**

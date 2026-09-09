@@ -33,8 +33,10 @@ import { useTopLevelWindow } from './windowid.js';
  *
  * `pick()` resolves to `'#rrggbb'`, or `null` when the user cancelled. It
  * never rejects for lack of a backend on an X11 tree — the connection this
- * tree renders through *is* the fallback rung — so `supported` is about the
- * forced-backend and future-platform cases, not a check most apps must make.
+ * tree renders through *is* the fallback rung. Where that is not true the
+ * flag is the answer: on the cocoa backend nothing can sample the screen
+ * yet (docs/macos.md), `supported` is false, and a picker that gates its
+ * eyedropper button on it simply does not draw one.
  *
  * The portal dialog is parented to the window this component is in, the
  * `useFileDialog()` way: resolved at the moment the pick starts, with
