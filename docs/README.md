@@ -217,6 +217,13 @@ that have not been built, and say so at the top.
   input, the resolve-after-a-pass loop that follows, and the oscillation it
   can produce. Implemented; [styling.md](styling.md#container-queries) is
   the reference.
+- [architecture/custom-layout.md](architecture/custom-layout.md) — why an
+  arrangement that depends on a layout output has to run inside the pass
+  rather than in an effect, the two seams that do — a `layout` that arranges
+  a box's children and a `position` that moves one node, with `sticky` now
+  the built-in one — how a layout's children become yoga trees of their own,
+  and what they cost. Implemented; [styling.md](styling.md#custom-layouts)
+  is the reference.
 - [architecture/drag-and-drop.md](architecture/drag-and-drop.md) — XDND on
   both sides: where the advertisement lives when every control is drawn into
   one window, what the drag-source half costs, and the API review that

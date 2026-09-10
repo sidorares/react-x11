@@ -33,11 +33,16 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
   `space-between`, `space-around`, `space-evenly`), `alignItems`,
   `alignSelf`, `alignContent`, `flexWrap`, `flex`, `flexGrow`, `flexShrink`,
   `flexBasis`, `gap`, `rowGap`, `columnGap`
-- **Position**: `position` (`relative`, `absolute`, `static`, `sticky`),
-  `top`, `right`, `bottom`, `left`, `start`, `end`. Under `sticky` the
-  insets are how close to the nearest scroll pane's edges the box may come,
-  not offsets — see
-  [styling.md](styling.md#sticky-positioning)
+- **Position**: `position` (`relative`, `absolute`, `static`, `sticky`, or
+  one registered with `registerPosition`), `top`, `right`, `bottom`,
+  `left`, `start`, `end`. Under `sticky` the insets are how close to the
+  nearest scroll pane's edges the box may come, not offsets — see
+  [styling.md](styling.md#sticky-positioning) and
+  [custom positions](styling.md#custom-positions)
+- **Arrangement**: `layout` (`masonry`, `equal-row`, or one registered with
+  `registerLayout`) arranges the children in place of flexbox, and a
+  child's `layoutItem` is what it tells that layout — see
+  [styling.md](styling.md#custom-layouts)
 - **Spacing**: `margin`, `marginTop/Right/Bottom/Left`, `padding`,
   `paddingTop/Right/Bottom/Left`
 - **Visibility**: `display` (`flex`, `none`), `overflow` (`visible`,
