@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.11.0](https://github.com/sidorares/react-x11/compare/v2.10.2...v2.11.0) (2026-09-10)
+
+
+### Features
+
+* **eyedropper:** a cocoa rung over NSColorSampler ([#520](https://github.com/sidorares/react-x11/issues/520)) ([0afeee8](https://github.com/sidorares/react-x11/commit/0afeee8246e32cc0f79b628b20c62c3695c05778))
+
+
+### Bug Fixes
+
+* **eyedropper:** the X11 rung needs a connection, not just an app ([#518](https://github.com/sidorares/react-x11/issues/518)) ([824d0c7](https://github.com/sidorares/react-x11/commit/824d0c7326a97ee70e22639a5c80438ee156dc18))
+* **types:** declare `scale` on DrawnNode, and say which unit `abs` is in ([#519](https://github.com/sidorares/react-x11/issues/519)) ([951c742](https://github.com/sidorares/react-x11/commit/951c7421b9e323d75fc4aaa9c407ef25bd765fea))
+
 ## [2.10.2](https://github.com/sidorares/react-x11/compare/v2.10.1...v2.10.2) (2026-09-09)
 
 
