@@ -76,7 +76,10 @@ export type TransferType = 'text' | 'files' | 'uris' | (string & {});
 
 export interface ClipboardOptions {
   /** Selection atom name; `'CLIPBOARD'` by default, `'PRIMARY'` for the
-   * middle-click buffer. Any name works. */
+   * middle-click buffer. Any name works on X11. On the Cocoa backend only
+   * `'CLIPBOARD'` is the pasteboard: every other name is a selection nobody
+   * can paste from — writes resolve and change nothing, reads find it
+   * empty. */
   selection?: string;
   /** ms to wait for the owner at each protocol step. */
   timeout?: number;

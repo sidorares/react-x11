@@ -26,8 +26,9 @@ its own Copy item.
 > negotiated per paste, and macOS's is a _pasteboard the system holds_. On
 > the Cocoa backend `writeText`/`readText` work, and everything built on
 > them — the text controls' Ctrl/⌘ C, X, V and their Edit menus — works with
-> them. What is not there yet is the rest of this page:
-> [`PRIMARY`](#two-clipboards) (macOS has no middle-click selection), a
+> them. [`PRIMARY`](#primary-is-x11-only) is X11-only rather than missing:
+> nothing on macOS is filled by selecting text, so there selecting copies
+> nothing. What is not there yet is the rest of this page: a
 > [multi-flavour payload](#writing) (`write()` takes the plain-text flavour
 > and drops the others, and `read({ target })` rejects anything but text),
 > and [`watch()`](#knowing-when-it-changes) (it resolves to a no-op
@@ -57,6 +58,30 @@ Two consequences worth knowing, because neither matches a browser:
   yet.
 - **Someone else copying takes it away.** Ownership is exclusive; there is
   no "clipboard history" to fall back on.
+
+### `PRIMARY` is X11-only
+
+macOS has one pasteboard, and it is `CLIPBOARD`'s: nothing there is filled
+by selecting text, and a middle click pastes nothing. So on the Cocoa
+backend every selection but `CLIPBOARD` — `PRIMARY`, `SECONDARY`, a name of
+your own — is one nobody can paste from:
+
+- `write()` and `writeText()` resolve and leave the pasteboard alone;
+- `read()` answers `null`, `readText()` rejects and `targets()` is `[]` —
+  X's answers for a selection nobody owns;
+- `clear()` leaves the pasteboard alone, and `watch()` never fires.
+
+That is what keeps selecting from being copying. A drag across a
+`selectable` surface, a select-all, shift+arrows in a field: each takes
+`PRIMARY` on X11, and on macOS none of them replaces what the user copied
+somewhere else. Code written to the X11 convention needs no platform check.
+
+`PRIMARY` is deliberately not kept inside the app instead. Its point is the
+paste in _another_ application; all an in-process copy could keep is a
+middle click that types into a text field, which no Mac text field does. An
+app that wants select-to-copy on macOS anyway — a terminal emulator, say —
+can write `CLIPBOARD` itself: a surface's `selectedText()` is the text, and
+`onSelectionChange` says when it moved.
 
 ## `useClipboard()`
 
@@ -209,7 +234,9 @@ raw protocol. See ntk's own clipboard documentation for the ICCCM details.
 ## Limits
 
 - **The Cocoa backend is text-only**, as the note at the top of this page
-  says: no `PRIMARY`, one flavour, and `watch()` never fires.
+  says: one flavour, and `watch()` never fires. `PRIMARY` is not a limit
+  there but a platform difference: see
+  [`PRIMARY` is X11-only](#primary-is-x11-only).
 - **No clipboard-manager handoff** (`SAVE_TARGETS`), so the data really does
   vanish when the app exits.
 - **`STRING` is latin-1 by definition**, so codepoints above U+00FF are lossy

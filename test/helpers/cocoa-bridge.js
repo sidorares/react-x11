@@ -188,7 +188,8 @@ export function fakeCocoaBridge({ screens } = {}) {
     fontWithSize: (f, size) =>
       fontFor(`${f.ps}@${size}`, { ps: f.ps, family: f.family, size }),
     // one line, 8px a code point, the ascent and descent of the metrics
-    // above: enough for a `<text>` to measure, lay out and be painted
+    // above: enough for a `<text>` to measure, lay out and be painted — and,
+    // with the line's one left-to-right run, to paint a selection over
     createLayout({ spans }) {
       const text = spans.map((span) => span.text).join('');
       const size = spans[0]?.size ?? 14;
@@ -209,6 +210,7 @@ export function fakeCocoaBridge({ screens } = {}) {
             baseline: size * 0.8,
             ascent: size * 0.8,
             descent: size * 0.2,
+            runs: [{ x: 0, width, start: 0, end: text.length, rtl: false }],
           },
         ],
       };
