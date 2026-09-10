@@ -242,8 +242,27 @@ export class CocoaApp {
     };
     this._atoms = new Map();
 
+    // ntk's clipboard shape over `NSPasteboard.general` — which is the one
+    // pasteboard, and it is CLIPBOARD's. X's other everyday selection,
+    // PRIMARY, is taken by *selecting text at all* and pasted with a middle
+    // click, and core takes it on every selection gesture (textselection.js
+    // `own()`, the text controls' `_ownSelection`). Sent to the pasteboard,
+    // each of those gestures was a Copy: a drag across a paragraph replaced
+    // the link the user had just copied in another app.
+    //
+    // So every other name — PRIMARY, SECONDARY, one of the app's own — is a
+    // selection nobody on this desktop can paste from: a write resolves and
+    // changes nothing, a read finds no owner, `targets()` is empty, `clear()`
+    // leaves the pasteboard alone. Deliberately not a PRIMARY kept in this
+    // process: its point is the paste in *another* application, and inside
+    // one all it would keep is a middle click that types into a text field,
+    // which no Mac text field does. An app that wants select-to-copy anyway
+    // — a terminal — writes CLIPBOARD from `onSelectionChange`
+    // (docs/clipboard.md, "Two clipboards").
+    const isClipboard = (selection = 'CLIPBOARD') => selection === 'CLIPBOARD';
     this.clipboard = {
-      write: (data) => {
+      write: (data, { selection } = {}) => {
+        if (!isClipboard(selection)) return Promise.resolve();
         const text =
           typeof data === 'string'
             ? data
@@ -251,15 +270,24 @@ export class CocoaApp {
         native.pasteboardWriteText(String(text));
         return Promise.resolve();
       },
-      clear: () => {
-        native.pasteboardClear();
+      clear: (selection) => {
+        if (isClipboard(selection)) native.pasteboardClear();
         return Promise.resolve();
       },
-      targets: () => {
+      targets: ({ selection } = {}) => {
+        if (!isClipboard(selection)) return Promise.resolve([]);
         const text = native.pasteboardReadText();
         return Promise.resolve(text == null ? [] : ['UTF8_STRING', 'STRING']);
       },
-      read: ({ target } = {}) => {
+      read: ({ selection, target } = {}) => {
+        if (!isClipboard(selection)) {
+          return Promise.reject(
+            new Error(
+              `clipboard: nothing to paste — ${selection} is an X11 ` +
+                'selection, and on macOS only CLIPBOARD is the pasteboard',
+            ),
+          );
+        }
         const text = native.pasteboardReadText();
         if (text == null) {
           return Promise.reject(

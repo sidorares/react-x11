@@ -163,7 +163,7 @@ Their presence is what registers the node, so there is nothing else to
 mount: [drag-and-drop.md](drag-and-drop.md).
 
 `selectable` makes an element a **selection surface**: text inside it can be
-dragged over, copied and handed to the PRIMARY selection. See
+dragged over, copied and, on X11, handed to the PRIMARY selection. See
 [Selecting text](#selecting-text) below.
 
 `scale` zooms a subtree, CSS `zoom` rather than a transform: every length
@@ -1319,7 +1319,9 @@ drag inside it selects across every piece of text under it, a double click
 takes a word, a triple click takes a block, Ctrl+A takes the surface and
 Ctrl+C copies it. Releasing the button hands the text to **PRIMARY**, so a
 middle click in a terminal pastes it — which is what selecting text means
-on X11 ([clipboard.md](clipboard.md)).
+on X11 ([clipboard.md](clipboard.md)). macOS has no PRIMARY, so there a
+release copies nothing and only a copy reaches the pasteboard
+([clipboard.md](clipboard.md#primary-is-x11-only)).
 
 ### What is in a surface
 
@@ -1504,7 +1506,7 @@ Interactions: click/drag selection, double-click word select, triple-click
 select all, **dead keys and Compose**
 ([events.md](events.md#composition)), Backspace/Delete, arrows (+Shift extends), Home/End, Ctrl+A,
 Ctrl+C/X/V on CLIPBOARD, middle-click paste from PRIMARY, selections own
-PRIMARY (X11 conventions, select-all included), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
+PRIMARY (X11 conventions, select-all included; [X11 only](clipboard.md#primary-is-x11-only)), **Ctrl+Z / Ctrl+Shift+Z** (Ctrl+Y too) to undo
 and redo, and a **right-click menu**. Focusable by default; shows the text
 cursor. `ev.preventDefault()` in your `onKeyDown`/`onMouseDown` suppresses
 the built-in editing behavior. To copy or paste from anywhere else — a

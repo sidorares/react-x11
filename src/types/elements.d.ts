@@ -222,7 +222,8 @@ export interface SelectionProps<T = DrawnNode> {
   /**
    * `true` makes this element a selection surface: a drag across the text
    * inside it selects, double and triple clicks take a word and a block,
-   * Ctrl+A and Ctrl+C work, and a release takes PRIMARY. It also makes the
+   * Ctrl+A and Ctrl+C work, and on X11 a release takes PRIMARY (macOS has
+   * none: there, only a copy reaches the pasteboard). It also makes the
    * element a focus target, so the keys have somewhere to arrive —
    * `tabIndex={-1}` keeps it out of the Tab cycle.
    *

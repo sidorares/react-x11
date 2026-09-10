@@ -407,7 +407,9 @@ export class TextSelection {
   }
 
   /** Take PRIMARY, which in X is what "there is a selection here" means to
-   * every other application on the display. */
+   * every other application on the display. macOS has no PRIMARY, and the
+   * cocoa backend's clipboard answers the write with nothing
+   * (src/cocoa/app.js) — there, a selection is never a copy. */
   own() {
     if (this.isCollapsed) return;
     takeVisibleSelection(this.node);
