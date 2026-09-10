@@ -1542,7 +1542,10 @@ function _Eyedropper() {
       signal,
     });
     const rung: ScreenColorBackend | null = await screenColorBackend();
-    // @ts-expect-error — not a rung: there is nothing to draw a third one with
+    // macOS's system sampler is a rung like the others, nameable for a kiosk
+    await pickScreenColor({ backend: 'cocoa' });
+    // @ts-expect-error — not a rung: the screen is the one thing an app
+    // cannot draw itself, so there is no built-in picker to fall back to
     await pickScreenColor({ backend: 'builtin' });
     // @ts-expect-error — the hook binds the tree's connection itself
     pick({ app: undefined });

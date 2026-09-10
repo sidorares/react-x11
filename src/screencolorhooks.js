@@ -33,14 +33,16 @@ import { useTopLevelWindow } from './windowid.js';
  *
  * `pick()` resolves to `'#rrggbb'`, or `null` when the user cancelled. It
  * never rejects for lack of a backend on an X11 tree — the connection this
- * tree renders through *is* the fallback rung. Where that is not true the
- * flag is the answer: on the cocoa backend nothing can sample the screen
- * yet (docs/macos.md), `supported` is false, and a picker that gates its
- * eyedropper button on it simply does not draw one.
+ * tree renders through *is* the fallback rung — nor on a cocoa tree whose
+ * bridge has the system sampler (`@windowkit/appkit` >= 0.9). Where neither
+ * is true the flag is the answer: `supported` is false, and a picker that
+ * gates its eyedropper button on it simply does not draw one.
  *
  * The portal dialog is parented to the window this component is in, the
  * `useFileDialog()` way: resolved at the moment the pick starts, with
  * `parentWindow` as the override for a tree with several top-level windows.
+ * On the cocoa rung that window is what names the app whose sampler runs;
+ * the system draws the loupe over the whole screen, owned by no window.
  *
  * While a pick is in flight, `picking` is true and another `pick()` returns
  * **the same promise** — a double-clicked button must not queue a second
