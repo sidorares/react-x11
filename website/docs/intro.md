@@ -78,8 +78,8 @@ pure-JavaScript X server on the page and connects to it.
 Layout is [yoga-layout](https://www.yogalayout.dev/) (WASM) on both, and so
 are the reconciler, the styles, the events, the components and the hooks.
 `npm install` never compiles anything: the X11 stack is JavaScript all the
-way down, and the Cocoa bridge is an optional dependency that ships
-prebuilt.
+way down, and the two native addons in the tree — the Cocoa bridge and
+`x11-dri` for direct GL — are optional dependencies that ship prebuilt.
 
 The [macOS backend](/docs/reference/macos) is the design record for the
 second one, and [remote display](/docs/reference/remote) is the case the

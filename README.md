@@ -30,22 +30,26 @@ The same components, the same hooks and the same `style` objects run on both:
 - **Cocoa** ([docs/macos.md](docs/macos.md)) — a real Mac app: `NSWindow`s,
   the menu bar at the top of the screen, AppKit's own control bezels, native
   open/save panels, native notifications, Core Animation compositing. No X
-  server anywhere. The one compiled piece in the project is its bridge,
-  [`@windowkit/appkit`](https://www.npmjs.com/package/@windowkit/appkit) — an
-  optional dependency with prebuilds, absent on Linux installs.
+  server anywhere. It rides on
+  [`@windowkit/appkit`](https://www.npmjs.com/package/@windowkit/appkit), a
+  thin mechanism-only Objective-C++ bridge — an optional dependency shipping
+  prebuilds, absent on Linux installs.
 
 `createRoot()` picks for you: **Cocoa on macOS** when the bridge is
 installed, X11 via `$DISPLAY` everywhere else, and X11 on a Mac without the
 bridge so an XQuartz setup keeps working. `createRoot({ backend: 'x11' })`
 or `REACT_X11_BACKEND=x11` pins it.
 
-Layout is [yoga-layout](https://www.npmjs.com/package/yoga-layout) and text
-shaping is [fontkit](https://github.com/foliojs/fontkit) on the X11 side,
-CoreText on the Cocoa one. `npm install` never compiles anything — and
-`npm test` doesn't even need an X server (node-x11 ships an in-process
-pure-JS X server that the tests render into and read pixels back from; every
-screenshot below was rendered that way too, by driving the real examples
-through the real event pipeline).
+Layout is [yoga-layout](https://www.npmjs.com/package/yoga-layout) (WASM) on
+both, and text shaping is [fontkit](https://github.com/foliojs/fontkit) on
+the X11 side, CoreText on the Cocoa one. **`npm install` never compiles
+anything**: the X11 stack is JavaScript all the way down, and the two native
+addons in the tree — the Cocoa bridge and `x11-dri` for direct GL — are
+optional dependencies that ship prebuilt. And `npm test` doesn't even need
+an X server (node-x11 ships an in-process pure-JS X server that the tests
+render into and read pixels back from; every screenshot below was rendered
+that way too, by driving the real examples through the real event
+pipeline).
 
 ### On X11, the wire carries drawing, not pixels
 
