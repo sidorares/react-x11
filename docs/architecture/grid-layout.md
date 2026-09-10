@@ -16,8 +16,8 @@ remembers what it asks a child.**
 
 - **Performance** (§3). A prototype registered with `registerLayout('grid')`
   lays out a gallery of 300 cards in `repeat(auto-fill, minmax(200px, 1fr))`
-  in 3.8 ms for a frame in which one card's text changed, and a 200-row
-  `auto 1fr` form in 5.1 ms, against 13.4 ms and 14.2 ms for the nearest
+  in 2.5 ms for a frame in which one card's text changed, and a 200-row
+  `auto 1fr` form in 3.4 ms, against 13.0 ms and 13.5 ms for the nearest
   flexbox. The first cut was 3.4 times _slower_ than flexbox, and the reason
   was the seam, not grid: it asked every child the same questions every run,
   several runs a frame. The fix is in, and `masonry` and `equal-row` get it
@@ -144,15 +144,19 @@ are medians of nine.
 
 | case                     | flexbox |    grid | masonry |
 | ------------------------ | ------: | ------: | ------: |
-| form — mount             | 38.8 ms | 32.5 ms |         |
-| form — one text changed  | 14.2 ms |  5.1 ms |         |
-| form — resized 1000↔900  |  5.4 ms |  3.1 ms |         |
-| cards — mount            | 65.5 ms | 80.5 ms | 76.2 ms |
-| cards — one text changed | 13.4 ms |  3.8 ms |  1.6 ms |
-| cards — resized 1000↔900 | 21.5 ms |  6.9 ms |  4.4 ms |
-| dashboard — mount        |         | 18.3 ms |         |
-| dashboard — one changed  |         |  3.2 ms |         |
-| dashboard — resized      |         |  3.6 ms |         |
+| form — mount             | 36.0 ms | 27.9 ms |         |
+| form — one text changed  | 13.5 ms |  3.4 ms |         |
+| form — resized 1000↔900  |  5.0 ms |  2.0 ms |         |
+| cards — mount            | 64.8 ms | 74.0 ms | 72.3 ms |
+| cards — one text changed | 13.0 ms |  2.5 ms |  1.6 ms |
+| cards — resized 1000↔900 | 20.3 ms |  5.1 ms |  4.2 ms |
+| dashboard — mount        |         | 16.5 ms |         |
+| dashboard — one changed  |         |  2.4 ms |         |
+| dashboard — resized      |         |  2.4 ms |         |
+
+These are the branch rebased onto master at e309f8b, in two runs that agree
+within 5%. A run before the rebase read higher for the grid host: 3.8 ms
+for the cards' changed frame, and 5.1 ms for the form's.
 
 Grid is faster than flexbox on the frames that happen after mount, for the
 structural reason in [custom-layout.md](custom-layout.md#5-cost): each

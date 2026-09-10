@@ -295,9 +295,9 @@ the changes and resizes are medians of nine:
 
 | case                    | masonry | flex-wrap |
 | ----------------------- | ------: | --------: |
-| mount                   | 76.2 ms |   65.5 ms |
-| one card's text changed |  1.6 ms |   13.4 ms |
-| window resized 1000↔900 |  4.4 ms |   21.5 ms |
+| mount                   | 72.3 ms |   64.8 ms |
+| one card's text changed |  1.6 ms |   13.0 ms |
+| window resized 1000↔900 |  4.2 ms |   20.3 ms |
 
 The two are different algorithms, so read the last two rows as "not
 slower" before "faster". What they do show is structural: each child's tree is a
