@@ -30,6 +30,7 @@ import { CocoaNotifications } from './notifications.js';
 import { CocoaPaneHost } from './panehost.js';
 import { CocoaPermissions } from './permissions.js';
 import { CocoaPaneWindow } from './panewindow.js';
+import { CocoaColorSampler } from './screencolor.js';
 import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
 import { CocoaSurface } from './surface.js';
@@ -187,6 +188,17 @@ export class CocoaApp {
       typeof native.calendars === 'function' &&
       typeof native.eventsBetween === 'function'
         ? new CocoaCalendars(this)
+        : null;
+
+    // The system colour sampler, `NSColorSampler` (src/cocoa/screencolor.js).
+    // Present exactly when the bridge has it (>= 0.9), and its presence is
+    // the top rung of src/screencolor.js's ladder for this app — an older
+    // bridge leaves that ladder where it was, which on this backend is no
+    // rung at all: `useEyedropper().supported` stays false and a picker
+    // draws no dropper button.
+    this.colorSampler =
+      typeof native.sampleScreenColor === 'function'
+        ? new CocoaColorSampler(native)
         : null;
 
     // The GL policy, glbackend.js's shape. No GLX exists here, so the

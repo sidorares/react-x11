@@ -1,34 +1,44 @@
 // Sample one pixel from the screen — the eyedropper, through whatever this
 // machine actually has.
 //
-// The file dialog's ladder again (docs/filedialog.md), two rungs this time:
+// The file dialog's ladder again (docs/filedialog.md), three rungs:
 //
-//   1. **the portal** — `org.freedesktop.portal.Screenshot.PickColor`. The
+//   1. **the system sampler** — `NSColorSampler` on the cocoa backend
+//      (src/cocoa/screencolor.js). macOS draws the loupe out of process, so
+//      the app needs no Screen Recording grant of its own and the user gets
+//      the magnifier every other Mac colour picker shows them. Found by the
+//      app carrying `colorSampler`, never by naming a backend here.
+//   2. **the portal** — `org.freedesktop.portal.Screenshot.PickColor`. The
 //      desktop draws its own magnifier and hands back the colour, which is
 //      also the only route that works under a compositor that would refuse a
 //      root read, and the only route Wayland has at all. Needs version 2 of
 //      the Screenshot interface — XFCE ships none, GNOME and KDE ship 2 —
 //      so the gate is the interface's `version` property, not `hasService()`.
-//   2. **X11** — grab the pointer with a crosshair, wait for the click,
+//   3. **X11** — grab the pointer with a crosshair, wait for the click,
 //      `GetImage` a 1×1 at it, decode by the server's own pixel layout.
 //      Reached under a bare WM, over ssh, on XQuartz: everywhere there is a
 //      display and nothing else, which is the case react-x11 exists for.
 //
-// There is no third rung to draw, because the thing being read — the whole
+// Rungs 1 and 2 are the same shape — ask the system, it draws the picker,
+// it hands back an sRGB triple — which is why the sampler goes on top of the
+// portal rather than under the crosshair: where the OS will do this for us,
+// it does it better, and `hexFromPortalColor()` converts for both.
+//
+// There is no rung to *draw*, because the thing being read — the whole
 // screen — is precisely what an application cannot draw itself. So unlike
 // `useFileDialog()`, `useEyedropper()` adds no rung; it adds the binding a
-// component wants (`picking`, `supported`, the owner window) over the same
-// two.
+// component wants (`picking`, `supported`, the owner window) over these
+// three.
 //
 // Which means the ladder really can run out, and where it does the floor has
-// to be the typed rejection rather than a crash. The cocoa backend is that
-// place today: its `app.X` is a stub with just enough on it for the modules
-// that keep an X escape hatch to no-op (src/cocoa/app.js), so an app object
-// is not by itself a connection that can grab a pointer and read a root
-// window. Rung 2 is gated on the requests it is built out of, not on there
-// being an app — the feature-detection rule `requireExtension()` already
-// follows — and macOS's own sampler (`NSColorSampler`) is a bridge gap, not
-// a rung this file can reach (docs/macos.md).
+// to be the typed rejection rather than a crash. A cocoa app on a bridge
+// older than 0.9 is that place: its `app.X` is a stub with just enough on it
+// for the modules that keep an X escape hatch to no-op (src/cocoa/app.js),
+// so an app object is not by itself a connection that can grab a pointer and
+// read a root window. Rung 3 is gated on the requests it is built out of,
+// not on there being an app — the feature-detection rule `requireExtension()`
+// already follows, and the rule rung 1 follows too, one bridge verb instead
+// of three X requests.
 //
 // ## The grab is the dangerous part
 //
@@ -52,6 +62,7 @@ import {
   portalRequest,
   portalVersion,
 } from './portal.js';
+import { liveApps } from './trace-registry.js';
 import { windowIdOf } from './windowid.js';
 
 export const SCREENSHOT_IFACE = 'org.freedesktop.portal.Screenshot';
@@ -70,10 +81,11 @@ export class NoScreenColorError extends Error {
     super(
       `react-x11: ${
         message ??
-        'no way to sample a colour from the screen — there is no ' +
-          'Screenshot portal with PickColor (interface version 2) on the ' +
-          'session bus, and no X connection was given for the fallback. ' +
-          'Pass `app` (from createRoot() or useApp()), or use useEyedropper().'
+        'no way to sample a colour from the screen — no cocoa app with a ' +
+          'system sampler, no Screenshot portal with PickColor (interface ' +
+          'version 2) on the session bus, and no X connection was given for ' +
+          'the fallback. Pass `app` (from createRoot() or useApp()), or use ' +
+          'useEyedropper().'
       }`,
       { cause },
     );
@@ -82,7 +94,91 @@ export class NoScreenColorError extends Error {
 }
 
 // --------------------------------------------------------------------------
-// Rung 1: the portal
+// Rung 1: the system sampler, on the cocoa backend
+// --------------------------------------------------------------------------
+
+/**
+ * The app whose system sampler a pick should use, or null.
+ *
+ * Never a backend check: an app that can sample the screen says so by
+ * carrying `colorSampler` (src/cocoa/screencolor.js), and this asks the app
+ * the caller named — `app`, or a `parentWindow` that points at a mounted
+ * node — before asking the connections the renderer is drawing through, the
+ * rule `filePanels` and `calendars` follow. Several of those with only one
+ * showing a window is the next case (a borrowed connection stays registered
+ * after its root unmounts); genuinely several is a real null, since the
+ * sampler belongs to one process's NSApplication.
+ */
+function samplerApp(opts) {
+  const named = appFor(opts);
+  if (named) return named.colorSampler ? named : null;
+  const apps = liveApps().filter((one) => one.colorSampler);
+  if (apps.length <= 1) return apps[0] ?? null;
+  const showing = apps.filter((one) => (one._rootChildren ?? []).length > 0);
+  return showing.length === 1 ? showing[0] : null;
+}
+
+/**
+ * Show `NSColorSampler` and wait for it.
+ *
+ * Resolves `'#rrggbb'` on a pick and `null` on a dismissal — the two
+ * outcomes every rung answers with — through the *portal's* conversion,
+ * because the bridge answers in the portal's units: sRGB in 0–1, gamut
+ * mapped from whatever space the display is in. Rejects on an abort, and on
+ * a colour with no sRGB form at all (a pattern colour), which is the
+ * bridge's one error.
+ *
+ * **An abort ends our wait, not the sampler.** AppKit has no verb to
+ * dismiss it — the session ends when the user picks or presses Escape — so
+ * where the portal rung Closes its request and the X11 rung releases its
+ * grab, this one can only stop listening: the loupe stays up, the colour
+ * that arrives afterwards is dropped, and until then the pending sample
+ * holds the event loop open the way pending I/O does. Nothing is left
+ * grabbed, which is what the abort exists to guarantee.
+ */
+function cocoaPick(opts, app) {
+  const signal = opts.signal;
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new PortalCancelledError());
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new PortalCancelledError());
+    signal?.addEventListener('abort', onAbort, { once: true });
+    // No `settle()` gate, unlike the X11 rung: that one exists because a
+    // grab must be released exactly once on every path out, and an aborted
+    // pick here holds nothing — the loupe is the user's, not ours. The
+    // colour that lands after an abort reaches an already-rejected promise
+    // and is dropped by the promise itself.
+    const done = () => signal?.removeEventListener('abort', onAbort);
+
+    app.colorSampler.sample().then(
+      (color) => {
+        done();
+        // A dismissal is an ordinary outcome, not a throw — Escape on the
+        // X11 rung, the dialog's own cancel on the portal, this here.
+        if (color == null) return resolve(null);
+        const hex = hexFromPortalColor([color.r, color.g, color.b]);
+        if (!hex) {
+          return reject(
+            new Error(
+              'react-x11: the system colour sampler answered without a ' +
+                'colour — expected sRGB { r, g, b } in 0–1, got ' +
+                `${JSON.stringify(color)}.`,
+            ),
+          );
+        }
+        resolve(hex);
+      },
+      (err) => {
+        done();
+        reject(err);
+      },
+    );
+  });
+}
+
+// --------------------------------------------------------------------------
+// Rung 2: the portal
 // --------------------------------------------------------------------------
 
 /**
@@ -141,7 +237,7 @@ async function portalCanPick(ref) {
 }
 
 // --------------------------------------------------------------------------
-// Rung 2: X11
+// Rung 3: X11
 // --------------------------------------------------------------------------
 
 // x11.eventMask bits, spelled out the way xsettings.js spells its one. No
@@ -588,8 +684,9 @@ function noX11Reason(app, backend) {
     return (
       'this tree does not render through an X connection — a cocoa-backend ' +
       'app, for instance, whose `X` cannot grab the pointer or read a root ' +
-      'window. macOS has a system sampler of its own (NSColorSampler) but ' +
-      'the bridge does not expose it yet, so there is no rung here: ' +
+      "window. macOS's own sampler is the rung above, and this app does not " +
+      'carry it: `@windowkit/appkit` is older than 0.9, which has no ' +
+      '`sampleScreenColor`. Until it is updated there is no rung here — ' +
       '`useEyedropper().supported` is false, which is the signal to leave ' +
       'the eyedropper button undrawn (docs/macos.md).'
     );
@@ -605,23 +702,30 @@ function noX11Reason(app, backend) {
 }
 
 /**
- * Which rung this machine lands on, without grabbing anything.
+ * Which rung this machine lands on, without showing or grabbing anything.
  *
- * `'portal'` needs the Screenshot interface at version 2 — the probe reads
- * the interface's `version` property, because `hasService()` cannot see
- * which interfaces a portal's backends actually provide (XFCE's provides no
- * Screenshot at all). `'x11'` needs a connection to answer with, so pass
- * `app` (or a `parentWindow` that resolves to one) — and one that can
- * actually grab, which a cocoa-backend app cannot. Without either the
- * fallback is unreachable and the honest answer is `null`.
+ * `'cocoa'` is the app carrying `colorSampler` — a cocoa-backend tree on
+ * `@windowkit/appkit` >= 0.9 — and it is asked first, so a Mac never falls
+ * through to a rung that would draw a worse picker. `'portal'` needs the
+ * Screenshot interface at version 2 — the probe reads the interface's
+ * `version` property, because `hasService()` cannot see which interfaces a
+ * portal's backends actually provide (XFCE's provides no Screenshot at
+ * all). `'x11'` needs a connection to answer with, so pass `app` (or a
+ * `parentWindow` that resolves to one) — and one that can actually grab,
+ * which a cocoa-backend app cannot. With none of the three the honest
+ * answer is `null`.
  *
  * Acquires a bus reference and releases it, so it is cheap but not free —
  * `useEyedropper().supported` caches it for you.
  *
- * @returns {Promise<'portal'|'x11'|null>}
+ * @returns {Promise<'cocoa'|'portal'|'x11'|null>}
  */
 export async function screenColorBackend(options = {}) {
   const backend = options.backend;
+  if (!backend || backend === 'cocoa') {
+    if (samplerApp(options)) return 'cocoa';
+    if (backend === 'cocoa') return null;
+  }
   if (!backend || backend === 'portal') {
     const ref = await sessionBus();
     if (ref) {
@@ -637,6 +741,19 @@ export async function screenColorBackend(options = {}) {
 }
 
 async function runPick(opts) {
+  const wantCocoa = !opts.backend || opts.backend === 'cocoa';
+  if (wantCocoa) {
+    const app = samplerApp(opts);
+    if (app) return await cocoaPick(opts, app);
+    if (opts.backend === 'cocoa') {
+      throw new NoScreenColorError(
+        "backend: 'cocoa' — no system colour sampler here: this tree does " +
+          'not render through the cocoa backend, or its `@windowkit/appkit` ' +
+          'is older than 0.9.',
+      );
+    }
+  }
+
   const wantPortal = !opts.backend || opts.backend === 'portal';
   if (wantPortal) {
     const ref = await sessionBus();
@@ -664,20 +781,22 @@ async function runPick(opts) {
 }
 
 /**
- * Sample one pixel from the screen: the desktop's own picker where there is
- * one, a crosshair grab on plain X11 everywhere else.
+ * Sample one pixel from the screen: the system's own picker where there is
+ * one — `NSColorSampler` on macOS, the Screenshot portal on a desktop that
+ * has it — and a crosshair grab on plain X11 everywhere else.
  *
  * ```js
  * const hex = await pickScreenColor({ app });
  * if (hex) setFill(hex);            // '#rrggbb'; null means cancelled
  * ```
  *
- * Resolves to **`'#rrggbb'`**, or `null` when the user cancelled (Escape, or
- * the portal dialog's own cancel) — cancelling is an ordinary outcome and
- * should not need a `try`. Rejects with {@link NoScreenColorError} when
- * neither rung is reachable, which is the signal to hide the button;
- * `signal` aborts the pick and releases the grab before the rejection is
- * reported.
+ * Resolves to **`'#rrggbb'`**, or `null` when the user cancelled (Escape,
+ * the portal dialog's own cancel, dismissing the sampler) — cancelling is an
+ * ordinary outcome and should not need a `try`. Rejects with
+ * {@link NoScreenColorError} when no rung is reachable, which is the signal
+ * to hide the button; `signal` aborts the pick, releasing the X11 grab or
+ * closing the portal request before the rejection is reported (the system
+ * sampler cannot be dismissed from code — see docs/eyedropper.md).
  *
  * In a component, reach for {@link useEyedropper} instead — it binds the
  * connection and the owner window, and exposes `picking`/`supported` as

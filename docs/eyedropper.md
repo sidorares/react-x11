@@ -22,31 +22,37 @@ function StrokePicker({ value, onChange }) {
 }
 ```
 
-Cancelling — Escape, or the desktop dialog's own cancel — resolves to `null`.
-It is an ordinary outcome, not an exception, on both backends, so the whole
-error path is one `if`. The same contract as the
+Cancelling — Escape, the desktop dialog's own cancel, a dismissed macOS
+sampler — resolves to `null`. It is an ordinary outcome, not an exception,
+on every rung, so the whole error path is one `if`. The same contract as the
 [file dialogs](filedialog.md), on purpose.
 
 ## The ladder
 
-|     |                |                                                                                                                                                                                                                                         |
-| --- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **the portal** | `org.freedesktop.portal.Screenshot.PickColor` over D-Bus. The desktop draws its own magnifier and hands the colour back. GNOME and KDE ship it; it is also the only route that exists on Wayland.                                       |
-| 2   | **X11**        | The classic route: grab the pointer with a crosshair, wait for the click, read the 1×1 under it, decode by the server's own pixel layout. Works under a bare WM, over ssh, on XQuartz — everywhere there is a display and nothing else. |
+|     |                        |                                                                                                                                                                                                                                                                                                                 |
+| --- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **the system sampler** | `NSColorSampler` on the [cocoa backend](macos.md), where the app the tree renders through carries `colorSampler` (`@windowkit/appkit` >= 0.9). macOS draws the loupe out of process, so the app needs no Screen Recording grant of its own and the user gets the magnifier every other Mac colour picker shows. |
+| 2   | **the portal**         | `org.freedesktop.portal.Screenshot.PickColor` over D-Bus. The desktop draws its own magnifier and hands the colour back. GNOME and KDE ship it; it is also the only route that exists on Wayland.                                                                                                               |
+| 3   | **X11**                | The classic route: grab the pointer with a crosshair, wait for the click, read the 1×1 under it, decode by the server's own pixel layout. Works under a bare WM, over ssh, on XQuartz — everywhere there is a display and nothing else.                                                                         |
 
 `screenColorBackend()` reports which rung this machine lands on without
 grabbing anything; `useEyedropper().supported` is the same answer as render
 state.
 
-There is no third rung to draw, and that is the difference from the file
-dialog's ladder: the thing being read — the whole screen — is precisely what
-an application cannot draw itself. So the hook adds binding, not a fallback
-of its own — and the ladder can therefore run out. Where it does, the floor
-is the typed rejection and `supported: false`, never a crash: the **cocoa
-backend** is that place today (its `app.X` is a stub, so there is no pointer
-to grab and no root window to read, and macOS's own `NSColorSampler` is a
-bridge gap — [macos.md](macos.md)). The rung is gated on the requests it is
-built out of rather than on there being an app, so a picker on macOS draws
+The first two rungs are the same shape — ask the system, it draws the
+picker, it hands back an sRGB triple — which is why the sampler goes on top
+of the portal and not under the crosshair: where the OS will do this for us,
+it does it better.
+
+There is no rung to _draw_, and that is the difference from the file dialog's
+ladder: the thing being read — the whole screen — is precisely what an
+application cannot draw itself. So the hook adds binding, not a fallback of
+its own — and the ladder can therefore run out. Where it does, the floor is
+the typed rejection and `supported: false`, never a crash. A cocoa app on a
+bridge **older than 0.9** is that place: its `app.X` is a stub, so there is
+no pointer to grab and no root window to read either ([macos.md](macos.md)).
+Both system rungs are gated on what they are built out of — one bridge verb,
+three X requests — rather than on there being an app, so a picker there draws
 no eyedropper button instead of one that throws on its first press.
 
 ### The version gate
@@ -96,11 +102,12 @@ Two things the hook does beyond forwarding:
   second `pick()` returns the promise already in flight rather than starting
   a second grab — so a double-clicked button cannot make the user click
   twice.
-- **`supported` is almost always true on this toolkit.** A react-x11 tree
-  has an X connection by definition, and the connection _is_ the fallback
-  rung. It goes false when a forced `backend: 'portal'` finds no portal —
-  and it is the seam that keeps the button honest on whatever platform comes
-  later.
+- **`supported` is almost always true on this toolkit.** An X11 tree has a
+  connection by definition, and the connection _is_ the fallback rung; a
+  cocoa tree has the system sampler. It goes false when a forced
+  `backend: 'portal'` finds no portal, and on a cocoa app whose bridge
+  predates the sampler — which is what keeps the button honest on whatever
+  platform comes next.
 
 ## The bare function
 
@@ -111,26 +118,37 @@ const hex = await pickScreenColor({ app });
 ```
 
 Same options, same results. The one addition is `app`: the X11 rung needs a
-connection to grab and read on, and a bare function has no tree to take one
-from — pass the app `createRoot()` returned (or `useApp()` in a component,
-or a `parentWindow` that points at a mounted node, which carries its
-connection with it). Without a portal and without a connection it rejects
-with `NoScreenColorError` — a **typed** rejection, so it reads as "hide the
-button", not as a crash.
+connection to grab and read on and the cocoa rung needs the app whose
+sampler to show, and a bare function has no tree to take one from — pass the
+app `createRoot()` returned (or `useApp()` in a component, or a
+`parentWindow` that points at a mounted node, which carries its app with
+it). With no app named, the connections the renderer is currently drawing
+through are asked, the way `openFile()` finds its native panel. Where no
+rung answers it rejects with `NoScreenColorError` — a **typed** rejection,
+so it reads as "hide the button", not as a crash.
 
-One pick per connection at a time: a second concurrent `pickScreenColor()`
-on the same app is refused loudly, because a second grab from the same
-client would silently _replace_ the first and one pick would settle with the
-other's click. The hook's shared in-flight promise is the friendly version
-of the same rule.
+One pick per connection at a time **on the X11 rung**: a second concurrent
+`pickScreenColor()` on the same app is refused loudly, because a second grab
+from the same client would silently _replace_ the first and one pick would
+settle with the other's click. The hook's shared in-flight promise is the
+friendly version of the same rule. The system sampler needs no such refusal:
+`NSColorSampler` "begins or attaches to an existing color sampling session",
+so a second pick joins the loupe that is up and both callers get the same
+colour.
 
 ## What differs between the rungs
 
-- **The portal draws a magnifier; the X11 rung deliberately does not.** On
-  X11 it is grab, crosshair, click — and Escape cancels. The desktops whose
-  users expect a loupe have a portal that draws one; a hand-rolled loupe on
-  the bottom rung would be a screenshot of the screen re-rendered at 8×,
-  permanently slightly wrong about scaling and colour management.
+- **The system rungs draw a magnifier; the X11 rung deliberately does not.**
+  On X11 it is grab, crosshair, click — and Escape cancels. The desktops
+  whose users expect a loupe have a portal or an `NSColorSampler` that draws
+  one; a hand-rolled loupe on the bottom rung would be a screenshot of the
+  screen re-rendered at 8×, permanently slightly wrong about scaling and
+  colour management.
+- **Only the system rungs need no permission.** Both the portal and
+  `NSColorSampler` run the picker in another process and hand back a
+  colour, so nothing here asks for a screen-capture grant — on macOS that
+  is the difference between a dropper button and a TCC prompt for Screen
+  Recording.
 - **On the X11 rung the keyboard also picks.** Return, KP Enter or space
   samples the pixel under the pointer without a click — GTK's shape — and
   the keyboard is grabbed for the duration so Escape works wherever the
@@ -140,11 +158,19 @@ of the same rule.
   the window's own value. What exactly the portal samples is the desktop's
   choice, not this API's — GNOME's and KDE's pickers read the composited
   screen too.
-- **Both rungs answer `'#rrggbb'`.** The portal hands back `(ddd)` floats
-  and X11 hands back server-layout words; every consumer wants a CSS colour
-  it can paint with, so the conversion happens once, here. If something
-  later needs the unrounded portal values, an option can widen the return —
-  starting with channels would have made the common case do arithmetic.
+- **`signal` means less on the cocoa rung.** AppKit offers no way to dismiss
+  a sampler from code — the session ends when the user picks or presses
+  Escape — so an abort there ends the wait and nothing else: the loupe stays
+  up, and the colour it eventually reports is dropped. Until then that
+  pending sample holds the process's event loop open, the way pending I/O
+  does. The portal's request is Closed and the X11 grab is released, which
+  is what an abort has to guarantee where something _is_ held.
+- **Every rung answers `'#rrggbb'`.** The portal and the sampler hand back
+  sRGB floats and X11 hands back server-layout words; every consumer wants a
+  CSS colour it can paint with, so the conversion happens once, here — the
+  same function for the two float rungs. If something later needs the
+  unrounded values, an option can widen the return — starting with channels
+  would have made the common case do arithmetic.
 
 ## The grab, and what it displaces
 
@@ -170,14 +196,15 @@ lifecycle belongs to core rather than to apps:
 
 ## Running it anywhere
 
-| where                                              | rung                                                                                                               |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| GNOME / KDE, or any portal with Screenshot ≥ 2     | portal                                                                                                             |
-| XFCE (portal present, no Screenshot interface)     | X11                                                                                                                |
-| ssh, `startx`, XQuartz, a container with a display | X11                                                                                                                |
-| macOS, `backend: 'cocoa'`                          | none — `supported` is false, `pickScreenColor()` rejects typed ([macos.md](macos.md))                              |
-| Node 20, where npm skips `dbus-native`             | X11                                                                                                                |
-| Wayland, some day                                  | portal only — there is no root window to read, which is a further reason the ladder lives here and not in each app |
+| where                                                | rung                                                                                                               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| macOS, the cocoa backend, `@windowkit/appkit` >= 0.9 | cocoa — `NSColorSampler` ([macos.md](macos.md))                                                                    |
+| macOS, the cocoa backend, an older bridge            | none — `supported` is false, `pickScreenColor()` rejects typed                                                     |
+| GNOME / KDE, or any portal with Screenshot ≥ 2       | portal                                                                                                             |
+| XFCE (portal present, no Screenshot interface)       | X11                                                                                                                |
+| ssh, `startx`, XQuartz, a container with a display   | X11                                                                                                                |
+| Node 20, where npm skips `dbus-native`               | X11                                                                                                                |
+| Wayland, some day                                    | portal only — there is no root window to read, which is a further reason the ladder lives here and not in each app |
 
 ## Building a colour picker on it
 

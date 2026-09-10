@@ -6,22 +6,26 @@ import type { AbortSignalLike, WindowTarget } from './filedialog.js';
 import type { NtkApp } from './nodes.js';
 
 /** Which rung of the ladder answered — or would. */
-export type ScreenColorBackend = 'portal' | 'x11';
+export type ScreenColorBackend = 'cocoa' | 'portal' | 'x11';
 
 export interface PickScreenColorOptions {
   /**
    * The window the picker belongs to — `parent_window` for the portal, and
-   * (when it points at a mounted node) the connection the X11 rung grabs on.
-   * `useEyedropper()` infers it from the tree.
+   * (when it points at a mounted node) the app the cocoa rung samples
+   * through or the connection the X11 rung grabs on. `useEyedropper()`
+   * infers it from the tree.
    */
   parentWindow?: WindowTarget;
   /** Abort the pick. Closes the portal request, or releases the X11 grab —
-   * the grab is released **before** the rejection is reported. */
+   * the grab is released **before** the rejection is reported. On the cocoa
+   * rung it ends the wait only: `NSColorSampler` cannot be dismissed from
+   * code, so the loupe stays up until the user answers it. */
   signal?: AbortSignalLike;
   /** Force a rung, for kiosks and for tests. */
   backend?: ScreenColorBackend;
   /**
-   * The connection the X11 rung grabs and reads on. Required for that rung
+   * The app a pick runs through: the cocoa rung's `colorSampler`, or the
+   * connection the X11 rung grabs and reads on. Required for either rung
    * when `parentWindow` does not resolve to a mounted node — the hook passes
    * the tree's own.
    */
@@ -40,23 +44,25 @@ export declare class NoScreenColorError extends Error {
 }
 
 /**
- * Sample one pixel from the screen: the desktop's own picker
- * (`org.freedesktop.portal.Screenshot.PickColor`, Screenshot interface
- * version 2) where there is one, a crosshair pointer grab on plain X11
- * everywhere else.
+ * Sample one pixel from the screen: the system's own picker where there is
+ * one — `NSColorSampler` on the cocoa backend (`@windowkit/appkit` >= 0.9),
+ * `org.freedesktop.portal.Screenshot.PickColor` (Screenshot interface
+ * version 2) on a desktop that has it — and a crosshair pointer grab on
+ * plain X11 everywhere else.
  *
  * Resolves to `'#rrggbb'`, or `null` when the user cancelled — Escape on the
- * X11 rung, the dialog's own cancel on the portal. Rejects with
- * {@link NoScreenColorError} when neither rung is reachable.
+ * X11 rung, the dialog's own cancel on the portal, a dismissed sampler on
+ * cocoa. Rejects with {@link NoScreenColorError} when no rung is reachable.
  */
 export declare function pickScreenColor(
   options?: PickScreenColorOptions,
 ): Promise<string | null>;
 
 /**
- * Which rung this machine lands on, without grabbing anything. `'x11'` needs
- * a connection to answer with — pass `app`, or a `parentWindow` pointing at
- * a mounted node — and `null` means {@link pickScreenColor} would reject.
+ * Which rung this machine lands on, without showing or grabbing anything.
+ * `'cocoa'` and `'x11'` both need an app to answer through — pass `app`, or
+ * a `parentWindow` pointing at a mounted node — and `null` means
+ * {@link pickScreenColor} would reject.
  */
 export declare function screenColorBackend(
   options?: Pick<PickScreenColorOptions, 'app' | 'backend' | 'parentWindow'>,
