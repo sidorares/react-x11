@@ -113,13 +113,27 @@ export interface LayoutStyle {
    * `'sticky'` lays it out in flow like `'relative'`, then holds it inside
    * the nearest scroll pane's edges by its insets — `top: 0` keeps a header
    * at the top of the pane until its parent scrolls away and takes it
-   * along. A sticky box paints over its siblings of the same `zIndex`.
-   * See docs/styling.md, "Sticky positioning".
+   * along. A position registered with `registerPosition` (react-x11/host)
+   * is written the same way, by name or with its options, and also lays the
+   * box out in flow and then moves it. Either paints over its siblings of
+   * the same `zIndex`. See docs/styling.md, "Sticky positioning" and
+   * "Custom positions".
    */
-  position?: PositionType;
-  /** An offset from the edge — or, under `position: 'sticky'`, how close
-   *  to the scroll pane's edge the box may come. A percentage of a sticky
-   *  inset is of the pane's size. The same holds for the other five. */
+  position?: import('../host.js').PositionValue;
+  /**
+   * A layout algorithm arranging this box's children in place of flexbox,
+   * by name or written with its options — `'equal-row'`,
+   * `{ name: 'masonry', columns: 3 }`. It runs inside the layout pass; the
+   * box's own `gap`, `justifyContent` and `alignItems` are what it spaces
+   * and aligns by. See docs/styling.md, "Custom layouts".
+   */
+  layout?: import('../host.js').LayoutValue;
+  /** What this box tells the layout arranging it — `masonry`'s `span`. */
+  layoutItem?: import('../host.js').CustomLayoutItem;
+  /** An offset from the edge — or, under sticky or a registered position,
+   *  the scheme's to read: how close to the scroll pane's edge the box may
+   *  come, for sticky, where a percentage is of the pane's size. The same
+   *  holds for the other five. */
   top?: Length;
   right?: Length;
   bottom?: Length;
