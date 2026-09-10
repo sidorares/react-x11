@@ -416,6 +416,22 @@ function insetRect(rect, by) {
 
 /** The whole pixels inside `rect` — a fractional edge left out — or null
  * when none are. */
+/**
+ * A `position: 'sticky'` inset as a distance in device pixels, or null for
+ * an edge that does not stick. Numbers arrive already scaled (styles.js,
+ * `scaleResolvedStyle`); a percentage is of `size`, the pane's scrollport
+ * along that axis, which is CSS's rule for a sticky inset. `'auto'` and
+ * anything else leave the edge free, as `auto` does in CSS.
+ */
+function stickyInset(value, size) {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string' && value.endsWith('%')) {
+    const percent = Number.parseFloat(value);
+    return Number.isFinite(percent) ? (percent / 100) * size : null;
+  }
+  return null;
+}
+
 function innerPixels(rect) {
   const x = Math.ceil(rect.x);
   const y = Math.ceil(rect.y);
@@ -1985,6 +2001,11 @@ export class Node {
     // design is held at — see WindowNode._resolveContainerQueries. Before
     // `_syncStyle`, which reads and writes it.
     this._cq = null;
+    // `position: 'sticky'`: the paint reach this node was left at by the
+    // last pass that placed it — where its pixels are, which the next
+    // placement claims when it moves them (WindowNode._placeSticky). Null
+    // on every node that is not sticky, and on one not yet placed.
+    this._stickyShown = null;
     this._syncStyle(props);
     this.yoga = yoga ? createLayoutNode() : null;
     if (this.yoga) {
@@ -2210,6 +2231,10 @@ export class Node {
     this.style = this._anim?.size
       ? { ...target, ...this._animatedValues() }
       : target;
+    // Sticking is done by the window after each layout pass, which finds
+    // the nodes through this registry. One that stops being sticky stays in
+    // it until that pass has put it back where layout has it.
+    if (this.style.position === 'sticky') this.root?._stickyNodes?.add(this);
     // The paint reach reads the style now in force — a shadow's spread, an
     // outline's width — so it is dropped on every swap, here, before the
     // old-extent claims below measure the new reach against the old one.
@@ -3409,6 +3434,17 @@ export class Node {
   }
 
   /**
+   * How far the blit this viewport has pending will move the pixels it
+   * keeps: the delta `_applyScrollBlits` hands `scrollRegion`, from the
+   * offsets captured when the blit was armed to the ones in force now. Only
+   * meaningful while `_blitLedgerOpen()`.
+   */
+  _blitShift() {
+    const from = this._pendingBlitFrom;
+    return { x: from.x - this.scrollX, y: from.y - this.scrollY };
+  }
+
+  /**
    * This node's paint bounds from before a child-list mutation — the `before`
    * half of `_childListChanged`'s protocol, captured while a departing child
    * is still attached.
@@ -3528,6 +3564,9 @@ export class Node {
     if (opaque) this.root?._opaqueNodes?.delete(this);
     this.root = root;
     if (opaque) root?._opaqueNodes?.add(this);
+    // styled before it had a window, so this is where a sticky node is
+    // first registered for placement (WindowNode._placeSticky)
+    if (this.style?.position === 'sticky') root?._stickyNodes?.add(this);
     // A node is styled in its constructor, before it has a window — so this
     // is where a loop declared by the very first style finds a frame clock
     // to run on.
@@ -3791,6 +3830,13 @@ export class Node {
     // node carried on painting at the position it no longer had.
     const drawn = [];
     const z = [];
+    // A sticky child is lifted over its in-flow siblings of the same
+    // `zIndex`, the way CSS paints a positioned box over non-positioned
+    // ones: a header held at the top of a pane sits over the rows that
+    // scroll under it, which are its later siblings and would otherwise
+    // paint on top. Hit testing walks the same order backwards, so the
+    // header also takes the press.
+    const lift = [];
     for (const c of this.children) {
       if (
         DRAWN_KINDS.has(c.kind) &&
@@ -3800,26 +3846,27 @@ export class Node {
       ) {
         drawn.push(c);
         z.push(c.style.zIndex ?? 0);
+        lift.push(c.style.position === 'sticky' ? 1 : 0);
       }
     }
     // document order already answers the usual no-zIndex case; the sort is
-    // only paid when some z actually disagrees with it
+    // only paid when some key actually disagrees with it
     let order = drawn;
     for (let i = 1; i < z.length; i++) {
-      if (z[i] < z[i - 1]) {
+      if (z[i] < z[i - 1] || (z[i] === z[i - 1] && lift[i] < lift[i - 1])) {
         order = drawn
-          .map((node, j) => ({ node, z: z[j], j }))
-          .sort((a, b) => a.z - b.z || a.j - b.j)
+          .map((node, j) => ({ node, z: z[j], lift: lift[j], j }))
+          .sort((a, b) => a.z - b.z || a.lift - b.lift || a.j - b.j)
           .map((e) => e.node);
         break;
       }
     }
-    this._paintOrderCache = { order, drawn, z };
+    this._paintOrderCache = { order, drawn, z, lift };
     return order;
   }
 
-  /** Do the cached drawn children and their z-keys still match the tree? */
-  _paintOrderFresh({ drawn, z }) {
+  /** Do the cached drawn children and their sort keys still match the tree? */
+  _paintOrderFresh({ drawn, z, lift }) {
     let j = 0;
     for (const c of this.children) {
       if (
@@ -3833,7 +3880,8 @@ export class Node {
       if (
         j >= drawn.length ||
         drawn[j] !== c ||
-        z[j] !== (c.style.zIndex ?? 0)
+        z[j] !== (c.style.zIndex ?? 0) ||
+        lift[j] !== (c.style.position === 'sticky' ? 1 : 0)
       ) {
         return false;
       }
@@ -4201,6 +4249,191 @@ export class Node {
     for (const child of this.children) {
       if (!child.isWindow) child._shiftAbs(dx, dy);
     }
+  }
+
+  /**
+   * The scroll pane a `position: 'sticky'` node holds its insets against:
+   * the nearest ancestor that scrolls — a `<box>` or a `<window>` with
+   * `overflow: 'scroll'`. Only that. `'hidden'` clips without scrolling
+   * here, which is CSS's `clip` rather than its `hidden`, so a card that
+   * rounds its corners does not quietly capture the header inside it — the
+   * CSS trap of a sticky element that "does nothing". Null when nothing
+   * above scrolls, and the node stays where layout put it.
+   */
+  _stickyPane() {
+    for (let n = this.parent; n; n = n.parent) {
+      if (n.isScroller?.()) return n;
+      if (n.isWindow) return null;
+    }
+    return null;
+  }
+
+  /**
+   * Where layout put this node before anything shifted it: the origin its
+   * parent hands its children — scrolled, when the parent is a scroll pane
+   * — plus yoga's offset. The same sum `absolutize` makes, asked again so
+   * that nothing has to remember which shifts a rect already carries: the
+   * scroll fast path moves a sticky node along with its pane's content
+   * (`_shiftAbs`), offset and all.
+   */
+  _laidOutAt() {
+    const parent = this.parent;
+    const origin = (parent.isScroller?.() && parent._childOrigin) || parent.abs;
+    return {
+      x: origin.x + this.yoga.getComputedLeft(),
+      y: origin.y + this.yoga.getComputedTop(),
+    };
+  }
+
+  /**
+   * Move this node to where `position: 'sticky'` holds it this frame — or,
+   * with `sticky` false, for a node whose style has just stopped asking,
+   * back to where layout has it. The subtree rides along. True when it
+   * moved.
+   */
+  _stick(sticky) {
+    const at = this._laidOutAt();
+    const pane = sticky ? this._stickyPane() : null;
+    const offset = pane ? this._stickyOffset(pane, at) : null;
+    const mx = at.x + (offset?.x ?? 0) - this.abs.x;
+    const my = at.y + (offset?.y ?? 0) - this.abs.y;
+    if (mx === 0 && my === 0) return false;
+    this._shiftAbs(mx, my);
+    // every cached union above still counts this subtree where it was
+    this._clearHitBounds();
+    return true;
+  }
+
+  /**
+   * CSS's sticky offset, per axis, in device pixels. An edge with an inset
+   * may not cross the pane's matching edge moved in by that inset, so the
+   * node is pushed back inside — but never so far that its margin box
+   * leaves its parent's content box, which is what carries a section's
+   * header off with the section. Where both edges of an axis stick, the
+   * top and left pushes are applied last and win, as in Blink.
+   *
+   * The pane's edges are its scrollport, inside the border and over the
+   * padding: the band the content scrolls through. A percentage inset is
+   * of that band's size, CSS's rule for sticky.
+   */
+  _stickyOffset(pane, at) {
+    const style = this.style;
+    const py = pane.yoga;
+    const port = {
+      left: pane.abs.x + py.getComputedBorder(Yoga.EDGE_LEFT),
+      top: pane.abs.y + py.getComputedBorder(Yoga.EDGE_TOP),
+      right:
+        pane.abs.x + pane.abs.width - py.getComputedBorder(Yoga.EDGE_RIGHT),
+      bottom:
+        pane.abs.y + pane.abs.height - py.getComputedBorder(Yoga.EDGE_BOTTOM),
+    };
+    const portWidth = port.right - port.left;
+    const portHeight = port.bottom - port.top;
+    // yoga's precedence, which the inset appliers use too: the logical
+    // edge wins over the physical one it lands on
+    const rtl = this.direction === 'rtl';
+    const leftInset = rtl
+      ? (style.end ?? style.left)
+      : (style.start ?? style.left);
+    const rightInset = rtl
+      ? (style.start ?? style.right)
+      : (style.end ?? style.right);
+    const top = stickyInset(style.top, portHeight);
+    const bottom = stickyInset(style.bottom, portHeight);
+    const left = stickyInset(leftInset, portWidth);
+    const right = stickyInset(rightInset, portWidth);
+    if (top === null && bottom === null && left === null && right === null) {
+      return null;
+    }
+    const box = this._stickyBounds(pane);
+    const { width, height } = this.abs;
+    let x = 0;
+    let y = 0;
+    if (right !== null) {
+      const push = Math.min(0, port.right - right - (at.x + width));
+      x += Math.max(push, Math.min(0, box.left - at.x));
+    }
+    if (left !== null) {
+      const push = Math.max(0, port.left + left - at.x);
+      x += Math.min(push, Math.max(0, box.right - (at.x + width)));
+    }
+    if (bottom !== null) {
+      const push = Math.min(0, port.bottom - bottom - (at.y + height));
+      y += Math.max(push, Math.min(0, box.top - at.y));
+    }
+    if (top !== null) {
+      const push = Math.max(0, port.top + top - at.y);
+      y += Math.min(push, Math.max(0, box.bottom - (at.y + height)));
+    }
+    // whole pixels, which is what keeps the pane's scroll blit a copy
+    return { x: Math.round(x), y: Math.round(y) };
+  }
+
+  /**
+   * The box this node's margin box has to stay inside while it sticks: its
+   * parent's content box, pulled in by the node's own margins. When the
+   * parent is the pane itself, the content box is the content the pane
+   * scrolls — at least the pane's own, and as far as
+   * `measureScrollContent` found the children reaching — so a header that
+   * is a direct child of the pane sticks for the whole of its scroll.
+   */
+  _stickyBounds(pane) {
+    const parent = this.parent;
+    const py = parent.yoga;
+    const inner = (edge) =>
+      py.getComputedBorder(edge) + py.getComputedPadding(edge);
+    let box;
+    if (parent === pane) {
+      const origin = pane._childOrigin ?? pane.abs;
+      const { width, height } = pane.abs;
+      const padLeft = py.getComputedPadding(Yoga.EDGE_LEFT);
+      const padRight = py.getComputedPadding(Yoga.EDGE_RIGHT);
+      const bottom =
+        Math.max(
+          height - py.getComputedBorder(Yoga.EDGE_BOTTOM),
+          pane.contentHeight,
+        ) - py.getComputedPadding(Yoga.EDGE_BOTTOM);
+      // `contentWidth` is measured from the edge the content starts at,
+      // which is the right-hand one under RTL (measureScrollContent)
+      box =
+        pane.direction === 'rtl'
+          ? {
+              left:
+                origin.x +
+                padLeft +
+                Math.min(
+                  py.getComputedBorder(Yoga.EDGE_LEFT),
+                  width - pane.contentWidth,
+                ),
+              right: origin.x + width - inner(Yoga.EDGE_RIGHT),
+            }
+          : {
+              left: origin.x + inner(Yoga.EDGE_LEFT),
+              right:
+                origin.x +
+                Math.max(
+                  width - py.getComputedBorder(Yoga.EDGE_RIGHT),
+                  pane.contentWidth,
+                ) -
+                padRight,
+            };
+      box.top = origin.y + inner(Yoga.EDGE_TOP);
+      box.bottom = origin.y + bottom;
+    } else {
+      const abs = parent.abs;
+      box = {
+        left: abs.x + inner(Yoga.EDGE_LEFT),
+        top: abs.y + inner(Yoga.EDGE_TOP),
+        right: abs.x + abs.width - inner(Yoga.EDGE_RIGHT),
+        bottom: abs.y + abs.height - inner(Yoga.EDGE_BOTTOM),
+      };
+    }
+    const own = this.yoga;
+    box.left += own.getComputedMargin(Yoga.EDGE_LEFT);
+    box.top += own.getComputedMargin(Yoga.EDGE_TOP);
+    box.right -= own.getComputedMargin(Yoga.EDGE_RIGHT);
+    box.bottom -= own.getComputedMargin(Yoga.EDGE_BOTTOM);
+    return box;
   }
 
   /**
@@ -9436,6 +9669,9 @@ export class WindowNode extends Scrollable(Node) {
     // when every attached node has a computed size to offer
     this._containerQueryNodes = new Set();
     this._cqFresh = false;
+    // `position: 'sticky'` nodes, placed after every layout pass against
+    // the pane they stick in — see _placeSticky
+    this._stickyNodes = new Set();
     // nodes whose child list changed and whose own size is pinned: their new
     // arrangement is only measurable once layout has run (see
     // Node._childListChanged)
@@ -12040,6 +12276,92 @@ export class WindowNode extends Scrollable(Node) {
     }
   }
 
+  /**
+   * Place every `position: 'sticky'` node in this window (docs/styling.md,
+   * "Sticky positioning"). Layout lays one out in flow, exactly as it does a
+   * `relative` one; this is the other half, run once the pass has placed
+   * everything — including the pass a scroll runs, so a header lands in the
+   * frame that scrolled rather than the one after it.
+   *
+   * Ancestors first: a sticky node inside another rides the outer one's
+   * shift, and measures its own from where that left it.
+   *
+   * A shift here is a move nothing else claims — the layout diff has already
+   * run, and the scroll fast path moves a pane's content without one — so it
+   * claims its own pixels: where the node was shown and where it is going.
+   * "Where it was shown" is the last placement's reach, moved along by the
+   * blit if one is pending over it. A node that rode the scroll like its
+   * neighbours lands exactly there and claims nothing, which is what keeps
+   * a pane of headers on the blit path; a held one claims two header-sized
+   * rects, written into the blitting pane's ledger and clipped to it the
+   * way `_reflowed`'s claims are.
+   */
+  _placeSticky() {
+    const nodes = [];
+    for (const node of this._stickyNodes) {
+      if (
+        node.destroyed ||
+        node.root !== this ||
+        node.isWindow ||
+        !node.yoga ||
+        !node.parent
+      ) {
+        this._stickyNodes.delete(node);
+        node._stickyShown = null;
+        continue;
+      }
+      nodes.push(node);
+    }
+    if (nodes.length > 1) {
+      const depth = new Map();
+      for (const node of nodes) {
+        let d = 0;
+        for (let n = node.parent; n; n = n.parent) d++;
+        depth.set(node, d);
+      }
+      nodes.sort((a, b) => depth.get(a) - depth.get(b));
+    }
+    const cap = this._damageRectCap();
+    for (const node of nodes) {
+      const sticky = node.style.position === 'sticky';
+      node._stick(sticky);
+      // one that stopped asking is back where layout has it: let it go
+      if (!sticky) this._stickyNodes.delete(node);
+      const before = node._stickyShown;
+      const after =
+        sticky && !node.hidden && node.style.display !== 'none'
+          ? node.paintBounds()
+          : null;
+      node._stickyShown = after;
+      if (this._damage === FULL_DAMAGE) continue;
+      const sv = node._blitViewport();
+      let was = before;
+      if (was && sv) {
+        const shift = sv._blitShift();
+        was = { ...was, x: was.x + shift.x, y: was.y + shift.y };
+      }
+      if (
+        was &&
+        after &&
+        was.x === after.x &&
+        was.y === after.y &&
+        was.width === after.width &&
+        was.height === after.height
+      ) {
+        continue;
+      }
+      for (const rect of [was, after]) {
+        if (!rect) continue;
+        const claim = sv ? intersectRects(rect, sv.paintBounds()) : rect;
+        if (!claim) continue;
+        if (sv && !sv._recordBlitClaim(claim)) {
+          sv._pendingBlitFrom = BLIT_POISONED;
+        }
+        this._damage = addDamageRect(this._damage, claim, cap);
+      }
+    }
+  }
+
   /** The frame itself. True when it painted or presented something. */
   _flushFrame() {
     // A frame is scheduled a tick before it is painted, and the connection
@@ -12112,6 +12434,9 @@ export class WindowNode extends Scrollable(Node) {
       } finally {
         layoutDiffSink = null;
       }
+      // …and sticky nodes against the arrangement that walk produced: where
+      // one sticks depends on where its pane and its parent landed
+      if (this._stickyNodes.size !== 0) this._placeSticky();
       this.needsLayout = false;
       this.needsPaint = true;
       // The other half of a contained reflow: the pre-mutation arrangement was
@@ -12295,6 +12620,25 @@ export class WindowNode extends Scrollable(Node) {
       this._applyContentsBlit(node, contents, width, height);
       return;
     }
+    // Back where the frame started: a burst of scrolls that went one way
+    // and back again inside one refresh — the Cocoa wheel folds a burst
+    // into one paced frame, and a trackpad's reversal is exactly that.
+    // Nothing on screen moved, so there is no band to shift and the
+    // scroll's claim on the whole viewport is owed nothing; what did change
+    // inside it is in the ledger, and the ledger is what gets repainted.
+    // (Every pixel-shift gate below is moot for a shift of nothing.)
+    if (from.x === node.scrollX && from.y === node.scrollY) {
+      const box = node.abs;
+      const kept = this._blitKeptDamage(box);
+      if (!kept) return;
+      let rects = kept;
+      for (const claim of ledger ?? []) {
+        const inside = intersectRects(claim, box);
+        if (inside) rects = addDamageRect(rects, inside);
+      }
+      this._damage = rects;
+      return;
+    }
     // children clip to the border box, so a border ring or rounded corner
     // would be shifted like content — any painted side counts
     const blitBorder = resolveBorderWidths(node.style, node.direction);
@@ -12399,9 +12743,12 @@ export class WindowNode extends Scrollable(Node) {
     // dragged a copy of the old thumb along: repaint the dragged copy's
     // rect and the new thumb's rect — small rects, where the full track
     // would run the viewport's whole length and merge with the strip into
-    // most of the viewport. The cross-axis bar did not move, but its band's
-    // pixels were shifted like everything else, so its track repaints
-    // whole; it lies along the strip, so their merge stays a band.
+    // most of the viewport. The cross-axis bar did not move, but the blit
+    // shifted its pixels like everything else: its track repaints whole,
+    // and so does the copy of the track the shift dragged off it — a pane
+    // scrolling both ways otherwise trails a smear of old thumb behind its
+    // bar, a row per pixel scrolled. Both lie along the strip on the far
+    // edge, so their merge stays a band.
     const scrolledBar = node._scrollbar(axis);
     if (scrolledBar) {
       const savedX = node.scrollX;
@@ -12427,7 +12774,15 @@ export class WindowNode extends Scrollable(Node) {
       });
     }
     const crossBar = node._scrollbar(axis === 'y' ? 'x' : 'y');
-    if (crossBar) rects = addDamageRect(rects, scrollbarTrackRect(crossBar));
+    if (crossBar) {
+      const track = scrollbarTrackRect(crossBar);
+      rects = addDamageRect(rects, track);
+      const dragged = intersectRects(
+        { ...track, x: track.x - dx, y: track.y - dy },
+        vp,
+      );
+      if (dragged) rects = addDamageRect(rects, dragged);
+    }
     for (const repair of repairs) rects = addDamageRect(rects, repair);
     // The last gate, and the only one that has to wait until the rects are
     // assembled: the frame carries at most MAX_DAMAGE_RECTS of them, so a

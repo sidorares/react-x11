@@ -10,7 +10,9 @@
 //     holds the present until it lands, so garbage is never on glass;
 //   - a window nobody can see owes no frame and no present — ordered out,
 //     miniaturized, or entirely behind another application's window;
-//   - a wheel notch is answered on the event, like a press.
+//   - a wheel notch is answered on the event, like a press — and the rest
+//     of a burst waits for the next refresh: one flip per refresh while
+//     the wheel turns, and only the wheel.
 //
 // And three more from the pass after it (#442, over bridge 0.4):
 //
@@ -1034,6 +1036,100 @@ test('a wheel notch is answered on the event, like a press', async () => {
     2,
     'and the frame went out before the route returned',
   );
+});
+
+// Two scroll events in one pump tick used to be two frames and two flips
+// microseconds apart, the second drawn into the buffer the first had just
+// taken off glass — which the WindowServer could still be compositing. A
+// scroll's frame blits before it repairs, so a composite caught between the
+// two showed a held sticky header dragged up a pixel, or the rows under it
+// on top of it, for one frame. One flip per refresh, whoever asks for it.
+test('a burst of wheel events is one frame per refresh: the first on the spot, the rest paced', async () => {
+  const { app, wnd, node, native, flushes } = await mount(
+    h(
+      'box',
+      { style: { flexGrow: 1, overflow: 'scroll' } },
+      ...Array.from({ length: 40 }, (_, i) =>
+        box({ height: 30, backgroundColor: i % 2 ? '#ffffff' : '#eeeeee' }),
+      ),
+    ),
+    { width: 100, height: 100 },
+  );
+  // A second's interval, which no burst below outlasts even on a slow
+  // runner, and a window quiet before it: its last flip and its clock's
+  // last frame both long ago — so that without the answered frame
+  // restarting the clock, the pump would find a paced frame due at once.
+  wnd._frameInterval = 1000;
+  wnd._presentedAt = -Infinity;
+  wnd._rafLast = -1e9;
+  const scroller = node.children[0];
+  const notch = () =>
+    app._route({
+      type: 'wheel',
+      windowNumber: wnd.windowNumber,
+      x: 50,
+      y: 50,
+      gx: 50,
+      gy: 50,
+      dx: 0,
+      dy: -1,
+      precise: false,
+      time: 1,
+    });
+  const before = { flushes: flushes.count, flips: flips(native) };
+  notch();
+  assert.equal(flushes.count, before.flushes + 1, 'the first is answered');
+  assert.equal(flips(native), before.flips + 1, 'and on glass');
+  const answered = scroller.scrollY;
+  assert.ok(answered > 0);
+  assert.equal(wnd._flippedRecently(), true, 'which is now in flight');
+  // the rest of the burst scrolls the model and paints nothing
+  for (let i = 0; i < 4; i++) notch();
+  assert.equal(scroller.scrollY, answered * 5, 'every notch still scrolled');
+  assert.equal(flushes.count, before.flushes + 1, 'without a frame each');
+  assert.equal(flips(native), before.flips + 1, 'or a flip each');
+  // …and the pump does not paint it a moment later either: the answered
+  // frame restarted the window's clock, so the next one waits its interval
+  app._tickFrames(wnd._presentedAt + 1);
+  app._presentAll();
+  assert.equal(flushes.count, before.flushes + 1, 'not inside the interval');
+  // one paced frame once it has passed, with the whole burst in it
+  app._tickFrames(wnd._rafLast + 1000);
+  app._presentAll();
+  assert.equal(flushes.count, before.flushes + 2, 'one catch-up frame');
+  assert.equal(flips(native), before.flips + 2);
+});
+
+// The gate and the clock restart are the wheel's and nothing else's. A live
+// resize paints each tick into a pair it has just made, so a flip before it
+// has nothing to race, and its ticks run inside AppKit's resize loop where
+// no paced frame can. When every answered input restarted the clock, the
+// catch-up frame a drag owes waited out an interval after the release and
+// the presenter gate's `resize` rule counted two frames after the last tick
+// where one is the budget.
+test('the frame a live resize owes still runs on the first tick after the drag', async () => {
+  const { native, app, wnd, node, flushes } = await mount(
+    h(
+      'box',
+      { style: { flexGrow: 1, flexDirection: 'row' } },
+      box({ flexGrow: 1, backgroundColor: '#3498db' }),
+      box({ flexGrow: 1, backgroundColor: '#e74c3c' }),
+    ),
+  );
+  // the gate on, and a window quiet before the drag
+  wnd._frameInterval = 1000;
+  wnd._presentedAt = -Infinity;
+  wnd._rafLast = -1e9;
+  for (let i = 1; i <= 5; i += 1) {
+    native.setWindowFrame(wnd._h, null, null, 100 + i * 4, 80 + i * 2);
+  }
+  assert.equal(flushes.count, 6, 'every tick a frame of its own');
+  assert.equal(node._floorsCatchUp, true, 'one catch-up frame is owed');
+  // the release, a moment after the last tick flipped
+  app._endLiveResizes();
+  app._tickFrames(wnd._presentedAt + 1);
+  assert.equal(flushes.count, 7, 'the owed frame runs at once');
+  assert.equal(node._floorsCatchUp, false);
 });
 
 // --- the screen layout ------------------------------------------------------

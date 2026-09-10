@@ -894,11 +894,27 @@ export class CocoaApp {
     });
     // Painted now, like a press. On X11 the wheel is paced on the frame
     // clock because ntk coalesces a touchpad's dozens of reports per frame
-    // into one event; AppKit already delivers scroll events at the
-    // display's rate, so answering each one is answering once per refresh
-    // — and answering it on the next frame tick instead was a 15ms median
-    // between the notch and the scroll, most of a refresh period of nothing.
+    // into one event; AppKit mostly delivers scroll events at the display's
+    // rate, so answering each one is answering once per refresh — and
+    // answering it on the next frame tick instead was a 15ms median between
+    // the notch and the scroll, most of a refresh period of nothing.
+    //
+    // Mostly: a trackpad's momentum lands two in one tick often, and a
+    // second flip inside the refresh draws into the buffer the first one
+    // just took off glass (`CocoaWindow._flippedRecently` says why that
+    // shows). So the rest of a burst lands React's half and leaves the
+    // paint to the paced frame the scroll already asked for — the model
+    // has scrolled, and the next refresh shows all of it.
+    if (wnd._flippedRecently()) {
+      flushSyncWork();
+      return;
+    }
+    const started = performance.now();
     this._afterInput();
+    // …and a frame that answered the wheel is this refresh's frame: the
+    // window's clock restarts from it, or a pump tick a few milliseconds
+    // later finds the clock due and flips again.
+    if (wnd._presentedAt >= started) wnd._rafLast = wnd._presentedAt;
   }
 
   _routeKey(ev) {

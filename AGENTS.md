@@ -354,7 +354,7 @@ stop it, in one place — see docs/desktop.md for the worked example.
   Runs in CI beside lint. **A prop change is not done until the `.d.ts` and a
   line in the type test change with it** — hand-written declarations drift
   silently otherwise, and nothing else catches it.
-- `npm run examples:{app,theming,container-queries,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,selection,widgets,windows,wm}`
+- `npm run examples:{app,theming,container-queries,schedule,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,selection,widgets,windows,wm}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). `examples:app` is the showcase: it hosts `form`, `widgets`
   and `tasks` as tabs by importing the panel each of them exports, so a new
@@ -1089,6 +1089,30 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     a layout animation from a paint-only one. See `damageForAnimation`: an
     out-of-flow node animating a layout property is bounded by its parent,
     which contains both where it was and where it is going.
+
+- **`position: 'sticky'` is placed after layout, not by it**
+  (`WindowNode._placeSticky`). Yoga lays a sticky node out as `relative`
+  with its insets withheld — `applyLayoutStyle` sends it `undefined` for
+  them, since they are thresholds and never offsets — and the window then
+  shifts it, ancestors first, against the nearest `overflow: 'scroll'` pane
+  and its parent's content box, in the same pass a scroll runs. Three
+  things are easy to undo:
+  - **Nothing remembers an offset.** The scroll fast path (#405) moves a
+    pane's content with `_shiftAbs`, a sticky node's last offset included,
+    so each pass re-derives where layout put the node (`_laidOutAt`: its
+    parent's child origin plus yoga's offset) and moves it from wherever it
+    is. A stored offset goes stale on exactly the frames that matter.
+  - **Its moves are claimed by hand.** Neither the layout diff nor the fast
+    path sees the shift, so the pass claims the reach the node was shown at
+    last frame — moved by the pending blit when one will drag those pixels
+    — and the reach it lands at, into the blitting pane's ledger and
+    clipped to it. A node that rode the scroll lands exactly where the blit
+    put its pixels and claims nothing, which is what keeps a pane of
+    headers on the fast path. `test/sticky.test.js` fences both halves, and
+    the blitted frame against a full repaint.
+  - **It paints over its siblings.** `paintOrder()` lifts a sticky child
+    over its siblings of the same `zIndex`, hit testing walks the same order
+    backwards, and the Cocoa layer presenter takes zPosition from it.
 
 - **A commit's per-insert bookkeeping is amortized, not paid per row**
   (issue #397). React mounts a subtree one `insertBefore` at a time, so a
