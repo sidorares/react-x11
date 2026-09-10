@@ -3434,14 +3434,26 @@ export class Node {
   }
 
   /**
-   * How far the blit this viewport has pending will move the pixels it
-   * keeps: the delta `_applyScrollBlits` hands `scrollRegion`, from the
-   * offsets captured when the blit was armed to the ones in force now. Only
-   * meaningful while `_blitLedgerOpen()`.
+   * How far the blit this viewport has pending moves the pixels it keeps:
+   * the delta `_applyScrollBlits` hands `scrollRegion`, from the offsets
+   * captured when the blit was armed to the ones in force now. `from` is
+   * that origin, for a caller that has already taken it off the node.
+   *
+   * It is the content's own move, and along x that is not always against
+   * the offset. `scrollX` is a distance from the start edge, which is the
+   * right-hand one under `direction: 'rtl'`, so there `_absolutizeChildren`
+   * carries the children right as it grows — and the band the blit keeps,
+   * the strip it exposes, the thumb it drags along and the claims in the
+   * ledger all go the way the children went.
    */
-  _blitShift() {
-    const from = this._pendingBlitFrom;
-    return { x: from.x - this.scrollX, y: from.y - this.scrollY };
+  _blitShift(from = this._pendingBlitFrom) {
+    const dx = this.scrollX - from.x;
+    // 0 - x rather than -x: negating +0 yields -0, which survives into
+    // request buffers and test comparisons
+    return {
+      x: this.direction === 'rtl' ? 0 + dx : 0 - dx,
+      y: 0 - (this.scrollY - from.y),
+    };
   }
 
   /**
@@ -6755,8 +6767,9 @@ export const Scrollable = (Base) =>
       // is the right-hand edge in RTL — so scrolling shifts the children the
       // other way. Keeping it a distance rather than a coordinate is what
       // makes `scrollTo({x: 0})` mean "back to the beginning" in both
-      // directions, and keeps every clamp, every max and the blit's arithmetic
-      // in one sign.
+      // directions, and keeps every clamp and every max in one sign. What
+      // moves pixels with the content does not share it: the scroll blit
+      // asks `_blitShift`, which asks the direction.
       const ox = rtl ? originX + this.scrollX : originX - this.scrollX;
       const oy = originY - this.scrollY;
       // The layout diff and a scroll would double-report each other: a scroll
@@ -12656,8 +12669,11 @@ export class WindowNode extends Scrollable(Node) {
     // shift is a copy
     if (!isIntegerRect(vp)) return;
     if (!Number.isInteger(from.x) || !Number.isInteger(from.y)) return;
-    const dx = node.scrollX - from.x;
-    const dy = node.scrollY - from.y;
+    // How far the kept pixels move, which is how far the content moved —
+    // the sense `scrollRegion` takes and `_applyContentsBlit` is handed.
+    // Not the change in the offsets: along x in RTL the two agree only in
+    // size (`_blitShift`).
+    const { x: dx, y: dy } = node._blitShift(from);
     if (!Number.isInteger(dx) || !Number.isInteger(dy)) return;
     if (dx === 0 && dy === 0) return;
     // one axis at a time: a diagonal scroll needs an L of strips whose
@@ -12703,8 +12719,8 @@ export class WindowNode extends Scrollable(Node) {
     for (const claim of ledger ?? []) {
       const moved = claim.pre
         ? {
-            x: claim.x - dx,
-            y: claim.y - dy,
+            x: claim.x + dx,
+            y: claim.y + dy,
             width: claim.width,
             height: claim.height,
           }
@@ -12719,8 +12735,9 @@ export class WindowNode extends Scrollable(Node) {
     if (repairArea > area * BLIT_MAX_CLAIM_AREA) return;
     if (!this._scrollBlitSafe(node, vp)) return;
     let rects = keep;
-    // the strip the shift exposed, full breadth — it also covers the corner
-    // gutter beside the bars, whose old pixels the blit did not overwrite
+    // the strip the shift exposed, on the side the pixels moved away from,
+    // full breadth — it also covers the corner gutter beside the bars, whose
+    // old pixels the blit did not overwrite
     const axis = dy !== 0 ? 'y' : 'x';
     const delta = dy !== 0 ? dy : dx;
     rects = addDamageRect(
@@ -12728,12 +12745,12 @@ export class WindowNode extends Scrollable(Node) {
       axis === 'y'
         ? {
             x: vp.x,
-            y: delta > 0 ? vp.y + vp.height - delta : vp.y,
+            y: delta > 0 ? vp.y : vp.y + vp.height + delta,
             width: vp.width,
             height: Math.abs(delta),
           }
         : {
-            x: delta > 0 ? vp.x + vp.width - delta : vp.x,
+            x: delta > 0 ? vp.x : vp.x + vp.width + delta,
             y: vp.y,
             width: Math.abs(delta),
             height: vp.height,
@@ -12760,8 +12777,8 @@ export class WindowNode extends Scrollable(Node) {
       node.scrollY = savedY;
       if (oldBar) {
         rects = addDamageRect(rects, {
-          x: oldBar.x - 1 - dx,
-          y: oldBar.y - 1 - dy,
+          x: oldBar.x - 1 + dx,
+          y: oldBar.y - 1 + dy,
           width: oldBar.width + 2,
           height: oldBar.height + 2,
         });
@@ -12778,7 +12795,7 @@ export class WindowNode extends Scrollable(Node) {
       const track = scrollbarTrackRect(crossBar);
       rects = addDamageRect(rects, track);
       const dragged = intersectRects(
-        { ...track, x: track.x - dx, y: track.y - dy },
+        { ...track, x: track.x + dx, y: track.y + dy },
         vp,
       );
       if (dragged) rects = addDamageRect(rects, dragged);
@@ -12797,10 +12814,7 @@ export class WindowNode extends Scrollable(Node) {
       if (inside) painted += inside.width * inside.height;
     }
     if (painted > area * SCROLL_BLIT_MAX_REPAINT) return;
-    // scroll offsets grow down/right; the pixels move the other way
-    // (0 - x rather than -x: negating +0 yields -0, which survives into
-    // request buffers and test comparisons)
-    if (!wnd.scrollRegion({ ...vp }, 0 - dx, 0 - dy)) return;
+    if (!wnd.scrollRegion({ ...vp }, dx, dy)) return;
     this._damage = rects;
   }
 

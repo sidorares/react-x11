@@ -974,6 +974,13 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   blit, a border/borderRadius on the scroll pane, an overlapping
   non-descendant, a debug overlay or DevTools highlight all bail.
 
+  The shift is the content's move, not the offsets': `scrollX` counts from
+  the start edge, so under `direction: 'rtl'` a growing offset carries the
+  content _right_, and a delta written as "against the offset" moves the
+  band, the exposed strip, the dragged thumb and the ledger's claims the
+  wrong way. `Node._blitShift` is where offsets become that move — read it
+  rather than subtracting offsets.
+
   A claim landing inside the viewport used to bail too. It now goes into a
   per-frame **ledger** on the scrolling node (issue #398), recorded at
   `invalidate` time — _before_ rects coalesce and hide it, the reason the
