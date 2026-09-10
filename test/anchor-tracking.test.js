@@ -196,6 +196,44 @@ test('a tracked popup closes once its trigger scrolls entirely out of view', asy
   await x11Root.unmount();
 });
 
+// Where "entirely out of view" begins, to the pixel. Anchoring asks the
+// paint walk's off-screen test without the pixel paint allows for ink past
+// a box (`Node._offscreen`): a trigger with one row inside the viewport is
+// in view, and one whose box ends on the viewport's edge is not, whatever
+// its antialiasing puts in the row past it.
+test('a tracked popup stays while one row of its trigger shows, and closes when none does', async () => {
+  const app = createMockApp();
+  const triggerRef = React.createRef();
+  const popupRef = React.createRef();
+  const closedRef = { current: 0 };
+  const x11Root = await renderScrolledTrigger(app, {
+    triggerRef,
+    element: h(Harness, { triggerRef, popupRef, closedRef }),
+  });
+
+  const wnd = app.windows[0];
+  const scroller = wnd._reactX11Node.children.find((n) => n.kind === 'box');
+  const before = popupRef.current.y;
+
+  // the trigger sits at content y 40..60: at 59 its last row is the
+  // viewport's first
+  scroller.scrollTo({ y: 59 });
+  await waitFor(
+    () => popupRef.current?.y === before - 59,
+    'the popup following the trigger to its last visible row',
+  );
+  assert.strictEqual(closedRef.current, 0, 'a row of the trigger still shows');
+
+  // at 60 its box ends on the viewport's top edge, and none of it shows
+  scroller.scrollTo({ y: 60 });
+  await waitFor(
+    () => closedRef.current > 0,
+    'onClose firing once the trigger’s box ended on the viewport’s edge',
+  );
+
+  await x11Root.unmount();
+});
+
 test("a tracked popup follows the trigger's own layout moving under it", async () => {
   const app = createMockApp();
   const triggerRef = React.createRef();

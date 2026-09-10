@@ -5616,7 +5616,7 @@ export class Node {
     }
     for (const child of order) {
       if (child._promoted) continue; // on a layer of its own: a hole here
-      if (child._offscreen()) continue;
+      if (child._offscreen(child.abs, DAMAGE_SLOP)) continue;
       if (child._outsideDamage()) continue;
       child.paint(ctx);
     }
@@ -5668,21 +5668,34 @@ export class Node {
    * (`src/anchor.js`): a popup pointed at a caret has to know when *the
    * caret* has scrolled out of the editor, which happens many screens before
    * the editor itself goes anywhere.
+   *
+   * `slop` is how near counts as reaching in. The paint walk passes
+   * `DAMAGE_SLOP`, for the reason `_outsideDamage` does: antialiasing puts
+   * a glyph's ink a fraction of a pixel past its box, so right-aligned or
+   * RTL text whose box ends exactly at a pane's edge, or the window's, inks
+   * the first column inside it. Culled, that column goes without the ink in
+   * every pass, full repaints included, and the scroll blit carries it: a
+   * notch that moves the text in shows the bare column where a full repaint
+   * paints the text, and a notch the other way carries the ink onto a
+   * column whose full repaint culls it. The pixel's cost is a node whose box
+   * touches the edge, such as a list row abutting the viewport, painted and
+   * clipped away; its children further out are still culled. Anchoring
+   * asks with none, since a caret a pixel past the viewport is out of view.
    */
-  _offscreen(rect = this.abs) {
+  _offscreen(rect = this.abs, slop = 0) {
     const window = this.root?.abs;
     if (!window) return false;
     const { x, y, width, height } = rect;
     if (
-      x + width <= 0 ||
-      y + height <= 0 ||
-      x >= window.width ||
-      y >= window.height
+      x + width <= -slop ||
+      y + height <= -slop ||
+      x >= window.width + slop ||
+      y >= window.height + slop
     ) {
       return true;
     }
     for (let n = this.parent; n && n !== this.root; n = n.parent) {
-      if (n.clipsChildren() && !rectsOverlap(rect, n.abs)) return true;
+      if (n.clipsChildren() && !rectsOverlap(rect, n.abs, slop)) return true;
     }
     return false;
   }
