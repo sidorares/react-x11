@@ -224,6 +224,12 @@ that have not been built, and say so at the top.
   the built-in one — how a layout's children become yoga trees of their own,
   and what they cost. Implemented; [styling.md](styling.md#custom-layouts)
   is the reference.
+- [architecture/grid-layout.md](architecture/grid-layout.md) — whether CSS
+  Grid can be a `layout` on that seam: a prototype of the spec's track
+  sizing, placement and named areas, what it costs against flexbox — more
+  than it should have, until the seam remembered what it asks a child — how
+  much of the spec it is, and why neither yoga nor Taffy is the shorter way.
+  Not built.
 - [architecture/drag-and-drop.md](architecture/drag-and-drop.md) — XDND on
   both sides: where the advertisement lives when every control is drawn into
   one window, what the drag-source half costs, and the API review that

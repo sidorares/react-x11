@@ -76,7 +76,8 @@
     "docs:build": "npm --prefix website run build",
     "docs:test": "npm --prefix website test",
     "bench:presenters": "node --import tsx scripts/bench/presenters.js",
-    "bench:touched": "node scripts/bench/touched.js"
+    "bench:touched": "node scripts/bench/touched.js",
+    "bench:grid": "node --import tsx scripts/bench/grid/bench.mjs"
   },
   "repository": {
     "type": "git",

@@ -1536,7 +1536,9 @@ pixels, so an algorithm never multiplies by the scale. A value of the wrong
 type, or an option you did not declare, is reported naming it, and takes
 the default. What the box's own style already says — `gap`,
 `justifyContent`, `alignItems` — is `info.style`: read it rather than
-declaring options that mean the same thing.
+declaring options that mean the same thing. `info.scale` is the box's device
+pixels per logical pixel, for a length the schema cannot see: one inside a
+string, like a grid's track list.
 
 **What core does, so the algorithm does not have to.** It lays each child
 out at its rect, mirrors the slots when the box reads right to left and

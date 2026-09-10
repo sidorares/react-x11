@@ -228,6 +228,19 @@ options that mean the same things: `equal-row` has no options of its own.
   the host's. Yoga's dirtied callback is no substitute: it fires only on the
   way from clean to dirty, and a child hidden since it mounted was never
   laid out and would never say so — a test pins exactly that case.
+- **What a child is asked is remembered.** An algorithm asks each child the
+  same questions every run, and a host runs several times a frame — the
+  floors passes, the pass proper, the placement. Each answer is a layout of
+  the child's tree, and two different questions evict each other from
+  yoga's one-entry cache, so the answers are kept (`Node._hostSizesNow`)
+  until something inside the child changes. That shows as dirt on its root:
+  every layout of the root goes through `layoutHostChild` or the memo, both
+  drop the memo when they find it dirty, and nothing else clears the dirt.
+  Answers taken off the pixel grid are kept apart from the rest. A placement
+  leaves a tree already laid out at its rect where it is (`_hostLaidAt`),
+  since the floors pass voids yoga's own cache for every tree in the window.
+  Before this, a 300-card grid's frame took 3.4 times flexbox's
+  ([grid-layout.md](grid-layout.md#3-performance)).
 - **Right to left is the core's.** An algorithm is written once, from the
   left; the placement mirrors each slot across the content box when the host
   reads right to left, and each child's own tree mirrors inside it.
@@ -261,28 +274,30 @@ tree:
 - **Heights**, at the width the placement gave each child
   (`_measureHostChildHeights`) — a minimum height is a height for a width,
   and the width is the algorithm's. Only for a child that can come out
-  shorter than its content, one given a height or naming its own: a
-  masonry's cards take their natural heights and squeeze nothing, so the
-  common case pays nothing. A live resize defers them with the rest.
+  shorter than its content: one naming a height of its own, or one its rect
+  gives less height than its content takes at the rect's width. A masonry's
+  cards and a stretched grid row's items, sized to fit, squeeze nothing, so
+  the common case pays nothing. A live resize defers them with the rest.
 
 ## 5. Cost
 
 **No layout, no cost.** Every added branch is behind `_layoutHosts.size` or
 a `_host !== null` read; the sweep returns on an empty registry.
 
-**With a layout.** The spike (§6): a masonry of 300 cards of 9 yoga nodes
-each, hosted in one measured leaf over detached trees, against the same
-cards as a flex-wrap row:
+**With a layout.** Measured on the seam as built
+(`scripts/bench/grid/bench.mjs`, in the in-process server with real text
+shaping): 300 cards of 9 yoga nodes each, with wrapping titles, laid out by
+`masonry` and, for comparison, as a flex-wrap row. Layout time per frame;
+the changes and resizes are medians of nine:
 
-| case                           |   custom host | native flex-wrap |
-| ------------------------------ | ------------: | ---------------: |
-| host measured per pass         |          once |                  |
-| clean frame / a sibling's dirt | 0 re-measures |                  |
-| one card's text grew           |       0.25 ms |           2.6 ms |
-| window resized 1200↔1100       |        1.6 ms |           2.7 ms |
+| case                    | masonry | flex-wrap |
+| ----------------------- | ------: | --------: |
+| mount                   | 76.2 ms |   65.5 ms |
+| one card's text changed |  1.6 ms |   13.4 ms |
+| window resized 1000↔900 |  4.4 ms |   21.5 ms |
 
-The two are different algorithms, so read it as "not slower", not as
-"faster". What it does show is structural: each child's tree is a
+The two are different algorithms, so read the last two rows as "not
+slower" before "faster". What they do show is structural: each child's tree is a
 containment boundary, so a change inside one card re-lays out that card
 (one text measure of 300), and no cycle can form inside a pass — a child
 cannot reach the constraints its host gives it. Container queries needed a
@@ -307,6 +322,9 @@ dirtied callback, and only the sweep covers a child never laid out).
   columns; nothing here paginates.
 - **Min-content heights** for an algorithm to read; only widths are handed
   over.
+- **Grid.** Feasible on this seam, and measured: a prototype, what it costs
+  against flexbox, and what shipping it would take are in
+  [grid-layout.md](grid-layout.md).
 - **Hot reload** keeps a mounted host on the definition it started with
   until its style names a layout again — the contract registered elements
   have.
