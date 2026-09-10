@@ -522,7 +522,6 @@ function rectsBounds(rects) {
   return out;
 }
 
-/** Do two rects share any area? Touching edges do not count. */
 /** Does `rect` reach into any of the four `radius`-sized corner squares of
  * `box` — the only part of a rounded border a translation cannot keep? */
 function cornerSquaresOverlap(box, radius, rect) {
@@ -542,12 +541,17 @@ function cornerSquaresOverlap(box, radius, rect) {
   return corners.some((square) => rectsOverlap(square, rect));
 }
 
-function rectsOverlap(a, b) {
+/**
+ * Do two rects share any area? Touching edges do not count. With a
+ * `margin`, do they come within that many pixels of each other: the same
+ * question asked of either one grown by `margin` on every side.
+ */
+function rectsOverlap(a, b, margin = 0) {
   return (
-    a.x < b.x + b.width &&
-    b.x < a.x + a.width &&
-    a.y < b.y + b.height &&
-    b.y < a.y + a.height
+    a.x < b.x + b.width + margin &&
+    b.x < a.x + a.width + margin &&
+    a.y < b.y + b.height + margin &&
+    b.y < a.y + a.height + margin
   );
 }
 
@@ -5625,12 +5629,20 @@ export class Node {
    * saving comes from — the clip alone would still put every request on the
    * wire for the server to throw away.
    *
-   * Tested against the subtree's bounds, not `abs`: see `paintBounds`.
+   * Tested against the subtree's bounds, not `abs`: see `paintBounds`. And
+   * with the pixel of `DAMAGE_SLOP` to spare. A claim is grown by it before
+   * it gets here, but a rect that never was a claim — the strip a scroll
+   * blit exposes, a scrollbar's repair — is exact, and antialiasing puts
+   * ink just outside a glyph's box (`_childrenCanOverflow` allows the same
+   * pixel). Text whose box ends where such a rect begins inks its first
+   * column; culled, that column keeps what was under the text where a full
+   * repaint has the ink. The pass is clipped to the rect, so painting the
+   * text lets that ink land and nothing else.
    */
   _outsideDamage() {
     const damage = this.root?._paintDamage;
     if (!damage) return false;
-    return !rectsOverlap(this._subtreeBounds(), damage);
+    return !rectsOverlap(this._subtreeBounds(), damage, DAMAGE_SLOP);
   }
 
   /**

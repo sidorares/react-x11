@@ -1119,3 +1119,163 @@ for (const direction of ['ltr', 'rtl']) {
     }
   });
 }
+
+// --- ink a pixel past its box, where a strip begins ----------------------
+//
+// Antialiasing puts a glyph's ink a fraction of a pixel outside its box, so
+// text whose box ends exactly where a pass begins inks the pass's first
+// column, and the cull that skips subtrees outside the pass has to let it.
+// A claim is grown by a pixel before anything is culled against it; the
+// strip a blit exposes is not a claim, and is exact. Right-to-left text ends
+// at its box's right edge, and a pane whose content moves left exposes its
+// strip on the right, so a title whose edge was at the viewport's lands on
+// the strip's. Found in the schedule example at scale 2: one pixel, 255 in
+// the blitted frame and 253 in a full repaint.
+
+test('text whose box ends where a strip begins keeps its antialiased edge, frame by frame', async (t) => {
+  // two windows, a server each: one blits, and its twin, with no
+  // scrollRegion to call, repaints the whole viewport on every scroll
+  const apps = [await createHeadlessApp(), await createHeadlessApp()];
+  const x11Roots = [];
+  try {
+    for (const app of apps) x11Roots.push(await createRoot({ app, scale: 2 }));
+    const twins = [];
+    for (const x11Root of x11Roots) {
+      const ref = React.createRef();
+      const titles = [];
+      const instance = await new Promise((resolve) =>
+        x11Root.render(
+          h(
+            'window',
+            { width: 330, height: 90, style: { backgroundColor: '#ffffff' } },
+            h(
+              'box',
+              {
+                ref,
+                style: {
+                  overflow: 'scroll',
+                  flexGrow: 1,
+                  flexDirection: 'row',
+                  direction: 'rtl',
+                },
+              },
+              // 200 device pixels a card in a 660 viewport: at none of the
+              // positions below does a title's box end on the pane's left
+              // edge. The off-screen cull makes no allowance for ink past a
+              // box, so the two windows can disagree about that column for a
+              // reason of its own.
+              ...Array.from({ length: 8 }, (_, i) =>
+                h(
+                  'box',
+                  { key: i, style: { width: 100, flexShrink: 0, padding: 8 } },
+                  h(
+                    'text',
+                    {
+                      ref: (node) => (titles[i] = node),
+                      style: { fontSize: 12, color: '#20304a' },
+                    },
+                    'in between',
+                  ),
+                ),
+              ),
+            ),
+          ),
+          resolve,
+        ),
+      );
+      twins.push({
+        instance,
+        root: instance._reactX11Node,
+        pane: ref.current,
+        titles,
+      });
+    }
+    const [blit, full] = twins;
+    if (typeof blit.instance.scrollRegion !== 'function') {
+      t.skip('installed ntk has no Window.scrollRegion yet');
+      return;
+    }
+    full.instance.scrollRegion = undefined;
+    let blits = 0;
+    const realScrollRegion = blit.instance.scrollRegion.bind(blit.instance);
+    blit.instance.scrollRegion = (...args) => {
+      const ok = realScrollRegion(...args);
+      if (ok) blits += 1;
+      return ok;
+    };
+    const W = 660;
+    const H = 180;
+    const paint = ({ root }) => {
+      root._scheduled = false;
+      root.flush();
+    };
+    const settled = () => Promise.all(apps.map(settle));
+    twins.forEach(paint);
+    await settled();
+
+    const landings = [];
+    const scrollTo = async (x) => {
+      const before = blits;
+      for (const twin of twins) {
+        twin.pane._scrollByDevice(x - twin.pane.scrollX, 0);
+        paint(twin);
+      }
+      await settled();
+      const [a, b] = await Promise.all(
+        twins.map(({ root }) => readPixels(root._ctx, W, H)),
+      );
+      const rects = blit.root._lastDamageRects ?? [];
+      // the premise, where it holds: a title's box ends on a strip's left
+      // edge, and a full repaint inks the column past it
+      for (const title of blit.titles) {
+        const { x: tx, y: ty, width, height } = title.abs;
+        const edge = tx + width;
+        const strip = rects.find(
+          (r) => r.x === edge && r.y <= ty && r.y + r.height >= ty + height,
+        );
+        if (!strip || blits === before) continue;
+        let ink = 255;
+        for (let y = ty; y < ty + height; y++) {
+          ink = Math.min(ink, b.data[(y * W + edge) * 4]);
+        }
+        assert.ok(ink < 255, `the title ending at ${edge} inks past its box`);
+        landings.push(x);
+      }
+      let count = 0;
+      let first = null;
+      for (let i = 0; i < a.data.length; i += 4) {
+        if (
+          a.data[i] === b.data[i] &&
+          a.data[i + 1] === b.data[i + 1] &&
+          a.data[i + 2] === b.data[i + 2] &&
+          a.data[i + 3] === b.data[i + 3]
+        ) {
+          continue;
+        }
+        count += 1;
+        first ??= { x: (i / 4) % W, y: Math.floor(i / 4 / W) };
+      }
+      assert.strictEqual(
+        count,
+        0,
+        `scrollX ${x}: the blitted frame differs from a full repaint in ` +
+          `${count} pixels, first at ${JSON.stringify(first)}; damage ` +
+          JSON.stringify(rects),
+      );
+    };
+    // from 430, content moving left in steps of 1 to 5 pixels and two of
+    // about 200, onto the three scroll positions that put a title's edge on
+    // the viewport's — 416, 216 and 16 — and one step on from each
+    for (const x of [430, 429, 427, 424, 419, 416, 415, 216, 211, 16, 13]) {
+      await scrollTo(x);
+    }
+    assert.deepStrictEqual(
+      landings,
+      [415, 211, 13],
+      'where a title’s box ended on the left edge of a blitted strip',
+    );
+  } finally {
+    for (const x11Root of x11Roots) await x11Root.unmount();
+    for (const app of apps) await app.close();
+  }
+});
