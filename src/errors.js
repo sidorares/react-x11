@@ -60,6 +60,35 @@ export function reportHandlerError(node, handler, error) {
 }
 
 /**
+ * A throw from a layout or a placement (docs/extending.md) — code that runs
+ * inside a frame, where no error boundary is on the stack either. Reported
+ * the way a handler's throw is, `onUncaughtError` included, and the frame
+ * carries on with the fallback `consequence` names: one bad algorithm must
+ * not stop the window from painting.
+ */
+export function reportLayoutError(node, what, error, consequence) {
+  const element = node?.kind ? `<${node.kind}>` : '(unknown)';
+  const owner = ownerName(node);
+  const custom = node?.app && perContainer.get(node.app);
+  if (custom) {
+    custom(error, {
+      componentStack: owner ? `\n    in ${owner}` : undefined,
+      element,
+      handler: what,
+      node,
+    });
+    return;
+  }
+  console.error(
+    `react-x11: ${what} on ${element}${owner ? ` in ${owner}` : ''} threw. ` +
+      'It ran inside a frame rather than a render, so no error boundary ' +
+      `could catch it. ${consequence}.`,
+    error,
+  );
+  markFailed();
+}
+
+/**
  * `REACT_X11_STRICT_TOKENS=1` makes a `$token` the theme does not define
  * fatal again, for a build that would rather stop than paint something
  * wrong. The default reports and carries on — see `reportStyleError`.
@@ -101,6 +130,23 @@ export function reportStyleError(
     `${message}${owner ? ` — in ${owner}` : ''}. ${consequence}; set ` +
       'REACT_X11_STRICT_TOKENS=1 to make this throw instead.',
   );
+  markFailed();
+}
+
+/**
+ * A style that asks for something that is not there — a layout or a
+ * placement nobody registered, an option of the wrong type. Reported and
+ * carried on from, once per node and message, the way an unknown token is;
+ * with no strict switch, because the fallback it names is a real one and
+ * not a property silently dropped.
+ */
+export function reportStyleProblem(node, message, consequence) {
+  const seen = reportedStyleErrors.get(node);
+  if (seen?.has(message)) return;
+  if (seen) seen.add(message);
+  else reportedStyleErrors.set(node, new Set([message]));
+  const owner = ownerName(node);
+  console.error(`${message}${owner ? ` — in ${owner}` : ''}. ${consequence}.`);
   markFailed();
 }
 

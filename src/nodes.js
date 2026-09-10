@@ -65,6 +65,12 @@ import {
   validateImageProps,
 } from './imagesource.js';
 import { Yoga } from './yoga.js';
+import {
+  isPlaced,
+  positionOf,
+  resolveOptions,
+  unknownPositionMessage,
+} from './layouts.js';
 import { scaleOf } from './scale.js';
 // Namespace import for `Surface`, the same shape and the same reason as
 // `paintcache.js`: a named import of something an older ntk does not export
@@ -117,7 +123,9 @@ import { baseTheme } from './palette.js';
 import {
   callHandler,
   ownerName,
+  reportLayoutError,
   reportStyleError,
+  reportStyleProblem,
   STRICT_TOKENS,
 } from './errors.js';
 import {
@@ -418,22 +426,6 @@ function insetRect(rect, by) {
 
 /** The whole pixels inside `rect` — a fractional edge left out — or null
  * when none are. */
-/**
- * A `position: 'sticky'` inset as a distance in device pixels, or null for
- * an edge that does not stick. Numbers arrive already scaled (styles.js,
- * `scaleResolvedStyle`); a percentage is of `size`, the pane's scrollport
- * along that axis, which is CSS's rule for a sticky inset. `'auto'` and
- * anything else leave the edge free, as `auto` does in CSS.
- */
-function stickyInset(value, size) {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string' && value.endsWith('%')) {
-    const percent = Number.parseFloat(value);
-    return Number.isFinite(percent) ? (percent / 100) * size : null;
-  }
-  return null;
-}
-
 function innerPixels(rect) {
   const x = Math.ceil(rect.x);
   const y = Math.ceil(rect.y);
@@ -2126,11 +2118,16 @@ export class Node {
     // design is held at — see WindowNode._resolveContainerQueries. Before
     // `_syncStyle`, which reads and writes it.
     this._cq = null;
-    // `position: 'sticky'`: the paint reach this node was left at by the
-    // last pass that placed it — where its pixels are, which the next
-    // placement claims when it moves them (WindowNode._placeSticky). Null
-    // on every node that is not sticky, and on one not yet placed.
-    this._stickyShown = null;
+    // A position placed after layout (`sticky`, or one registered with
+    // `registerPosition`): the paint reach this node was left at by the last
+    // pass that placed it — where its pixels are, which the next placement
+    // claims when it moves them (WindowNode._placeNodes) — the request its
+    // style resolved to, cached per style, and the definition that threw,
+    // which is not asked again until the style names another. Null on every
+    // node without one.
+    this._placedShown = null;
+    this._placementCache = null;
+    this._placementFailed = null;
     this._syncStyle(props);
     this.yoga = yoga ? createLayoutNode() : null;
     if (this.yoga) {
@@ -2356,10 +2353,11 @@ export class Node {
     this.style = this._anim?.size
       ? { ...target, ...this._animatedValues() }
       : target;
-    // Sticking is done by the window after each layout pass, which finds
-    // the nodes through this registry. One that stops being sticky stays in
-    // it until that pass has put it back where layout has it.
-    if (this.style.position === 'sticky') this.root?._stickyNodes?.add(this);
+    // Placing is done by the window after each layout pass, which finds the
+    // nodes through this registry. One that stops asking stays in it until
+    // that pass has put it back where layout has it — and `position` being a
+    // layout property, the change that stops it brings that pass along.
+    if (isPlaced(this.style)) this.root?._placedNodes?.add(this);
     // The paint reach reads the style now in force — a shadow's spread, an
     // outline's width — so it is dropped on every swap, here, before the
     // old-extent claims below measure the new reach against the old one.
@@ -3722,9 +3720,9 @@ export class Node {
     if (opaque) this.root?._opaqueNodes?.delete(this);
     this.root = root;
     if (opaque) root?._opaqueNodes?.add(this);
-    // styled before it had a window, so this is where a sticky node is
-    // first registered for placement (WindowNode._placeSticky)
-    if (this.style?.position === 'sticky') root?._stickyNodes?.add(this);
+    // styled before it had a window, so this is where a placed node is
+    // first registered (WindowNode._placeNodes)
+    if (this.style && isPlaced(this.style)) root?._placedNodes?.add(this);
     // A node is styled in its constructor, before it has a window — so this
     // is where a loop declared by the very first style finds a frame clock
     // to run on.
@@ -3988,12 +3986,12 @@ export class Node {
     // node carried on painting at the position it no longer had.
     const drawn = [];
     const z = [];
-    // A sticky child is lifted over its in-flow siblings of the same
-    // `zIndex`, the way CSS paints a positioned box over non-positioned
-    // ones: a header held at the top of a pane sits over the rows that
-    // scroll under it, which are its later siblings and would otherwise
-    // paint on top. Hit testing walks the same order backwards, so the
-    // header also takes the press.
+    // A placed child — sticky, or a registered position — is lifted over its
+    // in-flow siblings of the same `zIndex`, the way CSS paints a positioned
+    // or transformed box over non-positioned ones: a header held at the top
+    // of a pane sits over the rows that scroll under it, which are its later
+    // siblings and would otherwise paint on top. Hit testing walks the same
+    // order backwards, so the header also takes the press.
     const lift = [];
     for (const c of this.children) {
       if (
@@ -4004,7 +4002,7 @@ export class Node {
       ) {
         drawn.push(c);
         z.push(c.style.zIndex ?? 0);
-        lift.push(c.style.position === 'sticky' ? 1 : 0);
+        lift.push(isPlaced(c.style) ? 1 : 0);
       }
     }
     // document order already answers the usual no-zIndex case; the sort is
@@ -4039,7 +4037,7 @@ export class Node {
         j >= drawn.length ||
         drawn[j] !== c ||
         z[j] !== (c.style.zIndex ?? 0) ||
-        lift[j] !== (c.style.position === 'sticky' ? 1 : 0)
+        lift[j] !== (isPlaced(c.style) ? 1 : 0)
       ) {
         return false;
       }
@@ -4410,15 +4408,14 @@ export class Node {
   }
 
   /**
-   * The scroll pane a `position: 'sticky'` node holds its insets against:
-   * the nearest ancestor that scrolls — a `<box>` or a `<window>` with
-   * `overflow: 'scroll'`. Only that. `'hidden'` clips without scrolling
-   * here, which is CSS's `clip` rather than its `hidden`, so a card that
-   * rounds its corners does not quietly capture the header inside it — the
-   * CSS trap of a sticky element that "does nothing". Null when nothing
-   * above scrolls, and the node stays where layout put it.
+   * The scroll pane a placement is measured against: the nearest ancestor
+   * that scrolls — a `<box>` or a `<window>` with `overflow: 'scroll'`.
+   * Only that. `'hidden'` clips without scrolling here, which is CSS's
+   * `clip` rather than its `hidden`, so a card that rounds its corners does
+   * not quietly capture the sticky header inside it — the CSS trap of a
+   * sticky element that "does nothing". Null when nothing above scrolls.
    */
-  _stickyPane() {
+  _scrollPane() {
     for (let n = this.parent; n; n = n.parent) {
       if (n.isScroller?.()) return n;
       if (n.isWindow) return null;
@@ -4431,7 +4428,7 @@ export class Node {
    * parent hands its children — scrolled, when the parent is a scroll pane
    * — plus yoga's offset. The same sum `absolutize` makes, asked again so
    * that nothing has to remember which shifts a rect already carries: the
-   * scroll fast path moves a sticky node along with its pane's content
+   * scroll fast path moves a placed node along with its pane's content
    * (`_shiftAbs`), offset and all.
    */
   _laidOutAt() {
@@ -4444,103 +4441,172 @@ export class Node {
   }
 
   /**
-   * Move this node to where `position: 'sticky'` holds it this frame — or,
-   * with `sticky` false, for a node whose style has just stopped asking,
-   * back to where layout has it. The subtree rides along. True when it
-   * moved.
+   * The position this node's style places it with — `sticky` is the
+   * built-in one — resolved: the definition, and its options with lengths in
+   * device pixels. Null for none, and for one that cannot be had, which is
+   * reported once and leaves the node where layout put it. Cached per style:
+   * the pass asks every frame, and the style only moves through `_retarget`.
    */
-  _stick(sticky) {
-    const at = this._laidOutAt();
-    const pane = sticky ? this._stickyPane() : null;
-    const offset = pane ? this._stickyOffset(pane, at) : null;
-    const mx = at.x + (offset?.x ?? 0) - this.abs.x;
-    const my = at.y + (offset?.y ?? 0) - this.abs.y;
-    if (mx === 0 && my === 0) return false;
-    this._shiftAbs(mx, my);
-    // every cached union above still counts this subtree where it was
-    this._clearHitBounds();
-    return true;
-  }
-
-  /**
-   * CSS's sticky offset, per axis, in device pixels. An edge with an inset
-   * may not cross the pane's matching edge moved in by that inset, so the
-   * node is pushed back inside — but never so far that its margin box
-   * leaves its parent's content box, which is what carries a section's
-   * header off with the section. Where both edges of an axis stick, the
-   * top and left pushes are applied last and win, as in Blink.
-   *
-   * The pane's edges are its scrollport, inside the border and over the
-   * padding: the band the content scrolls through. A percentage inset is
-   * of that band's size, CSS's rule for sticky.
-   */
-  _stickyOffset(pane, at) {
+  _placement() {
     const style = this.style;
-    const py = pane.yoga;
-    const port = {
-      left: pane.abs.x + py.getComputedBorder(Yoga.EDGE_LEFT),
-      top: pane.abs.y + py.getComputedBorder(Yoga.EDGE_TOP),
-      right:
-        pane.abs.x + pane.abs.width - py.getComputedBorder(Yoga.EDGE_RIGHT),
-      bottom:
-        pane.abs.y + pane.abs.height - py.getComputedBorder(Yoga.EDGE_BOTTOM),
-    };
-    const portWidth = port.right - port.left;
-    const portHeight = port.bottom - port.top;
-    // yoga's precedence, which the inset appliers use too: the logical
-    // edge wins over the physical one it lands on
-    const rtl = this.direction === 'rtl';
-    const leftInset = rtl
-      ? (style.end ?? style.left)
-      : (style.start ?? style.left);
-    const rightInset = rtl
-      ? (style.start ?? style.right)
-      : (style.end ?? style.right);
-    const top = stickyInset(style.top, portHeight);
-    const bottom = stickyInset(style.bottom, portHeight);
-    const left = stickyInset(leftInset, portWidth);
-    const right = stickyInset(rightInset, portWidth);
-    if (top === null && bottom === null && left === null && right === null) {
-      return null;
+    const cache = this._placementCache;
+    if (cache !== null && cache.style === style) return cache.request;
+    const found = positionOf(style);
+    let request = null;
+    if (found !== null) {
+      if (!found.def) {
+        reportStyleProblem(
+          this,
+          unknownPositionMessage(found.name),
+          'It is laid out in flow, as relative is',
+        );
+      } else {
+        const { options, problem } = resolveOptions(
+          found.def.options,
+          found.raw,
+          this.scale,
+          `<${this.kind} style={{ position: "${found.name}" }}>`,
+        );
+        if (problem) reportStyleProblem(this, problem, 'It takes its default');
+        request = { name: found.name, def: found.def, options };
+      }
     }
-    const box = this._stickyBounds(pane);
-    const { width, height } = this.abs;
-    let x = 0;
-    let y = 0;
-    if (right !== null) {
-      const push = Math.min(0, port.right - right - (at.x + width));
-      x += Math.max(push, Math.min(0, box.left - at.x));
+    // a placement that threw is not asked again until the style names
+    // another one
+    if (
+      this._placementFailed !== null &&
+      this._placementFailed !== request?.def
+    ) {
+      this._placementFailed = null;
     }
-    if (left !== null) {
-      const push = Math.max(0, port.left + left - at.x);
-      x += Math.min(push, Math.max(0, box.right - (at.x + width)));
-    }
-    if (bottom !== null) {
-      const push = Math.min(0, port.bottom - bottom - (at.y + height));
-      y += Math.max(push, Math.min(0, box.top - at.y));
-    }
-    if (top !== null) {
-      const push = Math.max(0, port.top + top - at.y);
-      y += Math.min(push, Math.max(0, box.bottom - (at.y + height)));
-    }
-    // whole pixels, which is what keeps the pane's scroll blit a copy
-    return { x: Math.round(x), y: Math.round(y) };
+    this._placementCache = { style, request };
+    return request;
   }
 
   /**
-   * The box this node's margin box has to stay inside while it sticks: its
-   * parent's content box, pulled in by the node's own margins. When the
-   * parent is the pane itself, the content box is the content the pane
-   * scrolls — at least the pane's own, and as far as
-   * `measureScrollContent` found the children reaching — so a header that
-   * is a direct child of the pane sticks for the whole of its scroll.
+   * Move this node to where its placement puts it this frame — or, with no
+   * request, back to where layout has it, which is what a node whose style
+   * just stopped asking needs. The subtree rides along. Returns whether the
+   * placement asked for another frame.
+   *
+   * Nothing remembers an offset. The scroll fast path (#405) moves a placed
+   * node along with its pane's content, offset and all, so each pass
+   * re-derives where layout put it (`_laidOutAt`) and moves it from wherever
+   * it is now: a stored offset goes stale on exactly the frames that matter.
    */
-  _stickyBounds(pane) {
+  _place(request, t) {
+    const at = this._laidOutAt();
+    let dx = 0;
+    let dy = 0;
+    let again = false;
+    if (request !== null && this._placementFailed !== request.def) {
+      let result = null;
+      try {
+        result = request.def.place(
+          this,
+          this._placementContext(at, request.options, t),
+        );
+      } catch (error) {
+        this._placementFailed = request.def;
+        reportLayoutError(
+          this,
+          `position "${request.name}"`,
+          error,
+          'The node stays where layout put it until its style names another ' +
+            'position',
+        );
+      }
+      if (result) {
+        // whole pixels, which is what keeps a pane's scroll blit a copy
+        const x = Math.round(result.x ?? 0);
+        const y = Math.round(result.y ?? 0);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          dx = x;
+          dy = y;
+          again = result.again === true;
+        } else {
+          reportStyleProblem(
+            this,
+            `react-x11: position "${request.name}" moved <${this.kind}> by ` +
+              `{ x: ${result.x}, y: ${result.y} } — an offset is two finite ` +
+              'numbers, in device pixels',
+            'The node stays where layout put it',
+          );
+        }
+      }
+    }
+    const mx = at.x + dx - this.abs.x;
+    const my = at.y + dy - this.abs.y;
+    if (mx !== 0 || my !== 0) {
+      this._shiftAbs(mx, my);
+      // every cached union above still counts this subtree where it was
+      this._clearHitBounds();
+    }
+    return again;
+  }
+
+  /**
+   * What a position's placement is handed (docs/extending.md, "A position
+   * of your own"): where layout put the node, the scroll pane above it and the
+   * box it has to stay inside — window coordinates, device pixels, the space
+   * `abs` is in — so a placement that holds a node against an edge adds and
+   * subtracts, and never converts.
+   */
+  _placementContext(at, options, t) {
+    const own = this.yoga;
+    const pane = this._scrollPane();
+    let scrolled = null;
+    if (pane) {
+      const py = pane.yoga;
+      const abs = pane.abs;
+      scrolled = {
+        // the band the content scrolls through: inside the border, over
+        // the padding
+        scrollport: {
+          left: abs.x + py.getComputedBorder(Yoga.EDGE_LEFT),
+          top: abs.y + py.getComputedBorder(Yoga.EDGE_TOP),
+          right: abs.x + abs.width - py.getComputedBorder(Yoga.EDGE_RIGHT),
+          bottom: abs.y + abs.height - py.getComputedBorder(Yoga.EDGE_BOTTOM),
+        },
+        scrollX: pane.scrollX,
+        scrollY: pane.scrollY,
+      };
+    }
+    return {
+      laidOut: {
+        x: at.x,
+        y: at.y,
+        width: this.abs.width,
+        height: this.abs.height,
+      },
+      pane: scrolled,
+      container: this._placementContainer(pane),
+      margin: {
+        left: own.getComputedMargin(Yoga.EDGE_LEFT),
+        top: own.getComputedMargin(Yoga.EDGE_TOP),
+        right: own.getComputedMargin(Yoga.EDGE_RIGHT),
+        bottom: own.getComputedMargin(Yoga.EDGE_BOTTOM),
+      },
+      direction: this.direction,
+      scale: this.scale,
+      now: t,
+      options,
+    };
+  }
+
+  /**
+   * The box a placed node is contained by: its parent's content box — or,
+   * when the parent is the scroll pane itself, the content the pane scrolls:
+   * at least the pane's own box, and as far as `measureScrollContent` found
+   * the children reaching — so a header that is a direct child of the pane
+   * sticks for the whole of its scroll. Window coordinates; the node's own
+   * margins are the placement's to apply.
+   */
+  _placementContainer(pane) {
     const parent = this.parent;
     const py = parent.yoga;
     const inner = (edge) =>
       py.getComputedBorder(edge) + py.getComputedPadding(edge);
-    let box;
     if (parent === pane) {
       const origin = pane._childOrigin ?? pane.abs;
       const { width, height } = pane.abs;
@@ -4553,7 +4619,7 @@ export class Node {
         ) - py.getComputedPadding(Yoga.EDGE_BOTTOM);
       // `contentWidth` is measured from the edge the content starts at,
       // which is the right-hand one under RTL (measureScrollContent)
-      box =
+      const box =
         pane.direction === 'rtl'
           ? {
               left:
@@ -4577,21 +4643,15 @@ export class Node {
             };
       box.top = origin.y + inner(Yoga.EDGE_TOP);
       box.bottom = origin.y + bottom;
-    } else {
-      const abs = parent.abs;
-      box = {
-        left: abs.x + inner(Yoga.EDGE_LEFT),
-        top: abs.y + inner(Yoga.EDGE_TOP),
-        right: abs.x + abs.width - inner(Yoga.EDGE_RIGHT),
-        bottom: abs.y + abs.height - inner(Yoga.EDGE_BOTTOM),
-      };
+      return box;
     }
-    const own = this.yoga;
-    box.left += own.getComputedMargin(Yoga.EDGE_LEFT);
-    box.top += own.getComputedMargin(Yoga.EDGE_TOP);
-    box.right -= own.getComputedMargin(Yoga.EDGE_RIGHT);
-    box.bottom -= own.getComputedMargin(Yoga.EDGE_BOTTOM);
-    return box;
+    const abs = parent.abs;
+    return {
+      left: abs.x + inner(Yoga.EDGE_LEFT),
+      top: abs.y + inner(Yoga.EDGE_TOP),
+      right: abs.x + abs.width - inner(Yoga.EDGE_RIGHT),
+      bottom: abs.y + abs.height - inner(Yoga.EDGE_BOTTOM),
+    };
   }
 
   /**
@@ -9936,9 +9996,12 @@ export class WindowNode extends Scrollable(Node) {
     // when every attached node has a computed size to offer
     this._containerQueryNodes = new Set();
     this._cqFresh = false;
-    // `position: 'sticky'` nodes, placed after every layout pass against
-    // the pane they stick in — see _placeSticky
-    this._stickyNodes = new Set();
+    // nodes whose `position` is placed after layout (sticky among them),
+    // placed after every layout pass — see _placeNodes — and whether one
+    // asked for a frame of its own, with nothing to lay out (an animated
+    // position)
+    this._placedNodes = new Set();
+    this._placementsDue = false;
     // nodes whose child list changed and whose own size is pinned: their new
     // arrangement is only measurable once layout has run (see
     // Node._childListChanged)
@@ -12544,13 +12607,15 @@ export class WindowNode extends Scrollable(Node) {
   }
 
   /**
-   * Place every `position: 'sticky'` node in this window (docs/styling.md,
-   * "Sticky positioning"). Layout lays one out in flow, exactly as it does a
-   * `relative` one; this is the other half, run once the pass has placed
+   * Place every node whose `position` is placed after layout — `sticky` is
+   * the built-in one (docs/styling.md, "Custom positions"). Layout lays one
+   * out in flow; this is the other half, run once the pass has placed
    * everything — including the pass a scroll runs, so a header lands in the
-   * frame that scrolled rather than the one after it.
+   * frame that scrolled rather than the one after it — and on a frame with
+   * nothing to lay out when an animated placement asked for one
+   * (`_placementsDue`).
    *
-   * Ancestors first: a sticky node inside another rides the outer one's
+   * Ancestors first: a placed node inside another rides the outer one's
    * shift, and measures its own from where that left it.
    *
    * A shift here is a move nothing else claims — the layout diff has already
@@ -12563,11 +12628,13 @@ export class WindowNode extends Scrollable(Node) {
    * rects, written into the blitting pane's ledger and clipped to it the
    * way `_reflowed`'s claims are. They overlap by all but the scroll's
    * delta, and the ledger folds them into one entry (`_recordBlitClaim`),
-   * with every held child's claims inside it.
+   * with every held child's claims inside it. True when anything was
+   * claimed.
    */
-  _placeSticky() {
+  _placeNodes() {
+    this._placementsDue = false;
     const nodes = [];
-    for (const node of this._stickyNodes) {
+    for (const node of this._placedNodes) {
       if (
         node.destroyed ||
         node.root !== this ||
@@ -12575,8 +12642,8 @@ export class WindowNode extends Scrollable(Node) {
         !node.yoga ||
         !node.parent
       ) {
-        this._stickyNodes.delete(node);
-        node._stickyShown = null;
+        this._placedNodes.delete(node);
+        node._placedShown = null;
         continue;
       }
       nodes.push(node);
@@ -12591,17 +12658,19 @@ export class WindowNode extends Scrollable(Node) {
       nodes.sort((a, b) => depth.get(a) - depth.get(b));
     }
     const cap = this._damageRectCap();
+    const t = now();
+    let claimed = false;
     for (const node of nodes) {
-      const sticky = node.style.position === 'sticky';
-      node._stick(sticky);
+      const request = node._placement();
+      if (node._place(request, t)) this._placementsDue = true;
       // one that stopped asking is back where layout has it: let it go
-      if (!sticky) this._stickyNodes.delete(node);
-      const before = node._stickyShown;
+      if (request === null) this._placedNodes.delete(node);
+      const before = node._placedShown;
       const after =
-        sticky && !node.hidden && node.style.display !== 'none'
+        request !== null && !node.hidden && node.style.display !== 'none'
           ? node.paintBounds()
           : null;
-      node._stickyShown = after;
+      node._placedShown = after;
       if (this._damage === FULL_DAMAGE) continue;
       const sv = node._blitViewport();
       let was = before;
@@ -12627,8 +12696,13 @@ export class WindowNode extends Scrollable(Node) {
           sv._pendingBlitFrom = BLIT_POISONED;
         }
         this._damage = addDamageRect(this._damage, claim, cap);
+        claimed = true;
       }
     }
+    // an animated placement's next frame, on the window's clock — asked from
+    // inside a flush, which answers it once this frame is over
+    if (this._placementsDue) this._scheduleFrame();
+    return claimed;
   }
 
   /** The frame itself. True when it painted or presented something. */
@@ -12703,9 +12777,9 @@ export class WindowNode extends Scrollable(Node) {
       } finally {
         layoutDiffSink = null;
       }
-      // …and sticky nodes against the arrangement that walk produced: where
-      // one sticks depends on where its pane and its parent landed
-      if (this._stickyNodes.size !== 0) this._placeSticky();
+      // …and placed nodes against the arrangement that walk produced: where
+      // one goes depends on where its pane and its parent landed
+      if (this._placedNodes.size !== 0) this._placeNodes();
       this.needsLayout = false;
       this.needsPaint = true;
       // The other half of a contained reflow: the pre-mutation arrangement was
@@ -12737,6 +12811,11 @@ export class WindowNode extends Scrollable(Node) {
     } else if (this._reflowed.size) {
       for (const node of this._reflowed) node._reflowBefore = null;
       this._reflowed.clear();
+    }
+    // An animated placement asked for this frame and nothing laid out: its
+    // pass runs on its own, against the arrangement the last one left
+    if (!layoutRan && this._placementsDue && this._placeNodes()) {
+      this.needsPaint = true;
     }
     // A presenter compositing part of the tree on layers of its own — the
     // surface presenter's promoted nodes (src/cocoa/promotion.js) — gets

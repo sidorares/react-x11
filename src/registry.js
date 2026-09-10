@@ -30,6 +30,7 @@ import {
   CUSTOM_SELF_DAMAGED,
   Node,
 } from './nodes.js';
+import { markLayoutsHotReloadSession } from './layouts.js';
 
 /** kind -> definition. Insertion-ordered, which is the order errors list. */
 const registry = new Map();
@@ -54,6 +55,9 @@ let hotReloadSession = false;
 /** @internal — called by react-x11/refresh; not part of the public API. */
 export function markHotReloadSession(active = true) {
   hotReloadSession = active;
+  // the layout and placement registries follow the same rule, for the same
+  // module-scope reason
+  markLayoutsHotReloadSession(active);
 }
 
 function assertNode(node, type) {
