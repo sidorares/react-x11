@@ -1165,7 +1165,11 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   - **A child's dirt stops at its own root.** The window sweeps every
     host's children before each pass (`_sweepLayoutHosts`). Yoga's dirtied
     callback is no substitute: it fires only from clean to dirty, and a
-    child never laid out — hidden since it mounted — is dirty already.
+    child never laid out — hidden since it mounted — is dirty already. The
+    floors pass covers the same ground today (a changed child owes it a
+    width, and measuring off the pixel grid has yoga ask every host again),
+    so removing the sweep alone passes the suite: change one with the other
+    in view.
   - **The content floors stop at a host** and are measured inside each
     child, tree by tree. A height floor measured at placement time runs off
     the pixel grid after the pass, which leaves yoga holding a tree laid out

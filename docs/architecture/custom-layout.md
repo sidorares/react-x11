@@ -227,7 +227,10 @@ options that mean the same things: `equal-row` has no options of its own.
   window looks for it before every pass (`_sweepLayoutHosts`) and makes it
   the host's. Yoga's dirtied callback is no substitute: it fires only on the
   way from clean to dirty, and a child hidden since it mounted was never
-  laid out and would never say so — a test pins exactly that case.
+  laid out and would never say so. A second path covers the same ground
+  today: a changed child owes the floors pass a width, and that pass
+  measures off the pixel grid, which has yoga ask every host again. Take
+  either away and the tests pass; take both and they fail.
 - **What a child is asked is remembered.** An algorithm asks each child the
   same questions every run, and a host runs several times a frame — the
   floors passes, the pass proper, the placement. Each answer is a layout of
