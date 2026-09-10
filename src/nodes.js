@@ -9,6 +9,7 @@ import {
   applyLayoutStyle,
   applyLayoutDefaults,
   createLayoutNode,
+  isMeasuringExactly,
   measuringExactly,
   paintPropsChanged,
   textStyleFrom,
@@ -2034,6 +2035,28 @@ const MEASURE_MODE_NAMES = new Set(['exactly', 'at-most', 'unconstrained']);
 const yogaDirection = (node) =>
   node.direction === 'rtl' ? Yoga.DIRECTION_RTL : Yoga.DIRECTION_LTR;
 
+/**
+ * Lay out one of a layout host's children as the root it is. Dirt on the
+ * root means something inside it changed — content, a style, a floor
+ * written — since the sizes remembered for it were taken, and they go
+ * (`Node._hostSizesNow`). Every layout of such a root comes through here or
+ * through that, which is what makes the dirt a reliable sign: nothing else
+ * clears it.
+ */
+function layoutHostChild(child, width, height, dir) {
+  const yoga = child.yoga;
+  if (yoga.isDirty()) child._hostSizes = null;
+  child._hostLaidAt = null;
+  yoga.calculateLayout(width, height, dir);
+}
+
+/** A remembered size, with a bound on how many: an algorithm asks a child a
+ *  handful of questions a pass, not a new one each run. */
+function remember(sizes, key, size) {
+  if (sizes.size >= 32) sizes.clear();
+  sizes.set(key, size);
+}
+
 const marginBoxWidth = (yoga) =>
   yoga.getComputedWidth() +
   yoga.getComputedMargin(Yoga.EDGE_LEFT) +
@@ -2303,6 +2326,16 @@ export class Node {
     this._hostAbsolute = false;
     this._handle = null;
     this._itemCache = null;
+    // …and the sizes the algorithm was told it takes, for as long as nothing
+    // inside it changes — it asks the same questions every run, several runs
+    // a frame — and whether a placement ever gave it less height than its
+    // content, which from then on keeps its height floors measured
+    this._hostSizes = null;
+    this._hostSqueezed = false;
+    // the rect its tree was last laid out at by a placement, while nothing
+    // has laid it out since — the next placement at the same rect has
+    // nothing to do
+    this._hostLaidAt = null;
     // the layout that threw, with the style value that named it: flexbox
     // until the style names a different one
     this._layoutAbandoned = null;
@@ -5068,6 +5101,9 @@ export class Node {
       child._floorMinH = undefined;
     }
     child._hostSlot = null;
+    child._hostSizes = null;
+    child._hostSqueezed = false;
+    child._hostLaidAt = null;
     if (child.style.position === 'absolute') {
       const holder = this._hostHolder();
       holder.insertChild(cy, holder.getChildCount());
@@ -5276,27 +5312,55 @@ export class Node {
     for (let i = 0; i < flow.length; i++) {
       const child = flow[i];
       const r = rects[i];
-      child.yoga.calculateLayout(
-        r.width ?? undefined,
-        r.height ?? undefined,
-        dir,
-      );
-      // A child that can come out shorter than its content — given a
-      // height, or naming its own — has rows that can be squeezed, which
-      // need their floors at the width it just got. A masonry's cards, at
-      // their natural heights, never do.
-      if (
+      // A child that can come out shorter than its content has rows that can
+      // be squeezed, which need their floors at the width it gets: one that
+      // names a height of its own, or one its rect gives less height than
+      // its content takes at that width — asked before it is laid out at
+      // the rect, since asking lays it out at its natural height. A
+      // stretched row of items sized to fit it, and a masonry's cards,
+      // never are.
+      const squeezed =
         floors &&
-        (r.height != null ||
-          typeof child.style.height === 'number' ||
-          typeof child.style.maxHeight === 'number') &&
+        (typeof child.style.height === 'number' ||
+          typeof child.style.maxHeight === 'number' ||
+          (r.height != null &&
+            (child._hostSqueezed ||
+              r.height <
+                child._measureInHost(
+                  r.width == null ? NO_CONSTRAINTS : { width: r.width },
+                ).height -
+                  0.5)));
+      // A tree already laid out at this rect, with nothing inside it changed,
+      // is left as it is. Yoga would do the same from its own cache but for
+      // the floors pass, which measures off the pixel grid and so voids every
+      // cached layout in the window — and each child here is a window-sized
+      // layout's worth of calls to find out nothing moved.
+      const at = child._hostLaidAt;
+      if (
+        at === null ||
+        at.width !== r.width ||
+        at.height !== r.height ||
+        at.dir !== dir ||
+        child.yoga.isDirty()
+      ) {
+        layoutHostChild(
+          child,
+          r.width ?? undefined,
+          r.height ?? undefined,
+          dir,
+        );
+      }
+      if (
+        squeezed &&
         (child._floorH === undefined ||
           child._floorAtW === undefined ||
           Math.abs(child._floorAtW - child.yoga.getComputedWidth()) >= 1)
       ) {
         this._measureHostChildHeights(child, r, dir);
+        child._hostSqueezed = true;
         measuredHeights = true;
       }
+      child._hostLaidAt = { width: r.width, height: r.height, dir };
       const x = rtl ? cw - r.x - (r.width ?? marginBoxWidth(child.yoga)) : r.x;
       // whole pixels: the child's own tree was rounded from its corner, so
       // a fractional corner would put every edge in it between two pixels
@@ -5344,14 +5408,14 @@ export class Node {
       // what it holds now comes off first: a floor read back as content
       // could only ever grow
       writeFloorsWithin(child, 'height', stale);
-      cy.calculateLayout(width, undefined, dir);
+      layoutHostChild(child, width, undefined, dir);
       const intrinsic = new Map();
       captureLeafHeights(child, intrinsic);
       const frozen = [];
       freezeWidths(child, frozen);
       const shrunk = [];
       setMeasuringShrink(child, 'height', shrunk);
-      cy.calculateLayout(width, 0, dir);
+      layoutHostChild(child, width, 0, dir);
       const span = contentSpan(child, 'height', intrinsic, root);
       restoreWidths(frozen);
       restoreShrink(shrunk);
@@ -5362,7 +5426,7 @@ export class Node {
       stale.add(child);
       writeFloorsWithin(child, 'height', stale);
     });
-    cy.calculateLayout(r.width ?? undefined, r.height ?? undefined, dir);
+    layoutHostChild(child, r.width ?? undefined, r.height ?? undefined, dir);
     child._floorAtW = cy.getComputedWidth();
   }
 
@@ -5411,39 +5475,68 @@ export class Node {
           "or 'unconstrained'",
       );
     }
-    let w = widthMode === 'unconstrained' ? undefined : c.width;
-    let h = heightMode === 'unconstrained' ? undefined : c.height;
-    if (widthMode === 'at-most') {
-      // CSS's fit-content: what it would like, if that fits — and never
-      // narrower than what it cannot be narrower than
-      yoga.calculateLayout(undefined, undefined, dir);
-      const natural = marginBoxWidth(yoga);
-      w =
-        natural <= c.width
-          ? undefined
-          : Math.max(c.width, this._intrinsicInHost().minContentWidth);
+    const sizes = this._hostSizesNow();
+    const key = `${dir}|${widthMode}|${c.width}|${heightMode}|${c.height}`;
+    let size = sizes.get(key);
+    if (size === undefined) {
+      this._hostLaidAt = null;
+      let w = widthMode === 'unconstrained' ? undefined : c.width;
+      let h = heightMode === 'unconstrained' ? undefined : c.height;
+      if (widthMode === 'at-most') {
+        // CSS's fit-content: what it would like, if that fits — and never
+        // narrower than what it cannot be narrower than
+        const { minContentWidth, maxContentWidth } = this._intrinsicInHost();
+        w =
+          maxContentWidth <= c.width
+            ? undefined
+            : Math.max(c.width, minContentWidth);
+      }
+      if (heightMode === 'at-most') {
+        yoga.calculateLayout(w, undefined, dir);
+        h = marginBoxHeight(yoga) <= c.height ? undefined : c.height;
+      }
+      yoga.calculateLayout(w, h, dir);
+      size = { width: marginBoxWidth(yoga), height: marginBoxHeight(yoga) };
+      remember(sizes, key, size);
     }
-    if (heightMode === 'at-most') {
-      yoga.calculateLayout(w, undefined, dir);
-      h = marginBoxHeight(yoga) <= c.height ? undefined : c.height;
-    }
-    yoga.calculateLayout(w, h, dir);
-    return { width: marginBoxWidth(yoga), height: marginBoxHeight(yoga) };
+    return { width: size.width, height: size.height };
   }
 
   /** `LayoutChild.intrinsicSizes`. The maximum is a layout with no bound;
    *  the minimum is the content floor measured for this child, and until
    *  one has been, the maximum — nothing is squeezed on a guess. */
   _intrinsicInHost() {
-    const yoga = this.yoga;
-    yoga.calculateLayout(undefined, undefined, yogaDirection(this.parent));
-    const max = marginBoxWidth(yoga);
-    const margins =
-      yoga.getComputedMargin(Yoga.EDGE_LEFT) +
-      yoga.getComputedMargin(Yoga.EDGE_RIGHT);
+    const dir = yogaDirection(this.parent);
+    const sizes = this._hostSizesNow();
+    let widest = sizes.get(dir);
+    if (widest === undefined) {
+      const yoga = this.yoga;
+      this._hostLaidAt = null;
+      yoga.calculateLayout(undefined, undefined, dir);
+      widest = {
+        max: marginBoxWidth(yoga),
+        margins:
+          yoga.getComputedMargin(Yoga.EDGE_LEFT) +
+          yoga.getComputedMargin(Yoga.EDGE_RIGHT),
+      };
+      remember(sizes, dir, widest);
+    }
+    const { max, margins } = widest;
     const min =
       this._floorW === undefined ? max : Math.min(max, this._floorW + margins);
     return { minContentWidth: min, maxContentWidth: max };
+  }
+
+  /** The sizes remembered for this child of a layout host: kept while
+   *  nothing inside it changes, which dirt on its root would say
+   *  (`layoutHostChild`), and apart for each side of the pixel grid, since
+   *  the same layout measured off it comes to a different size. */
+  _hostSizesNow() {
+    let memo = this._hostSizes;
+    if (memo === null || this.yoga.isDirty()) {
+      memo = this._hostSizes = { onGrid: new Map(), exact: new Map() };
+    }
+    return isMeasuringExactly() ? memo.exact : memo.onGrid;
   }
 
   /** This child's `layoutItem`, against the options its layout declared. */
@@ -13542,7 +13635,7 @@ export class WindowNode extends Scrollable(Node) {
         const cy = child.yoga;
         const shrunk = [];
         setMeasuringShrink(child, 'width', shrunk);
-        cy.calculateLayout(0, undefined, dir);
+        layoutHostChild(child, 0, undefined, dir);
         const span = contentSpan(child, 'width', null, this);
         child._floorW = declaresOwnMinimum(child, 'width')
           ? cy.getComputedWidth()

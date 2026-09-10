@@ -1155,7 +1155,7 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   host in `src/nodes.js`; docs/architecture/custom-layout.md). Yoga gives a
   node a measure function or children, never both, so the host is a
   measured leaf and each child a root — and everything that assumed the
-  yoga tree mirrors the node tree has a host branch. Four things are easy
+  yoga tree mirrors the node tree has a host branch. Five things are easy
   to undo:
   - **A `<box>` is a `Scrollable`,** whose own `_absolutizeChildren` is the
     walk `absolutize` takes: a host branch in `Node.absolutize` alone is
@@ -1174,6 +1174,13 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     again.
   - **A host's `freeRecursive` does not reach its children's trees**, which
     are roots; `_freeHostTrees`, from `destroySubtree`, frees them.
+  - **What a child answered is remembered** (`_hostSizesNow`) until dirt on
+    its root says something inside changed, and a placement skips a tree
+    already at its rect (`_hostLaidAt`). Both lean on one rule: every
+    `calculateLayout` on a host child's root goes through `layoutHostChild`
+    or the memo, which drop what they remembered when the root is dirty. A
+    new direct call there clears the dirt without dropping the memo, and the
+    next frame lays the child out from sizes that are no longer true.
 
 - **A commit's per-insert bookkeeping is amortized, not paid per row**
   (issue #397). React mounts a subtree one `insertBefore` at a time, so a

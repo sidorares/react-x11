@@ -1722,12 +1722,20 @@ export const createLayoutNode = () => Yoga.Node.create(layoutConfig());
 export function measuringExactly(measure) {
   const cfg = layoutConfig();
   cfg.setPointScaleFactor(0);
+  exactDepth++;
   try {
     return measure();
   } finally {
+    exactDepth--;
     cfg.setPointScaleFactor(1);
   }
 }
+
+let exactDepth = 0;
+
+/** Whether yoga is measuring off the pixel grid right now: a size taken in
+ *  here is not the size the same layout comes to on it. */
+export const isMeasuringExactly = () => exactDepth > 0;
 
 /**
  * The yoga defaults that are not CSS's, written once per node.
