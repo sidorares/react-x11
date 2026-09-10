@@ -208,16 +208,18 @@ close, `transparent`, `theme`, `frameRate`, `hidden` — works. What a
 **window manager** does is where the two part company, because macOS has no
 separate one to negotiate with, and the honest list is short:
 
-| prop                                                                                              | on Cocoa                                                                                                       |
-| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `minWidth`/`minHeight`/`maxWidth`/`maxHeight`, `resizable`                                        | honoured — they become the window's own min/max size                                                           |
-| `transparent`, `borderRadius`                                                                     | always available; every window composites, so there is no "if a compositor is running"                         |
-| `states: ['demands_attention']`                                                                   | the Dock bounce, held until the state is removed                                                               |
-| every other `_NET_WM_STATE`, and `fullscreen`                                                     | inert — the bridge has no zoom/miniaturize/fullscreen verbs yet (windowkit/appkit#15)                          |
-| `onStatesChange`, and `useWindowState()`'s `states`/`desktop`/`obscured`                          | never fire — they read `_NET_WM_STATE` and friends off the window, and there is none. `focused` does work      |
-| `wmClass`, `windowType`, `decorations`, `transientFor`, `gravity`, the increment and aspect hints | inert. They are messages to a window manager, and there is not one                                             |
-| `onClientMessage`                                                                                 | never fires — X11's ClientMessage has no counterpart                                                           |
-| `embeddable`                                                                                      | means a `<Frame>` pane, and works — but through shared surfaces rather than reparenting ([frame.md](frame.md)) |
+| prop                                                                     | on Cocoa                                                                                                                                   |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `minWidth`/`minHeight`/`maxWidth`/`maxHeight`                            | honoured — they become the window's own min/max size                                                                                       |
+| `resizable`, `decorations`                                               | honoured, but read **once, at creation**: they are `NSWindow` style options rather than hints, so changing either after mount does nothing |
+| `transparent`, `borderRadius`                                            | always available; every window composites, so there is no "if a compositor is running"                                                     |
+| `states: ['demands_attention']`                                          | the Dock bounce, held until the state is removed                                                                                           |
+| every other `_NET_WM_STATE`, and `fullscreen`                            | inert — the bridge has no zoom/miniaturize/fullscreen verbs yet (windowkit/appkit#15)                                                      |
+| `onStatesChange`, and `useWindowState()`'s `states`/`desktop`/`obscured` | never fire — they read `_NET_WM_STATE` and friends off the window, and there is none. `focused` does work                                  |
+| `wmClass`, `windowType`, `gravity`, the increment and aspect hints       | inert. They are messages to a window manager, and there is not one                                                                         |
+| `transientFor`                                                           | inert today — a stub waiting on `addChildWindow`; a managed `<Dialog>` already floats on its own window                                    |
+| `onClientMessage`                                                        | never fires — X11's ClientMessage has no counterpart                                                                                       |
+| `embeddable`                                                             | means a `<Frame>` pane, and works — but through shared surfaces rather than reparenting ([frame.md](frame.md))                             |
 
 Inert means **inert, not fatal, and today also silent**: the prop is
 accepted and does nothing, so shared application code stays branch-free. See
