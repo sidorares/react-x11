@@ -258,9 +258,16 @@ function disagreement(a, b, width) {
 // across whichever axis a notch does not move, and the blit drags that bar's
 // pixels along with the talks: a notch across left a copy of the vertical
 // thumb 48 pixels in from its track, a 6 by 44 sliver at the top of the
-// pane, at the other edge in RTL. The shipped programme at 640 by 400,
-// because in the small one's window the blit declines every notch, and a
-// declined notch compares nothing. Each pass sets its direction rather than
+// pane, at the other edge in RTL. And every node `position: 'sticky'` holds
+// claims where it was and where it is, two rects a notch apart with its
+// held children inside them. Summed, a held header's claims ran past the
+// quarter of the viewport the ledger allows; the times column, held down
+// the pane's whole height, merged with the thumb along the bottom into most
+// of the viewport; mid-push, six held nodes ran the ledger out of entries.
+// Each of those notches declined the blit, and a declined notch compares
+// nothing, so every notch here is asserted to have blitted first. The
+// shipped programme at 640 by 400, because in the small one's window the
+// blit declines every notch. Each pass sets its direction rather than
 // taking the locale's, so it knows which way the pixels go.
 for (const direction of ['ltr', 'rtl']) {
   test(`a notch the scroll blit serves paints what a full repaint does, ${direction}`, async () => {
@@ -298,16 +305,43 @@ for (const direction of ['ltr', 'rtl']) {
           ` x ${box?.x0} to ${box?.x1}, y ${box?.y0} to ${box?.y1}`,
       );
     };
+    // Scrolling on carries the content toward the start edge, left in LTR
+    // and right in RTL.
+    const across = (d) => (direction === 'rtl' ? d : -d);
+    // The notches stay off scrollX 96. There, in RTL, one glyph of a room's
+    // name rounds a pixel to one side where it is drawn and to the other
+    // where it was copied from: ntk places a glyph by rounding its origin
+    // plus its offset, and in floating point the last bits of that sum move
+    // with the origin's magnitude. A copy of it is a pixel off a repaint,
+    // blit or no blit — hidden by a notch that repaints most of the
+    // viewport, which this one no longer does.
+    //
     // across, with the times, the corner and the day's name held at the
-    // start edge: the vertical bar is the one dragged. Scrolling on carries
-    // the content toward the start edge, left in LTR and right in RTL.
-    const across = direction === 'rtl' ? 48 : -48;
-    await notch({ x: 48 }, [across, 0]);
-    await notch({ x: 96 }, [across, 0]);
+    // start edge: the vertical bar is the one dragged
+    await notch({ x: 48 }, [across(48), 0]);
+    const times = byName('times-thu');
+    const held =
+      direction === 'rtl'
+        ? pane.abs.x + pane.abs.width - (times.abs.x + times.abs.width)
+        : times.abs.x - pane.abs.x;
+    assert.equal(held, 0, 'the times are held at the start edge');
+    // down and back up with Thursday's header held at the top: its two
+    // rects, and a notch up drags its copy down across the strip
+    await notch({ y: 13 }, [0, -13]);
+    await notch({ y: 61 }, [0, -48]);
+    await notch({ y: 13 }, [0, 48]);
+    assert.equal(byName('header-thu').abs.y, pane.abs.y, 'the header is held');
+    // back across and on, the exposed strip running down the held times
+    await notch({ x: 35 }, [across(-13), 0]);
+    await notch({ x: 83 }, [across(48), 0]);
     // down, through Thursday's header being pushed off by Friday's: the
     // horizontal bar is dragged up off its track
     await scroll(pane, { y: 801 });
     await notch({ y: 849 }, [0, -48]);
     await notch({ y: 801 }, [0, 48]);
+    // across in the middle of the push, both days' times, corners and
+    // names held: twelve claims, a handful of regions
+    await notch({ x: 35 }, [across(-48), 0]);
+    await notch({ x: 83 }, [across(48), 0]);
   });
 }

@@ -388,7 +388,9 @@ const BLIT_CONTENTS = Object.freeze({ contents: true });
 // before the frame gives up and repaints the viewport instead (issue #398).
 // A virtualized list's scroll frame changes a handful of regions — the two
 // spacers and the entering rows — and past that the blit plus a scatter of
-// repaints stops being cheaper than the one pass it replaced.
+// repaints stops being cheaper than the one pass it replaced. The area is
+// what the regions add to the strip the frame repaints anyway, a pixel two
+// of them share counted once.
 const BLIT_MAX_CLAIMS = 8;
 const BLIT_MAX_CLAIM_AREA = 0.25;
 
@@ -472,6 +474,85 @@ function scrollbarTrackRect(bar) {
   return insetRect(rect, -1);
 }
 
+/**
+ * The band a scrollbar's thumb travels in, as the line along the track's
+ * inner edge and the viewport edge beyond it: `bottom` for a horizontal
+ * bar, `right` for a vertical one, `left` for the vertical bar of an RTL
+ * viewport. A whole pixel, just outside the track's slop, so the parts a
+ * rect is cut into still meet on a pixel boundary once they are snapped.
+ */
+function scrollbarBand(bar, vp) {
+  const track = scrollbarTrackRect(bar);
+  if (bar.axis === 'x') {
+    return track.y + track.height / 2 > vp.y + vp.height / 2
+      ? { edge: 'bottom', at: Math.floor(track.y) }
+      : { edge: 'top', at: Math.ceil(track.y + track.height) };
+  }
+  return track.x + track.width / 2 > vp.x + vp.width / 2
+    ? { edge: 'right', at: Math.floor(track.x) }
+    : { edge: 'left', at: Math.ceil(track.x + track.width) };
+}
+
+/**
+ * Rects sharing a whole edge joined into the one rect they make, until no
+ * two do. Exact — a join is the union of the two, so the list stays
+ * disjoint — and it only saves a pass: a rect cut at a band's line whose
+ * parts met nothing on either side comes back whole.
+ */
+function joinAlongEdges(rects) {
+  const out = [...rects];
+  for (let joined = true; joined;) {
+    joined = false;
+    for (let i = 0; i < out.length && !joined; i++) {
+      for (let j = i + 1; j < out.length && !joined; j++) {
+        const a = out[i];
+        const b = out[j];
+        let union = null;
+        if (
+          a.x === b.x &&
+          a.width === b.width &&
+          (a.y + a.height === b.y || b.y + b.height === a.y)
+        ) {
+          const y = Math.min(a.y, b.y);
+          union = { x: a.x, y, width: a.width, height: a.height + b.height };
+        } else if (
+          a.y === b.y &&
+          a.height === b.height &&
+          (a.x + a.width === b.x || b.x + b.width === a.x)
+        ) {
+          const x = Math.min(a.x, b.x);
+          union = { x, y: a.y, width: a.width + b.width, height: a.height };
+        }
+        if (!union) continue;
+        out.splice(j, 1);
+        out[i] = union;
+        joined = true;
+      }
+    }
+  }
+  return out;
+}
+
+/** `rect` cut along a band's line: the part on the band's side of it and
+ * the rest, either of them null where the line misses the rect. */
+function splitAtBand(rect, band) {
+  const vertical = band.edge === 'left' || band.edge === 'right';
+  const start = vertical ? rect.x : rect.y;
+  const end = start + (vertical ? rect.width : rect.height);
+  const at = Math.min(Math.max(band.at, start), end);
+  const piece = (from, to) => {
+    if (to <= from) return null;
+    return vertical
+      ? { x: from, y: rect.y, width: to - from, height: rect.height }
+      : { x: rect.x, y: from, width: rect.width, height: to - from };
+  };
+  const before = piece(start, at);
+  const after = piece(at, end);
+  return band.edge === 'right' || band.edge === 'bottom'
+    ? { inside: after, outside: before }
+    : { inside: before, outside: after };
+}
+
 // REACT_X11_DEBUG_PAINT: each frame strokes its damage rects in the next of
 // these, so a region repainting every frame strobes visibly.
 const FLASH_COLORS = [
@@ -513,6 +594,46 @@ function unionRect(a, b) {
 
 function rectArea(r) {
   return Math.max(0, r.width) * Math.max(0, r.height);
+}
+
+/**
+ * The area a list of rects covers, a pixel under several of them counted
+ * once. Exact, column by column: between each pair of neighbouring x
+ * edges, the rects spanning that column merge their y extents. Asked about
+ * a handful of rects at a time.
+ */
+function unionArea(rects) {
+  const xs = rects.flatMap((r) => [r.x, r.x + r.width]).sort((a, b) => a - b);
+  let total = 0;
+  for (let i = 1; i < xs.length; i++) {
+    const left = xs[i - 1];
+    const right = xs[i];
+    if (right <= left) continue;
+    const spans = rects
+      .filter((r) => r.x <= left && r.x + r.width >= right)
+      .sort((a, b) => a.y - b.y);
+    let covered = 0;
+    let reach = -Infinity;
+    for (const r of spans) {
+      const from = Math.max(r.y, reach);
+      const to = r.y + r.height;
+      if (to > from) covered += to - from;
+      reach = Math.max(reach, to);
+    }
+    total += covered * (right - left);
+  }
+  return total;
+}
+
+/** Do two overlapping rects cover exactly the box around them — one inside
+ * the other, or the two spanning the same extent along one axis? */
+function unionIsBox(a, b) {
+  return (
+    rectContains(a, b) ||
+    rectContains(b, a) ||
+    (a.x === b.x && a.width === b.width) ||
+    (a.y === b.y && a.height === b.height)
+  );
 }
 
 /** The box around a non-empty list of rects. */
@@ -3423,17 +3544,38 @@ export class Node {
    * run — the diff's, the reflow queue's — already names where it landed.
    * Read off the window rather than passed in, so a claim from application
    * code reached during the layout pass is filed on the right side of it.
+   *
+   * A region the ledger already holds is not another one. A claim that
+   * overlaps an entry and covers exactly the box around the two of them is
+   * folded into it: the same pixels, one entry. A held sticky node claims
+   * one rect twice — where it was, and where it is a delta along — and
+   * every sticky node held inside it claims inside those, so kept apart, a
+   * pane holding a few of them ran out of entries on regions it had already
+   * counted. Only between claims on the same side of the layout pass: the
+   * blit moves one kind and not the other.
    */
   _recordBlitClaim(rect) {
     const ledger = this._blitLedger;
-    if (!ledger || ledger.length >= BLIT_MAX_CLAIMS) return false;
+    if (!ledger) return false;
     const inside = intersectRects(rect, this.abs);
     // beside the band the blit moves: those pixels are painted the ordinary
     // way, out of the frame's own damage
     if (!inside) return true;
+    const pre = !this.root?._laidOut;
+    let claim = { ...inside, pre };
+    for (let i = ledger.length - 1; i >= 0; i--) {
+      const entry = ledger[i];
+      if (entry.pre !== pre || !rectsOverlap(entry, claim)) continue;
+      if (!unionIsBox(entry, claim)) continue;
+      claim = { ...unionRect(entry, claim), pre };
+      ledger.splice(i, 1);
+      // grown, it can fold an entry already passed over
+      i = ledger.length;
+    }
     // …and a claim that covers the viewport leaves the blit nothing to keep
-    if (rectContains(inside, this.abs)) return false;
-    ledger.push({ ...inside, pre: !this.root?._laidOut });
+    if (rectContains(claim, this.abs)) return false;
+    if (ledger.length >= BLIT_MAX_CLAIMS) return false;
+    ledger.push(claim);
     return true;
   }
 
@@ -12419,7 +12561,9 @@ export class WindowNode extends Scrollable(Node) {
    * neighbours lands exactly there and claims nothing, which is what keeps
    * a pane of headers on the blit path; a held one claims two header-sized
    * rects, written into the blitting pane's ledger and clipped to it the
-   * way `_reflowed`'s claims are.
+   * way `_reflowed`'s claims are. They overlap by all but the scroll's
+   * delta, and the ledger folds them into one entry (`_recordBlitClaim`),
+   * with every held child's claims inside it.
    */
   _placeSticky() {
     const nodes = [];
@@ -12826,34 +12970,14 @@ export class WindowNode extends Scrollable(Node) {
     // no more complicated, so a mid-viewport change — a row upgrading from
     // skeleton to content while the list scrolls — rides the fast path too
     // instead of falling back to the whole viewport.
-    const repairs = [];
-    let repairArea = 0;
-    for (const claim of ledger ?? []) {
-      const moved = claim.pre
-        ? {
-            x: claim.x + dx,
-            y: claim.y + dy,
-            width: claim.width,
-            height: claim.height,
-          }
-        : claim;
-      const inside = intersectRects(moved, vp);
-      if (!inside) continue;
-      repairs.push(inside);
-      repairArea += inside.width * inside.height;
-    }
-    // past this the blit plus a scatter of repaints is no longer cheaper
-    // than the one full-viewport pass it replaced
-    if (repairArea > area * BLIT_MAX_CLAIM_AREA) return;
-    if (!this._scrollBlitSafe(node, vp)) return;
-    let rects = keep;
-    // the strip the shift exposed, on the side the pixels moved away from,
+    //
+    // The strip the shift exposed, on the side the pixels moved away from,
     // full breadth — it also covers the corner gutter beside the bars, whose
-    // old pixels the blit did not overwrite
+    // old pixels the blit did not overwrite — is repainted on every frame
+    // the blit serves, whatever the ledger holds.
     const axis = dy !== 0 ? 'y' : 'x';
     const delta = dy !== 0 ? dy : dx;
-    rects = addDamageRect(
-      rects,
+    const strip =
       axis === 'y'
         ? {
             x: vp.x,
@@ -12866,8 +12990,56 @@ export class WindowNode extends Scrollable(Node) {
             y: vp.y,
             width: Math.abs(delta),
             height: vp.height,
-          },
-    );
+          };
+    const repairs = [];
+    for (const claim of ledger ?? []) {
+      const moved = claim.pre
+        ? {
+            x: claim.x + dx,
+            y: claim.y + dy,
+            width: claim.width,
+            height: claim.height,
+          }
+        : claim;
+      const inside = intersectRects(moved, vp);
+      if (inside) repairs.push(inside);
+    }
+    // Past this the blit plus a scatter of repaints is no longer cheaper
+    // than the one full-viewport pass it replaced. Priced as what the
+    // repairs add to the strip: a pixel under two of them, or under one and
+    // the strip, is painted once. Summed, a held sticky header paid for its
+    // rect twice — it claims where it was and where it is, a delta apart —
+    // then again for each sticky node held inside it, and scrolled back up
+    // it paid a third time for the strip the blit dragged its copy across.
+    const repairArea = repairs.length
+      ? unionArea([strip, ...repairs]) - rectArea(strip)
+      : 0;
+    if (repairArea > area * BLIT_MAX_CLAIM_AREA) return;
+    if (!this._scrollBlitSafe(node, vp)) return;
+    // The band the scrolled bar's thumb travels in is repaired on its own.
+    // The thumb's rects are thin and run along the viewport's edge, and a
+    // rect reaching into the band from inside — a column held down the
+    // pane's whole height, the strip at the end the thumb has come to —
+    // merged with them into the box around both, which reaches back across
+    // the viewport. Cut at the band's line instead, each part coalesces on
+    // its own side of it, and the band stays a band.
+    //
+    // Assembled uncapped, so the parts of a cut stay apart until every rect
+    // is in: a cap merge would pick the two halves of one rect first — they
+    // waste nothing — and put the overlap back. The halves that met nothing
+    // on either side are rejoined after, which is the rect uncut and one
+    // pass fewer, and only then is the frame capped.
+    const scrolledBar = node._scrollbar(axis);
+    const band = scrolledBar ? scrollbarBand(scrolledBar, vp) : null;
+    let rects = keep;
+    const add = (rect) => {
+      const { inside, outside } = band
+        ? splitAtBand(rect, band)
+        : { inside: null, outside: rect };
+      if (outside) rects = addDamageRect(rects, outside, Infinity);
+      if (inside) rects = addDamageRect(rects, inside, Infinity);
+    };
+    add(strip);
     // Scrollbar repair. The scrolled axis's thumb moved *and* the blit
     // dragged a copy of the old thumb along: repaint the dragged copy's
     // rect and the new thumb's rect — small rects, where the full track
@@ -12878,7 +13050,6 @@ export class WindowNode extends Scrollable(Node) {
     // scrolling both ways otherwise trails a smear of old thumb behind its
     // bar, a row per pixel scrolled. Both lie along the strip on the far
     // edge, so their merge stays a band.
-    const scrolledBar = node._scrollbar(axis);
     if (scrolledBar) {
       const savedX = node.scrollX;
       const savedY = node.scrollY;
@@ -12888,38 +13059,51 @@ export class WindowNode extends Scrollable(Node) {
       node.scrollX = savedX;
       node.scrollY = savedY;
       if (oldBar) {
-        rects = addDamageRect(rects, {
-          x: oldBar.x - 1 + dx,
-          y: oldBar.y - 1 + dy,
-          width: oldBar.width + 2,
-          height: oldBar.height + 2,
-        });
+        rects = addDamageRect(
+          rects,
+          {
+            x: oldBar.x - 1 + dx,
+            y: oldBar.y - 1 + dy,
+            width: oldBar.width + 2,
+            height: oldBar.height + 2,
+          },
+          Infinity,
+        );
       }
-      rects = addDamageRect(rects, {
-        x: scrolledBar.x - 1,
-        y: scrolledBar.y - 1,
-        width: scrolledBar.width + 2,
-        height: scrolledBar.height + 2,
-      });
+      rects = addDamageRect(
+        rects,
+        {
+          x: scrolledBar.x - 1,
+          y: scrolledBar.y - 1,
+          width: scrolledBar.width + 2,
+          height: scrolledBar.height + 2,
+        },
+        Infinity,
+      );
     }
     const crossBar = node._scrollbar(axis === 'y' ? 'x' : 'y');
     if (crossBar) {
       const track = scrollbarTrackRect(crossBar);
-      rects = addDamageRect(rects, track);
+      add(track);
       const dragged = intersectRects(
         { ...track, x: track.x + dx, y: track.y + dy },
         vp,
       );
-      if (dragged) rects = addDamageRect(rects, dragged);
+      if (dragged) add(dragged);
     }
-    for (const repair of repairs) rects = addDamageRect(rects, repair);
+    for (const repair of repairs) add(repair);
+    rects = joinAlongEdges(rects).reduce(
+      (capped, rect) => addDamageRect(capped, rect),
+      [],
+    );
     // The last gate, and the only one that has to wait until the rects are
-    // assembled: the frame carries at most MAX_DAMAGE_RECTS of them, so a
-    // repair that does not sit beside the strip is merged with whatever is
-    // nearest — the scrollbar column, most often — and the box of that
-    // merge can reach back across the viewport. When it does, the blit is
-    // buying a shift and paying for the viewport anyway, so let the plain
-    // repaint scrollTo already claimed have the frame.
+    // assembled: damage rects must not overlap, and the frame carries at
+    // most MAX_DAMAGE_RECTS of them, so repairs that meet — a column and a
+    // row at a corner — or that the cap has to pair up are merged into the
+    // box around them, and that box can reach back across the viewport.
+    // When it does, the blit is buying a shift and paying for the viewport
+    // anyway, so let the plain repaint scrollTo already claimed have the
+    // frame.
     let painted = 0;
     for (const rect of rects) {
       const inside = intersectRects(rect, vp);

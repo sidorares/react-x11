@@ -815,6 +815,42 @@ test('a held header keeps the blit, and repaints only where it was and where it 
   assert.ok(area(rects) < 400 * 400 * 0.3, JSON.stringify(rects));
 });
 
+// A header a fifth of the pane tall. It claims where it was and where it
+// is, two rects a notch apart, and summed those came to more than the
+// quarter of the viewport the ledger allows; scrolled back up, the band the
+// blit dragged its copy down across is the exposed strip, which the frame
+// repaints anyway. Priced as what they add to the strip, both notches cost
+// the header's own rect.
+test('a tall held header costs the blit its own rect, whichever way the pane scrolls', async () => {
+  const pane = React.createRef();
+  const header = React.createRef();
+  const { wnd, root } = await mount(
+    h(
+      'box',
+      { ref: pane, style: { overflow: 'scroll', flexGrow: 1 } },
+      h('box', { style: { height: 200, flexShrink: 0 } }),
+      section(0, header, { rows: 20, header: { height: 80 } }),
+    ),
+    { width: 400, height: 400 },
+  );
+  pane.current.scrollTo(248);
+  await frame();
+  for (const to of [296, 248]) {
+    wnd.calls.length = 0;
+    pane.current.scrollTo(to);
+    await frame();
+    assert.strictEqual(top(header.current, pane.current), 0, 'held');
+    assert.strictEqual(blits(wnd).length, 1, `the notch to ${to} blitted`);
+    const rects = root._lastDamageRects;
+    const covers = (x, y) =>
+      rects.some(
+        (r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height,
+      );
+    assert.ok(covers(5, 5) && covers(395, 75), JSON.stringify(rects));
+    assert.ok(area(rects) < 400 * 400 * 0.4, JSON.stringify(rects));
+  }
+});
+
 // --- the pixels, against the real ntk and an in-process X server ----------
 
 const require = createRequire(import.meta.url);

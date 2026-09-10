@@ -92,9 +92,25 @@ test('scrolling back up exposes a strip at the top', async () => {
   assert.deepStrictEqual(blits(wnd), [
     ['scrollRegion', { x: 0, y: 0, width: 400, height: 400 }, 0, 48],
   ]);
-  const strip = root._lastDamageRects.find((r) => r.width === 400);
-  assert.strictEqual(strip.y, 0);
-  assert.ok(strip.height >= 48);
+  // every pixel of the top 48 rows — across the content, and beside it in
+  // the band the thumb travels, which is repaired along with the thumb
+  const rects = root._lastDamageRects;
+  const hit = (x, y) =>
+    rects.some(
+      (r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height,
+    );
+  for (let y = 0; y < 48; y++) {
+    for (let x = 0; x < 400; x++) {
+      assert.ok(
+        hit(x, y),
+        `the strip misses ${x},${y}: ${JSON.stringify(rects)}`,
+      );
+    }
+  }
+  // …and not the box around the strip and the thumb under it, which the
+  // strip used to merge with at this end of the track: 74% of the viewport
+  const area = rects.reduce((sum, r) => sum + r.width * r.height, 0);
+  assert.ok(area < 400 * 400 * 0.2, `repainted ${JSON.stringify(rects)}`);
 });
 
 test('several scrollTo calls in one frame blit once, by the net delta', async () => {
@@ -149,17 +165,51 @@ test('other damage inside the viewport is repainted where the shift leaves it', 
   );
 });
 
-test('a repaint the damage cap merged back across the viewport is not worth blitting', async () => {
+// Full-width rows at opposite ends of the viewport both reach into the band
+// the scrolled bar's thumb travels in. They used to merge with the thumb's
+// rects there, and the box of that merge was most of the viewport again;
+// cut at the band's line, the rows and the band repaint as themselves.
+test('repairs at opposite ends of the viewport keep the blit, and stay apart', async () => {
   const { wnd, root, ref } = await mount();
   await tick();
   const rows = root.children[0].children;
   wnd.calls.length = 0;
   ref.current.scrollTo(48);
-  // full-width rows at opposite ends of the viewport: the frame carries
-  // four damage rects, so these merge with each other and with the
-  // scrollbar column, and the box of that merge is the viewport back again
   root.invalidate(false, rows[1]);
   root.invalidate(false, rows[8]);
+  await tick();
+  assert.strictEqual(blits(wnd).length, 1, 'the blit fired');
+  const rects = root._lastDamageRects;
+  // both rows where the shift left them, 48 up, edge to edge
+  for (const [x, y] of [
+    [0, 40 - 48 + 20],
+    [399, 40 - 48 + 20],
+    [0, 320 - 48 + 20],
+    [399, 320 - 48 + 20],
+  ]) {
+    assert.ok(
+      covers(rects, x, y),
+      `misses ${x},${y}: ${JSON.stringify(rects)}`,
+    );
+  }
+  const area = rects.reduce((sum, r) => sum + r.width * r.height, 0);
+  assert.ok(
+    area < 400 * 400 * 0.4,
+    `the rows, the strip and the band: ${JSON.stringify(rects)}`,
+  );
+});
+
+// Damage rects must not overlap, so two claims that meet at a corner
+// coalesce into the box around them — here most of the viewport, for a
+// column and a row a sliver wide. The blit would buy a shift and pay for
+// the viewport anyway.
+test('claims that coalesce back across the viewport are not worth blitting', async () => {
+  const { wnd, root, ref } = await mount();
+  await tick();
+  wnd.calls.length = 0;
+  ref.current.scrollTo(48);
+  root.invalidate(false, { x: 0, y: 0, width: 10, height: 400 });
+  root.invalidate(false, { x: 0, y: 340, width: 390, height: 10 });
   await tick();
   assert.strictEqual(blits(wnd).length, 0, 'the blit would not pay: no blit');
 });
@@ -180,12 +230,40 @@ test('a claim that covers the viewport keeps the full repaint', async () => {
 test('more changes than the ledger carries keep the full repaint', async () => {
   const { wnd, root, ref } = await mount();
   await tick();
-  const rows = root.children[0].children;
   wnd.calls.length = 0;
   ref.current.scrollTo(48);
-  for (let i = 0; i < 10; i++) root.invalidate(false, rows[i]);
+  // ten separate regions — small, apart, none a part of another
+  for (let i = 0; i < 10; i++) {
+    root.invalidate(false, { x: 10 + 36 * i, y: 150, width: 20, height: 20 });
+  }
   await tick();
   assert.strictEqual(blits(wnd).length, 0, 'past the ledger cap: no blit');
+});
+
+// A claim inside one the ledger already holds is the same region again — a
+// held sticky header claims where it was and where it is, a delta apart,
+// and every sticky node held inside it claims inside those. They fold into
+// the entry they are part of rather than spending one each.
+test('changes inside a change the ledger holds do not count against it', async () => {
+  const { wnd, root, ref } = await mount();
+  await tick();
+  wnd.calls.length = 0;
+  ref.current.scrollTo(48);
+  for (let i = 0; i < 10; i++) {
+    root.invalidate(false, {
+      x: 40 + i,
+      y: 120 + i,
+      width: 120 - 2 * i,
+      height: 40 - 2 * i,
+    });
+  }
+  await tick();
+  assert.strictEqual(blits(wnd).length, 1, 'ten claims, one region: blitted');
+  assert.ok(
+    covers(root._lastDamageRects, 50, 130 - 48),
+    `the region, where the shift left it: ` +
+      JSON.stringify(root._lastDamageRects),
+  );
 });
 
 test('changes covering most of the viewport keep the full repaint', async () => {
