@@ -130,15 +130,15 @@
     "churn": 0
   },
   "scroll: 10 notches over a virtualized list": {
-    "requests": 295,
-    "bytesOut": 14104,
-    "bytesIn": 3032,
-    "replies": 44,
-    "composites": 70,
-    "compositePixels": 561760,
+    "requests": 284,
+    "bytesOut": 13184,
+    "bytesIn": 3192,
+    "replies": 43,
+    "composites": 90,
+    "compositePixels": 397540,
     "filteredComposites": 0,
     "convolvedPixels": 0,
-    "stalls": 12,
+    "stalls": 11,
     "dupQueries": 0,
     "churn": 0
   },

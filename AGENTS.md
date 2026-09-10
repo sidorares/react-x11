@@ -989,10 +989,22 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   blit translates the previous frame's rendering, which is correct
   everywhere the content did not change; the ledger is the list of places
   it did. It still bails when a claim covers the viewport, when there are
-  more than `BLIT_MAX_CLAIMS` of them, or when what they add up to
-  (`BLIT_MAX_CLAIM_AREA`, and `SCROLL_BLIT_MAX_REPAINT` once the damage cap
-  has merged them with the strip and the scrollbar column) stops being
-  cheaper than the one pass it replaced. The case this exists for is the
+  more than `BLIT_MAX_CLAIMS` regions in it, or when what they add to the
+  exposed strip (`BLIT_MAX_CLAIM_AREA`, and `SCROLL_BLIT_MAX_REPAINT` once
+  the frame's rects are assembled) stops being cheaper than the one pass it
+  replaced. Both are measured as pixels, not as rects: a claim that overlaps
+  an entry and covers exactly the box around the two folds into it, and the
+  area is a union, so a pixel two claims share — or a claim and the strip —
+  counts once. Summing them priced a held sticky header at twice its rect
+  plus its held children. And everything the frame repairs besides the
+  thumb is cut at the edge of the band the scrolled bar's thumb travels in:
+  the thumb's rects are thin and run along the viewport's edge, and a rect
+  reaching into the band — a column held down the pane's side, the strip at
+  the end the thumb has come to — merged with them into a box reaching back
+  across the viewport. The halves of a cut that met nothing are rejoined, so
+  a plain pane's frame is the rects it always was. Of 79 mixed notches across
+  the timetable in `examples/schedule.jsx`, 14 blitted before these three and
+  all 79 do after. The case this exists for is the
   **virtualized list**, whose own re-slice commit claims inside the viewport
   on every scroll frame by construction — the spacers resize and the
   entering rows mount — so the fast path used to fire on the first wheel
@@ -1015,7 +1027,18 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   fail, and does (887 requests and 3.28 Mpx against a 437 / 0.65 baseline).
   The virtualized-list scenario beside it is fenced the same way, and is
   what prices the ledger: ten notches cost 295 requests / 0.56 Mpx with it
-  and 785 / 3.20 without.
+  and 785 / 3.20 without. The band cut moved it to 284 / 0.40, and its
+  composites from 70 to 90: a row that meets the thumb is two passes now,
+  where it was one box stretched down the thumb's length.
+
+  One thing breaks the invariant that is not the blit's. ntk places a glyph
+  by rounding its run's origin plus its offset, and in floating point the
+  last bits of that sum — so which way an offset within an ulp of .5 rounds
+  — depend on the origin's magnitude: a run copied 48 px along can sit a
+  pixel off from the same run drawn there. It is rare, one glyph at one
+  notch, and happens more in RTL, where right-aligned runs start on
+  fractions. The timetable's pixel test steers clear of the notches where
+  it does. Rounding the offsets against a whole-pixel origin in ntk ends it.
 
   **Where scrolling actually spent its time was neither of those.** Profiling a
   50,000-row table found the cost in ntk's `clip()`: intersecting a clip
@@ -1115,8 +1138,12 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     — and the reach it lands at, into the blitting pane's ledger and
     clipped to it. A node that rode the scroll lands exactly where the blit
     put its pixels and claims nothing, which is what keeps a pane of
-    headers on the fast path. `test/sticky.test.js` fences both halves, and
-    the blitted frame against a full repaint.
+    headers on the fast path. A held one's two rects overlap by all but the
+    notch and fold into one ledger entry, its held children's inside it,
+    so it costs the blit its own rect whichever way the pane scrolls.
+    `test/sticky.test.js` fences both halves, and the blitted frame against
+    a full repaint; `test/schedule-example.test.js` does the same for a
+    pane of them, notch by notch.
   - **It paints over its siblings.** `paintOrder()` lifts a sticky child
     over its siblings of the same `zIndex`, hit testing walks the same order
     backwards, and the Cocoa layer presenter takes zPosition from it.
