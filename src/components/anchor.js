@@ -64,7 +64,7 @@ function sameAnchorRect(a, b) {
  * it floating over content it no longer belongs to, detached from anything
  * the user can see it points at. So once the trigger is entirely past a
  * clipping ancestor's own bounds or past the owner window itself
- * (`Node._offscreen()`, the same check paint culling uses), tracking calls
+ * (`Node._offscreen()`, paint culling's check less its slop), tracking calls
  * `onOutOfView` instead of measuring — closing the popup, or hiding it, is
  * the caller's call — and does not resume until re-opened. With no
  * `onOutOfView` this just stops updating rather than snapping to a rect

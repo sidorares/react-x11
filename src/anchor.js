@@ -93,9 +93,10 @@ function deviceAt(at, s) {
 
 /**
  * Has the thing this popup points at scrolled out of view? The check paint
- * culling uses (`Node._offscreen`), asked about the sub-rect rather than
- * about the node: an editor scrolls its own text, so the caret leaves the
- * viewport a long time before the editor does.
+ * culling uses (`Node._offscreen`), without the pixel paint allows for ink
+ * past a box, and asked about the sub-rect rather than about the node: an
+ * editor scrolls its own text, so the caret leaves the viewport a long time
+ * before the editor does.
  *
  * A degenerate rect counts as its own thinnest visible version — a caret is
  * a line with no width and a `{x, y}` anchor is a point with neither, and

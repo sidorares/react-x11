@@ -1161,9 +1161,7 @@ test('text whose box ends where a strip begins keeps its antialiased edge, frame
               },
               // 200 device pixels a card in a 660 viewport: at none of the
               // positions below does a title's box end on the pane's left
-              // edge. The off-screen cull makes no allowance for ink past a
-              // box, so the two windows can disagree about that column for a
-              // reason of its own.
+              // edge. That edge is the off-screen cull's, tested below.
               ...Array.from({ length: 8 }, (_, i) =>
                 h(
                   'box',
@@ -1279,3 +1277,194 @@ test('text whose box ends where a strip begins keeps its antialiased edge, frame
     for (const app of apps) await app.close();
   }
 });
+
+// --- ink a pixel past its box, at the pane's edge ------------------------
+//
+// The same pixel where the viewport itself ends. The cull that skips a
+// subtree entirely outside the window or a clipping ancestor made no
+// allowance for it, so a title whose box ended exactly at the pane's left
+// edge was culled in every pass, full repaints included, and the column
+// inside the edge went without its ink. The blit carries that column: a
+// notch that moves the title in shows it bare where a full repaint paints
+// the title, and a notch the other way carries the ink onto a column whose
+// full repaint culls it. Found in the schedule example at scale 2, one
+// pixel either way.
+//
+// No padding on the side a card's title ends at, so the card's box ends
+// where the title's does, and a cull that made the allowance for text alone
+// would never reach the title. The pane runs on the window's edge and
+// inside it, because the cull tests the window and a clipping ancestor
+// apart.
+
+for (const [inset, where, stops] of [
+  // content moving right, scrollX up in RTL, onto the position that ends a
+  // title's box on the pane's left edge, then two pixels on; then moving
+  // left, from a frame where a title's box ends three pixels inside the
+  // pane, onto the position that ends it on the edge
+  [0, 'on the window’s edge', [330, 335, 340, 342, 551, 543, 540]],
+  [20, 'inside the window', [370, 375, 380, 382, 591, 583, 580]],
+]) {
+  test(`text whose box ends at a pane’s edge keeps its antialiased edge, frame by frame (the pane ${where})`, async (t) => {
+    // two windows, a server each, as above
+    const apps = [await createHeadlessApp(), await createHeadlessApp()];
+    const x11Roots = [];
+    try {
+      for (const app of apps) {
+        x11Roots.push(await createRoot({ app, scale: 2 }));
+      }
+      const twins = [];
+      for (const x11Root of x11Roots) {
+        const ref = React.createRef();
+        const titles = [];
+        const instance = await new Promise((resolve) =>
+          x11Root.render(
+            h(
+              'window',
+              { width: 330, height: 90, style: { backgroundColor: '#ffffff' } },
+              h(
+                'box',
+                { style: { flexGrow: 1, flexDirection: 'row' } },
+                inset > 0 &&
+                  h('box', { style: { width: inset, flexShrink: 0 } }),
+                h(
+                  'box',
+                  {
+                    ref,
+                    style: {
+                      overflow: 'scroll',
+                      flexGrow: 1,
+                      flexDirection: 'row',
+                      direction: 'rtl',
+                    },
+                  },
+                  ...Array.from({ length: 8 }, (_, i) =>
+                    h(
+                      'box',
+                      {
+                        key: i,
+                        style: {
+                          width: 100,
+                          flexShrink: 0,
+                          paddingTop: 8,
+                          paddingBottom: 8,
+                          paddingEnd: 8,
+                        },
+                      },
+                      h(
+                        'text',
+                        {
+                          ref: (node) => (titles[i] = node),
+                          style: { fontSize: 12, color: '#20304a' },
+                        },
+                        'in between',
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            resolve,
+          ),
+        );
+        twins.push({
+          instance,
+          root: instance._reactX11Node,
+          pane: ref.current,
+          titles,
+        });
+      }
+      const [blit, full] = twins;
+      if (typeof blit.instance.scrollRegion !== 'function') {
+        t.skip('installed ntk has no Window.scrollRegion yet');
+        return;
+      }
+      full.instance.scrollRegion = undefined;
+      let blits = 0;
+      const realScrollRegion = blit.instance.scrollRegion.bind(blit.instance);
+      blit.instance.scrollRegion = (...args) => {
+        const ok = realScrollRegion(...args);
+        if (ok) blits += 1;
+        return ok;
+      };
+      const W = 660;
+      const H = 180;
+      const paint = ({ root }) => {
+        root._scheduled = false;
+        root.flush();
+      };
+      const settled = () => Promise.all(apps.map(settle));
+      twins.forEach(paint);
+      await settled();
+
+      const differ = [];
+      const edges = [];
+      for (const x of stops) {
+        const before = blits;
+        for (const twin of twins) {
+          twin.pane._scrollByDevice(x - twin.pane.scrollX, 0);
+          paint(twin);
+        }
+        await settled();
+        const [a, b] = await Promise.all(
+          twins.map(({ root }) => readPixels(root._ctx, W, H)),
+        );
+        let count = 0;
+        let first = null;
+        for (let i = 0; i < a.data.length; i += 4) {
+          if (
+            a.data[i] === b.data[i] &&
+            a.data[i + 1] === b.data[i + 1] &&
+            a.data[i + 2] === b.data[i + 2] &&
+            a.data[i + 3] === b.data[i + 3]
+          ) {
+            continue;
+          }
+          count += 1;
+          first ??= { x: (i / 4) % W, y: Math.floor(i / 4 / W) };
+        }
+        if (count > 0) {
+          differ.push(
+            `scrollX ${x}: ${count} pixels, first at ${JSON.stringify(first)};` +
+              ` damage ${JSON.stringify(blit.root._lastDamageRects ?? [])}`,
+          );
+        }
+        // the premise: a blitted frame with a title's box ending on the
+        // pane's left edge or just inside it, and where it ends inside, a
+        // full repaint inks the column past it
+        if (blits === before) continue;
+        const left = blit.pane.abs.x;
+        for (const title of blit.titles) {
+          const { x: tx, y: ty, width, height } = title.abs;
+          const edge = tx + width;
+          if (edge < left || edge > left + 3) continue;
+          edges.push([x, edge - left]);
+          if (edge === left) continue;
+          let ink = 255;
+          for (let y = ty; y < ty + height; y++) {
+            ink = Math.min(ink, b.data[(y * W + edge) * 4]);
+          }
+          assert.ok(ink < 255, `the title ending at ${edge} inks past its box`);
+        }
+      }
+      assert.deepStrictEqual(
+        differ,
+        [],
+        'the frames where the blitted window differs from a full repaint',
+      );
+      assert.deepStrictEqual(
+        edges,
+        [
+          [stops[2], 0],
+          [stops[3], 2],
+          [stops[5], 3],
+          [stops[6], 0],
+        ],
+        'where a blitted frame had a title’s box end on the pane’s left ' +
+          'edge, or just inside it',
+      );
+    } finally {
+      for (const x11Root of x11Roots) await x11Root.unmount();
+      for (const app of apps) await app.close();
+    }
+  });
+}
