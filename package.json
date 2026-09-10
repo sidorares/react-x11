@@ -16,6 +16,7 @@
     "examples:theming": "tsx examples/theming.jsx",
     "examples:container-queries": "tsx examples/container-queries.jsx",
     "examples:schedule": "tsx examples/schedule.jsx",
+    "examples:custom-layout": "tsx examples/custom-layout.jsx",
     "examples:appearance": "tsx examples/appearance.jsx",
     "examples:animation": "tsx examples/animation.jsx",
     "examples:simple": "tsx examples/simple.jsx",
@@ -75,7 +76,8 @@
     "docs:build": "npm --prefix website run build",
     "docs:test": "npm --prefix website test",
     "bench:presenters": "node --import tsx scripts/bench/presenters.js",
-    "bench:touched": "node scripts/bench/touched.js"
+    "bench:touched": "node scripts/bench/touched.js",
+    "bench:grid": "node --import tsx scripts/bench/grid/bench.mjs"
   },
   "repository": {
     "type": "git",

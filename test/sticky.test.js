@@ -3,7 +3,7 @@
 // content box, which is what lets the next section push a header off
 // (docs/styling.md, "Sticky positioning"). The placement runs after every
 // layout pass, the one a scroll runs included (nodes.js,
-// `WindowNode._placeSticky`), so these tests scroll and read `abs` the frame
+// `WindowNode._placeNodes`), so these tests scroll and read `abs` the frame
 // after — there is no later frame for the answer to arrive in.
 import { test } from 'node:test';
 import assert from 'node:assert';
@@ -494,7 +494,7 @@ test('a sticky node inside another is placed after it, whichever became sticky f
   const { render, root } = await mount(tree('relative'));
   render(tree('sticky'));
   await frame();
-  const registered = [...root._stickyNodes];
+  const registered = [...root._placedNodes];
   assert.ok(
     registered[0] === inner.current && registered[1] === outer.current,
     'the inner one registered first',
@@ -596,7 +596,7 @@ test('a node that stops being sticky goes back where layout has it, and one that
   render(tree('relative'));
   await frame();
   assert.strictEqual(top(header.current, pane.current), -60, 'back in flow');
-  assert.strictEqual(root._stickyNodes.size, 0, 'and let go');
+  assert.strictEqual(root._placedNodes.size, 0, 'and let go');
 
   render(tree('sticky'));
   await frame();
@@ -614,12 +614,12 @@ test('an unmounted sticky node leaves the registry', async () => {
       h('box', { style: { height: 300, flexShrink: 0 } }),
     );
   const { render, root } = await mount(tree(true));
-  assert.strictEqual(root._stickyNodes.size, 1);
+  assert.strictEqual(root._placedNodes.size, 1);
   render(tree(false));
   await frame();
   pane.current.scrollTo(20);
   await frame();
-  assert.strictEqual(root._stickyNodes.size, 0);
+  assert.strictEqual(root._placedNodes.size, 0);
 });
 
 test('a sticky node paints over its later siblings and takes the press there', async () => {

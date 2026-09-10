@@ -1,11 +1,19 @@
 // `react-x11/host` — the seam a package that is not react-x11 uses to add
-// a host element. See docs/extending.md for the node contract; this file is
-// only the entry point.
+// a host element, a layout algorithm or a positioning scheme. See
+// docs/extending.md for the contracts; this file is only the entry point.
 export {
   registerElement,
   unregisterElement,
   registeredElements,
 } from './registry.js';
+export {
+  registerLayout,
+  unregisterLayout,
+  registeredLayouts,
+  registerPosition,
+  unregisterPosition,
+  registeredPositions,
+} from './layouts.js';
 
 import { DRAWN_KINDS as DRAWN } from './nodes.js';
 import { registeredElements } from './registry.js';

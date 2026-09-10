@@ -1467,16 +1467,180 @@ not create. Three things it has to do that a GL surface does not:
 - **Give it back, do not destroy it.** The element's own test file asserts
   that first, because it is the failure this shape is most able to cause.
 
+## A layout algorithm of your own
+
+`layout` on a box ([styling.md](styling.md#custom-layouts)) names an
+algorithm, and `registerLayout` teaches react-x11 one. A radial menu's:
+
+```js
+import { registerLayout } from 'react-x11/host';
+
+registerLayout('radial', {
+  options: { radius: { type: 'length', default: 80 } },
+  layout(children, c, { radius }) {
+    const sizes = children.map((child) => child.measure());
+    const reach = Math.max(0, ...sizes.map((s) => Math.max(s.width, s.height)));
+    const width = c.widthMode === 'exactly' ? c.width : 2 * radius + reach;
+    const height = c.heightMode === 'exactly' ? c.height : 2 * radius + reach;
+    const step = (2 * Math.PI) / Math.max(1, children.length);
+    return {
+      width,
+      height,
+      children: sizes.map((s, i) => ({
+        x: width / 2 + radius * Math.cos(i * step) - s.width / 2,
+        y: height / 2 + radius * Math.sin(i * step) - s.height / 2,
+      })),
+    };
+  },
+});
+```
+
+```jsx
+<box style={{ layout: { name: 'radial', radius: 64 } }}>
+  {tools.map((tool) => (
+    <ToolButton key={tool.id} tool={tool} />
+  ))}
+</box>
+```
+
+**One function, two questions.** `layout(children, constraints, options,
+info)` is asked how big the box's content is for `constraints` —
+`{ width, height, widthMode, heightMode }`, the vocabulary `measureContent`
+speaks, with `Infinity` for no bound — several times a pass, at sizes
+nothing is drawn at. When both modes are `'exactly'` the box has its size,
+and the answer places too: `children`, one rect per child, `{ x, y }` from
+the content box's corner, with a `width` and a `height` to lay the child out
+at — either one left out is the child's own. So it is a question about a
+hypothetical, under the rules `measureContent` has
+([above](#what-it-must-not-do)): no reading `abs`, no state, finite numbers.
+
+**What it gets of a child** is a `LayoutChild`, never a node:
+
+| member                  |                                                                                                                                           |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `measure(constraints?)` | the child's size under the constraints. A number with no mode is `'exactly'`, an axis left out `'unconstrained'`, `'at-most'` fit-content |
+| `intrinsicSizes()`      | `{ minContentWidth, maxContentWidth }`: the narrowest it can be drawn at — its content floor — and the width it takes with no bound       |
+| `options`               | its `layoutItem`, against your `childOptions`                                                                                             |
+| `index`                 | its place in the list                                                                                                                     |
+
+Every size is the child's **margin box** — a margin is part of the room a
+child takes — so an algorithm that lines children up is right about margins
+without knowing they exist; and every size is in device pixels, like
+`measureContent`'s.
+
+**Options are declared, and typed.** `options` and `childOptions` map each
+name to `{ type, default }`: `'length'`, `'number'`, `'integer'`,
+`'boolean'`, `'string'`, `'any'`, or an array of the values it may take. A
+`length` is written in logical pixels in the style and arrives in device
+pixels, so an algorithm never multiplies by the scale. A value of the wrong
+type, or an option you did not declare, is reported naming it, and takes
+the default. What the box's own style already says — `gap`,
+`justifyContent`, `alignItems` — is `info.style`: read it rather than
+declaring options that mean the same thing. `info.scale` is the box's device
+pixels per logical pixel, for a length the schema cannot see: one inside a
+string, like a grid's track list.
+
+**What core does, so the algorithm does not have to.** It lays each child
+out at its rect, mirrors the slots when the box reads right to left and
+rounds them to whole pixels, places absolutely positioned children by their
+insets, measures the children's content floors, carries a child's change
+into the next pass, and — when the algorithm throws, or answers something
+that is not a size — reports it and lays the box out as flexbox, in the same
+frame.
+
+Register before you render, as for an element. A name registered twice with
+a different function throws unless `override: true`; under hot reload a
+module re-registering its own replaces it, and a mounted box keeps the
+definition it started with until its style names a layout again. The
+built-in `masonry` and `equal-row` are worked examples (`src/layouts.js`).
+
+In TypeScript, augment `CustomLayouts` with your layout's options and
+`layout: { name: 'radial', radius: 40 }` type-checks, typos included;
+`CustomLayoutItem` is what a child may say:
+
+```ts
+declare module 'react-x11/host' {
+  interface CustomLayouts {
+    radial: { radius?: number };
+  }
+}
+```
+
+## A position of your own
+
+`registerPosition` adds a positioning scheme
+([styling.md](styling.md#custom-positions)): the box is laid out in flow, as
+`relative` is, and after every layout pass `place(node, context)` says how
+far to move it from there. A drop's flight home — from where the pointer let
+go to where layout put the item:
+
+```js
+import { registerPosition } from 'react-x11/host';
+
+registerPosition('landing', {
+  options: {
+    from: { type: 'any' }, // { x, y }, window coordinates
+    started: { type: 'number' },
+    ms: { type: 'number', default: 200 },
+  },
+  place(node, { laidOut, now, options: { from, started, ms } }) {
+    if (!from) return null;
+    const t = Math.min(1, (now - started) / ms);
+    const left = (1 - t) * (1 - t); // easing out
+    return {
+      x: (from.x - laidOut.x) * left,
+      y: (from.y - laidOut.y) * left,
+      again: t < 1,
+    };
+  },
+});
+```
+
+`place` returns `{ x, y }` — how far to move the node, in device pixels, which
+are rounded to whole ones for you — or null to leave it where layout put it;
+`again: true` asks for another frame, which runs the placement pass with
+nothing to lay out. It resizes nothing and sets no state: it runs on every
+layout pass, a scroll's included, which is what lets what it moves land in
+the frame that scrolled.
+
+What it is handed, in window coordinates and device pixels, the space `abs`
+is in:
+
+| field               |                                                                                                                    |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `laidOut`           | `{ x, y, width, height }`: where layout put the node, before any placement moved it                                |
+| `pane`              | the nearest scroll pane: its `scrollport` — inside its border, over its padding — and `scrollX`/`scrollY`; or null |
+| `container`         | the box it is contained by: its parent's content box, or the whole scrolled content for a direct child of a pane   |
+| `margin`            | its margins                                                                                                        |
+| `direction`/`scale` | the node's                                                                                                         |
+| `now`               | the frame clock, in ms                                                                                             |
+| `options`           | its options, resolved as a layout's are                                                                            |
+
+`node` is the node itself, for its `style`: the insets are the scheme's to
+read — sticky reads them as thresholds — and yoga never sees them as
+offsets.
+
+**What core does.** It re-derives where layout put the node on every pass
+(nothing may remember an offset: the scroll fast path moves a node with its
+pane, offset and all), claims where it was and where it went as damage —
+into the scroll blit's ledger, so a pane of placed nodes keeps the blit —
+lifts it over its siblings of the same `zIndex` for paint and for hit
+testing, and when `place` throws, reports it once and leaves the node where
+layout put it until its style names another position. `position: 'sticky'`
+is written against exactly this context (`placeSticky` in `src/layouts.js`).
+
+In TypeScript, augment `CustomPositions` the way `CustomLayouts` is.
+
 ## The subpath exports
 
-| subpath             |                                                                                                                                          |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `react-x11/host`    | `registerElement`, `unregisterElement`, `registeredElements`, `hostTypes`, `knownElements`, `drawnKinds`                                 |
-| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                                                         |
-| `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary                                               |
-| `react-x11/yoga`    | the layout engine — `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed; see below                                                       |
-| `react-x11/ntk`     | ntk itself, re-exported — `Path2D`, `Image`, `Pixmap`, the font sources, `createClient` — and `Surface`, on whichever backend the app is |
-| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                                                     |
+| subpath             |                                                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `react-x11/host`    | `registerElement`, `registerLayout`, `registerPosition` and their `unregister…`/`registered…` pairs, `hostTypes`, `knownElements`, `drawnKinds` |
+| `react-x11/node`    | `Node`, the built-in node classes, `Scrollable`, `intrinsicSize`                                                                                |
+| `react-x11/style`   | `createStyles`, `flattenStyle`, `isStyleProp`, `resolveTokens`, the rest of the vocabulary                                                      |
+| `react-x11/yoga`    | the layout engine — `Yoga`, `loadLayout`, `layoutLoaded`. Rarely needed; see below                                                              |
+| `react-x11/ntk`     | ntk itself, re-exported — `Path2D`, `Image`, `Pixmap`, the font sources, `createClient` — and `Surface`, on whichever backend the app is        |
+| `react-x11/keysyms` | the `XK_*` constants, `keysymOf`, `charOf`, `MOD`, `ctrlChordLetter`                                                                            |
 
 **Reach ntk through `react-x11/ntk`, not a second dependency.** Two copies
 of ntk in one process means two font caches and two glyph atlases, and a
@@ -1493,12 +1657,14 @@ never links against it and yoga's ABI never becomes part of this seam. If you
 are writing an element and reaching for `react-x11/yoga`, the answer is
 almost certainly `measureContent`.
 
-`react-x11/yoga` is for the case that is genuinely different: a package
-implementing a **layout algorithm of its own** that wants to delegate part of
-it. `@react-x11/components`'s `<Html>` is the worked example — its
-`display: flex` builds a small yoga tree, asks it, and reads the answer back
-rather than re-deriving flexbox, which is long, subtle, and silently wrong
-when it is wrong.
+`react-x11/yoga` is for the case that is genuinely different. A layout that
+arranges a box's children is `registerLayout`
+([above](#a-layout-algorithm-of-your-own)) and never needs it; what does is
+an element laying out content it draws itself that wants to delegate part
+of that to flexbox. `@react-x11/components`'s `<Html>` is the worked example
+— its `display: flex` builds a small yoga tree, asks it, and reads the
+answer back rather than re-deriving flexbox, which is long, subtle, and
+silently wrong when it is wrong.
 
 Such a package must use **this** engine rather than its own `yoga-layout`
 dependency, for the same reason it must reach ntk through `react-x11/ntk`:

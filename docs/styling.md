@@ -959,6 +959,118 @@ Not yet: CSS's `scroll-padding`. Scrolling a node into view — keyboard focus
 reaching a row — brings it to the pane's edge, which can be under a held
 header.
 
+Sticky is the built-in [custom position](#custom-positions): the same
+placement, written against the same context a registered one is handed.
+
+## Custom positions
+
+A position is CSS's positioning scheme: `relative` lays the box out in flow
+and moves it by its insets, `sticky` lays it out in flow and holds it against
+a scroll pane's edges. `registerPosition` adds one of your own — the box laid
+out in flow, then moved by an offset your scheme works out once the layout
+pass is done, in the same frame:
+
+```jsx
+import { registerPosition } from 'react-x11/host';
+
+// a layer that scrolls at a share of the pane's speed
+registerPosition('parallax', {
+  options: { rate: { type: 'number', default: 0.5 } },
+  place: (node, { pane, options }) =>
+    pane ? { x: 0, y: Math.round(pane.scrollY * options.rate) } : null,
+});
+
+<box style={{ overflow: 'scroll', flexGrow: 1 }}>
+  <image src={hero} style={{ height: 240, position: 'parallax' }} />
+  <box style={{ position: { name: 'parallax', rate: 0.2 } }}>…</box>
+</box>;
+```
+
+- **It is a `position` value**, by name or with its options, and switches
+  like one — from a container query block too. The box is laid out exactly
+  where `relative` would put it, and moved; nothing around it reflows.
+- **The insets are the scheme's.** Yoga never sees them as offsets: sticky
+  reads them as thresholds, and a registered position reads them as whatever
+  it documents.
+- **It runs on every layout pass**, the one a scroll runs included, so what
+  it moves lands in the frame that scrolled; one that animates asks for the
+  next frame itself. It paints and takes the press over its siblings of the
+  same `zIndex`, like sticky.
+- **Options are typed**: a `length` is written in logical pixels like any
+  length in a style, and a wrong option is reported, naming it, and takes
+  its default.
+
+The contract — what `place` is handed and may return — is in
+[extending.md](extending.md#a-position-of-your-own).
+
+## Custom layouts
+
+`layout` hands a box's children to a layout algorithm in place of flexbox.
+Two are built in:
+
+```jsx
+// a board of notes, each dropped into whichever column is shortest so far
+<box style={{ layout: { name: 'masonry', columnWidth: 220 }, gap: 12 }}>
+  {notes.map((note) => (
+    <Note
+      key={note.id}
+      note={note}
+      style={note.pinned && { layoutItem: { span: 2 } }}
+    />
+  ))}
+</box>
+
+// a dialog's buttons, every one as wide as the widest, at the row's end
+<box style={{ layout: 'equal-row', gap: 8, justifyContent: 'flex-end' }}>
+  <Button>Cancel</Button>
+  <Button>Save changes</Button>
+</box>
+```
+
+**`masonry`** is columns, each child placed in the one that is shortest so
+far: the layout of a photo wall or a board of notes of different heights,
+which flexbox cannot write — a wrapping row lines its items up in rows. As
+many `columnWidth`-wide columns as fit (240 by default), or exactly
+`columns`, sharing the width; `columnGap`, `rowGap` and `gap` space them,
+and a child's `layoutItem: { span: 2 }` lays it across two.
+
+**`equal-row`** is a row whose children are all as wide as the widest of
+them. Flexbox makes siblings equal only by dividing a width it was given
+(`flex: 1`), and a row sized by its content — a dialog's buttons — has none
+to divide. Squeezed, the cells shrink together, down to the widest child's
+content floor and no further. `gap`, `justifyContent` and `alignItems` mean
+what they mean on a flex row, and `alignItems` defaults to `'stretch'`, so
+the cells are one height too.
+
+Things to know:
+
+- **It runs inside the layout pass.** The box's size is what the algorithm
+  answers and its children are where it puts them, in the same frame — on
+  a window resize, a live resize, a scroll or a container query flip, with
+  no React render involved. That is the difference from measuring in
+  `onLayout` and setting state, which paints the old arrangement first
+  ([react-features.md](react-features.md#measuring-a-node)).
+- **It is a style property**, so a container query block can switch it:
+  `'@container width < 500': { layout: { name: 'masonry', columns: 1 } }`.
+- **Right to left is mirrored for you.** An algorithm places from the left,
+  and the renderer mirrors each child across the box when it reads right to
+  left: a masonry fills from the right-hand column.
+- **Absolutely positioned children** are not the algorithm's: they are
+  placed by their insets against the box's padding box, as anywhere else.
+- **A child's content floor still holds.** A row inside a masonry card
+  squeezes its label only as far as its longest word, the rule everywhere
+  else ([elements.md](elements.md#everything-shrinks-nothing-shrinks-to-nothing)).
+- **Not on a scroll pane or a window.** A pane's size is its viewport's,
+  not its content's: put the layout on a `<box>` inside it, which is what it
+  scrolls. It is reported once, and the pane lays out as it would without.
+- **A layout that throws**, or a name nobody registered, is reported, and
+  the box is laid out as flexbox — in the same frame.
+
+Writing one of your own is `registerLayout` from `react-x11/host`
+([extending.md](extending.md#a-layout-algorithm-of-your-own)). The design
+record, with why it has to run in the pass rather than in an effect, is
+[architecture/custom-layout.md](architecture/custom-layout.md).
+
 ## Transitions
 
 `transition` names how long a change takes. A number covers every animatable
@@ -1326,6 +1438,23 @@ can be looked at without stopping the compositor for the whole session. See
   `overflow: 'scroll'` makes a pane (see
   [Sticky positioning](#sticky-positioning)). A header inside a rounded card
   sticks to the list the card scrolls in, and stays inside the card.
+- **A registered position is a `position` value, not a property of its
+  own.** CSS's `position` already picks a positioning scheme, and sticky is
+  one whose insets mean something other than an offset; a scheme of your own
+  is the same kind of thing. The first spelling, `placement`, was already
+  the anchor vocabulary — which side of its trigger a popup opens on — and
+  threw on the first `<popup placement>` it met. What one property costs is
+  composing a scheme with `absolute`, which a wrapping box answers.
+- **A layout is a style property, and runs inside the pass.** What a layout
+  decides depends on sizes the pass produces, so a React-side one —
+  measure in `onLayout`, set state — paints the old arrangement first, and
+  misses every pass React never sees: a scroll, a live resize, a
+  transition. A style property is also one a container query block can
+  switch in the same frame.
+- **The renderer mirrors right to left, not the algorithm.** An algorithm
+  places from the left, once, and each slot is mirrored across the box when
+  it reads right to left — the way yoga mirrors a flex row, so no layout can
+  forget to.
 
 ## Elements that are not styled
 

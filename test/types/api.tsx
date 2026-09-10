@@ -208,6 +208,18 @@ const s = createStyles({
   // held against the nearest scroll pane's edges by its insets
   sectionHeader: { position: 'sticky', top: 0 },
   stickyColumn: { position: 'sticky', start: 0, bottom: '10%' },
+  // a layout arranging the children: the built-in ones with typed options,
+  // and an app's own layouts and positions once it has augmented
+  // react-x11/host (test/types/layouts.ts)
+  gallery: { layout: { name: 'masonry', columnWidth: 180 }, gap: 8 },
+  pinned: { layoutItem: { span: 2 } },
+  footer: { layout: 'equal-row', justifyContent: 'flex-end', gap: 8 },
+  wheel: { layout: { name: 'radial', radius: 60 } },
+  drifting: { position: { name: 'parallax', rate: 0.3 } },
+  // @ts-expect-error — a misspelt option is caught like a misspelt property
+  typo: { layout: { name: 'masonry', colums: 3 } },
+  // @ts-expect-error — and a position nobody registered is not one
+  lost: { position: 'absolut' },
   pulse: {
     backgroundColor: '$track',
     animation: {

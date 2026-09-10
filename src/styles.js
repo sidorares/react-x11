@@ -45,16 +45,28 @@ const POSITION = {
   static: Yoga.POSITION_TYPE_STATIC,
   relative: Yoga.POSITION_TYPE_RELATIVE,
   absolute: Yoga.POSITION_TYPE_ABSOLUTE,
-  // Laid out in flow, exactly as `relative` is — sticking is not something
-  // layout does, it is a shift the scroll pane makes afterwards (nodes.js,
-  // `WindowNode._placeSticky`). What differs is the insets: here they are
-  // thresholds against the pane's edges, so yoga must never see them as
-  // offsets (`applyLayoutStyle`).
-  sticky: Yoga.POSITION_TYPE_RELATIVE,
 };
 
-/** The properties that are an offset under `relative` and `absolute`, and a
- *  threshold under `sticky` — see `applyLayoutStyle`. */
+/**
+ * Yoga's position type for a `position` value. `static`, `relative` and
+ * `absolute` are yoga's own. Everything else — `sticky`, and every position
+ * registered with `registerPosition` (src/layouts.js) — is laid out in flow
+ * exactly as `relative` is and moved afterwards: placing is not something
+ * layout does (nodes.js, `WindowNode._placeNodes`). What differs is the
+ * insets, which are the placement's to read — thresholds, for sticky — so
+ * yoga must never see them as offsets (`applyLayoutStyle`).
+ */
+const positionTypeOf = (v) =>
+  typeof v === 'string' && Object.hasOwn(POSITION, v)
+    ? POSITION[v]
+    : Yoga.POSITION_TYPE_RELATIVE;
+
+/** Whether a `position` is placed after layout rather than by it. */
+const isPlacedPosition = (v) =>
+  v != null && !(typeof v === 'string' && Object.hasOwn(POSITION, v));
+
+/** The properties that are an offset under `relative` and `absolute`, and the
+ *  placement's to read under any other — see `applyLayoutStyle`. */
 const INSETS = new Set(['top', 'right', 'bottom', 'left', 'start', 'end']);
 
 const DISPLAY = {
@@ -139,10 +151,7 @@ const LAYOUT_APPLIERS = {
   flexGrow: (n, v) => n.setFlexGrow(v ?? 0),
   flexShrink: (n, v) => n.setFlexShrink(v ?? 1),
   flexBasis: (n, v) => n.setFlexBasis(v),
-  position: (n, v) =>
-    n.setPositionType(
-      pick(POSITION, v, 'position') ?? Yoga.POSITION_TYPE_RELATIVE,
-    ),
+  position: (n, v) => n.setPositionType(positionTypeOf(v)),
   // Which way the boxes under this one run. Everything else in this file is
   // physical; this is the one property that decides what "start" means, and
   // yoga inherits it down its own tree — so a `<box>` that sets it mirrors
@@ -465,6 +474,13 @@ const STYLE_PROPS = new Set([
   // the ones that say it. Neither layout nor paint: it changes nothing about
   // this node, only what the blocks under it resolve against.
   'container',
+  // A registered layout algorithm that arranges this node's children — CSS's
+  // `display: layout(name)`, with the algorithm's options written beside the
+  // name — and what a child tells the one arranging it, CSS's child input
+  // properties (docs/styling.md, "Custom layouts"). Layout in every sense
+  // but yoga's: the node side reads them (nodes.js, the layout host).
+  'layout',
+  'layoutItem',
 ]);
 
 export const isStyleProp = (name) => STYLE_PROPS.has(name);
@@ -724,6 +740,22 @@ function validateValue(key, value, where) {
   }
 }
 
+const ALGORITHM_NAME = /^[A-Za-z_][\w-]*$/;
+
+/** A plain object of options — what `layoutItem` is, and what a `layout` or
+ *  a registered `position` written with its options is. */
+const isOptionBag = (v) =>
+  v == null || (typeof v === 'object' && !Array.isArray(v));
+
+/** A `layout` / `position` value: a name, or one written with its options —
+ *  `'masonry'`, `{ name: 'masonry', columns: 3 }`. Whether the name is
+ *  registered is the node's to find out when it resolves the style: an
+ *  algorithm may be registered after the style that names it is written. */
+const isAlgorithm = (v) =>
+  v == null ||
+  (typeof v === 'string' && ALGORITHM_NAME.test(v)) ||
+  (isOptionBag(v) && typeof v.name === 'string' && ALGORITHM_NAME.test(v.name));
+
 function validateStyle(style, where) {
   for (const key of Object.keys(style)) {
     if (isQuery(key)) {
@@ -773,6 +805,28 @@ function validateStyle(style, where) {
         `react-x11: invalid container ${JSON.stringify(style[key])} in ` +
           `${where} (expected true, or a name like 'sidebar' — letters, ` +
           "digits, '_' and '-', not starting with a digit)",
+      );
+    }
+    if (key === 'layout' && !isAlgorithm(style[key])) {
+      throw new Error(
+        `react-x11: invalid layout ${JSON.stringify(style[key])} in ${where} ` +
+          "(expected a registered name like 'masonry', or { name: 'masonry' } " +
+          "with the layout's options beside it)",
+      );
+    }
+    if (key === 'position' && !isAlgorithm(style[key])) {
+      throw new Error(
+        `react-x11: invalid position ${JSON.stringify(style[key])} in ` +
+          `${where} (expected 'static', 'relative', 'absolute', 'sticky', or ` +
+          'a position registered with registerPosition — its name, or ' +
+          "{ name: '…' } with its options beside it)",
+      );
+    }
+    if (key === 'layoutItem' && !isOptionBag(style[key])) {
+      throw new Error(
+        `react-x11: invalid layoutItem ${JSON.stringify(style[key])} in ` +
+          `${where} (expected an object of the options the layout arranging ` +
+          'this node reads, like { span: 2 })',
       );
     }
     if (key === 'flex' && !isFlexShorthand(style[key])) {
@@ -1668,12 +1722,20 @@ export const createLayoutNode = () => Yoga.Node.create(layoutConfig());
 export function measuringExactly(measure) {
   const cfg = layoutConfig();
   cfg.setPointScaleFactor(0);
+  exactDepth++;
   try {
     return measure();
   } finally {
+    exactDepth--;
     cfg.setPointScaleFactor(1);
   }
 }
+
+let exactDepth = 0;
+
+/** Whether yoga is measuring off the pixel grid right now: a size taken in
+ *  here is not the size the same layout comes to on it. */
+export const isMeasuringExactly = () => exactDepth > 0;
 
 /**
  * The yoga defaults that are not CSS's, written once per node.
@@ -1698,23 +1760,39 @@ export function applyLayoutDefaults(yogaNode) {
  */
 export function applyLayoutStyle(yogaNode, props, oldProps = {}) {
   let changed = false;
-  // A sticky node's insets are thresholds the scroll pane reads after layout,
-  // never offsets — so yoga gets `undefined` for them, and a node that turns
-  // sticky (or stops) has all six re-sent whether or not they changed. The
-  // flip still counts as a change: the pass it asks for is what re-places
-  // the node.
-  const sticky = props.position === 'sticky';
-  const flipped = sticky !== (oldProps.position === 'sticky');
+  // A placed node's insets — sticky's thresholds, or whatever a registered
+  // position reads them as — are the placement's, never offsets: yoga gets
+  // `undefined` for them, and a node that becomes placed (or stops) has all
+  // six re-sent whether or not they changed. The flip still counts as a
+  // change: the pass it asks for is what places the node.
+  const placed = isPlacedPosition(props.position);
+  const flipped = placed !== isPlacedPosition(oldProps.position);
   for (const key of Object.keys(LAYOUT_APPLIERS)) {
-    if (props[key] !== oldProps[key] || (flipped && INSETS.has(key))) {
+    const moved =
+      key === 'position'
+        ? !samePosition(props.position, oldProps.position)
+        : props[key] !== oldProps[key];
+    if (moved || (flipped && INSETS.has(key))) {
       LAYOUT_APPLIERS[key](
         yogaNode,
-        sticky && INSETS.has(key) ? undefined : props[key],
+        placed && INSETS.has(key) ? undefined : props[key],
       );
       changed = true;
     }
   }
   return changed;
+}
+
+/** Two `position` values asking for the same thing. A registered one written
+ *  with its options is an object, and an inline object is a new one every
+ *  render — which must not cost a layout pass per commit. */
+function samePosition(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const key of keys) if (a[key] !== b[key]) return false;
+  return true;
 }
 
 /** @returns true if any paint-only prop changed */

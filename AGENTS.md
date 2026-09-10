@@ -354,7 +354,7 @@ stop it, in one place — see docs/desktop.md for the worked example.
   Runs in CI beside lint. **A prop change is not done until the `.d.ts` and a
   line in the type test change with it** — hand-written declarations drift
   silently otherwise, and nothing else catches it.
-- `npm run examples:{app,theming,container-queries,schedule,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,selection,widgets,windows,wm}`
+- `npm run examples:{app,theming,container-queries,schedule,custom-layout,simple,simple-nojsx,xeyes,dashboard,tasks,menu,form,selection,widgets,windows,wm}`
   — need a running X server (`DISPLAY` set; XQuartz on macOS, Xvfb for
   automation). `examples:app` is the showcase: it hosts `form`, `widgets`
   and `tasks` as tabs by importing the panel each of them exports, so a new
@@ -1120,13 +1120,16 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     out-of-flow node animating a layout property is bounded by its parent,
     which contains both where it was and where it is going.
 
-- **`position: 'sticky'` is placed after layout, not by it**
-  (`WindowNode._placeSticky`). Yoga lays a sticky node out as `relative`
-  with its insets withheld — `applyLayoutStyle` sends it `undefined` for
-  them, since they are thresholds and never offsets — and the window then
-  shifts it, ancestors first, against the nearest `overflow: 'scroll'` pane
-  and its parent's content box, in the same pass a scroll runs. Three
-  things are easy to undo:
+- **`position: 'sticky'`, and every registered position, is placed after
+  layout, not by it** (`WindowNode._placeNodes`, `src/layouts.js`). Yoga
+  lays a placed node out as `relative` with its insets withheld —
+  `applyLayoutStyle` sends it `undefined` for them, since they are the
+  scheme's to read and never offsets — and the window then shifts it,
+  ancestors first, by what its `place` returns: for sticky, against the
+  nearest `overflow: 'scroll'` pane and its parent's content box. It runs
+  in the same pass a scroll runs. Sticky is written against the same
+  context a registered position is handed, so `test/sticky.test.js` is the
+  fence for the generic half too. Three things are easy to undo:
   - **Nothing remembers an offset.** The scroll fast path (#405) moves a
     pane's content with `_shiftAbs`, a sticky node's last offset included,
     so each pass re-derives where layout put the node (`_laidOutAt`: its
@@ -1144,9 +1147,44 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     `test/sticky.test.js` fences both halves, and the blitted frame against
     a full repaint; `test/schedule-example.test.js` does the same for a
     pane of them, notch by notch.
-  - **It paints over its siblings.** `paintOrder()` lifts a sticky child
+  - **It paints over its siblings.** `paintOrder()` lifts a placed child
     over its siblings of the same `zIndex`, hit testing walks the same order
     backwards, and the Cocoa layer presenter takes zPosition from it.
+
+- **A `layout` host's children are yoga trees of their own** (the layout
+  host in `src/nodes.js`; docs/architecture/custom-layout.md). Yoga gives a
+  node a measure function or children, never both, so the host is a
+  measured leaf and each child a root — and everything that assumed the
+  yoga tree mirrors the node tree has a host branch. Five things are easy
+  to undo:
+  - **A `<box>` is a `Scrollable`,** whose own `_absolutizeChildren` is the
+    walk `absolutize` takes: a host branch in `Node.absolutize` alone is
+    never reached for a box. `offsetInParent` is the one sum for "where
+    layout put this in its parent", which `onLayout`, `scrollIntoView` and
+    a pane's extent all make.
+  - **A child's dirt stops at its own root.** The window sweeps every
+    host's children before each pass (`_sweepLayoutHosts`). Yoga's dirtied
+    callback is no substitute: it fires only from clean to dirty, and a
+    child never laid out — hidden since it mounted — is dirty already. The
+    floors pass covers the same ground today (a changed child owes it a
+    width, and measuring off the pixel grid has yoga ask every host again),
+    so removing the sweep alone passes the suite: change one with the other
+    in view.
+  - **The content floors stop at a host** and are measured inside each
+    child, tree by tree. A height floor measured at placement time runs off
+    the pixel grid after the pass, which leaves yoga holding a tree laid out
+    under a config it no longer has: the step lays out once more on the
+    grid, or the next frame — a scroll's included — lays the whole tree out
+    again.
+  - **A host's `freeRecursive` does not reach its children's trees**, which
+    are roots; `_freeHostTrees`, from `destroySubtree`, frees them.
+  - **What a child answered is remembered** (`_hostSizesNow`) until dirt on
+    its root says something inside changed, and a placement skips a tree
+    already at its rect (`_hostLaidAt`). Both lean on one rule: every
+    `calculateLayout` on a host child's root goes through `layoutHostChild`
+    or the memo, which drop what they remembered when the root is dirty. A
+    new direct call there clears the dirt without dropping the memo, and the
+    next frame lays the child out from sizes that are no longer true.
 
 - **A commit's per-insert bookkeeping is amortized, not paid per row**
   (issue #397). React mounts a subtree one `insertBefore` at a time, so a
