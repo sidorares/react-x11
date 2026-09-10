@@ -41,7 +41,13 @@ state.
 There is no third rung to draw, and that is the difference from the file
 dialog's ladder: the thing being read — the whole screen — is precisely what
 an application cannot draw itself. So the hook adds binding, not a fallback
-of its own.
+of its own — and the ladder can therefore run out. Where it does, the floor
+is the typed rejection and `supported: false`, never a crash: the **cocoa
+backend** is that place today (its `app.X` is a stub, so there is no pointer
+to grab and no root window to read, and macOS's own `NSColorSampler` is a
+bridge gap — [macos.md](macos.md)). The rung is gated on the requests it is
+built out of rather than on there being an app, so a picker on macOS draws
+no eyedropper button instead of one that throws on its first press.
 
 ### The version gate
 
@@ -169,6 +175,7 @@ lifecycle belongs to core rather than to apps:
 | GNOME / KDE, or any portal with Screenshot ≥ 2     | portal                                                                                                             |
 | XFCE (portal present, no Screenshot interface)     | X11                                                                                                                |
 | ssh, `startx`, XQuartz, a container with a display | X11                                                                                                                |
+| macOS, `backend: 'cocoa'`                          | none — `supported` is false, `pickScreenColor()` rejects typed ([macos.md](macos.md))                              |
 | Node 20, where npm skips `dbus-native`             | X11                                                                                                                |
 | Wayland, some day                                  | portal only — there is no root window to read, which is a further reason the ladder lives here and not in each app |
 
