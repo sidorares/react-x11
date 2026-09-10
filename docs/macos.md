@@ -9,16 +9,32 @@ published as **[`@windowkit/appkit`](https://www.npmjs.com/package/@windowkit/ap
 `node-calayers`, read `@windowkit/appkit`: that is what the POC was called
 before it was published.
 
-What has landed, against §"The plan" at the foot of this page: Phase 0 (the
-bridge contract), Phase 1 (the surface presenter, which is still the
-measured default), Phase 2 (the presenter seam), and most of Phases 4 and 5
-— the system menu bar, native control bezels, native file panels,
-notifications, appearance, screens and scale, the pasteboard, drag and drop,
-`<glarea>` over CGL, `NSStatusItem` and the Dock, Apple-Event app lifecycle,
-`useSupports('nativeControls')`, and layer promotion for animation. Phase 3
-is partial: the full layer presenter exists behind
-`cocoa: { presenter: 'layers' }` and is opt-in while it is measured, with
-layer promotion serving the animation case on the default path.
+What has landed, against §"The plan" at the foot of this page: **Phase 0**
+(the bridge contract) and **Phase 1** (the surface presenter, still the
+measured default), then most of **Phases 4 and 5** — the system menu bar,
+native control bezels, native file panels, notifications, appearance,
+screens and scale, the pasteboard, drag and drop, `<glarea>` over CGL,
+`NSStatusItem` and the Dock, Apple-Event app lifecycle,
+`useSupports('nativeControls')`, and layer promotion for animation.
+
+**Phase 2 did not happen, and that is the good news.** It proposed
+extracting X11's paint/damage/flush into a presenter behind a formal
+invalidate/flush contract, as an X11-neutral refactor pinned by the pixel
+gates. What the code does instead is cheaper and safer: the surface
+presenter _is_ the existing paint machinery, drawing into the window's
+bitmap, and the seam is a handful of **optional hooks feature-detected on
+the window object** — `presentFrame`, `noteInvalidate`, `scrollRegion`,
+`animateNode`, `cancelNodeAnimation` (`src/cocoa/window.js`, read at
+`src/nodes.js:2302`). A window that does not define them gets today's path
+byte for byte, which is the guarantee Phase 2 wanted without the refactor
+it asked for. Nothing is documented in `extending.md` terms because there
+is no interface to document.
+
+**Phase 3** is therefore partial rather than blocked: the full layer
+presenter is real (`src/cocoa/presenter.js`, `CocoaLayerPresenter` — one
+CALayer per drawn node) but stays behind `cocoa: { presenter: 'layers' }`
+while §"Measure first" is open, and layer promotion covers the animation
+case on the default path.
 
 **Not built**, and honestly the interesting remainder: an `NSAccessibility`
 bridge over the a11y model (on Cocoa `createRoot()` leaves the AT-SPI bridge
