@@ -653,11 +653,11 @@ export interface ScrollProps {
   /**
    * The offsets moved, by any route. The wheel, the keys, a bar and
    * `scrollTo`/`scrollBy` report inside the call. Layout reports once its
-   * pass is over, after the frame that shows the move: a `scrollTo` held
-   * for the pane's first layout landing, a `scrollIntoView` resolving, or
-   * the offset pulled back when the content shrinks or the viewport grows
-   * under it. Each report carries the offsets in force when it is
-   * delivered.
+   * pass is over, after the frame that shows the move: a held `scrollTo`
+   * landing (one made before the pane's first layout, or past the extent
+   * the last pass measured), a `scrollIntoView` resolving, or the offset
+   * pulled back when the content shrinks or the viewport grows under it.
+   * Each report carries the offsets in force when it is delivered.
    */
   onScroll?: (ev: ScrollEvent) => void;
   /** Fired from layout, so it arrives for a list nobody has scrolled yet. */

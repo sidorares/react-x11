@@ -79,10 +79,11 @@ before the layout pass, so `abs` there is still the previous frame's rect
 before. For a size, let the element report it with `onLayout`
 ([below](#measuring-a-node)); for a style that depends on one, write a
 container query ([styling.md](styling.md#container-queries)), which the
-pass answers in the same frame. `scrollIntoView`, and a `scrollTo` on a pane
-that has not been laid out yet, measure nothing when you call them — the
-pass resolves them — so they are safe here
-([elements.md](elements.md#scrolling)).
+pass answers in the same frame. `scrollIntoView` measures nothing when you
+call it, and neither does the part of a `scrollTo` past the extent the last
+pass measured, which is what `scrollTo(Infinity)` asks for when it follows
+rows this commit added. The pass answers both against the geometry it
+produces, so they are safe here ([elements.md](elements.md#scrolling)).
 
 The same boundary is why an event handler feels instant: react-x11 lands the
 React update caused by a click or a keystroke **before** the frame goes out,
