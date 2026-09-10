@@ -179,10 +179,10 @@ is called out where the answer is.
 
 ## Design records
 
-[`architecture/`](architecture/) holds the documents behind the bigger
-pieces: measured, written against a named commit, and kept as the record of
-_why_ rather than the reference for _what_. Some describe what shipped;
-some are proposals that have not been built, and say so at the top.
+`architecture/` holds the documents behind the bigger pieces: measured,
+written against a named commit, and kept as the record of _why_ rather than
+the reference for _what_. Some describe what shipped; some are proposals
+that have not been built, and say so at the top.
 
 - [architecture/frame-pacing.md](architecture/frame-pacing.md) — the
   design record behind `frameRate`: why a window fed off an input path

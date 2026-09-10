@@ -101,7 +101,7 @@ const root = await createRoot({ app }); // a connection you already have
 an in-process X server with no `$DISPLAY` at all. `root.render(element,
 callback?)` applies mounts and updates **synchronously**; painting happens a
 frame later, on the window's frame clock. Every option is in the
-**[docs index](/docs/reference/)**.
+**[docs index](/docs/reference)**.
 
 ## Styling in one minute
 
