@@ -508,7 +508,7 @@ element already has, fed by whichever transport §2.3 the build has.
 
 | piece                         | file                                                                                                                        |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| the element and its props     | `src/elements.js`, `src/nodes.js` — a node beside `GlAreaNode`                                                              |
+| the element and its props     | the kind switch in `src/Reconciler.js`, and a node beside `GlAreaNode`                                                      |
 | the layer, Cocoa              | `src/cocoa/promotion.js` (a second kind of candidate) and a new `src/cocoa/video.js`, in the shape of `src/cocoa/glarea.js` |
 | the accessor                  | `src/node.d.ts`, `test/types/extend.tsx`                                                                                    |
 | the frame sink, both backends | ntk `Surface` + `drawImage`, unchanged                                                                                      |

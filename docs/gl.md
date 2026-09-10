@@ -1,4 +1,4 @@
-# 3D: `<glarea>` and the two backends
+# 3D: `<glarea>` and the three ways underneath it
 
 react-x11 gives you a **GL surface in the layout** and nothing above it. A
 scene graph — meshes, materials, lights, post-processing — is
@@ -20,23 +20,31 @@ reconciler and renders through the surface described here.
 `examples/viewer3d.jsx` is the worked example: a model viewer that orbits,
 and the display-list discipline the indirect backend demands.
 
-## The two backends
+## The three ways
 
-Which one a connection has decides what `onDraw` can do, because they are
-different APIs — not two spellings of one.
+`<glarea>` and `onDraw` are the same everywhere. What is underneath is not:
+these are different APIs, not three spellings of one, and which one a
+connection has decides what `onDraw` can do.
 
-|                | **direct**                                                                                                                                                                                                             | **indirect**                                                       |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| how it draws   | OpenGL ES 2 on the GPU, in two flavors: on Linux frames reach the server as dma-buf descriptors over DRI3 + Present, and on macOS/XQuartz the server exports the window's surface over Apple-DRI and CGL draws into it | GL commands encoded into the X connection                          |
-| shaders        | **yes**, GLSL ES 1.00                                                                                                                                                                                                  | none; the protocol encodes no shader objects                       |
-| render targets | **yes** — framebuffer objects                                                                                                                                                                                          | none; the protocol encodes no framebuffer objects                  |
-| geometry       | vertex buffers on the GPU                                                                                                                                                                                              | immediate mode compiled into display lists                         |
-| lighting       | per fragment                                                                                                                                                                                                           | per vertex                                                         |
-| cost per frame | one Present request                                                                                                                                                                                                    | matrices, material state and one `CallList` per mesh               |
-| where it runs  | a local connection, plus ntk's optional `x11-dri` addon: a Linux server with DRI3, or macOS/XQuartz with Apple-DRI (ntk 8.4.0)                                                                                         | any server that allows indirect contexts, including over a network |
+|                | **direct** (X11)                                                                                                                                                                                                       | **indirect** (X11)                                                 | **Cocoa**                                                                                    |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| how it draws   | OpenGL ES 2 on the GPU, in two flavors: on Linux frames reach the server as dma-buf descriptors over DRI3 + Present, and on macOS/XQuartz the server exports the window's surface over Apple-DRI and CGL draws into it | GL commands encoded into the X connection                          | CGL — OpenGL 4.1 core on Metal — into IOSurface-backed framebuffers, presented as a sublayer |
+| shaders        | **yes**, GLSL ES 1.00                                                                                                                                                                                                  | none; the protocol encodes no shader objects                       | **yes**                                                                                      |
+| render targets | **yes** — framebuffer objects                                                                                                                                                                                          | none; the protocol encodes no framebuffer objects                  | **yes** — it draws into one                                                                  |
+| geometry       | vertex buffers on the GPU                                                                                                                                                                                              | immediate mode compiled into display lists                         | vertex buffers on the GPU                                                                    |
+| lighting       | per fragment                                                                                                                                                                                                           | per vertex                                                         | per fragment                                                                                 |
+| cost per frame | one Present request                                                                                                                                                                                                    | matrices, material state and one `CallList` per mesh               | a swap between two targets; the WindowServer composites                                      |
+| where it runs  | a local connection, plus ntk's optional `x11-dri` addon: a Linux server with DRI3, or macOS/XQuartz with Apple-DRI (ntk 8.4.0)                                                                                         | any server that allows indirect contexts, including over a network | any Mac, on the Cocoa backend — it needs the same optional `x11-dri` addon and nothing else  |
 
-The default is indirect, because it is what react-x11 has always used. Turn
-the other on per app:
+The Cocoa column is the X11 direct path with the X-specific half swapped
+out: the same `x11-dri` CGL context and the same WebGL-shaped `gl` table,
+but instead of attaching to a surface an X server exported, frames render
+into IOSurfaces and present by handing the surface's id to the area's own
+`CALayer`. `glPolicy: 'indirect'` is the one setting that is an error there
+and says so — GLX is a protocol, and there is no server to speak it to.
+
+On X11 the default is indirect, because it is what react-x11 has always
+used. Turn the other on per app:
 
 ```jsx
 const root = await createRoot({ glPolicy: 'auto' });
@@ -66,9 +74,11 @@ both the flavor and which backend actually drew.
 
 ## Raw GL through `onDraw`
 
-`onDraw(gl, { width, height, node })` hands you the context itself, and the
-two backends spell GL differently — camelCase ES 2 against PascalCase
-OpenGL 1.x. Nothing translates between them. Branch on `gl.backend`:
+`onDraw(gl, { width, height, node })` hands you the context itself, and
+there are two spellings of GL to write against — camelCase ES 2 against
+PascalCase OpenGL 1.x. Nothing translates between them. Branch on
+`gl.backend`, which is `'direct'` or `'indirect'`; the Cocoa path reports
+`'direct'`, because that is the API it hands you:
 
 ```jsx
 <glarea
@@ -79,10 +89,12 @@ OpenGL 1.x. Nothing translates between them. Branch on `gl.backend`:
 />
 ```
 
-Code written against one backend will not run on the other, which is why the
-default policy does not switch under an app that never asked for it — and
-why `examples/viewer3d.jsx` reports which backend it got rather than
-pretending it can draw on both.
+Code written against one spelling will not run on the other, which is why
+the default X11 policy does not switch under an app that never asked for it
+— and why `examples/viewer3d.jsx` reports which one it got rather than
+pretending it can draw on both. It also means a scene written for the direct
+API runs unchanged on the Cocoa backend, and one written for indirect GLX
+does not run there at all.
 
 **On the indirect backend, geometry belongs in a display list.** Every
 immediate-mode vertex is a command on the wire, so a mesh re-sent per frame

@@ -154,8 +154,14 @@ export function useClipboard(): Clipboard;
  * policy it is false whatever the machine could do, because the indirect
  * backend is what draws. `app.glCapabilities()` is the machine's answer, and
  * says why.
+ *
+ * `'nativeControls'` is whether this backend renders the platform's own
+ * control bezels — the Cocoa backend, never X11. The widget set already
+ * branches on it through the theme's `controls: 'auto'` policy; this is for
+ * application code composing its own controls to sit beside native ones. It
+ * is a property of the backend and never changes over the app's life.
  */
-export type SupportsFeature = 'transparency' | 'shaders';
+export type SupportsFeature = 'transparency' | 'shaders' | 'nativeControls';
 
 /**
  * Can this **display** do something? `'transparency'` is true when the

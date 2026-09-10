@@ -17,6 +17,22 @@ npm start          # the window opens on your desktop
 Nothing in the app changes. No VNC, no browser, no streaming daemon, no port
 to forward, no second copy of the UI.
 
+**This is the X11 backend**, and it is the reason X11 stays the flagship
+target rather than becoming the legacy one: the Cocoa backend has no wire at
+all, so nothing on this page applies to it. That matters in one specific
+case — **an app running on a Mac and drawing somewhere else**. `$DISPLAY` in
+the environment does not choose the backend there; `backend: 'auto'` sees
+darwin and picks Cocoa, and the window opens on the Mac. Say which you want:
+
+```sh
+REACT_X11_BACKEND=x11 DISPLAY=thin-client:0 npm start
+```
+
+`createRoot({ display: … })` or `createRoot({ stream: … })` also settle it —
+naming an X endpoint in code _is_ choosing X11, because an ignored
+connection option would be worse than either answer. An app running on Linux
+and drawing to a Mac's XQuartz is not affected: both ends are X11 already.
+
 ## What it costs, measured
 
 The honest comparison is with pixel streaming (VNC, RDP, a
@@ -26,27 +42,40 @@ instead. The trade is bytes-per-frame against round-trips-per-interaction.
 From `scripts/bench/baseline.json`, which measures against node-x11's
 in-process server — so these are exact protocol costs, not estimates:
 
-| scenario                           | requests | bytes out | replies |
-| ---------------------------------- | -------- | --------- | ------- |
-| mount: a window, 40 boxes + labels | 89       | 3.7 kB    | 4       |
-| 50 filled rounded boxes            | 175      | 15 kB     | 1       |
-| a paragraph of text                | 32       | 5.9 kB    | 1       |
-| 10 wheel notches over 500 rows     | 437      | 17.7 kB   | 22      |
+| scenario                           | requests | bytes out | replies | stalls |
+| ---------------------------------- | -------- | --------- | ------- | ------ |
+| mount: a window, 40 boxes + labels | 110      | 4.2 kB    | 32      | 0      |
+| 50 filled rounded boxes            | 122      | 6.6 kB    | 7       | 0      |
+| a paragraph of text                | 39       | 6.0 kB    | 7       | 0      |
+| 10 wheel notches over 500 rows     | 224      | 11.2 kB   | 22      | 4      |
 
-**A whole window appears for under four kilobytes.** A single 1280×800 frame
+**A whole window appears for about four kilobytes.** A single 1280×800 frame
 of VNC, even well compressed, is tens to hundreds of kilobytes, and it is
 sent again every time anything moves. Scrolling a 500-row table ten notches
-costs 17 kB here because only the damaged strip is redrawn (the
+costs 11 kB here because only the damaged strip is redrawn (the
 [scroll-blit path](../AGENTS.md), issue #138); the same scroll under pixel
 streaming is ten full frames.
 
 What react-x11 pays instead is **latency sensitivity**. Bandwidth is not the
 scarce resource on a link like this — round trips are. A request that waits
 for a reply stalls the pipeline for a full RTT, so on a 60 ms link every
-reply is 60 ms of nothing. That is why "avoid round trips" is rule 4 in
-[AGENTS.md](../AGENTS.md#protocol-efficiency), why atoms, geometry and glyph
-pages are cached rather than re-asked, and why the `replies` column above is
-the one to watch: the mount costs 4, and a whole scroll gesture costs 22.
+reply is 60 ms of nothing.
+
+The last two columns are how that is watched, and the difference between
+them is the whole point. `replies` counts requests that carry an answer;
+`stalls` counts the ones whose reply arrived with **nothing pipelined behind
+them** — the request was the last thing sent, so the connection really did
+sit idle for a round trip. A pipelined reply costs a reply and no time: the
+mount's 32 are almost all `InternAtom`, fired off together while the window
+is built, and it stalls on none of them. (The bench's own `settle()` fences
+are a fixed floor in that column, so read growth rather than the absolute
+number.)
+
+So the rule — "avoid round trips", rule 4 in
+[AGENTS.md](../AGENTS.md#protocol-efficiency) — is really "avoid _blocking_
+round trips", which is why atoms, geometry and glyph pages are cached rather
+than re-asked, and why `stalls` is the column to watch on a slow link.
+`npm run bench -- --hotspots` attributes them, request by request.
 
 Rules of thumb, from the shape of the protocol rather than from a benchmark
 we have not run:

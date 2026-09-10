@@ -12,11 +12,24 @@ import { Frame } from 'react-x11';
 ```
 
 `<Frame>` mounts a module of your application in a **process of its own** and
-embeds its window here, laid out like any other child. It is this package's
-iframe: the same composition of a window boundary and a process boundary,
-behind one element. Both boundaries already existed separately — the window
-half is [`<foreign>`](embedding.md), the process half is a forked node — and
-`<Frame>` is deliberately nothing more than the contract between them.
+embeds its output here, laid out like any other child. It is this package's
+iframe: the same composition of a display boundary and a process boundary,
+behind one element, and it works on both backends.
+
+How the display boundary is drawn differs, and it is worth knowing which one
+you are on when reading a trace:
+
+- **X11** — the pane renders into a real window of its own and the host
+  embeds it over [`<foreign>`](embedding.md). Two boundaries that already
+  existed separately, with `<Frame>` as the contract between them.
+- **Cocoa** — there is no server to share, so the pane paints into
+  `IOSurface`s created shared and presents by message; the host points one
+  sublayer of its window at whichever surface the pane last presented. The
+  pane has no `NSWindow` at all.
+
+Either way the host owns layout and hit testing and the pane owns its
+drawing, which is the line that makes this **CPU offloading, not
+isolation**.
 
 What the process boundary buys is the part no amount of careful coding buys
 in-process:
@@ -33,11 +46,12 @@ in-process:
   GC pauses are its own.
 
 And what it does not buy, said once here and again in
-[security.md](security.md): **it is not a security boundary.** The pane
-holds a full-privilege connection to the same X server — it can read keys,
-take screenshots, move windows. `<Frame>` contains a pane's _failures_, not
-its intentions; code you would not run in-process is code you should not run
-at all.
+[security.md](security.md): **it is not a security boundary.** On X11 the
+pane holds a full-privilege connection to the same X server — it can read
+keys, take screenshots, move windows — and on Cocoa it is an ordinary child
+process of your application with your file system and your network.
+`<Frame>` contains a pane's _failures_, not its intentions; code you would
+not run in-process is code you should not run at all.
 
 ## The pane module
 

@@ -17,18 +17,21 @@ and [node-x11](https://sidorares.github.io/node-x11/), which implement the
 X11 protocol in JavaScript, and yoga-layout, which is WASM. There is no
 native module and no toolkit to have installed.
 
-You need **Node 20.19 or newer** and an X server to draw to:
+You need **Node 20.19 or newer** and somewhere to draw:
 
-| where               | what to run                                                     |
-| ------------------- | --------------------------------------------------------------- |
-| Linux desktop       | nothing — `$DISPLAY` is already set                             |
-| macOS               | [XQuartz](https://www.xquartz.org/), then open a fresh terminal |
-| headless / CI       | `Xvfb :99 & export DISPLAY=:99`                                 |
-| a disposable screen | `Xephyr :10 -screen 1200x800 & export DISPLAY=:10`              |
-| someone else's box  | `ssh -X`, and draw to your own display over the wire            |
+| where               | what to run                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| macOS               | nothing — the native **Cocoa** backend is the default there                        |
+| Linux desktop       | nothing — `$DISPLAY` is already set                                                |
+| headless / CI       | `Xvfb :99 & export DISPLAY=:99`                                                    |
+| a disposable screen | `Xephyr :10 -screen 1200x800 & export DISPLAY=:10`                                 |
+| someone else's box  | `ssh -X`, and draw to your own display over the wire                               |
+| macOS, but on X11   | [XQuartz](https://www.xquartz.org/), a fresh terminal, and `REACT_X11_BACKEND=x11` |
 
-Or skip all of that and use the **[playground](/playground)**, which runs a
-JavaScript X server in the page.
+The Cocoa backend arrives with react-x11 as an optional dependency
+(`@windowkit/appkit`, prebuilt — nothing compiles); if it is not installed,
+a Mac falls back to X11. Or skip all of that and use the
+**[playground](/playground)**, which runs a JavaScript X server in the page.
 
 ## A first program
 
@@ -77,21 +80,28 @@ works exactly as well and runs under plain `node`; the repo's
 [`examples/simple-nojsx.js`](https://github.com/sidorares/react-x11/tree/master/examples/simple-nojsx.js)
 is the same program written that way.
 
-## The two entry points
+## The entry point
 
 ```js
-import { createRoot, render } from 'react-x11';
+import { createRoot } from 'react-x11';
 ```
 
-`await createRoot(container?)` is the modern one. With no argument it
-connects to `$DISPLAY` and gives you `{ app, render(element), unmount() }`,
-where `app` is the ntk App — one X connection. Pass an existing ntk App to
-render into a connection you already have, which is how the hermetic tests
-drive the renderer against an in-process X server with no `$DISPLAY` at all.
+`await createRoot(options?)` is the whole of it. With no options it opens a
+connection to whichever backend this machine has — Cocoa on macOS, else X11
+via `$DISPLAY` — and gives you `{ app, render(element), unmount() }`, where
+`app` is that backend's app object (on X11, the ntk App and its one X
+connection).
 
-`render(element, callback?, container?)` is the legacy entry point. Both
-apply mounts and updates **synchronously**; painting happens a frame later,
-on ntk's frame clock.
+```js
+const root = await createRoot({ backend: 'x11', display: ':1' });
+const root = await createRoot({ app }); // a connection you already have
+```
+
+`createRoot({ app })` is how the hermetic tests drive the renderer against
+an in-process X server with no `$DISPLAY` at all. `root.render(element,
+callback?)` applies mounts and updates **synchronously**; painting happens a
+frame later, on the window's frame clock. Every option is in the
+**[docs index](/docs/reference/)**.
 
 ## Styling in one minute
 
@@ -158,7 +168,7 @@ REACT_X11_DEVTOOLS=1 npx tsx hello.jsx            # 2. your app, bridge on
 ```
 
 Component tree, props, hooks and the Profiler, plus highlight-on-hover:
-hovering a component in the tree tints its rect in the X11 window. See
+hovering a component in the tree tints its rect in the app's window. See
 **[DevTools](/docs/reference/devtools)** for the rest, including
 `REACT_X11_DEBUG_LAYOUT=1`, which outlines every laid-out node when a
 flexbox is not doing what you expect.
@@ -188,9 +198,9 @@ also what makes `<div>` a compile error. See
 The repo carries a
 [tour of runnable examples](https://github.com/sidorares/react-x11/tree/master/examples),
 each a single file: `simple`, `xeyes` (the `<canvas>` escape hatch),
-`dashboard`, `tasks`, `form`, `widgets`, `menu`, `theming`,
-`windows`, `three` — and `wm`, a reparenting **window manager** whose frames
-are react-x11 components.
+`dashboard`, `tasks`, `form`, `widgets`, `menu`, `theming`, `windows`,
+`viewer3d` (raw GL in a `<glarea>`) — and `wm`, a reparenting **window
+manager** whose frames are react-x11 components, which is X11 only.
 
 ```bash
 npm run examples:app     # the showcase: SplitPane + Tabs hosting three panels

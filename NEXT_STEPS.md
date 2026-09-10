@@ -1,5 +1,18 @@
 # NEXT_STEPS.md — making react-x11 actually usable
 
+> **This is a historical roadmap, last audited 2026-07-30 against react-x11
+> 1.2.0.** It has not been kept current since, and it is out of date in ways
+> that matter: the published version is 2.11.0; `Tree`, `Calendar`,
+> `DatePicker` and the `<mesh>` scene graph were removed from core and now
+> live in `@react-x11/components`; and the largest thing to happen since is
+> not in here at all — a **second backend**, native macOS over Core
+> Animation, which is [docs/macos.md](docs/macos.md).
+>
+> The current design records live in
+> [docs/architecture/](docs/architecture/), one per piece, each written
+> against a named commit. [docs/README.md](docs/README.md) is the reference.
+> This file is kept for the reasoning behind the decisions of its era.
+
 > **Status (2026-07-30, audited against the tree):** Phases 0–5 are done and
 > merged, and so is the **3D work over indirect GLX** in full — `<glarea>`,
 > the `<mesh>` scene tree on a display-list compiler, lights, textures and

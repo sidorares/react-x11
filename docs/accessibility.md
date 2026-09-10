@@ -11,6 +11,18 @@ It is on by default and costs nothing to have: with no accessibility bus on
 the machine the bridge never comes up, and the render path pays one property
 read per event for the hooks it would have filled.
 
+> **This is the X11 backend's bridge, and today it is the only one.** AT-SPI
+> is a freedesktop protocol with nothing to register against on macOS, so on
+> the **Cocoa** backend `createRoot()` leaves it off (`desktop: { a11y:
+false }` by default there) and no `NSAccessibility` bridge has been built
+> in its place — a Cocoa-backend app is not yet reachable by VoiceOver.
+> Everything else on this page still earns its keep there: `role`, `aria-*`
+> and `announce()` are properties of the shared node tree, keyboard
+> traversal and the widgets' own semantics are shared code, and all of it is
+> what an `NSAccessibility` bridge will read when it lands
+> ([macos.md](macos.md), Phase 5). Write them now; nothing changes when it
+> does.
+
 ```jsx
 <box role="button" aria-label="Close" onClick={close} focusable>
   <text>×</text>

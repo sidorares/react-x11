@@ -299,13 +299,19 @@ four are what this reads, from the best source the machine has:
    source with an accent colour. `ReadAll(['org.freedesktop.appearance'])`,
    live over `SettingChanged`. libadwaita, Qt 6.5+, Firefox and Electron all
    read this one.
-2. **XSETTINGS** — pre-D-Bus, X11-only. `Net/ThemeName` is a _name_, so "is
+2. **macOS** — `NSUserDefaults` and `NSWorkspace` through one long-lived
+   `osascript` child, and only where the _process_ is running on a Mac. It
+   comes before XSETTINGS on purpose: on a Mac, the Mac's own preference is
+   the one the user set, and an XSETTINGS daemon there is something they
+   installed by hand. It is in practice the only source on a Mac, on either
+   backend — a stock XQuartz has no portal, no XSETTINGS manager and an
+   unset `RESOURCE_MANAGER`. A _Linux_ process drawing to an XQuartz display
+   never reaches this rung at all, which is correct: it cannot read that
+   Mac's defaults.
+3. **XSETTINGS** — pre-D-Bus, X11-only. `Net/ThemeName` is a _name_, so "is
    this dark" comes down to trusting the `-dark` suffix — which is exactly
    what the portal was invented to replace, so it is a fallback and never a
    correction. Live over `PropertyNotify`.
-3. **macOS** — `NSUserDefaults` and `NSWorkspace` through one long-lived
-   `osascript` child. It is the _only_ source on a Mac: a stock XQuartz has no
-   portal, no XSETTINGS manager, and an unset `RESOURCE_MANAGER`.
 
 `RESOURCE_MANAGER` is not a rung. It is where `Xft.dpi`, `Xft.rgba` and
 `Xcursor.*` live — font and cursor rendering — and there has never been an X
@@ -338,15 +344,15 @@ off along with the other two integrations that talk to the session bus.
 
 ## What each rung can actually answer
 
-|                 | portal                               | XSETTINGS           | macOS |
-| --------------- | ------------------------------------ | ------------------- | ----- |
-| `colorScheme`   | yes                                  | from the theme name | yes   |
-| `accent`        | yes, where the backend implements it | **no such key**     | yes   |
-| `accentText`    | no — the palette picks by contrast   | no                  | yes   |
-| `selection`     | no — the accent itself               | no                  | yes   |
-| `palette`       | no                                   | no                  | yes   |
-| `contrast`      | yes                                  | from the theme name | yes   |
-| `reducedMotion` | version 2 of the interface           | rarely — see below  | yes   |
+|                 | portal                               | macOS | XSETTINGS           |
+| --------------- | ------------------------------------ | ----- | ------------------- |
+| `colorScheme`   | yes                                  | yes   | from the theme name |
+| `accent`        | yes, where the backend implements it | yes   | **no such key**     |
+| `accentText`    | no — the palette picks by contrast   | yes   | no                  |
+| `selection`     | no — the accent itself               | yes   | no                  |
+| `palette`       | no                                   | yes   | no                  |
+| `contrast`      | yes                                  | yes   | from the theme name |
+| `reducedMotion` | version 2 of the interface           | yes   | rarely — see below  |
 
 `Gtk/EnableAnimations` is in GTK's key list but a settings daemon need not
 export it, and gnome-settings-daemon does not — 53 settings on the session

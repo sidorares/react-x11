@@ -1,15 +1,38 @@
 # A native macOS backend
 
-**Status: research RFC with a working POC.** Written 2026-09-01 against
-react-x11 2.2.1, ntk 8.8.0, and `node-calayers` 0.1.0 — a proof-of-concept
-Node addon (Objective-C++, ~900 lines native + 155 JS) that already does
-retained CALayer trees, CoreText measurement and rasterization, native
-control bezels, window snapshots, and an NSApplication event pump driven
-from Node's own loop. The POC is local (not yet published); publishing it
-against the API contract in this document is the first actionable step.
-The line counts and inventories below are measurements, not estimates;
-where a companion number comes from [wayland.md](wayland.md), it is cited
-rather than re-measured.
+**Status: shipped, and still being extended.** This began life as a research
+RFC written 2026-09-01 against react-x11 2.2.1, and the backend it planned is
+now in the tree: `src/cocoa/` is ~8,800 lines across 23 modules, the bridge
+published as **[`@windowkit/appkit`](https://www.npmjs.com/package/@windowkit/appkit)**
+(an `optionalDependency`, `^0.9.0` as of react-x11 2.11.0), and
+`createRoot()` selects it **by default on macOS**. Where this document says
+`node-calayers`, read `@windowkit/appkit`: that is what the POC was called
+before it was published.
+
+What has landed, against §"The plan" at the foot of this page: Phase 0 (the
+bridge contract), Phase 1 (the surface presenter, which is still the
+measured default), Phase 2 (the presenter seam), and most of Phases 4 and 5
+— the system menu bar, native control bezels, native file panels,
+notifications, appearance, screens and scale, the pasteboard, drag and drop,
+`<glarea>` over CGL, `NSStatusItem` and the Dock, Apple-Event app lifecycle,
+`useSupports('nativeControls')`, and layer promotion for animation. Phase 3
+is partial: the full layer presenter exists behind
+`cocoa: { presenter: 'layers' }` and is opt-in while it is measured, with
+layer promotion serving the animation case on the default path.
+
+**Not built**, and honestly the interesting remainder: an `NSAccessibility`
+bridge over the a11y model (on Cocoa `createRoot()` leaves the AT-SPI bridge
+off and puts nothing in its place), IME through `NSTextInputClient`, a
+`'cocoa'` backend for `react-x11/test`, `opacity`/`transform` as style
+properties, and the `Primary` chord token. §"Open questions" is still live,
+and the name question (§Public API #8) was answered by inaction: the package
+is still `react-x11`.
+
+The line counts and inventories below are measurements taken when this was
+written, not estimates; where a companion number comes from
+[wayland.md](wayland.md), it is cited rather than re-measured. Sections
+titled "Measured:" were added as the work landed and each names the commit
+it was measured at.
 
 ## What this is, and is not
 
@@ -121,7 +144,11 @@ customer, seam for everyone else" rule the codebase already follows.
 
 ## What the POC already proves
 
-`node-calayers` (local, `~/tmp/node-calayers`) settles the risky
+_Kept as written, because it is the record of what was de-risked before any
+of this was built. The package is published as `@windowkit/appkit` now, and
+every "known POC limit" at the foot of this section has since been closed._
+
+`node-calayers` (then local, `~/tmp/node-calayers`) settles the risky
 mechanisms, which is what a POC is for:
 
 - **A Node process can own NSApplication.** Node's main thread _is_ the
@@ -171,7 +198,7 @@ by polling), sublayer append-only (no insert-at-index), no raw-buffer
 pasteboard, no drag session, no display-link frame clock, and the
 pump-on-a-timer model leaves AppKit's internal modal loops (live resize,
 menu tracking) starving JS. The full required API is specified in
-§"node-calayers: the required API".
+§"The bridge: the required API".
 
 ## What already carries over
 
@@ -1412,7 +1439,7 @@ additive or mechanical:
    the window snapshot. Pixel _hashes_ are per-backend by construction
    (CoreText raster ≠ ntk raster); cross-backend assertions compare
    structure and behavior, not bytes.
-7. **Packaging.** `node-calayers` publishes as its own package — a
+7. **Packaging.** The bridge publishes as its own package — a
    freestanding, toolkit-agnostic Cocoa bridge (its README already
    documents the host-config mapping for any reconciler), `os:
 ["darwin"]`, prebuilds for arm64/x64, N-API (which keeps the Bun
@@ -1437,10 +1464,13 @@ additive or mechanical:
    and import written after that multiplies the cost, and do not ship a
    compatibility alias _afterward_ (AGENTS.md's own shim rule).
 
-## node-calayers: the required API
+## The bridge: the required API
 
-The contract to publish against — grouped, with the POC's coverage
-marked. Mechanism only; policy stays in the renderer.
+The contract that was published against, grouped, with the POC's coverage
+marked at the time (✅ had it, 🆕 was the work). Mechanism only; policy
+stays in the renderer. `@windowkit/appkit` has since grown past this list —
+its own README is the current reference; this is the shape it was asked
+for.
 
 **App & run loop.** `initApp()`; `pump()` ✅; run-loop drain hook
 (option 2: install/remove the libuv drain, with the re-entrancy guard)
@@ -1964,7 +1994,7 @@ about everything and prove nothing.
 Each phase has an exit that makes the next safe to start; the first two
 run against today's renderer with no core changes.
 
-- **Phase 0 — the bridge contract (node-calayers).** Close the POC gaps
+- **Phase 0 — the bridge contract.** Close the POC gaps
   that block everything else: event modifiers + per-window routing +
   wheel/key posting, window delegates, `insertSublayer`, raw-buffer/
   IOSurface contents, batched ops, display link, run-loop drain
@@ -2058,5 +2088,6 @@ run against today's renderer with no core changes.
   oven-sh/bun#15661 for bun under App Sandbox.
 - WebKit/Gecko form-control rendering via offscreen `NSCell` drawing —
   the native-bezel technique the POC reproduces.
-- `node-calayers` POC — `~/tmp/node-calayers` (to be published; §"the
-  required API" is its 0.2.0 contract).
+- [`@windowkit/appkit`](https://www.npmjs.com/package/@windowkit/appkit) —
+  the bridge this document specified, as published. §"The bridge: the
+  required API" was its 0.2.0 contract.

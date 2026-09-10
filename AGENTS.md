@@ -4,14 +4,29 @@ Guidance for AI agents (and new contributors) working on react-x11.
 
 ## What this project is
 
-A custom React renderer whose host environment is an X11 server, with
-react-like ergonomics on top of [ntk](https://github.com/sidorares/ntk) /
-[node-x11](https://github.com/sidorares/node-x11) — pure JavaScript
-implementations of the X11 protocol, no native bridge.
+A custom React renderer for desktop applications, with react-like
+ergonomics over **two backends**:
 
-Architecture (see NEXT_STEPS.md for the full rationale): only `<window>`,
-`<popup>`, `<glarea>` and `<foreign>` map to real X11 windows (`<glarea>`
-because GLX needs its own visual, `<foreign>` because the window is another
+- **X11** — [ntk](https://github.com/sidorares/ntk) /
+  [node-x11](https://github.com/sidorares/node-x11), pure JavaScript
+  implementations of the X11 protocol, no native bridge. The flagship
+  target, and the only one with `<foreign>` embedding, substructure
+  redirect (`examples/wm.jsx`) and `react-x11/test`.
+- **Cocoa** — `src/cocoa/`, over the `@windowkit/appkit` bridge (an
+  `optionalDependency`, prebuilt). Real `NSWindow`s, Core Animation
+  compositing, the system menu bar, native control bezels. **The default
+  on darwin**, so `npm test`, the benches and the examples all behave
+  differently there than they did before it existed — check which backend
+  you are measuring. `docs/macos.md` is the design record.
+
+`createRoot()` resolves the backend (`src/Reconciler.js`, `resolveBackend`);
+everything above the node tree is shared, and a backend difference belongs
+behind a feature test on the app or window object rather than a
+`process.platform` check.
+
+Architecture: only `<window>`, `<popup>`, `<glarea>` and `<foreign>` map to
+real windows of the display system (`<glarea>` because GL needs its own
+surface, `<foreign>` because the window is another
 process's); everything else is a retained
 lightweight node — one yoga-layout node each — painted into the owning
 window's double-buffered 2d context on ntk's frame clock, with synthetic
@@ -67,12 +82,23 @@ no override-redirect staging (issue #4).
   **outlive the effect cleanup until the exit**, because a `useFrameClose`
   handler flushing through a callback prop sends its `invoke` after the
   unmount message.
-- `src/scene3d.js` — the 3D scene tree inside a `<glarea>`: `<mesh>`,
-  `<group>`, geometry/material nodes and the renderer that compiles each
-  geometry into a server-side **display list** (a frame is matrices +
-  material state + one `CallList` per mesh). `src/geometry3d.js` generates
-  the primitives, `src/mat4.js` is the matrix math, `src/raycast3d.js` +
-  `src/pointer3d.js` are picking and mesh pointer events.
+- `src/cocoa/` — the Cocoa backend, ~8,800 lines: `app.js` (the app
+  object, the AppKit pump, the per-display frame clocks, event routing),
+  `window.js` (an `NSWindow` and its IOSurface swapchain), `presenter.js`
+  (the surface presenter — the X11 paint machinery over a bitmap) and
+  `promotion.js` (animated nodes lifted onto CALayers above it),
+  `context2d.js` (a canvas-shaped 2d context over CoreGraphics), `fonts.js`
+  (CoreText measurement and glyph runs), plus one small module per platform
+  service: `bezels`, `calendar`, `dnd`, `dock`, `filepanels`, `glarea`,
+  `globalmenu`, `keymap`, `notifications`, `panehost`/`panewindow`,
+  `permissions`, `screencolor`, `statusitem`, `surface`. `native.js`
+  resolves the bridge (`REACT_X11_CALAYERS_PATH` points it at a checkout).
+  Nothing here is imported off darwin — `Reconciler.js` `import()`s
+  `cocoa/app.js` only when the backend resolves to it.
+- `src/mat4.js` — matrix math, left over from the 3D scene tree that used
+  to live here (`<mesh>`, `<group>`, geometries, materials); that moved to
+  `@react-x11/components/three` in #379, and core keeps the `<glarea>`
+  surface it drew into.
 - `src/svgnodes.js` — `<svg>` over ntk's `SvgView`: `SvgNode` (sized from
   its viewBox like `<image>`, cached as coverage when the drawing is one
   colour) and `SvgChildNode`, the declarative SVG elements underneath it,
@@ -1233,8 +1259,9 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   since 3.9.1). Anything heading for **GL** or for **interpolation** wants
   `cssColorStraight` — `glClearColor` and material colours take unassociated
   alpha, and a lerp that formats its result back into an `rgba()` string only
-  round-trips on straight values. `src/glnodes.js`, `src/scene3d.js` and
-  `src/styles.js` use the straight parser for exactly that reason. Note that
+  round-trips on straight values. `src/glnodes.js`, `src/styles.js` and
+  `src/cocoa/app.js` use the straight parser for exactly that reason — the
+  last because CoreGraphics takes unassociated alpha too. Note that
   opaque colours are identical either way, so a test with `#000000` and
   `#ffffff` cannot tell the two apart.
 - **A subtree's paint reach is cached, and every change to it has to be
@@ -1274,9 +1301,10 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   boundary can be declared, and a reload re-instantiates every module —
   `react` included. The mounted reconciler then holds a different React than
   the reloaded components call and the first hook throws
-  `resolveDispatcher(...) is null`. Hot reloading stays on
-  `examples/hmr-register.mjs`, which deliberately keeps `node_modules` and
-  `src/` out of the hot graph for exactly this reason.
+  `resolveDispatcher(...) is null`. Hot reloading stays on the supported
+  entry point, `react-x11/refresh` (`src/refresh/`), whose loader keeps
+  `node_modules` and `src/` out of the hot graph for exactly this reason;
+  `npm run examples:tasks:hot` is it running.
 
 ## Style
 
