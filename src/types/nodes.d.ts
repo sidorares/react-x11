@@ -18,8 +18,17 @@ export interface DrawnNode {
    * was registered under. What queries and paint order match on:
    * `screen.all((n) => n.kind === 'gauge')`. */
   readonly kind: string;
-  /** Position and size within the owning window, valid after layout. */
+  /** Position and size within the owning window, valid after layout. In
+   * **device pixels**, like everything painted — a mouse event's `x`/`y`
+   * are logical, `scale` apart (docs/scale.md). `ev.nativeEvent.x`/`y` are
+   * the same point as `ev.x`/`y` already in this unit, which is what a
+   * pointer measured against a laid-out box wants. */
   readonly abs: Rect;
+  /** Device pixels per logical pixel for this node: the display's scale
+   * times any `scale` prop above it, resolved once and constant for the
+   * node's life. The number that converts between `abs` and the logical
+   * unit an app writes styles and reads events in. */
+  readonly scale: number;
   readonly parent: DrawnNode | null;
   readonly children: readonly DrawnNode[];
   /** Take the keyboard focus, if this node is focusable. Returns the node,
@@ -42,14 +51,18 @@ export interface DrawnNode {
   readonly direction: 'ltr' | 'rtl';
   /** Whether `node` is this node or a descendant of it (DOM `contains`). */
   contains(node: DrawnNode | null): boolean;
+  /** The boxes this node occupies, in **logical** pixels — already divided
+   * by `scale`, so they compare directly with an event's `x`/`y`. One rect
+   * for a box; one per line for wrapped text. */
   getClientRects(): Rect[];
 
   // --- text geometry (docs/elements.md, "Selection") ------------------------
   //
   // Every drawn node answers these; an element with no text answers `null`,
   // `0` and `[]`. Indices are **code points** and rectangles are in the
-  // owning window's coordinates — the same space as `abs` and a mouse
-  // event's `x`/`y`.
+  // owning window's coordinates — the same space as `abs`, which is device
+  // pixels: this seam speaks that unit deliberately, so a point taken from
+  // an event arrives through `ev.nativeEvent` or multiplied by `scale`.
 
   /** This element's text, or null when it has none. */
   textContent(): string | null;

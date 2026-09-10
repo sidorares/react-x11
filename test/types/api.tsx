@@ -327,6 +327,11 @@ function Elements() {
   // issue #271: the resolved direction, which is what a widget measuring a
   // pointer against this box has to read
   const _dir: 'ltr' | 'rtl' | undefined = boxRef.current?.direction;
+  // the unit `abs` is in, for a pointer measured against it: without this a
+  // component reads `ev.x` against a device-pixel box and the gesture comes
+  // out at half speed on a retina panel
+  const _scale: number | undefined = boxRef.current?.scale;
+  const _box: number | undefined = boxRef.current?.abs.width;
   const _holds = () => boxRef.current?.contains(inputRef.current);
   // issue #253: the question the wheel asks a scroller on its way out
   const _room: boolean | undefined = scrollRef.current?.canScroll(0, 48);
