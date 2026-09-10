@@ -1284,7 +1284,13 @@ function collectFloorStale(node, stale, found, sweep) {
       child._floorMinH = null;
     }
     if (child.style.display === 'none') continue;
-    if (child._floorW === undefined && receivesFloor(child, 'width')) {
+    // A layout host reads its children's min-content widths
+    // (`LayoutChild.intrinsicSizes`), so an extent one of them is missing is a
+    // width pass owed, though no flex floor is written from it.
+    if (
+      child._floorW === undefined &&
+      (receivesFloor(child, 'width') || node._host != null)
+    ) {
       found.width = true;
     }
     if (child._floorH === undefined && receivesFloor(child, 'height')) {
@@ -1657,6 +1663,26 @@ function writeFloors(node, axis) {
       child.yoga.setMinHeight(value);
       child._floorMinH = floor;
     }
+  }
+}
+
+/** `writeFloors` over the stale nodes of one subtree — a layout host's
+ *  child, whose height floors are measured tree by tree
+ *  (`Node._measureHostChildHeights`). */
+function writeFloorsWithin(node, axis, stale) {
+  if (stale.has(node)) writeFloors(node, axis);
+  for (const child of node.children) {
+    if (child.yoga && !child.isWindow) writeFloorsWithin(child, axis, stale);
+  }
+}
+
+/** Take every height extent under `node` off, and list its nodes to be
+ *  written again: its width moved, and a height is a height for a width. */
+function forgetHeightFloors(node, stale) {
+  node._floorH = undefined;
+  stale.add(node);
+  for (const child of node.children) {
+    if (child.yoga && !child.isWindow) forgetHeightFloors(child, stale);
   }
 }
 
@@ -5203,14 +5229,14 @@ export class Node {
    * placement and the box is the size it was: the children are still laid
    * out exactly as that placement left them.
    */
-  _placeHostChildren() {
+  _placeHostChildren(floors) {
     const host = this._host;
-    if (host === null || this.destroyed || this.hidden) return;
-    if (this.style.display === 'none') return;
+    if (host === null || this.destroyed || this.hidden) return false;
+    if (this.style.display === 'none') return false;
     const yoga = this.yoga;
     const width = yoga.getComputedWidth();
     const height = yoga.getComputedHeight();
-    if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
     const bl = yoga.getComputedBorder(Yoga.EDGE_LEFT);
     const bt = yoga.getComputedBorder(Yoga.EDGE_TOP);
     const br = yoga.getComputedBorder(Yoga.EDGE_RIGHT);
@@ -5234,7 +5260,7 @@ export class Node {
       last.height === ch &&
       last.rtl === rtl
     ) {
-      return;
+      return false;
     }
     const result = this._runLayout(
       { width: cw, height: ch, widthMode: 'exactly', heightMode: 'exactly' },
@@ -5242,10 +5268,11 @@ export class Node {
     );
     host.measured = false;
     host.size = { width: cw, height: ch, rtl };
-    if (result === null) return;
+    if (result === null) return false;
     const dir = rtl ? Yoga.DIRECTION_RTL : Yoga.DIRECTION_LTR;
     const flow = host.flow;
     const rects = result.children;
+    let measuredHeights = false;
     for (let i = 0; i < flow.length; i++) {
       const child = flow[i];
       const r = rects[i];
@@ -5254,6 +5281,22 @@ export class Node {
         r.height ?? undefined,
         dir,
       );
+      // A child that can come out shorter than its content — given a
+      // height, or naming its own — has rows that can be squeezed, which
+      // need their floors at the width it just got. A masonry's cards, at
+      // their natural heights, never do.
+      if (
+        floors &&
+        (r.height != null ||
+          typeof child.style.height === 'number' ||
+          typeof child.style.maxHeight === 'number') &&
+        (child._floorH === undefined ||
+          child._floorAtW === undefined ||
+          Math.abs(child._floorAtW - child.yoga.getComputedWidth()) >= 1)
+      ) {
+        this._measureHostChildHeights(child, r, dir);
+        measuredHeights = true;
+      }
       const x = rtl ? cw - r.x - (r.width ?? marginBoxWidth(child.yoga)) : r.x;
       // whole pixels: the child's own tree was rounded from its corner, so
       // a fractional corner would put every edge in it between two pixels
@@ -5276,6 +5319,51 @@ export class Node {
         if (child._hostAbsolute) child._hostSlot = { x: bl, y: bt };
       }
     }
+    return measuredHeights;
+  }
+
+  /**
+   * The height floors inside one of this host's children, at the width the
+   * placement just gave it — a minimum height is always a height for a
+   * width (`WindowNode._applyContentFloors`), and a child's width is the
+   * algorithm's. Measured the way the window measures its own, off the
+   * pixel grid: the tree at its width with no bound on its height, the
+   * leaves' heights taken, the widths held and the collapse read back
+   * (`contentSpan`). Then the floors inside it are written, and it is laid
+   * out again at its rect.
+   */
+  _measureHostChildHeights(child, r, dir) {
+    const root = this.root;
+    if (!root) return;
+    const cy = child.yoga;
+    const stale = root._floorsStale;
+    const width = r.width ?? marginBoxWidth(cy);
+    // at a new width every height inside it is a question again
+    if (child._floorH !== undefined) forgetHeightFloors(child, stale);
+    measuringExactly(() => {
+      // what it holds now comes off first: a floor read back as content
+      // could only ever grow
+      writeFloorsWithin(child, 'height', stale);
+      cy.calculateLayout(width, undefined, dir);
+      const intrinsic = new Map();
+      captureLeafHeights(child, intrinsic);
+      const frozen = [];
+      freezeWidths(child, frozen);
+      const shrunk = [];
+      setMeasuringShrink(child, 'height', shrunk);
+      cy.calculateLayout(width, 0, dir);
+      const span = contentSpan(child, 'height', intrinsic, root);
+      restoreWidths(frozen);
+      restoreShrink(shrunk);
+      child._floorH = declaresOwnMinimum(child, 'height')
+        ? cy.getComputedHeight()
+        : span;
+      root._floorsMeasured += 1;
+      stale.add(child);
+      writeFloorsWithin(child, 'height', stale);
+    });
+    cy.calculateLayout(r.width ?? undefined, r.height ?? undefined, dir);
+    child._floorAtW = cy.getComputedWidth();
   }
 
   /** `absolutize`'s walk, for a layout host: each child from the slot its
@@ -10847,6 +10935,9 @@ export class WindowNode extends Scrollable(Node) {
     yoga.setWidth(undefined);
     yoga.setHeight(undefined);
     if (axis === 'width') {
+      // the layout hosts' children first, tree by tree: what they can be
+      // squeezed to is what the hosts answer the pass below with
+      if (this._layoutHosts.size !== 0) this._measureHostChildWidths();
       const shrunk = [];
       setMeasuringShrink(this, axis, shrunk);
       this._layoutPasses += 1;
@@ -12818,11 +12909,15 @@ export class WindowNode extends Scrollable(Node) {
    *  needs: fresh ones when something changed them, the ones in hand during
    *  a live resize, none when nothing moved them. */
   _layoutStep(width, height) {
+    // whether this step keeps the content floors: a live resize lays out
+    // against the ones in hand, and the layout hosts' children follow suit
+    let floors = true;
     if (!this._floorsDirty && this._floorsWidth === width) {
       this._layoutRoot(width, height);
     } else if (this._deferContentFloors(width)) {
       this._scheduleFloorsCatchUp();
       this._layoutRoot(width, height);
+      floors = false;
     } else {
       this._applyContentFloors(width, height);
     }
@@ -12832,7 +12927,16 @@ export class WindowNode extends Scrollable(Node) {
     // with it turned off, so the frame it threw in is already the flexbox
     // one.
     if (this._layoutHosts.size !== 0) {
-      this._placeLayoutHosts();
+      // A child's height floors are measured after the pass, at the width it
+      // was placed at, and off the pixel grid (`measuringExactly`), which
+      // leaves yoga holding a tree laid out under a grid it no longer has:
+      // the next pass would lay the whole of it out again, a scroll's
+      // included. One more pass now, on the grid, and the frame ends where
+      // every other frame does.
+      if (this._placeLayoutHosts(floors)) {
+        this._layoutRoot(width, height);
+        this._placeLayoutHosts(false);
+      }
       if (this._abandonFailedHosts()) this._layoutStep(width, height);
     }
   }
@@ -13412,11 +13516,57 @@ export class WindowNode extends Scrollable(Node) {
     return hosts;
   }
 
+  /**
+   * The content floors inside every layout host's children, tree by tree. A
+   * card a masonry lays out is a yoga tree of its own, and the window's own
+   * measuring pass stops at the host, which answers for itself as a leaf —
+   * so without this the rows inside the card would get no floor and squeeze
+   * to nothing. Each stale child is measured the way the window measures its
+   * tree: no room on offer, the shrink borrowed (`setMeasuringShrink`), the
+   * span read back into the extents of everything stale inside it
+   * (`contentSpan`), which `_writeFloors` then writes with the rest. The
+   * child's own extent is its min-content width, which is what its host
+   * reads of it (`LayoutChild.intrinsicSizes`).
+   *
+   * Deepest hosts first, so a host inside a card has its own children's
+   * extents in hand when the card's pass asks it for its minimum.
+   */
+  _measureHostChildWidths() {
+    for (const host of this._hostsInOrder(true)) {
+      if (host.hidden || host.style.display === 'none') continue;
+      const dir = yogaDirection(host);
+      for (const child of host.children) {
+        if (!inFlow(child) || child.hidden || child._floorW !== undefined) {
+          continue;
+        }
+        const cy = child.yoga;
+        const shrunk = [];
+        setMeasuringShrink(child, 'width', shrunk);
+        cy.calculateLayout(0, undefined, dir);
+        const span = contentSpan(child, 'width', null, this);
+        child._floorW = declaresOwnMinimum(child, 'width')
+          ? cy.getComputedWidth()
+          : span;
+        restoreShrink(shrunk);
+        this._floorsMeasured += 1;
+        // the floors inside it are written from what this found…
+        this._floorsStale.add(child);
+        // …and it was laid out with no room, which the placement undoes
+        host._host.measured = true;
+      }
+    }
+  }
+
   /** Every layout host's final call, parents first: placing a host lays its
    *  children's trees out, which is where the hosts inside them are
-   *  measured — and they place after. */
-  _placeLayoutHosts() {
-    for (const host of this._hostsInOrder(false)) host._placeHostChildren();
+   *  measured — and they place after. True when a host measured height
+   *  floors inside its children, which is a pass off the pixel grid. */
+  _placeLayoutHosts(floors) {
+    let measuredHeights = false;
+    for (const host of this._hostsInOrder(false)) {
+      if (host._placeHostChildren(floors)) measuredHeights = true;
+    }
+    return measuredHeights;
   }
 
   /**
