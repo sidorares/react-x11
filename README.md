@@ -242,8 +242,8 @@ Widget **components** (plain React on top of the primitives, themable via
 `PasswordInput` — whose mask is a scribble that moves on every keystroke
 rather than a countable row of bullets — `Dialog`, a modal built on
 `<popup trapFocus>` which traps Tab and restores focus when it closes,
-`FileDialog`, and the containers an application window is built from:
-`Tabs`, `Table` and `SplitPane`. See
+`FileDialog`, the two containers an application window is built from —
+`Tabs` and `SplitPane` — and a virtualized `Table`. See
 [docs/components.md](docs/components.md). Richer widgets — `Markdown`,
 `Tree`, `Calendar`/`DatePicker`, a three.js scene graph — live in
 [`@react-x11/components`](https://github.com/sidorares/react-x11-components).
