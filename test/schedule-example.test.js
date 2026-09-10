@@ -79,14 +79,14 @@ const SMALL = {
   ),
 };
 
-async function mount(props = {}) {
+async function mount(
+  props = {},
+  { width = 520, height = 360, direction } = {},
+) {
+  const panel = h(SchedulePanel, { schedule: SMALL, ...props });
   const handle = await renderX11(
-    h(SchedulePanel, { schedule: SMALL, ...props }),
-    {
-      fonts,
-      width: 520,
-      height: 360,
-    },
+    direction ? h('box', { style: { flexGrow: 1, direction } }, panel) : panel,
+    { fonts, width, height },
   );
   await waitFor(() => {
     assert.ok(screen.getByTestName('pane').abs.height > 0, 'not laid out yet');
@@ -220,3 +220,94 @@ test('the held header is what the pixels show', async () => {
   await scroll(pane, { y: 120 });
   assert.deepEqual(await pixelAt(ctx, x, y), before);
 });
+
+/** Every pixel of the window, straight RGBA. */
+const pixelsOf = (ctx, width, height) =>
+  new Promise((resolve, reject) =>
+    ctx.getImageData(0, 0, width, height, (err, image) =>
+      err ? reject(err) : resolve(image.data),
+    ),
+  );
+
+/** How many pixels two reads disagree on, and the box they lie in. */
+function disagreement(a, b, width) {
+  let count = 0;
+  let box = null;
+  for (let i = 0; i < a.length; i += 4) {
+    if (a[i] === b[i] && a[i + 1] === b[i + 1] && a[i + 2] === b[i + 2]) {
+      continue;
+    }
+    const x = (i / 4) % width;
+    const y = Math.floor(i / 4 / width);
+    count++;
+    box = box
+      ? {
+          x0: Math.min(box.x0, x),
+          y0: Math.min(box.y0, y),
+          x1: Math.max(box.x1, x),
+          y1: Math.max(box.y1, y),
+        }
+      : { x0: x, y0: y, x1: x, y1: y };
+  }
+  return { count, box };
+}
+
+// The scroll blit copies the frame it has and repaints only what the copy
+// got wrong, so a notch it serves has to come out as the frame a full
+// repaint paints. The grid scrolls both ways, which gives the pane a bar
+// across whichever axis a notch does not move, and the blit drags that bar's
+// pixels along with the talks: a notch across left a copy of the vertical
+// thumb 48 pixels in from its track, a 6 by 44 sliver at the top of the
+// pane, at the other edge in RTL. The shipped programme at 640 by 400,
+// because in the small one's window the blit declines every notch, and a
+// declined notch compares nothing. Each pass sets its direction rather than
+// taking the locale's, so it knows which way the pixels go.
+for (const direction of ['ltr', 'rtl']) {
+  test(`a notch the scroll blit serves paints what a full repaint does, ${direction}`, async () => {
+    const width = 640;
+    const height = 400;
+    const {
+      window: wnd,
+      windowNode,
+      ctx,
+    } = await mount(
+      { schedule: buildSchedule() },
+      { width, height, direction },
+    );
+    const pane = byName('pane');
+    const shifts = [];
+    const scrollRegion = wnd.scrollRegion.bind(wnd);
+    wnd.scrollRegion = (region, dx, dy) => {
+      const ok = scrollRegion(region, dx, dy);
+      if (ok) shifts.push([dx, dy]);
+      return ok;
+    };
+    const notch = async (to, shift) => {
+      shifts.length = 0;
+      await scroll(pane, to);
+      const where = JSON.stringify(to);
+      assert.deepEqual(shifts, [shift], `the notch to ${where} blitted`);
+      const blitted = await pixelsOf(ctx, width, height);
+      await act(() => windowNode.invalidate(false));
+      const repainted = await pixelsOf(ctx, width, height);
+      const { count, box } = disagreement(blitted, repainted, width);
+      assert.equal(
+        count,
+        0,
+        `the notch to ${where} differs from a full repaint in ${count} pixels,` +
+          ` x ${box?.x0} to ${box?.x1}, y ${box?.y0} to ${box?.y1}`,
+      );
+    };
+    // across, with the times, the corner and the day's name held at the
+    // start edge: the vertical bar is the one dragged. Scrolling on carries
+    // the content toward the start edge, left in LTR and right in RTL.
+    const across = direction === 'rtl' ? 48 : -48;
+    await notch({ x: 48 }, [across, 0]);
+    await notch({ x: 96 }, [across, 0]);
+    // down, through Thursday's header being pushed off by Friday's: the
+    // horizontal bar is dragged up off its track
+    await scroll(pane, { y: 801 });
+    await notch({ y: 849 }, [0, -48]);
+    await notch({ y: 801 }, [0, 48]);
+  });
+}
