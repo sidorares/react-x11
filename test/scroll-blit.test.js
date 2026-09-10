@@ -892,3 +892,230 @@ test('a claim between two scrolls cannot re-arm the blit mid-frame (#295)', asyn
       JSON.stringify(root._lastDamageRects),
   );
 });
+
+// --- right-to-left panes -------------------------------------------------
+//
+// `scrollX` is a distance from the start edge, and under `direction: 'rtl'`
+// that edge is the right-hand one, so a growing offset carries the content
+// right (`_absolutizeChildren`). The blit has to go the way the content went:
+// the band it keeps, the strip it exposes, the thumb it drags along and the
+// ledger's claims all used to follow the offset's sign instead, and moved
+// the wrong way in RTL. Each test runs in both directions and reads its
+// expectation off where the content actually went.
+
+// 20 columns of 40px in a 400x400 window: `mount`, turned on its side.
+async function mountRow(direction) {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const ref = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 400, height: 400 },
+      h(
+        'box',
+        {
+          ref,
+          style: {
+            overflow: 'scroll',
+            flexGrow: 1,
+            flexDirection: 'row',
+            direction,
+          },
+        },
+        ...Array.from({ length: 20 }, (_, i) =>
+          h('box', {
+            key: i,
+            style: {
+              width: 40,
+              flexShrink: 0,
+              backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+            },
+          }),
+        ),
+      ),
+    ),
+  );
+  const wnd = app.windows[0];
+  await tick();
+  return { x11Root, wnd, root: wnd._reactX11Node, ref };
+}
+
+for (const direction of ['ltr', 'rtl']) {
+  test(`a horizontal blit moves the pixels the way the content moved (${direction})`, async () => {
+    const { x11Root, wnd, root, ref } = await mountRow(direction);
+    const first = ref.current.children[0];
+    const was = first.abs.x;
+    wnd.calls.length = 0;
+    ref.current.scrollTo({ x: 48 });
+    await tick();
+    const moved = first.abs.x - was;
+    // the premise: scrolling towards the end carries the content away from
+    // the start edge, which is the right-hand one in RTL
+    assert.strictEqual(moved, direction === 'rtl' ? 48 : -48);
+    assert.deepStrictEqual(blits(wnd), [
+      ['scrollRegion', { x: 0, y: 0, width: 400, height: 400 }, moved, 0],
+    ]);
+    // the strip the shift exposed is on the side the content moved away
+    // from, and it is repainted top to bottom
+    const rects = root._lastDamageRects;
+    assert.ok(rects, 'the frame stayed bounded');
+    const strip = moved > 0 ? 0 : 400 + moved;
+    for (const x of [strip, strip + 47]) {
+      for (const y of [0, 200, 399]) {
+        assert.ok(
+          covers(rects, x, y),
+          `damage misses the exposed strip at ${x},${y}: ` +
+            JSON.stringify(rects),
+        );
+      }
+    }
+    const area = rects.reduce((sum, r) => sum + r.width * r.height, 0);
+    assert.ok(
+      area < 400 * 400 * 0.25,
+      `repainted ${area}px² — the strip and thumb rects, not the viewport ` +
+        JSON.stringify(rects),
+    );
+    await x11Root.unmount();
+  });
+
+  test(`a horizontal blit repaints the thumb it dragged along (${direction})`, async () => {
+    const { x11Root, wnd, root, ref } = await mountRow(direction);
+    // start mid-row, so the dragged copy of the old thumb stays on screen
+    ref.current.scrollTo({ x: 96 });
+    await tick();
+    const sv = ref.current;
+    const first = sv.children[0];
+    const was = first.abs.x;
+    const before = sv._scrollbar('x');
+    wnd.calls.length = 0;
+    sv.scrollTo({ x: 144 });
+    await tick();
+    assert.strictEqual(blits(wnd).length, 1, 'the fast path fired');
+    const moved = first.abs.x - was;
+    const after = sv._scrollbar('x');
+    const rects = root._lastDamageRects;
+    // the new thumb, and every column of the copy of the old one, which
+    // rode the blit as far as the content did
+    const y = before.y + before.height / 2;
+    const xs = [after.x + 3];
+    const end = Math.min(400, before.x + before.width + moved);
+    for (let x = Math.max(0, before.x + moved); x < end; x += 4) xs.push(x);
+    for (const x of xs) {
+      assert.ok(
+        covers(rects, x, y),
+        `damage misses thumb pixel at ${x},${y}: ${JSON.stringify(rects)}`,
+      );
+    }
+    await x11Root.unmount();
+  });
+
+  test(`a claim inside a horizontal pane is repainted where the blit moved it (${direction})`, async () => {
+    const { x11Root, wnd, root, ref } = await mountRow(direction);
+    const first = ref.current.children[0];
+    const was = first.abs.x;
+    wnd.calls.length = 0;
+    ref.current.scrollTo({ x: 48 });
+    // a second change lands in the same frame, inside the viewport, at the
+    // rect it occupies *before* the shift — near the left edge, clear of
+    // the box a strip on the wrong side merges into with the thumb rects
+    root.invalidate(false, { x: 40, y: 120, width: 40, height: 120 });
+    await tick();
+    assert.strictEqual(blits(wnd).length, 1, 'the fast path fired');
+    const moved = first.abs.x - was;
+    // the blit moved those pixels as far as it moved the content, so the
+    // repaint has to follow them there
+    assert.ok(
+      covers(root._lastDamageRects, 60 + moved, 130),
+      `damage misses the moved region: ` +
+        JSON.stringify(root._lastDamageRects),
+    );
+    await x11Root.unmount();
+  });
+
+  test(`a blitted horizontal scroll is byte-identical to the repaint it replaced (${direction})`, async (t) => {
+    const app = await createHeadlessApp();
+    const x11Root = await createRoot({ app });
+    try {
+      const ref = React.createRef();
+      const instance = await new Promise((resolve) =>
+        x11Root.render(
+          h(
+            'window',
+            { width: 400, height: 300, style: { backgroundColor: '#f5f6fa' } },
+            h(
+              'box',
+              {
+                ref,
+                style: {
+                  overflow: 'scroll',
+                  flexGrow: 1,
+                  flexDirection: 'row',
+                  direction,
+                },
+              },
+              ...Array.from({ length: 40 }, (_, i) =>
+                h(
+                  'box',
+                  {
+                    key: i,
+                    style: {
+                      width: 40,
+                      flexShrink: 0,
+                      padding: 6,
+                      backgroundColor: i % 2 ? '#ffffff' : '#dbe4ee',
+                    },
+                  },
+                  h(
+                    'text',
+                    { style: { fontSize: 12, color: '#20304a' } },
+                    `${i}`,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          resolve,
+        ),
+      );
+      if (typeof instance.scrollRegion !== 'function') {
+        t.skip('installed ntk has no Window.scrollRegion yet');
+        return;
+      }
+      const root = instance._reactX11Node;
+      const frame = () => {
+        root._scheduled = false;
+        root.flush();
+      };
+      frame();
+      await settle(app);
+
+      // scroll through the fast path, and prove it really took it
+      let blitCalls = 0;
+      const realScrollRegion = instance.scrollRegion.bind(instance);
+      instance.scrollRegion = (...args) => {
+        blitCalls += 1;
+        return realScrollRegion(...args);
+      };
+      ref.current.scrollTo({ x: 48 });
+      frame();
+      await settle(app);
+      assert.strictEqual(blitCalls, 1, 'the fast path fired');
+      assert.ok(root._lastDamageRects, 'and the frame stayed bounded');
+      const blitted = await readPixels(root._ctx, 400, 300);
+
+      // repaint the same state from scratch: the ground truth
+      root.invalidate(false);
+      frame();
+      await settle(app);
+      const repainted = await readPixels(root._ctx, 400, 300);
+      assert.ok(
+        Buffer.from(blitted.data).equals(Buffer.from(repainted.data)),
+        'blitted pixels differ from a full repaint of the same state',
+      );
+    } finally {
+      await x11Root.unmount();
+      await app.close();
+    }
+  });
+}
