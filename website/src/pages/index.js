@@ -241,7 +241,7 @@ export default function Home() {
                   over ssh.
                 </p>
                 <p>
-                  <Link to="/docs/intro#the-wire-carries-drawing-not-pixels">
+                  <Link to="/docs/intro#on-x11-the-wire-carries-drawing-not-pixels">
                     How that works, and how it is measured →
                   </Link>
                 </p>

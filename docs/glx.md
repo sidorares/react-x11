@@ -1,10 +1,12 @@
 # 3D over indirect GLX
 
-How the 3D scene elements work, and what the transport can never do. The API
-itself is in
-[elements.md](elements.md#3d-scene-mesh-group-geometries-materials) and
-[components.md](components.md#canvas3d) — this page is the design underneath
-them, kept because the constraints explain most of the API's shape.
+How a 3D scene works over this transport, and what the transport can never
+do. `<glarea>` and the three ways underneath it are [gl.md](gl.md); the
+scene graph that rides on this one is
+[`@react-x11/components/three`](ecosystem.md). This page is the design
+underneath both, kept because the constraints explain most of the API's
+shape — and because they are permanent: they are properties of a wire
+protocol frozen in the 1990s, not of any implementation.
 
 `<glarea>` is a real X child window on a GLX visual, and everything drawn
 into it travels as **indirect GLX**: the GL protocol encoded into the same X
@@ -35,7 +37,7 @@ which are out of scope.
 That rules out, permanently and by protocol: shader materials and
 post-processing. Both are implemented on the direct backend, and asking for
 one here throws an error naming the reason rather than rendering something
-that only looks right — `DIRECT_ONLY_KINDS` in `src/scene3d.js` is the list.
+that only looks right — the scene graph keeps the list, as `DIRECT_ONLY_KINDS`.
 (`<instancedMesh>` works on both, but as a loop over transforms rather than
 as hardware instancing, which GLX also encodes no way to ask for.)
 
@@ -52,10 +54,10 @@ static scene costs O(meshes) requests per frame instead of O(vertices).
 
 This is the AGENTS.md "Protocol efficiency" rule set applied literally — use
 server-side primitives, batch, never re-send what the server already has —
-and because it is a protocol property rather than an intention,
-`test/scene3d.test.js` asserts it on the encoded command stream: a
-6 000-vertex sphere compiles once, and the steady-state frame is under 30 GL
-commands with no vertices in it.
+and because it is a protocol property rather than an intention, the scene
+graph's own tests assert it on the encoded command stream: a 6 000-vertex
+sphere compiles once, and the steady-state frame is under 30 GL commands
+with no vertices in it.
 
 The cache is keyed by geometry identity. A geometry prop change recompiles
 that one list; a transform or material change is per-frame state only, so the
@@ -99,8 +101,9 @@ The primary tests are **hermetic and assert the encoded GLX command
 stream**, not pixels: that a geometry compiles to one display list, that a
 frame emits matrices plus `CallList` rather than thousands of `Vertex3f`,
 and that a transform change re-sends no geometry. That is the property that
-actually matters, and checking it needs no GL at all —
-`test/scene3d.test.js` and `test/glarea.test.js`.
+actually matters, and checking it needs no GL at all. Core's half is
+`test/glarea.test.js` and `test/viewer3d.test.js`; the scene graph tests its
+own in its own repo.
 
 Pixels are the awkward part. On XQuartz, GL renders into a Metal surface the
 compositor owns rather than into the X drawable, so `GetImage` reads back

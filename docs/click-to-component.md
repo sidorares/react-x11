@@ -1,9 +1,10 @@
 # Click to component
 
 Alt+Click any rendered element to jump straight to the JSX line that created
-it, in your editor. On macOS/XQuartz that's **Option+Click** — Option is
-what XQuartz maps to X11's Mod1 by default; the installed-feature log line
-says whichever one applies to your platform.
+it, in your editor. On macOS that's **Option+Click**, on both backends: the
+Cocoa backend maps ⌥ to Mod1 itself, and XQuartz maps it there by default
+("Option keys send Alt_L and Alt_R" in its Input preferences). The
+installed-feature log line says whichever one applies to your platform.
 
 ## Setup
 

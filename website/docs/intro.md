@@ -6,16 +6,18 @@ slug: /intro
 
 # What react-x11 is
 
-react-x11 is a **React renderer whose host environment is an X11 server**.
+react-x11 is a **React renderer for desktop applications**, whose host is a
+display system rather than a document.
 
 There is no DOM and no HTML anywhere in it, and no browser engine underneath
 it — this is not Electron with a different skin. React's job in a renderer is
 to compute what changed; the renderer's job is to turn that into side effects
 on some host. In react-dom those side effects are DOM mutations. Here they
 are **X11 protocol requests** — `CreateWindow`, `MapWindow`,
-`ConfigureWindow`, `RenderCompositeGlyphs` — written to a socket. `<box>` is
-not a `<div>` with different paint; it is a retained layout node the renderer
-draws with, and `<div>` is not an element that exists.
+`ConfigureWindow`, `RenderCompositeGlyphs` — written to a socket, or **Core
+Animation layers and CoreGraphics drawing** on macOS. `<box>` is not a
+`<div>` with different paint; it is a retained layout node the renderer draws
+with, and `<div>` is not an element that exists.
 
 ```jsx
 import React, { useState } from 'react';
@@ -55,30 +57,35 @@ const root = await createRoot(); // connects via $DISPLAY
 root.render(<Counter />);
 ```
 
-That is a real X11 client. It opens a window on a Linux desktop, on macOS
-under [XQuartz](https://www.xquartz.org/), or on a display forwarded over
-ssh. You can also
+That program runs unchanged on both of react-x11's backends. On Linux — or
+on a display forwarded over ssh, or `Xvfb` in CI — it is a real X11 client.
+On macOS it is a real Mac app: an `NSWindow`, Core Animation compositing, no
+X server anywhere. `createRoot()` picks, and
+[`backend`](/docs/reference) pins it. You can also
 [run it right now in this browser](/playground) — the playground boots a
 pure-JavaScript X server on the page and connects to it.
 
-## Everything is JavaScript
+## Two backends, one tree
 
-`npm install` never compiles anything, and there is no native bridge to a
-toolkit:
+|                  | **X11**                                                                                                 | **Cocoa**                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| where            | a Linux desktop, `ssh -X`, `Xvfb`, a thin client, macOS via XQuartz                                     | macOS, natively                                                |
+| what goes out    | drawing operations on a socket — the server owns the pixels                                             | property mutations of a retained layer tree                    |
+| the toolkit      | [ntk](https://sidorares.github.io/ntk/) over [node-x11](https://sidorares.github.io/node-x11/), pure JS | `@windowkit/appkit`, a thin prebuilt Objective-C++ bridge      |
+| text             | [fontkit](https://github.com/foliojs/fontkit) shaping, server-side glyph sets                           | CoreText                                                       |
+| what only it has | `<foreign>` embedding, the window-manager example, `react-x11/test`, remote display                     | the system menu bar, native control bezels, native panels, TCC |
 
-| layer                                                 | what it does                                                                      |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------- |
-| **react-x11**                                         | React primitives, layout, painting policy — decides _how often_ anything is drawn |
-| [**ntk**](https://sidorares.github.io/ntk/)           | a canvas-like 2d context, text layout, widgets — owns _how_ drawing is encoded    |
-| [**node-x11**](https://sidorares.github.io/node-x11/) | the X11 protocol itself, in pure JS — think xlib rewritten in node                |
+Layout is [yoga-layout](https://www.yogalayout.dev/) (WASM) on both, and so
+are the reconciler, the styles, the events, the components and the hooks.
+`npm install` never compiles anything: the X11 stack is JavaScript all the
+way down, and the two native addons in the tree — the Cocoa bridge and
+`x11-dri` for direct GL — are optional dependencies that ship prebuilt.
 
-Layout is [yoga-layout](https://www.yogalayout.dev/) (WASM), text shaping is
-[fontkit](https://github.com/foliojs/fontkit), and drawing goes through the
-X **RENDER** extension — so composition, gradients and glyph drawing happen
-_in the X server_, and a line of text costs about a byte per glyph on the
-wire.
+The [macOS backend](/docs/reference/macos) is the design record for the
+second one, and [remote display](/docs/reference/remote) is the case the
+first one is categorically better at.
 
-## The wire carries drawing, not pixels
+## On X11, the wire carries drawing, not pixels
 
 Every renderer has to decide what to send. react-x11 does not rasterize a
 frame on the client and ship the buffer across: React reconciles the
@@ -117,68 +124,82 @@ last metric exists because the others hide the most common regression — a
 change that adds almost nothing to the wire while multiplying the server's
 work.
 
-## What maps to a real X window
+## What maps to a real window
 
-Almost nothing, on purpose. Only `<window>`, `<popup>` and `<glarea>` are
-real X11 windows. Everything else is a retained lightweight node — one yoga
-node each — painted into the owning window's double-buffered 2d context on
-ntk's frame clock, with synthetic events dispatched by front-to-back hit
-testing.
+Almost nothing, on purpose. Only `<window>`, `<popup>`, `<glarea>` and
+`<foreign>` are real windows of the display system. Everything else is a
+retained lightweight node — one yoga node each — painted into the owning
+window's double-buffered 2d context on its frame clock, with synthetic
+events dispatched by front-to-back hit testing.
 
 That is what makes a thousand-row table cheap: a thousand X windows would be
 a thousand server-side resources and a thousand expose events, while a
 thousand drawn nodes are a layout pass and one repaint.
 
-X windows are also created **top-down in the commit phase**, never in the
+Windows are also created **top-down in the commit phase**, never in the
 render phase — React may discard a render pass, and a discarded pass must not
 have opened windows on your screen.
 
 ## The feature set
 
 - **[Elements](/docs/reference/elements)** — `<window>`, `<popup>`, `<box>`,
-  `<text>`, `<textinput>`, `<textarea>`, `<image>`, `<canvas>`, plus
-  rich-content wrappers `<markdown>`, `<html>`, `<svg>` and `<tex>` around
-  ntk's document widgets. Any `<box>` or `<window>` scrolls with
+  `<text>`, `<textinput>`, `<textarea>`, `<image>`, `<canvas>`, `<svg>`,
+  `<glarea>` and `<foreign>`, plus anything `registerElement()` adds from
+  outside the package. Any `<box>` or `<window>` scrolls with
   `overflow: 'scroll'`.
 - **[Widget components](/docs/reference/components)** — `Button`,
   `Checkbox`, `Radio`, `Switch`, `Slider`, `ProgressBar`, `Select`,
-  `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `SplitPane`
-  and a virtualized `Table`. Plain React over the primitives — no reconciler
-  support, nothing you could not have written yourself.
+  `Tooltip`, `Icon`, `PasswordInput`, `Dialog`, `FileDialog`,
+  `MenuBar`/`ContextMenu`, `Tabs`, `SplitPane` and a virtualized `Table`.
+  Plain React over the primitives — no reconciler support, nothing you could
+  not have written yourself — and on the Cocoa backend they wear AppKit's own
+  bezels by default.
 - **Flexbox layout** — the same yoga engine React Native lays out with, so
   `flexDirection`, `gap`, `padding` and friends behave the way you expect.
 - **[Inline styles with pseudo-states](/docs/reference/styling)** —
   `:hover`, `:focus`, `:active`, `:disabled` in the `style` object. They
   resolve in the renderer as a repaint of one node, with **no React render**,
   because each is something the node already knows about itself.
-- **[Window size queries](/docs/reference/styling#window-size-queries)** —
-  `'@width >= 600'`, the X11 analogue of `@media`: a style asks about the
-  window it is laid out in, not the screen.
+- **[Size and container queries](/docs/reference/styling#window-size-queries)**
+  — `'@width >= 600'` asks about the window a style is laid out in, and
+  `'@container (width > 400)'` about the nearest container ancestor. The
+  analogue of `@media` and `@container`, with no screen in the picture.
 - **Theme tokens and transitions** — `backgroundColor: '$panel'` resolves
   against the nearest `theme` above the node, so a hoisted style can still
   follow the theme; `transition: 120` lerps numbers and colours on the
-  window's frame clock.
+  window's frame clock — and on macOS a transition on a plain box can be
+  handed to the render server, where it keeps moving while the JS thread is
+  busy.
 - **[Synthetic events](/docs/reference/events)** — capture and bubble
   phases, `onClick` with DOM-style `detail` click counting, hover
   enter/leave, wheel, keyboard, focus and Tab traversal, `preventDefault()`
   over element default actions, pointer capture, a `cursor` style property.
-- **[A subset of react-three-fiber](/docs/reference/elements#3d-scene-mesh-group-geometries-materials)**
-  — `<mesh>`, `<group>`, box/plane/sphere/cylinder/torus geometries,
-  materials with textures, four light types and raycast pointer events,
-  drawn over **indirect GLX**: the GL protocol goes over the same X
-  connection. No GPU bindings, no native module.
+- **[Desktop integration](/docs/reference/desktop)** — the menu bar where
+  the desktop keeps menus, native open/save panels, notifications,
+  drag and drop with the rest of the system, light/dark and accent, the
+  screen layout, the user's own calendar. Each a ladder that takes the best
+  rung the machine has and says so when there is none.
+- **[3D](/docs/reference/gl)** — a `<glarea>` in the layout, over indirect
+  GLX (no GPU bindings, no native module), the direct GPU backend, or CGL on
+  macOS. `@react-x11/components/three` is a three.js scene graph over it.
 - **[Hot reloading](/docs/getting-started#hot-reloading)** — React Fast Refresh under
   ESM loader hooks. Edit a component while the program runs and it updates
-  in place: the X connection, the window and component state all survive.
+  in place: the connection, the window and component state all survive.
 - **[React DevTools](/docs/reference/devtools)** — the standard standalone
   app. Component tree, props and hooks, and hovering a component in the tree
-  tints its rect in the X11 window.
+  tints its rect in the app's window.
 - **[TypeScript](/docs/reference/typescript)** — declarations ship with the
-  package. Set `jsxImportSource: "react-x11"` and the X11 elements type
+  package. Set `jsxImportSource: "react-x11"` and the host elements type
   check — which is also what makes `<div>` a compile error rather than a
   runtime throw.
 - **[Click to component](/docs/reference/click-to-component)** — Alt+Click a
   rendered element to open the JSX line that created it in your editor.
+
+Rich documents — `<Markdown>`, `<Formula>`, a `Tree`, a `Calendar`, a
+terminal — are
+[`@react-x11/components`](https://github.com/sidorares/react-x11-components),
+built from the public host elements above rather than baked into the
+renderer.
 
 ## Things that are unusual about it
 
@@ -187,13 +208,15 @@ have opened windows on your screen.
   every screenshot in these docs, and so does this site's playground.
 - **A `ref` is an escape hatch to the layer below.** For drawn elements you
   get the retained node (its absolute rect, `scrollTo`, …); for `<window>`
-  and `<popup>` you get the live ntk window, and the whole ntk API with it.
+  and `<popup>` you get the live window object — on X11 the ntk window, and
+  the whole ntk API with it.
 - **It can be the window manager.** The repo's `examples/wm.jsx` is a real
   reparenting WM whose frames — titlebar, buttons, eight resize handles —
   are react-x11 components, with foreign X windows reparented inside them.
+  X11 only: substructure redirect has no macOS equivalent.
 - **Protocol cost is a design concern.** `npm run bench` measures requests,
-  bytes, replies, RENDER composites and the pixel area those composites
-  touch, against a checked-in baseline.
+  bytes, replies, blocking round trips, RENDER composites and the pixel area
+  those composites touch, against a checked-in baseline.
 
 ## Where to go next
 

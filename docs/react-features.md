@@ -129,9 +129,12 @@ and `onResize`, and [components.md](components.md) for `useAnchor`.
 
 Two different kinds of object, depending on the element:
 
-- **`<window>` and `<popup>`** hand back the live **ntk window** — the
-  object with `getContext('2d')`, and what
-  [`windowIdOf()`](elements.md) resolves to an XID.
+- **`<window>` and `<popup>`** hand back the live **window object** of
+  whichever backend is drawing — on X11 the ntk window, which is what
+  [`windowIdOf()`](elements.md) resolves to an XID. Both spell
+  `getContext('2d')` and `requestAnimationFrame` the same way; anything
+  past that is the backend's own surface, so a component that reaches
+  further should say which backend it is for.
 - **every other element** hands back its **node**: `focus()`, `blur()`,
   `focused`, `hitTest()`, `containsPoint()`, `getClientRects()`, and `abs`
   for its position and size. `<textinput>`/`<textarea>` additionally match

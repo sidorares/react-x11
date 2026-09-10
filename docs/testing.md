@@ -9,6 +9,17 @@ means a passing test has exercised the path a user actually takes.
 That server is node-x11's `lib/xserver`, written in JavaScript. It arrives
 with ntk, so there is nothing new to install.
 
+**The harness drives the X11 backend**, on every platform including macOS —
+there is no `'cocoa'` backend for `renderX11()`, and `createRoot()`'s own
+choice does not apply here because the harness always passes it an `app`.
+That is deliberate rather than pending: the point of this harness is a real
+protocol connection to a real server in-process, and macOS has no protocol
+to connect to. What it means in practice is that an app targeting both
+backends tests its **tree, its queries and its behaviour** here — all of
+which are shared — while anything that is genuinely per-backend (a native
+bezel's pixels, an `NSMenu`, a pasteboard flavour) is covered by the
+renderer's own Cocoa tests against a fake bridge, and by looking at a Mac.
+
 ```js
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';

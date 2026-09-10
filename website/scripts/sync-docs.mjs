@@ -185,6 +185,8 @@ const ORDER = [
   'clipboard.md',
   'typescript.md',
   'extending.md',
+  'embedding.md',
+  'frame.md',
   'testing.md',
   'desktop.md',
   'dbus.md',
@@ -197,18 +199,24 @@ const ORDER = [
   'desktop-calendar.md',
   'appearance.md',
   'system.md',
+  'scale.md',
   'remote.md',
+  'macos.md',
   'wayland.md',
   'security.md',
   'packaging.md',
   'devtools.md',
   'debugging.md',
   'click-to-component.md',
+  'gl.md',
   'glx.md',
   'ecosystem.md',
   // docs/ecosystem/ — same order as the compatibility tables on the landing
   // page. Matched by basename, and sorting happens per directory, so these
   // never collide with the top-level names above.
+  //
+  // docs/architecture/ is not listed: those are design records rather than
+  // reference, and alphabetical is as good an order as any for them.
   'state.md',
   'data-fetching.md',
   'forms.md',

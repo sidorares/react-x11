@@ -162,11 +162,9 @@ The rest each have one thing yoga could not answer:
 | ------------------------- | --------------------------------------------------- |
 | `Slider`                  | the drag, and Left/Right (Up/Down do not)           |
 | `Tabs`                    | Left/Right walk the strip the way it is drawn       |
-| `Tree`                    | the indent, the twisty, and which arrow opens       |
 | `Table`                   | column resizing, the sort mark, the header's scroll |
 | `SplitPane`               | which pane is first, the drag and its arrows        |
 | `MenuBar` / `ContextMenu` | submenus open to the start side, and their arrows   |
-| `Calendar` / `DatePicker` | a week runs the other way, and so do Left/Right     |
 | `Select`, `PasswordInput` | the field's own insets follow the text              |
 
 `<textinput>` and `<textarea>` mirror on the inside too — the value, the
@@ -340,9 +338,8 @@ at the call site:
 ```
 
 That covers the hover case too. `:hover` marks the row, `color` is
-inherited, and the label and the icon both follow — which is why `Tree`'s
-twisty and `ContextMenu`'s submenu chevron carry no colour of their own any
-more. The `color` prop is for saying something the surrounding text does
+inherited, and the label and the icon both follow — which is why
+`ContextMenu`'s submenu chevron carries no colour of its own any more. The `color` prop is for saying something the surrounding text does
 not: a destructive action's mark, or a check drawn on an accent fill.
 
 **`size` does not inherit, and is deliberately not `fontSize`.** A glyph is
@@ -357,7 +354,7 @@ Each glyph is a drawing over `<canvas mono>`
 ([elements.md](elements.md#canvas)), which is a promise that everything it
 paints is one colour it did not choose — so one drawing serves every state a
 control puts it in, and the paint cache can keep one rendered copy of
-`chevronDown` at 12px for every twisty in a `Tree` at once.
+`chevronDown` at 12px for every chevron on the screen at once.
 
 The entry is **coverage**, so the colour is applied at composite time and
 stays out of the key: one rendered copy of `chevronDown` at 12px serves the
@@ -367,9 +364,9 @@ the trick the glyph cache runs on text, and the one `<svg>` gets for a
 coverage surface is pixels at a fixed size, so one icon at two sizes is two
 entries.
 
-The drawings are module-level, so re-rendering a `Tree` invalidates none of
-its twisties: `<canvas>` compares `onDraw` by identity, and a fresh closure
-per render is a repaint per glyph.
+The drawings are module-level, so re-rendering a list invalidates none of
+its icons: `<canvas>` compares `onDraw` by identity, and a fresh closure per
+render is a repaint per glyph.
 
 `icons` is the map of raw drawings, for a widget that wants the glyph
 without the component:
@@ -408,17 +405,6 @@ their own so an override wins by position, and forward any remaining props
 to the host box. `Radio` is the exception: it takes only the props listed
 below, and the group around it carries the layout.
 
-Under a **native bezel** — the Cocoa backend
-([macos.md](macos.md#native-controls)) — `style` sizes the box the control
-_sits in_ rather than the control itself. A `<Button>` or a `<Select>` keeps
-AppKit's own height and is centred in whatever footprint the layout gives it,
-so `style={{ height: 44 }}`, a `height: '100%'` in a taller parent or a
-`flexGrow: 1` leave a 22pt control in a 44pt slot instead of stretching a
-bezel the system draws at one size. The slack around it is not part of the
-control: a press up there does nothing, as it does in AppKit. Drawn controls
-stretch as they always have — their chrome is drawn to the box and their
-label is centred in it, so a stretched drawn control is merely roomy.
-
 ```jsx
 import { Button, Checkbox, RadioGroup, Radio, Switch, ProgressBar } from 'react-x11';
 
@@ -437,6 +423,49 @@ import { Button, Checkbox, RadioGroup, Radio, Switch, ProgressBar } from 'react-
 
 Label text is the children (or a `label` prop); a bare string is wrapped in
 a `<text>` for you, so `<Button>Save</Button>` needs no `<text>`.
+
+### Native bezels
+
+On a backend that renders the platform's own control bezels — today the
+**Cocoa** backend, never X11 — `Button`, `Checkbox`, `Radio`, `Switch`,
+`Slider` and `Select` wear AppKit's pixels by default, while interaction,
+focus, keyboard and accessibility stay this library's shared implementation.
+The mechanism is a bezel _image_ drawn through the ordinary paint path, not
+an embedded `NSView`: the press model and the event routing are behaviour
+this project considers part of its identity, and a real `NSControl` would
+take them over wholesale. [macos.md](macos.md#native-controls) is the
+design record.
+
+**Default native, seam out**, at three levels:
+
+```jsx
+<ThemeProvider value={{ controls: 'drawn' }}>
+  {' '}
+  {/* the app's identity   */}
+  <Button native={false}>Brand</Button> {/* one control          */}
+</ThemeProvider>;
+
+const canGoNative = useSupports('nativeControls'); // what the backend has
+```
+
+`controls` is `'auto'` (bezels where the backend has them), `'native'` (ask
+for them, and hear about it in development where there are none) or
+`'drawn'` (this library's rendering everywhere). It lives in the theme
+rather than in `style` because whether an app looks native is an
+app-identity decision, not a per-node one. `native={false}` is the escape
+hatch for the one custom-branded control — and a control naming its own
+colours in `style` should also say it, because a bezel the system draws
+ignores them.
+
+Under a native bezel, `style` sizes the box the control _sits in_ rather
+than the control itself. A `<Button>` or a `<Select>` keeps AppKit's own
+height and is centred in whatever footprint the layout gives it, so
+`style={{ height: 44 }}`, a `height: '100%'` in a taller parent or a
+`flexGrow: 1` leave a 22pt control in a 44pt slot instead of stretching a
+bezel the system draws at one size. The slack around it is not part of the
+control: a press up there does nothing, as it does in AppKit. Drawn controls
+stretch as they always have — their chrome is drawn to the box and their
+label is centred in it, so a stretched drawn control is merely roomy.
 
 ### The press state
 
@@ -496,9 +525,9 @@ which is why it is set even though nothing in react-x11 reads it. There is no
 `preventDefault`: the value has already changed by the time the handler runs.
 
 **The line is `name`.** A widget that takes one is a form field and reports
-an event. `Tabs`, `Tree`, `Table` and the menus are not form fields — you
-would never register a tab strip with formik — and keep their plain callbacks
-(`Tabs` calls `onChange(id)`).
+an event. `Tabs`, `Table` and the menus are not form fields — you would never
+register a tab strip with formik — and keep their plain callbacks (`Tabs`
+calls `onChange(id)`).
 
 `name` is otherwise inert; it exists so a form library has somewhere to put
 one. See [docs/ecosystem/forms.md](ecosystem/forms.md).

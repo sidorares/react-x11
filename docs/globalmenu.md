@@ -25,10 +25,24 @@ import { MenuBar } from 'react-x11';
 />;
 ```
 
-That is the whole of it, and it is the same line either way. Where a panel is
-showing menus, `MenuBar` renders nothing and the panel shows this one; where
-there is not — a stock GNOME session, XQuartz, an ssh session, a bare `startx`,
-CI — it draws the bar itself, exactly as before.
+That is the whole of it, and it is the same line every time. Where the
+platform has somewhere to put a menu, `MenuBar` renders nothing and the
+platform shows this one; where it does not, `MenuBar` draws the bar itself,
+exactly as before.
+
+| where the menu goes                                    | when                                                                                  |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| **the macOS menu bar**, at the top of the screen       | the Cocoa backend, always                                                             |
+| **the desktop's panel**, over `com.canonical.dbusmenu` | a panel is running one of the applets above                                           |
+| **the window**, drawn by `MenuBar`                     | everything else — a stock GNOME session, XQuartz, an ssh session, a bare `startx`, CI |
+
+The rest of this page is about the middle row, which is the one with a
+protocol in it. The macOS row is
+[macos.md §Menus](macos.md#menus-the-global-menu-finally-at-home): the
+adapter is `src/cocoa/globalmenu.js`, it consumes the same `menus` array
+through the same snapshot machinery, and because a menu bar is a platform
+constant rather than a service that may or may not be running, it takes the
+menu the moment it is installed — the drawn fallback never renders there.
 
 ## The item vocabulary is the protocol's
 
@@ -71,6 +85,14 @@ The outer array is a list of _alternatives_; each inner one is modifier tokens
 (`Control`, `Alt`, `Shift`, `Super`) ending in the key. Only the first is
 drawn — a row has one shortcut column.
 
+**On macOS, `Control` means ⌘.** A cross-platform app writes its shortcuts
+in the primary modifier, and the Mac's primary modifier is Command, not its
+own ⌃ — so `[['Control', 'S']]` becomes ⌘S in the menu bar, which is what a
+Mac user expects Save to be. `Super` maps there too; `Shift` and `Alt` are
+themselves. A chord the `NSMenu` spelling cannot express is simply not
+printed beside the item — the binding still fires, because the app's own
+window answers it (below).
+
 The key is named the way GDK names it, so `plus` rather than `+` and `Prior`
 rather than `PgUp`, because that is what a panel's importer parses. Menus print
 the friendly form: `[['Control', 'plus']]` draws as `Ctrl++`.
@@ -88,8 +110,10 @@ turns them off for an application with a dispatcher of its own.
 
 ## What happens on the wire
 
-Enough to recognise it in `dbus-monitor`, and to know what to look at when a
-menu does not appear.
+The D-Bus path, in enough detail to recognise it in `dbus-monitor` and to
+know what to look at when a menu does not appear. None of this applies on
+the Cocoa backend, where there is no wire and no registrar — installing an
+`NSMenu` is the whole of it.
 
 1. **Detection.** Does something own `com.canonical.AppMenu.Registrar` right
    now? Only ownership counts — see the trap below.

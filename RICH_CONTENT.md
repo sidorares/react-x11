@@ -1,5 +1,17 @@
 # Where rich content belongs: ntk, react-x11, or a module of its own
 
+> **Historical: this is how the question was decided, and it has since been
+> acted on.** `<markdown>`, `<html>` and `<tex>` were removed from react-x11
+> in 2.0 — each rendered a whole document as one opaque drawing, which
+> foreclosed selection across blocks and re-rendering only the block that
+> changed — and their successors are components in
+> [`@react-x11/components`](https://github.com/sidorares/react-x11-components),
+> composed from public host elements: `<Markdown>` and `<Formula>`, with
+> `<RichText>` and `<CodeBlock>` underneath. `<svg>` stayed, and is the only
+> one of the five still a host element here. There is no `src/richnodes.js`
+> any more. Read what follows as the reasoning, not as a description of the
+> tree.
+
 > **Status: this is the analysis, not the decision.** The decision and the
 > staged plan live in
 > [sidorares/ntk#106](https://github.com/sidorares/ntk/issues/106). It

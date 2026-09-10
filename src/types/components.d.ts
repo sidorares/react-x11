@@ -125,6 +125,20 @@ export interface Theme {
   direction: 'ltr' | 'rtl';
   paddingX: number;
   paddingY: number;
+  /**
+   * Not a colour: whether the widgets wear the **platform's own control
+   * bezels**. `'auto'` (the default) takes them wherever the backend has
+   * them — today the Cocoa backend, never X11 — `'native'` asks for them
+   * and says so in development where there are none, and `'drawn'` keeps
+   * this library's own rendering everywhere.
+   *
+   * It lives here rather than in `style` because whether an app looks
+   * native is an app-identity decision, not a per-node one;
+   * {@link NativeControlProp.native} is the per-control override, and
+   * `useSupports('nativeControls')` is how application code asks what this
+   * backend can do. See docs/components.md and docs/macos.md.
+   */
+  controls?: 'auto' | 'native' | 'drawn';
 }
 
 export interface ThemeProviderProps {
@@ -193,6 +207,20 @@ export function useDirection(): 'ltr' | 'rtl';
 
 /** Props a widget passes through to the `<box>` it renders. */
 type WidgetProps = Omit<BoxProps, 'children' | 'style' | 'ref'>;
+
+/**
+ * The per-instance escape hatch from the platform's own control bezel, for
+ * the one custom-branded control in an otherwise native app.
+ *
+ * The policy proper is {@link Theme.controls}; this overrides it for this
+ * control. `false` keeps the drawn rendering — which is what a control
+ * naming its own colours in `style` should say, because a bezel the system
+ * draws ignores them. `true` asks for the bezel regardless of the theme's
+ * policy, and is a development warning on a backend that has none.
+ */
+interface NativeControlProp {
+  native?: boolean;
+}
 
 /**
  * What a value widget's `onChange` receives — one signature across the
@@ -279,7 +307,7 @@ export const iconNames: readonly IconName[];
 /** The default icon box for a given `fontSize`. */
 export function iconSize(fontSize: number): number;
 
-export interface ButtonProps extends WidgetProps {
+export interface ButtonProps extends WidgetProps, NativeControlProp {
   children?: ReactNode;
   label?: string;
   onPress?: (ev: MouseEvent<DrawnNode>) => void;
@@ -328,7 +356,8 @@ export interface PasswordInputProps extends WidgetProps, NamedWidget {
 }
 export const PasswordInput: ComponentType<PasswordInputProps>;
 
-export interface CheckboxProps extends WidgetProps, NamedWidget {
+export interface CheckboxProps
+  extends WidgetProps, NamedWidget, NativeControlProp {
   children?: ReactNode;
   label?: string;
   checked?: boolean;
@@ -346,7 +375,7 @@ export interface RadioGroupProps<T = unknown> extends WidgetProps, NamedWidget {
 }
 export function RadioGroup<T = unknown>(props: RadioGroupProps<T>): ReactNode;
 
-export interface RadioProps<T = unknown> {
+export interface RadioProps<T = unknown> extends NativeControlProp {
   value: T;
   children?: ReactNode;
   label?: string;
@@ -354,7 +383,8 @@ export interface RadioProps<T = unknown> {
 }
 export function Radio<T = unknown>(props: RadioProps<T>): ReactNode;
 
-export interface SwitchProps extends WidgetProps, NamedWidget {
+export interface SwitchProps
+  extends WidgetProps, NamedWidget, NativeControlProp {
   checked?: boolean;
   onChange?: (ev: WidgetChangeEvent<boolean>) => void;
   disabled?: boolean;
@@ -378,7 +408,8 @@ export interface ProgressBarProps extends WidgetProps {
 }
 export const ProgressBar: ComponentType<ProgressBarProps>;
 
-export interface SliderProps extends WidgetProps, NamedWidget {
+export interface SliderProps
+  extends WidgetProps, NamedWidget, NativeControlProp {
   value?: number;
   min?: number;
   max?: number;
@@ -462,7 +493,8 @@ export const Dialog: ComponentType<DialogProps>;
 /** An option, or a plain value used as both value and label. */
 export type SelectOption<T = unknown> = { value: T; label: string } | T;
 
-export interface SelectProps<T = unknown> extends WidgetProps, NamedWidget {
+export interface SelectProps<T = unknown>
+  extends WidgetProps, NamedWidget, NativeControlProp {
   value?: T;
   options?: readonly SelectOption<T>[];
   onChange?: (ev: WidgetChangeEvent<T>) => void;

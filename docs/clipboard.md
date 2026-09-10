@@ -20,6 +20,20 @@ middle-click paste, select-to-own. This page is for everything else: a
 canvas that copies an image, a list that pastes files, a document view with
 its own Copy item.
 
+> **This page describes the X11 backend.** The clipboard is the one API
+> where the two backends are not yet at parity, and the difference is
+> structural rather than cosmetic: X's model is _ownership of a selection_,
+> negotiated per paste, and macOS's is a _pasteboard the system holds_. On
+> the Cocoa backend `writeText`/`readText` work, and everything built on
+> them — the text controls' Ctrl/⌘ C, X, V and their Edit menus — works with
+> them. What is not there yet is the rest of this page:
+> [`PRIMARY`](#two-clipboards) (macOS has no middle-click selection), a
+> [multi-flavour payload](#writing) (`write()` takes the plain-text flavour
+> and drops the others, and `read({ target })` rejects anything but text),
+> and [`watch()`](#knowing-when-it-changes) (it resolves to a no-op
+> unsubscribe and never fires). Drag and drop is not affected — it carries
+> its full payload on both backends ([drag-and-drop.md](drag-and-drop.md)).
+
 ## Two clipboards
 
 X has no clipboard buffer. "Copy" means owning a **selection** — a named
@@ -194,6 +208,8 @@ raw protocol. See ntk's own clipboard documentation for the ICCCM details.
 
 ## Limits
 
+- **The Cocoa backend is text-only**, as the note at the top of this page
+  says: no `PRIMARY`, one flavour, and `watch()` never fires.
 - **No clipboard-manager handoff** (`SAVE_TARGETS`), so the data really does
   vanish when the app exits.
 - **`STRING` is latin-1 by definition**, so codepoints above U+00FF are lossy
