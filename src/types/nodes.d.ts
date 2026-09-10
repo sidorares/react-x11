@@ -123,7 +123,13 @@ export interface ScrollableNode extends DrawnNode {
   readonly scrollY: number;
   readonly contentWidth: number;
   readonly contentHeight: number;
-  /** A number scrolls the vertical axis; an object moves either or both. */
+  /**
+   * A number scrolls the vertical axis; an object moves either or both,
+   * clamped to the content. Made before the pane's first layout, when there
+   * is no content to clamp to yet, the offset is held and that layout
+   * applies it — so a mount-time effect can restore a position — and
+   * `onScroll` reports it once it has.
+   */
   scrollTo(to: number | ScrollTarget): void;
   scrollBy(by: number | ScrollTarget): void;
   /**

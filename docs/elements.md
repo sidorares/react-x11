@@ -1140,6 +1140,20 @@ node fully visible, and is safe to call from an effect right after that
 node mounts: the request is resolved on the next layout pass, when the
 node actually has geometry.
 
+So is a `scrollTo` made before the pane's first layout. Until a pass has
+measured the content there is nothing to clamp the offset to, so it is held,
+and that pass applies it, clamped to what it found, before the frame paints:
+restoring a list's position from a mount-time `useLayoutEffect` shows the
+list at that position in its first frame. A `scrollBy` after it moves on
+from the held offset. Once the pass is over, after that frame, `onScroll`
+reports where the pane landed, if it moved; until then `scrollX`/`scrollY`
+keep their old values. On a pane that has been laid out, `scrollTo` moves
+the offset and
+fires `onScroll` inside the call, clamped to the content as the last layout
+measured it — so a `scrollTo` past the end of rows added in the same commit
+stops at the old end, and `scrollIntoView` on the new last row is what
+reaches it.
+
 ### On a `<window>`
 
 `<window style={{ overflow: 'scroll' }}>` scrolls the window's own content,

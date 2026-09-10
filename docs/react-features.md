@@ -72,13 +72,26 @@ So an adjustment made in `useEffect` flickers. This is not a timing race you
 can get lucky with — updates from a layout effect are folded into the frame
 being prepared, and updates from a passive effect are not.
 
+That holds for a correction computed from React state. One computed from
+**geometry** is a layout behind: a layout effect runs after the commit and
+before the layout pass, so `abs` there is still the previous frame's rect
+(zeros, on mount), and anything measured from it describes the frame
+before. For a size, let the element report it with `onLayout`
+([below](#measuring-a-node)); for a style that depends on one, write a
+container query ([styling.md](styling.md#container-queries)), which the
+pass answers in the same frame. `scrollIntoView`, and a `scrollTo` on a pane
+that has not been laid out yet, measure nothing when you call them — the
+pass resolves them — so they are safe here
+([elements.md](elements.md#scrolling)).
+
 The same boundary is why an event handler feels instant: react-x11 lands the
 React update caused by a click or a keystroke **before** the frame goes out,
 so the response and the default action paint together rather than a frame
 apart.
 
 ```jsx
-// good — the corrected size is in the first frame the user sees
+// good — `tooTall` and `fits` are React state, so the corrected rows paint
+// in the same frame as the state that asked for them
 useLayoutEffect(() => {
   if (tooTall) setRows(fits);
 }, [tooTall, fits]);
