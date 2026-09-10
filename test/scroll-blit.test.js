@@ -384,6 +384,113 @@ test('the scrolled thumb is repainted at both its old and new place', async () =
   }
 });
 
+// A pane that scrolls both ways has a bar across the axis the scroll did not
+// move. The blit shifts that bar's pixels along with everything else, so a
+// copy of it lands off its track, and nothing in the strip or the scrolled
+// bar's repair reaches there: the pane trailed a smear of old thumb above its
+// horizontal bar, a row per pixel scrolled (found scrolling
+// examples/schedule.jsx, a timetable wider and taller than its window).
+async function mountBothWays() {
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const ref = React.createRef();
+  x11Root.render(
+    h(
+      'window',
+      { width: 400, height: 400 },
+      h(
+        'box',
+        { ref, style: { overflow: 'scroll', flexGrow: 1 } },
+        ...Array.from({ length: 20 }, (_, i) =>
+          h('box', {
+            key: i,
+            style: {
+              width: 800,
+              height: 40,
+              flexShrink: 0,
+              backgroundColor: i % 2 ? '#ffffff' : '#eef1f5',
+            },
+          }),
+        ),
+      ),
+    ),
+  );
+  const wnd = app.windows[0];
+  return { wnd, root: wnd._reactX11Node, ref };
+}
+
+test('the cross bar is repaired where the blit dragged it, not only on its track', async () => {
+  const { wnd, root, ref } = await mountBothWays();
+  await tick();
+  ref.current.scrollTo(96);
+  await tick();
+  const bar = ref.current._scrollbar('x');
+  assert.ok(bar, 'the pane has a horizontal bar');
+  wnd.calls.length = 0;
+  ref.current.scrollTo(144);
+  await tick();
+  assert.strictEqual(blits(wnd).length, 1, 'the frame blitted');
+  const rects = root._lastDamageRects;
+  const covers = (r, x, y) =>
+    x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height;
+  // the bar where it is, and the copy of it the 48px shift left above it
+  for (const point of [
+    [bar.x + 3, bar.y + 2],
+    [bar.x + 3, bar.y + 2 - 48],
+  ]) {
+    assert.ok(
+      rects.some((r) => covers(r, point[0], point[1])),
+      `damage misses the cross bar at ${point}: ${JSON.stringify(rects)}`,
+    );
+  }
+});
+
+// Scrolls that cancel inside one frame — a trackpad reversing within a
+// refresh, which the Cocoa wheel now folds into one paced frame, or a
+// handler that scrolls and scrolls back — leave every pixel where it was.
+// The frame used to keep the scroll's claim on the whole viewport and
+// repaint it: a pane filling its window counted a full-window frame at
+// every reversal of the presenter bench's wheel sweep.
+test('scrolls that come back to where the frame started repaint nothing', async () => {
+  const { wnd, root, ref } = await mount();
+  await tick();
+  ref.current.scrollTo(96);
+  await tick();
+  wnd.calls.length = 0;
+  ref.current.scrollBy(48);
+  ref.current.scrollBy(-48);
+  await tick();
+  assert.strictEqual(blits(wnd).length, 0, 'there was nothing to shift');
+  assert.deepStrictEqual(root._lastDamageRects, [], 'and nothing to repaint');
+});
+
+test('…except what changed inside the viewport meanwhile', async () => {
+  const { wnd, root, ref } = await mount();
+  await tick();
+  ref.current.scrollTo(96);
+  await tick();
+  wnd.calls.length = 0;
+  ref.current.scrollBy(48);
+  root.invalidate(false, { x: 40, y: 120, width: 120, height: 40 });
+  ref.current.scrollBy(-48);
+  await tick();
+  const rects = root._lastDamageRects;
+  assert.ok(rects, 'bounded');
+  const area = rects.reduce((sum, r) => sum + r.width * r.height, 0);
+  assert.ok(
+    area < 400 * 400 * 0.1,
+    `not the viewport: ${JSON.stringify(rects)}`,
+  );
+  const covers = (x, y) =>
+    rects.some(
+      (r) => x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height,
+    );
+  assert.ok(
+    covers(50, 130),
+    `the change is repainted: ${JSON.stringify(rects)}`,
+  );
+});
+
 // --- the virtualized list, the case the ledger exists for (issue #398) ---
 //
 // A list that re-slices itself on every scroll frame claims inside its own

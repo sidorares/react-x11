@@ -12620,6 +12620,25 @@ export class WindowNode extends Scrollable(Node) {
       this._applyContentsBlit(node, contents, width, height);
       return;
     }
+    // Back where the frame started: a burst of scrolls that went one way
+    // and back again inside one refresh — the Cocoa wheel folds a burst
+    // into one paced frame, and a trackpad's reversal is exactly that.
+    // Nothing on screen moved, so there is no band to shift and the
+    // scroll's claim on the whole viewport is owed nothing; what did change
+    // inside it is in the ledger, and the ledger is what gets repainted.
+    // (Every pixel-shift gate below is moot for a shift of nothing.)
+    if (from.x === node.scrollX && from.y === node.scrollY) {
+      const box = node.abs;
+      const kept = this._blitKeptDamage(box);
+      if (!kept) return;
+      let rects = kept;
+      for (const claim of ledger ?? []) {
+        const inside = intersectRects(claim, box);
+        if (inside) rects = addDamageRect(rects, inside);
+      }
+      this._damage = rects;
+      return;
+    }
     // children clip to the border box, so a border ring or rounded corner
     // would be shifted like content — any painted side counts
     const blitBorder = resolveBorderWidths(node.style, node.direction);
@@ -12724,9 +12743,12 @@ export class WindowNode extends Scrollable(Node) {
     // dragged a copy of the old thumb along: repaint the dragged copy's
     // rect and the new thumb's rect — small rects, where the full track
     // would run the viewport's whole length and merge with the strip into
-    // most of the viewport. The cross-axis bar did not move, but its band's
-    // pixels were shifted like everything else, so its track repaints
-    // whole; it lies along the strip, so their merge stays a band.
+    // most of the viewport. The cross-axis bar did not move, but the blit
+    // shifted its pixels like everything else: its track repaints whole,
+    // and so does the copy of the track the shift dragged off it — a pane
+    // scrolling both ways otherwise trails a smear of old thumb behind its
+    // bar, a row per pixel scrolled. Both lie along the strip on the far
+    // edge, so their merge stays a band.
     const scrolledBar = node._scrollbar(axis);
     if (scrolledBar) {
       const savedX = node.scrollX;
@@ -12752,7 +12774,15 @@ export class WindowNode extends Scrollable(Node) {
       });
     }
     const crossBar = node._scrollbar(axis === 'y' ? 'x' : 'y');
-    if (crossBar) rects = addDamageRect(rects, scrollbarTrackRect(crossBar));
+    if (crossBar) {
+      const track = scrollbarTrackRect(crossBar);
+      rects = addDamageRect(rects, track);
+      const dragged = intersectRects(
+        { ...track, x: track.x - dx, y: track.y - dy },
+        vp,
+      );
+      if (dragged) rects = addDamageRect(rects, dragged);
+    }
     for (const repair of repairs) rects = addDamageRect(rects, repair);
     // The last gate, and the only one that has to wait until the rects are
     // assembled: the frame carries at most MAX_DAMAGE_RECTS of them, so a
