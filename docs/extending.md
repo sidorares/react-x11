@@ -1133,7 +1133,11 @@ when you say nothing.
 **Painting: `paintDamage()`.** The rect this pass covers, in the owning
 window's coordinates — the same space as `abs`, in device pixels — or `null`
 when the frame is unbounded and everything has to be drawn. Cull
-against it exactly as core culls the tree:
+against it the way core culls the tree, where a pixel short of the rect
+still counts as inside it: antialiasing puts ink just past the bounds you
+computed, and the pass is clipped to the rect, so drawing a near miss costs
+one draw and loses nothing. Here `overlaps(a, b, 1)` asks whether two rects
+come within a pixel of each other:
 
 ```js
 class FlowNode extends Node {
@@ -1142,11 +1146,11 @@ class FlowNode extends Node {
     // thing: nothing bounds you, draw the lot
     const damage = this.paintDamage();
     for (const cell of this.gridCells()) {
-      if (damage && !overlaps(cell, damage)) continue;
+      if (damage && !overlaps(cell, damage, 1)) continue;
       this.drawCell(ctx, cell);
     }
     for (const edge of this.edges) {
-      if (damage && !overlaps(edge.routedBounds, damage)) continue;
+      if (damage && !overlaps(edge.routedBounds, damage, 1)) continue;
       this.drawEdge(ctx, edge);
     }
     // …nodes, minimap, controls
@@ -1262,7 +1266,7 @@ class FlowNode extends Node {
     // …and this is the exposed strip, not the pane. Nothing here changes.
     const damage = this.paintDamage();
     for (const item of this.scene()) {
-      if (damage && !overlaps(item.bounds, damage)) continue;
+      if (damage && !overlaps(item.bounds, damage, 1)) continue;
       this.draw(ctx, item);
     }
   }

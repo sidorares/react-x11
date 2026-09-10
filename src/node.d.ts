@@ -504,8 +504,10 @@ export declare class Node {
    * An element whose node is one node never needs it; being painted at all
    * means it is inside the pass. An element that draws a **scene** into one
    * node culls against it the way core culls the tree, instead of redrawing
-   * the scene into a clip that throws most of it away. Window coordinates,
-   * the same space as `abs`; read-only.
+   * the scene into a clip that throws most of it away. Core counts a pixel
+   * short of the rect as inside it, for the antialiasing that inks just
+   * past a shape's bounds. Window coordinates, the same space as `abs`;
+   * read-only.
    */
   paintDamage(): Rect | null;
   /**
