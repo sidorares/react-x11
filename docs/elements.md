@@ -1145,19 +1145,25 @@ node fully visible, and is safe to call from an effect right after that
 node mounts: the request is resolved on the next layout pass, when the
 node actually has geometry.
 
-So is a `scrollTo` made before the pane's first layout. Until a pass has
-measured the content there is nothing to clamp the offset to, so it is held,
-and that pass applies it, clamped to what it found, before the frame paints:
-restoring a list's position from a mount-time `useLayoutEffect` shows the
-list at that position in its first frame. A `scrollBy` after it moves on
-from the held offset. Once the pass is over, after that frame, `onScroll`
-reports where the pane landed, if it moved; until then `scrollX`/`scrollY`
-keep their old values. On a pane that has been laid out, `scrollTo` moves
-the offset and
-fires `onScroll` inside the call, clamped to the content as the last layout
-measured it — so a `scrollTo` past the end of rows added in the same commit
-stops at the old end, and `scrollIntoView` on the new last row is what
-reaches it.
+`scrollTo` answers inside the call, from the extent the last layout pass
+measured: the offset moves and `onScroll` fires before it returns. When a
+pass is already owed, the part of the request that extent could not answer
+is kept as well, and the pass answers it again against the content it
+measures, before the frame paints. Two cases need that:
+
+- A pane no pass has laid out yet has no extent at all. Restoring a list's
+  position from a mount-time `useLayoutEffect` shows the list at that
+  position in its first frame.
+- Rows added in the commit the request comes from are not in the extent
+  yet. A log that follows its new lines with `scrollTo(Infinity)` from a
+  layout effect shows each one at the end, in the first frame that has it.
+
+`Infinity` means the end, wherever the pass finds it, and the End key goes
+there the same way. Prefer it to `contentHeight`, which is the last pass's
+measurement too: a target computed from it falls short when a commit adds
+more than a viewport. A `scrollBy` made before that pass moves on from where
+the pass puts the pane. Until the pass, `scrollX`/`scrollY` read the call's
+answer, and `onScroll` reports the pass's once it is over.
 
 `onScroll` fires for **every** move of the offsets, not only the ones a call
 made. The wheel, the keys, a bar and `scrollTo`/`scrollBy` on a laid-out

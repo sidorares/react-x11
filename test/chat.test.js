@@ -334,6 +334,34 @@ describe('examples/chat', () => {
     assert.equal(composer('#general').value, 'half a thought');
   });
 
+  test('the log keeps a sent message in view once it overflows', async () => {
+    // The follow is `scrollTo(Infinity)` from a layout effect, and the
+    // frame's layout pass answers it against the content it measures.
+    // Clamped against the last pass's extent instead, every send landed one
+    // line short of the end, with the message just sent below the fold.
+    await mount(testTransport());
+    const pane = log('#general');
+    let overflowed = 0;
+    for (let i = 0; overflowed < 3 && i < 40; i++) {
+      const text = `msg ${i}.`;
+      await userEvent.type(composer('#general'), `${text}\n`);
+      await waitFor(() => {
+        const [line] = within(pane).getAllByText(text);
+        assert.ok(line.abs?.height > 0, `${text} is not laid out yet`);
+      });
+      const end = pane.contentHeight - pane.abs.height;
+      if (end <= 0) continue;
+      overflowed += 1;
+      assert.equal(pane.scrollY, end, `${text} left the log short of its end`);
+      const [line] = within(pane).getAllByText(text);
+      assert.ok(
+        line.abs.y + line.abs.height <= pane.abs.y + pane.abs.height,
+        `${text} is below the fold`,
+      );
+    }
+    assert.equal(overflowed, 3, 'the log never overflowed');
+  });
+
   // Deliberately not tested here: the #202/#323 promise that a hidden pane
   // stops taking keys. This app cannot isolate it — the only way to hide a
   // channel is to click another one, and that click moves the focus itself,

@@ -125,12 +125,20 @@ export interface ScrollableNode extends DrawnNode {
   readonly contentHeight: number;
   /**
    * A number scrolls the vertical axis; an object moves either or both,
-   * clamped to the content. Made before the pane's first layout, when there
-   * is no content to clamp to yet, the offset is held and that layout
-   * applies it — so a mount-time effect can restore a position — and
-   * `onScroll` reports it once it has.
+   * clamped to the content. It answers at once from the extent the last
+   * layout pass measured. While a pass is owed — before the pane's first
+   * layout, or in the commit that added its new rows — whatever it asks past
+   * that extent is held too, and the pass answers it again against the
+   * content it measures, before the frame paints: `scrollTo(Infinity)` from
+   * a layout effect follows new rows to the end in the frame that shows
+   * them. `onScroll` reports the call's answer at once, and the pass's once
+   * that pass is over.
    */
   scrollTo(to: number | ScrollTarget): void;
+  /**
+   * The same, by a delta. Made while a `scrollTo` is held for the pass, it
+   * moves on from where the pass puts the pane.
+   */
   scrollBy(by: number | ScrollTarget): void;
   /**
    * Is there room to move on the axis a delta names? What the wheel's

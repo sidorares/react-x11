@@ -7654,6 +7654,30 @@ const SCROLLBAR_SLOP = 4;
 
 const clampScroll = (v, max) => Math.min(Math.max(0, v), max);
 
+/**
+ * One axis of a scroll request held for a pass
+ * (`Scrollable._holdScrollTo`): `{ base, steps }`, the request the extent in
+ * hand could not answer and the relative ones made after it. `to` is the new
+ * request on this axis (null leaves the axis alone), `step` its delta when
+ * it was relative.
+ */
+function holdAxis(held, to, step, owed, max) {
+  if (to == null) return held ?? null;
+  if (held && step != null) {
+    return { base: held.base, steps: [...held.steps, step] };
+  }
+  return owed && to > max ? { base: to, steps: [] } : null;
+}
+
+/** Where a held axis lands against the extent a pass measured: the base,
+ *  clamped, then each step from there, clamped in turn — the answers a pane
+ *  that already had this extent would have given one request at a time. */
+function replayHeld({ base, steps }, max) {
+  let at = clampScroll(base, max);
+  for (const step of steps) at = clampScroll(at + step, max);
+  return at;
+}
+
 // Every box and every window now answers `_scrollbars()`, and almost none of
 // them has any: the shared empty keeps that answer allocation-free on a path
 // walked per node per hit test.
@@ -8147,40 +8171,20 @@ export const Scrollable = (Base) =>
       );
     }
 
-    _scrollToDevice(want) {
-      // A pane no layout pass has placed as a scroller has no extent to
-      // clamp against: on mount `contentHeight` and `abs` are still the
-      // zeros they were built with, so the clamp below would turn any offset
-      // into 0 and drop the request — which is what restoring a list's
-      // position from a mount-time effect runs into, and so does a box that
-      // starts scrolling in the same commit. The offset is held instead, the
-      // way `scrollIntoView` holds its node, and `_resolveScrollTo` applies
-      // it against what the pass measures. `_childOrigin` is the witness:
-      // the first pass that places this pane's children as a scroller
-      // writes it, and a style that stops scrolling clears it. Nothing is
-      // armed for the blit, since that pass is a layout change rather than a
-      // pure scroll, and `onScroll` waits for the pass as well.
-      if (this._childOrigin == null && this.isScroller()) {
-        this._scrollToTarget = {
-          x: want.x ?? this._scrollToTarget?.x,
-          y: want.y ?? this._scrollToTarget?.y,
-        };
-        this._invalidateLayout('scroll');
-        return;
-      }
+    _scrollToDevice(want, by = null) {
+      const maxX = this._maxScroll('x');
+      const maxY = this._maxScroll('y');
       const next = {
-        x:
-          want.x == null
-            ? this.scrollX
-            : clampScroll(want.x, this._maxScroll('x')),
-        y:
-          want.y == null
-            ? this.scrollY
-            : clampScroll(want.y, this._maxScroll('y')),
+        x: want.x == null ? this.scrollX : clampScroll(want.x, maxX),
+        y: want.y == null ? this.scrollY : clampScroll(want.y, maxY),
       };
-      if (next.x === this.scrollX && next.y === this.scrollY) return;
+      const moved = next.x !== this.scrollX || next.y !== this.scrollY;
+      const holding = this._holdScrollTo(want, by, maxX, maxY);
+      if (!moved && !holding) return;
       const root = this.root;
-      if (root) {
+      // A pane no pass has placed arms nothing: its first pass is a layout
+      // change rather than a pure scroll.
+      if (root && this._childOrigin != null) {
         // Arming is the one moment the evidence still exists: the viewport
         // claim recorded below coalesces earlier claims into itself
         // (addDamageRect keeps the list disjoint), after which a change
@@ -8224,7 +8228,7 @@ export const Scrollable = (Base) =>
       }
       this.scrollX = next.x;
       this.scrollY = next.y;
-      this.props.onScroll?.(this._scrollEvent());
+      if (moved) this.props.onScroll?.(this._scrollEvent());
       // A scroll reflows this viewport's contents and nothing else, and the
       // viewport clips them, so the damage is this node's own rect. It is a
       // layout change all the same — children's absolute positions move — hence
@@ -8238,21 +8242,59 @@ export const Scrollable = (Base) =>
     }
 
     /**
-     * Apply the offset a `scrollTo` asked for before this pane's first
-     * layout (see `_scrollToDevice`), clamped to the extent the pass has
-     * just measured. Its `onScroll` is the pass's, like every move layout
-     * makes (see `_absolutizeChildren`).
+     * Keep the part of a request the extent in hand cannot answer, for the
+     * pass that will measure one that can. `_scrollToDevice` clamps against
+     * `contentWidth`/`contentHeight` and `abs` as the last pass left them,
+     * and two kinds of pane have nothing better there yet:
+     *
+     * - one no pass has placed as a scroller (`_childOrigin` is the
+     *   witness): on mount those are still the zeros they were built with,
+     *   and a box that starts scrolling in the same commit never measured
+     *   them. Restoring a list's position from a mount-time effect is the
+     *   case.
+     * - one whose next pass is already owed (`needsLayout`): rows mounted in
+     *   the commit the request comes from are not in the extent yet, so a
+     *   follow to the end from a layout effect stopped at the old end.
+     *
+     * What the extent in hand can answer still lands at once, with its
+     * `onScroll` and its blit origin. The request is kept as well, and
+     * `_resolveScrollTo` answers it again against what the pass measures,
+     * before anything is placed.
+     *
+     * Per axis, a request replaces whatever was held on that axis, and a
+     * relative one (`by`) made while something is held is kept as a step
+     * after it, so the pass replays the frame's requests the way a pane with
+     * a fresh extent would have taken them. Returns whether anything is
+     * held.
+     */
+    _holdScrollTo(want, by, maxX, maxY) {
+      const root = this.root;
+      const owed =
+        this.isScroller() &&
+        (this._childOrigin == null ||
+          (root != null && root.needsLayout && !root._inFlush));
+      const was = this._scrollToTarget;
+      const x = holdAxis(was?.x, want.x, by?.x, owed, maxX);
+      const y = holdAxis(was?.y, want.y, by?.y, owed, maxY);
+      this._scrollToTarget = x || y ? { x, y } : null;
+      if (!this._scrollToTarget) return false;
+      if (root) (root._heldScrolls ??= new Set()).add(this);
+      return true;
+    }
+
+    /**
+     * Answer a held request (`_holdScrollTo`) against the extent this pass
+     * has just measured: each held axis's base, clamped, then each step
+     * after it, clamped in turn. Its `onScroll` is the pass's, like every
+     * move layout makes (see `_absolutizeChildren`).
      */
     _resolveScrollTo() {
-      const target = this._scrollToTarget;
-      if (!target) return;
+      const held = this._scrollToTarget;
+      if (!held) return;
       this._scrollToTarget = null;
-      if (target.x != null) {
-        this.scrollX = clampScroll(target.x, this._maxScroll('x'));
-      }
-      if (target.y != null) {
-        this.scrollY = clampScroll(target.y, this._maxScroll('y'));
-      }
+      this.root?._heldScrolls?.delete(this);
+      if (held.x) this.scrollX = replayHeld(held.x, this._maxScroll('x'));
+      if (held.y) this.scrollY = replayHeld(held.y, this._maxScroll('y'));
     }
 
     /**
@@ -8311,30 +8353,32 @@ export const Scrollable = (Base) =>
      * `scrollTo`. */
     scrollBy(by) {
       const s = this.scale;
-      if (typeof by === 'number')
-        return this._scrollToDevice({ y: this._scrollBase('y') + by * s });
-      this._scrollToDevice({
-        x: by?.x == null ? undefined : this._scrollBase('x') + by.x * s,
-        y: by?.y == null ? undefined : this._scrollBase('y') + by.y * s,
-      });
+      const step =
+        typeof by === 'number'
+          ? { y: by * s }
+          : {
+              x: by?.x == null ? undefined : by.x * s,
+              y: by?.y == null ? undefined : by.y * s,
+            };
+      this._scrollToDevice(
+        {
+          x: step.x == null ? undefined : this.scrollX + step.x,
+          y: step.y == null ? undefined : this.scrollY + step.y,
+        },
+        step,
+      );
     }
 
     /** The wheel's and the key handler's entry: whole device pixels, which
      * is what keeps the scroll blit on the pixel grid at any scale. */
     _scrollByDevice(dx, dy) {
-      this._scrollToDevice({
-        x: dx ? this._scrollBase('x') + dx : undefined,
-        y: dy ? this._scrollBase('y') + dy : undefined,
-      });
-    }
-
-    /** Where a relative scroll starts on one axis: the offset in force, or
-     * the one a `scrollTo` is holding for the first layout, so a `scrollBy`
-     * after it moves on from there, as it would on a laid-out pane. */
-    _scrollBase(axis) {
-      const held = this._scrollToTarget?.[axis];
-      if (held != null) return held;
-      return axis === 'x' ? this.scrollX : this.scrollY;
+      this._scrollToDevice(
+        {
+          x: dx ? this.scrollX + dx : undefined,
+          y: dy ? this.scrollY + dy : undefined,
+        },
+        { x: dx || undefined, y: dy || undefined },
+      );
     }
 
     /**
@@ -8400,7 +8444,8 @@ export const Scrollable = (Base) =>
         case XK_HOME:
           return this._scrollToDevice({ y: 0 });
         case XK_END:
-          return this._scrollToDevice({ y: this._maxScroll('y') });
+          // the end the pass measures, if one is owed (`_holdScrollTo`)
+          return this._scrollToDevice({ y: Infinity });
         case XK_SPACE:
           return this._scrollByDevice(0, ev.shiftKey ? -page : page);
         default:
@@ -13858,6 +13903,15 @@ export class WindowNode extends Scrollable(Node) {
       // …and placed nodes against the arrangement that walk produced: where
       // one goes depends on where its pane and its parent landed
       if (this._placedNodes.size !== 0) this._placeNodes();
+      // A held scroll request the walk never reached goes, rather than
+      // landing on some later pass. A pane no pass has placed yet keeps it:
+      // its first placement is the pass it is waiting for.
+      if (this._heldScrolls?.size) {
+        for (const node of this._heldScrolls) {
+          if (node._childOrigin != null) node._scrollToTarget = null;
+        }
+        this._heldScrolls.clear();
+      }
       this.needsLayout = false;
       this.needsPaint = true;
       // The other half of a contained reflow: the pre-mutation arrangement was

@@ -68,6 +68,7 @@ import React, {
   use,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useOptimistic,
   useRef,
@@ -741,14 +742,20 @@ class PaneBoundary extends React.Component {
  * there. Scroll up and new lines stop yanking the view — the check is
  * against the *previous* frame's offset, because by the time the effect runs
  * the content is already taller.
+ *
+ * A layout effect, so a new line and the scroll that shows it paint in one
+ * frame. And `Infinity` rather than `contentHeight`, which is the last
+ * layout's measurement and does not have this commit's lines in it yet: the
+ * layout pass answers `scrollTo(Infinity)` against the content it measures
+ * (docs/elements.md#scrolling).
  */
 function Scrollback({ channel, messages }) {
   const ref = useRef(null);
   const pinned = useRef(true);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = ref.current;
-    if (node && pinned.current) node.scrollTo(node.contentHeight);
+    if (node && pinned.current) node.scrollTo(Infinity);
   }, [messages]);
 
   return (
