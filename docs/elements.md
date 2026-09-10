@@ -1154,6 +1154,18 @@ measured it — so a `scrollTo` past the end of rows added in the same commit
 stops at the old end, and `scrollIntoView` on the new last row is what
 reaches it.
 
+`onScroll` fires for **every** move of the offsets, not only the ones a call
+made. The wheel, the keys, a bar and `scrollTo`/`scrollBy` on a laid-out
+pane report inside the call. Layout moves the offsets on its own, and a
+browser fires `scroll` for each: the held `scrollTo` above landing, a
+`scrollIntoView` resolving (focus landing on a row below the fold is one),
+and the clamp that pulls the offset back when the content shrinks or the
+viewport grows under it, as when rows are filtered out of a list scrolled
+to its end. Those report once the pass is over, like `onViewport`: after
+the frame that shows the new offset, and only if the pass moved it. The
+payload is read when the report is delivered, so a handler that mirrors the
+offset into state, as `Table` does, ends where the pane did.
+
 ### On a `<window>`
 
 `<window style={{ overflow: 'scroll' }}>` scrolls the window's own content,

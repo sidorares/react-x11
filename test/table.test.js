@@ -171,6 +171,55 @@ test('scrolling swaps which rows exist', async () => {
   await x11Root.unmount();
 });
 
+test('rows that shrink under a body scrolled to its end leave no gap', async () => {
+  // The body clamps its offset when the rows it scrolls get fewer, and the
+  // table re-slices from `onScroll`, which reports that clamp (a move made
+  // by layout, not by a call) once the pass is over. Before it did, the
+  // slice stayed where the old offset had put it, and the top of the
+  // viewport was a band with no row in it.
+  const app = createMockApp();
+  const x11Root = await createRoot({ app });
+  const render = (n) =>
+    x11Root.render(
+      h(
+        'window',
+        { width: 300, height: 200 },
+        h(Table, { columns: COLUMNS, rows: makeRows(n) }),
+      ),
+    );
+  render(100);
+  await settle();
+  const body = find(root(app), (n) => n.isScroller?.());
+  body.scrollTo({ y: 100 * 24 });
+  await settle();
+  render(95);
+  await settle();
+  await settle();
+
+  const view = body.abs;
+  assert.strictEqual(body.scrollY, 95 * 24 - view.height, 'at the new end');
+  const rows = [];
+  const walk = (n) => {
+    if (n.props.role === 'row') rows.push(n.abs);
+    n.children.forEach((c) => !c.isWindow && walk(c));
+  };
+  walk(body);
+  // the stretches of the viewport, from its top, that no built row covers
+  const gaps = [];
+  let at = view.y;
+  for (const r of rows.sort((a, b) => a.y - b.y)) {
+    if (at >= view.y + view.height) break;
+    if (r.y > at) {
+      gaps.push([at - view.y, Math.min(r.y, view.y + view.height) - view.y]);
+    }
+    at = Math.max(at, r.y + r.height);
+  }
+  if (at < view.y + view.height) gaps.push([at - view.y, view.height]);
+  assert.deepStrictEqual(gaps, [], 'every line of the viewport shows a row');
+
+  await x11Root.unmount();
+});
+
 test('clicking a header sorts, and clicking again reverses', async () => {
   const changes = [];
   const app = await mount({ onSortChange: (next) => changes.push(next) }, 4);

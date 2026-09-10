@@ -141,7 +141,8 @@ export interface ScrollableNode extends DrawnNode {
   /**
    * Scroll the minimum amount on both axes that makes a descendant fully
    * visible. Safe to call right after that node mounts — the request is
-   * resolved on the next layout pass, when it has geometry.
+   * resolved on the next layout pass, when it has geometry, and `onScroll`
+   * reports the move once that pass is over.
    */
   scrollIntoView(node: DrawnNode): void;
 }
