@@ -16,6 +16,7 @@
     "examples:theming": "tsx examples/theming.jsx",
     "examples:container-queries": "tsx examples/container-queries.jsx",
     "examples:schedule": "tsx examples/schedule.jsx",
+    "examples:custom-layout": "tsx examples/custom-layout.jsx",
     "examples:appearance": "tsx examples/appearance.jsx",
     "examples:animation": "tsx examples/animation.jsx",
     "examples:simple": "tsx examples/simple.jsx",
