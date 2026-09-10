@@ -148,6 +148,13 @@ two part company routinely — a user hits a maximize hotkey, a tiling WM
 declines a fullscreen request — and an app that mirrors the state in its own
 UI has nowhere else to read it.
 
+Every row but `focused` and `visible` reads `_NET_WM_STATE` off the window,
+so on the **Cocoa** backend there is nothing behind them: `minimized`,
+`maximized`, `fullscreen`, `obscured`, `states` and `desktop` keep their
+initial values and never change. `focused` works there — it comes from the
+focus events, not from a property. The bridge growing zoom/miniaturize verbs
+is what would fill the rest in ([macos.md](macos.md)).
+
 With no argument it reads the window the component is in, inferred the way
 [`useTopLevelWindow()`](filedialog.md) infers it: exact for a one-window app,
 and a documented guess for a tree with several. Pass a ref to be certain.
