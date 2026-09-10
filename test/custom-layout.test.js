@@ -390,6 +390,49 @@ test('a row of equal buttons takes its width from its content', async () => {
 
 // --- keeping up with the tree -------------------------------------------------
 
+test('a stretched child stays stretched when what is inside it changes', async () => {
+  const cells = refsOf(3);
+  const moved = React.createRef();
+  const a = h('box', {
+    key: 'a',
+    ref: moved,
+    style: { width: 20, height: 10 },
+  });
+  const b = h('box', { key: 'b', style: { width: 20, height: 10 } });
+  const tree = (swapped) =>
+    h(
+      'box',
+      { style: { layout: 'equal-row' } },
+      h(
+        'box',
+        { key: 0, ref: cells[0] },
+        h('box', { style: { width: 20, height: 10 } }),
+      ),
+      h('box', { key: 1, ref: cells[1] }, swapped ? [b, a] : [a, b]),
+      h(
+        'box',
+        { key: 2, ref: cells[2] },
+        h('box', { style: { width: 20, height: 30 } }),
+      ),
+    );
+  const { render } = await mount(tree(false));
+  assert.deepStrictEqual(
+    cells.map((r) => r.current.abs.height),
+    [30, 30, 30],
+  );
+  assert.strictEqual(rel(moved.current).y, 0);
+  render(tree(true));
+  await frame();
+  // The middle cell's two boxes changed places and its size did not, so
+  // its rect is the one it had. Measuring it laid its tree out at its
+  // natural 20; the placement has to lay it out at the row's 30 again.
+  assert.deepStrictEqual(
+    cells.map((r) => r.current.abs.height),
+    [30, 30, 30],
+  );
+  assert.strictEqual(rel(moved.current).y, 10);
+});
+
 test('a child that grows is re-measured in the pass, and the ones after it move', async () => {
   const refs = refsOf(4);
   // the first card's height is two levels down, so the change reaches the
@@ -630,13 +673,16 @@ test('an absolutely positioned child is placed by its insets, not by the layout'
           right: 0,
           top: 0,
           width: 30,
-          height: 10,
+          height: 30,
         },
       }),
       h('box', { key: 'b', ref: refs[1], style: { height: 20 } }),
     ),
   );
+  // Handed to the masonry, the badge would have taken the second column
+  // and, taller than the first card, sent the second card under that one.
   assert.deepStrictEqual(xs(refs), [10, 160], 'the layout never saw it');
+  assert.deepStrictEqual(ys(refs), [10, 10]);
   assert.deepStrictEqual(rel(badge.current), { x: 290, y: 0 });
 });
 

@@ -10,6 +10,7 @@ import assert from 'node:assert';
 import React from 'react';
 
 import { createRoot } from '../src/index.js';
+import { registerLayout, unregisterLayout } from '../src/host.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;
@@ -101,6 +102,35 @@ test('equal-row squeezes its cells to the widest child’s floor and no further'
   );
 });
 
+test('a child whose floor moves takes its equal-row cells with it', async () => {
+  const refs = [React.createRef(), React.createRef(), React.createRef()];
+  // 90 wide by its own say, so the row itself is owed no floor
+  const row = (padding) =>
+    h(
+      'box',
+      { style: { layout: 'equal-row', width: 90 } },
+      h('box', { ref: refs[0], style: { padding } }, wrapping(3)),
+      button(refs[1]),
+      button(refs[2]),
+    );
+  const { render } = await mount(row(8));
+  // 30 each would be below the floor of 36: they overflow at it
+  assert.deepStrictEqual(
+    refs.map((r) => r.current.abs.width),
+    [36, 36, 36],
+  );
+  // The first button's own padding grows, which moves its floor to 46 and
+  // changes nothing inside it. Nothing writes a floor on that button — its
+  // layout reads the floor rather than yoga — nor on the row, so the width
+  // pass is owed for the child alone.
+  render(row(13));
+  await frame();
+  assert.deepStrictEqual(
+    refs.map((r) => r.current.abs.width),
+    [46, 46, 46],
+  );
+});
+
 test('a layout host’s own floor is what its algorithm answers with no room', async () => {
   const host = React.createRef();
   await mount(
@@ -139,6 +169,40 @@ test('a card whose height is its own holds its rows at their floors', async () =
     rows.map((r) => r.current.abs.height),
     [20, 20],
   );
+});
+
+test('a rect shorter than its child’s content holds the child’s rows at their floors', async () => {
+  // a layout that puts its one child in a 30-high slot, whatever it holds
+  registerLayout('slot', {
+    layout: (children, c) => ({
+      width: c.widthMode === 'exactly' ? c.width : 100,
+      height: c.heightMode === 'exactly' ? c.height : 30,
+      children: children.map(() => ({ x: 0, y: 0, width: 100, height: 30 })),
+    }),
+  });
+  try {
+    const rows = [React.createRef(), React.createRef()];
+    await mount(
+      h(
+        'box',
+        { style: { layout: 'slot' } },
+        h(
+          'box',
+          { key: 0 },
+          h('box', { ref: rows[0] }, h('box', { style: { height: 20 } })),
+          h('box', { ref: rows[1] }, h('box', { style: { height: 20 } })),
+        ),
+      ),
+    );
+    // the child names no height, the rect does: 40 of rows in 30, and they
+    // overflow it rather than squash
+    assert.deepStrictEqual(
+      rows.map((r) => r.current.abs.height),
+      [20, 20],
+    );
+  } finally {
+    unregisterLayout('slot');
+  }
 });
 
 test('a card’s height floors follow the width it is placed at', async () => {
