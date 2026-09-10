@@ -34,6 +34,9 @@ export class CocoaWindow {
     // — the period of the display it is on (`_refreshFrameInterval`).
     this._rafLast = 0;
     this._frameInterval = 0;
+    // …and when a frame last reached glass, whoever painted it: the pump's
+    // paced frame or an input answered on the spot (`frameInFlight`)
+    this._presentedAt = -Infinity;
 
     const s = this.scale;
     // Snapped to whole POINTS: AppKit rounds window sizes to the point
@@ -570,6 +573,28 @@ export class CocoaWindow {
     return false;
   }
 
+  /**
+   * Whether this window flipped less than one of its frame intervals ago —
+   * the wheel's gate (`CocoaApp._routeWheel`), and only the wheel's.
+   *
+   * A trackpad routinely lands two scroll events in one pump tick, and each
+   * used to paint and flip on the spot: the second frame was drawn into the
+   * buffer the first flip had taken off glass microseconds before, while the
+   * WindowServer could still be compositing from it. A scroll's frame blits,
+   * then repaints what the shift got wrong, so a composite caught between the
+   * two shows the blit alone — a held sticky header dragged up a pixel for a
+   * frame, or the rows under it painted over it, then corrected. No other
+   * input has both halves of that: a resize paints into a pair it has just
+   * made, and a press or a key does not come in bursts inside a refresh.
+   *
+   * Off with the interval: `frameInterval: 0` asks for no pacing at all.
+   */
+  _flippedRecently(now = performance.now()) {
+    return (
+      this._frameInterval > 0 && now - this._presentedAt < this._frameInterval
+    );
+  }
+
   requestAnimationFrame(cb) {
     return this.app._requestFrame(cb, this);
   }
@@ -597,6 +622,7 @@ export class CocoaWindow {
     // again next tick and the frame goes out the moment the window is back.
     if (this._holdPresent || !this._visible()) return false;
     this._dirty = false;
+    this._presentedAt = performance.now();
     if (this._chain) {
       const shown = this._chain.back;
       this._native.surfaceUnlock(shown.handle);

@@ -1764,7 +1764,8 @@ Five changes, each fenced by a test:
   to a steady 16 (52 → 56fps against the 62.5Hz driver), and the wheel is
   answered on the event like a press — AppKit already delivers scroll
   events at the display's rate, so that is once per refresh by
-  construction.
+  construction. (Mostly: a trackpad lands two in one tick often enough
+  that the window now gates it — see "The wheel is gated to the display too" below.)
 
 The structural half of these numbers is a gate now:
 `npm run bench:presenters -- --check` judges full-window frames, the share
@@ -1854,6 +1855,23 @@ renderer's own and are listed at the end.
   host, so a present now counts as in flight for one frame interval; the
   same burst is one frame at the size it ended on, plus the one the first
   message was answered with. `test/cocoa-frames.test.js`.
+- **The wheel is gated to the display too** (`CocoaApp._routeWheel`,
+  `CocoaWindow._flippedRecently`). The wheel's early flush painted and
+  flipped for every scroll event, and a trackpad lands two in one pump
+  tick often, so the second frame was drawn into the buffer the first
+  flip had taken off glass microseconds before — while the WindowServer
+  could still be compositing from it. A scroll's frame blits before it
+  repaints what the shift got wrong, and a composite caught between the
+  two shows the blit alone: a held `position: 'sticky'` header dragged up
+  a pixel for a frame, or the rows under it painted over it and then
+  corrected. Everything else in a scrolling pane moves anyway, which is
+  why this hid until something was meant to hold still. Now the first
+  event of a burst is answered on the spot and the rest fold into the
+  next paced frame, and a frame that answered the wheel restarts the
+  window's clock, so the pump does not flip again a few milliseconds
+  after it. Only the wheel: a resize paints into a pair it has just made,
+  and gating its ticks cost the live resize a frame after the drag
+  (`resize` in the presenter gate caught it). `test/cocoa-frames.test.js`.
 
 **What was left, in order of what it cost** — the three items of #445,
 measured in the pass below: a full relayout of a large tree (44ms at 3,600
