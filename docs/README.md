@@ -29,12 +29,15 @@ is called out where the answer is.
   `Radio`/`RadioGroup`, `Switch`, `ProgressBar`), `Select`, `Slider`,
   `Tooltip`, `Dialog`, `MenuBar`/`ContextMenu`, `Tabs`, `Table`,
   `SplitPane`, and the `useAnchor` popup placement hook.
-- [globalmenu.md](globalmenu.md) — handing a window's menu bar to the
-  desktop's panel where there is one, with no configuration: the dbusmenu
-  item vocabulary `MenuBar` shares with it, why detection means "a panel is
-  running" rather than "one could be started", the diff that decides between
-  patching properties and invalidating a layout, and the menu host in
-  `scripts/` for seeing it work without such a desktop.
+- [globalmenu.md](globalmenu.md) — handing a window's menu bar to wherever
+  the platform keeps menus, with no configuration: the macOS menu bar on the
+  cocoa backend, the desktop's panel over `com.canonical.dbusmenu` where one
+  is running, and the drawn bar everywhere else. The item vocabulary
+  `MenuBar` shares with all three, why detection means "a panel is running"
+  rather than "one could be started", the diff that decides between patching
+  properties and invalidating a layout, why `Control` in a shortcut means ⌘
+  on a Mac, and the menu host in `scripts/` for seeing the D-Bus path work
+  on a desktop that has none.
 - [events.md](events.md) — the synthetic event system: dispatch phases,
   event object shape, focus, cursors, default actions.
 - [accessibility.md](accessibility.md) — screen readers see react-x11 apps:
@@ -58,7 +61,9 @@ is called out where the answer is.
 - [clipboard.md](clipboard.md) — copy and paste beyond the built-in text
   controls: `useClipboard()`, the CLIPBOARD/PRIMARY split, offering several
   flavours of one payload, the `text`/`files`/`uris` groups shared with drag
-  and drop, `watch()`, and why a copy carries a timestamp.
+  and drop, `watch()`, and why a copy carries a timestamp. The one API where
+  the backends are not at parity — text works on both, and the rest of that
+  list is X11's.
 - [typescript.md](typescript.md) — the bundled types: one tsconfig option,
   why JSX comes from `react-x11/jsx-runtime` rather than an augmentation,
   and how the declarations are kept from drifting.
