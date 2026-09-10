@@ -6704,6 +6704,7 @@ export const Scrollable = (Base) =>
       this._scrollMeasureDirty = true;
       if (this.isScroller()) return;
       this._scrollIntoViewTarget = null;
+      this._scrollToTarget = null;
       this._childOrigin = null;
       if (this.scrollX === 0 && this.scrollY === 0) return;
       this.scrollX = 0;
@@ -6771,10 +6772,16 @@ export const Scrollable = (Base) =>
         this._scrollMeasureDirty = false;
         this.yoga.markLayoutSeen();
       }
+      // A scrollTo held for this pass lands first, so a node asked into view
+      // in the same frame is brought in from where that scroll put the pane:
+      // the order the two have on a laid-out pane, where scrollTo applies at
+      // once and scrollIntoView waits for the pass.
+      const heldFrom = this._resolveScrollTo();
       this._resolveScrollIntoView();
       this.scrollY = clampScroll(this.scrollY, this._maxScroll('y'));
       this.scrollX = clampScroll(this.scrollX, this._maxScroll('x'));
       this._reportViewport();
+      if (heldFrom) this._reportScrollTo(heldFrom);
       // `scrollX` is how far the content has moved **from its start**, which
       // is the right-hand edge in RTL — so scrolling shifts the children the
       // other way. Keeping it a distance rather than a coordinate is what
@@ -7003,6 +7010,26 @@ export const Scrollable = (Base) =>
     }
 
     _scrollToDevice(want) {
+      // A pane no layout pass has placed as a scroller has no extent to
+      // clamp against: on mount `contentHeight` and `abs` are still the
+      // zeros they were built with, so the clamp below would turn any offset
+      // into 0 and drop the request — which is what restoring a list's
+      // position from a mount-time effect runs into, and so does a box that
+      // starts scrolling in the same commit. The offset is held instead, the
+      // way `scrollIntoView` holds its node, and `_resolveScrollTo` applies
+      // it against what the pass measures. `_childOrigin` is the witness:
+      // the first pass that places this pane's children as a scroller
+      // writes it, and a style that stops scrolling clears it. Nothing is
+      // armed for the blit, since that pass is a layout change rather than a
+      // pure scroll, and `onScroll` waits for the pass as well.
+      if (this._childOrigin == null && this.isScroller()) {
+        this._scrollToTarget = {
+          x: want.x ?? this._scrollToTarget?.x,
+          y: want.y ?? this._scrollToTarget?.y,
+        };
+        this._invalidateLayout('scroll');
+        return;
+      }
       const next = {
         x:
           want.x == null
@@ -7059,18 +7086,7 @@ export const Scrollable = (Base) =>
       }
       this.scrollX = next.x;
       this.scrollY = next.y;
-      // the handler is application code: logical, like every payload —
-      // finder.jsx's row virtualisation divides scrollY by a row height it
-      // wrote in a style, and those must be the same unit
-      const s = this.scale;
-      this.props.onScroll?.({
-        scrollX: next.x / s,
-        scrollY: next.y / s,
-        contentWidth: this.contentWidth / s,
-        contentHeight: this.contentHeight / s,
-        viewportWidth: this.abs.width / s,
-        viewportHeight: this.abs.height / s,
-      });
+      this.props.onScroll?.(this._scrollEvent());
       // A scroll reflows this viewport's contents and nothing else, and the
       // viewport clips them, so the damage is this node's own rect. It is a
       // layout change all the same — children's absolute positions move — hence
@@ -7081,6 +7097,60 @@ export const Scrollable = (Base) =>
       // exposed strip and blits the rest — see WindowNode.)
       this.root?.invalidate(true, this, 'scroll');
       if (root) root._scrollClaim = null;
+    }
+
+    /**
+     * Apply the offset a `scrollTo` asked for before this pane's first
+     * layout (see `_scrollToDevice`), clamped to the extent the pass has
+     * just measured. Returns the offsets it moved the pane from, for the
+     * `onScroll` that follows the pass, or null when nothing was held.
+     */
+    _resolveScrollTo() {
+      const target = this._scrollToTarget;
+      if (!target) return null;
+      this._scrollToTarget = null;
+      const from = { x: this.scrollX, y: this.scrollY };
+      if (target.x != null) {
+        this.scrollX = clampScroll(target.x, this._maxScroll('x'));
+      }
+      if (target.y != null) {
+        this.scrollY = clampScroll(target.y, this._maxScroll('y'));
+      }
+      return from;
+    }
+
+    /**
+     * `onScroll` for a held scroll the pass has resolved, when the pass
+     * left the pane somewhere other than `from`. Deferred like `onViewport`,
+     * since a setState from the handler would re-enter the pass, so it
+     * arrives after the frame that first shows the new offset. The payload
+     * is read on delivery, not now: a wheel landing in between has already
+     * reported where it went, and a payload from before it would leave the
+     * handler behind the pane.
+     */
+    _reportScrollTo(from) {
+      if (from.x === this.scrollX && from.y === this.scrollY) return;
+      setImmediate(() => {
+        const notify = this.props.onScroll;
+        if (this.destroyed || !notify) return;
+        callHandler(this, 'onScroll', notify, this._scrollEvent());
+      });
+    }
+
+    /** `onScroll`'s payload, for the offsets in force. The handler is
+     * application code, so it is logical like every payload: finder.jsx's
+     * row virtualisation divides scrollY by a row height it wrote in a
+     * style, and those must be the same unit. */
+    _scrollEvent() {
+      const s = this.scale;
+      return {
+        scrollX: this.scrollX / s,
+        scrollY: this.scrollY / s,
+        contentWidth: this.contentWidth / s,
+        contentHeight: this.contentHeight / s,
+        viewportWidth: this.abs.width / s,
+        viewportHeight: this.abs.height / s,
+      };
     }
 
     /**
@@ -7104,10 +7174,10 @@ export const Scrollable = (Base) =>
     scrollBy(by) {
       const s = this.scale;
       if (typeof by === 'number')
-        return this._scrollToDevice({ y: this.scrollY + by * s });
+        return this._scrollToDevice({ y: this._scrollBase('y') + by * s });
       this._scrollToDevice({
-        x: by?.x == null ? undefined : this.scrollX + by.x * s,
-        y: by?.y == null ? undefined : this.scrollY + by.y * s,
+        x: by?.x == null ? undefined : this._scrollBase('x') + by.x * s,
+        y: by?.y == null ? undefined : this._scrollBase('y') + by.y * s,
       });
     }
 
@@ -7115,9 +7185,18 @@ export const Scrollable = (Base) =>
      * is what keeps the scroll blit on the pixel grid at any scale. */
     _scrollByDevice(dx, dy) {
       this._scrollToDevice({
-        x: dx ? this.scrollX + dx : undefined,
-        y: dy ? this.scrollY + dy : undefined,
+        x: dx ? this._scrollBase('x') + dx : undefined,
+        y: dy ? this._scrollBase('y') + dy : undefined,
       });
+    }
+
+    /** Where a relative scroll starts on one axis: the offset in force, or
+     * the one a `scrollTo` is holding for the first layout, so a `scrollBy`
+     * after it moves on from there, as it would on a laid-out pane. */
+    _scrollBase(axis) {
+      const held = this._scrollToTarget?.[axis];
+      if (held != null) return held;
+      return axis === 'x' ? this.scrollX : this.scrollY;
     }
 
     /**
