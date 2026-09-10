@@ -651,9 +651,13 @@ export interface BoxProps
 /** What `overflow: 'scroll'` adds, on a `<box>` or a `<window>`. */
 export interface ScrollProps {
   /**
-   * The offsets moved: the wheel, the keys, a bar, `scrollTo`/`scrollBy`.
-   * A `scrollTo` held for the pane's first layout reports once that layout
-   * has applied it, after the frame that shows it.
+   * The offsets moved, by any route. The wheel, the keys, a bar and
+   * `scrollTo`/`scrollBy` report inside the call. Layout reports once its
+   * pass is over, after the frame that shows the move: a `scrollTo` held
+   * for the pane's first layout landing, a `scrollIntoView` resolving, or
+   * the offset pulled back when the content shrinks or the viewport grows
+   * under it. Each report carries the offsets in force when it is
+   * delivered.
    */
   onScroll?: (ev: ScrollEvent) => void;
   /** Fired from layout, so it arrives for a list nobody has scrolled yet. */

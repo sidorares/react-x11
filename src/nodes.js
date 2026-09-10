@@ -6772,16 +6772,23 @@ export const Scrollable = (Base) =>
         this._scrollMeasureDirty = false;
         this.yoga.markLayoutSeen();
       }
+      // The moves layout makes on its own, with nobody's call to report them
+      // from: a `scrollTo` held for this pane's first pass landing, a
+      // `scrollIntoView` resolving against the geometry this pass produced,
+      // and the clamp pulling the offset back when the content shrank, or
+      // the viewport grew, under it. A browser fires `scroll` for each, so
+      // `onScroll` hears of them too, once the pass is over.
+      const from = { x: this.scrollX, y: this.scrollY };
       // A scrollTo held for this pass lands first, so a node asked into view
       // in the same frame is brought in from where that scroll put the pane:
       // the order the two have on a laid-out pane, where scrollTo applies at
       // once and scrollIntoView waits for the pass.
-      const heldFrom = this._resolveScrollTo();
+      this._resolveScrollTo();
       this._resolveScrollIntoView();
       this.scrollY = clampScroll(this.scrollY, this._maxScroll('y'));
       this.scrollX = clampScroll(this.scrollX, this._maxScroll('x'));
       this._reportViewport();
-      if (heldFrom) this._reportScrollTo(heldFrom);
+      this._reportScrollTo(from);
       // `scrollX` is how far the content has moved **from its start**, which
       // is the right-hand edge in RTL — so scrolling shifts the children the
       // other way. Keeping it a distance rather than a coordinate is what
@@ -7102,31 +7109,31 @@ export const Scrollable = (Base) =>
     /**
      * Apply the offset a `scrollTo` asked for before this pane's first
      * layout (see `_scrollToDevice`), clamped to the extent the pass has
-     * just measured. Returns the offsets it moved the pane from, for the
-     * `onScroll` that follows the pass, or null when nothing was held.
+     * just measured. Its `onScroll` is the pass's, like every move layout
+     * makes (see `_absolutizeChildren`).
      */
     _resolveScrollTo() {
       const target = this._scrollToTarget;
-      if (!target) return null;
+      if (!target) return;
       this._scrollToTarget = null;
-      const from = { x: this.scrollX, y: this.scrollY };
       if (target.x != null) {
         this.scrollX = clampScroll(target.x, this._maxScroll('x'));
       }
       if (target.y != null) {
         this.scrollY = clampScroll(target.y, this._maxScroll('y'));
       }
-      return from;
     }
 
     /**
-     * `onScroll` for a held scroll the pass has resolved, when the pass
-     * left the pane somewhere other than `from`. Deferred like `onViewport`,
-     * since a setState from the handler would re-enter the pass, so it
-     * arrives after the frame that first shows the new offset. The payload
-     * is read on delivery, not now: a wheel landing in between has already
-     * reported where it went, and a payload from before it would leave the
-     * handler behind the pane.
+     * `onScroll` for an offset a layout pass moved — a held `scrollTo`
+     * landing, a `scrollIntoView` resolving, or the clamp when the content
+     * shrank or the viewport grew (see `_absolutizeChildren`) — when the
+     * pass left the pane somewhere other than `from`. Deferred like
+     * `onViewport`, since a setState from the handler would re-enter the
+     * pass, so it arrives after the frame that first shows the new offset.
+     * The payload is read on delivery, not now: a wheel landing in between
+     * has already reported where it went, and a payload from before it
+     * would leave the handler behind the pane.
      */
     _reportScrollTo(from) {
       if (from.x === this.scrollX && from.y === this.scrollY) return;
@@ -7276,7 +7283,8 @@ export const Scrollable = (Base) =>
      * only exist after a layout pass, so a caller reacting to a mount (a
      * list widget moving its selection, say) would otherwise measure a node
      * that has no geometry yet. `absolutize` resolves it against freshly
-     * computed yoga positions.
+     * computed yoga positions, and `onScroll` reports the move once that
+     * pass is over (`_reportScrollTo`).
      */
     scrollIntoView(node) {
       if (!node || !this.isScroller()) return;
