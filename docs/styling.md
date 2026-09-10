@@ -893,6 +893,72 @@ wrote a `<ThemeProvider>` is dark on a dark desktop, which is how that app
 blends in ([appearance.md](appearance.md)). A token no palette defines is
 reported the same way, naming every token the one in force does have.
 
+## Sticky positioning
+
+`position: 'sticky'` is CSS's: the box is laid out in flow, exactly where
+`relative` would put it, and then held inside the nearest scroll pane by its
+insets. `top: 0` keeps a section's header at the top of the pane while the
+section scrolls under it — until the section's end arrives and carries the
+header off, which is how the next section's header takes over.
+
+```jsx
+const s = createStyles({
+  pane: { overflow: 'scroll', flexGrow: 1 },
+  section: { flexShrink: 0 },
+  header: { position: 'sticky', top: 0, backgroundColor: '$background' },
+});
+
+<box style={s.pane}>
+  {groups.map((group) => (
+    <box key={group.letter} style={s.section}>
+      <text style={s.header}>{group.letter}</text>
+      {group.people.map((person) => (
+        <Row key={person.id} person={person} />
+      ))}
+    </box>
+  ))}
+</box>;
+```
+
+- **The insets are thresholds, not offsets.** `top: 12` says the box's top
+  edge may come no nearer than 12px to the pane's top edge; it does not move
+  a box that is already further down. `top`, `bottom`, `left`, `right`,
+  `start` and `end` all work, in any combination, and a percentage is of the
+  pane's size. An edge with no inset does not stick.
+- **The pane is the nearest ancestor with `overflow: 'scroll'`** — a `<box>`
+  or the `<window>`. Its edges are inside its border and over its padding:
+  the band the content scrolls through. `overflow: 'hidden'` clips without
+  scrolling, so — unlike on the web — a rounded card between a header and
+  the pane does not quietly become the pane the header sticks to. With
+  nothing above that scrolls, the box stays where layout put it.
+- **The parent is the limit.** The box's margin box never leaves its
+  parent's content box, and that is the push. Wrap each header with the rows
+  it heads, as above: a header that is a sibling of every row has the whole
+  list for a parent and sticks for the whole list. A direct child of the
+  pane has the pane's content for a parent, and sticks for the whole scroll.
+- **It paints over its siblings.** A sticky box paints after its siblings of
+  the same `zIndex`, as CSS paints a positioned box over the ones in flow, so
+  the rows that scroll under a header do not paint over it, and it takes the
+  press where it covers them. `zIndex` still orders it first. Give it a
+  background, or the rows show through.
+- **It lands in the frame that scrolled.** The pane applies the offset in
+  the layout pass the scroll runs — never through a re-render — so a header
+  cannot trail its content by a frame, and a pane of headers keeps the
+  scroll blit: a header riding with its rows costs nothing, and a held one
+  repaints its own rect.
+- **`onLayout` reports where layout put the box**, not where it is held,
+  the same way a scroll does not fire it. Where it is held is
+  `getClientRects()`.
+
+Both axes at once, and one sticky box inside another, are what
+`examples/schedule.jsx` is made of: day banners pushed off by the next day, a
+row of room names held under the banner, a column of times held at the left,
+and the corner where the two meet.
+
+Not yet: CSS's `scroll-padding`. Scrolling a node into view — keyboard focus
+reaching a row — brings it to the pane's edge, which can be under a held
+header.
+
 ## Transitions
 
 `transition` names how long a change takes. A number covers every animatable
@@ -1252,6 +1318,14 @@ can be looked at without stopping the compositor for the whole session. See
   where `useControl` already returns `hover`/`focused`/`pressed` as state
   ([components.md](components.md#basic-controls)). `<Checkbox>` does exactly
   that, because its well is a sibling of the label the press lands on.
+- **Sticky sticks to a pane that scrolls, not to anything that clips.** CSS
+  makes every `overflow` but `visible` a scroll container, so a header
+  inside a card with `overflow: hidden` sticks to the card — which never
+  scrolls — and appears to do nothing, the most asked-about sticky bug there
+  is. Here `'hidden'` is CSS's `clip`: it clips and scrolls nothing, and only
+  `overflow: 'scroll'` makes a pane (see
+  [Sticky positioning](#sticky-positioning)). A header inside a rounded card
+  sticks to the list the card scrolls in, and stays inside the card.
 
 ## Elements that are not styled
 

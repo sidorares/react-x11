@@ -205,6 +205,9 @@ const s = createStyles({
     start: '-40%',
     animation: { start: { to: '100%', duration: 1100 } },
   },
+  // held against the nearest scroll pane's edges by its insets
+  sectionHeader: { position: 'sticky', top: 0 },
+  stickyColumn: { position: 'sticky', start: 0, bottom: '10%' },
   pulse: {
     backgroundColor: '$track',
     animation: {

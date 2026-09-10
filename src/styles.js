@@ -45,7 +45,17 @@ const POSITION = {
   static: Yoga.POSITION_TYPE_STATIC,
   relative: Yoga.POSITION_TYPE_RELATIVE,
   absolute: Yoga.POSITION_TYPE_ABSOLUTE,
+  // Laid out in flow, exactly as `relative` is — sticking is not something
+  // layout does, it is a shift the scroll pane makes afterwards (nodes.js,
+  // `WindowNode._placeSticky`). What differs is the insets: here they are
+  // thresholds against the pane's edges, so yoga must never see them as
+  // offsets (`applyLayoutStyle`).
+  sticky: Yoga.POSITION_TYPE_RELATIVE,
 };
+
+/** The properties that are an offset under `relative` and `absolute`, and a
+ *  threshold under `sticky` — see `applyLayoutStyle`. */
+const INSETS = new Set(['top', 'right', 'bottom', 'left', 'start', 'end']);
 
 const DISPLAY = {
   flex: Yoga.DISPLAY_FLEX,
@@ -1688,9 +1698,19 @@ export function applyLayoutDefaults(yogaNode) {
  */
 export function applyLayoutStyle(yogaNode, props, oldProps = {}) {
   let changed = false;
+  // A sticky node's insets are thresholds the scroll pane reads after layout,
+  // never offsets — so yoga gets `undefined` for them, and a node that turns
+  // sticky (or stops) has all six re-sent whether or not they changed. The
+  // flip still counts as a change: the pass it asks for is what re-places
+  // the node.
+  const sticky = props.position === 'sticky';
+  const flipped = sticky !== (oldProps.position === 'sticky');
   for (const key of Object.keys(LAYOUT_APPLIERS)) {
-    if (props[key] !== oldProps[key]) {
-      LAYOUT_APPLIERS[key](yogaNode, props[key]);
+    if (props[key] !== oldProps[key] || (flipped && INSETS.has(key))) {
+      LAYOUT_APPLIERS[key](
+        yogaNode,
+        sticky && INSETS.has(key) ? undefined : props[key],
+      );
       changed = true;
     }
   }

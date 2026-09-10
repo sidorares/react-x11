@@ -37,7 +37,7 @@ export type Align =
   | 'space-around';
 
 export type FlexWrap = 'nowrap' | 'wrap' | 'wrap-reverse';
-export type PositionType = 'static' | 'relative' | 'absolute';
+export type PositionType = 'static' | 'relative' | 'absolute' | 'sticky';
 export type Display = 'flex' | 'none';
 export type Overflow = 'visible' | 'hidden' | 'scroll';
 export type BorderStyle = 'solid' | 'dashed';
@@ -108,7 +108,18 @@ export interface LayoutStyle {
    *  say `minWidth: 0` (or an `overflow` that clips) for that. */
   flexShrink?: number;
   flexBasis?: Dimension;
+  /**
+   * `'relative'` (the default) and `'absolute'` move the box by its insets.
+   * `'sticky'` lays it out in flow like `'relative'`, then holds it inside
+   * the nearest scroll pane's edges by its insets — `top: 0` keeps a header
+   * at the top of the pane until its parent scrolls away and takes it
+   * along. A sticky box paints over its siblings of the same `zIndex`.
+   * See docs/styling.md, "Sticky positioning".
+   */
   position?: PositionType;
+  /** An offset from the edge — or, under `position: 'sticky'`, how close
+   *  to the scroll pane's edge the box may come. A percentage of a sticky
+   *  inset is of the pane's size. The same holds for the other five. */
   top?: Length;
   right?: Length;
   bottom?: Length;
