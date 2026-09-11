@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { createRoot } from '../Reconciler.js';
-import { setAnimationClock } from '../nodes.js';
+import { setAnimationClock } from '../nodes/animation.js';
 import { setAppearanceForTests } from '../appearance.js';
 
 // A test process must not register with the desktop's live AT-SPI registry —

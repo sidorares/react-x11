@@ -28,8 +28,8 @@ import {
   DRAWN_KINDS,
   CUSTOM_SEMANTIC_NAMES,
   CUSTOM_SELF_DAMAGED,
-  Node,
-} from './nodes.js';
+} from './nodes/kinds.js';
+import { Node } from './nodes/node.js';
 import { markLayoutsHotReloadSession } from './layouts.js';
 
 /** kind -> definition. Insertion-ordered, which is the order errors list. */

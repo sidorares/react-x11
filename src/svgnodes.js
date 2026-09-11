@@ -12,7 +12,8 @@
 // grain for it.
 import { SvgView } from 'ntk';
 
-import { Node, intrinsicSize } from './nodes.js';
+import { Node } from './nodes/node.js';
+import { intrinsicSize } from './nodes/layout.js';
 import { isLayoutProp, isPaintProp } from './styles.js';
 
 // SVG attributes that are camelCase in SVG itself; every other camelCase

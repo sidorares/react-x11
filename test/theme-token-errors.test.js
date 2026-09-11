@@ -14,7 +14,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { appearanceChanged } from '../src/nodes.js';
+import { appearanceChanged } from '../src/nodes/cascade.js';
 import { createMockApp } from './helpers/mock-app.js';
 import { runScript } from './helpers/run-script.js';
 

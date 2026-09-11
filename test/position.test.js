@@ -20,7 +20,7 @@ import {
   unregisterPosition,
   registeredPositions,
 } from '../src/host.js';
-import { setAnimationClock } from '../src/nodes.js';
+import { setAnimationClock } from '../src/nodes/animation.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;

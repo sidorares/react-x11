@@ -34,7 +34,8 @@ import { XEMBED, XEmbedSocket } from 'ntk';
 
 import { isFocusable } from './a11y.js';
 import { lastInputTime } from './inputtime.js';
-import { Node, pixelFor } from './nodes.js';
+import { Node } from './nodes/node.js';
+import { pixelFor } from './nodes/window/capabilities.js';
 
 const px = (v) => Math.max(1, Math.round(v || 0));
 

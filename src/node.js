@@ -13,27 +13,25 @@
 // they run after the application's own handlers and not at all if one of
 // those called `preventDefault`, which is the ordering that makes an
 // interactive element composable rather than something to work around.
-export {
-  Node,
-  // `class MyPane extends Scrollable(Node)` — the same mixin <box> and
-  // <window> use, so a registered element can honour `overflow: 'scroll'`
-  // with the wheel, the keys, the bars and the a11y role already wired.
-  Scrollable,
-  // The `measureContent` body of an element whose content has a size of its
-  // own and an aspect ratio to keep — what <image> and <svg> answer with.
-  intrinsicSize,
-  // The cadence a caret blinks at, so an element that draws one is in step
-  // with `<textinput>` rather than a few tens of milliseconds beside it.
-  CARET_BLINK_MS,
-  BoxNode,
-  TextNode,
-  ImageNode,
-  CanvasNode,
-  TextInputNode,
-  TextAreaNode,
-  WindowNode,
-  PopupNode,
-} from './nodes.js';
+export { Node } from './nodes/node.js';
+// `class MyPane extends Scrollable(Node)` — the same mixin <box> and
+// <window> use, so a registered element can honour `overflow: 'scroll'`
+// with the wheel, the keys, the bars and the a11y role already wired.
+export { Scrollable } from './nodes/scrollable.js';
+// The `measureContent` body of an element whose content has a size of its
+// own and an aspect ratio to keep — what <image> and <svg> answer with.
+export { intrinsicSize } from './nodes/layout.js';
+// The cadence a caret blinks at, so an element that draws one is in step
+// with `<textinput>` rather than a few tens of milliseconds beside it.
+export { CARET_BLINK_MS } from './nodes/textinput.js';
+export { BoxNode } from './nodes/box.js';
+export { TextNode } from './nodes/text.js';
+export { ImageNode } from './nodes/image.js';
+export { CanvasNode } from './nodes/canvas.js';
+export { TextInputNode } from './nodes/textinput.js';
+export { TextAreaNode } from './nodes/textarea.js';
+export { WindowNode } from './nodes/window/window.js';
+export { PopupNode } from './nodes/window/popup.js';
 
 // The two precedents for an element that owns a real child X window rather
 // than painting into its parent's: registered with `drawn: false`, realized

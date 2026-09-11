@@ -9,7 +9,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import React from 'react';
 import { renderX11, cleanup } from '../src/testing/index.js';
-import { TEXT_STRIP_BELOW } from '../src/nodes.js';
+import { TEXT_STRIP_BELOW } from '../src/nodes/text.js';
 
 const require = createRequire(import.meta.url);
 const fonts = {

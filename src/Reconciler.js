@@ -18,21 +18,19 @@ import {
 } from './priority.js';
 import {
   WindowNode,
-  PopupNode,
-  BoxNode,
-  TextNode,
-  TextChunkNode,
-  ImageNode,
-  CanvasNode,
-  TextInputNode,
-  TextAreaNode,
-  appearanceChanged,
   beginWindowMaps,
   flushWindowMaps,
   flushWindowRestacks,
-  windowAttributes,
-  setTextStripBelow,
-} from './nodes.js';
+} from './nodes/window/window.js';
+import { PopupNode } from './nodes/window/popup.js';
+import { BoxNode } from './nodes/box.js';
+import { TextNode, TextChunkNode, setTextStripBelow } from './nodes/text.js';
+import { ImageNode } from './nodes/image.js';
+import { CanvasNode } from './nodes/canvas.js';
+import { TextInputNode } from './nodes/textinput.js';
+import { TextAreaNode } from './nodes/textarea.js';
+import { appearanceChanged } from './nodes/cascade.js';
+import { windowAttributes } from './nodes/window/hints.js';
 import { setFrameRateDefault } from './pacing.js';
 import { hasDropProps } from './dnd.js';
 import { AppProvider } from './appcontext.js';

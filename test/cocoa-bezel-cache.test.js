@@ -10,7 +10,7 @@ import assert from 'node:assert';
 import { test } from 'node:test';
 
 import { BezelStore } from '../src/cocoa/bezels.js';
-import { appearanceChanged } from '../src/nodes.js';
+import { appearanceChanged } from '../src/nodes/cascade.js';
 
 /** The slice of the bridge the store touches, counting the cell renders. */
 function fakeNative() {

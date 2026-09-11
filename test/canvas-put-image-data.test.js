@@ -22,7 +22,7 @@ import {
   pixelAt,
   isNear,
 } from '../src/testing/index.js';
-import { resetPutImageDataWarningForTests } from '../src/nodes.js';
+import { resetPutImageDataWarningForTests } from '../src/nodes/canvas.js';
 
 const h = React.createElement;
 

@@ -17,7 +17,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { setAnimationClock } from '../src/nodes.js';
+import { setAnimationClock } from '../src/nodes/animation.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;

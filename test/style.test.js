@@ -407,7 +407,8 @@ test('REACT_X11_STYLE_ONLY: a flat style prop is an error that names the fix', a
   // a child process because the flag is read at module load.
   const { execFileSync } = await import('node:child_process');
   const script = `
-    import { BoxNode, WindowNode } from './src/nodes.js';
+    import { BoxNode } from './src/nodes/box.js';
+    import { WindowNode } from './src/nodes/window/window.js';
     import { createMockApp } from './test/helpers/mock-app.js';
     const app = createMockApp();
     try {
@@ -513,7 +514,7 @@ test('fading in from transparent never darkens on the way', async () => {
 });
 
 test('a transition eases a colour instead of snapping to it', async () => {
-  const { setAnimationClock } = await import('../src/nodes.js');
+  const { setAnimationClock } = await import('../src/nodes/animation.js');
   let clock = 1000;
   setAnimationClock(() => clock);
   try {
@@ -571,7 +572,7 @@ test('a transition eases a colour instead of snapping to it', async () => {
 });
 
 test('a transition after an idle spell still runs', async () => {
-  const { setAnimationClock } = await import('../src/nodes.js');
+  const { setAnimationClock } = await import('../src/nodes/animation.js');
   let clock = 1000;
   setAnimationClock(() => clock);
   try {
@@ -620,7 +621,7 @@ test('a transition after an idle spell still runs', async () => {
 });
 
 test('an interrupted transition reverses from where it got to', async () => {
-  const { setAnimationClock } = await import('../src/nodes.js');
+  const { setAnimationClock } = await import('../src/nodes/animation.js');
   let clock = 0;
   setAnimationClock(() => clock);
   try {
@@ -665,7 +666,7 @@ test('an interrupted transition reverses from where it got to', async () => {
 });
 
 test('transitions cover layout too, and relayout as they run', async () => {
-  const { setAnimationClock } = await import('../src/nodes.js');
+  const { setAnimationClock } = await import('../src/nodes/animation.js');
   let clock = 0;
   setAnimationClock(() => clock);
   try {
@@ -710,7 +711,7 @@ test('transitions cover layout too, and relayout as they run', async () => {
 });
 
 test('a transition started by a prop change schedules its own frames', async () => {
-  const { setAnimationClock } = await import('../src/nodes.js');
+  const { setAnimationClock } = await import('../src/nodes/animation.js');
   let clock = 1000;
   setAnimationClock(() => clock);
   try {
@@ -808,7 +809,7 @@ test('a property with no midpoint snaps rather than animating', async () => {
 
 test('Switch: the thumb slides between the ends instead of snapping', async () => {
   const { Switch } = await import('../src/index.js');
-  const { setAnimationClock } = await import('../src/nodes.js');
+  const { setAnimationClock } = await import('../src/nodes/animation.js');
   let clock = 0;
   setAnimationClock(() => clock);
   try {

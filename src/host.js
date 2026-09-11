@@ -15,7 +15,7 @@ export {
   registeredPositions,
 } from './layouts.js';
 
-import { DRAWN_KINDS as DRAWN } from './nodes.js';
+import { DRAWN_KINDS as DRAWN } from './nodes/kinds.js';
 import { registeredElements } from './registry.js';
 
 const BUILT_IN = Object.freeze([
