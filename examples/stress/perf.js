@@ -14,6 +14,10 @@
 
 const fmt = (rects) => {
   if (!rects) return 'FULL WINDOW';
+  // An empty list: every claim the frame made was answered on a layer of its
+  // own (the Cocoa presenter — a hover's background, say), so the bitmap
+  // painted nothing. Not the same as a frame that claimed nothing.
+  if (rects.length === 0) return 'LAYERS ONLY';
   const one = (r) => `${r.width}x${r.height} @ ${r.x},${r.y}`;
   // A frame paints a list of rects, and the whole point of the list is that it
   // can be smaller than the box around it — so when there is more than one,
