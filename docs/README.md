@@ -5,7 +5,11 @@ XQuartz) and Cocoa (a native Mac app, no X server anywhere). The same tree,
 components, styles and hooks run on both, and `createRoot()` picks — Cocoa
 on macOS where the bridge is installed, X11 otherwise. Every page below is
 about both unless it says otherwise; where a backend changes the answer, it
-is called out where the answer is.
+is called out where the answer is. Two more backends are coming, toward
+full cross-platform support — Windows ([windows.md](windows.md)) and
+native Wayland ([wayland.md](wayland.md)) — and until they land, those two
+pages are design documents and everything else describes the two that
+ship.
 
 - [macos.md](macos.md) — the Cocoa backend: what a retained layer tree
   changes about a renderer built for a drawing protocol, the two presenters
@@ -157,6 +161,15 @@ is called out where the answer is.
   actually changes, the fd transport (why the prototype is Bun-first), the
   rendering tiers from a pure-JS span compositor to GPU 2d over x11-dri,
   what maps and what is gone by design, and the phased plan.
+- [windows.md](windows.md) — the research PRD for a native Windows
+  backend, the next step toward full cross-platform support. Where Windows
+  sits between the Wayland and macOS inversions (the client rasterizes, into
+  retained composition surfaces that keep the damage model intact), a UI
+  thread of the addon's own so that Windows' modal loops never freeze JS,
+  Direct2D and DirectWrite behind the contracts the Cocoa backend already
+  proved, why the bridge is our own mechanism-only addon rather than
+  anything on npm, what maps and what is gone, the phased plan, and what to
+  probe first on a Windows machine.
 - [security.md](security.md) — the threat model, plainly: X11 has no
   isolation between clients, `$XAUTHORITY` is a password, and what
   react-x11 does and does not defend against.
