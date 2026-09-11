@@ -20,12 +20,12 @@ const App = mod.default ?? mod.App;
 const root = await createRoot();
 root.render(React.createElement(App));
 
-setTimeout(() => {
+setTimeout(async () => {
   let i = 0;
   for (const wnd of root.app._windows.values()) {
     const file = i === 0 ? outFile : outFile.replace(/\.png$/, `-${i}.png`);
     console.log('window', wnd.windowNumber, wnd.width, 'x', wnd.height, '->');
-    console.log('  ', file, wnd.snapshot(file));
+    console.log('  ', file, await wnd.snapshot(file));
     i++;
   }
   root.unmount().then(() => process.exit(0));

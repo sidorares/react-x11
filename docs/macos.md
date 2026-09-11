@@ -918,52 +918,149 @@ is rule two of the Windows design, followed before it was written down.
 
 ### The renderer's half
 
-- **A launcher.** The app's entry has to run on the worker, and the main
-  thread has to be parked before the entry runs there. The proposal is a
-  preload — `node --import react-x11/cocoa-main app.jsx`, and `bun --preload`
-  the same — that on the main thread starts a Worker on the entry with the
-  same `execArgv` and a shared environment, then calls `runMain()` and never
-  returns, so the entry is never evaluated on the main thread. Inside the
-  worker the same module installs the bootstrap below. Without it,
-  `createRoot` keeps the pump. The probe used an explicit main script; the
-  preload is not probed yet.
-- **The worker's bootstrap.** A Worker's `process.stdout` forwards through
-  the main thread's event loop, which is parked, so the worker's
-  `console.log` is lost — measured, and under Bun the console bypasses
-  `process.stdout` altogether. The bootstrap swaps in streams that write
-  straight to fds 1 and 2, and a new global `Console` over them.
-  `process.exit` inside a Worker ends only the worker — measured: the probe
-  outlived it with `[NSApp run]` orphaned — so it becomes a request to the
-  main thread, which returns from `runMain()` and lets Node's own
-  `process.exit` stop the worker in order. The probe's first try, `exit()`
-  on the UI thread, raced static destructors and aborted. Signals arrive as
-  events from a dispatch source on the main thread and are re-emitted on the
-  worker's `process`, where Node never delivers them.
-- **`CocoaApp`** (`src/cocoa/app.js`). The pump goes — `start()`'s interval,
-  `pump2`, `_endLiveResizes` — and the frame timer loses the tick it was
-  fitted between; the display link can then tick from the UI thread through
-  the same channel, which is the Windows PRD's frame thread
-  ([windows.md](windows.md#the-frame-clock)). Events arrive in batches:
-  `_route` runs per event and `_afterInput` once per batch. The flushes that
-  exist because a modal loop starves microtasks — `_routeGeometry`'s
-  coalesced second flush, the discrete priority #484 gave a native drag's
-  handlers — become ordinary scheduling again.
-- **Thirteen call sites change shape**: the ones in `src/cocoa/` that use a
-  value AppKit returns. `createWindow2`, `windowNumber` and `windowRootLayer`
-  become handles allocated at the call, and `CocoaApp._windows` is keyed by
-  the bridge's handle instead of the window number, which arrives later;
-  `createStatusItem` and `requestUserAttention` likewise. `getWindowFrame`,
-  `windowIsVisible` and `listScreens` read published state. The rest become
-  answers that arrive later: `pasteboardReadText` (the clipboard contract is
-  a promise already), `snapshotWindow`, `beginDrag`'s `began` (an event),
-  `dragItemString` inside a drop (the payload's cheap forms are read into
-  `drag-perform` itself), and `measureControl` behind the bezel cache.
+Threaded mode is the default on macOS: `node app.js`, `bun app.jsx` and
+`tsx app.jsx` run the app on a worker, with nothing in the app or on the
+command line asking for it. It needs a bridge with `runMain()`,
+@windowkit/appkit 0.10. What it costs at startup, and how to skip it, is in
+[packaging.md](packaging.md#on-macos-the-app-moves-onto-a-worker).
+
+- **The move** (`src/cocoa/relaunch.js`, reached from `src/bootstrap.js`,
+  the first import of `src/index.js`). An entry's imports finish before its
+  body runs, so when react-x11 is evaluated on the main thread the app has
+  not run a line. It starts a Worker on that same entry, with the same
+  `execArgv` and a shared environment, and parks the main thread in
+  `Atomics.wait` — no AppKit yet — until the worker says what it needs. The
+  first cocoa `createRoot` asks for AppKit (`requestAppKit`), and the main
+  thread launches it and enters `runMain()`; an app that never makes one,
+  an X11 app on XQuartz or a script, never launches AppKit and never gets a
+  Dock tile. It is synchronous throughout, `process.exit` being the main
+  thread's only way out, because a top-level await would cost the CommonJS
+  builds and `require()` of the package. It declines, and the app keeps the
+  pump, off macOS; with `REACT_X11_THREADED=0` or `REACT_X11_BACKEND=x11`;
+  for a REPL or `-e`; in a single executable, whose entry is not a file a
+  worker can load; under a test runner; and when react-x11 is imported
+  after the app started running. It tells that last case by Node's
+  `performance.nodeTiming.loopStart`, -1 until the event loop turns, and in
+  Bun, which reports 1 there from the first line, by the entry's record in
+  the module cache, absent until the entry has run (both measured).
+- **`react-x11/cocoa-main`** (`src/cocoa/main.js`) is the same move asked
+  for by name — `node --import react-x11/cocoa-main app.js`,
+  `bun --preload react-x11/cocoa-main app.jsx` — before the entry is loaded
+  at all, which spares the main thread loading the entry's imports for
+  nothing, and without the checks. Off macOS, and inside a Worker the app
+  starts, it does nothing.
+- **The worker's side** (`bootstrapWorker`), set up by the same import on
+  the worker, which recognises the shared state in its `workerData`; the
+  pieces are `src/cocoa/threaded.js`'s. Stdout, stderr and the console
+  write straight to fds 1 and 2: a Worker's own forward through its
+  parent's loop, which is parked, and Bun's console bypasses
+  `process.stdout` altogether. `process.exit` asks the main thread first
+  (`requestExit`) and then ends the worker, which is also how Node's own
+  handling of an uncaught error reaches it, with code 1; `exit()` on the UI
+  thread, the probe's first try, raced static destructors. The worker says
+  it is done after the app's last exit listener — kept last, since Node
+  runs a worker's exit listeners through `process.emit` and Bun calls them
+  directly (measured) — and the main thread ends the process on that, so
+  an app's exit handlers finish as they would in a process of its own. It
+  prints its own uncaught error, because the parked main thread never runs
+  its loop again to hear the worker's `'error'`. A `signal` event is
+  re-emitted on the worker's `process`, and one nobody listens for exits
+  128 + n. The first cocoa root waits for `runMain` before it builds the
+  app: until the run starts the bridge has published nothing, and an app
+  that asked `listScreens()` then got `[]` and took scale 1 on a 2x panel
+  (measured). What the app imports before react-x11 runs before this
+  set-up, so a module that logs as it loads belongs after it.
+- **One channel** (`openThreadedChannel`). The bridge takes one `connect`
+  per environment, so the bootstrap opens it before the entry runs and
+  fans the batches out — signals to itself, the rest to `CocoaApp`. What a
+  subscriber throws leaves the delivery once every subscriber has had the
+  batch, and the bridge makes it the worker's uncaught exception. Before
+  0.10 it was swallowed: an exception out of a threadsafe function's
+  callback is, under Node's default policy, a warning — the app went on
+  with its window up and the error gone (measured, and fixed in the bridge
+  as windowkit/appkit#65).
+- **`CocoaApp`** (`src/cocoa/app.js`) is fed by the batches
+  (`_routeBatch`): each event is routed as the pump routes it, what the
+  inputs owe — React's half, the paint, the present (`_afterInput`) — is
+  paid once per batch, and then comes the frame tick the pump did. No
+  interval and no `pump2`; every frame gets a timer of its own, and
+  `_routeGeometry`'s coalesced second flush is the pump's alone. The display link ticking from the UI thread through the same
+  channel, the Windows PRD's frame thread
+  ([windows.md](windows.md#the-frame-clock)), is still to come.
+- **Windows are keyed by the handle.** `createWindow2` answers a handle at
+  the call; `windowNumber` and the published frame arrive with
+  `window-created`, and every window event names the handle.
+- **The fence.** A flip is a command the UI thread applies later, so the
+  buffer it takes off glass is still on glass when the call returns.
+  `CocoaWindow.frameInFlight()` — the X11 contract's fence, which the pump
+  never needed — holds the window's next frame and its catch-up copy until
+  `surface-released` names that buffer. A new size is never in flight: it
+  paints into a new pair that nothing shows. A release that never comes
+  lets go after 100 ms, and the scroll blit settles the catch-up before it
+  moves a band.
+- **The resize handshake.** Each flip is a recorded frame committed with
+  the size it was painted at, in AppKit's own points, and each window asks
+  AppKit to wait for it for `cocoa: { resizeWait }` ms — 50 by default, 0
+  for none. The layer presenter's frame commits its size too.
+- **A live resize is what AppKit brackets**: `liveResizing` is set between
+  the bridge's `window-live-resize` begin and end (windowkit/appkit#63), in
+  both modes. AppKit's tracking loop reports a resize per pointer move and
+  nothing when the drag stops, so the pump used to read the end as "a pump
+  tick ran", and a worker, which no AppKit loop holds, has nothing like
+  that to read; a drag that pauses now stays a drag, and the catch-up frame
+  runs on the tick after the release.
+- **Answers that come later.** `clipboard.read()` and `targets()`;
+  `CocoaWindow.snapshot()`, a promise now on both threads; the drop's
+  payload, read from the event's `items`; and bezels. `BezelStore.prefetch`
+  asks for every kind's metrics beside the rest of startup — 41–49 ms cold,
+  where the yoga load beside it takes 15–50 — so layout reads them
+  synchronously as before. A bezel not drawn yet is null: its canvas draws
+  the one it had and repaints when the new one lands, and a bezel drawn at
+  rest brings its pressed twin, so a press never waits for one.
 - **Tests.** The 22 `test/cocoa-*.test.js` files drive fake bridges that
-  answer synchronously; with threaded mode behind a flag they keep passing
-  on the pump, and a threaded fake is a queue and a batch callback. The
-  contract the renderer needs is the X11 one, asynchronous from the start,
-  which [windows.md](windows.md#the-rules-that-keep-it-from-deadlocking)
+  answer synchronously and keep passing on the pump;
+  `test/cocoa-threaded.test.js` drives the same app over a fake in a
+  worker's shapes, `test/cocoa-relaunch.test.js` pins when the move
+  happens and the worker's side of the hand-off, and
+  `test/cocoa-threaded-launch.test.js` runs real apps with the real bridge
+  — moved by the import, by the launcher, kept on the pump, and one that
+  never makes a root (it skips without a bridge that has `runMain`).
+  The contract the renderer needs is the X11 one, asynchronous from the
+  start, which [windows.md](windows.md#the-rules-that-keep-it-from-deadlocking)
   makes the same point about.
+
+Measured 2026-09-11, M1 Pro, Node 26.0.0 and Bun 1.4.0, the bridge built
+from its main branch at 0b17653: `createRoot` took 92 ms on the worker and
+102 ms with the pump, for one window; the launch test's three cases —
+the entry on a worker with its window made and painted, `process.exit(7)`,
+and an uncaught error printed with exit 1 — pass under both runtimes; and
+`examples/app.jsx` ran under the launcher with nothing on stderr. On the
+published 0.10.0, spawn to the first painted window of a one-window app,
+median of seven: Node 471 ms on the pump, 544 ms moved by the import,
+462 ms moved by the launcher; Bun 408, 446 and 385 ms; memory 170, 219 and
+186 MB under Node, 150, 182 and 159 MB under Bun. `examples/raster-gate.jsx`,
+started with no flag under Bun and under `node --import tsx`, kept
+animating through a live resize at 48–62 fps.
+
+The activation policy is the launch's: the launcher has launched AppKit
+before the app's code runs, so `cocoa: { activationPolicy }` can only
+switch it afterwards, when a Regular launch has already shown its Dock
+tile. The bridge reads `APPKIT_ACTIVATION_POLICY` as it launches
+(windowkit/appkit#67) — `APPKIT_ACTIVATION_POLICY=accessory node --import
+react-x11/cocoa-main app.js` for a menu-bar app, or `LSUIElement` in a
+bundle's `Info.plist` — and an app whose option disagrees with how it
+launched is told so, naming the variable.
+
+What it does not do yet, each noted where it lives:
+
+- A drop's binary types, an image, are offered and read as nothing: the
+  event carries the text and URL forms, and a worker cannot read the drag
+  pasteboard inside the callback.
+- The layer presenter's colour transitions start from the declared value,
+  since `presentationValue` answers later on a worker.
+- A transparent window's shadow is recomputed a frame interval after a
+  flip, rather than once the flip has committed.
+- `process.stdin` still forwards through the parked main thread.
 
 ### What changes for an app
 
@@ -987,8 +1084,9 @@ is rule two of the Windows design, followed before it was written down.
 - A hardware live resize, a real drag session, and pixels on glass.
 - `<glarea>`'s `x11-dri` CGL context inside a worker.
 - `react-x11/refresh`'s module hooks inside a worker.
-- The buffer handoff under the paint cache and the scroll blit, which copy
-  from the buffer the last flip retired and so rely on today's ordering.
+- The fence and the scroll blit on glass: the fence keeps the next paint
+  off the buffer being shown, and the blit settles its catch-up first, but
+  neither has been looked at on screen.
 - IME and NSAccessibility, neither built yet: both are questions AppKit asks
   the view synchronously, and both take the answer the Windows design gives
   them — the caret rect and a copy of the accessibility tree, pushed ahead
@@ -996,11 +1094,13 @@ is rule two of the Windows design, followed before it was written down.
 
 ### The order
 
-The bridge's core first, behind a flag, with pump mode unchanged and still
-the default; then the launcher and a batch-fed `CocoaApp`; then the verbs a
-group at a time, each group's tests passing in both modes. The default flips
-when the numbers say so — an input-to-photon measurement and the resize
-cell of the Cocoa bench — because perceived latency is the metric this
+The bridge's core and every verb have landed (windowkit/appkit#50–#54), and
+so have a batch-fed `CocoaApp` and the move that makes threaded mode the
+default on macOS. Pump mode stays, unchanged, as the off switch
+(`REACT_X11_THREADED=0`) and wherever the move declines — a single
+executable first among them. Still to take under threaded mode: an
+input-to-photon measurement and the resize cell of the Cocoa bench, which
+runs its columns on the pump — perceived latency is the metric this
 project grades on, and latency is what the change is for.
 
 ## Native controls
@@ -1978,10 +2078,10 @@ Five changes, each fenced by a test:
   measured incrementally (§"Measured: incremental floors") — and a drag
   calls the frame from inside every pointer move. A live tick lays out against
   the floors it has (exact along the main axis, a frame stale for wrapped
-  text across it) and the first pump tick after the release measures once
+  text across it) and the first frame tick after the release measures once
   and lays out again: answer the input, then catch up. Only under
-  `liveResizing`, which the Cocoa window reads off AppKit's flag and the
-  pump clears; an X window never sets it. A content change mid-drag takes
+  `liveResizing`, which the Cocoa window holds between AppKit's begin and
+  end of the drag (`window-live-resize`); an X window never sets it. A content change mid-drag takes
   the measured path.
 - **A window nobody can see owes nothing** (`CocoaWindow._visible`): frames
   for a window that is ordered out or miniaturized wait in the queue and

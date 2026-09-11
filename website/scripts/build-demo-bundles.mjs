@@ -157,6 +157,14 @@ await esbuild.build({
     // cocoa backend and must resolve the specifier
     zlib: path.join(shimsDir, 'zlib.js'),
     'node:zlib': path.join(shimsDir, 'zlib.js'),
+    // the cocoa backend's threaded mode — the worker question and the
+    // worker's stdio, macOS only for the same reason. The `node:` spellings
+    // alone: those are what src/cocoa writes, and a bare `stream` here would
+    // hand every other package that reads it a stub that throws.
+    'node:worker_threads': path.join(shimsDir, 'cocoa-threaded.js'),
+    'node:console': path.join(shimsDir, 'cocoa-threaded.js'),
+    'node:stream': path.join(shimsDir, 'cocoa-threaded.js'),
+    'node:tty': path.join(shimsDir, 'cocoa-threaded.js'),
     // createRequire, used by react-x11 to read its own package.json
     module: path.join(shimsDir, 'module.js'),
     'node:module': path.join(shimsDir, 'module.js'),

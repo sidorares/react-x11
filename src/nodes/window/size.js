@@ -243,7 +243,7 @@ export class WindowSize {
    * frame stale for wrapped text along the other, and the frame after the
    * release measures once and lays out again — "answer the input, then
    * catch up". Only while the window says it is being resized live
-   * (`liveResizing`, the Cocoa window's reading of AppKit's flag; an X
+   * (`liveResizing`, set between AppKit's begin and end of the drag; an X
    * window has no such thing and takes the measured path every time), only
    * when the floors exist to reuse, and never over a content change the
    * floors have not seen — a row that mounted mid-drag has no floor at all,
@@ -278,7 +278,7 @@ export class WindowSize {
         this._floorsCatchUp = false;
         return;
       }
-      // still dragging (a pump tick inside a pause of the drag): wait on
+      // still dragging — a drag that pauses has not ended: wait on
       if (this.window.liveResizing) {
         schedule(run);
         return;

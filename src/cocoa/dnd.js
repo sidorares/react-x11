@@ -149,28 +149,42 @@ export function requestedAction(operations) {
  * `DropSession.localDrop` hands the handler: `items` by type, the parsed
  * `files`, the best `text`, and a `getData` answering from the same read.
  */
-export function readPayload(native, types) {
+export function readPayload(native, types, carried = null) {
   const values = {};
   const urls = [];
-  const items = (() => {
-    try {
-      return native.dragItems?.() ?? [];
-    } catch {
-      return [];
-    }
-  })();
-  items.forEach((item, index) => {
+  // On a worker the drop carries its payload's text and URL forms itself
+  // (`items: [{ types, strings }]`, windowkit/appkit#51), since the drag
+  // pasteboard cannot be read back from there inside the callback; its
+  // other types are offered, and read as nothing.
+  const read = carried
+    ? {
+        items: carried,
+        string: (index, uti) => carried[index]?.strings?.[uti] ?? null,
+        data: () => null,
+      }
+    : {
+        items: (() => {
+          try {
+            return native.dragItems?.() ?? [];
+          } catch {
+            return [];
+          }
+        })(),
+        string: (index, uti) => native.dragItemString(index, uti),
+        data: (index, uti) => native.dragItemData(index, uti),
+      };
+  read.items.forEach((item, index) => {
     for (const uti of item?.types ?? []) {
       if (uti === 'public.file-url' || uti === 'public.url') {
-        const url = native.dragItemString(index, uti);
+        const url = read.string(index, uti);
         if (url) urls.push(url);
         continue;
       }
       const mime = mimeFromUti(uti, native);
       if (!mime || values[mime] !== undefined) continue;
       const value = isTextual(uti, mime)
-        ? native.dragItemString(index, uti)
-        : native.dragItemData(index, uti);
+        ? read.string(index, uti)
+        : read.data(index, uti);
       if (value == null) continue;
       values[mime] = value;
       if (
@@ -360,7 +374,7 @@ export class CocoaDropTransport {
     const offer = this._offer(ev);
     const extras = drag
       ? drag._dropExtras()
-      : readPayload(this.wnd._native, offer.types);
+      : readPayload(this.wnd._native, offer.types, ev.items ?? null);
     const outcome = this.session.localDrop(offer, extras, Date.now());
     if (drag && outcome.handled) drag.currentAction = outcome.action;
     const response = { accept: outcome.handled };

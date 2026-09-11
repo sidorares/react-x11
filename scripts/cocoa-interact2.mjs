@@ -48,10 +48,8 @@ const windows = () => [...root.app._windows.values()];
 const shot = (name) => {
   windows().forEach((w, i) => {
     w.present();
-    console.log(
-      name,
-      i,
-      w.snapshot(`/tmp/chat2-${name}${i ? `-${i}` : ''}.png`),
+    w.snapshot(`/tmp/chat2-${name}${i ? `-${i}` : ''}.png`).then((ok) =>
+      console.log(name, i, ok),
     );
   });
 };

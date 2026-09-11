@@ -215,11 +215,18 @@ export interface RootOptions {
    * as the bridge reports it, 16 where the OS cannot say. A number here
    * applies to every window instead. `pumpInterval` is the AppKit event
    * pump's cadence, in ms (8 by default), which is the floor under input
-   * latency. `appName` is what the Dock, ⌘-Tab and the app menu print for
+   * latency; an app started under `react-x11/cocoa-main` has no pump.
+   * `resizeWait` is how long, in ms, AppKit may hold a live-resize tick for
+   * the app's frame at the new size under `react-x11/cocoa-main`, where
+   * the frame is painted on another thread (50 by default; 0 lets the edge
+   * move without waiting). `appName` is what the Dock, ⌘-Tab and the app menu print for
    * an unbundled process (a bundle's Info.plist wins); `activationPolicy`
    * is `'regular'` (a Dock tile, a ⌘-Tab entry — the default),
    * `'accessory'` (a menu-bar app: windows but no tile) or `'prohibited'`,
-   * fixed before the app finishes launching. `exitOnQuit` (default `true`)
+   * fixed before the app finishes launching — under `react-x11/cocoa-main`
+   * the app launches before its code runs, so there the launch policy is
+   * `APPKIT_ACTIVATION_POLICY`'s, and this one a switch once the code
+   * runs. `exitOnQuit` (default `true`)
    * ends the process once a quit request — the Dock's Quit, ⌘Q, a logout —
    * has closed the app: the request routes through the primary window's
    * close request first, so `onCloseRequest` there is where an app
@@ -231,6 +238,7 @@ export interface RootOptions {
     promote?: boolean;
     frameInterval?: number;
     pumpInterval?: number;
+    resizeWait?: number;
     appName?: string;
     activationPolicy?: 'regular' | 'accessory' | 'prohibited';
     exitOnQuit?: boolean;
