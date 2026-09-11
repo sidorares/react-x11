@@ -1681,7 +1681,7 @@ swapchain; Windows' two candidate primitive sets are exactly the two
 vocabularies — a Direct2D target for the verb table, DirectComposition
 visuals for a presenter — so it starts at the floor with the wrapper
 and the swapchain reused and adds a composition presenter later behind
-the same seam.
+the same seam. [windows.md](windows.md) is that backend's PRD.
 
 **In order, with the priority stated:** the existing two backends, X11
 and Cocoa, become stable and performant before a third is started, so

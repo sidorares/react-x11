@@ -40,6 +40,13 @@ installed, X11 via `$DISPLAY` everywhere else, and X11 on a Mac without the
 bridge so an XQuartz setup keeps working. `createRoot({ backend: 'x11' })`
 or `REACT_X11_BACKEND=x11` pins it.
 
+Two more backends are on the way, and the goal they serve is **full
+cross-platform support**: **Windows** — Win32 windows, Direct2D and
+DirectWrite, DWM compositing — with [docs/windows.md](docs/windows.md) as
+its PRD, and **native Wayland**, with [docs/wayland.md](docs/wayland.md)
+as its RFC. Both arrive as backends beside these two, not replacements for
+either: the same tree, the same components, the same `style` objects.
+
 Layout is [yoga-layout](https://www.npmjs.com/package/yoga-layout) (WASM) on
 both, and text shaping is [fontkit](https://github.com/foliojs/fontkit) on
 the X11 side, CoreText on the Cocoa one. **`npm install` never compiles
@@ -115,20 +122,24 @@ That is the shape of the problem this is good at:
 And the shape it is not good at, so you can stop here rather than in week
 three:
 
-- **Windows.** There is no Windows backend and none planned; if you need
-  Windows, use Electron or Tauri. Two targets ship — X11 and Cocoa — and
-  they are not the same app: the desktop-shell half of X11 (`<foreign>`
-  embedding, panel struts, substructure redirect, the window-manager example
-  below) has no macOS equivalent, and `react-x11/test` drives the X11
-  backend only. [docs/macos.md](docs/macos.md) says which is which.
+- **Windows — today.** There is no Windows backend yet, so an app that has
+  to ship on Windows now wants Electron or Tauri. One is coming: a native
+  backend over Win32 windows, Direct2D and DirectWrite, composited by DWM
+  through DirectComposition, on a mechanism-only bridge shaped like the
+  Cocoa one. [docs/windows.md](docs/windows.md) is the PRD, from the
+  threading model up to what each desktop integration becomes. Two targets
+  ship meanwhile — X11 and Cocoa — and they are not the same app: the
+  desktop-shell half of X11 (`<foreign>` embedding, panel struts,
+  substructure redirect, the window-manager example below) has no macOS
+  equivalent, and `react-x11/test` drives the X11 backend only.
+  [docs/macos.md](docs/macos.md) says which is which.
 - **native Wayland — today.** There is no Wayland backend yet. Ordinary
   application windows work fine on a Wayland desktop through Xwayland, which
   is not going away — but the desktop-shell half of X11 (panel struts,
   global key grabs, screen capture, and the window-manager example below)
-  needs a real X session. A native backend is researched and planned as a
-  **second target beside X11, not a migration**:
-  [docs/wayland.md](docs/wayland.md) is the RFC, from the fd transport up
-  to what the rendering would ride on.
+  needs a real X session. A native backend is coming too, as a **target
+  beside X11, not a migration**: [docs/wayland.md](docs/wayland.md) is the
+  RFC, from the fd transport up to what the rendering would ride on.
 - **reusing web components.** There is no DOM. Your MUI, your Tailwind and
   your `recharts` do not come with you; the state, data-fetching, validation
   and math libraries mostly do. [docs/ecosystem.md](docs/ecosystem.md) says

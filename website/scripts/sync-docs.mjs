@@ -203,6 +203,7 @@ const ORDER = [
   'remote.md',
   'macos.md',
   'wayland.md',
+  'windows.md',
   'security.md',
   'packaging.md',
   'devtools.md',
