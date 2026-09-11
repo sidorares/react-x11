@@ -1784,7 +1784,10 @@ function runCell(name, env) {
       ...(SHOTS ? ['--shots'] : []),
     ],
     {
-      env: { ...process.env, ...env },
+      // The pump's numbers: every column here measures pump mode, which
+      // `REACT_X11_THREADED=0` keeps a child in on macOS, where it would
+      // otherwise move onto a worker at import (src/cocoa/relaunch.js).
+      env: { ...process.env, REACT_X11_THREADED: '0', ...env },
       encoding: 'utf8',
       timeout: (seconds + 40) * 1000,
     },

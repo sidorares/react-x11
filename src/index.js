@@ -1,3 +1,7 @@
+// First, before anything else in the package: on macOS it moves the app
+// onto a worker before the app's own code runs (src/bootstrap.js).
+import './bootstrap.js';
+
 export { createRoot, Renderer } from './Reconciler.js';
 export { createStyles, flattenStyle } from './styles.js';
 export { windowIdOf, useWindowId, useTopLevelWindow } from './windowid.js';

@@ -89,6 +89,58 @@ test(
   },
 );
 
+// No flag at all: the first import of react-x11 moves the app onto a worker
+// (src/cocoa/relaunch.js). NODE_TEST_CONTEXT is what the test runner hands
+// this process, and the relaunch declines a test runner's children.
+const auto = (mode, env = {}) =>
+  runNode(
+    ['test/fixtures/cocoa-threaded-app.js', mode],
+    { NO_AT_BRIDGE: '1', NODE_TEST_CONTEXT: '', ...env },
+    30000,
+  );
+
+test(
+  'with no flag at all the app moves onto a worker as react-x11 is imported',
+  { skip },
+  async () => {
+    const run = await auto('report');
+    assert.strictEqual(run.code, 0, run.stderr);
+    const got = report(run.stdout);
+    assert.deepStrictEqual(
+      [got.isMainThread, got.threaded, got.made, got.presented],
+      [false, true, true, true],
+    );
+    assert.strictEqual(got.scale, bridge.listScreens()[0].scale);
+  },
+);
+
+test(
+  'REACT_X11_THREADED=0 keeps the app on the main thread, with the pump',
+  { skip },
+  async () => {
+    const run = await auto('report', { REACT_X11_THREADED: '0' });
+    assert.strictEqual(run.code, 0, run.stderr);
+    const got = report(run.stdout);
+    assert.deepStrictEqual(
+      [got.isMainThread, got.threaded, got.presented],
+      [true, false, true],
+    );
+  },
+);
+
+test(
+  'an app that never makes a cocoa root runs on the worker and never launches AppKit',
+  { skip },
+  async () => {
+    const run = await auto('plain');
+    assert.strictEqual(run.code, 0, run.stderr);
+    assert.deepStrictEqual(report(run.stdout), {
+      isMainThread: false,
+      appKit: false,
+    });
+  },
+);
+
 test(
   'an app that closes its window and runs out ends the process, its entry run once',
   { skip },

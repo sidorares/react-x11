@@ -10,16 +10,24 @@
 //           before the worker is gone
 //   throw   throw once the window is up
 //   idle    print it, close the window and let the script run out
+//   plain   make no root at all: print where it ran and whether AppKit did
 //
 // With no mode it does nothing: the test runner runs every file under
 // test/ as a test of its own, and on Linux there is no window to open.
 import { isMainThread } from 'node:worker_threads';
 import React from 'react';
 
+import { loadNative } from '../../src/cocoa/native.js';
 import { createRoot } from '../../src/index.js';
 
 const mode = process.argv[2];
-if (mode) await run(mode);
+if (mode === 'plain') {
+  console.log(
+    JSON.stringify({ isMainThread, appKit: loadNative().threaded() }),
+  );
+} else if (mode) {
+  await run(mode);
+}
 
 async function run(mode) {
   const root = await createRoot({ backend: 'cocoa' });
@@ -50,6 +58,8 @@ async function run(mode) {
       presented: (wnd?._presentedAt ?? 0) > 0,
       scale: app.scale,
       entry: process.argv[1].endsWith('cocoa-threaded-app.js'),
+      // the whole process's, workers and all
+      rssMB: Math.round(process.memoryUsage().rss / 1048576),
     }),
   );
   if (mode === 'exit') {

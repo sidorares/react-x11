@@ -38,7 +38,10 @@ The same components, the same hooks and the same `style` objects run on both:
 `createRoot()` picks for you: **Cocoa on macOS** when the bridge is
 installed, X11 via `$DISPLAY` everywhere else, and X11 on a Mac without the
 bridge so an XQuartz setup keeps working. `createRoot({ backend: 'x11' })`
-or `REACT_X11_BACKEND=x11` pins it.
+or `REACT_X11_BACKEND=x11` pins it. On macOS the app's JS runs on a worker
+while AppKit keeps the main thread, so a menu, a drag or a live resize never
+stops it — `node app.js` is enough, and `REACT_X11_THREADED=0` keeps the
+main thread ([docs/macos.md](docs/macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own)).
 
 Two more backends are on the way, and the goal they serve is **full
 cross-platform support**: **Windows** — Win32 windows, Direct2D and

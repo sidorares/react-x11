@@ -918,42 +918,58 @@ is rule two of the Windows design, followed before it was written down.
 
 ### The renderer's half
 
-Run the app under the launcher and nothing else in it changes:
+Threaded mode is the default on macOS: `node app.js`, `bun app.jsx` and
+`tsx app.jsx` run the app on a worker, with nothing in the app or on the
+command line asking for it. It needs a bridge with `runMain()`,
+@windowkit/appkit 0.10. What it costs at startup, and how to skip it, is in
+[packaging.md](packaging.md#on-macos-the-app-moves-onto-a-worker).
 
-```sh
-node --import react-x11/cocoa-main app.js
-node --import tsx --import react-x11/cocoa-main app.jsx
-bun --preload react-x11/cocoa-main app.jsx
-```
-
-Without the launcher `createRoot` keeps the pump, which stays the default
-until the numbers say otherwise (§"The order" below). The launcher needs a
-bridge with `runMain()`, @windowkit/appkit 0.10.
-
-- **The launcher** (`src/cocoa/main.js`). On the main thread it launches
-  AppKit (`initApp`), starts a Worker whose entry is the bootstrap below,
-  and calls `runMain()`; a top-level await holds the app's entry back, so
-  it is never evaluated on the main thread. Off macOS, and inside any
-  Worker (one the app starts inherits the `--import`), it does nothing, so
-  one command line serves every platform. When `runMain` returns it waits
-  for the worker's own ending, because the worker's uncaught error arrives
-  there as an event — with no listener it was lost when the exit won the
-  race (measured) — and the launcher prints it. Bun does not apply a
-  `--preload` from `execArgv` to a Worker (measured, 1.4.0), which is why
-  the bootstrap is a module of its own rather than the launcher run twice.
-- **The worker's bootstrap** (`src/cocoa/worker.js`, `threaded.js`).
-  Stdout, stderr and the console write straight to fds 1 and 2: a Worker's
-  own forward through its parent's loop, which is parked, and Bun's console
-  bypasses `process.stdout` altogether. `process.exit` asks the main
-  thread first (`requestExit`) and then ends the worker, which is also how
-  Node's own handling of an uncaught error reaches the launcher, with code
-  1; `exit()` on the UI thread, the probe's first try, raced static
-  destructors. A `signal` event is re-emitted on the worker's `process`,
-  and one nobody listens for exits 128 + n. `process.argv[1]` is the app's
-  entry again. The bootstrap waits for `runMain` before it imports the
-  entry: the worker's first line ran 50 ms ahead of the run, and an app
+- **The move** (`src/cocoa/relaunch.js`, reached from `src/bootstrap.js`,
+  the first import of `src/index.js`). An entry's imports finish before its
+  body runs, so when react-x11 is evaluated on the main thread the app has
+  not run a line. It starts a Worker on that same entry, with the same
+  `execArgv` and a shared environment, and parks the main thread in
+  `Atomics.wait` — no AppKit yet — until the worker says what it needs. The
+  first cocoa `createRoot` asks for AppKit (`requestAppKit`), and the main
+  thread launches it and enters `runMain()`; an app that never makes one,
+  an X11 app on XQuartz or a script, never launches AppKit and never gets a
+  Dock tile. It is synchronous throughout, `process.exit` being the main
+  thread's only way out, because a top-level await would cost the CommonJS
+  builds and `require()` of the package. It declines, and the app keeps the
+  pump, off macOS; with `REACT_X11_THREADED=0` or `REACT_X11_BACKEND=x11`;
+  for a REPL or `-e`; in a single executable, whose entry is not a file a
+  worker can load; under a test runner; and when react-x11 is imported
+  after the app started running. It tells that last case by Node's
+  `performance.nodeTiming.loopStart`, -1 until the event loop turns, and in
+  Bun, which reports 1 there from the first line, by the entry's record in
+  the module cache, absent until the entry has run (both measured).
+- **`react-x11/cocoa-main`** (`src/cocoa/main.js`) is the same move asked
+  for by name — `node --import react-x11/cocoa-main app.js`,
+  `bun --preload react-x11/cocoa-main app.jsx` — before the entry is loaded
+  at all, which spares the main thread loading the entry's imports for
+  nothing, and without the checks. Off macOS, and inside a Worker the app
+  starts, it does nothing.
+- **The worker's side** (`bootstrapWorker`), set up by the same import on
+  the worker, which recognises the shared state in its `workerData`; the
+  pieces are `src/cocoa/threaded.js`'s. Stdout, stderr and the console
+  write straight to fds 1 and 2: a Worker's own forward through its
+  parent's loop, which is parked, and Bun's console bypasses
+  `process.stdout` altogether. `process.exit` asks the main thread first
+  (`requestExit`) and then ends the worker, which is also how Node's own
+  handling of an uncaught error reaches it, with code 1; `exit()` on the UI
+  thread, the probe's first try, raced static destructors. The worker says
+  it is done after the app's last exit listener — kept last, since Node
+  runs a worker's exit listeners through `process.emit` and Bun calls them
+  directly (measured) — and the main thread ends the process on that, so
+  an app's exit handlers finish as they would in a process of its own. It
+  prints its own uncaught error, because the parked main thread never runs
+  its loop again to hear the worker's `'error'`. A `signal` event is
+  re-emitted on the worker's `process`, and one nobody listens for exits
+  128 + n. The first cocoa root waits for `runMain` before it builds the
+  app: until the run starts the bridge has published nothing, and an app
   that asked `listScreens()` then got `[]` and took scale 1 on a 2x panel
-  (measured).
+  (measured). What the app imports before react-x11 runs before this
+  set-up, so a module that logs as it loads belongs after it.
 - **One channel** (`openThreadedChannel`). The bridge takes one `connect`
   per environment, so the bootstrap opens it before the entry runs and
   fans the batches out — signals to itself, the rest to `CocoaApp`. What a
@@ -1004,8 +1020,11 @@ bridge with `runMain()`, @windowkit/appkit 0.10.
 - **Tests.** The 22 `test/cocoa-*.test.js` files drive fake bridges that
   answer synchronously and keep passing on the pump;
   `test/cocoa-threaded.test.js` drives the same app over a fake in a
-  worker's shapes, and `test/cocoa-threaded-launch.test.js` runs the
-  launcher with the real bridge (it skips without one that has `runMain`).
+  worker's shapes, `test/cocoa-relaunch.test.js` pins when the move
+  happens and the worker's side of the hand-off, and
+  `test/cocoa-threaded-launch.test.js` runs real apps with the real bridge
+  — moved by the import, by the launcher, kept on the pump, and one that
+  never makes a root (it skips without a bridge that has `runMain`).
   The contract the renderer needs is the X11 one, asynchronous from the
   start, which [windows.md](windows.md#the-rules-that-keep-it-from-deadlocking)
   makes the same point about.
@@ -1015,7 +1034,13 @@ from its main branch at 0b17653: `createRoot` took 92 ms on the worker and
 102 ms with the pump, for one window; the launch test's three cases —
 the entry on a worker with its window made and painted, `process.exit(7)`,
 and an uncaught error printed with exit 1 — pass under both runtimes; and
-`examples/app.jsx` ran under the launcher with nothing on stderr.
+`examples/app.jsx` ran under the launcher with nothing on stderr. On the
+published 0.10.0, spawn to the first painted window of a one-window app,
+median of seven: Node 471 ms on the pump, 544 ms moved by the import,
+462 ms moved by the launcher; Bun 408, 446 and 385 ms; memory 170, 219 and
+186 MB under Node, 150, 182 and 159 MB under Bun. `examples/raster-gate.jsx`,
+started with no flag under Bun and under `node --import tsx`, kept
+animating through a live resize at 48–62 fps.
 
 The activation policy is the launch's: the launcher has launched AppKit
 before the app's code runs, so `cocoa: { activationPolicy }` can only
@@ -1070,11 +1095,13 @@ What it does not do yet, each noted where it lives:
 ### The order
 
 The bridge's core and every verb have landed (windowkit/appkit#50–#54), and
-so have the launcher and a batch-fed `CocoaApp`, opt-in, with pump mode
-unchanged and still the default. The default flips when the numbers say
-so — an input-to-photon measurement and the resize cell of the Cocoa bench,
-neither taken yet under the launcher — because perceived latency is the
-metric this project grades on, and latency is what the change is for.
+so have a batch-fed `CocoaApp` and the move that makes threaded mode the
+default on macOS. Pump mode stays, unchanged, as the off switch
+(`REACT_X11_THREADED=0`) and wherever the move declines — a single
+executable first among them. Still to take under threaded mode: an
+input-to-photon measurement and the resize cell of the Cocoa bench, which
+runs its columns on the pump — perceived latency is the metric this
+project grades on, and latency is what the change is for.
 
 ## Native controls
 

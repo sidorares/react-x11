@@ -82,6 +82,11 @@ dynamically imported behind environment variables. A bundler will pull in
 out with a resolver plugin the way
 `website/scripts/build-demo-bundles.mjs` does.
 
+On macOS the bundle moves onto a worker as it starts, the way the source
+does, and still needs nothing beside it: the worker's entry is the bundle
+itself. Verified with a one-window app under Node and Bun; what it costs,
+and how to skip it, is [below](#on-macos-the-app-moves-onto-a-worker).
+
 ## Tier 3 — Node single executable
 
 ```sh
@@ -166,6 +171,12 @@ before the backend could say what it was loading; on a release you cannot
 move off, `--define:import.meta.url='"file:///dev/null"'` at bundle time is
 the workaround, and `test/cocoa-native.test.js` keeps the fix.
 
+A SEA runs the cocoa backend in pump mode, on the main thread: the move
+onto a worker (below) starts the worker on the entry file, and a SEA's
+entry is inside the binary, where a worker cannot load it from. So a menu,
+a drag or a live resize stops its JS, as every cocoa app's did before
+threaded mode.
+
 [ntk-fonts]: https://github.com/sidorares/ntk/blob/master/docs/fonts.md
 
 ## Tier 4 — AppImage, `.deb`, `.rpm`
@@ -225,7 +236,10 @@ $APP/Contents/MacOS/Downloads app.mjs   # or app.cjs from tier 3
 script that execs node from elsewhere does not work: `NSBundle.mainBundle` is
 resolved from the running executable's own path, so the bundle the system
 sees would be node's location, not yours. Copy the binary in (or ship a tier
-3 SEA, which is one file and wants to live there anyway).
+3 SEA, which is one file and wants to live there anyway). Which tier the
+bundle wraps decides where the app's JS runs: a tier 2 bundle beside the
+binary moves onto a worker, a SEA stays on the pump
+([below](#on-macos-the-app-moves-onto-a-worker)).
 
 What the bundle changes, measured with the same script run both ways:
 
@@ -471,8 +485,64 @@ identity, `productbuild --sign` and the upload are Apple's documentation.
 [bun-codesign]: https://bun.com/docs/bundler/executables#code-signing-on-macos
 [node-entitlements]: https://github.com/nodejs/node/blob/main/tools/osx-entitlements.plist
 
+## On macOS: the app moves onto a worker
+
+On macOS the first import of react-x11 moves the app onto a
+`worker_threads` Worker. AppKit keeps the process main thread — it is the
+only thread AppKit lets own a window — and an app whose JS ran there would
+stop through every menu, drag, live resize and modal panel
+([macos.md](macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own)). The
+worker's entry is your entry itself, run from the top: when react-x11 is
+imported the entry has not run a line yet, because its imports finish
+before its body does. The main thread then waits, and launches AppKit only
+when the app's first cocoa `createRoot` asks for it.
+
+What it costs, measured on an M1 Pro with Node 26 and Bun 1.4 — spawn to
+the first painted window of a one-window app, the median of seven runs:
+
+|                       | pump (`REACT_X11_THREADED=0`) | the move (the default) | `--import react-x11/cocoa-main` |
+| --------------------- | ----------------------------: | ---------------------: | ------------------------------: |
+| Node, the source      |                        471 ms |                 544 ms |                          462 ms |
+| Node, a tier 2 bundle |                        427 ms |                 463 ms |                               — |
+| Bun, the source       |                        408 ms |                 446 ms |                          385 ms |
+| Bun, a tier 2 bundle  |                        401 ms |                 426 ms |                               — |
+| memory, Node / Bun    |                  170 / 150 MB |           219 / 182 MB |                    186 / 159 MB |
+
+The move's 25–73 ms and 30–50 MB are the main thread loading the entry's
+imports once, for nothing, before the worker loads them again; a bundle is
+at the low end because one file loads faster than a tree of them. An app
+that imports react-x11 and never makes a cocoa root — an X11 app on
+XQuartz, a script — never launches AppKit, and pays 95–131 ms more to exit
+(Node 251 → 382 ms, Bun 196 → 291 ms).
+
+To skip the cost, or the move:
+
+- **Start with the launcher**: `node --import react-x11/cocoa-main app.mjs`,
+  or `bun --preload react-x11/cocoa-main app.mjs`. It moves the app before
+  the entry is loaded at all, which is faster than the pump and costs only
+  the worker. It resolves the installed package, so it is for an app run
+  from a checkout or an `npm install` — anywhere you write the command
+  line.
+- **Stay on the pump** with `REACT_X11_THREADED=0`: the app keeps the main
+  thread, and a menu, a drag or a live resize stops its JS again.
+- **Import react-x11 first** in the entry. What the entry imports before
+  it loads on the main thread as well as on the worker: nothing to notice
+  for React, but a module that does work as it loads — opens a port,
+  writes a file, logs — does it twice.
+
+The move does not happen in a single executable (tier 3, and
+`bun build --compile`), whose entry is not a file a worker can load, so it
+runs on the pump; under a test runner; with `REACT_X11_THREADED=0` or
+`REACT_X11_BACKEND=x11`; and when react-x11 is imported after the app has
+started running — a dynamic `import()` from a timer — where the worker
+would run again what the entry has already done.
+
 ## Checklist
 
+- On macOS, choose where the app's JS runs: the default move onto a worker
+  costs 25–73 ms of startup, `--import react-x11/cocoa-main` skips it,
+  `REACT_X11_THREADED=0` keeps the pump, and a SEA always does
+  ([above](#on-macos-the-app-moves-onto-a-worker)).
 - Pick the format deliberately: `--format=esm` (tier 2, needs the banner) or
   `--format=cjs` (tier 3, needs no top-level await in your own code).
 - With `esm`, alias the banner's `createRequire`.

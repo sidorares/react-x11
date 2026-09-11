@@ -16,8 +16,12 @@ const nope = (what) =>
   };
 
 module.exports = {
-  // node:worker_threads
+  // node:worker_threads — the relaunch onto a worker (src/cocoa/relaunch.js)
+  // never starts off macOS, so these are never called
   isMainThread: true,
+  Worker: nope('Worker'),
+  SHARE_ENV: undefined,
+  workerData: null,
   // node:console, node:stream
   Console: nope('Console'),
   Writable: nope('Writable'),

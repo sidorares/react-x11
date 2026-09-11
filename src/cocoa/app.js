@@ -41,7 +41,7 @@ import { CocoaSurface } from './surface.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
-import { threadedChannel } from './threaded.js';
+import { requestAppKit, threadedChannel } from './threaded.js';
 
 // The frame interval: how often a scheduled frame may paint, in ms. The
 // default is the period of the display the window is on — `listScreens`
@@ -1422,6 +1422,9 @@ export async function createCocoaApp(options = {}) {
         'root on the main thread.',
     );
   }
+  // AppKit is launched on the first cocoa root, not before — an app on a
+  // worker that never makes one gets no Dock tile (src/cocoa/relaunch.js)
+  if (channel) await requestAppKit(native);
   const app = new CocoaApp(native, options);
 
   setScaleForTests(app, app.scale, 'cocoa');

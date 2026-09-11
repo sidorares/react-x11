@@ -13,8 +13,93 @@ import fs from 'node:fs';
 import { constants } from 'node:os';
 import { Writable } from 'node:stream';
 import tty from 'node:tty';
+import { inspect } from 'node:util';
 
 let channel = null;
+
+// The relaunch's shared state (src/cocoa/relaunch.js), [state, exit code]:
+// the main thread waits on it, without AppKit, until the worker says what
+// it needs — AppKit, or nothing more because it is done.
+export const RELAUNCH = Object.freeze({ WAITING: 0, APPKIT: 1, ENDED: 2 });
+let relaunchState = null;
+
+/** The worker's end of the relaunch's shared state. */
+export function bindRelaunchState(buffer) {
+  relaunchState = buffer ? new Int32Array(buffer) : null;
+}
+
+/**
+ * Ask the main thread for AppKit, and wait until its run has started. The
+ * main thread waits without it, so an app that never makes a cocoa root
+ * never launches it; the first cocoa `createRoot` does. Until `runMain`
+ * runs the bridge has published nothing — an app that asked `listScreens()`
+ * then got `[]` and took scale 1 on a 2x panel (measured) — so the wait is
+ * not optional.
+ */
+export async function requestAppKit(native, state = relaunchState) {
+  if (state && Atomics.load(state, 0) === RELAUNCH.WAITING) {
+    Atomics.store(state, 0, RELAUNCH.APPKIT);
+    Atomics.notify(state, 0);
+  }
+  while (!native.threaded()) await new Promise((r) => setTimeout(r, 1));
+}
+
+/** The worker is done, with `code`: the main thread ends the process. */
+export function signalEnded(code, state = relaunchState) {
+  if (!state) return;
+  Atomics.store(state, 1, Number.parseInt(code, 10) || 0);
+  Atomics.store(state, 0, RELAUNCH.ENDED);
+  Atomics.notify(state, 0);
+}
+
+/**
+ * Call `fn(code)` when the worker exits, after every exit listener the app
+ * has — its last word. The main thread ends the process on it, and an app's
+ * `process.on('exit')` handler must have finished by then, as it has in a
+ * process of its own. Kept last by re-adding it whenever the app adds one:
+ * Node runs a worker's exit listeners through `process.emit` and Bun calls
+ * them directly (measured), so wrapping the emit would cover only Node.
+ */
+export function onWorkerEnd(fn, proc = process) {
+  const add = proc.on;
+  const last = (code) => fn(code ?? proc.exitCode ?? 0);
+  add.call(proc, 'exit', last);
+  for (const name of [
+    'on',
+    'addListener',
+    'once',
+    'prependListener',
+    'prependOnceListener',
+  ]) {
+    const method = proc[name];
+    proc[name] = function (event, listener) {
+      const out = method.call(this, event, listener);
+      if (event === 'exit' && listener !== last) {
+        proc.removeListener('exit', last);
+        add.call(proc, 'exit', last);
+      }
+      return out;
+    };
+  }
+}
+
+/**
+ * Print an uncaught error the way Node prints one, from the worker itself.
+ * Node hands a worker's uncaught error to its parent as an event, and the
+ * parent here is parked for good — it ends the process on the worker's
+ * word and never runs its event loop again to hear it. Only when nothing
+ * handles the error: an app's own `uncaughtException` handler means it is
+ * not uncaught.
+ */
+export function printUncaught(
+  proc = process,
+  write = (s) => proc.stderr.write(s),
+) {
+  proc.on('uncaughtExceptionMonitor', (err) => {
+    if (proc.listenerCount('uncaughtException') > 0) return;
+    write(`${inspect(err)}\n`);
+  });
+}
 
 /** The open channel, or null outside threaded mode. */
 export function threadedChannel() {
