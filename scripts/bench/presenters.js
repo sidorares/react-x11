@@ -963,25 +963,20 @@ const SCENARIOS = {
         [header(`resize — ${COLS}x${ROWS} cells`), grid()],
         'bench resize',
       ),
-    setup(ctx) {
-      // A drag, not a script: the delegate reports every tick as live, and
-      // no pump runs between them (AppKit's modal loop owns the thread) —
-      // so the end-of-drag reset the pump performs is held off until the
-      // burst is over, when `drive` puts it back.
-      const app = ctx.app;
-      const route = app._routeGeometry.bind(app);
-      app._routeGeometry = (ev) => route({ ...ev, live: true });
-      ctx.extra.endLiveResizes = app._endLiveResizes.bind(app);
-      app._endLiveResizes = () => {};
-    },
     drive(ctx) {
       const { tick, native, wnd, extra } = ctx;
       const steps = 40;
-      if (tick === steps + 1 && extra.endLiveResizes) {
-        // the mouse release: the modal loop ends, the pump runs again
-        ctx.app._endLiveResizes = extra.endLiveResizes;
-        extra.endLiveResizes = null;
-      }
+      // A drag, not a script: AppKit brackets it — `window-live-resize`
+      // begin before the first tick, end at the mouse release — and no pump
+      // runs between the ticks, since AppKit's modal loop owns the thread.
+      const liveResize = (phase) =>
+        ctx.app._route({
+          type: 'window-live-resize',
+          windowNumber: wnd.windowNumber,
+          phase,
+        });
+      if (tick === 1) liveResize('begin');
+      if (tick === steps + 1) liveResize('end');
       if (tick <= steps) {
         // a sawtooth: mostly growing, with a shrink every few steps, the way
         // a hand on a corner wobbles
