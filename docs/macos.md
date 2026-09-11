@@ -25,7 +25,7 @@ presenter _is_ the existing paint machinery, drawing into the window's
 bitmap, and the seam is a handful of **optional hooks feature-detected on
 the window object** — `presentFrame`, `noteInvalidate`, `scrollRegion`,
 `animateNode`, `cancelNodeAnimation` (`src/cocoa/window.js`, read at
-`src/nodes.js:2302`). A window that does not define them gets today's path
+`src/nodes/animation.js`). A window that does not define them gets today's path
 byte for byte, which is the guarantee Phase 2 wanted without the refactor
 it asked for. Nothing is documented in `extending.md` terms because there
 is no interface to document.
@@ -1614,7 +1614,7 @@ is dispatch (issue #433, `react-x11/ntk` asking the app), not a port.
 implements canvas2d plus the ntk extensions — `fillRects`, `drawGlyphs`
 with its run contract, `positioned`, Path2D as an argument to
 fill/stroke/clip, the callback-shaped `getImageData`, `Render.PictOp`
-numbering. That is react-x11's policy: it is what `nodes.js` and every
+numbering. That is react-x11's policy: it is what `src/nodes/` and every
 registered element paint against, X11 answers it through ntk's XRender
 encoder, Cocoa through `CocoaContext2D` over CG verbs, Wayland will
 through the `'2d-sw'` rasterizer [wayland.md](wayland.md) builds on
@@ -1723,7 +1723,7 @@ otherwise; `cpu` is the process as a share of one core, driver ticks at
 
 Five changes, each fenced by a test:
 
-- **The paint reach is cached** (`Node._paintBoundsCache`, nodes.js). A
+- **The paint reach is cached** (`Node._paintBoundsCache`, src/nodes/invalidate.js). A
   bounded frame asked every subtree on the way to its rect whether it
   reached in, and each answer walked the subtree: a one-cell repaint cost
   the whole tree, linearly. The union is now kept until something that
@@ -1745,7 +1745,7 @@ Five changes, each fenced by a test:
   present until that frame lands; the release owes at most one flush.
   `test/cocoa-frames.test.js`.
 - **A live resize defers the content floors** (`_deferContentFloors`,
-  nodes.js). The floors (#249) were three extra layout passes and their
+  src/nodes/window/size.js). The floors (#249) were three extra layout passes and their
   walks — 21 of the 44ms a relayout cost on this tree, before they were
   measured incrementally (§"Measured: incremental floors") — and a drag
   calls the frame from inside every pointer move. A live tick lays out against
@@ -1893,7 +1893,7 @@ Written 2026-09-03 against the pass above (react-x11 2.5.0, `@windowkit/appkit`
 | `anim` on the 120Hz panel                                            | 108–113fps      | 108.6fps        |
 
 - **The floors are measured incrementally** (`collectFloorStale`,
-  `probeHeightFloors`, `contentSpan`, nodes.js). Every node keeps the
+  `probeHeightFloors`, `contentSpan`, src/nodes/window/floors.js). Every node keeps the
   extent it was last measured at — what it needs from the box around it,
   on each axis — and a measurement re-reads only the nodes whose subtree
   changed, taking the rest at the number they carry. Which subtrees
@@ -2010,7 +2010,7 @@ Two harnesses answer it, and they answer the same question:
   real rasters — a byte per pixel, `ScrollSurface` and `CopySurfaceRegion`
   written out with the natives' own clamping — and the proof obligation is
   one line: render the same pane into two windows, delete `scrollRegion`
-  on the second (which is how nodes.js feature-detects a backend without
+  on the second (which is how the scroll blit feature-detects a backend without
   the fast path), and the buffer handed to the layer must hold the picture
   the repaint painted. Then the frames a pan meets: bursts coalesced into
   one frame, a frame painted but not presented, a present held or

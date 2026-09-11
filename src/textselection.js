@@ -9,7 +9,7 @@
 //
 // **A surface is a `selectable` element, and its participants are whatever
 // under it can answer for its own text.** An element joins by implementing
-// the four accessors in nodes.js (`textContent`, `textIndexAt`,
+// the four accessors in nodes/selectable.js (`textContent`, `textIndexAt`,
 // `textCaretRect`, `textRangeRects`) — `<text>` does, and so does a terminal
 // or a log view written outside this package. There is no registration call
 // and no list of blessed kinds: a document is a tree, and the tree is walked.
@@ -226,7 +226,7 @@ export class TextSelection {
    * pointer is: a press landed on the wrong character and a drag stopped
    * short at half its distance. The X event underneath already carries the
    * device numbers; an event synthesized without one is multiplied up, the
-   * way every other pointer consumer in nodes.js does it.
+   * way every other pointer consumer in src/nodes/ does it.
    */
   devicePoint(ev) {
     const scale = this.node.scale > 0 ? this.node.scale : 1;

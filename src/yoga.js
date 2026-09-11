@@ -1,6 +1,6 @@
 // The layout engine, without a top-level await.
 //
-// Every drawn node owns one yoga node (`nodes.js`), and `styles.js` is the
+// Every drawn node owns one yoga node (`src/nodes/`), and `styles.js` is the
 // translation from style props to yoga setters. This module is where the
 // engine itself comes from.
 //

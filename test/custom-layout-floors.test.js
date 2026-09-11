@@ -1,4 +1,4 @@
-// The content floors (#249, nodes.js `contentSpan`) inside a layout host's
+// The content floors (#249, nodes/window/floors.js `contentSpan`) inside a layout host's
 // children. A child a layout arranges is a yoga tree of its own, which the
 // window's measuring pass does not reach — it stops at the host and asks it
 // for its minimum as a leaf. So the floors of what is inside each child are

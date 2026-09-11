@@ -155,7 +155,7 @@ event with `preventDefault()` (`window.js:543`, `window.js:2467`).
 
 react-x11 still does all of that by hand — `setActions()`, an `InternAtom`
 callback, and a `wnd.on('message')` filter
-([nodes.js:3684-3715](../../src/nodes.js)). So the Phase 0 item is now better
+([nodes/window/listeners.js](../../src/nodes/window/listeners.js)). So the Phase 0 item is now better
 than "make the listener unconditional and route by `message_type`": **adopt
 `wnd.on('close')` and delete the block**, which leaves `on('message')`
 completely free for the XDND router with no routing logic at all. `'message'`
@@ -255,9 +255,9 @@ foundation is good.
 - **Splitting the source off as separate work** is right. It is a much bigger
   job (§6), and the target half is independently useful.
 - **The infrastructure survey is accurate**: ClientMessage already routes to
-  `WindowNode` ([nodes.js:3697](../../src/nodes.js)), hit testing and hover
+  `WindowNode` ([nodes/window/listeners.js](../../src/nodes/window/listeners.js)), hit testing and hover
   path diffing already exist in `EventManager`, and `window._screenOrigin`
-  ([nodes.js:3506](../../src/nodes.js)) already holds the root-coordinate
+  ([nodes/window/window.js](../../src/nodes/window/window.js)) already holds the root-coordinate
   translation `XdndPosition` needs.
 
 Four corrections to the protocol detail before moving on:
@@ -327,7 +327,7 @@ Consequences, and this is the direct answer to the question:
   had to care about `windowed` does not.
 - **Nested `<window>` children need routing, not advertising.** react-x11
   supports child `<window>`s inside a parent
-  ([nodes.js:3460](../../src/nodes.js)). Those are not top-levels, so they get
+  ([nodes/window/window.js](../../src/nodes/window/window.js)). Those are not top-levels, so they get
   no property; messages arrive at the outer window carrying **root**
   coordinates, and the router must descend our own window tree in JS:
   root point → each realized `WindowNode`'s `_screenOrigin` + size → topmost
@@ -389,7 +389,7 @@ template:
 | Moment  | Hook                                                                                                                                                                                        | What to do                                                                                                                                 |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Mount   | `finalizeInitialChildren` returns `true` when the props declare drop handling ([Reconciler.js:342](../../src/Reconciler.js)) → `commitMount` ([Reconciler.js:352](../../src/Reconciler.js)) | `root._dnd.register(node)`. Must be `commitMount`, not `createInstance`: the node needs its `root`, which `_setRoot` assigns on insertion. |
-| Update  | `commitUpdate` → `applyProps` ([nodes.js:956](../../src/nodes.js)), next to the existing `trapFocus` branch                                                                                 | register/unregister on the boolean edge only                                                                                               |
+| Update  | `commitUpdate` → `applyProps` ([nodes/node.js](../../src/nodes/node.js)), next to the existing `trapFocus` branch                                                                           | register/unregister on the boolean edge only                                                                                               |
 | Unmount | `detachDeletedInstance` ([Reconciler.js:424](../../src/Reconciler.js)), which already calls `events.forget(instance)`                                                                       | one more line: `instance.root?._dnd?.forget(instance)`                                                                                     |
 | Hidden  | —                                                                                                                                                                                           | do **not** track. `hitTest` already skips hidden nodes; a hidden-but-registered node costs one unsuppressed `XdndStatus` and nothing else. |
 
@@ -398,7 +398,7 @@ as `ATOM`/32 unconditionally, next to `applyWindowStates` — same reasoning as
 the EWMH properties there, a declaration made before anyone can look.
 
 One refactor falls out: the `message` listener is currently installed only
-when `onCloseRequest` is set ([nodes.js:3697](../../src/nodes.js)). Make it
+when `onCloseRequest` is set ([nodes/window/listeners.js](../../src/nodes/window/listeners.js)). Make it
 unconditional and route by `ev.message_type` — `WM_PROTOCOLS` to the close
 path, `Xdnd*` to the DnD router. Cheap, and `_NET_WM_PING`/`_NET_WM_SYNC` will
 want it later.
@@ -730,7 +730,7 @@ need ([§0.1](#01-audit-against-ntk-530)).
 
 - **[react-x11]** Adopt `wnd.on('close')` for `onCloseRequest` and delete the
   `setActions()` + `InternAtom` + `on('message')` block
-  ([nodes.js:3684-3715](../../src/nodes.js)) — filed as
+  ([nodes/window/listeners.js](../../src/nodes/window/listeners.js)) — filed as
   [#160](https://github.com/sidorares/react-x11/issues/160). That frees
   `'message'` for the XDND router with no routing logic, and makes
   `onCloseRequest` cancellable. The only real prerequisite, and independently
@@ -933,7 +933,7 @@ Unusually strong here, and worth exploiting.
   format), [ntk#163](https://github.com/sidorares/ntk/issues/163) (selection
   watch), [ntk#155](https://github.com/sidorares/ntk/issues/155) (cancellable
   `close`).
-- In-tree: [events.js](../../src/events.js), [nodes.js](../../src/nodes.js),
+- In-tree: [events.js](../../src/events.js), [nodes/window/droptarget.js](../../src/nodes/window/droptarget.js),
   [Reconciler.js](../../src/Reconciler.js), [styles.js](../../src/styles.js),
   [windowed-regions.md](windowed-regions.md), [ecosystem.md](../ecosystem.md);
   ntk 5.3.0 `lib/clipboard.js`, `lib/window.js`, `lib/cursor.js`,

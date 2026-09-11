@@ -3,7 +3,7 @@
 // moved it (a neighbouring field wrapping to a second line), or an owner
 // window nudged by the window manager or a script all left it hanging over
 // stale ground. `useAnchorTracking` (anchor.js) and the `onAnchorChange`
-// subscription it reads (`WindowNode`, nodes.js) are the fix.
+// subscription it reads (`WindowNode`, nodes/window/anchoring.js) are the fix.
 //
 // These tests exercise the shared mechanism directly with a minimal tracked
 // popup, rather than through any one widget — Select, Tooltip, MenuBar and

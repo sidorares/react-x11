@@ -269,7 +269,7 @@ per-frame re-decision, same demote-and-claim-the-hole. Four honest changes:
 
 ### 4.4 The frame
 
-The seams already exist and are already in the right order (src/nodes.js,
+The seams already exist and are already in the right order (src/nodes/window/flush.js,
 `WindowNode.flush`):
 
 1. The element draws into its back buffer when its data changes, and claims

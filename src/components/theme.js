@@ -183,7 +183,7 @@ function planted(children, theme, style) {
  *
  * **With no provider it is the desktop's**, and this re-renders when the
  * desktop changes, which is what makes a react-x11 app that says nothing
- * about colour go dark on a dark desktop. `node.theme` in `nodes.js` answers
+ * about colour go dark on a dark desktop. `node.theme` in `nodes/cascade.js` answers
  * the same question for the other route.
  *
  * Identity matters: widgets plant what this returns on their own root node,
@@ -368,7 +368,7 @@ export const capBand = (fontSize) => Math.round(fontSize * 0.72);
  *
  * `undefined` for the width when off, never `0`: a node with no
  * `outlineWidth` of its own is one core can leave out of the widened damage
- * rects entirely (`_outlineExtent`, src/nodes.js), and `0` is the documented
+ * rects entirely (`_outlineExtent`, src/nodes/boxpaint.js), and `0` is the documented
  * way to opt *out* of a ring the node would otherwise get.
  */
 export const focusRingStyle = (theme, on) =>

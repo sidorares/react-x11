@@ -261,7 +261,7 @@ shaping) with the missing span compositor and a client glyph atlas, and
 register it as a sibling 2d context. The seam already exists and is the
 whole reason this is tractable: every context registers in
 `Drawable.renderingContextFactory` (`'2d'`, `'x11'`, `'opengl'`, `'gles'`,
-`'cgl'` today), and `nodes.js` asks for a context by name and never looks
+`'cgl'` today), and `src/nodes/` asks for a context by name and never looks
 behind it.
 
 - **Portability: perfect.** JS + typed arrays; runs everywhere including

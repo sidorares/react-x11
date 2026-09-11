@@ -52,7 +52,7 @@ const POSITION = {
  * `absolute` are yoga's own. Everything else — `sticky`, and every position
  * registered with `registerPosition` (src/layouts.js) — is laid out in flow
  * exactly as `relative` is and moved afterwards: placing is not something
- * layout does (nodes.js, `WindowNode._placeNodes`). What differs is the
+ * layout does (nodes/position.js, `WindowNode._placeNodes`). What differs is the
  * insets, which are the placement's to read — thresholds, for sticky — so
  * yoga must never see them as offsets (`applyLayoutStyle`).
  */
@@ -478,7 +478,7 @@ const STYLE_PROPS = new Set([
   // `display: layout(name)`, with the algorithm's options written beside the
   // name — and what a child tells the one arranging it, CSS's child input
   // properties (docs/styling.md, "Custom layouts"). Layout in every sense
-  // but yoga's: the node side reads them (nodes.js, the layout host).
+  // but yoga's: the node side reads them (nodes/layouthost.js).
   'layout',
   'layoutItem',
 ]);
@@ -523,7 +523,7 @@ const SIZE_QUERY = /^@(width|height)\s*(>=|<=|>|<)\s*(\d+(?:\.\d+)?)$/;
  * *when* it is answered — a container's size is what a layout pass
  * produces, not what one starts from, so the blocks are resolved after the
  * pass and the tree laid out once more if an answer moved
- * (nodes.js, `_resolveContainerQueries`).
+ * (nodes/queries.js, `_resolveContainerQueries`).
  */
 const CONTAINER_QUERY =
   /^@container(?:\s+([A-Za-z_][\w-]*))?\s+(width|height)\s*(>=|<=|>|<)\s*(\d+(?:\.\d+)?)$/;
@@ -644,7 +644,7 @@ export function containerQueryNames(style) {
  * Which of a style's container blocks match, as one string with a character
  * per block in declaration order. What a node remembers between layout
  * passes so a re-resolution runs only when an answer actually moved, and
- * what the oscillation check compares (nodes.js `_resolveContainerQueries`).
+ * what the oscillation check compares (nodes/queries.js `_resolveContainerQueries`).
  */
 export function containerAnswers(style, containers) {
   let out = '';
@@ -1428,7 +1428,7 @@ export function stripTokens(style) {
  * anyone hears about it: mistakes are pushed onto `problems` and the caller
  * decides what one costs. Resolving itself never throws — it runs from a
  * commit and from an X event alike, and only the caller knows whether React
- * is on the stack to route a throw to a boundary (src/nodes.js).
+ * is on the stack to route a throw to a boundary (src/nodes/cascade.js).
  *
  * A cache hit replays the problems it recorded, so the second node to wear a
  * misspelled shared style is reported like the first.
@@ -1748,7 +1748,7 @@ export const isMeasuringExactly = () => exactDepth > 0;
  * The pair to it is the automatic minimum size — a flex item that may shrink
  * still cannot shrink below its content unless it says so. Yoga has no such
  * rule, so the renderer measures the floors itself; see `Node`'s content
- * floors in nodes.js.
+ * floors in nodes/window/floors.js.
  */
 export function applyLayoutDefaults(yogaNode) {
   yogaNode.setFlexShrink(1);

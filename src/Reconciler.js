@@ -1,5 +1,5 @@
 // The react-reconciler host config plus the public render entry points.
-// Host instances are the retained nodes from nodes.js; only <window> and
+// Host instances are the retained nodes from src/nodes/; only <window> and
 // <popup> map to real X11 windows (see NEXT_STEPS.md), and those windows
 // are created top-down in the commit phase (WindowNode.realize) so every
 // CreateWindow names its actual parent from the start — createInstance
@@ -160,7 +160,7 @@ const HostConfig = {
 
   prepareForCommit() {
     // …so that a <window> realized during the mutation phase waits to be
-    // mapped until React has finished hiding whatever it hides (nodes.js,
+    // mapped until React has finished hiding whatever it hides (nodes/window/window.js,
     // beginWindowMaps)
     beginWindowMaps();
     traceHooks.commitStart?.();
@@ -311,7 +311,7 @@ const HostConfig = {
     // Under REACT_X11_STRICT_TOKENS every token-styled node asks for one as
     // well, since a bad token is only *found* once the node is attached —
     // which is after this ran — and commitMount is the first moment React
-    // holds that node's own fiber (nodes.js `_tokenProblem`). Gated on the
+    // holds that node's own fiber (nodes/cascade.js `_tokenProblem`). Gated on the
     // flag so the default mount pays nothing for a debugging mode.
     return (
       type === 'popup' ||
@@ -326,7 +326,7 @@ const HostConfig = {
     // first, and before any of the work below: the tree is on its way out.
     // `false` afterwards marks this instance's one commitMount spent, so a
     // later re-attach throws at once rather than deferring to a call that
-    // will never come (nodes.js `_tokenProblem`).
+    // will never come (nodes/cascade.js `_tokenProblem`).
     const tokenError = instance._tokenError;
     instance._tokenError = false;
     if (tokenError) throw tokenError;
@@ -791,7 +791,7 @@ export async function createRoot(options = {}) {
   beginCompose(app, rest.compose);
 
   // Under what size a paragraph is painted as a strip of its ink instead
-  // of as glyphs (nodes.js, `TextNode._paintsStrip`): six logical pixels by
+  // of as glyphs (nodes/text.js, `TextNode._paintsStrip`): six logical pixels by
   // default, 0 for glyphs at every size.
   setTextStripBelow(app, rest.textStripBelow);
 

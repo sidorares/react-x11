@@ -104,7 +104,7 @@ regeneration one-liner in a comment, not fetched or computed.
 ## 3. The two-module split, and the hook-slot seam
 
 ```
-nodes.js / events.js / Reconciler.js          (hot paths)
+src/nodes/, events.js, Reconciler.js          (hot paths)
         │  a11yHooks.focus?.(…)  — null when off
         ▼
 src/a11y.js       the model: role/name/states/tree-projection as pure

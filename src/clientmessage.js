@@ -75,7 +75,7 @@ function atomName(X, id) {
  * hands it to `dispatch` in arrival order.
  *
  * `dispatch` is the caller's, so the priority and the paint stay with the
- * other window events in nodes.js; what lives here is the naming and the
+ * other window events in nodes/window/; what lives here is the naming and the
  * ordering it has to preserve.
  */
 export function createClientMessages(node, dispatch) {

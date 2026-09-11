@@ -6,7 +6,7 @@
  * wiring at all. That rules out building it from the `Menu` components,
  * which live a layer above the nodes and cannot be mounted from one — so
  * the rows are measured and drawn here, and a node hangs them in a
- * `<popup>` (`openEditMenu`, nodes.js, which is the public seam).
+ * `<popup>` (`openEditMenu`, nodes/editmenupopup.js, which is the public seam).
  *
  * Deliberately free of node imports: this takes plain data, a measuring
  * function and a 2d context. It can be tested without a tree, and falls
@@ -64,7 +64,7 @@ export function editMenuColors(theme) {
 /**
  * The rows, in the standard order, each enabled exactly when it would do
  * something — the whole of the menu's policy, as a pure function of the
- * verbs a target offers (`openEditMenu`, nodes.js).
+ * verbs a target offers (`openEditMenu`, nodes/editmenupopup.js).
  *
  * **A verb that was not handed over is a row that is not there**, rather
  * than a greyed one. It was motivated by `<textinput sensitive>`, where a

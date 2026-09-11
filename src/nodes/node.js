@@ -333,7 +333,7 @@ export class Node {
     // A registered element that declared childrenAllowed: false says so
     // here, rather than laying out a child that will never paint. The flag
     // is set on the instance by the registry, so this stays one property
-    // read and nodes.js keeps not importing it.
+    // read and src/nodes/ keeps not importing it.
     if (this._childrenAllowed === false) {
       throw new Error(
         `react-x11: <${this.kind}> takes no children (registered with ` +

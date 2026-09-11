@@ -70,7 +70,7 @@ jobs:
   # presenters bench for hot-path files alone — the paint walk and damage
   # model, the layout floors, the event dispatch, src/cocoa, the benches and
   # the dependency manifest — so a docs PR spends nothing here and a
-  # nodes.js PR spends two minutes. What it judges is structural
+  # src/nodes/ PR spends two minutes. What it judges is structural
   # (scripts/bench/presenters-gate.json): full-window frames, the share of
   # the window one cell repaints, frames per resize tick, frames painted for
   # a window nobody can see. Never milliseconds — a shared runner's timings

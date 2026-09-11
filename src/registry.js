@@ -229,7 +229,7 @@ export function createRegisteredNode(type, props, app, hostContext) {
   const definition = registry.get(type);
   if (!definition) return undefined;
   const node = assertNode(definition.create(props, app, hostContext), type);
-  // read by Node.insertBefore — carried on the instance so nodes.js needs
+  // read by Node.insertBefore — carried on the instance so src/nodes/ needs
   // no import from here
   if (!definition.childrenAllowed) node._childrenAllowed = false;
   return node;

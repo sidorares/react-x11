@@ -7,7 +7,7 @@
 // Everything here goes through the published surface: the element is
 // registered through `react-x11/host`, subclasses `Node` from
 // `react-x11/node`, and calls `openEditMenu` off the package root. A test
-// reaching into src/nodes.js would prove nothing about what a sibling
+// reaching into src/nodes/ would prove nothing about what a sibling
 // package can do.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert';

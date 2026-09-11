@@ -132,10 +132,10 @@ rect and serves real server Expose from the pixmap with zero JS when the backing
 ([events.js:84](../../src/events.js)), so every window selects `PointerMotion` over its whole area
 whether or not anything wants hover. ntk coalesces motion keep-last per paced 16 ms frame, so the
 expensive work runs at frame rate, not device rate. Per motion frame:
-`hitTest` ([nodes.js:1118](../../src/nodes.js)) does a front-to-back recursive descent calling
+`hitTest` ([nodes/hittest.js](../../src/nodes/hittest.js)) does a front-to-back recursive descent calling
 `paintOrder()` — three array allocations, a per-child wrapper object, and a sort — _at every
 visited node_, and only prunes a
-subtree when the point is outside **and** the node clips ([nodes.js:1127](../../src/nodes.js));
+subtree when the point is outside **and** the node clips ([nodes/hittest.js](../../src/nodes/hittest.js));
 non-clipping rows recurse into all children regardless. Then the hover path is diffed, `_path` is
 computed twice (hover + dispatch), and `:hover` flips invalidate.
 
@@ -155,7 +155,7 @@ tested last — 57 µs at 1000. Every event also allocates a closure-laden synth
 ### 1.2 Damage and paint
 
 Damage is a capped list of ≤4 disjoint rects at the window root with least-waste merging
-([nodes.js:192-320](../../src/nodes.js)). A hover-flip frame produces one coalesced ~65×16 rect and
+([nodes/damage.js](../../src/nodes/damage.js)). A hover-flip frame produces one coalesced ~65×16 rect and
 31 ctx calls — the damage _narrowing_ works well. The cost that remains is the walk that exploits
 it: culling tests each candidate child via `_subtreeBounds()`, which is recursive and deliberately
 uncached, so repainting a 65×16 rect at 1000 controls made **2158 recursive `_subtreeBounds`
@@ -174,7 +174,7 @@ granularity exists only when the backing is valid.
 One `needsLayout` boolean per window; a layout frame runs yoga (`yoga-layout@3.2.1` **wasm**,
 shared with ntk) once at the root, then an O(N) `absolutize` walk — 4 embind crossings per node —
 regardless of what changed. **Every wheel notch is `invalidate(true, …, 'scroll')` — a full-tree
-relayout + absolutize per notch** ([nodes.js:1839](../../src/nodes.js)), because scroll offset is
+relayout + absolutize per notch** ([nodes/layout.js](../../src/nodes/layout.js)), because scroll offset is
 baked into `abs` during absolutize. The scroll-blit fast path then tries to narrow the repaint,
 behind ~12 gates and a per-frame O(N) `_scrollBlitSafe` walk — and is currently **inert at
 runtime** (installed ntk 4.2.0 has no `scrollRegion`; the chain ntk#139 → release → #137/#139 is

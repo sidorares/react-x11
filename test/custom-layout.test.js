@@ -1,5 +1,5 @@
 // `layout`: a registered algorithm arranging a box's children inside the pass
-// that lays the window out (src/layouts.js; the layout host in nodes.js;
+// that lays the window out (src/layouts.js; the layout host in src/nodes/layouthost.js;
 // docs/styling.md "Custom layouts"). The children are yoga trees of their
 // own and the box a measured leaf in its parent's, so these read `abs` the
 // frame after a change — there is no later frame for an answer to arrive in.

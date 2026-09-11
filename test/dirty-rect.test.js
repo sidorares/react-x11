@@ -702,7 +702,7 @@ test('a non-style prop the node paints from still damages it', async () => {
 // None was visible to the tests above, because each needs a *second* commit
 // after the tree has settled.
 
-// Mirrors DAMAGE_SLOP in src/nodes.js: paintBounds inflates a claimed region
+// Mirrors DAMAGE_SLOP in src/nodes/damage.js: paintBounds inflates a claimed region
 // by a pixel, so a node that inks slightly outside its rect is still covered.
 const SLOP = 1;
 

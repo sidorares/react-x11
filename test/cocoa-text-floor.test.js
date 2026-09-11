@@ -1,6 +1,6 @@
 // The Cocoa text engine's answer to "how narrow can you be?" — the
 // min-content floor yoga measures every `<text>` for (`minWidth: 'auto'`,
-// nodes.js `contentSpan`), which arrives at `fonts.layout()` as a width
+// nodes/window/floors.js `contentSpan`), which arrives at `fonts.layout()` as a width
 // offer of zero.
 //
 // It used to be read as "no bound at all" and answered with the whole
@@ -223,7 +223,7 @@ describe('the min-content floor', () => {
   test('an ellipsis with nothing to cap cannot fire, here either', () => {
     const native = fakeNative();
     const fonts = new CocoaFontManager(native);
-    // `maxLines: undefined` is how an uncapped paragraph arrives (nodes.js
+    // `maxLines: undefined` is how an uncapped paragraph arrives (TextNode
     // sends `_maxLines()` only when it is finite), and ntk elides off the
     // line count — so this is a plain min-content measurement
     fonts.layout([{ text: 'Plain boxes.' }], base, {

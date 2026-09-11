@@ -9,7 +9,7 @@
 //
 // Everything registers through `react-x11/host` and subclasses
 // `react-x11/node`, because the point of the issue is that a sibling package
-// can do this: a test reaching into src/nodes.js would prove nothing.
+// can do this: a test reaching into src/nodes/ would prove nothing.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';

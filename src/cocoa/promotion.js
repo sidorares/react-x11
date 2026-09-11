@@ -178,7 +178,7 @@ function scrollbarStrip(bar, scale) {
  * The surface window's promoted nodes: which ones have a layer, what each
  * layer shows, and the animations the render server runs on them.
  * `frame()` is the whole of the per-frame work, called by the window from
- * nodes.js's `prepareFrame` seam — after layout, before the damage is taken.
+ * the `prepareFrame` seam in nodes/window/flush.js — after layout, before the damage is taken.
  */
 export class CocoaPromotion {
   constructor(window) {

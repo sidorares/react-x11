@@ -383,7 +383,7 @@ let clockInstalled = false;
 /**
  * Drive transitions from a number you control instead of from wall-clock
  * time. `setAnimationClock` exists for exactly this; it was reachable only
- * through a deep import into `src/nodes.js`.
+ * through a deep import into `src/nodes/animation.js`.
  *
  * ```js
  * const clock = withFrameClock();

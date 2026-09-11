@@ -17,7 +17,7 @@
 // fontShapeText / fontWithSize / ctxDrawGlyphs).
 //
 // Index spaces, because two meet here: `lines[].start/end` and
-// `runs[].start/end` are UTF-16 code units (what `rangeBands` in nodes.js
+// `runs[].start/end` are UTF-16 code units (what `rangeBands` in nodes/text.js
 // compares against), while `caretPosition()` takes and `indexAt()` returns
 // code points (what the selection and caret code speak). CoreText itself is
 // UTF-16 end to end; the code-point conversion happens at this boundary and
@@ -936,7 +936,7 @@ export class CocoaFontManager {
     }
     // A width offer of zero is a question, not a degenerate layout: yoga
     // asks it to find the node's min-content floor (`minWidth: 'auto'`,
-    // nodes.js). It used to fall into the `undefined` below and answer
+    // nodes/window/floors.js). It used to fall into the `undefined` below and answer
     // max-content — the whole paragraph on one line — so a `<text>` in a
     // flex item held its container open at its longest line and two equal
     // columns came out 823px and 34px wide. `brokenAtEveryOpportunity` is
@@ -944,7 +944,7 @@ export class CocoaFontManager {
     const minContent = Number.isFinite(maxWidth) && maxWidth <= 0;
     // Whether this paragraph is one that ends in a `…`. Both halves: ntk
     // elides off the line *count*, so an ellipsis with nothing to cap can
-    // never fire (nodes.js `_maxLines`), and neither can this.
+    // never fire (nodes/text.js `_maxLines`), and neither can this.
     const elides = overflow === 'ellipsis' && Number.isFinite(maxLines);
     // An eliding paragraph's floor is the mark, not its longest word, and
     // it is cut here because the native cannot cut without a width to cut

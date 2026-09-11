@@ -1,6 +1,6 @@
 // The seam between the renderer and the optional debug module.
 //
-// Reconciler.js and nodes.js import this file, so it has to stay safe to
+// Reconciler.js and nodes/window/flush.js import this file, so it has to stay safe to
 // bundle for the browser playground: no node builtins, no side effects,
 // nothing but a registry of live connections and a pair of hook slots. The
 // heavy half (protocol parsing, sinks, file writing) lives in debug.js and

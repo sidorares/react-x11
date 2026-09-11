@@ -20,7 +20,7 @@ process.memoryUsage = () => ({
   heapUsed: 42 * 1024 * 1024,
   heapTotal: 64 * 1024 * 1024,
 });
-// Freezing `Date.now()` also freezes every `transition`: `nodes.js` drives
+// Freezing `Date.now()` also freezes every `transition`: `src/nodes/` drives
 // them off it, so an animation started by one of the scenes below stalls at
 // t=0 and photographs the colour a control was leaving rather than the one it
 // landed on. Harmless for these scenes, which capture at rest — but a new one

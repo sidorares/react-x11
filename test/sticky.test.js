@@ -2,7 +2,7 @@
 // nearest scroll pane's edges by its insets — and never out of its parent's
 // content box, which is what lets the next section push a header off
 // (docs/styling.md, "Sticky positioning"). The placement runs after every
-// layout pass, the one a scroll runs included (nodes.js,
+// layout pass, the one a scroll runs included (nodes/position.js,
 // `WindowNode._placeNodes`), so these tests scroll and read `abs` the frame
 // after — there is no later frame for the answer to arrive in.
 import { test } from 'node:test';

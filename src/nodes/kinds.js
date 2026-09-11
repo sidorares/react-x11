@@ -6,7 +6,7 @@
  * Kinds that lay out with yoga and paint into the owning window —
  * `paintOrder` filters on this, so a kind missing from it lays out and
  * never paints. Mutable because `registerElement` (registry.js) adds to it;
- * that direction, rather than nodes.js importing the registry, is what
+ * that direction, rather than src/nodes/ importing the registry, is what
  * keeps the two files acyclic.
  */
 export const DRAWN_KINDS = new Set([

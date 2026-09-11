@@ -1,7 +1,7 @@
 // The accessibility model: standard `role` / `aria-*` props resolved against
 // the retained node tree, plus the hook slots the renderer polls.
 //
-// This file is the cheap half. It is imported unconditionally by nodes.js,
+// This file is the cheap half. It is imported unconditionally by src/nodes/,
 // events.js and Reconciler.js, so it must cost nothing when accessibility is
 // off: no D-Bus, no node builtins, no side effects — the hot paths pay one
 // property read per hook (`hooks.focus?.(…)`), exactly the trace-registry
@@ -941,7 +941,7 @@ export function a11yAttributes(node) {
  * **The one thing "activatable" means**: there is a click here to make.
  *
  * Three input routes stand on this — the pointer, an AT's `DoAction`, and
- * the keyboard's Space/Enter (`Node.defaultKeyDown`, nodes.js) — and they
+ * the keyboard's Space/Enter (`Node.defaultKeyDown`, nodes/node.js) — and they
  * all dispatch the same click, so a control cannot answer one of them and
  * not another. It lives here, beside the bridge's rule, because the bridge
  * is the layer that already had to write the rule down.

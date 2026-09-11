@@ -32,18 +32,30 @@ const isClass = (value) =>
   typeof value === 'function' &&
   /^class\b/.test(Function.prototype.toString.call(value));
 
+// Every static form that puts one module into another's load order: an
+// import or re-export from a relative path, a bare `import './x.js'` included.
+const STATIC_IMPORT =
+  /^(?:import|export)\s(?:[^;'"]*?\sfrom\s)?['"](\.[^'"]+)['"]/gm;
+
 test('every class exported from src/nodes/ is a node class or an installed part', async () => {
+  // Every module first: a part is installed when its class's module loads,
+  // which can come after the part's own in any one import order.
+  const loaded = [];
+  for (const file of modules(ROOT)) {
+    loaded.push([file, await import(pathToFileURL(file).href)]);
+  }
   const stray = [];
   let parts = 0;
-  for (const file of modules(ROOT)) {
-    const mod = await import(pathToFileURL(file).href);
+  for (const [file, mod] of loaded) {
     for (const [name, value] of Object.entries(mod)) {
       if (!isClass(value)) continue;
-      if (value === Node || value.prototype instanceof Node) continue;
+      // parts first: installing re-parents a part onto its class's parent,
+      // so a WindowNode part's prototype is `instanceof Node` too
       if (installedOnto(value)) {
         parts++;
         continue;
       }
+      if (value === Node || value.prototype instanceof Node) continue;
       stray.push(`${relative(ROOT, file)}: ${name}`);
     }
   }
@@ -62,7 +74,7 @@ test('the modules under src/nodes/ import each other without a cycle', () => {
   const graph = new Map();
   for (const file of modules(ROOT)) {
     const text = readFileSync(file, 'utf8');
-    const deps = [...text.matchAll(/^import\s[\s\S]*?\sfrom\s+'(\.[^']+)';/gm)]
+    const deps = [...text.matchAll(STATIC_IMPORT)]
       .map((m) => resolve(dirname(file), m[1]))
       .filter((p) => p.startsWith(ROOT));
     graph.set(file, deps);
