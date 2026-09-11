@@ -22,6 +22,8 @@
 // a threshold. Both are plain data, so this module needs nothing from
 // src/nodes/ — the node side is there, next to the pass it runs in.
 
+import { gridLayout } from './grid.js';
+
 /** name -> definition, insertion-ordered: the order an error lists them in. */
 const layouts = new Map();
 const positions = new Map();
@@ -198,8 +200,41 @@ function request(value, table) {
   return { name, def: table.get(name) ?? null, raw };
 }
 
-/** The layout a resolved style asks its node to arrange its children with. */
-export const layoutOf = (style) => request(style.layout, layouts);
+/**
+ * The layout a resolved style asks its node to arrange its children with —
+ * named by `layout`, or by `display: 'grid'`, which is CSS's name for the
+ * built-in grid and the same request as `layout: 'grid'`. Where the two
+ * disagree — `display: 'grid'` beside another layout, or `layout: 'grid'`
+ * beside `display: 'flex'` — the answer carries a `conflict` for the node to
+ * report and no definition, so the box is flexbox until they agree.
+ * `display: 'flex'` beside any other layout is no disagreement: it says the
+ * box is shown, which is all `display` said before grid was one of its values.
+ */
+export function layoutOf(style) {
+  const requested = request(style.layout, layouts);
+  const display = style.display;
+  if (display === 'grid') {
+    if (requested === null) return GRID_REQUEST;
+    if (requested.name === 'grid') return requested;
+    return disagreement("display: 'grid'", requested);
+  }
+  if (display === 'flex' && requested?.name === 'grid') {
+    return disagreement("display: 'flex'", requested);
+  }
+  return requested;
+}
+
+function disagreement(display, requested) {
+  return {
+    name: requested.name,
+    def: null,
+    raw: requested.raw,
+    conflict:
+      `react-x11: ${display} and layout: ${JSON.stringify(requested.name)} ` +
+      'disagree about how this box lays out its children — say it once ' +
+      "(display: 'grid' and layout: 'grid' are the same request)",
+  };
+}
 
 /** CSS's own positions, which yoga lays out — and the one CSS has that this
  *  renderer does not (`fixed`), kept out of the registry so it cannot come
@@ -672,3 +707,15 @@ registerLayout('masonry', {
 });
 
 registerLayout('equal-row', { [BUILTIN]: true, layout: equalRow });
+
+// `grid`: CSS's, from a module of its own (src/grid.js). It takes no options:
+// its tracks are the box's own style — `gridTemplateColumns` and the rest —
+// and a child's place is its own `gridColumn`, `gridRow` or `gridArea`.
+registerLayout('grid', { [BUILTIN]: true, layout: gridLayout });
+
+/** What `display: 'grid'` asks for, with no `layout` beside it. */
+const GRID_REQUEST = Object.freeze({
+  name: 'grid',
+  def: layouts.get('grid'),
+  raw: null,
+});

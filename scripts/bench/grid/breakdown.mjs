@@ -10,9 +10,6 @@ const require = createRequire(import.meta.url);
 const React = require('react');
 const { renderX11, act, screen } =
   await import('../../../src/testing/index.js');
-const { registerLayout } = await import('../../../src/host.js');
-const { registerGrid } = await import('./grid-layout.js');
-registerGrid(registerLayout);
 
 const FONT = join(
   dirname(require.resolve('katex/package.json')),
@@ -61,10 +58,13 @@ const card = (i) =>
       ),
     ),
   );
-const layout =
+const arrangement =
   which === 'grid'
-    ? { name: 'grid', columns: 'repeat(auto-fill, minmax(200px, 1fr))' }
-    : { name: 'masonry', columnWidth: 200 };
+    ? {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+      }
+    : { layout: { name: 'masonry', columnWidth: 200 } };
 const tree = h(
   'box',
   { style: { flexGrow: 1, overflow: 'scroll' } },
@@ -72,7 +72,7 @@ const tree = h(
     'box',
     {
       'data-testname': 'host',
-      style: { layout, gap: 8, padding: 8, flexShrink: 0 },
+      style: { ...arrangement, gap: 8, padding: 8, flexShrink: 0 },
     },
     Array.from({ length: N }, (_, i) => card(i)),
   ),
@@ -242,9 +242,14 @@ await act(() => sleep(20));
 await frame('one text changed', () => setters[CHANGED](words(CHANGED, 40)));
 await frame('it changed back', () => setters[CHANGED](words(CHANGED, 2)));
 const wnd = windowNode.window;
-await frame('resized 1000 -> 900', async () => {
+await frame('resized 1000 -> 900, a width never asked at', async () => {
   wnd.width = 900;
   wnd.emit('resize', { width: 900, height: 700 });
+  await sleep(30);
+});
+await frame('resized 900 -> 1000, a width asked at before', async () => {
+  wnd.width = 1000;
+  wnd.emit('resize', { width: 1000, height: 700 });
   await sleep(30);
 });
 process.exit(0);

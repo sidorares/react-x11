@@ -1003,10 +1003,119 @@ registerPosition('parallax', {
 The contract — what `place` is handed and may return — is in
 [extending.md](extending.md#a-position-of-your-own).
 
+## Grid
+
+`display: 'grid'` lays a box's children out as a CSS grid, written the way
+CSS writes one — `gridTemplateColumns` on the box, `gridColumn` on a child —
+so a grid copied from a web codebase lays out here as it was written:
+
+```jsx
+// a form: the labels as wide as the widest, the fields taking the rest
+<box
+  style={{
+    display: 'grid',
+    gridTemplateColumns: 'auto 1fr',
+    columnGap: 12,
+    rowGap: 6,
+  }}
+>
+  <text>Name</text>
+  <textinput />
+  <text>Postal address</text>
+  <textarea />
+  <box style={{ gridColumn: '1 / -1' }}>{/* a row the whole width */}</box>
+</box>
+
+// a gallery: as many columns of 200 and up as fit, each row as tall as its
+// tallest card
+<box
+  style={{
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+    gap: 8,
+  }}
+>
+  {cards}
+</box>
+
+// an app's shell, by named areas
+<box
+  style={{
+    display: 'grid',
+    gridTemplateColumns: '200px 1fr',
+    gridTemplateRows: 'auto 1fr auto',
+    gridTemplateAreas: ['head head', 'side main', 'foot foot'],
+    flexGrow: 1,
+  }}
+>
+  <Header style={{ gridArea: 'head' }} />
+  <Sidebar style={{ gridArea: 'side' }} />
+  <Main style={{ gridArea: 'main' }} />
+  <Footer style={{ gridArea: 'foot' }} />
+</box>
+```
+
+| on the grid box                           | CSS                                |                                                                                                                                                                                                                            |
+| ----------------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gridTemplateColumns`, `gridTemplateRows` | `grid-template-*`                  | a track list — lengths in `px` (logical pixels), `%` and `fr`; `auto`, `min-content`, `max-content`; `minmax()`, `fit-content()`; `repeat()` with a count, `auto-fill` or `auto-fit` — or a number: that many equal tracks |
+| `gridTemplateAreas`                       | `grid-template-areas`              | one quoted string per row — `'"head head" "side main"'` — or an array of the rows                                                                                                                                          |
+| `gridAutoColumns`, `gridAutoRows`         | `grid-auto-*`                      | the size of a track the grid adds for a child placed past its template; a number is a length                                                                                                                               |
+| `gridAutoFlow`                            | `grid-auto-flow`                   | `'row'` (the default) or `'column'`, and `'dense'` to back-fill a hole                                                                                                                                                     |
+| `gap`, `columnGap`, `rowGap`              | `gap`                              | between the tracks                                                                                                                                                                                                         |
+| `justifyItems`, `alignItems`              | `justify-items`, `align-items`     | where each child sits in its area: `'stretch'` (the default), `'flex-start'`, `'center'`, `'flex-end'`                                                                                                                     |
+| `justifyContent`, `alignContent`          | `justify-content`, `align-content` | where the tracks sit when they leave room                                                                                                                                                                                  |
+| **on a child**                            |                                    |                                                                                                                                                                                                                            |
+| `gridColumn`, `gridRow`                   | `grid-column`, `grid-row`          | `2`, `'span 2'`, `'2 / 4'`, `'2 / span 3'`, `'1 / -1'`                                                                                                                                                                     |
+| `gridArea`                                | `grid-area`                        | a name from `gridTemplateAreas`, or four lines; `gridColumn` and `gridRow` beside it win for their own axis                                                                                                                |
+| `justifySelf`, `alignSelf`                | `justify-self`, `align-self`       | its own place in its area, over the grid's                                                                                                                                                                                 |
+
+Things to know:
+
+- **A number is a count** where CSS's value is a track list:
+  `gridTemplateColumns: 3` is three equal columns, `repeat(3, minmax(0,
+1fr))`, the way Tailwind's `grid-cols-3` means it — equal whatever is in
+  them. `'repeat(3, 1fr)'` is CSS's own, a column never narrower than what is
+  in it, so one long word widens its column. Inside a track list a length
+  takes its unit, `'200px 1fr'`; on `gridAutoRows` a number is a length, and
+  on `gridColumn` a line, counting from 1 at the start and from -1 at the
+  end.
+- **`layout: 'grid'` is the same request**, under the name every layout goes
+  by ([below](#custom-layouts)). A box whose `display` and `layout` disagree
+  — `display: 'grid'` beside `layout: 'masonry'`, or `layout: 'grid'` beside
+  `display: 'flex'` — is reported, and laid out as flexbox until they agree.
+- **The alignment keywords are this renderer's**, the ones `alignItems`
+  already takes: `'flex-start'` and `'flex-end'` where CSS grid writes
+  `start` and `end`. A value it does not take is an error listing the ones
+  it does.
+- **The lines are whole pixels.** Tracks are sized exactly and their lines
+  snapped, so neighbours in `'1fr 1fr 1fr'` meet on a shared pixel and every
+  gap is as wide as it was written. Chrome lays a track out at a fraction of
+  a pixel, so a row whose content fits in the fraction can wrap one line
+  differently here.
+- **It is checked against Chrome.** A corpus of grids Chrome laid out is
+  part of the test suite (`test/grid-conformance.test.js`) and lays out here
+  within a pixel of Chrome's, but for the fraction above.
+- **Not here:** subgrid (a grid's child lays its own children out), baseline
+  alignment, named lines (`[full-start]` — name an area instead) and the
+  `grid` and `grid-template` shorthands. A value that uses one is an error
+  naming it.
+- **It runs inside the layout pass**, as every layout does — on a window's
+  resize, a live one included, and in the frame a container query flips. A
+  query block can switch one property alone:
+  `'@container width < 500': { gridTemplateColumns: 1 }`. In a scroll pane,
+  the grid is a `<box>` inside the pane.
+- **What it costs** is its children's sizes, asked only where a track needs
+  them. Fixed tracks, `minmax(0, 1fr)` and a bare count never ask; `1fr`'s
+  minimum is the content floor, which is measured anyway; `auto`,
+  `min-content` and `max-content` columns ask each child once for each width;
+  `auto` rows ask each child its height at its column's width, which placing
+  it needs anyway. What a child answered is remembered until something inside
+  it changes, so a frame in which one card's text changed lays out that card.
+
 ## Custom layouts
 
 `layout` hands a box's children to a layout algorithm in place of flexbox.
-Two are built in:
+[Grid](#grid) is one, and the other two built in are:
 
 ```jsx
 // a board of notes, each dropped into whichever column is shortest so far

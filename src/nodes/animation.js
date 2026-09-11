@@ -13,6 +13,7 @@ import {
   ease,
   isLayoutProp,
 } from '../styles.js';
+import { GRID_CONTAINER_PROPS, GRID_ITEM_PROPS } from '../grid.js';
 import { isPlaced } from '../layouts.js';
 import { desktopSettings, watchDesktopSettings } from '../desktopsettings.js';
 import { watchWindowState, windowStateSnapshot } from '../windowstate.js';
@@ -20,6 +21,24 @@ import { shadowExtentOf } from './boxpaint.js';
 import { inThemeWalk } from './cascade.js';
 import { insetRect } from './rects.js';
 import { shallowEqual } from './util.js';
+
+/** Two values of a grid property that lay out the same: an inline
+ *  `gridTemplateAreas` array is a new array every render. */
+const sameGridValue = (a, b) =>
+  a === b ||
+  (Array.isArray(a) &&
+    Array.isArray(b) &&
+    a.length === b.length &&
+    a.every((row, i) => row === b[i]));
+
+/** Whether what a grid reads off its own style moved — the properties yoga
+ *  never sees, so nothing else would ask the layout again. */
+const gridContainerMoved = (was, now) =>
+  GRID_CONTAINER_PROPS.some((prop) => !sameGridValue(was[prop], now[prop]));
+
+/** …and off one of its children. */
+const gridItemMoved = (was, now) =>
+  GRID_ITEM_PROPS.some((prop) => was[prop] !== now[prop]);
 
 /**
  * The node whose bounds cover where an animating node will be next frame, or
@@ -136,19 +155,34 @@ export class NodeAnimation {
     // size or container query, a token — so this is where the children are
     // handed to it or taken back. Before the node has a box (the constructor
     // styles it first) there is nothing to hand them from.
+    // `display: 'grid'` is the same request under CSS's name for it.
     if (
       this.yoga &&
       (displayed.layout !== this.style.layout ||
+        displayed.display !== this.style.display ||
         (this._host !== null && this._host.scale !== this.scale) ||
-        (this.style.layout != null &&
+        ((this.style.layout != null || this.style.display === 'grid') &&
           displayed.overflow !== this.style.overflow))
     ) {
       this._syncLayoutHost();
     }
+    // A grid reads its tracks off the style, where yoga never sees them, so
+    // a change to one asks the algorithm again — and gives one that threw
+    // another go.
+    if (this.yoga && gridContainerMoved(displayed, this.style)) {
+      if (this._host !== null) this._hostChanged();
+      else if (this._layoutAbandoned !== null) {
+        this._layoutAbandoned = null;
+        this._syncLayoutHost();
+      }
+    }
     // …and a child of one tells it when what the algorithm reads of it moved
     const host = this.parent?._host;
     if (host != null) {
-      if (!shallowEqual(displayed.layoutItem, this.style.layoutItem)) {
+      if (
+        !shallowEqual(displayed.layoutItem, this.style.layoutItem) ||
+        gridItemMoved(displayed, this.style)
+      ) {
         this.parent._hostChanged();
       }
       if (
@@ -194,7 +228,7 @@ export class NodeAnimation {
     // `display: 'none'` hides a subtree as completely as React's own flag
     // does, whether it arrived from a prop, a state block or a size query —
     // so focus leaves it by the same rule (`_visibilityChanged`).
-    if (displayed.display !== this.style.display) {
+    if ((displayed.display === 'none') !== (this.style.display === 'none')) {
       this._visibilityChanged(this.style.display !== 'none');
     }
     // A shadow that just got smaller — or went away — has to claim where it

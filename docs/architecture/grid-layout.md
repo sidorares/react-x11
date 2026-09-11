@@ -1,50 +1,46 @@
-# Grid layout: what a `grid` on the layout seam would take
+# Grid layout: CSS grid on the layout seam
 
-_Feasibility study, 2026-09-11. Written against the branch that adds the
-layout seam ([custom-layout.md](custom-layout.md); react-x11 2.11 plus that
-branch). Measured with a prototype on the seam, `scripts/bench/grid/`, in
-the in-process X server with real text shaping (KaTeX Main), on one machine
-(Apple M1 Pro, node 26). The outside facts in §7 are as of the date and
-linked; they will drift._
+_Design record, 2026-09-11. It began the same day as a feasibility study
+with a prototype, on the branch that added the layout seam
+([custom-layout.md](custom-layout.md)); this is the record of what was
+built from it. Measured in the in-process X server with real text shaping
+(KaTeX Main), on one machine (Apple M1 Pro, node 26), and against Chrome 152. The outside facts in §8 are as of the date and linked; they will
+drift._
+
+_[styling.md](../styling.md#grid) is the reference for the style
+properties; this is why they are the shape they are._
 
 ---
 
 ## 0. TL;DR
 
-**Feasible on the seam, without yoga's help, and not expensive once the seam
-remembers what it asks a child.**
-
-- **Performance** (§3). A prototype registered with `registerLayout('grid')`
-  lays out a gallery of 300 cards in `repeat(auto-fill, minmax(200px, 1fr))`
-  in 2.5 ms for a frame in which one card's text changed, and a 200-row
-  `auto 1fr` form in 3.4 ms, against 13.0 ms and 13.5 ms for the nearest
-  flexbox. The first cut was 3.4 times _slower_ than flexbox, and the reason
-  was the seam, not grid: it asked every child the same questions every run,
-  several runs a frame. The fix is in, and `masonry` and `equal-row` get it
-  too.
-- **API** (§2). `layout: { name: 'grid', columns: '120px 1fr' }` on the
-  box, with `rows`, `areas` and `autoFlow` beside `columns`, and
-  `layoutItem: { column: 'span 2' }` on a child: CSS's names and CSS's
-  track grammar, in a string, because that is what can be copied from the
-  web. Every other toolkit surveyed types its tracks instead (§7), and the
-  option schema could take both.
-- **Complexity** (§4). The prototype is 675 lines of code; the spec's track
-  sizing algorithm is 218 of them. What it leaves out — subgrid, baselines,
-  named lines, column flow, the second column pass — is where most of
-  Taffy's 7,500 go. Subgrid cannot be built on this seam at all: a child's
-  tree is its own.
-- **Recommendation** (§6): ship `grid` as the third built-in layout, from
-  the prototype, with the probe's cases as tests. Don't wait for yoga, whose
-  grid has an API and no released algorithm, and don't take a second engine
-  for it: Taffy's JS builds are four to six times yoga's size.
+- **What:** `display: 'grid'` lays a box's children out by CSS Grid's
+  placement algorithm (css-grid-2 §8.5) and its track sizing algorithm
+  (§12), inside the layout pass, as a layout on the seam. `layout: 'grid'`
+  is the same request; a box whose `display` and `layout` disagree is
+  reported and laid out as flexbox.
+- **The style is CSS's, and flat** (§2): `gridTemplateColumns`,
+  `gridTemplateRows`, `gridTemplateAreas`, `gridAutoColumns`,
+  `gridAutoRows`, `gridAutoFlow` and `justifyItems` on the box; `gridColumn`,
+  `gridRow`, `gridArea` and `justifySelf` on a child. The names every
+  CSS-in-JS library and React DOM write, and the ones yoga's own grid uses.
+- **Held to Chrome** (§4): a 400-case corpus Chrome laid out is part of the
+  test suite and lays out here within a pixel of it, but for one case where
+  Chrome parts ways with the spec and this grid keeps to the spec.
+- **Cheaper than the flexbox that does the nearest thing** on every frame
+  measured (§3) — 300 cards: mount 59 ms against 63, one card's text
+  changing 2.1 ms against 13.1, a live resize 20.3 ms against 25.8.
+- **Left out** (§5): subgrid, which this seam cannot carry; baselines;
+  named lines; the `grid` and `grid-template` shorthands; the second column
+  pass.
 
 ## 1. What grid is for here
 
-Flexbox lines things up in one direction. The layouts an app here reaches
-for that it cannot write:
+Flexbox lines things up in one direction. The layouts an app here reached
+for and could not write:
 
 - **A form.** Labels in a column as wide as the widest label, fields taking
-  the rest. Flexbox does it with a fixed label width, which a translation
+  the rest. Flexbox did it with a fixed label width, which a translation
   breaks, or by measuring in an effect, a frame late
   ([custom-layout.md](custom-layout.md#1-why-the-core)).
 - **A dashboard.** Tiles spanning columns and rows, packed densely.
@@ -58,317 +54,305 @@ Those are the three cases measured in §3.
 
 ```jsx
 <box
-  style={{
-    layout: { name: 'grid', columns: 'auto 1fr' },
-    columnGap: 12,
-    rowGap: 6,
-  }}
+  style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 12 }}
 >
   <text>Name</text>
   <textinput />
-  <text>Postal address</text>
-  <textarea />
-</box>
-
-<box
-  style={{
-    layout: {
-      name: 'grid',
-      columns: '200px 1fr',
-      rows: 'auto 1fr auto',
-      areas: ['head head', 'side main', 'foot foot'],
-    },
-  }}
->
-  <box style={{ layoutItem: { area: 'head' } }} />
-  <box style={{ layoutItem: { area: 'side' } }} />
-  <box style={{ layoutItem: { area: 'main' } }} />
-  <box style={{ layoutItem: { area: 'foot' } }} />
+  <box style={{ gridColumn: '1 / -1' }} />
 </box>
 ```
 
-| on the box, in `layout` | CSS                   |                                                                                                    |
-| ----------------------- | --------------------- | -------------------------------------------------------------------------------------------------- |
-| `columns`, `rows`       | `grid-template-*`     | px (logical), %, fr, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` |
-| `autoColumns/Rows`      | `grid-auto-*`         | the size of an implicit track                                                                      |
-| `autoFlow`              | `grid-auto-flow`      | `'row'` or `'row dense'`                                                                           |
-| `areas`                 | `grid-template-areas` | one string per row                                                                                 |
-| `justifyItems`          | `justify-items`       | `stretch`, `start`, `center`, `end`                                                                |
-| **on a child**          |                       |                                                                                                    |
-| `column`, `row`         | `grid-column/row`     | `2`, `'2 / 4'`, `'span 2'`, `'2 / span 3'`                                                         |
-| `area`                  | `grid-area`           | a name from `areas`                                                                                |
-| **the box's own style** |                       |                                                                                                    |
-| `gap`, `columnGap`, …   | `gap`                 | between tracks                                                                                     |
-| `alignItems`            | `align-items`         | each item in its row                                                                               |
+### Flat, and CSS's names
 
-**`layout: 'grid'`, not `display: 'grid'`.** Here the property that names
-the algorithm arranging a box's children is `layout`, and grid is one more
-value of it: the same seam, the same `layoutItem`, the same floors, RTL and
-error handling as `masonry`. `display` keeps its one job, whether the box
-takes part at all.
+The study proposed the shape a registered layout has —
+`layout: { name: 'grid', columns: 'auto 1fr' }` on the box and
+`layoutItem: { column: 'span 2' }` on a child — and it read as heavy,
+because it is the one thing nobody else does. The prior art (§8) splits in
+two:
 
-**A string, or typed tracks.** Every other declarative toolkit surveyed
-types its tracks instead of parsing them (§7): Flutter's
-`flutter_layout_grid` (`[4.5.fr, 100.px, auto]`, with a string only for
-named areas), Compose's `Grid` (`column(160.dp); row(1.fr)`), SwiftUI's
-`LazyVGrid` (`[GridItem(.fixed(100)), GridItem(.flexible())]`). They have
-no CSS to be compatible with; a React app has, and a string is what can be
-copied from the web and read by anyone who has written CSS. The cost is
-that TypeScript sees `string`: a template-literal type can check the simple
-tracks but not `repeat()`. The option schema can take both, a string or an
-array of tracks.
+- **Style objects use CSS's own names, flat.** Objects in emotion and
+  styled-components, StyleX, vanilla-extract, MUI's `sx`, Chakra's and
+  Panda's style props, and React DOM's `style` all write
+  `display: 'grid', gridTemplateColumns: '…'` and `gridColumn: 'span 2'`.
+  None of them shortens anything inside the object. Yoga's own grid,
+  unreleased, names its style `gridTemplateColumns` too, and CSS's masonry
+  shipped as `display: grid-lanes`, reusing grid's properties.
+- **What is short lives a layer up**: Tailwind's `grid-cols-3` and
+  `col-span-2`, or a component's props — Radix's `<Grid columns="3">`,
+  Chakra's `<SimpleGrid columns={3}>`, Panda's `grid({ columns: 3 })`.
 
-**One thing the seam did not have for this.** A `length` option arrives in
-device pixels, but a length inside a track list is not an option the schema
-can see. The prototype multiplies by `info.scale`, which the seam passed and
-did not document; it is documented now
-([extending.md](../extending.md#a-layout-algorithm-of-your-own)). A shipped
-grid would do better with a `'tracks'` option type that core parses and
-scales once, so no run repeats the parse.
+So the style here is CSS's longhands, flat. A grid copied from a React DOM
+codebase lays out as written; a style array or a query block can change one
+property without restating the rest — `flattenStyle` replaces a `layout`
+object whole, so with the options bag a block that changed the columns had
+to restate the name and the areas too; and the day yoga's grid ships,
+handing it the work changes no style. The terse spelling belongs in the
+class-string layer the compact-styles prototype proposes, where Tailwind's
+names carry over as they are.
+
+**`display: 'grid'`, and `layout: 'grid'` beside it.** Every system
+above turns grid on with `display` — CSS, Tailwind's `grid` class, React
+DOM, yoga's `Display.Grid`, `display: grid-lanes` — so `display` does here
+too. `layout` stays the name every layout goes by, the Houdini role
+(`display: layout(name)` in CSS), and `layout: 'grid'` asks for the same
+grid. They disagree when `display: 'grid'` stands beside another layout, or
+`layout: 'grid'` beside `display: 'flex'`; the box is reported and laid out
+as flexbox until they agree (`layoutOf`, src/layouts.js). `display: 'flex'`
+beside `masonry` is no disagreement: it says the box is shown, which is all
+`display` said before grid was one of its values, and the docs' own
+`'@container …': { display: 'flex' }` to show a box again relies on it.
+
+A registered layout keeps `layout: { name, … }` and `layoutItem`: it cannot
+claim global style names. That is the asymmetry flexbox already has, whose
+properties are flat because they are CSS's.
+
+### The values
+
+| on the box                                | CSS                   |                                                                                                    |
+| ----------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------- |
+| `gridTemplateColumns`, `gridTemplateRows` | `grid-template-*`     | px (logical), %, fr, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` |
+| `gridTemplateAreas`                       | `grid-template-areas` | one quoted string per row, or an array of the rows                                                 |
+| `gridAutoColumns`, `gridAutoRows`         | `grid-auto-*`         | the sizes an implicit track takes, in turn                                                         |
+| `gridAutoFlow`                            | `grid-auto-flow`      | `row`, `column`, and `dense`                                                                       |
+| `justifyItems`                            | `justify-items`       | `stretch`, `flex-start`, `center`, `flex-end`                                                      |
+| **on a child**                            |                       |                                                                                                    |
+| `gridColumn`, `gridRow`                   | `grid-column/row`     | `2`, `'2 / 4'`, `'span 2'`, `'2 / span 3'`, `'1 / -1'`                                             |
+| `gridArea`                                | `grid-area`           | a name from `gridTemplateAreas`, or four lines                                                     |
+| `justifySelf`                             | `justify-self`        | `auto`, and `justifyItems`' values                                                                 |
+
+`gap`, `columnGap`, `rowGap`, `alignItems`, `alignSelf`, `justifyContent`
+and `alignContent` are the box's and the child's own flex properties, and
+mean for a grid what they mean in CSS.
+
+- **A number is a count in a template**: `gridTemplateColumns: 3` is
+  `repeat(3, minmax(0, 1fr))`. Every layer that shortens grid means that by
+  a number, and compiles it to exactly that string — Tailwind's
+  `grid-cols-3`, Radix's `columns="3"`, Chakra's and Mantine's
+  `SimpleGrid`, Panda's `grid()` pattern. A number that is not a length is
+  no stranger here than `maxLines: 3` or `flex: 1`, and CSS gives a bare
+  number no meaning in a track list. On `gridAutoRows` a number is a length
+  — an implicit track has a size and never a count — and on `gridColumn` a
+  line, as in CSS and in React DOM, which never gives it `px`.
+- **The alignment keywords are this renderer's**, the ones `alignItems`
+  takes: `flex-start` and `flex-end` where CSS grid writes `start` and
+  `end`. One spelling per concept; the error names the one to write.
+- **Checked where written.** The style validator runs the layout's own
+  parsers in development (`validateValue`, src/styles.js), so a track list
+  that would not lay out is an error naming the property and the fix — a
+  unitless length says to write `px` and that a bare number is a count — not
+  a layout that throws and falls back to flexbox.
+
+### What the seam gained
+
+Two things, both general:
+
+- **`LayoutChild.style`**, the child's resolved style: what a grid places a
+  child by and aligns it with. A registered layout can read a child's
+  `alignSelf` the same way.
+- **`info.report(message, consequence)`**, to say a mistake the algorithm
+  can lay out around — a `gridArea` naming no area, `layoutItem` on a grid's
+  child — once, the way a bad style value is said. A throw stays for what
+  cannot be laid out.
+
+And one thing the funnel had to learn: a grid's properties are not yoga's,
+so nothing dirtied a grid whose `gridTemplateColumns` changed.
+`_retarget` compares `GRID_CONTAINER_PROPS` and `GRID_ITEM_PROPS` and asks
+the host again, as it already did for `layoutItem`.
 
 ## 3. Performance
 
-Three scenarios, each against the nearest flexbox:
-
-- **Form:** 200 rows of `auto 1fr` — a label, and a bordered field with
-  text; 400 children. The flexbox is 200 rows with a fixed-width label.
-- **Cards:** 300 cards of 9 yoga nodes each, with wrapping titles, in
-  `repeat(auto-fill, minmax(200px, 1fr))`. The flexbox is a flex-wrap row
-  with a 200px basis; `masonry` lays out the same cards for comparison.
-- **Dashboard:** 120 tiles in `repeat(6, 1fr)` with dense flow, a third of
-  them two columns wide and a fifth two rows tall.
-
-Layout time is `WindowNode._layoutStep`'s, per frame. A change is one
-item's text going from two words to forty and back; changes and resizes
-are medians of nine.
+`npm run bench:grid`: layout time per frame, `WindowNode._layoutStep`'s.
+The changes are an item's text going from two words to forty and back;
+changes and resizes are medians.
 
 | case                     | flexbox |    grid | masonry |
 | ------------------------ | ------: | ------: | ------: |
-| form — mount             | 36.0 ms | 27.9 ms |         |
-| form — one text changed  | 13.5 ms |  3.4 ms |         |
-| form — resized 1000↔900  |  5.0 ms |  2.0 ms |         |
-| cards — mount            | 64.8 ms | 74.0 ms | 72.3 ms |
-| cards — one text changed | 13.0 ms |  2.5 ms |  1.6 ms |
-| cards — resized 1000↔900 | 20.3 ms |  5.1 ms |  4.2 ms |
-| dashboard — mount        |         | 16.5 ms |         |
-| dashboard — one changed  |         |  2.4 ms |         |
-| dashboard — resized      |         |  2.4 ms |         |
+| form — mount             | 36.4 ms | 28.6 ms |         |
+| form — one text changed  | 13.9 ms |  3.5 ms |         |
+| form — resized 1000↔900  |  5.2 ms |  2.9 ms |         |
+| form — live resize       |  7.6 ms |  6.8 ms |         |
+| cards — mount            | 63.0 ms | 59.3 ms | 75.3 ms |
+| cards — one text changed | 13.1 ms |  2.1 ms |  1.8 ms |
+| cards — resized 1000↔900 | 20.2 ms |  5.2 ms |  4.3 ms |
+| cards — live resize      | 25.8 ms | 20.3 ms | 27.9 ms |
+| dashboard — mount        |         | 15.2 ms |         |
+| dashboard — one changed  |         |  2.2 ms |         |
+| dashboard — live resize  |         |  4.5 ms |         |
 
-These are the branch rebased onto master at e309f8b, in two runs that agree
-within 5%. A run before the rebase read higher for the grid host: 3.8 ms
-for the cards' changed frame, and 5.1 ms for the form's.
+The form is 200 rows of `auto 1fr` against flexbox rows with a fixed label
+width; the cards 300 cards of 9 yoga nodes each in
+`repeat(auto-fill, minmax(200px, 1fr))` against a flex-wrap row with a 200px
+basis; the dashboard 120 tiles in `repeat(6, 1fr)`, dense, a third two
+columns wide and a fifth two rows tall.
 
-Grid is faster than flexbox on the frames that happen after mount, for the
-structural reason in [custom-layout.md](custom-layout.md#5-cost): each
-item's tree is a containment boundary, so a change re-lays out one item and
-the algorithm reads everyone else's sizes from what it was told last time.
-Mount pays for every child's answers once.
+**Two resizes, and the difference matters.** The study measured only the
+first: a window resized back and forth between two widths, which the seam
+answers from what each child said at those widths before. A live resize —
+a width nothing has been asked at, every frame, which is what a drag is —
+asks every child again; there grid is level with flexbox rather than four
+times cheaper. 801 child-tree layouts a frame for the 300 cards, under
+three a card.
 
-**The first cut was slower, and it was the seam.** Before the seam
-remembered anything, the cards' changed frame took 45.7 ms, 3.4 times
-flexbox's, and the form's 20.8 ms. One frame, broken down
-(`scripts/bench/grid/breakdown.mjs`):
+**Why it is cheaper than the prototype**, whose cards took 92 ms to mount
+and 36 ms a live-resize frame: a track asks its children for sizes only
+when its sizing function is intrinsic, as the spec has it. The gallery's
+`minmax(200px, 1fr)` has a fixed minimum, so its columns ask nothing — no
+max-content layout of any card — and each card is asked its height once,
+at the snapped width it is then laid out at, which is the question the
+placement's own check asks.
 
-- **The algorithm ran eight times.** Yoga asks a host's measure function in
-  the floors pass (`exactly 0`, then `at-most 0`, the host's own floor), in
-  the height floors pass and in the pass proper, and the placement makes
-  one more call. None of that is grid's: `masonry` runs as often.
-- **Each run asked every child two questions,** its intrinsic widths and its
-  height at its column's width. Each answer was a `calculateLayout` on the
-  child's tree, and the two questions evicted each other from the one layout
-  yoga caches for a root: 4,800 full child layouts a frame for 300 cards, 40
-  of the 50 ms.
-- **A stretched item's rect names a height,** which the floors code took to
-  mean a child that could be squeezed. It measured the item's height floors,
-  off the pixel grid, and paid a whole extra pass for it.
-- **The floors pass measures off the pixel grid,** which voids yoga's cached
-  layouts, so the placement laid all 300 trees out again to find each one
-  where it already was.
+**What the seam still costs**, found building this and left for changes of
+their own:
 
-Three fixes to the seam, none of them grid's
-([custom-layout.md](custom-layout.md#the-mechanism)):
+- `probeHeightFloors` asks a host its height at its **border-box** width
+  (`_heightForWidth`), where yoga's measure is given the content box: a
+  grid with padding is asked at widths nothing is drawn at, each a layout
+  of every child. Masonry's four layouts a card a live-resize frame are
+  mostly that.
+- `intrinsicSizes()` lays a child out unconstrained for its max-content
+  width even when only the minimum is read.
+- The floors pass asks a host its height at its narrowest, which lays
+  every child out at a width no frame uses.
 
-1. **A child's answers are remembered** (`Node._hostSizesNow`) until
-   something inside it changes. That shows as dirt on its root, because
-   every layout of the root goes through `layoutHostChild` or the memo,
-   which drop the memo when they find it dirty. Answers taken off the pixel
-   grid are kept apart.
-2. **A rect's height squeezes a child** only when it is less than the
-   child's content takes at the rect's width. A stretched row, sized to fit
-   its items, never squeezes them.
-3. **The placement leaves a tree already at its rect** where it is, unless
-   it is dirty.
+## 4. Held to Chrome
 
-Afterwards: 4 memo misses in 3,900 questions on a changed frame, and one
-tree laid out at placement, the one that changed.
+`test/grid-conformance.test.js` lays out 400 grids that Chrome laid out
+first (`scripts/grid-fixture.mjs`, into `test/fixtures/grid-chrome.json`)
+and compares every item's rect, within a pixel. The grids are seeded and
+text-free — an item holds a box of a fixed size or a wrapping row of fixed
+chips — so both engines agree on every content size and the fixture is the
+same on any machine. Half the cases pile features together; the other half
+add exactly one of the harder ones — negative lines, a span wider than the
+grid, a line past it, self and content alignment, a definite height, column
+flow — to a case otherwise made of plain ones, so each feature has cases of
+its own.
 
-**What still costs:**
+**399 of 400 match.** The one that does not is a case where Chrome and the
+spec part ways, and this grid keeps to the spec: an auto-placed item whose
+span in the flow's direction reaches several tracks past the explicit grid.
+The spec's cursor finds it room across the grid's edge; Chrome puts it
+after everything placed. Probed on its own: a straddle of one track lays
+out as Chrome does, in either flow; the cases that differ reach four or
+five tracks past it.
 
-- **A new width asks every child again.** A resize measures each child at
-  its new column width once; the resize rows above are that. So does the
-  floor question when the widest word in any item changes, since the
-  narrowest a column can be moves with it.
-- **The first frame after mount** asks the off-grid questions for the first
-  time.
-- **The algorithm's own work** is one pass over the items per axis, plus a
-  sort by span and a per-span-group distribution. At 300 items it is well
-  under a millisecond a run, now that the children's answers cost a lookup.
+Built against three more corpora of the same kind — 1,000 cases — it
+matched all but three, and those three are the one difference snapping the
+lines makes: Chrome lays a track out at 94.66 px and wraps a row of chips
+that fits in the 95 px here. The prototype, on the first two of those
+corpora, matched 97–99% of the cases using only what it claimed and 59–70%
+overall: negative lines threw, and neither self nor content alignment nor
+column flow was there.
 
-That is the same shape of work Chromium's grid does: per item, a min/max
-query, a measure pass and a layout pass, each cached (§7).
+**The lines are snapped, not the items.** Tracks are sized exactly, and
+each track line is rounded to a whole pixel (`trackLines`); an item's rect
+runs from one rounded line to another. Rounding each item's own position
+and width, which the prototype did, left a seam of a pixel between
+neighbours in `1fr 1fr 1fr` and drew a 7px gap as 6. It would also lay a
+child's tree out at a fraction, the input yoga divides a rounding residue
+by (issue #411).
 
-## 4. Complexity
+`test/grid.test.js` holds the cases worth a name — and the renderer's
+side: the style, the disagreement between `display` and `layout`,
+validation, the reports, a grid following its style from frame to frame.
+Each of fifteen deliberate breaks of the implementation fails one of them.
 
-The prototype is `scripts/bench/grid/grid-layout.js`: 675 lines of code,
-comments aside.
-
-| part                                                              | lines |
-| ----------------------------------------------------------------- | ----: |
-| track lists: the grammar, `repeat()`, auto-fill counts            |   141 |
-| placement: lines, spans, areas, auto-placement (sparse and dense) |   121 |
-| the track sizing algorithm (css-grid-2 §12.3–12.8)                |   218 |
-| the layout: contributions, shrink-to-fit, alignment, registration |   195 |
-
-Its probe (`scripts/bench/grid/probe.mjs`) has 13 cases worked by hand, all
-passing:
-
-- fixed and fr tracks; gaps;
-- an auto column as wide as its widest label;
-- auto-fill and auto-fit (collapsing the empty tracks);
-- spans, with auto-placement flowing around a definite item; dense packing
-  back-filling a hole;
-- named areas;
-- stretch, and an item with a height of its own keeping it;
-- a spanning item growing the auto tracks it spans;
-- shrink-to-fit;
-- right to left;
-- the floor.
-
-The right-to-left case passes without a line of the prototype written for
-it: the core mirrors what an algorithm answers.
-
-**What it leaves out, and what each would take:**
+## 5. What is left out
 
 - **Subgrid.** Impossible on this seam: a subgrid's items take part in the
-  parent's track sizing, and the parent's algorithm sees a child only as a
-  size. The seam would have to hand an algorithm its grandchildren. Taffy
-  does not have subgrid either.
-- **Baselines** (`alignItems: 'baseline'` within a row): yoga's baseline
-  function, which the seam does not expose
-  ([custom-layout.md](custom-layout.md#7-not-done)).
-- **Named lines, `autoFlow: 'column'`, negative line numbers, and
-  `justify-content`/`align-content` distribution:** mechanical, a few dozen
-  lines each.
+  parent's track sizing, and an algorithm sees a child only as something to
+  measure. The seam would have to hand an algorithm its grandchildren. A
+  table whose rows share their columns is where it would pay.
+- **Baselines** (`alignItems: 'baseline'` in a row): yoga's baseline
+  function, which the seam does not expose. Treated as `flex-start`.
+- **Named lines** (`[full-start] 1fr`): an error naming them; an area is
+  the way to name a place.
+- **The `grid`, `grid-template` and `place-*` shorthands**: one spelling
+  per concept, and the longhands are the ones every CSS-in-JS library
+  writes.
 - **The second column pass** (§12.1 step 3): sizing the columns again when
   an item's min-content contribution changed once the rows were sized. It
-  matters for items whose width follows their height, such as an aspect
-  ratio or an orthogonal flow, and costs one more pass over the columns.
-- **Distributing a spanning item's extra space** is simplified to an even
-  split, up to the growth limits and then past them. The spec distributes
-  to base sizes and growth limits in separate steps, with "infinitely
-  growable" tracks. That is where most of the remaining difference from a
-  browser lies.
+  matters for items whose width follows their height.
+- **An auto repeat counted against a maximum width**: CSS counts
+  `repeat(auto-fill, …)` against `max-width` when the width is indefinite;
+  here it repeats once there.
+- **Percentage gaps**, and `order`.
 
-For scale, Taffy's grid module is 7,508 lines (§7): the above, the spec's
-corners and their tests.
+## 6. Complexity
 
-## 5. What building it showed about the seam
+`src/grid.js` is about 1,400 lines of code, 1,650 with its comments: the
+parsers, placement with implicit tracks on both sides, the track sizing
+algorithm with the spec's distribution of a spanning item's space —
+base sizes and growth limits in their separate steps, infinitely growable
+tracks, `fit-content()` caps — and alignment. For scale, Taffy's grid
+module is 7,508 lines (§8): the above, its corners and their tests.
 
-- **The seam re-asked its children** (§3): the memo, the squeeze rule and
-  the placement skip. Found here, fixed for every layout.
-- **`info.scale`** was needed for lengths inside a string, and is documented
-  now.
-- **Min-content heights** are not handed to an algorithm
-  ([custom-layout.md](custom-layout.md#7-not-done)). Grid does not need them
-  in horizontal text: an item's block-axis min- and max-content are both
-  its height at its column's width, which `measure({ width })` answers.
-- **Nothing else.** Auto-placement, track sizing and alignment are the
-  algorithm's; floors, right to left, absolutely positioned children, a
-  throw, and running inside the pass are the core's, and a grid gets them
-  without asking.
+## 7. Why not an engine
 
-## 6. Recommendation
-
-- **Ship `grid` as the third built-in** in `src/layouts.js`, from the
-  prototype. The probe's cases become tests. Spanning items get the spec's
-  full distribution, and `autoFlow: 'column'` and named lines come when
-  someone asks for them. The box's options and a child's are typed through
-  `CustomLayouts` and `CustomLayoutItem`, with a template-literal type for
-  the simple track lists. An estimate: the prototype's 675 lines become
-  about 900 with the distribution done properly, plus tests.
-- **Don't wait for yoga.** Its grid landed in March 2026 as an API with no
-  layout algorithm; the algorithm is in open PRs; and `yoga-layout` has not
-  released on npm since December 2024. When it does ship, a `grid` on the
-  seam can hand the work over without the style changing.
-- **Don't take Taffy.** Its JS and WASM builds are third-party and 0.9–1.3
-  MB, against `yoga-layout`'s 224 KB, and it would be a second layout engine,
+- **Not yoga's.** Its grid landed in March 2026 as an API with no layout
+  algorithm, the algorithm is in open PRs, and `yoga-layout` has not
+  released on npm since December 2024. When it ships, a grid named with
+  CSS's properties can hand it the work without a style changing.
+- **Not Taffy.** Its JS and WASM builds are third-party and 0.9–1.3 MB,
+  against `yoga-layout`'s 224 KB, and it would be a second layout engine,
   with its own text-measuring bridge, for one algorithm.
 
-## 7. Outside facts
+## 8. Outside facts
 
 As of 2026-09-11.
 
-- **Yoga.**
-  - Grid has been requested since 2019
-    ([react/yoga#867](https://github.com/react/yoga/issues/867)).
-  - [#1865](https://github.com/react/yoga/pull/1865), opened 2025-11-17,
-    leaves out areas, named lines, subgrid, auto-flow, `repeat()`,
-    auto-fill/fit and `fit-content`.
-  - It was split into nine parts. Part 1 (#1893: style types, the C/JS API,
-    `Display.Grid`) landed on 2026-03-05 with no layout algorithm
-    ([07524851f54b](https://github.com/react/yoga/commit/07524851f54b)).
-  - The algorithm is in open PRs #1894, #1923 and
-    [#1994](https://github.com/react/yoga/pull/1994). There is no
-    experimental flag for it.
-  - `yoga-layout` 3.2.1 (2024-12-13) is still the latest release on
-    [npm](https://www.npmjs.com/package/yoga-layout).
-- **Taffy.**
-  - `src/compute/grid` is 7,508 lines at
-    [a1c3f8f](https://github.com/DioxusLabs/taffy/tree/a1c3f8fb3e2c978c3a4f062873bdb16d5eaf6cfd/src/compute/grid);
-    `track_sizing.rs` alone is 1,537, and its flexbox is 3,615.
-  - It has dense placement, named lines and areas. Subgrid
-    ([#468](https://github.com/DioxusLabs/taffy/issues/468)) and masonry
-    ([#910](https://github.com/DioxusLabs/taffy/issues/910)) are open
-    issues.
-  - Its only published grid numbers are from 0.3: a 100×100 grid in 7.07 ms
-    ([results](https://github.com/DioxusLabs/taffy/blob/main/benches/results-2023-02-08.md)).
-  - There is no official JS package
-    ([#394](https://github.com/DioxusLabs/taffy/pull/394)). Third-party
-    builds: [`taffy-layout`](https://www.npmjs.com/package/taffy-layout),
-    902 KB unpacked, and
-    [`@taffyjs/wasm`](https://www.npmjs.com/package/@taffyjs/wasm), 1.34 MB.
 - **The spec.** [css-grid-2 §12](https://www.w3.org/TR/css-grid-2/#algo-grid-sizing),
-  the grid sizing algorithm: columns, then rows at the columns' widths,
-  then each once more if a contribution changed, then alignment.
-- **Chromium.**
-  - LayoutNG caches a grid item's measure and layout passes
-    ([LayoutNG](https://developer.chrome.com/docs/chromium/layoutng)).
-  - An item whose width depends on its row sets `needs_additional_pass`
-    ([grid_layout_algorithm.cc](https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/renderer/core/layout/grid/grid_layout_algorithm.cc)).
-  - Firefox's nested grids cost exponentially in their depth until
-    measurement caches fixed it in 94 and 99
-    ([1591366](https://bugzilla.mozilla.org/show_bug.cgi?id=1591366),
-    [1682686](https://bugzilla.mozilla.org/show_bug.cgi?id=1682686)).
-- **Other toolkits' APIs.**
-  - [flutter_layout_grid](https://pub.dev/packages/flutter_layout_grid):
-    typed track lists, with a string only for named areas.
-  - Compose's `Grid`: a typed DSL, experimental in 1.11.0-alpha04 and
-    stable in 1.13.0-alpha02
-    ([release notes](https://developer.android.com/jetpack/androidx/releases/compose-foundation)).
-  - SwiftUI's [`Grid`](https://developer.apple.com/documentation/swiftui/grid)
-    takes its columns from its rows, and
-    [`LazyVGrid`](https://developer.apple.com/documentation/swiftui/griditem)
-    a typed array.
-  - React Native has no grid in core;
-    [FlashList](https://shopify.github.io/flash-list/docs/usage/) has a
-    masonry mode and per-item spans.
+  the grid sizing algorithm, and §8.5, placement.
+- **Prior art for the style.**
+  - Tailwind v4: `grid-cols-<n>` compiles to `repeat(<n>, minmax(0, 1fr))`,
+    `col-span-full` to `1 / -1`; arbitrary track lists are
+    `grid-cols-[200px_1fr]`; there are no area utilities in core
+    ([grid-template-columns](https://tailwindcss.com/docs/grid-template-columns),
+    [grid-column](https://tailwindcss.com/docs/grid-column),
+    [discussion #2634](https://github.com/tailwindlabs/tailwindcss/discussions/2634)).
+  - Radix Themes' `<Grid columns="3">` compiles a count to
+    `repeat(3, minmax(0, 1fr))`
+    ([grid.props.tsx](https://github.com/radix-ui/themes/blob/HEAD/packages/radix-ui-themes/src/components/grid.props.tsx));
+    so do Chakra's `SimpleGrid`
+    ([simple-grid.tsx](https://github.com/chakra-ui/chakra-ui/blob/HEAD/packages/react/src/components/simple-grid/simple-grid.tsx)),
+    Mantine's `SimpleGrid` and Panda's `grid()` pattern
+    ([patterns](https://panda-css.com/docs/concepts/patterns)); Chakra's
+    and Panda's own docs write `gridTemplateColumns` in full in a style
+    object. Theme UI's `<Grid width={128}>` is
+    `repeat(auto-fit, minmax(128px, 1fr))`
+    ([Grid](https://theme-ui.com/components/grid)).
+  - Yoga's grid, unreleased, names its style `gridTemplateColumns`
+    (`yoga/style/Style.h` on react/yoga's main).
+  - CSS's masonry shipped in Safari 26 as `display: grid-lanes`, reusing
+    `grid-template-columns`, `gap` and `grid-column: span`
+    ([WebKit](https://webkit.org/blog/17660/introducing-css-grid-lanes/)).
+- **Yoga.** Grid has been requested since 2019
+  ([react/yoga#867](https://github.com/react/yoga/issues/867)). Part 1 of
+  nine (#1893: style types, the C and JS API, `Display.Grid`) landed on
+  2026-03-05 with no layout algorithm
+  ([07524851f54b](https://github.com/react/yoga/commit/07524851f54b)); the
+  algorithm is in open PRs #1894, #1923 and
+  [#1994](https://github.com/react/yoga/pull/1994). `yoga-layout` 3.2.1
+  (2024-12-13) is still the latest release on
+  [npm](https://www.npmjs.com/package/yoga-layout).
+- **Taffy.** `src/compute/grid` is 7,508 lines at
+  [a1c3f8f](https://github.com/DioxusLabs/taffy/tree/a1c3f8fb3e2c978c3a4f062873bdb16d5eaf6cfd/src/compute/grid);
+  subgrid ([#468](https://github.com/DioxusLabs/taffy/issues/468)) is an
+  open issue. There is no official JS package
+  ([#394](https://github.com/DioxusLabs/taffy/pull/394)); third-party
+  builds are [`taffy-layout`](https://www.npmjs.com/package/taffy-layout),
+  902 KB unpacked, and
+  [`@taffyjs/wasm`](https://www.npmjs.com/package/@taffyjs/wasm), 1.34 MB.
+- **Chromium.** LayoutNG caches a grid item's measure and layout passes
+  ([LayoutNG](https://developer.chrome.com/docs/chromium/layoutng)); Firefox's
+  nested grids cost exponentially in their depth until measurement caches
+  fixed it ([1591366](https://bugzilla.mozilla.org/show_bug.cgi?id=1591366),
+  [1682686](https://bugzilla.mozilla.org/show_bug.cgi?id=1682686)).
 
-## 8. The scripts
+## 9. The scripts
 
-`scripts/bench/grid/`:
-
-- `grid-layout.js` is the prototype.
-- `probe.mjs` holds the cases in §4.
-- `bench.mjs` is the table in §3 (`npm run bench:grid`).
-- `breakdown.mjs` is one frame taken apart, run by run, with the memo's
-  hits and misses.
+- `scripts/grid-fixture.mjs` regenerates the Chrome fixture (`CHROME=` to
+  point it at a browser).
+- `scripts/bench/grid/bench.mjs` is the table in §3 (`npm run bench:grid`).
+- `scripts/bench/grid/breakdown.mjs` is one frame taken apart, run by run,
+  with what the seam remembered for each child and what it had to ask
+  again.

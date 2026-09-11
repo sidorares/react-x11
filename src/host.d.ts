@@ -145,6 +145,10 @@ export interface LayoutChild {
   /** The narrowest it can be drawn at — its content floor — and the width
    *  it would take with no bound at all. */
   intrinsicSizes(): { minContentWidth: number; maxContentWidth: number };
+  /** Its own resolved style, in device pixels — what a grid places it by
+   *  (`gridColumn`, `gridArea`) and aligns it with (`alignSelf`,
+   *  `justifySelf`). */
+  readonly style: Readonly<import('./types/style.js').StyleProperties>;
 }
 
 /** Where one child goes, from the content box's corner. A `width` or
@@ -170,6 +174,13 @@ export interface LayoutInfo {
    *  — in device pixels. */
   style: Readonly<import('./types/style.js').StyleProperties>;
   scale: number;
+  /**
+   * Say that something in the style is wrong but can be laid out around —
+   * a grid area nobody named — the way a bad style value is said: once,
+   * on the console and to the test harness. `consequence` is what happens
+   * instead. A throw is for what cannot be laid out at all.
+   */
+  report(message: string, consequence: string): void;
 }
 
 export interface LayoutDefinition {
@@ -274,6 +285,9 @@ export function registeredPositions(): string[];
 export interface CustomLayouts {
   masonry: { columns?: number; columnWidth?: number };
   'equal-row': Record<never, never>;
+  /** CSS grid — `layout: 'grid'` is `display: 'grid'`. It takes no options:
+   *  its tracks are the box's own style, `gridTemplateColumns` and the rest. */
+  grid: Record<never, never>;
 }
 
 /** What a child's `layoutItem` may tell the layout arranging it — augmented

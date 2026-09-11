@@ -19,8 +19,8 @@ for the two registration contracts; this is why they are the shape they are._
 - **A layout** arranges a box's children: `registerLayout(name, { layout })`,
   then `style={{ layout: name }}` on any box. The algorithm is asked how big
   the box's content is for the room on offer, and — once the pass has given
-  the box its size — where each child goes. `masonry` and `equal-row` are
-  built in.
+  the box its size — where each child goes. `grid` (which `display: 'grid'`
+  names too), `masonry` and `equal-row` are built in.
 - **A position** moves one node after the pass, by an offset, resizing
   nothing: `registerPosition(name, { place })`, then
   `style={{ position: name }}`. It is CSS's positioning scheme opened up, and
@@ -325,9 +325,10 @@ dirtied callback, and only the sweep covers a child never laid out).
   columns; nothing here paginates.
 - **Min-content heights** for an algorithm to read; only widths are handed
   over.
-- **Grid.** Feasible on this seam, and measured: a prototype, what it costs
-  against flexbox, and what shipping it would take are in
-  [grid-layout.md](grid-layout.md).
+- **Subgrid.** [Grid](grid-layout.md) is built on this seam, and this is
+  the part of it the seam cannot carry: a subgrid's items take part in the
+  parent grid's track sizing, and an algorithm here sees a child as
+  something to measure, never its children.
 - **Hot reload** keeps a mounted host on the definition it started with
   until its style names a layout again — the contract registered elements
   have.

@@ -1521,6 +1521,7 @@ hypothetical, under the rules `measureContent` has
 | `measure(constraints?)` | the child's size under the constraints. A number with no mode is `'exactly'`, an axis left out `'unconstrained'`, `'at-most'` fit-content |
 | `intrinsicSizes()`      | `{ minContentWidth, maxContentWidth }`: the narrowest it can be drawn at — its content floor — and the width it takes with no bound       |
 | `options`               | its `layoutItem`, against your `childOptions`                                                                                             |
+| `style`                 | its own resolved style, read-only, in device pixels — what `grid` places a child by (`gridColumn`) and aligns it with (`alignSelf`)       |
 | `index`                 | its place in the list                                                                                                                     |
 
 Every size is the child's **margin box** — a margin is part of the room a
@@ -1538,7 +1539,10 @@ the default. What the box's own style already says — `gap`,
 `justifyContent`, `alignItems` — is `info.style`: read it rather than
 declaring options that mean the same thing. `info.scale` is the box's device
 pixels per logical pixel, for a length the schema cannot see: one inside a
-string, like a grid's track list.
+string, like a grid's track list. `info.report(message, consequence)` says
+that something in a style is wrong but can be laid out around — a grid area
+nobody named — once, the way a bad style value is said; a throw is for what
+cannot be laid out at all.
 
 **What core does, so the algorithm does not have to.** It lays each child
 out at its rect, mirrors the slots when the box reads right to left and
@@ -1552,7 +1556,9 @@ Register before you render, as for an element. A name registered twice with
 a different function throws unless `override: true`; under hot reload a
 module re-registering its own replaces it, and a mounted box keeps the
 definition it started with until its style names a layout again. The
-built-in `masonry` and `equal-row` are worked examples (`src/layouts.js`).
+built-in `masonry` and `equal-row` are worked examples (`src/layouts.js`),
+and so is `grid` (`src/grid.js`), which takes no options: it reads the box's
+tracks from `info.style` and each child's place from the child's `style`.
 
 In TypeScript, augment `CustomLayouts` with your layout's options and
 `layout: { name: 'radial', radius: 40 }` type-checks, typos included;

@@ -1,12 +1,13 @@
 // examples/custom-layout.jsx — a pinboard arranged by the built-in
-// `masonry`, by a `justified` layout the example registers, and by
-// flex-wrap for comparison.
+// `masonry`, by a `justified` layout the example registers, by CSS grid, and
+// by flex-wrap for comparison.
 //
 // What these pin is what the example is for: the masonry drops each pin
 // into the shortest column and a featured pin spans two, the justified rows
-// each fill the width at one height, the segmented controls are equal-width
-// and squeeze to their floor and no further, and right to left mirrors all
-// of it without either algorithm knowing.
+// each fill the width at one height, the grid lines the pins up in columns
+// and rows and packs a featured pin's hole densely, the segmented controls
+// are equal-width and squeeze to their floor and no further, and right to
+// left mirrors all of it without any of the algorithms knowing.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -41,7 +42,7 @@ afterEach(cleanup);
 const h = React.createElement;
 
 const COUNT = 12;
-const GAP = 12; // the board's padding, and the masonry's gap
+const GAP = 12; // the board's padding, and the masonry's and the grid's gap
 const PIN = 200;
 const SEGMENT_INSET = 2 * 10 + 2 * 1; // a segment's padding and border
 
@@ -216,6 +217,72 @@ test('justified rows each fill the width at one height, each photo as wide as it
   );
 });
 
+test('the grid lines the pins up in columns and rows, and packs the hole a featured pin leaves', async () => {
+  await mount();
+  await userEvent.click(byName('arrangement-grid'));
+  const width = inner();
+  // repeat(auto-fill, minmax(200px, 1fr)): as many as fit, sharing the rest
+  const cols = Math.floor((width + GAP) / (PIN + GAP));
+  assert.equal(cols, 3, `a board ${width} wide holds three columns`);
+  const column = (width - GAP * (cols - 1)) / cols;
+  const row = 160; // the grid's rows
+  let rects = pinRects();
+  rects.forEach((r, i) => {
+    assert.ok(near(r.w, column), `pin ${i} is ${r.w} wide, a column ${column}`);
+    assert.equal(r.h, row, `pin ${i} is one row tall`);
+  });
+  assert.deepEqual(
+    rowsOf(rects).map((pins) => pins.length),
+    [3, 3, 3, 3],
+    'three to a row, in order',
+  );
+  assertApart(rects);
+
+  // Featured, the third pin takes two columns and two rows, so it no longer
+  // fits at the end of the first row and starts the second: the fourth,
+  // packed densely, takes the hole it left.
+  await userEvent.click(byName('pin-p2'));
+  rects = pinRects();
+  assert.ok(near(rects[2].w, 2 * column + GAP), `two columns: ${rects[2].w}`);
+  assert.equal(rects[2].h, 2 * row + GAP, 'and two rows');
+  assert.equal(rects[2].x, 0, 'at the start of the second row');
+  assert.equal(rects[3].y, 0, 'the fourth pin fills the first row');
+  assert.ok(near(rects[3].x, 2 * (column + GAP)), 'at its end');
+  assertApart(rects);
+  // every cell of every row the pins reach is taken
+  const cells = rects.reduce(
+    (n, r) =>
+      n +
+      Math.round((r.w + GAP) / (column + GAP)) *
+        Math.round((r.h + GAP) / (row + GAP)),
+    0,
+  );
+  const bottom = Math.max(...rects.map((r) => r.y + r.h));
+  assert.equal(cells, cols * Math.round((bottom + GAP) / (row + GAP)));
+});
+
+test('a grid of a column count shares the width between that many, however narrow', async () => {
+  await mount();
+  await userEvent.click(byName('arrangement-grid'));
+  for (const cols of [2, 4]) {
+    await userEvent.click(byName(`columns-${cols}`));
+    const column = (inner() - GAP * (cols - 1)) / cols;
+    const rects = pinRects();
+    assert.equal(new Set(rects.map((r) => r.x)).size, cols);
+    rects.forEach((r, i) => {
+      assert.ok(
+        near(r.w, column),
+        `pin ${i} is ${r.w} wide, a column ${column}`,
+      );
+      assert.equal(r.h, 160, `pin ${i} is one row tall`);
+    });
+    assertApart(rects);
+  }
+  // four columns of a board this wide are narrower than the 200 "Auto"
+  // keeps to: a count is that many equal columns, whatever they come to
+  assert.ok(pinRects()[0].w < PIN);
+});
+
 test('flex-wrap lines the pins up in rows; back to masonry they pack again', async () => {
   await mount();
   await userEvent.click(byName('arrangement-wrap'));
@@ -242,10 +309,10 @@ test('flex-wrap lines the pins up in rows; back to masonry they pack again', asy
 });
 
 test('a segmented control is equal-row: squeezed to its longest word and no further', async () => {
-  const segments = () =>
-    ['masonry', 'justified', 'wrap'].map((v) => byName(`arrangement-${v}`).abs);
+  const ARRANGEMENT = ['masonry', 'justified', 'grid', 'wrap'];
+  const segments = () => ARRANGEMENT.map((v) => byName(`arrangement-${v}`).abs);
   const labels = () =>
-    ['Masonry', 'Justified rows', 'Flex wrap'].map(
+    ['Masonry', 'Justified rows', 'Grid', 'Flex wrap'].map(
       (t) => screen.getByText(t).abs.width,
     );
 
@@ -276,12 +343,12 @@ test('a segmented control is equal-row: squeezed to its longest word and no furt
   );
   assert.ok(near(Math.max(...lines), room), 'and no room to spare');
   // the labels that wrapped made their segments taller, and stretch made
-  // all three as tall
+  // all four as tall
   assert.ok(narrow.every((a) => a.height === narrow[0].height));
   assert.ok(narrow[0].height > wide[0].height, 'the labels wrapped');
 });
 
-test('right to left the board and the controls mirror, and neither algorithm knew', async () => {
+test('right to left the board and the controls mirror, and none of the algorithms knew', async () => {
   await mount({ direction: 'rtl' });
   const width = inner();
   let rects = pinRects();
@@ -304,4 +371,13 @@ test('right to left the board and the controls mirror, and neither algorithm kne
     'the first row starts at the right',
   );
   assert.ok(rects[1].x < rects[0].x);
+
+  await userEvent.click(byName('arrangement-grid'));
+  rects = pinRects();
+  assert.ok(
+    near(rects[0].x + rects[0].w, width),
+    "the grid's first column is at the right",
+  );
+  assert.ok(rects[0].x > rects[1].x && rects[1].x > rects[2].x);
+  assertApart(rects);
 });
