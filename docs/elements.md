@@ -39,13 +39,18 @@ Numbers are pixels, strings like `'50%'` / `'auto'` pass through to yoga.
   nearest scroll pane's edges the box may come, not offsets — see
   [styling.md](styling.md#sticky-positioning) and
   [custom positions](styling.md#custom-positions)
-- **Arrangement**: `layout` (`masonry`, `equal-row`, or one registered with
-  `registerLayout`) arranges the children in place of flexbox, and a
-  child's `layoutItem` is what it tells that layout — see
+- **Grid**: `display: 'grid'` arranges the children as a CSS grid —
+  `gridTemplateColumns`, `gridTemplateRows`, `gridTemplateAreas`,
+  `gridAutoColumns`, `gridAutoRows`, `gridAutoFlow` and `justifyItems` on
+  the box, `gridColumn`, `gridRow`, `gridArea` and `justifySelf` on a child
+  — see [styling.md](styling.md#grid)
+- **Arrangement**: `layout` (`grid`, `masonry`, `equal-row`, or one
+  registered with `registerLayout`) arranges the children in place of
+  flexbox, and a child's `layoutItem` is what it tells that layout — see
   [styling.md](styling.md#custom-layouts)
 - **Spacing**: `margin`, `marginTop/Right/Bottom/Left`, `padding`,
   `paddingTop/Right/Bottom/Left`
-- **Visibility**: `display` (`flex`, `none`), `overflow` (`visible`,
+- **Visibility**: `display` (`flex`, `grid`, `none`), `overflow` (`visible`,
   `hidden`, `scroll`)
 
 ### Everything shrinks, nothing shrinks to nothing

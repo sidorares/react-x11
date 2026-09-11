@@ -38,7 +38,38 @@ export type Align =
 
 export type FlexWrap = 'nowrap' | 'wrap' | 'wrap-reverse';
 export type PositionType = 'static' | 'relative' | 'absolute' | 'sticky';
-export type Display = 'flex' | 'none';
+/** `'grid'` lays the box's children out as a CSS grid — see docs/styling.md,
+ *  "Grid"; `'none'` hides the box and everything in it. */
+export type Display = 'flex' | 'grid' | 'none';
+
+/**
+ * A grid line, as CSS's `grid-column` / `grid-row` write it: a number
+ * counting from 1 at the start or from -1 at the end, `'span 2'`, or a
+ * start and an end — `'2 / 4'`, `'1 / -1'`, `'2 / span 3'`.
+ */
+export type GridLine =
+  | number
+  | 'auto'
+  | `span ${number}`
+  | `${number} / ${number}`
+  | `${number}/${number}`
+  | `${number} / span ${number}`
+  | `span ${number} / ${number}`
+  | `${number} / auto`
+  | `auto / ${number}`
+  | `auto / span ${number}`;
+
+export type GridAutoFlow =
+  | 'row'
+  | 'column'
+  | 'dense'
+  | 'row dense'
+  | 'column dense'
+  | 'dense row'
+  | 'dense column';
+
+export type JustifyItems = 'flex-start' | 'center' | 'flex-end' | 'stretch';
+export type JustifySelf = 'auto' | JustifyItems;
 export type Overflow = 'visible' | 'hidden' | 'scroll';
 export type BorderStyle = 'solid' | 'dashed';
 export type PointerEvents = 'auto' | 'none';
@@ -130,6 +161,41 @@ export interface LayoutStyle {
   layout?: import('../host.js').LayoutValue;
   /** What this box tells the layout arranging it — `masonry`'s `span`. */
   layoutItem?: import('../host.js').CustomLayoutItem;
+  /**
+   * A `display: 'grid'` box's columns: a CSS track list — `'200px 1fr'`,
+   * `'auto 1fr'`, `'repeat(auto-fill, minmax(200px, 1fr))'` — with lengths
+   * in logical pixels written `px`, `%` of the grid and `fr` shares; or a
+   * number, that many equal columns (`repeat(n, minmax(0, 1fr))`). A list
+   * that would not lay out is an error naming it. See docs/styling.md,
+   * "Grid".
+   */
+  gridTemplateColumns?: number | string;
+  /** …its rows, the same way. */
+  gridTemplateRows?: number | string;
+  /** Named areas: one quoted string per row, as CSS writes them —
+   *  `'"head head" "side main"'` — or an array of the rows. */
+  gridTemplateAreas?: string | readonly string[];
+  /** The size of a column the grid adds for an item placed past its
+   *  template: a track list taken in turn, or a number — a length, here. */
+  gridAutoColumns?: number | string;
+  /** …and of a row, the same way. */
+  gridAutoRows?: number | string;
+  /** How a child with no place of its own is placed: along the rows (the
+   *  default) or the columns — and `dense` to back-fill a hole. */
+  gridAutoFlow?: GridAutoFlow;
+  /** Where each child sits across its area when it is narrower than the
+   *  area; `alignItems` is the other axis. */
+  justifyItems?: JustifyItems;
+  /** A grid child's columns: `2`, `'span 2'`, `'1 / -1'`. */
+  gridColumn?: GridLine;
+  /** …and its rows. */
+  gridRow?: GridLine;
+  /** The name of an area in the grid's `gridTemplateAreas`, or CSS's four
+   *  lines; `gridColumn` and `gridRow` beside it win for their axis. */
+  gridArea?: string | number;
+  /** Where this child sits across its area; `'auto'` is the grid's
+   *  `justifyItems`. */
+  justifySelf?: JustifySelf;
   /** An offset from the edge — or, under sticky or a registered position,
    *  the scheme's to read: how close to the scroll pane's edge the box may
    *  come, for sticky, where a percentage is of the pane's size. The same

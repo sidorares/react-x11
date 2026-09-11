@@ -6,6 +6,11 @@
 import { cssColorStraight } from 'ntk';
 
 import { parseBoxShadow, parseLinearGradient } from './decorations.js';
+import {
+  validateGridValue,
+  GRID_CONTAINER_PROPS,
+  GRID_ITEM_PROPS,
+} from './grid.js';
 import { Yoga } from './yoga.js';
 
 const FLEX_DIRECTION = {
@@ -69,8 +74,12 @@ const isPlacedPosition = (v) =>
  *  placement's to read under any other — see `applyLayoutStyle`. */
 const INSETS = new Set(['top', 'right', 'bottom', 'left', 'start', 'end']);
 
+/** `'grid'` is a flex item to yoga: the box takes its place in its parent's
+ *  line like any other, and its own children are the grid's to arrange — a
+ *  layout host (src/grid.js, nodes/layouthost.js). */
 const DISPLAY = {
   flex: Yoga.DISPLAY_FLEX,
+  grid: Yoga.DISPLAY_FLEX,
   none: Yoga.DISPLAY_NONE,
 };
 
@@ -481,6 +490,11 @@ const STYLE_PROPS = new Set([
   // but yoga's: the node side reads them (nodes/layouthost.js).
   'layout',
   'layoutItem',
+  // CSS grid's own properties, on a `display: 'grid'` box and on each of its
+  // children (docs/styling.md, "Grid"). Layout in every sense but yoga's, like
+  // the two above: the grid reads them off the style (src/grid.js).
+  ...GRID_CONTAINER_PROPS,
+  ...GRID_ITEM_PROPS,
 ]);
 
 export const isStyleProp = (name) => STYLE_PROPS.has(name);
@@ -716,21 +730,27 @@ function queryMatches(q, size, supports, containers) {
   }
 }
 
+const GRID_VALUES = new Set([...GRID_CONTAINER_PROPS, ...GRID_ITEM_PROPS]);
+
 /**
- * The two style values that are a small language rather than a number, and
- * therefore the two that can be *wrong* rather than merely absent. Parsed in
+ * The style values that are a small language rather than a number — a
+ * gradient, a shadow, and grid's track lists, areas and lines — and
+ * therefore the ones that can be *wrong* rather than merely absent. Parsed in
  * development wherever they are written — including inside a state block,
  * which is the half of the surface a `continue` used to skip — so the error
  * naming the property and the expected spelling arrives at the call site
- * instead of as a blank panel three commits later.
+ * instead of as a blank panel three commits later. A grid value goes through
+ * the parser the layout itself runs (src/grid.js), so the two agree.
  *
  * Tokens are still unresolved here (`$accent` is a colour as far as the
  * grammar is concerned), so this checks the shape and never the colours.
  */
 function validateValue(key, value, where) {
-  if (key !== 'backgroundImage' && key !== 'boxShadow') return;
+  const grid = GRID_VALUES.has(key);
+  if (!grid && key !== 'backgroundImage' && key !== 'boxShadow') return;
   try {
-    if (key === 'backgroundImage') parseLinearGradient(value);
+    if (grid) validateGridValue(key, value);
+    else if (key === 'backgroundImage') parseLinearGradient(value);
     else parseBoxShadow(value);
   } catch (err) {
     // the parser names the property and the grammar; only the call site is
@@ -946,6 +966,10 @@ const NOT_ANIMATABLE = new Set([
   // nothing is drawn from it, so there is no frame in which a halfway value
   // would be visible — and it may be an object, which does not lerp
   'hitSlop',
+  // a grid's tracks and a child's lines: a count of 3.5 columns, or line
+  // 2.5, is no grid at all, and a track list is a string
+  ...GRID_CONTAINER_PROPS,
+  ...GRID_ITEM_PROPS,
 ]);
 
 export const isAnimatableProp = (name) =>

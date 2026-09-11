@@ -58,6 +58,13 @@ class LayoutChild {
     return this.#node._layoutItemOptions();
   }
 
+  /** The child's own resolved style, read-only and in device pixels — what
+   *  a grid places it by (`gridColumn`, `gridArea`) and aligns it with
+   *  (`alignSelf`, `justifySelf`). */
+  get style() {
+    return this.#node.style;
+  }
+
   /**
    * The margin-box size this child takes under `constraints` — `{ width,
    * height, widthMode, heightMode }`, the vocabulary `measureContent`
@@ -168,11 +175,21 @@ export class NodeLayoutHost {
     let def = null;
     let options = null;
     if (found !== null) {
-      const refused = this._layoutRefusal();
-      if (refused !== null) {
+      const refused = found.conflict ? null : this._layoutRefusal();
+      if (found.conflict) {
         reportStyleProblem(
           this,
-          `react-x11: <${this.kind}> cannot take a layout — ${refused}`,
+          found.conflict,
+          'It is laid out as flexbox until the two agree',
+        );
+      } else if (refused !== null) {
+        reportStyleProblem(
+          this,
+          `react-x11: <${this.kind}> cannot ${
+            found.name === 'grid'
+              ? 'lay its children out as a grid'
+              : 'take a layout'
+          } — ${refused}`,
           'It lays out as it would without one',
         );
       } else if (!found.def) {
@@ -196,7 +213,17 @@ export class NodeLayoutHost {
             `<${this.kind} style={{ layout: "${found.name}" }}>`,
           );
           if (resolved.problem) {
-            reportStyleProblem(this, resolved.problem, 'It takes its default');
+            // the one layout whose options live in the style instead
+            const grid = found.def.builtin && found.name === 'grid';
+            reportStyleProblem(
+              this,
+              grid
+                ? "react-x11: layout: { name: 'grid' } takes no options — a " +
+                    "grid's tracks are the box's own style: gridTemplateColumns, " +
+                    'gridTemplateRows, gridTemplateAreas, gridAutoFlow'
+                : resolved.problem,
+              grid ? 'They are ignored' : 'It takes its default',
+            );
           }
           def = found.def;
           options = resolved.options;
@@ -456,6 +483,10 @@ export class NodeLayoutHost {
         host.def.layout(handles, constraints, host.options, {
           style: this.style,
           scale: this.scale,
+          // a mistake the algorithm can lay out around — a grid area nobody
+          // named — said once, the way a bad style value is
+          report: (message, consequence) =>
+            reportStyleProblem(this, message, consequence),
         }),
         handles.length,
         final,

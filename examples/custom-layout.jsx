@@ -1,10 +1,12 @@
-// A pinboard: two dozen photos, and three ways to arrange them — two of them
-// layouts flexbox cannot write.
+// A pinboard: two dozen photos, and four ways to arrange them — three of them
+// arrangements flexbox cannot write.
 //
 //   npm run examples:custom-layout
 //
-// `layout` on a box names the algorithm that arranges its children
-// (docs/styling.md, "Custom layouts"). The board here is arranged by one of:
+// A box's children are arranged by flexbox unless its style names another
+// algorithm: `display: 'grid'` for CSS's grid (docs/styling.md, "Grid"), or
+// `layout` for a registered one (docs/styling.md, "Custom layouts"). The
+// board here is arranged by one of:
 //
 //   Masonry          the built-in `masonry`: columns, each pin dropped into
 //                    whichever is shortest so far. "Auto" fits as many
@@ -13,9 +15,15 @@
 //   Justified rows   `justified`, registered in this file: rows that each
 //                    fill the width, every photo in a row one height and as
 //                    wide as its aspect ratio makes it at that height.
-//   Flex wrap        no `layout` at all — flexbox with `flexWrap: 'wrap'`,
-//                    for comparison: every row as tall as its tallest pin,
-//                    with a hole under each of the others.
+//   Grid             `display: 'grid'`, written the way CSS writes it: as
+//                    many columns of 200 and up as fit —
+//                    `repeat(auto-fill, minmax(200px, 1fr))` — or a count of
+//                    equal ones, and rows of one height. A featured pin takes
+//                    two columns and two rows, and `gridAutoFlow: 'dense'`
+//                    packs the pins after it into the hole it leaves.
+//   Flex wrap        flexbox with `flexWrap: 'wrap'`, for comparison: every
+//                    row as tall as its tallest pin, with a hole under each
+//                    of the others.
 //
 // The algorithms run inside the frame's layout pass, so nothing here listens
 // to a size or measures a pin in an effect, and there is no frame in which a
@@ -27,22 +35,23 @@
 //                   resize's own frames.
 //   Feature a pin   click it, or Tab to it and press Space: in the masonry it
 //                   spans two columns, in the justified rows it is twice as
-//                   wide, and the rest pack around it.
+//                   wide, in the grid it takes a block two columns wide and
+//                   two rows tall — and the rest pack around it.
 //   The toolbar     each segmented control is an `equal-row`: every segment
 //                   as wide as the widest label. Narrow the window and they
 //                   squeeze together — the labels wrap — but never below the
 //                   longest word in any of them.
 //   LANG=he_IL.UTF-8 npm run examples:custom-layout
 //                   everything mirrors: the columns fill from the right and
-//                   the rows start at it. Neither algorithm knows; the core
-//                   mirrors what they answer.
+//                   the rows start at it. None of the algorithms knows; the
+//                   core mirrors what they answer.
 import React, { useCallback, useState } from 'react';
 
 import { createRoot, createStyles } from '../src/index.js';
 import { registerLayout } from '../src/host.js';
 import { XK_KP_ENTER, XK_RETURN, XK_SPACE } from '../src/keysyms.js';
 
-const PIN = 200; // a masonry column's narrowest, and a pin's width in the wrap
+const PIN = 200; // a column's narrowest, and a pin's width in the wrap
 const GAP = 12;
 const ROW_HEIGHTS = { small: 110, medium: 160, large: 220 };
 
@@ -183,6 +192,7 @@ const PINS = buildPins();
 const ARRANGEMENTS = [
   { value: 'masonry', label: 'Masonry' },
   { value: 'justified', label: 'Justified rows' },
+  { value: 'grid', label: 'Grid' },
   { value: 'wrap', label: 'Flex wrap' },
 ];
 
@@ -199,8 +209,9 @@ const HEIGHTS = [
   { value: 'large', label: 'Large' },
 ];
 
-// What the board is. A `layout` goes on a box inside the scroll pane rather
-// than on the pane, which is sized by the window and not by what it holds.
+// What the board is. The arrangement goes on a box inside the scroll pane
+// rather than on the pane, which is sized by the window and not by what it
+// holds.
 function boardStyle(arrangement, columns, rowHeight) {
   switch (arrangement) {
     case 'masonry':
@@ -218,14 +229,27 @@ function boardStyle(arrangement, columns, rowHeight) {
         s.justified,
         { layout: { name: 'justified', rowHeight: ROW_HEIGHTS[rowHeight] } },
       ];
+    case 'grid':
+      // CSS's own property, flat on the box: "Auto" is the gallery's track
+      // list, and a number is that many equal columns
+      return [
+        s.grid,
+        {
+          gridTemplateColumns:
+            columns === 'auto'
+              ? `repeat(auto-fill, minmax(${PIN}px, 1fr))`
+              : columns,
+        },
+      ];
     default:
       return s.wrap;
   }
 }
 
-// What a pin says to the board. Each layout declares the options a child
-// may give it, so a pin says only what its board reads: an option the
-// layout did not declare is reported, naming it.
+// What a pin says to the board. A registered layout declares the options a
+// child may give it, and an option it did not declare is reported, naming
+// it; a grid's child places itself with CSS's own `gridColumn` and
+// `gridRow`.
 function itemStyle(arrangement, pin, featured) {
   switch (arrangement) {
     case 'masonry':
@@ -234,6 +258,8 @@ function itemStyle(arrangement, pin, featured) {
       return {
         layoutItem: { aspect: featured ? pin.aspect * 2 : pin.aspect },
       };
+    case 'grid':
+      return featured && s.pinBlock;
     default:
       return { width: featured ? 2 * PIN + GAP : PIN };
   }
@@ -259,9 +285,10 @@ function pressable(onPress) {
 
 function Pin({ pin, arrangement, featured, onToggle }) {
   // In the masonry and the wrap the pin is as wide as it is given and the
-  // photo keeps its aspect ratio; in the justified rows the layout names the
-  // pin's height as well, and the photo takes what the caption leaves.
-  const justified = arrangement === 'justified';
+  // photo keeps its aspect ratio; in the justified rows and the grid the
+  // board names the pin's height as well, and the photo takes what the
+  // caption leaves.
+  const fills = arrangement === 'justified' || arrangement === 'grid';
   return (
     <box
       {...pressable(() => onToggle(pin.id))}
@@ -277,13 +304,13 @@ function Pin({ pin, arrangement, featured, onToggle }) {
       <box
         style={[
           s.photo,
-          justified ? s.photoFill : { aspectRatio: pin.aspect },
+          fills ? s.photoFill : { aspectRatio: pin.aspect },
           { backgroundColor: pin.color },
         ]}
       >
         <text style={s.ratio}>{pin.ratio}</text>
       </box>
-      <text style={[s.caption, justified && s.captionLine]}>{pin.title}</text>
+      <text style={[s.caption, fills && s.captionLine]}>{pin.title}</text>
     </box>
   );
 }
@@ -352,7 +379,7 @@ export function PinboardPanel({
           value={arrangement}
           onChange={setArrangement}
         />
-        {arrangement === 'masonry' && (
+        {(arrangement === 'masonry' || arrangement === 'grid') && (
           <Segmented
             name="columns"
             label="Columns"
@@ -453,6 +480,16 @@ const s = createStyles({
   board: { flexShrink: 0, padding: GAP },
   masonry: { gap: GAP },
   justified: { gap: 6 },
+  // The columns change with the toolbar (`boardStyle`); what does not is
+  // here: rows of one height, packed densely — a pin placed after a featured
+  // one takes the hole the featured one left rather than starting a new row
+  // past it
+  grid: {
+    display: 'grid',
+    gridAutoRows: 160,
+    gridAutoFlow: 'dense',
+    gap: GAP,
+  },
   wrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -469,6 +506,8 @@ const s = createStyles({
     ':focus': { borderColor: '$accent' },
   },
   pinFeatured: { borderWidth: 2, borderColor: '$accent' },
+  // a featured pin in the grid: a block two columns wide and two rows tall
+  pinBlock: { gridColumn: 'span 2', gridRow: 'span 2' },
   photo: { justifyContent: 'flex-end', padding: 6 },
   photoFill: { flexGrow: 1 },
   ratio: { fontSize: 11, fontWeight: 'bold', color: '#ffffff' },
@@ -488,9 +527,9 @@ export function App(props) {
     <window
       width={920}
       height={660}
-      minWidth={600}
+      minWidth={640}
       minHeight={360}
-      title="Pinboard — custom layouts"
+      title="Pinboard — layouts"
       style={{ backgroundColor: '$background' }}
     >
       <PinboardPanel {...props} />

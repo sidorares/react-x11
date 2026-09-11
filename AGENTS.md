@@ -232,6 +232,20 @@ no override-redirect staging (issue #4).
   `npm run bench` prices it, but only since the `convolvedPixels` metric
   (#414): every other number is identical either way, which is how this
   survived a full bench run at 277M convolved pixels.
+- `src/grid.js` — CSS grid, the built-in layout behind `display: 'grid'`
+  (docs/architecture/grid-layout.md). Pure — strings and sizes in, rects
+  out — and the style validator runs its parsers, so a value that would not
+  lay out is an error where it was written. Held to Chrome by
+  `test/grid-conformance.test.js`, over a corpus Chrome laid out once
+  (`scripts/grid-fixture.mjs` regenerates it). Three things are easy to
+  undo: the **track lines** are snapped to whole pixels, never each item's
+  rect — neighbours in `1fr 1fr 1fr` would otherwise leave a seam, and a
+  child's tree would be laid out at a fraction, the input yoga divides a
+  rounding residue by (#411); a track asks its children for sizes **only
+  when its sizing function is intrinsic**, which is what keeps a gallery of
+  `minmax(200px, 1fr)` from asking them anything; and a bare number is a
+  count in `gridTemplate*`, a length in `gridAuto*` and a line in
+  `gridColumn`/`gridRow`, on purpose.
 
 ## Pre-release: there is nothing to be compatible with
 
@@ -1171,8 +1185,14 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   host in `src/nodes/layouthost.js`; docs/architecture/custom-layout.md).
   Yoga gives a node a measure function or children, never both, so the
   host is a measured leaf and each child a root — and everything that
-  assumed the yoga tree mirrors the node tree has a host branch. Five
-  things are easy to undo:
+  assumed the yoga tree mirrors the node tree has a host branch —
+  `display: 'grid'` is one (src/grid.js). Six things are easy to undo:
+  - **A grid's own properties are not yoga's,** so nothing dirties a box
+    whose `gridTemplateColumns` changed, or the grid above a child whose
+    `gridColumn` did: `_retarget` compares `GRID_CONTAINER_PROPS` and
+    `GRID_ITEM_PROPS` (src/grid.js) and asks the host again. A property a
+    grid starts reading goes in one of those lists, or a change to it lays
+    out nothing until something else does.
   - **A `<box>` is a `Scrollable`,** whose own `_absolutizeChildren` is the
     walk `absolutize` takes: a host branch in `Node.absolutize` alone is
     never reached for a box. `offsetInParent` is the one sum for "where

@@ -1,8 +1,15 @@
-// What the grid prototype costs on the layout seam, against the flexbox that
-// does the nearest thing — and what `masonry` costs on the same cards. Layout
-// time is WindowNode._layoutStep's, per frame, in the in-process server with
-// real text shaping (KaTeX Main). docs/architecture/grid-layout.md §3.
+// What a grid costs, against the flexbox that does the nearest thing — and
+// what `masonry` costs on the same cards. Layout time is
+// WindowNode._layoutStep's, per frame, in the in-process server with real
+// text shaping (KaTeX Main); "layouts" is every yoga calculateLayout the
+// frame made, the window's own passes and each child tree's.
+// docs/architecture/grid-layout.md §3.
 //   npm run bench:grid
+//
+// Two resizes, because the difference between them is the thing to know. A
+// window resized back and forth between two widths is answered from what
+// each child said at those widths before; a live resize — a new width every
+// frame — asks every child again, and is the one a drag feels.
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
@@ -10,9 +17,6 @@ const require = createRequire(import.meta.url);
 const React = require('react');
 const { renderX11, cleanup, act } =
   await import('../../../src/testing/index.js');
-const { registerLayout } = await import('../../../src/host.js');
-const { registerGrid, stats } = await import('./grid-layout.js');
-registerGrid(registerLayout);
 
 const FONT = join(
   dirname(require.resolve('katex/package.json')),
@@ -49,7 +53,7 @@ const small = { fontSize: 12 };
 
 const LABEL_W = 150;
 
-function form(grid, n = 200) {
+function form(kind, n = 200) {
   const label = (i) =>
     h(Live, { key: `l${i}`, i, initial: words(i, 1 + (i % 4)), style: small });
   const field = (i) =>
@@ -61,14 +65,15 @@ function form(grid, n = 200) {
       },
       h('text', { style: small }, `value ${i}`),
     );
-  if (grid) {
+  if (kind === 'grid') {
     const cells = [];
     for (let i = 0; i < n; i++) cells.push(label(i), field(i));
     return h(
       'box',
       {
         style: {
-          layout: { name: 'grid', columns: 'auto 1fr' },
+          display: 'grid',
+          gridTemplateColumns: 'auto 1fr',
           columnGap: 12,
           rowGap: 6,
           padding: 12,
@@ -78,6 +83,8 @@ function form(grid, n = 200) {
       cells,
     );
   }
+  // flexbox cannot size a column by its widest label: a fixed width is the
+  // nearest it comes
   return h(
     'box',
     { style: { gap: 6, padding: 12, flexShrink: 0 } },
@@ -124,33 +131,23 @@ function card(i, style) {
   );
 }
 
-function cards(grid, n = 300) {
-  if (grid === 'masonry') {
+function cards(kind, n = 300) {
+  const pane = { gap: 8, padding: 8, flexShrink: 0 };
+  if (kind === 'masonry') {
     return h(
       'box',
-      {
-        style: {
-          layout: { name: 'masonry', columnWidth: 200 },
-          gap: 8,
-          padding: 8,
-          flexShrink: 0,
-        },
-      },
+      { style: { layout: { name: 'masonry', columnWidth: 200 }, ...pane } },
       Array.from({ length: n }, (_, i) => card(i)),
     );
   }
-  if (grid) {
+  if (kind === 'grid') {
     return h(
       'box',
       {
         style: {
-          layout: {
-            name: 'grid',
-            columns: 'repeat(auto-fill, minmax(200px, 1fr))',
-          },
-          gap: 8,
-          padding: 8,
-          flexShrink: 0,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+          ...pane,
         },
       },
       Array.from({ length: n }, (_, i) => card(i)),
@@ -158,31 +155,21 @@ function cards(grid, n = 300) {
   }
   return h(
     'box',
-    {
-      style: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 8,
-        padding: 8,
-        flexShrink: 0,
-      },
-    },
+    { style: { flexDirection: 'row', flexWrap: 'wrap', ...pane } },
     Array.from({ length: n }, (_, i) =>
       card(i, { flexBasis: 200, flexGrow: 1, minWidth: 0 }),
     ),
   );
 }
 
-function dashboard(_grid, n = 120) {
+function dashboard(_kind, n = 120) {
   return h(
     'box',
     {
       style: {
-        layout: {
-          name: 'grid',
-          columns: 'repeat(6, 1fr)',
-          autoFlow: 'row dense',
-        },
+        display: 'grid',
+        gridTemplateColumns: 'repeat(6, 1fr)',
+        gridAutoFlow: 'dense',
         gap: 8,
         padding: 8,
         flexShrink: 0,
@@ -198,10 +185,8 @@ function dashboard(_grid, n = 120) {
             gap: 4,
             borderWidth: 1,
             borderColor: '#ccc',
-            layoutItem: {
-              column: `span ${i % 3 === 0 ? 2 : 1}`,
-              row: `span ${i % 5 === 0 ? 2 : 1}`,
-            },
+            gridColumn: `span ${i % 3 === 0 ? 2 : 1}`,
+            gridRow: `span ${i % 5 === 0 ? 2 : 1}`,
           },
         },
         h(Live, { i, initial: words(i, 2 + (i % 9)), style: small }),
@@ -215,21 +200,37 @@ function dashboard(_grid, n = 120) {
 
 let layoutMs = 0;
 let frames = 0;
+let layouts = 0;
 let patched = false;
+
+const owner = (obj, name) => {
+  let p = obj;
+  while (p && !Object.prototype.hasOwnProperty.call(p, name)) {
+    p = Object.getPrototypeOf(p);
+  }
+  return p;
+};
+
 function patch(windowNode) {
   if (patched) return;
   patched = true;
-  const proto = Object.getPrototypeOf(windowNode);
-  const orig = proto._layoutStep;
+  const proto = owner(windowNode, '_layoutStep');
+  const step = proto._layoutStep;
   let depth = 0;
   proto._layoutStep = function (...args) {
     if (depth++ === 0) frames++;
     const t = performance.now();
     try {
-      return orig.apply(this, args);
+      return step.apply(this, args);
     } finally {
       if (--depth === 0) layoutMs += performance.now() - t;
     }
+  };
+  const yoga = owner(windowNode.yoga, 'calculateLayout');
+  const calculate = yoga.calculateLayout;
+  yoga.calculateLayout = function (...args) {
+    layouts++;
+    return calculate.apply(this, args);
   };
 }
 
@@ -238,54 +239,39 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const reset = () => {
   layoutMs = 0;
   frames = 0;
-  stats.runs = 0;
-  stats.measures = 0;
-  stats.intrinsic = 0;
+  layouts = 0;
 };
+const ms = (v) => `${v.toFixed(1).padStart(5)} ms`;
 
-async function trial(name, build, grid) {
-  // mount, three times
+async function trial(name, build, kind) {
+  const tree = () =>
+    h('box', { style: { flexGrow: 1, overflow: 'scroll' } }, build(kind));
+  // mounted four times; the first render is where the prototypes get
+  // patched, so it is not counted
   const mounts = [];
   let windowNode;
-  for (let k = 0; k < 3; k++) {
+  for (let k = 0; k < 4; k++) {
     cleanup();
     setters = [];
     reset();
-    const pane = h(
-      'box',
-      { style: { flexGrow: 1, overflow: 'scroll' } },
-      build(grid),
-    );
-    ({ windowNode } = await renderX11(pane, { fonts, width: W, height: H }));
-    patch(windowNode);
-    if (k === 0) {
-      reset();
-      cleanup();
-      setters = [];
-      ({ windowNode } = await renderX11(pane, { fonts, width: W, height: H }));
-    }
+    ({ windowNode } = await renderX11(tree(), { fonts, width: W, height: H }));
     await act(() => sleep(20));
-    mounts.push(layoutMs);
+    if (k > 0) mounts.push(layoutMs);
+    patch(windowNode);
   }
-  const mountStats = { ...stats };
 
-  // one item's text changes, short to long and back
+  // one item's text goes from two words to forty and back
   const changes = [];
-  const perChange = [];
   for (let k = 0; k < 9; k++) {
     const i = (k * 41) % setters.length;
     reset();
     await act(() => setters[i](words(i, k % 2 ? 40 : 2)));
     await act(() => sleep(5));
     changes.push(layoutMs / Math.max(1, frames));
-    perChange.push({ ...stats, frames });
   }
 
-  // the window resized, 1000 <-> 900
-  const resizes = [];
   const wnd = windowNode.window;
-  for (let k = 0; k < 9; k++) {
-    const width = k % 2 ? W : W - 100;
+  const resize = async (width) => {
     reset();
     await act(async () => {
       wnd.width = width;
@@ -293,31 +279,26 @@ async function trial(name, build, grid) {
       wnd.emit('resize', { width, height: H });
       await sleep(30);
     });
-    resizes.push({ ms: layoutMs, frames });
-  }
+    return { ms: layoutMs, layouts: layouts / Math.max(1, frames) };
+  };
+  const between = [];
+  for (let k = 0; k < 9; k++) between.push(await resize(k % 2 ? W : W - 100));
+  const live = [];
+  for (let k = 1; k <= 15; k++) live.push(await resize(W - 100 - k * 7));
   cleanup();
-  const pc = perChange[perChange.length >> 1];
   console.log(
-    `${name.padEnd(28)} mount ${median(mounts).toFixed(2).padStart(7)} ms` +
-      ` | one text changed ${median(changes).toFixed(3).padStart(7)} ms/frame` +
-      ` | resize ${median(resizes.map((r) => r.ms))
-        .toFixed(2)
-        .padStart(6)} ms` +
-      ` (${median(resizes.map((r) => r.frames))} frames)` +
-      (grid
-        ? ` | mount: ${mountStats.runs} runs, ${mountStats.intrinsic} intrinsic, ${mountStats.measures} measures;` +
-          ` change: ${pc.runs} runs, ${pc.intrinsic} intrinsic, ${pc.measures} measures`
-        : ''),
+    `${name.padEnd(26)} mount ${ms(median(mounts))} | a text changed ` +
+      `${ms(median(changes))} | resized 1000↔900 ${ms(median(between.map((r) => r.ms)))}` +
+      ` | live resize ${ms(median(live.map((r) => r.ms)))},` +
+      ` ${Math.round(median(live.map((r) => r.layouts)))} layouts a frame`,
   );
 }
 
-for (const [name, build, both] of [
-  ['form, 200 rows', form, true],
-  ['cards, 300', cards, true],
-  ['dashboard, 120 with spans', dashboard, false],
+for (const [name, build, kinds] of [
+  ['form, 200 rows', form, ['flex', 'grid']],
+  ['cards, 300', cards, ['flex', 'grid', 'masonry']],
+  ['dashboard, 120 with spans', dashboard, ['grid']],
 ]) {
-  if (both) await trial(`${name} — flex`, build, false);
-  await trial(`${name} — grid`, build, true);
-  if (build === cards) await trial(`${name} — masonry`, build, 'masonry');
+  for (const kind of kinds) await trial(`${name} — ${kind}`, build, kind);
 }
 process.exit(0);

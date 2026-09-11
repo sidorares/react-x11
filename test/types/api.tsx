@@ -216,6 +216,29 @@ const s = createStyles({
   footer: { layout: 'equal-row', justifyContent: 'flex-end', gap: 8 },
   wheel: { layout: { name: 'radial', radius: 60 } },
   drifting: { position: { name: 'parallax', rate: 0.3 } },
+  // CSS grid, by `display` or by the name every layout goes by, with CSS's
+  // own flat names on the box and on each child
+  form: {
+    display: 'grid',
+    gridTemplateColumns: 'auto 1fr',
+    columnGap: 12,
+    '@width < 500': { gridTemplateColumns: 1 },
+  },
+  shell: {
+    layout: 'grid',
+    gridTemplateColumns: '200px 1fr',
+    gridTemplateRows: 'auto 1fr auto',
+    gridTemplateAreas: ['head head', 'side main', 'foot foot'],
+    gridAutoFlow: 'row dense',
+    gridAutoRows: 40,
+    justifyItems: 'center',
+  },
+  wide: { gridColumn: '1 / -1', gridRow: 'span 2', justifySelf: 'flex-end' },
+  main: { gridArea: 'main' },
+  // @ts-expect-error — a line is a number, a span or a pair, never a name
+  named: { gridColumn: 'content-start' },
+  // @ts-expect-error — CSS's `end` is spelled `flex-end` here, as in alignSelf
+  endish: { justifySelf: 'end' },
   // @ts-expect-error — a misspelt option is caught like a misspelt property
   typo: { layout: { name: 'masonry', colums: 3 } },
   // @ts-expect-error — and a position nobody registered is not one

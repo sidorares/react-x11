@@ -212,7 +212,9 @@ export class Node {
       // size, including the content floor `minWidth: 'auto'` is measured
       // with (#248), without knowing either of them exists.
       if (typeof this.measureContent === 'function') this._useMeasureContent();
-      if (this.style.layout != null) this._syncLayoutHost();
+      if (this.style.layout != null || this.style.display === 'grid') {
+        this._syncLayoutHost();
+      }
     }
     // the document selection: the state when this element is a `selectable`
     // surface, and the part of somebody else's that lands on this one
