@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.12.0](https://github.com/sidorares/react-x11/compare/v2.11.0...v2.12.0) (2026-09-11)
+
+
+### Features
+
+* **cocoa:** threaded mode, the app on a worker and AppKit on the main thread ([#542](https://github.com/sidorares/react-x11/issues/542)) ([23d84f7](https://github.com/sidorares/react-x11/commit/23d84f7f7beb3e7b888684a2bb1ec1588e338e07))
+* **style:** a layout and a position of your own, run inside the pass ([#534](https://github.com/sidorares/react-x11/issues/534)) ([429163a](https://github.com/sidorares/react-x11/commit/429163ae63d1dbeb295f032de995cffce806020d))
+* **style:** CSS grid, as CSS writes it ([#541](https://github.com/sidorares/react-x11/issues/541)) ([be0dc56](https://github.com/sidorares/react-x11/commit/be0dc56882516ad266fe30d626743d1cfc60d45f))
+* **style:** sticky positioning ([#523](https://github.com/sidorares/react-x11/issues/523)) ([641fb56](https://github.com/sidorares/react-x11/commit/641fb56d795eefb014a3b1cceb62b71837be64fe))
+
+
+### Bug Fixes
+
+* **cocoa:** a &lt;glarea&gt; is placed at once, not animated into place ([#537](https://github.com/sidorares/react-x11/issues/537)) ([13ffb34](https://github.com/sidorares/react-x11/commit/13ffb349553698441573bd17e124d24b321a4ae3))
+* **cocoa:** selecting text leaves the pasteboard alone ([#529](https://github.com/sidorares/react-x11/issues/529)) ([8b2d1bf](https://github.com/sidorares/react-x11/commit/8b2d1bf6ad17e58e45466ed8e5964571a0f2ae01))
+* **examples:** the stress frame log survives a frame painted on layers only ([#540](https://github.com/sidorares/react-x11/issues/540)) ([77b68fe](https://github.com/sidorares/react-x11/commit/77b68fe96814a1201427d9092773bd7d894250bd))
+* **paint:** a glyph's antialiased edge is not culled at a damage edge ([#527](https://github.com/sidorares/react-x11/issues/527)) ([852356d](https://github.com/sidorares/react-x11/commit/852356d7be1b4b64f16ead259666992be5e467b1))
+* **paint:** a glyph's antialiased edge is not culled at a pane's edge ([#532](https://github.com/sidorares/react-x11/issues/532)) ([e309f8b](https://github.com/sidorares/react-x11/commit/e309f8bba150b0c53dfbaf66d2489eed9d7847e9))
+* **scroll:** a scrollTo reaches rows added in the same commit ([#535](https://github.com/sidorares/react-x11/issues/535)) ([ceb95ea](https://github.com/sidorares/react-x11/commit/ceb95ea24d0390bc3bccf36121827a9d9de8f765))
+* **scroll:** held sticky nodes no longer cost a pane its scroll blit ([#533](https://github.com/sidorares/react-x11/issues/533)) ([b7a14c0](https://github.com/sidorares/react-x11/commit/b7a14c076668da8bcb2f11dfd24eefcb6e28b6b3))
+* **scroll:** hold a scrollTo made before the pane's first layout ([#528](https://github.com/sidorares/react-x11/issues/528)) ([d1cc286](https://github.com/sidorares/react-x11/commit/d1cc286072ff2ffd643983d48b1b6c89aba68d66))
+* **scroll:** onScroll reports the offsets a layout pass moves ([#530](https://github.com/sidorares/react-x11/issues/530)) ([f222230](https://github.com/sidorares/react-x11/commit/f222230e1fe040e698f188910402cdbc0b20de6a))
+* **scroll:** the blit follows RTL content ([#524](https://github.com/sidorares/react-x11/issues/524)) ([91e1d1c](https://github.com/sidorares/react-x11/commit/91e1d1c226ab881ac8ef92426195b8125ea955c8))
+
 ## [2.11.0](https://github.com/sidorares/react-x11/compare/v2.10.2...v2.11.0) (2026-09-10)
 
 
