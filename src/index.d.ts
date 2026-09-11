@@ -223,7 +223,10 @@ export interface RootOptions {
    * an unbundled process (a bundle's Info.plist wins); `activationPolicy`
    * is `'regular'` (a Dock tile, a ⌘-Tab entry — the default),
    * `'accessory'` (a menu-bar app: windows but no tile) or `'prohibited'`,
-   * fixed before the app finishes launching. `exitOnQuit` (default `true`)
+   * fixed before the app finishes launching — under `react-x11/cocoa-main`
+   * the app launches before its code runs, so there the launch policy is
+   * `APPKIT_ACTIVATION_POLICY`'s, and this one a switch once the code
+   * runs. `exitOnQuit` (default `true`)
    * ends the process once a quit request — the Dock's Quit, ⌘Q, a logout —
    * has closed the app: the request routes through the primary window's
    * close request first, so `onCloseRequest` there is where an app

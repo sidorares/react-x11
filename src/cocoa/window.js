@@ -12,14 +12,6 @@ import { CocoaLayerPresenter } from './presenter.js';
 import { CocoaPromotion } from './promotion.js';
 
 let nextWindowId = 1;
-// Threaded mode's end of a live resize (`_liveResizeTick`). AppKit's
-// tracking loop reports a resize per pointer move and nothing when the drag
-// stops, and the bridge sends no end, so a pause this long ends it. A pause
-// mid-drag that ends it early costs one measured frame (the catch-up in
-// nodes/window/size.js), which an X11 window pays on every tick; ending late
-// only delays that frame. 100ms is longer than the gap between two moves of
-// any drag that is still moving.
-const LIVE_RESIZE_IDLE_MS = 100;
 // How long a worker's flip may keep its window's back buffer before the
 // window draws into it anyway (`_armFence`). The release is reported once
 // the replacing frame has committed, a fraction of a millisecond later, and
@@ -120,7 +112,11 @@ export class CocoaWindow {
     this._catchUp = null;
     this._fenceTimer = null;
     this._shadowTimer = null;
-    this._liveEnd = null;
+    // AppKit's live resize, between the bridge's `window-live-resize` begin
+    // and end (`CocoaApp._routeLiveResize`): a tick of it lays out with the
+    // floors it has, and fresh ones are measured after the drag
+    // (nodes/window/size.js, `_deferContentFloors`)
+    this.liveResizing = false;
     this._h = this._native.createWindow2(options);
     // On a worker the bridge answers a handle at the call and makes the
     // window when its command runs: the number is null until then, and
@@ -243,34 +239,6 @@ export class CocoaWindow {
     this.y = Math.round(points.y * s);
     this._screenOrigin = { x: this.x, y: this.y };
     this._refreshFrameInterval();
-    // AppKit's inLiveResize, as the delegate reported it: the renderer
-    // answers a live tick with the layout floors it has and measures fresh
-    // ones after the drag (nodes/window/size.js, `_deferContentFloors`). Cleared by
-    // the pump (`_endLiveResizes`), because the pump cannot run while the
-    // resize loop owns the thread — a tick of it is the drag being over. On
-    // a worker, by a pause in the ticks (`_liveResizeTick`).
-    if (points.live === true) this.liveResizing = true;
-  }
-
-  /**
-   * Threaded mode's reading of the end of a live resize: each live tick
-   * restarts a timer, and the drag is over when the ticks stop
-   * (`LIVE_RESIZE_IDLE_MS`), or at once when a resize arrives that is not
-   * live. The pump's rule — a pump tick means the resize loop has let go of
-   * the thread — has nothing to read on a worker, which no loop of
-   * AppKit's ever holds.
-   */
-  _liveResizeTick(live) {
-    clearTimeout(this._liveEnd);
-    this._liveEnd = null;
-    if (!live) {
-      this.liveResizing = false;
-      return;
-    }
-    this._liveEnd = setTimeout(() => {
-      this._liveEnd = null;
-      this.liveResizing = false;
-    }, LIVE_RESIZE_IDLE_MS);
   }
 
   resize(width, height) {
@@ -330,8 +298,6 @@ export class CocoaWindow {
       this.app.cancelAttention(this._attentionRequest);
       this._attentionRequest = null;
     }
-    clearTimeout(this._liveEnd);
-    this._liveEnd = null;
     clearTimeout(this._shadowTimer);
     this._shadowTimer = null;
     this._promotion?.destroy();

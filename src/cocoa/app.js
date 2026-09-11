@@ -126,6 +126,27 @@ export class CocoaApp {
     // only when the root asked for one: a bridge without the option, or a
     // fake, is left alone.
     const policy = options.cocoa?.activationPolicy;
+    // Under the launcher (src/cocoa/main.js) the app launched before this
+    // code ran, so the policy is a switch after the fact, and a Regular
+    // launch has already registered its Dock tile. The bridge publishes
+    // what the app launched as, and takes the launch policy from
+    // APPKIT_ACTIVATION_POLICY (windowkit/appkit#67): a mismatch is said,
+    // with the variable that fixes it.
+    if (policy != null && threadedChannel()) {
+      const launched = native.activationPolicy?.();
+      if (
+        launched &&
+        launched !== policy &&
+        process.env.NODE_ENV !== 'production'
+      ) {
+        console.warn(
+          `react-x11: cocoa.activationPolicy is '${policy}', but the app ` +
+            `launched as '${launched}' — under react-x11/cocoa-main it is up ` +
+            'before its code runs. Start it with ' +
+            `APPKIT_ACTIVATION_POLICY=${policy} to launch as '${policy}'.`,
+        );
+      }
+    }
     if (policy != null && typeof native.initApp === 'function') {
       native.initApp({ activationPolicy: policy });
     }
@@ -620,7 +641,6 @@ export class CocoaApp {
     native.initApp();
     native.setBackendEventCallback((ev) => this._route(ev));
     this._pump = setInterval(() => {
-      this._endLiveResizes();
       native.pump2(); // flushes the previous tick's CATransaction
       if (this._shadowStale.size) {
         for (const wnd of this._shadowStale) {
@@ -645,16 +665,6 @@ export class CocoaApp {
     this._pumpInterval = Infinity;
     this._native.initApp();
     this._unsubscribe = channel.subscribe((batch) => this._routeBatch(batch));
-  }
-
-  /**
-   * A pump tick means no modal loop owns the thread, so no window is being
-   * resized live right now: the flag the delegate set on the last tick of a
-   * drag comes off here, ahead of the frames that tick, and the catch-up
-   * frame a deferred layout owes (nodes/window/size.js) runs on this very tick.
-   */
-  _endLiveResizes() {
-    for (const wnd of this._windows.values()) wnd.liveResizing = false;
   }
 
   /**
@@ -948,6 +958,8 @@ export class CocoaApp {
         // id nobody knows is an animation already forgotten (cancelled, or
         // its layer dropped), and the bridge's report is just late
         return this._animationEnds.get(ev.id)?.(ev);
+      case 'window-live-resize':
+        return this._routeLiveResize(ev);
       case 'window-created':
         // a worker's window, made on the UI thread after the call that
         // answered its handle
@@ -1100,9 +1112,6 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
     wnd._nativeResized(ev);
-    if (this._threaded && ev.type === 'window-resize') {
-      wnd._liveResizeTick(ev.live === true);
-    }
     wnd.emit('resize', {
       width: wnd.width,
       height: wnd.height,
@@ -1149,6 +1158,20 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
     wnd._occluded = ev.visible === false;
+  }
+
+  /**
+   * `windowWillStartLiveResize:` / `windowDidEndLiveResize:`, as the bridge
+   * brackets the drag AppKit's tracking loop runs (windowkit/appkit#63).
+   * Between the two a tick lays out with the floors it has; the end is the
+   * catch-up frame's cue (nodes/window/size.js), which the next frame tick
+   * runs — in pump mode the tick after the loop lets go, on a worker the
+   * end of this batch.
+   */
+  _routeLiveResize(ev) {
+    const wnd = this._window(ev);
+    if (!wnd || wnd.destroyed) return;
+    wnd.liveResizing = ev.phase === 'begin';
   }
 
   /**

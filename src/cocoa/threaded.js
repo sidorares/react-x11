@@ -16,11 +16,6 @@ import tty from 'node:tty';
 
 let channel = null;
 
-const rethrowLater = (err) =>
-  setImmediate(() => {
-    throw err;
-  });
-
 /** The open channel, or null outside threaded mode. */
 export function threadedChannel() {
   return channel;
@@ -32,26 +27,26 @@ export function threadedChannel() {
  * one connection per environment, and the bootstrap needs it before the
  * app's entry has run — a Ctrl-C during startup is already an event.
  *
- * What a subscriber throws is thrown again from a turn of its own
- * (`rethrow`), where it is the worker's uncaught exception: the launcher
- * prints it and the process exits 1, as a throw from a click handler ends
- * an X11 app. Left to propagate out of the delivery it would be swallowed —
- * the bridge leaves an exception from its batch callback pending, and
- * Node's default policy for one out of a threadsafe function's callback is
- * a warning on a stderr nobody reads here (measured 2026-09-11: the window
- * stayed up and the error was gone).
+ * What a subscriber throws leaves the delivery once every subscriber has
+ * had the batch, and the bridge makes it the worker's uncaught exception
+ * (windowkit/appkit#65): the launcher prints it and the process exits 1, as
+ * a throw from a click handler ends an X11 app.
  */
-export function openThreadedChannel(native, { rethrow = rethrowLater } = {}) {
+export function openThreadedChannel(native) {
   if (channel) return channel;
   const listeners = new Set();
   native.connect((batch) => {
+    let failed = false;
+    let failure;
     for (const fn of [...listeners]) {
       try {
         fn(batch);
       } catch (err) {
-        rethrow(err);
+        if (!failed) failure = err;
+        failed = true;
       }
     }
+    if (failed) throw failure;
   });
   channel = {
     native,

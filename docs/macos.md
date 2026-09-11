@@ -957,19 +957,18 @@ bridge with `runMain()`, @windowkit/appkit 0.10.
 - **One channel** (`openThreadedChannel`). The bridge takes one `connect`
   per environment, so the bootstrap opens it before the entry runs and
   fans the batches out — signals to itself, the rest to `CocoaApp`. What a
-  subscriber throws is thrown again from a turn of its own. Left in the
-  delivery it was swallowed: the bridge leaves an exception from its batch
-  callback pending, and Node's default policy for one out of a threadsafe
-  function's callback is a warning — the app went on with its window up
-  and the error gone (measured; `--force-node-api-uncaught-exceptions-policy`
-  makes it a crash).
+  subscriber throws leaves the delivery once every subscriber has had the
+  batch, and the bridge makes it the worker's uncaught exception. Before
+  0.10 it was swallowed: an exception out of a threadsafe function's
+  callback is, under Node's default policy, a warning — the app went on
+  with its window up and the error gone (measured, and fixed in the bridge
+  as windowkit/appkit#65).
 - **`CocoaApp`** (`src/cocoa/app.js`) is fed by the batches
   (`_routeBatch`): each event is routed as the pump routes it, what the
   inputs owe — React's half, the paint, the present (`_afterInput`) — is
   paid once per batch, and then comes the frame tick the pump did. No
-  interval, no `pump2`, no `_endLiveResizes`; every frame gets a timer of
-  its own, and `_routeGeometry`'s coalesced second flush is the pump's
-  alone. The display link ticking from the UI thread through the same
+  interval and no `pump2`; every frame gets a timer of its own, and
+  `_routeGeometry`'s coalesced second flush is the pump's alone. The display link ticking from the UI thread through the same
   channel, the Windows PRD's frame thread
   ([windows.md](windows.md#the-frame-clock)), is still to come.
 - **Windows are keyed by the handle.** `createWindow2` answers a handle at
@@ -987,10 +986,13 @@ bridge with `runMain()`, @windowkit/appkit 0.10.
   the size it was painted at, in AppKit's own points, and each window asks
   AppKit to wait for it for `cocoa: { resizeWait }` ms — 50 by default, 0
   for none. The layer presenter's frame commits its size too.
-- **A live resize ends on a 100 ms pause** in its ticks: AppKit's tracking
-  loop reports a resize per pointer move and nothing when the drag stops,
-  and the bridge sends no end. A pause that ends it early costs one
-  measured frame, which an X11 window pays on every tick.
+- **A live resize is what AppKit brackets**: `liveResizing` is set between
+  the bridge's `window-live-resize` begin and end (windowkit/appkit#63), in
+  both modes. AppKit's tracking loop reports a resize per pointer move and
+  nothing when the drag stops, so the pump used to read the end as "a pump
+  tick ran", and a worker, which no AppKit loop holds, has nothing like
+  that to read; a drag that pauses now stays a drag, and the catch-up frame
+  runs on the tick after the release.
 - **Answers that come later.** `clipboard.read()` and `targets()`;
   `CocoaWindow.snapshot()`, a promise now on both threads; the drop's
   payload, read from the event's `items`; and bezels. `BezelStore.prefetch`
@@ -1015,10 +1017,17 @@ the entry on a worker with its window made and painted, `process.exit(7)`,
 and an uncaught error printed with exit 1 — pass under both runtimes; and
 `examples/app.jsx` ran under the launcher with nothing on stderr.
 
+The activation policy is the launch's: the launcher has launched AppKit
+before the app's code runs, so `cocoa: { activationPolicy }` can only
+switch it afterwards, when a Regular launch has already shown its Dock
+tile. The bridge reads `APPKIT_ACTIVATION_POLICY` as it launches
+(windowkit/appkit#67) — `APPKIT_ACTIVATION_POLICY=accessory node --import
+react-x11/cocoa-main app.js` for a menu-bar app, or `LSUIElement` in a
+bundle's `Info.plist` — and an app whose option disagrees with how it
+launched is told so, naming the variable.
+
 What it does not do yet, each noted where it lives:
 
-- `activationPolicy` is applied after the launcher has launched AppKit, so
-  an `'accessory'` app shows a Dock tile for a moment.
 - A drop's binary types, an image, are offered and read as nothing: the
   event carries the text and URL forms, and a worker cannot read the drag
   pasteboard inside the callback.
@@ -2042,10 +2051,10 @@ Five changes, each fenced by a test:
   measured incrementally (§"Measured: incremental floors") — and a drag
   calls the frame from inside every pointer move. A live tick lays out against
   the floors it has (exact along the main axis, a frame stale for wrapped
-  text across it) and the first pump tick after the release measures once
+  text across it) and the first frame tick after the release measures once
   and lays out again: answer the input, then catch up. Only under
-  `liveResizing`, which the Cocoa window reads off AppKit's flag and the
-  pump clears; an X window never sets it. A content change mid-drag takes
+  `liveResizing`, which the Cocoa window holds between AppKit's begin and
+  end of the drag (`window-live-resize`); an X window never sets it. A content change mid-drag takes
   the measured path.
 - **A window nobody can see owes nothing** (`CocoaWindow._visible`): frames
   for a window that is ordered out or miniaturized wait in the queue and

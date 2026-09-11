@@ -378,6 +378,14 @@ test('a bounded flush onto a fresh surface asks for a full frame and holds the p
   assert.equal(flips(native), before + 1, 'which presents');
 });
 
+/** AppKit bracketing a drag, as the bridge reports it (windowkit/appkit#63). */
+const liveResize = (app, wnd, phase) =>
+  app._route({
+    type: 'window-live-resize',
+    windowNumber: wnd.windowNumber,
+    phase,
+  });
+
 test('a live resize lays out with the floors it has, and measures fresh ones once the drag ends', async () => {
   const { native, app, wnd, node, flushes } = await mount(
     h(
@@ -393,7 +401,8 @@ test('a live resize lays out with the floors it has, and measures fresh ones onc
     measured += 1;
     return apply(...a);
   };
-  // a drag: five live ticks, no pump between them
+  // a drag: AppKit's begin, then five live ticks with no pump between them
+  liveResize(app, wnd, 'begin');
   for (let i = 1; i <= 5; i += 1) {
     native.setWindowFrame(wnd._h, null, null, 100 + i * 4, 80 + i * 2);
   }
@@ -401,8 +410,8 @@ test('a live resize lays out with the floors it has, and measures fresh ones onc
   assert.equal(measured, 0, 'without measuring the floors again');
   assert.equal(wnd.liveResizing, true);
   assert.equal(node._floorsCatchUp, true, 'one catch-up frame is owed');
-  // the release: the pump runs, ends the live resize, ticks the frames
-  app._endLiveResizes();
+  // the release: AppKit's end, then the pump's frame tick
+  liveResize(app, wnd, 'end');
   app._tickFrames();
   assert.equal(measured, 1, 'measured once, after the drag');
   assert.equal(flushes.count, 7, 'one catch-up frame');
@@ -442,9 +451,10 @@ test('a live resize over content the floors have not seen measures them', async 
       box({ height: 20, backgroundColor: '#2ecc71' }),
     ),
   );
+  liveResize(app, wnd, 'begin');
   native.setWindowFrame(wnd._h, null, null, 110, 90);
   assert.equal(measured, 1, 'measured on the tick, live or not');
-  app._endLiveResizes();
+  liveResize(app, wnd, 'end');
   app._tickFrames();
   assert.equal(measured, 1, 'and nothing was owed after');
 });
@@ -1153,13 +1163,14 @@ test('the frame a live resize owes still runs on the first tick after the drag',
   wnd._frameInterval = 1000;
   wnd._presentedAt = -Infinity;
   wnd._rafLast = -1e9;
+  liveResize(app, wnd, 'begin');
   for (let i = 1; i <= 5; i += 1) {
     native.setWindowFrame(wnd._h, null, null, 100 + i * 4, 80 + i * 2);
   }
   assert.equal(flushes.count, 6, 'every tick a frame of its own');
   assert.equal(node._floorsCatchUp, true, 'one catch-up frame is owed');
   // the release, a moment after the last tick flipped
-  app._endLiveResizes();
+  liveResize(app, wnd, 'end');
   app._tickFrames(wnd._presentedAt + 1);
   assert.equal(flushes.count, 7, 'the owed frame runs at once');
   assert.equal(node._floorsCatchUp, false);

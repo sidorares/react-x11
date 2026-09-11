@@ -11,7 +11,8 @@
 //     budget `cocoa.resizeWait` gives;
 //   - the next frame waits for the buffer the last flip took off glass, and
 //     gives up waiting rather than freeze;
-//   - a live resize ends when its ticks stop;
+//   - a live resize is AppKit's begin to its end, and a launch policy the
+//     app did not get is said;
 //   - the clipboard, snapshots, bezels and a drop's payload take their
 //     answers the way a worker gets them;
 //   - the bootstrap: an exception leaves the delivery, `process.exit` asks
@@ -118,12 +119,16 @@ afterEach(async () => {
   resetThreadedChannelForTests();
 });
 
-/** A CocoaApp started in threaded mode over the fake. */
-function threadedApp(cocoa = {}) {
+/** A CocoaApp started in threaded mode over the fake; `launched` is the
+ * activation policy the bridge publishes for the launch. */
+function threadedApp(cocoa = {}, { launched = 'regular' } = {}) {
   const native = threadedBridge();
-  const { app } = fakeCocoaApp(cocoa, { native });
+  native.activationPolicy = () => launched;
+  // the channel first, as the launcher's bootstrap opens it before the app
   resetThreadedChannelForTests();
-  app.start({ channel: openThreadedChannel(native) });
+  const channel = openThreadedChannel(native);
+  const { app } = fakeCocoaApp(cocoa, { native });
+  app.start({ channel });
   apps.push(app);
   return { native, app };
 }
@@ -342,9 +347,11 @@ test('the resize handshake is asked for at the budget cocoa.resizeWait gives', a
   assert.deepStrictEqual(native.of('setResizeHandshake'), []);
 });
 
-test('a live resize ends when its ticks stop, or at the first resize that is not live', async () => {
+test('a live resize is what AppKit brackets: begin to end, however long the drag pauses', async () => {
   const { native, wnd } = await mountThreaded(h('box'));
-  const resize = (live, width = 110) =>
+  const live = (phase) =>
+    native.deliver({ type: 'window-live-resize', handle: wnd._h, phase });
+  const tick = (width) =>
     native.deliver({
       type: 'window-resize',
       handle: wnd._h,
@@ -352,19 +359,32 @@ test('a live resize ends when its ticks stop, or at the first resize that is not
       height: 70,
       x: 0,
       y: 0,
-      live,
+      live: true,
     });
-  resize(true);
+  live('begin');
+  tick(110);
   assert.strictEqual(wnd.liveResizing, true);
-  await sleep(40);
-  resize(true, 120);
-  await sleep(70);
-  assert.strictEqual(wnd.liveResizing, true, 'still dragging');
-  await until(() => !wnd.liveResizing, 'the pause to end it', 500);
-
-  resize(true);
-  resize(false);
+  await sleep(150);
+  assert.strictEqual(wnd.liveResizing, true, 'a pause is not the end');
+  tick(120);
+  live('end');
   assert.strictEqual(wnd.liveResizing, false);
+});
+
+test('under the launcher, a policy the app did not launch with is said, with the variable that sets it', () => {
+  const warnings = [];
+  const warn = console.warn;
+  console.warn = (msg) => warnings.push(String(msg));
+  try {
+    threadedApp({ activationPolicy: 'accessory' }, { launched: 'regular' });
+    assert.match(warnings.join('\n'), /APPKIT_ACTIVATION_POLICY=accessory/);
+    warnings.length = 0;
+    threadedApp({ activationPolicy: 'accessory' }, { launched: 'accessory' });
+    threadedApp({}, { launched: 'regular' });
+    assert.deepStrictEqual(warnings, []);
+  } finally {
+    console.warn = warn;
+  }
 });
 
 // --- answers that come later ---------------------------------------------------
@@ -493,25 +513,19 @@ test('a worker’s drop reads the payload its event carried', () => {
 
 // --- the bootstrap -------------------------------------------------------------
 
-test('what a subscriber throws leaves the delivery, and the others still get the batch', () => {
+test('what a subscriber throws leaves the delivery, once every subscriber has the batch', () => {
   resetThreadedChannelForTests();
   let deliver = null;
-  const thrown = [];
-  const channel = openThreadedChannel(
-    { connect: (fn) => (deliver = fn) },
-    { rethrow: (err) => thrown.push(err) },
-  );
+  const channel = openThreadedChannel({ connect: (fn) => (deliver = fn) });
   const seen = [];
   channel.subscribe(() => {
     throw new Error('from a handler');
   });
   channel.subscribe((batch) => seen.push(...batch));
-  assert.doesNotThrow(() => deliver([{ type: 'keydown' }]));
+  // out of the delivery, where the bridge makes it the worker's uncaught
+  // exception (windowkit/appkit#65)
+  assert.throws(() => deliver([{ type: 'keydown' }]), /from a handler/);
   assert.deepStrictEqual(seen, [{ type: 'keydown' }]);
-  assert.deepStrictEqual(
-    thrown.map((e) => e.message),
-    ['from a handler'],
-  );
 });
 
 test('process.exit on the worker asks the main thread first, with its code', () => {
