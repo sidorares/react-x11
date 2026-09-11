@@ -29,11 +29,21 @@ export class CocoaPaneHost {
       return;
     }
     this._rect = { ...rect };
-    this._native.setLayerProps(this.layer, {
-      frame: [rect.x / s, rect.y / s, rect.width / s, rect.height / s],
-      zPosition: 1e7,
-      hidden: false,
-    });
+    // Actions off: the layer is ours, not a presenter's, so no frame's
+    // transaction covers it, and a bare set tweens the pane into place at
+    // mount and after every resize — the trap CocoaGLArea._setLayerProps
+    // describes.
+    const native = this._native;
+    native.txBegin({ disableActions: true });
+    try {
+      native.setLayerProps(this.layer, {
+        frame: [rect.x / s, rect.y / s, rect.width / s, rect.height / s],
+        zPosition: 1e7,
+        hidden: false,
+      });
+    } finally {
+      native.txCommit();
+    }
   }
 
   /**

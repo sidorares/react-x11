@@ -161,7 +161,7 @@ export class CocoaGLArea {
     if (this.destroyed) return;
     this.rect = rect;
     const s = this.scale;
-    this._native.setLayerProps(this.layer, {
+    this._setLayerProps({
       frame: [rect.x / s, rect.y / s, rect.width / s, rect.height / s],
       // above both presenters' content: the surface presenter's contents
       // live on the root layer itself, the layers presenter's visuals top
@@ -193,8 +193,25 @@ export class CocoaGLArea {
   }
 
   map() {
-    if (!this.destroyed) {
-      this._native.setLayerProps(this.layer, { hidden: false });
+    if (!this.destroyed) this._setLayerProps({ hidden: false });
+  }
+
+  /**
+   * Everything this layer is handed goes out with Core Animation's implicit
+   * actions off. The layer is ours, not a presenter's, so no frame's
+   * transaction covers it, and a bare set animates each key for a quarter
+   * of a second from wherever the layer was: the surface grew into place
+   * at mount and trailed every step of a live resize. A present needs
+   * nothing here — `setLayerContentsIOSurface` opens its own transaction
+   * for the flip.
+   */
+  _setLayerProps(props) {
+    const native = this._native;
+    native.txBegin({ disableActions: true });
+    try {
+      native.setLayerProps(this.layer, props);
+    } finally {
+      native.txCommit();
     }
   }
 

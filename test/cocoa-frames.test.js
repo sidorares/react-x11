@@ -148,8 +148,16 @@ function fakeBridge({ screens } = {}) {
     },
     createLayer: () => ({ layer: ++seq }),
     addSublayer() {},
-    setLayerProps() {},
+    setLayerProps(layer, props) {
+      calls.push(['setLayerProps', layer, props]);
+    },
     removeFromSuperlayer() {},
+    txBegin(options) {
+      calls.push(['txBegin', options]);
+    },
+    txCommit() {
+      calls.push(['txCommit']);
+    },
     copySurfaceRegion(src, dst, rects) {
       calls.push(['copy', rects ? rects.length / 4 : 'all']);
     },
@@ -1001,6 +1009,31 @@ test('the host drops a present of a buffer the pane has since retired, and shows
   assert.throws(() => host.present(fresh.id), /not a layer/);
   host.destroy();
   wnd.destroy();
+});
+
+test('the host places the pane with implicit animations off', () => {
+  // The layer is the host's, not a presenter's, so no frame's transaction
+  // covers it: each set opens its own with actions off, or Core Animation
+  // tweens the pane into place at mount and after every resize.
+  const native = fakeBridge();
+  const host = new CocoaPaneHost(
+    { _native: native },
+    { _layer: { root: 1 }, scale: 2 },
+  );
+  host.setRect({ x: 20, y: 20, width: 360, height: 200 });
+  host.setRect({ x: 20, y: 20, width: 560, height: 320 });
+  const place = (frame) => [
+    ['txBegin', { disableActions: true }],
+    ['setLayerProps', host.layer, { frame, zPosition: 1e7, hidden: false }],
+    ['txCommit'],
+  ];
+  assert.deepEqual(
+    native.calls.filter(([name]) =>
+      ['txBegin', 'setLayerProps', 'txCommit'].includes(name),
+    ),
+    [...place([10, 10, 180, 100]), ...place([10, 10, 280, 160])],
+  );
+  host.destroy();
 });
 
 // --- the wheel ----------------------------------------------------------------------
