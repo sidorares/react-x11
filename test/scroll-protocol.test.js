@@ -10,7 +10,7 @@
 //
 // Everything registers its element through `react-x11/host` and imports from
 // `react-x11/node`, because the point is that a package outside react-x11
-// can do this — a test reaching into src/nodes.js would prove nothing about
+// can do this — a test reaching into src/nodes/ would prove nothing about
 // the published surface.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert';

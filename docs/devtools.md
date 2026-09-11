@@ -153,7 +153,7 @@ Notes for maintainers:
   with `getClientRects` is measured at mount through
   `instance.ownerDocument.documentElement` — nodes therefore expose both
   (see `Node.getClientRects` / the `ownerDocument` stub in
-  `src/nodes.js`).
+  `src/nodes/`).
 - Highlight events arrive on the backend agent
   (`hook.reactDevtoolsAgent`, or the `'react-devtools'` hook event);
   `attachHighlightAgent` maps the public instance to its owning window

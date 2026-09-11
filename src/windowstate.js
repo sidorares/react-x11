@@ -3,7 +3,7 @@
 //
 // A `<window>` asks for `fullscreen` or `maximized` and the window manager
 // decides — and it decides on its own account too, when the user hits a
-// hotkey or the titlebar button. `nodes.js` sends the requests; this is the
+// hotkey or the titlebar button. `nodes/window/hints.js` sends the requests; this is the
 // half that reads back what actually happened, plus the two things an app
 // needs that are not states at all: whether it has the keyboard, and whether
 // anyone can see it.

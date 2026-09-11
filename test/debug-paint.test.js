@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
-import { setDebugPaint } from '../src/nodes.js';
+import { setDebugPaint } from '../src/nodes/window/debugpaint.js';
 import { createMockApp } from './helpers/mock-app.js';
 
 const h = React.createElement;

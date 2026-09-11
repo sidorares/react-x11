@@ -243,7 +243,7 @@ function stackForSeq(X, seq16) {
 
 /**
  * Every 2d context this app paints windows through. react-x11 caches one
- * per window node (nodes.js), which is where ntk keeps `shapeStats`.
+ * per window node (`WindowNode`), which is where ntk keeps `shapeStats`.
  */
 function contextsOf(app) {
   return (app?._rootChildren ?? [])

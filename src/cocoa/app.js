@@ -583,7 +583,7 @@ export class CocoaApp {
    * A pump tick means no modal loop owns the thread, so no window is being
    * resized live right now: the flag the delegate set on the last tick of a
    * drag comes off here, ahead of the frames that tick, and the catch-up
-   * frame a deferred layout owes (nodes.js) runs on this very tick.
+   * frame a deferred layout owes (nodes/window/size.js) runs on this very tick.
    */
   _endLiveResizes() {
     for (const wnd of this._windows.values()) wnd.liveResizing = false;

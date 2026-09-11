@@ -1,7 +1,7 @@
 // The published test surface, tested through itself (issue #123).
 //
 // Everything here goes through `react-x11/test` the way a user's test would
-// — no reaching into `src/nodes.js`, no hand-built harness — which is the
+// — no reaching into `src/nodes/`, no hand-built harness — which is the
 // point: if this file needs an internal, the entry point is missing
 // something.
 import { test, afterEach, describe } from 'node:test';

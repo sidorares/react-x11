@@ -61,7 +61,7 @@ import {
   toLanguageTag,
 } from '../src/locale.js';
 import { useLocale } from '../src/localehooks.js';
-import { CARET_BLINK_MS } from '../src/nodes.js';
+import { CARET_BLINK_MS } from '../src/nodes/textinput.js';
 import { act, cleanup, renderX11, settle } from '../src/testing/index.js';
 
 const h = React.createElement;

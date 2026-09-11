@@ -13,7 +13,7 @@
 // baselines themselves, and the dependency manifest, because an ntk bump
 // moves everything under all of them. This script reads the diff against
 // the base, matches it against that list, and runs the benches the matches
-// owe — nothing for a docs change, the X11 protocol gate for a `nodes.js`
+// owe — nothing for a docs change, the X11 protocol gate for a `src/nodes/`
 // change, the Cocoa frame-clock gate as well on a mac. The list is the
 // policy, in one place, and it is deliberately short: a path that is not on
 // it is a path a regression cannot reach without going through one that is.
@@ -47,7 +47,8 @@ const BENCHES_BY_NAME = {
     // describes: a real regression fails twice
     retry: true,
     paths: [
-      /^src\/(nodes|node|paintcache|styles|decorations|svgnodes|events|frames|compositing|scale|yoga)\.js$/,
+      /^src\/nodes\//,
+      /^src\/(node|paintcache|styles|decorations|svgnodes|events|frames|compositing|scale|yoga)\.js$/,
       /^src\/components\//,
       /^scripts\/bench\/(protocol|xcount)\.js$/,
       /^scripts\/bench\/baseline\.json$/,
@@ -58,7 +59,8 @@ const BENCHES_BY_NAME = {
     what: 'X11 rendered pixels (hashes per scenario)',
     command: ['npm', ['run', 'bench:pixels', '--', '--check']],
     paths: [
-      /^src\/(nodes|node|paintcache|styles|decorations|svgnodes|events|frames|compositing|scale|yoga)\.js$/,
+      /^src\/nodes\//,
+      /^src\/(node|paintcache|styles|decorations|svgnodes|events|frames|compositing|scale|yoga)\.js$/,
       /^src\/components\//,
       /^scripts\/bench\/pixels\.js$/,
       /^scripts\/bench\/pixels-baseline\.json$/,
@@ -71,7 +73,8 @@ const BENCHES_BY_NAME = {
     platform: 'darwin',
     paths: [
       /^src\/cocoa\//,
-      /^src\/(nodes|node|paintcache|styles|events|frames|scale)\.js$/,
+      /^src\/nodes\//,
+      /^src\/(node|paintcache|styles|events|frames|scale)\.js$/,
       /^scripts\/bench\/presenters(-gate\.json|\.js)$/,
       /^package(-lock)?\.json$/,
     ],

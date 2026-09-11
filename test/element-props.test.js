@@ -18,16 +18,14 @@ import React from 'react';
 
 import { createRoot } from '../src/index.js';
 import { HOST_TYPES } from '../src/Reconciler.js';
-import {
-  BoxNode,
-  TextNode,
-  TextInputNode,
-  TextAreaNode,
-  ImageNode,
-  CanvasNode,
-  WindowNode,
-  PopupNode,
-} from '../src/nodes.js';
+import { BoxNode } from '../src/nodes/box.js';
+import { TextNode } from '../src/nodes/text.js';
+import { TextInputNode } from '../src/nodes/textinput.js';
+import { TextAreaNode } from '../src/nodes/textarea.js';
+import { ImageNode } from '../src/nodes/image.js';
+import { CanvasNode } from '../src/nodes/canvas.js';
+import { WindowNode } from '../src/nodes/window/window.js';
+import { PopupNode } from '../src/nodes/window/popup.js';
 import { SvgNode } from '../src/svgnodes.js';
 import { GlAreaNode } from '../src/glnodes.js';
 import { ForeignNode } from '../src/foreignnodes.js';

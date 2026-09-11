@@ -4,7 +4,7 @@
 //
 // The split follows `decorations.js`: classification, validation, decoding
 // and the `cacheKey` cache live here, where a test needs no server; the node
-// half in nodes.js is only lifecycle — when to resolve, when to claim
+// half in nodes/image.js is only lifecycle — when to resolve, when to claim
 // damage, when to let go.
 import { Image, Picture, decodeImage } from 'ntk';
 

@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import React from 'react';
 import { createRoot } from '../src/index.js';
 import { ProgressBar } from '../src/components/index.js';
-import { setAnimationClock } from '../src/nodes.js';
+import { setAnimationClock } from '../src/nodes/animation.js';
 import { animationValueAt, animationsOf, interpolate } from '../src/styles.js';
 import { setDesktopSettingsForTests } from '../src/desktopsettings.js';
 import { setWindowStateForTests } from '../src/windowstate.js';

@@ -110,7 +110,7 @@ degrades to a full-window repaint:
 ```
 react-x11: full-window repaint (800x600) reasons=props
 Error: invalidated here
-    at WindowNode.invalidate (src/nodes.js:…)
+    at WindowNode.invalidate (src/nodes/invalidate.js:…)
     at ...
 ```
 

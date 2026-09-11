@@ -461,7 +461,7 @@ test('a real blurred shadow is priced by its kernel, not by its box', async () =
   });
   try {
     const render = app.display.Render.majorOpcode;
-    // exactly what a blurred `boxShadow` did (src/nodes.js): coverage in an
+    // exactly what a blurred `boxShadow` did (src/nodes/boxpaint.js): coverage in an
     // a8 surface, the blur set on its *picture*, painted through a colour.
     // The parse has to survive node-x11's own SetPictureFilter packing —
     // padded name, 16.16 FIXED parameters — which is why this runs against

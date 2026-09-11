@@ -524,7 +524,7 @@ test('<canvas cacheKey> is opt-in, and caches when opted in', async () => {
 
 test('a registered element can opt into the cache', async () => {
   const { registerElement, unregisterElement } = await import('../src/host.js');
-  const { Node } = await import('../src/nodes.js');
+  const { Node } = await import('../src/nodes/node.js');
 
   let paints = 0;
   class SwatchNode extends Node {

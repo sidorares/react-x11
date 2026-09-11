@@ -50,7 +50,7 @@ function sameAnchorRect(a, b) {
  * hanging over stale ground.
  *
  * Subscribes to the anchoring node's owner window (`WindowNode.onAnchorChange`,
- * `nodes.js`) rather than polling: that fires exactly on the events which
+ * `nodes/window/anchoring.js`) rather than polling: that fires exactly on the events which
  * can actually move the rect — a layout pass and a fresh `_screenOrigin` —
  * so a still trigger costs nothing and a moved one is caught the same frame.
  * `getOptions` is read fresh through a ref on every notification, so callers
@@ -133,7 +133,7 @@ export function useAnchorTracking(
  * with it, so the first click anywhere goes to dismissing it.
  *
  * The window manager's own focus, then, rather than anything in the tree:
- * `WindowNode.onWindowFocusChange` (nodes.js), which the event manager
+ * `WindowNode.onWindowFocusChange` (nodes/window/window.js), which the event manager
  * notifies from the same place it suspends the caret.
  */
 export function useDismissOnWindowBlur(ref, active, onDismiss) {

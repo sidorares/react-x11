@@ -15,7 +15,7 @@
 //     render that is then thrown away has moved somebody else's window for
 //     real. So this node holds no socket until the owning `WindowNode`
 //     realizes it in the commit phase, exactly as `<glarea>` is realized
-//     (`_realizeChildWindows`, nodes.js).
+//     (`_realizeChildWindows`, nodes/window/window.js).
 //
 //  2. **Where the rect comes from.** Yoga, like any other child. Every
 //     change is a ConfigureWindow on the client plus the synthetic
@@ -34,7 +34,8 @@ import { XEMBED, XEmbedSocket } from 'ntk';
 
 import { isFocusable } from './a11y.js';
 import { lastInputTime } from './inputtime.js';
-import { Node, pixelFor } from './nodes.js';
+import { Node } from './nodes/node.js';
+import { pixelFor } from './nodes/window/capabilities.js';
 
 const px = (v) => Math.max(1, Math.round(v || 0));
 

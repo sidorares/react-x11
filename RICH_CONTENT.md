@@ -98,7 +98,7 @@ both bidi- and grapheme-cluster-aware, which is the part nobody wants to
 reimplement.
 
 And the selection _painting_ loop is already written, in
-`TextAreaNode._paintContent` (`src/nodes.js:2664`): walk `layout.lines[]`
+`TextAreaNode._paintContent` (`src/nodes/textarea.js`): walk `layout.lines[]`
 from `caretPosition(a).line` to `caretPosition(b).line`, fill a rect per
 line, special-case the bare-newline sliver. Fifteen lines, public API only.
 

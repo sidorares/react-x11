@@ -78,7 +78,7 @@ export class CocoaWindow {
     // Transparent to the pointer, the preview is passed over and the hit
     // reaches what it covers (#488; @windowkit/appkit >= 0.6.0, an older
     // bridge ignores the option). The drop side is excluded separately:
-    // nodes.js `_initDnd` gives a preview no DropSession and registers
+    // nodes/window/droptarget.js `_initDnd` gives a preview no DropSession and registers
     // nothing.
     if (attributes.dragPreview) options.ignoresMouseEvents = true;
     // The root layer's background is the "what newly exposed area shows"
@@ -97,7 +97,7 @@ export class CocoaWindow {
     this._refreshFrameInterval();
     if (attributes.sizeHints) this.setSizeHints(attributes.sizeHints);
 
-    // How many damage rects a frame may keep before merging them (nodes.js,
+    // How many damage rects a frame may keep before merging them (nodes/damage.js,
     // MAX_DAMAGE_RECTS is the X11 answer). A pass here costs one CoreGraphics
     // clip and a culled walk, where an X pass costs the server a clip mask,
     // so a frame in which a clock, a graph and a status row all ticked keeps
@@ -109,7 +109,7 @@ export class CocoaWindow {
     // The retained layer presenter (docs/macos.md Tier L), behind
     // REACT_X11_COCOA_PRESENTER=layers while the surface path is the
     // measured default. Its hooks exist only in this mode, so the feature
-    // detection in nodes.js keeps the surface path byte-identical; the
+    // detection in src/nodes/ keeps the surface path byte-identical; the
     // scroll blit is shadowed off because a layer frame has no backing
     // bitmap to blit. The last two are the animation seam: a transition or
     // a loop the presenter takes runs in the render server and schedules no
@@ -191,7 +191,7 @@ export class CocoaWindow {
     this._refreshFrameInterval();
     // AppKit's inLiveResize, as the delegate reported it: the renderer
     // answers a live tick with the layout floors it has and measures fresh
-    // ones after the drag (nodes.js, `_deferContentFloors`). Cleared by
+    // ones after the drag (nodes/window/size.js, `_deferContentFloors`). Cleared by
     // the pump (`_endLiveResizes`), because the pump cannot run while the
     // resize loop owns the thread — a tick of it is the drag being over.
     if (points.live === true) this.liveResizing = true;
@@ -259,7 +259,7 @@ export class CocoaWindow {
     this._releaseBacking();
   }
 
-  // --- window-manager-ish surface (feature-detected by nodes.js) -----------
+  // --- window-manager-ish surface (feature-detected by src/nodes/) ---------
 
   setTitle(title) {
     this.title = title;
@@ -290,7 +290,7 @@ export class CocoaWindow {
    * until the state is removed or the window goes. Every other name resolves
    * `false` — ntk's own contract for a state the server cannot honour —
    * because the bridge has no zoom/miniaturize/fullscreen verbs yet
-   * (windowkit/appkit#15 scoped them out); nodes.js swallows the false.
+   * (windowkit/appkit#15 scoped them out); WindowNode swallows the false.
    */
   setWmState(names, action = 'add') {
     const list = Array.isArray(names) ? names : [names];
@@ -315,9 +315,9 @@ export class CocoaWindow {
   // --- drag and drop (src/cocoa/dnd.js) ------------------------------------
 
   /**
-   * The drop side: nodes.js hands over the window's DropSession at realize
+   * The drop side: WindowNode hands over the window's DropSession at realize
    * (`_initDnd`), and from then on the app routes this window's `drag-*`
-   * events into it. Its presence on the window is what tells nodes.js the
+   * events into it. Its presence on the window is what tells WindowNode the
    * backend has drop machinery of its own.
    */
   attachDropTransport(session, node) {
@@ -467,7 +467,7 @@ export class CocoaWindow {
   }
 
   /**
-   * The per-flush painted rects (nodes.js's swapchain seam), accumulated
+   * The per-flush painted rects (WindowNode's swapchain seam), accumulated
    * until the next present: they are what the flip's catch-up copy covers.
    * `'full'`/null collapse the set — one full copy beats bookkeeping.
    */
@@ -476,7 +476,7 @@ export class CocoaWindow {
     if (this._freshSurface) {
       this._freshSurface = false;
       // A full flush painted every pixel of the new surface, and a resize
-      // event's flush is one (nodes.js, the 'resize' listener). A bounded
+      // event's flush is one (nodes/window/listeners.js, the 'resize' listener). A bounded
       // one left garbage outside its rects: hold the present until the full
       // frame asked for here lands, so the garbage is never on glass.
       if (rects) {

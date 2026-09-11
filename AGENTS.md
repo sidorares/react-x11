@@ -45,9 +45,25 @@ no override-redirect staging (issue #4).
   Written against react-reconciler 0.33 (React 19). If you upgrade
   react-reconciler, expect host config contract changes; the smoke test is
   the safety net.
-- `src/nodes.js` — the retained node tree: `WindowNode` (real X window,
-  paint/event/flex root), `BoxNode`, `TextNode` (+ spans/chunks),
-  `ImageNode`, `CanvasNode`. Layout (yoga), painting, hit testing.
+- `src/nodes/` — the retained node tree: `Node`, and the elements built on
+  it — `BoxNode`, `TextNode` (+ chunks), `ImageNode`, `CanvasNode`,
+  `TextInputNode`, `TextAreaNode`, and under `window/` the two that own a
+  real X window, `WindowNode` (paint, event and flex root) and `PopupNode`.
+  Split by **concern, not by class**: a class's own file keeps what the
+  class is (construction, props, the tree), and every other method lives in
+  the file of the concern it serves — `layout.js`, `paint.js`,
+  `invalidate.js`, `scrollblit.js`, `cascade.js`, `window/size.js` and the
+  rest — written as the body of a class that is never instantiated (a
+  _part_) and installed onto the real one by `installMethods` (`install.js`
+  says why). Where `Node` and `WindowNode` share a concern, both halves sit
+  in one file. The prototypes come out exactly as one class body would
+  leave them, so nothing downstream can tell. Three rules keep it that way:
+  a method name lives in exactly one file (`installMethods` throws on a
+  second); a concern file imports leaves and other concerns, never a class
+  file; and nothing under `src/nodes/` forms an import cycle or exports a
+  part nobody installs (`test/nodes-structure.test.js`). A new method goes
+  in its concern's file; a new concern is a new file with a part per class,
+  added to the class file's `installMethods` call.
 - `src/glnodes.js` — `<glarea>`: the GL surface. A child X window on a
   GLX visual (ntk's `chooseGLXConfig`), positioned by the parent's yoga
   rect, drawing `onDraw` frames on its own frame clock. First step of
@@ -176,9 +192,9 @@ no override-redirect staging (issue #4).
   classification; text style resolution. Also the **logical** edges
   (`paddingStart`, `marginEnd`, `borderStartWidth`, `start`/`end`) and the
   `direction` that decides what they mean: yoga resolves those for the
-  layout, and `Node.direction` (nodes.js) resolves the same rule a second
-  time for everything outside it — which side a scrollbar sits on, which
-  edge a logical border paints, the base level a paragraph of neutral
+  layout, and `Node.direction` (nodes/cascade.js) resolves the same rule
+  a second time for everything outside it — which side a scrollbar sits on,
+  which edge a logical border paints, the base level a paragraph of neutral
   characters shapes at. The floor under it is the palette's `direction`,
   seeded from the locale. Also the two prop sets the
   **inheritance** rule is written as: `INHERITED_TEXT_PROPS` (the ink, the
@@ -192,7 +208,7 @@ no override-redirect staging (issue #4).
 - `src/decorations.js` — the two style values that are a small language
   rather than a number: `backgroundImage`'s `linear-gradient(...)` and
   `boxShadow` (#345). Pure — strings in, geometry out — so the renderer half
-  in `nodes.js` is only compositing, and the grammar is testable without a
+  in `nodes/boxpaint.js` only composites, and the grammar is testable without a
   server. Two things there are not obvious and are commented at length. The
   gradient line carries **padding at both ends with the end colours pinned to
   it**, because past its last stop an XRender gradient is transparent rather
@@ -772,13 +788,13 @@ unchanged across the fix.
 ### Which bench a change owes
 
 A hot path is a short list of files — the paint walk and the damage model
-(`nodes.js`), the layout floors and styles, the paint cache, the event
+(`src/nodes/`), the layout floors and styles, the paint cache, the event
 dispatch that decides when a frame goes out (`events.js`, `frames.js`),
 `src/cocoa/`, the benches and their baselines, and `package.json`, because
 an ntk bump moves everything under all of them. `npm run bench:touched`
 reads your diff against `origin/master`, matches it against that list
 (`scripts/bench/touched.js` is the list, in one place), and runs the gates
-the matches owe: the X11 protocol and pixel gates for a `nodes.js` change,
+the matches owe: the X11 protocol and pixel gates for a `src/nodes/` change,
 the Cocoa frame-clock gate as well on a mac, nothing for a docs change.
 `--dry` says which without running them. CI does the same on every PR —
 the `bench` job runs the X11 gates unconditionally on Linux, and
@@ -1152,11 +1168,11 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
     backwards, and the Cocoa layer presenter takes zPosition from it.
 
 - **A `layout` host's children are yoga trees of their own** (the layout
-  host in `src/nodes.js`; docs/architecture/custom-layout.md). Yoga gives a
-  node a measure function or children, never both, so the host is a
-  measured leaf and each child a root — and everything that assumed the
-  yoga tree mirrors the node tree has a host branch. Five things are easy
-  to undo:
+  host in `src/nodes/layouthost.js`; docs/architecture/custom-layout.md).
+  Yoga gives a node a measure function or children, never both, so the
+  host is a measured leaf and each child a root — and everything that
+  assumed the yoga tree mirrors the node tree has a host branch. Five
+  things are easy to undo:
   - **A `<box>` is a `Scrollable`,** whose own `_absolutizeChildren` is the
     walk `absolutize` takes: a host branch in `Node.absolutize` alone is
     never reached for a box. `offsetInParent` is the one sum for "where
@@ -1270,7 +1286,7 @@ onDraw>`, `value`, `placeholder`. `children` and event handlers are
   face and fails on any node overflowing a pinned-width ancestor, which is
   the pass that would have caught it.
 - **`flexShrink` defaults to 1 and every flex item carries a content floor**
-  (#249, `nodes.js`: `contentSpan`, `writeContentFloors`). Yoga defaults the
+  (#249, `src/nodes/window/floors.js`: `contentSpan`, `writeFloors`). Yoga defaults the
   shrink to 0 and has no floor at all, and **neither of its two answers is
   usable on its own**: with 0 a row never squeezes into the space it has, and
   with 1 everything collapses to nothing — scrolling stops existing, because

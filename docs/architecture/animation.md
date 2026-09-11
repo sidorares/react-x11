@@ -59,7 +59,7 @@ look the day it moved to the render server.
 **Status, 2026-09-06.** Bridge items 1–8 shipped in `@windowkit/appkit`
 0.5.0 (§4.4). Landed in react-x11 on top of it: the presenter seam of §4.1
 and the PropBox rows of §4.2 (`animate`/`cancel` in
-src/cocoa/presenter.js, the `offloaded` entries in nodes.js), with additive
+src/cocoa/presenter.js, the `offloaded` entries in src/nodes/animation.js), with additive
 retargets for lengths and presentation-value retargets for colours, and
 reduce motion on the Cocoa backend (src/desktopsettings.js's `fromMacOS`).
 The vocabulary of §3 — easing, timelines, `opacity`, transforms — is still
@@ -73,7 +73,7 @@ to come; the control-point tables it needs exist (`EASING_CONTROL_POINTS`).
 property, an object picks them (docs/styling.md "Transitions"). One fixed
 ease-out cubic (`ease`, src/styles.js:1121). A transition starts from what
 is on screen, so an interrupted one reverses from where it got to
-(`_retarget`, src/nodes.js:2066), and it starts at `now()` rather than the
+(`_retarget`, src/nodes/animation.js), and it starts at `now()` rather than the
 last frame's timestamp, so an idle window does not find it already over
 (#80). Nothing before a node's first frame transitions — an inserted
 element appears at its style (`_placed`, test/transition-mount.test.js).
@@ -89,17 +89,17 @@ Phase is a modulo of elapsed time (`animationValueAt`, src/styles.js:965).
 An equal declaration keeps its phase across re-renders (`sameAnimation`).
 It stops when the window is unmapped, minimized or obscured, when anything
 above the node hides it, when the node unmounts or the style drops it, and
-under reduced motion (`_loopsAllowed`, src/nodes.js:2288) — and every one
+under reduced motion (`_loopsAllowed`, src/nodes/animation.js) — and every one
 of those restarts it from the top when it goes away.
 
 ### 1.2 The runtime
 
 One path for both shapes. `_retarget` puts an entry per property into
 `node._anim` and the node into `root._animating`; `flush` calls
-`_advanceAnimations(now())` (src/nodes.js:11090), which claims damage for
+`_advanceAnimations(now())` (src/nodes/animation.js), which claims damage for
 each animating node _before_ ticking it (a finished tick deletes the entry,
 and with it the only way to tell a layout animation from a paint one —
-`damageForAnimation`, src/nodes.js:620), ticks, and sets `needsPaint`. The
+`damageForAnimation`, src/nodes/animation.js), ticks, and sets `needsPaint`. The
 window keeps asking for frames while `_animating` is non-empty; the
 animation _is_ the repaint loop. `interpolate` (src/styles.js:990) lerps
 numbers, percentages of the same unit, and colours — premultiplied, so a
@@ -384,7 +384,7 @@ the transformed box's bounding rect, which is what damage, culling and
 `pointerEvents: 'none'` is the property for not hitting.
 
 **Not the zoom.** `<box scale={2}>` multiplies every length in the subtree
-and reshapes text at the size it will be drawn at (src/nodes.js:1778,
+and reshapes text at the size it will be drawn at (src/nodes/cascade.js,
 docs/scale.md); it is layout, and it is expensive to change. `scaleX` is
 paint: the rasterized subtree stretched. They are two different tools and
 the transform is the one that animates cheaply; the docs say so in one
@@ -606,7 +606,7 @@ delay }`, `parseAnimation` (`keyframes`, `repeat`, `delay`, `key`; the
   easing, `repeat` as a cap on the cycle count), `sameAnimation` over the
   new fields, and the six new properties in `PAINT_PROPS` — which puts
   them in state blocks and out of `NOT_ANIMATABLE` for free.
-- **src/nodes.js** — `_retarget` (easing and delay on the entry; the
+- **src/nodes/** — `_retarget` (easing and delay on the entry; the
   presenter seam), `_tickAnimations` (finite end → rest at the target,
   completion events), `_updateLoops` (cancel through the presenter),
   `paint` (the group path and its two fast paths around

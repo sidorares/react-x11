@@ -1,4 +1,4 @@
-// Frame pacing on a window (src/pacing.js under nodes.js): where a
+// Frame pacing on a window (src/pacing.js under WindowNode): where a
 // window's frame is scheduled, what it costs, and what that decides. The
 // mock app, a fake clock on the pacer, and a paint whose cost the test
 // sets — so a "flood" is a loop and a "wait" is a timer the test can see,

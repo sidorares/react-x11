@@ -26,12 +26,9 @@
 // knowing.
 import { cssColorStraight } from 'ntk';
 
-import {
-  Node,
-  addDamageRect,
-  damageToPaint,
-  intersectRects,
-} from '../nodes.js';
+import { Node } from '../nodes/node.js';
+import { addDamageRect, damageToPaint } from '../nodes/damage.js';
+import { intersectRects } from '../nodes/rects.js';
 import { EASING_CONTROL_POINTS, TRANSITION_CONTROL_POINTS } from '../styles.js';
 import { CocoaContext2D } from './context2d.js';
 
@@ -489,7 +486,7 @@ export function propBoxProps(node, app, scale, parentOrigin, order) {
 // --- animations the render server runs ---------------------------------------
 //
 // The node model keeps deciding what is animating and when it ends
-// (nodes.js `_retarget` / `_updateLoops`); what moves here is who
+// (nodes/animation.js `_retarget` / `_updateLoops`); what moves here is who
 // interpolates. Taken means the node's style goes to its target — the
 // layer's model value, sent by the next frame's property diff — and that
 // frame attaches an explicit animation carrying the pixels there; no frame

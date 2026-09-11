@@ -28,8 +28,8 @@ import {
   DRAWN_KINDS,
   CUSTOM_SEMANTIC_NAMES,
   CUSTOM_SELF_DAMAGED,
-  Node,
-} from './nodes.js';
+} from './nodes/kinds.js';
+import { Node } from './nodes/node.js';
 import { markLayoutsHotReloadSession } from './layouts.js';
 
 /** kind -> definition. Insertion-ordered, which is the order errors list. */
@@ -229,7 +229,7 @@ export function createRegisteredNode(type, props, app, hostContext) {
   const definition = registry.get(type);
   if (!definition) return undefined;
   const node = assertNode(definition.create(props, app, hostContext), type);
-  // read by Node.insertBefore — carried on the instance so nodes.js needs
+  // read by Node.insertBefore — carried on the instance so src/nodes/ needs
   // no import from here
   if (!definition.childrenAllowed) node._childrenAllowed = false;
   return node;

@@ -15,7 +15,7 @@
 // **the buffer handed to the layer must hold the same picture a backend
 // with no fast path would have painted** — and the way to check it is to
 // render the same pane twice in one app, deleting `scrollRegion` on the
-// second window, which is exactly how nodes.js feature-detects a backend
+// second window, which is exactly how the scroll blit feature-detects a backend
 // without the blit (`typeof wnd?.scrollRegion !== 'function'`).
 //
 // Then the frames a pan actually meets: several pans coalesced into one

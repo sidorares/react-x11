@@ -32,12 +32,9 @@
 // clock. Overlays, toasts, drag ghosts, spinners and floating cards pass by
 // construction; a hover fade on a row in the middle of a list does not,
 // and stays on the clock. docs/macos.md §"Layer promotion" is the account.
-import {
-  BoxNode,
-  addDamageRect,
-  damageToPaint,
-  intersectRects,
-} from '../nodes.js';
+import { BoxNode } from '../nodes/box.js';
+import { addDamageRect, damageToPaint } from '../nodes/damage.js';
+import { intersectRects } from '../nodes/rects.js';
 import { resolveBorderWidths } from '../styles.js';
 import {
   LayerAnimations,
@@ -181,7 +178,7 @@ function scrollbarStrip(bar, scale) {
  * The surface window's promoted nodes: which ones have a layer, what each
  * layer shows, and the animations the render server runs on them.
  * `frame()` is the whole of the per-frame work, called by the window from
- * nodes.js's `prepareFrame` seam — after layout, before the damage is taken.
+ * the `prepareFrame` seam in nodes/window/flush.js — after layout, before the damage is taken.
  */
 export class CocoaPromotion {
   constructor(window) {

@@ -1,9 +1,9 @@
 // Which windows owe a frame.
 //
-// Shared between the paint root (nodes.js — it records the debt in
+// Shared between the paint root (`WindowNode` — it records the debt in
 // `invalidate()` and pays it in `flush()`) and the event dispatcher
 // (events.js — it pays early, for discrete input). Its own module because
-// nodes.js already imports events.js, and the dispatcher cannot import the
+// src/nodes/ already imports events.js, and the dispatcher cannot import the
 // node back without a cycle.
 //
 // The set answers "which windows have unpainted damage" in O(1) at event

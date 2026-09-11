@@ -2,7 +2,7 @@
 // the window it is in — '@container width >= 400', or '@container sidebar
 // width >= 400' to name the container. A container's size is what a layout
 // pass produces, so the blocks are resolved after the pass and the tree laid
-// out once more when an answer moved (nodes.js `_resolveContainerQueries`).
+// out once more when an answer moved (nodes/queries.js `_resolveContainerQueries`).
 import { test } from 'node:test';
 import assert from 'node:assert';
 import React from 'react';

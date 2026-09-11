@@ -73,7 +73,7 @@ const itemHeight = (fontSize) => capBand(fontSize) + ITEM_PAD * 2;
 // what NSPopUpButtonCell does with a title too long for its cell. It is
 // also what makes the label *give way*: an eliding `nowrap` floors at the
 // mark it would end in, where a clipping one keeps its full width and
-// pushes whatever contains it wider (nodes.js, `_wrapWidth`).
+// pushes whatever contains it wider (nodes/text.js, `_wrapWidth`).
 const ONE_LINE = Object.freeze({
   textWrap: 'nowrap',
   textOverflow: 'ellipsis',
@@ -139,7 +139,7 @@ const MENU_BORDER = 1;
 // the trigger (`menuAnchorOptions`).
 const TRIGGER_PAD_LEFT = 10;
 // the scrollbar is drawn *over* the content rather than insetting it
-// (`nodes.js`, SCROLLBAR_WIDTH), so a menu that scrolls reserves the room
+// (`nodes/scrollbars.js`, SCROLLBAR_WIDTH), so a menu that scrolls reserves the room
 const SCROLLBAR_WIDTH = 6;
 
 function normalizeOption(option) {

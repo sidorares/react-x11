@@ -1,6 +1,6 @@
 // The two decorations that are not a colour: the gradient behind a box
 // (`backgroundImage`) and the shadow under it (`boxShadow`). Both are pure
-// here — strings in, numbers out — so the renderer half in `nodes.js` is
+// here — strings in, numbers out — so the renderer half in `nodes/boxpaint.js` is
 // only geometry and compositing, and the parsing can be tested without a
 // server (issue #345).
 //

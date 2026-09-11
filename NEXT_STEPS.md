@@ -1511,9 +1511,9 @@ closure through ntk, so the dependency cost is genuinely zero.
   one deliberately unpinned smoke test that asserts the resolved family
   _name_, since pinning otherwise makes #86 undetectable.
 - `withFrameClock(clock => …)`, because `setAnimationClock` exists at
-  `src/nodes.js:266` precisely so tests can drive transitions and is
+  `src/nodes/animation.js` precisely so tests can drive transitions and is
   unreachable from the package — `test/style.test.js` reaches it through
-  `await import('../src/nodes.js')` and hand-restores it in six places,
+  `await import('../src/nodes/animation.js')` and hand-restores it in six places,
   each of which would leak if the test threw.
 
 The cheapest real win in this section is not the harness though — it is that

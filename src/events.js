@@ -42,7 +42,7 @@ const WHEEL_BUTTONS = new Set([4, 5, 6, 7]);
  * every registered element that answers the wheel), so the conversion happens
  * here, once, and `deltaX`/`deltaY` mean pixels wherever they are read.
  *
- * The same step an arrow key takes (`SCROLL_KEY_STEP`, nodes.js), so a notch
+ * The same step an arrow key takes (`SCROLL_KEY_STEP`, nodes/scrollable.js), so a notch
  * and an arrow press move a list by the same amount.
  */
 export const WHEEL_NOTCH_PX = 48;
@@ -301,7 +301,7 @@ export function discrete(fn) {
  * One function, because there is more than one way to ask for it and they
  * must not drift: an AT's `DoAction("activate")` (atspi.js) and the
  * keyboard's Space/Enter on a focused control (`Node.defaultKeyDown`,
- * nodes.js) both land here, so a control that acts on the *press* — `Select`
+ * nodes/node.js) both land here, so a control that acts on the *press* — `Select`
  * and `MenuBar` drop their menus on mousedown, the way real menus do — is
  * reached by either, and neither can be the one input route a widget forgot.
  *
@@ -621,7 +621,7 @@ export class EventManager {
     if (!changed) return;
     // …and the things that keep a window of their own open on the strength
     // of this one having focus — a menu, a dropdown — which the focused node
-    // keeping its focus would otherwise never tell (`WindowNode`, nodes.js)
+    // keeping its focus would otherwise never tell (`WindowNode`, nodes/window/window.js)
     this.node._notifyWindowFocus?.(focused);
     a11yHooks.windowFocus?.(this.node, focused);
     runWithPriority(DiscreteEventPriority, () => {
@@ -755,7 +755,7 @@ export class EventManager {
     // The first wheel is what says this window wants smooth scrolling. It was
     // created on core events — an XI2 selection costs four times as many
     // bytes per *pointer move*, which a window that is never scrolled would
-    // pay for nothing — and takes the selection here, once (nodes.js,
+    // pay for nothing — and takes the selection here, once (nodes/window/window.js,
     // `upgradeToXI2`). Ahead of the dismiss check, because a scroll this
     // window heard is a scroll this window heard whatever it does with it.
     this.node.upgradeToXI2?.();
@@ -802,7 +802,7 @@ export class EventManager {
       // **The default action moves whole pixels and keeps the change.** A
       // scroll offset that is not an integer costs the scroll blit — the
       // server-side copy that makes a scroll cheap can only shift by whole
-      // pixels, so `_applyScrollBlits` (nodes.js) declines a fractional one
+      // pixels, so `_applyScrollBlits` (nodes/scrollblit.js) declines a fractional one
       // and repaints the viewport instead. A touchpad reporting a third of a
       // notch would therefore turn every frame of the smoothest gesture the
       // renderer has into a full repaint, which is the opposite of the
@@ -1695,7 +1695,7 @@ export class EventManager {
    * focusable, and still on screen.
    *
    * Three callers ask it — a focus scope closing, an edit menu closing
-   * (`closeEditMenu`, nodes.js) and a subtree coming out of hiding — and the
+   * (`closeEditMenu`, nodes/editmenupopup.js) and a subtree coming out of hiding — and the
    * third is why the question includes visibility. Whatever a modal was
    * opened from may have suspended while it was up, and handing the keyboard
    * back to it would put keys on an invisible control by the other route.

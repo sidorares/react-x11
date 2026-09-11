@@ -10,7 +10,7 @@ import { cssColorStraight } from 'ntk';
 // re-exported so the GL element layer stays one import for consumers
 export { directGLFailure, hasDirectGL } from './glbackend.js';
 
-import { Node } from './nodes.js';
+import { Node } from './nodes/node.js';
 import { FramePacer, resolveFrameRate } from './pacing.js';
 
 // One visual query per (app, spec): GetFBConfigs is a round trip and every

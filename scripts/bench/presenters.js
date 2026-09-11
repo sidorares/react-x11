@@ -367,7 +367,7 @@ function PulsingToast() {
   const [on, setOn] = React.useState(false);
   React.useEffect(() => {
     // after the first frame, not before it: a node nobody has seen yet
-    // takes no transition (nodes.js, `_placed`), and a change that lands
+    // takes no transition (src/nodes/, `_placed`), and a change that lands
     // before the mount frame would leave the toast in the bitmap until the
     // next one
     let timer = setTimeout(function flip() {

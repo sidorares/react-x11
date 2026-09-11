@@ -6,7 +6,7 @@
 //
 // Everything here registers its element through `react-x11/host` and imports
 // `Node` from `react-x11/node`, because the point of the issue is that a
-// package outside react-x11 can do this. A test reaching into src/nodes.js
+// package outside react-x11 can do this. A test reaching into src/nodes/
 // would prove nothing about the published surface.
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert';

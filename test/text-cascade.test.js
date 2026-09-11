@@ -27,7 +27,7 @@ import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
 import { createRoot } from '../src/index.js';
-import { setAnimationClock } from '../src/nodes.js';
+import { setAnimationClock } from '../src/nodes/animation.js';
 
 const require = createRequire(import.meta.url);
 const fontDir = join(

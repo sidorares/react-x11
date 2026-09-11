@@ -3,7 +3,7 @@
 // Separate from `components/theme.js` because the palette is not a React
 // concern. There are two routes into the tree — `useTheme()` through React
 // context, and a `$token` resolved against the nearest `theme` **prop** by
-// walking the node tree — and the second one lives in `nodes.js`, below the
+// walking the node tree — and the second one lives in `nodes/cascade.js`, below the
 // widget layer. Both have to agree on what "no theme was given" means, so the
 // answer belongs underneath both of them.
 //

@@ -20,7 +20,7 @@
 // Both are looked up by name from a style property (`layout`, `position`),
 // so a container query block can swap one in the frame its container crosses
 // a threshold. Both are plain data, so this module needs nothing from
-// nodes.js — the node side is there, next to the pass it runs in.
+// src/nodes/ — the node side is there, next to the pass it runs in.
 
 /** name -> definition, insertion-ordered: the order an error lists them in. */
 const layouts = new Map();

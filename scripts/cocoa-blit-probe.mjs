@@ -12,7 +12,7 @@
 // Two windows, the same pane, the same pan sequence. The first keeps
 // `scrollRegion`, so its frames blit the surviving band and repaint the
 // strips the shift exposed; the second has it deleted, which is how
-// nodes.js feature-detects a backend without the fast path, so its frames
+// src/nodes/ feature-detects a backend without the fast path, so its frames
 // repaint the claim whole. After each present the two backing surfaces are
 // read back and compared: the blit is only ever an optimization, so a
 // single differing pixel is a bug.
