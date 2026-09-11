@@ -17,7 +17,7 @@
 // `native={false}` (the widgets keep today's drawn rendering everywhere the
 // bezel is off, so custom-designed apps lose nothing).
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { useAppOrNull } from '../appcontext.js';
 import { useTheme } from './theme.js';
 
@@ -252,18 +252,23 @@ export function Bezel({
   if (value !== undefined) params.value = value;
   const sig = JSON.stringify(params);
   const store = app?.nativeBezels;
+  // What this canvas drew last, drawn again while a worker's store is still
+  // drawing the next one (src/cocoa/bezels.js, "On a worker"): the old
+  // state for a frame reads better than no control at all.
+  const last = useRef(null);
   // Keyed on the parameter signature so an unchanged bezel keeps its
   // `onDraw` identity — CanvasNode invalidates when the closure changes,
   // and a Button re-rendered by its parent must not repaint its bezel.
   const onDraw = useCallback(
     (ctx, info) => {
       if (!store || !info.width || !info.height) return;
-      const bezel = store.get(
-        JSON.parse(sig),
-        info.width,
-        info.height,
-        info.scale,
-      );
+      const node = info.node;
+      const bezel =
+        store.get(JSON.parse(sig), info.width, info.height, info.scale, () => {
+          if (!node.destroyed) node.invalidate();
+        }) ?? last.current;
+      if (!bezel) return;
+      last.current = bezel;
       ctx.drawImage(
         { _surfaceHandle: bezel.surface },
         bezel.sx,

@@ -95,7 +95,8 @@ const shot = (name) => {
   for (const win of root.app._windows.values()) {
     const file = `/tmp/chat-${name}${i ? `-${i}` : ''}.png`;
     win.present();
-    console.log(name, i, win.snapshot(file) ? file : 'FAILED');
+    const n = i;
+    win.snapshot(file).then((ok) => console.log(name, n, ok ? file : 'FAILED'));
     i++;
   }
 };

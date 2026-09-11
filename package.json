@@ -209,6 +209,10 @@
     "./keysyms": {
       "types": "./src/keysyms.d.ts",
       "default": "./src/keysyms.js"
+    },
+    "./cocoa-main": {
+      "types": "./src/cocoa/main.d.ts",
+      "default": "./src/cocoa/main.js"
     }
   },
   "types": "./src/index.d.ts"

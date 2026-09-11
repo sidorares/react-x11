@@ -1139,6 +1139,7 @@ async function main() {
         promote: false,
         frameInterval: 8,
         pumpInterval: 4,
+        resizeWait: 0,
         exitOnQuit: false,
       },
     })

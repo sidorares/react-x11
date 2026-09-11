@@ -12,6 +12,19 @@ import { CocoaLayerPresenter } from './presenter.js';
 import { CocoaPromotion } from './promotion.js';
 
 let nextWindowId = 1;
+// Threaded mode's end of a live resize (`_liveResizeTick`). AppKit's
+// tracking loop reports a resize per pointer move and nothing when the drag
+// stops, and the bridge sends no end, so a pause this long ends it. A pause
+// mid-drag that ends it early costs one measured frame (the catch-up in
+// nodes/window/size.js), which an X11 window pays on every tick; ending late
+// only delays that frame. 100ms is longer than the gap between two moves of
+// any drag that is still moving.
+const LIVE_RESIZE_IDLE_MS = 100;
+// How long a worker's flip may keep its window's back buffer before the
+// window draws into it anyway (`_armFence`). The release is reported once
+// the replacing frame has committed, a fraction of a millisecond later, and
+// a window must not freeze on a report that never came.
+const FENCE_TIMEOUT_MS = 100;
 
 export class CocoaWindow {
   constructor(app, attributes = {}) {
@@ -90,9 +103,39 @@ export class CocoaWindow {
       const parsed = app._parseColor(attributes.backgroundColor);
       if (parsed) options.backgroundColor = parsed;
     }
+    // Where it was asked to go, until AppKit says where it went
+    // (`_refreshOrigin`) — which on a worker is not before the window exists.
+    this.x = Math.round(attributes.x ?? 0);
+    this.y = Math.round(attributes.y ?? 0);
+    this._screenOrigin = { x: this.x, y: this.y };
+    // AppKit's content size in points, as the bridge last reported it
+    // (`_frameSize`)
+    this._points = null;
+    // Threaded mode's swapchain fence (`frameInFlight`): the IOSurface id
+    // on the layer as far as this window has asked, the one the last flip
+    // is taking off glass until the bridge says it is released, and the
+    // catch-up copy the back buffer is owed once it is back.
+    this._onGlass = null;
+    this._awaiting = null;
+    this._catchUp = null;
+    this._fenceTimer = null;
+    this._shadowTimer = null;
+    this._liveEnd = null;
     this._h = this._native.createWindow2(options);
+    // On a worker the bridge answers a handle at the call and makes the
+    // window when its command runs: the number is null until then, and
+    // `window-created` brings it (`_created`).
     this.windowNumber = this._native.windowNumber(this._h);
+    // What the app's window map and the events name this window by: the
+    // handle on a worker, where every window event carries it, and the
+    // number in pump mode, where the events carry only that.
+    this._key = app._threaded ? this._h : this.windowNumber;
     this._layer = this._native.windowRootLayer(this._h);
+    // A worker's frame lands after AppKit has moved the window's edge, so
+    // AppKit is asked to wait for it (`RESIZE_WAIT_MS`, src/cocoa/app.js).
+    if (app._threaded && app._resizeWait > 0) {
+      this._native.setResizeHandshake(this._h, { waitMs: app._resizeWait });
+    }
     this._refreshOrigin();
     this._refreshFrameInterval();
     if (attributes.sizeHints) this.setSizeHints(attributes.sizeHints);
@@ -162,6 +205,8 @@ export class CocoaWindow {
 
   _refreshOrigin() {
     const f = this._native.getWindowFrame(this._h);
+    // a worker's window AppKit has not made yet: the asked-for origin stands
+    if (!f) return;
     const s = this.scale;
     this.x = Math.round(f.x * s);
     this.y = Math.round(f.y * s);
@@ -180,8 +225,17 @@ export class CocoaWindow {
     this._frameInterval = this.app.frameIntervalFor(this);
   }
 
+  /** `window-created`: AppKit has made the window a worker asked for, and
+   * published where it put it. */
+  _created(ev) {
+    this.windowNumber = ev.windowNumber;
+    this._refreshOrigin();
+    this._refreshFrameInterval();
+  }
+
   /** Native geometry changed (delegate event, points). */
   _nativeResized(points) {
+    this._points = { width: points.width, height: points.height };
     const s = this.scale;
     this.width = Math.max(1, Math.round(points.width * s));
     this.height = Math.max(1, Math.round(points.height * s));
@@ -193,8 +247,30 @@ export class CocoaWindow {
     // answers a live tick with the layout floors it has and measures fresh
     // ones after the drag (nodes/window/size.js, `_deferContentFloors`). Cleared by
     // the pump (`_endLiveResizes`), because the pump cannot run while the
-    // resize loop owns the thread — a tick of it is the drag being over.
+    // resize loop owns the thread — a tick of it is the drag being over. On
+    // a worker, by a pause in the ticks (`_liveResizeTick`).
     if (points.live === true) this.liveResizing = true;
+  }
+
+  /**
+   * Threaded mode's reading of the end of a live resize: each live tick
+   * restarts a timer, and the drag is over when the ticks stop
+   * (`LIVE_RESIZE_IDLE_MS`), or at once when a resize arrives that is not
+   * live. The pump's rule — a pump tick means the resize loop has let go of
+   * the thread — has nothing to read on a worker, which no loop of
+   * AppKit's ever holds.
+   */
+  _liveResizeTick(live) {
+    clearTimeout(this._liveEnd);
+    this._liveEnd = null;
+    if (!live) {
+      this.liveResizing = false;
+      return;
+    }
+    this._liveEnd = setTimeout(() => {
+      this._liveEnd = null;
+      this.liveResizing = false;
+    }, LIVE_RESIZE_IDLE_MS);
   }
 
   resize(width, height) {
@@ -254,6 +330,10 @@ export class CocoaWindow {
       this.app.cancelAttention(this._attentionRequest);
       this._attentionRequest = null;
     }
+    clearTimeout(this._liveEnd);
+    this._liveEnd = null;
+    clearTimeout(this._shadowTimer);
+    this._shadowTimer = null;
     this._promotion?.destroy();
     this._native.destroyWindow2(this._h);
     this._releaseBacking();
@@ -407,6 +487,9 @@ export class CocoaWindow {
    * that frame is on glass.
    */
   _ensureSurface() {
+    // a paint that did not wait for the fence: the back buffer gets its
+    // catch-up now, so what it paints lands over the frame before it
+    this._settleBack();
     const w = this.width;
     const h = this.height;
     if (
@@ -464,6 +547,11 @@ export class CocoaWindow {
     }
     this._chain = null;
     this._surface = null;
+    // a new pair owes nothing to what the old one was showing
+    clearTimeout(this._fenceTimer);
+    this._fenceTimer = null;
+    this._awaiting = null;
+    this._catchUp = null;
   }
 
   /**
@@ -540,6 +628,9 @@ export class CocoaWindow {
    * caller falls back to the plain repaint. */
   scrollRegion(rect, dx, dy) {
     if (!this._surface) return false;
+    // the band moves over the frame before this one, not over a buffer
+    // still owed its catch-up
+    this._settleBack();
     if (!Number.isInteger(dx) || !Number.isInteger(dy)) return false;
     const moved = this._native.scrollSurface(
       this._surface,
@@ -569,8 +660,29 @@ export class CocoaWindow {
     return Boolean(moved);
   }
 
+  /**
+   * Whether this window's last frame still holds the buffer the next one
+   * would be drawn into — the X11 contract's fence (src/frames.js). The
+   * pump never needs it: a pump-mode flip is applied in the call, so the
+   * other buffer is off glass before the next paint. A worker's flip is a
+   * command the UI thread applies later, and until the bridge reports the
+   * buffer it replaced as released (`_surfaceReleased`), drawing into that
+   * buffer draws into what is on glass. A new size is never in flight: it
+   * paints into a new pair that nothing is showing.
+   *
+   * And while a batch is being routed (`CocoaApp._routeBatch`), its frame
+   * is the one owed: it goes out when the batch is done, answering every
+   * input in it at once. The early flush a discrete event asks for on its
+   * way out (src/frames.js) waits those few microseconds, rather than
+   * painting a state the next event in the same batch replaces.
+   */
   frameInFlight() {
-    return false;
+    if (this.app._batching) return true;
+    return (
+      this._awaiting != null &&
+      this._surfaceSize?.width === this.width &&
+      this._surfaceSize?.height === this.height
+    );
   }
 
   /**
@@ -626,44 +738,154 @@ export class CocoaWindow {
     if (this._chain) {
       const shown = this._chain.back;
       this._native.surfaceUnlock(shown.handle);
-      this._native.setLayerContentsIOSurface(this._layer, shown.iosurfaceId);
+      this._flip(() =>
+        this._native.setLayerContentsIOSurface(this._layer, shown.iosurfaceId),
+      );
       this._chain.back = this._chain.front;
       this._chain.front = shown;
       this._surface = this._chain.back.handle;
       // a different native surface owns the graphics state now — the
       // context re-syncs its sticky state off the generation
       this._surfaceGen++;
-      this._native.surfaceLock(this._surface);
-      const damage = this._flushDamage;
+      const catchUp = { from: shown.handle, damage: this._flushDamage };
       this._flushDamage = null;
-      this._native.copySurfaceRegion(
-        shown.handle,
-        this._surface,
-        damage === 'full' || !damage
-          ? null
-          : damage.flatMap((r) => [
-              Math.floor(r.x),
-              Math.floor(r.y),
-              Math.ceil(r.width) + 1,
-              Math.ceil(r.height) + 1,
-            ]),
-      );
-      if (this._transparentWindow) this.app._shadowStale.add(this);
+      // The buffer drawn into next is the one this flip takes off glass —
+      // when it was on glass at all: a new pair's first flip replaces a
+      // buffer of the old pair, or nothing. On a worker the flip has not
+      // happened yet, so its catch-up and the next paint wait for the
+      // bridge to say it has (`frameInFlight`).
+      const previous = this._onGlass;
+      this._onGlass = shown.iosurfaceId;
+      if (this.app._threaded && previous === this._chain.back.iosurfaceId) {
+        this._awaiting = previous;
+        this._catchUp = catchUp;
+        this._armFence();
+      } else {
+        this._settle(catchUp);
+      }
+      this._shadowAfterFlip();
       return true;
     }
-    this._native.surfaceToLayer(this._surface, this._layer);
-    // AppKit derives a transparent window's shadow from the content's
-    // opaque shape and does not recompute it on repaints — a popup whose
-    // card lands a frame after the map keeps the full-frame square AppKit
-    // guessed first. Recompute — but only once this present's transaction
-    // has actually flushed to the render server, or the recompute reads
-    // the frame BEFORE this one and keeps the square rim for menus that
-    // paint once and are only hovered after.
-    if (this._transparentWindow) this.app._shadowStale.add(this);
+    this._flip(() => this._native.surfaceToLayer(this._surface, this._layer));
+    this._shadowAfterFlip();
     return true;
   }
 
+  /**
+   * Hand a frame to the layer. In pump mode that is the verb alone: the
+   * bridge flips in a transaction of its own, in the call. On a worker the
+   * flip is recorded and committed as one frame (windowkit/appkit#52), and
+   * the commit says what size the frame was painted at, which is what a
+   * resize waits for (`setResizeHandshake`, #53). Actions off, as the
+   * bridge's own transaction has them.
+   */
+  _flip(apply) {
+    if (!this.app._threaded) return apply();
+    const native = this._native;
+    native.txBegin({ disableActions: true });
+    try {
+      return apply();
+    } finally {
+      native.txCommit(this._frameSize());
+    }
+  }
+
+  /**
+   * The size this window's frames are painted at, in the points AppKit
+   * measures a window by: the bridge's own figures when they describe the
+   * current size, so that the handshake's comparison is exact.
+   */
+  _frameSize() {
+    const p = this._points;
+    const s = this.scale;
+    if (
+      p &&
+      Math.max(1, Math.round(p.width * s)) === this.width &&
+      Math.max(1, Math.round(p.height * s)) === this.height
+    ) {
+      return { width: p.width, height: p.height };
+    }
+    return { width: this.width / s, height: this.height / s };
+  }
+
+  /** The back buffer is off glass: lock it for drawing and copy across what
+   * the frame now shown painted, so that the next frame starts from it. */
+  _settle({ from, damage }) {
+    this._native.surfaceLock(this._surface);
+    this._native.copySurfaceRegion(
+      from,
+      this._surface,
+      damage === 'full' || !damage
+        ? null
+        : damage.flatMap((r) => [
+            Math.floor(r.x),
+            Math.floor(r.y),
+            Math.ceil(r.width) + 1,
+            Math.ceil(r.height) + 1,
+          ]),
+    );
+  }
+
+  /** Stop waiting on the fence: the back buffer's catch-up, now. */
+  _settleBack() {
+    if (this._awaiting == null) return;
+    clearTimeout(this._fenceTimer);
+    this._fenceTimer = null;
+    this._awaiting = null;
+    const catchUp = this._catchUp;
+    this._catchUp = null;
+    if (catchUp && this._chain) this._settle(catchUp);
+  }
+
+  /** `surface-released` for `id`: true when it was the buffer this window
+   * was waiting on. */
+  _surfaceReleased(id) {
+    if (this._awaiting == null || this._awaiting !== id) return false;
+    this._settleBack();
+    return true;
+  }
+
+  _armFence() {
+    clearTimeout(this._fenceTimer);
+    this._fenceTimer = setTimeout(() => {
+      this._fenceTimer = null;
+      if (this._awaiting == null || this.destroyed) return;
+      this._settleBack();
+      this.app._tickFrames();
+      this.app._presentAll();
+    }, FENCE_TIMEOUT_MS);
+  }
+
+  /**
+   * AppKit derives a transparent window's shadow from the content's opaque
+   * shape and does not recompute it on repaints — a popup whose card lands
+   * a frame after the map keeps the full-frame square AppKit guessed first.
+   * Recompute — but only once this present's transaction has actually
+   * flushed to the render server, or the recompute reads the frame BEFORE
+   * this one and keeps the square rim for menus that paint once and are
+   * only hovered after. In pump mode that is the next pump tick; on a
+   * worker, where the flip is a command and the recompute would be another
+   * one drained beside it, a frame interval later.
+   */
+  _shadowAfterFlip() {
+    if (!this._transparentWindow) return;
+    if (!this.app._threaded) {
+      this.app._shadowStale.add(this);
+      return;
+    }
+    if (this._shadowTimer) return;
+    this._shadowTimer = setTimeout(
+      () => {
+        this._shadowTimer = null;
+        if (!this.destroyed) this._native.invalidateWindowShadow(this._h);
+      },
+      Math.max(1, Math.round(this._frameInterval || 16)),
+    );
+  }
+
+  /** The window's content as a PNG at `path`; resolves whether it was
+   * written. A promise on either thread: on a worker AppKit answers later. */
   snapshot(path) {
-    return this._native.snapshotWindow(this._h, path);
+    return this.app._ask('snapshotWindow', this._h, path);
   }
 }

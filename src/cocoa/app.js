@@ -4,14 +4,18 @@
 // createWindow / fonts / clipboard / X-stub / close, plus the event pump
 // that stands in for the X socket.
 //
-// The run loop is deliberately the simple version (docs/macos.md §"Input
-// and the run loop", option 1): Node's loop is master and a timer pumps
-// AppKit. Input latency is the pump cadence; AppKit's internal modal loops
-// (live resize, menu tracking) stall JS timers — but not the delegate
-// callbacks, which is why live resize still relayouts: the resize event
-// flushes the frame synchronously on its way through (`flushPendingFrames`,
-// the same early-flush a click gets). The CFRunLoop drain (option 2) is the
-// measured upgrade, not the first version.
+// Two run loops. By default Node's loop is master and a timer pumps AppKit
+// (docs/macos.md §"Input and the run loop", option 1): input waits for the
+// pump, and AppKit's modal loops (live resize, menu tracking, a drag) stall
+// JS timers — but not the delegate callbacks, which is why live resize
+// still relayouts: the resize event flushes the frame synchronously on its
+// way through (`flushPendingFrames`, the same early-flush a click gets).
+// Under the launcher (`node --import react-x11/cocoa-main`, src/cocoa/
+// main.js) the app runs on a worker instead, AppKit keeps the main thread
+// in a real `[NSApp run]`, and this object is fed by the bridge's batches
+// (`_routeBatch`) with no pump at all (docs/macos.md §"JS on a worker").
+import { isMainThread } from 'node:worker_threads';
+
 import { cssColorStraight } from 'ntk';
 
 import { deliverActivate, deliverOpen } from '../application.js';
@@ -37,6 +41,7 @@ import { CocoaSurface } from './surface.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
 import { loadNative } from './native.js';
+import { threadedChannel } from './threaded.js';
 
 // The frame interval: how often a scheduled frame may paint, in ms. The
 // default is the period of the display the window is on — `listScreens`
@@ -50,12 +55,25 @@ const PUMP_INTERVAL_MS = 8;
 // How early a pump tick may take a frame that is not quite due, in ms — the
 // drift of a timer, not a fraction of the pump (`_frameDue`).
 const FRAME_SLACK_MS = 1;
+// Threaded mode's live-resize handshake (windowkit/appkit#53): how long
+// AppKit may hold a resize tick for a frame painted at the new size, in ms.
+// The edge moves when the delegate returns, so the budget is how long a
+// slow frame may hold the drag back. 50 covers what a large tree costs —
+// the Cocoa `resize` cell measures 28ms a tick at 3,662 nodes
+// (docs/macos.md) — with room, where the bridge's own test met every tick
+// in 3.1ms against 3ms of layout. Past three 60Hz frames an edge that waits
+// reads as the drag stuttering, so a tree slower than that lets the edge
+// go first and its frame land after (Flutter's Windows embedder waits up
+// to 100, docs/windows.md §"Resize"). `createRoot({ cocoa: { resizeWait } })`
+// sets it; 0 is no handshake at all.
+const RESIZE_WAIT_MS = 50;
 
 export class CocoaApp {
   constructor(native, options = {}) {
     this._native = native;
     this.options = options;
-    this._windows = new Map(); // windowNumber -> CocoaWindow
+    // CocoaWindow._key -> CocoaWindow: the number, or on a worker the handle
+    this._windows = new Map();
     this._grabWindow = null;
     this._rafQueue = []; // [{ cb, wnd }]
     // the app's own frame clock, for a frame no window owns (a pane's)
@@ -83,6 +101,22 @@ export class CocoaApp {
     this._activeDrag = null;
     // set by a quit request; read by close() to end the process
     this._quitting = false;
+    // Threaded mode (`start({ channel })`): fed by the bridge's batches
+    // instead of a pump. `_batching` is set while one is routed, and what
+    // its inputs owe is paid once, at its end (`_routeBatch`).
+    this._threaded = false;
+    this._batching = false;
+    this._inputOwed = false;
+    this._wheeled = null;
+    this._unsubscribe = null;
+    const resizeWait = options.cocoa?.resizeWait ?? RESIZE_WAIT_MS;
+    if (!(resizeWait >= 0) || !Number.isFinite(resizeWait)) {
+      throw new TypeError(
+        'react-x11: cocoa.resizeWait is a number of milliseconds, 0 for ' +
+          `none — got ${resizeWait}.`,
+      );
+    }
+    this._resizeWait = resizeWait;
 
     // The activation policy has to be fixed before the app finishes
     // launching — a Regular launch registers a Dock tile, so an agent app
@@ -159,7 +193,9 @@ export class CocoaApp {
     // 'auto'` policy both test for this property, so a backend without it
     // (X11, the headless mock) draws the themed controls with no further
     // branching.
-    this.nativeBezels = new BezelStore(native);
+    this.nativeBezels = new BezelStore(native, {
+      answersLater: () => this._threaded,
+    });
 
     // macOS privacy authorizations (src/cocoa/permissions.js). Present
     // exactly when the bridge has them (>= 0.5), and its presence is the
@@ -276,8 +312,9 @@ export class CocoaApp {
       },
       targets: ({ selection } = {}) => {
         if (!isClipboard(selection)) return Promise.resolve([]);
-        const text = native.pasteboardReadText();
-        return Promise.resolve(text == null ? [] : ['UTF8_STRING', 'STRING']);
+        return this._ask('pasteboardReadText').then((text) =>
+          text == null ? [] : ['UTF8_STRING', 'STRING'],
+        );
       },
       read: ({ selection, target } = {}) => {
         if (!isClipboard(selection)) {
@@ -288,19 +325,20 @@ export class CocoaApp {
             ),
           );
         }
-        const text = native.pasteboardReadText();
-        if (text == null) {
-          return Promise.reject(
-            new Error('clipboard: nothing to paste — the pasteboard is empty'),
+        return this._ask('pasteboardReadText').then((text) => {
+          if (text == null) {
+            throw new Error(
+              'clipboard: nothing to paste — the pasteboard is empty',
+            );
+          }
+          if (target === undefined) return text;
+          if (target === 'UTF8_STRING' || target === 'STRING') {
+            return Buffer.from(text, 'utf8');
+          }
+          throw new Error(
+            `clipboard: cannot convert the pasteboard to ${target}`,
           );
-        }
-        if (target === undefined) return Promise.resolve(text);
-        if (target === 'UTF8_STRING' || target === 'STRING') {
-          return Promise.resolve(Buffer.from(text, 'utf8'));
-        }
-        return Promise.reject(
-          new Error(`clipboard: cannot convert the pasteboard to ${target}`),
-        );
+        });
       },
       watch: () => Promise.resolve(() => {}),
     };
@@ -308,6 +346,18 @@ export class CocoaApp {
 
   _parseColor(value) {
     return typeof value === 'string' ? cssColorStraight(value) : null;
+  }
+
+  /**
+   * A question only AppKit can answer, as a promise: asked in the call on
+   * the main thread, and through a callback from a worker — the bridge's
+   * rule for every read that has to ask AppKit rather than read what it
+   * published (windowkit/appkit#51).
+   */
+  _ask(verb, ...args) {
+    const native = this._native;
+    if (!this._threaded) return Promise.resolve(native[verb](...args));
+    return new Promise((resolve) => native[verb](...args, resolve));
   }
 
   findArgbVisual() {
@@ -403,7 +453,7 @@ export class CocoaApp {
   }
 
   _registerWindow(wnd) {
-    this._windows.set(wnd.windowNumber, wnd);
+    this._windows.set(wnd._key, wnd);
   }
 
   /**
@@ -544,14 +594,14 @@ export class CocoaApp {
   }
 
   _unregisterWindow(wnd) {
-    this._windows.delete(wnd.windowNumber);
+    this._windows.delete(wnd._key);
     if (this._grabWindow === wnd) this._grabWindow = null;
   }
 
   // --- the pump ------------------------------------------------------------
 
-  start({ pumpInterval = PUMP_INTERVAL_MS } = {}) {
-    if (this._pump) return;
+  start({ pumpInterval = PUMP_INTERVAL_MS, channel = null } = {}) {
+    if (this._pump || this._threaded) return;
     this._pumpInterval = pumpInterval;
     const native = this._native;
     // A pane process has no NSApplication to pump — no windows, no events,
@@ -561,6 +611,10 @@ export class CocoaApp {
         this._tickFrames();
         this._presentAll();
       }, pumpInterval);
+      return;
+    }
+    if (channel) {
+      this._startThreaded(channel);
       return;
     }
     native.initApp();
@@ -577,6 +631,20 @@ export class CocoaApp {
       this._tickFrames();
       this._presentAll();
     }, pumpInterval);
+  }
+
+  /**
+   * Threaded mode: the launcher's channel is open (src/cocoa/threaded.js),
+   * the main thread is in `[NSApp run]`, and this app is on a worker. There
+   * is no pump. Events arrive in the bridge's batches whenever AppKit has
+   * them, from inside its modal loops too, and the frame clock arms a timer
+   * for every frame it is owed, at whatever distance (`_armFrameTimer`).
+   */
+  _startThreaded(channel) {
+    this._threaded = true;
+    this._pumpInterval = Infinity;
+    this._native.initApp();
+    this._unsubscribe = channel.subscribe((batch) => this._routeBatch(batch));
   }
 
   /**
@@ -604,7 +672,7 @@ export class CocoaApp {
    */
   _requestFrame(cb, wnd = null) {
     this._rafQueue.push({ cb, wnd });
-    if (this._pump && this._rafQueue.length === 1) {
+    if ((this._pump || this._threaded) && this._rafQueue.length === 1) {
       const now = performance.now();
       this._armFrameTimer(Math.max(1, this._frameWait(wnd ?? this, now)), now);
     }
@@ -660,7 +728,8 @@ export class CocoaApp {
    * its own transaction (the bridge flushes on the flip), so what is
    * painted here is on glass without waiting for the next pump. What the
    * tick alone still does is pump AppKit's events, which is what
-   * `pumpInterval` stays the cadence of.
+   * `pumpInterval` stays the cadence of. With no pump at all — threaded
+   * mode, where `_pumpInterval` is Infinity — every frame is one of these.
    */
   _armFrameTimer(wait, now) {
     if (!(wait > 0 && wait < this._pumpInterval)) return;
@@ -699,6 +768,15 @@ export class CocoaApp {
     this._rafQueue = [];
     let soonest = Infinity;
     for (const entry of queue) {
+      // A window whose last flip has not given its back buffer back yet
+      // (threaded mode's fence, `CocoaWindow.frameInFlight`) waits before
+      // its clock is asked, or the clock would count a frame that did not
+      // run. The release is an event, and the batch it arrives in ticks
+      // again.
+      if (entry.wnd?.frameInFlight?.()) {
+        this._rafQueue.push(entry);
+        continue;
+      }
       const clock = entry.wnd ?? this;
       if (!due.has(clock)) due.set(clock, this._frameDue(clock, now));
       if (!due.get(clock)) {
@@ -745,8 +823,48 @@ export class CocoaApp {
    * exactly when it was worth showing.
    */
   _afterInput() {
+    // threaded mode pays it once, for the whole batch (`_routeBatch`)
+    if (this._batching) {
+      this._inputOwed = true;
+      return;
+    }
     flushSyncWork();
     flushPendingFrames();
+    this._presentAll();
+  }
+
+  /**
+   * Threaded mode's delivery: every event the bridge emitted since the
+   * last wake, in order. Each is routed as the pump routes it, but what an
+   * input owes — React's half, the paint, the present (`_afterInput`) — is
+   * paid once, when the batch is done: ten moves and a click that crossed
+   * while this thread was busy are one frame, not eleven. Then what a pump
+   * tick does: the frames that are due, and the ones a window's visibility
+   * or its back buffer was holding, which an occlusion change or a
+   * `surface-released` in this very batch may just have freed.
+   */
+  _routeBatch(batch) {
+    if (this._closed) return;
+    const started = performance.now();
+    this._batching = true;
+    try {
+      for (const ev of batch) this._route(ev);
+    } finally {
+      this._batching = false;
+    }
+    if (this._closed) return;
+    if (this._inputOwed) {
+      this._inputOwed = false;
+      this._afterInput();
+    }
+    // a frame that answered the wheel is this refresh's (`_routeWheel`)
+    if (this._wheeled) {
+      for (const wnd of this._wheeled) {
+        if (wnd._presentedAt >= started) wnd._rafLast = wnd._presentedAt;
+      }
+      this._wheeled = null;
+    }
+    this._tickFrames();
     this._presentAll();
   }
 
@@ -830,15 +948,23 @@ export class CocoaApp {
         // id nobody knows is an animation already forgotten (cancelled, or
         // its layer dropped), and the bridge's report is just late
         return this._animationEnds.get(ev.id)?.(ev);
+      case 'window-created':
+        // a worker's window, made on the UI thread after the call that
+        // answered its handle
+        return this._window(ev)?._created(ev);
+      case 'surface-released':
+        return this._routeSurfaceReleased(ev);
       default:
         return undefined;
     }
   }
 
+  /** The window an event is about. On a worker every window event names
+   * the bridge's handle, which is what windows are keyed by there; in pump
+   * mode the events name the number. */
   _window(ev) {
-    return ev.windowNumber != null
-      ? (this._windows.get(ev.windowNumber) ?? null)
-      : null;
+    const key = ev.handle ?? ev.windowNumber;
+    return key != null ? (this._windows.get(key) ?? null) : null;
   }
 
   /**
@@ -937,6 +1063,13 @@ export class CocoaApp {
       flushSyncWork();
       return;
     }
+    // in a batch the frame goes out when the batch is done, and the clock
+    // restarts from it there (`_routeBatch`)
+    if (this._batching) {
+      (this._wheeled ??= new Set()).add(wnd);
+      this._inputOwed = true;
+      return;
+    }
     const started = performance.now();
     this._afterInput();
     // …and a frame that answered the wheel is this refresh's frame: the
@@ -967,6 +1100,9 @@ export class CocoaApp {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
     wnd._nativeResized(ev);
+    if (this._threaded && ev.type === 'window-resize') {
+      wnd._liveResizeTick(ev.live === true);
+    }
     wnd.emit('resize', {
       width: wnd.width,
       height: wnd.height,
@@ -978,6 +1114,10 @@ export class CocoaApp {
     // During a live resize AppKit's modal loop owns the thread and Node
     // timers stall; flushing here is what keeps layout tracking the drag.
     this._afterInput();
+    // On a worker no modal loop holds this thread: a microtask queued here
+    // runs as soon as the batch returns, and what it commits schedules its
+    // frame like any other.
+    if (this._threaded) return;
     // The React HALF of the response — an anchored popup following the
     // window, an onResize setState — commits on a microtask AFTER this
     // handler returns, and the pump that would paint it is the thing the
@@ -1003,11 +1143,25 @@ export class CocoaApp {
    * present waits with them (`CocoaWindow._visible`); on, the next pump
    * tick runs the catch-up frame and puts it on glass — no early flush,
    * since nothing was asked for and the pump is at most one interval away.
+   * On a worker the end of the batch the event came in is that tick.
    */
   _routeOcclusion(ev) {
     const wnd = this._window(ev);
     if (!wnd || wnd.destroyed) return;
     wnd._occluded = ev.visible === false;
+  }
+
+  /**
+   * `surface-released`: a worker's frame took an IOSurface off a layer and
+   * the frame that replaced it has committed (windowkit/appkit#52). The
+   * window whose back buffer that was stops waiting on it
+   * (`CocoaWindow._surfaceReleased`), and the tick at the end of this
+   * batch runs the frame it was holding.
+   */
+  _routeSurfaceReleased(ev) {
+    for (const wnd of this._windows.values()) {
+      if (wnd._surfaceReleased(ev.id)) return;
+    }
   }
 
   _routeAccessibility(ev) {
@@ -1170,7 +1324,9 @@ export class CocoaApp {
     this._frameTimer = null;
     this._cocoaGL?.destroy();
     this._cocoaGL = null;
-    this._native.setBackendEventCallback(null);
+    this._unsubscribe?.();
+    this._unsubscribe = null;
+    if (!this._threaded) this._native.setBackendEventCallback(null);
     for (const wnd of [...this._windows.values()]) wnd.destroy();
     // A quit the app accepted: the tree is down and the connection closed,
     // and macOS is still waiting on the Cancel the bridge answered with. End
@@ -1231,12 +1387,29 @@ export function screenLayout(screens, scale) {
  */
 export async function createCocoaApp(options = {}) {
   const native = loadNative();
+  // The launcher's channel, when the app is on its worker. A worker without
+  // it has no thread running AppKit: the pump cannot run off the main
+  // thread (the bridge refuses), and a window asked for would never be made.
+  const channel = threadedChannel();
+  if (!channel && !isMainThread) {
+    throw new Error(
+      'react-x11: the cocoa backend runs on a worker thread only under its ' +
+        'launcher, which keeps AppKit on the main thread — start the app ' +
+        'with `node --import react-x11/cocoa-main app.js`, or create the ' +
+        'root on the main thread.',
+    );
+  }
   const app = new CocoaApp(native, options);
 
   setScaleForTests(app, app.scale, 'cocoa');
   setScreensForTests(app, screenLayout(app._screens, app.scale));
   setCompositingForTests(app, true);
 
-  app.start(options.cocoa ?? {});
+  app.start({ ...options.cocoa, channel });
+  // On a worker a control's bezel is measured and drawn on the UI thread
+  // and answered later (windowkit/appkit#54), so the metrics layout reads
+  // synchronously are asked for now, beside the rest of startup — the yoga
+  // load `createRoot` runs alongside takes longer.
+  if (channel) await app.nativeBezels.prefetch(app.scale);
   return app;
 }

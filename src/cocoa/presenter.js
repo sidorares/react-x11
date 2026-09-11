@@ -591,7 +591,12 @@ export class LayerAnimations {
         // transition reverses from where it got to" means here. A colour
         // cannot be additive, so the one before it is replaced.
         this._removeLive(node, prop);
-        const shown = this.native.presentationValue?.(layer, map.keyPath);
+        // On a worker the render server's value is an answer that comes
+        // later (windowkit/appkit#52), and the animation is added now: it
+        // runs from the declared value instead.
+        const shown = this.app._threaded
+          ? null
+          : this.native.presentationValue?.(layer, map.keyPath);
         opts.from = Array.isArray(shown) ? shown : this._value(map, entry.from);
         opts.to = this._value(map, entry.to);
         opts.timing = TRANSITION_CONTROL_POINTS;
@@ -803,7 +808,9 @@ export class CocoaLayerPresenter {
       }
       presented = true;
     } finally {
-      native.txCommit();
+      // the size this frame was laid out at, which a worker's live resize
+      // waits for (CocoaWindow._flip); the main thread's commit ignores it
+      native.txCommit(this.window._frameSize?.());
       this._claims = null;
       // a frame that threw half-way presents what it got to; the claims it
       // was answering are still owed, so the next frame answers them again
