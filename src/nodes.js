@@ -144,7 +144,24 @@ import { hooks as traceHooks } from './trace-registry.js';
 import { runWithPriority, DiscreteEventPriority } from './priority.js';
 import { lastInputTime } from './inputtime.js';
 import { armPasteState, canPaste } from './pastestate.js';
-import { ctrlChordLetter, MOD } from './keysyms.js';
+import {
+  ctrlChordLetter,
+  MOD,
+  XK_BACKSPACE,
+  XK_RETURN,
+  XK_KP_ENTER,
+  XK_HOME,
+  XK_LEFT,
+  XK_UP,
+  XK_RIGHT,
+  XK_DOWN,
+  XK_PAGE_UP,
+  XK_PAGE_DOWN,
+  XK_END,
+  XK_DELETE,
+  XK_ESCAPE,
+  XK_SPACE,
+} from './keysyms.js';
 import {
   codePointAtOffset,
   codePoints,
@@ -271,23 +288,28 @@ const DAMAGE_SLOP = 1;
  * hatch — see NO_SCROLL_BLIT and the paint cache's DISABLED. */
 const NO_BOUNDS_CACHE = process.env.REACT_X11_NO_BOUNDS_CACHE === '1';
 
-// While a bounded frame's layout pass runs, every node whose absolute rect
-// comes out different reports its old and new rects here (each already
-// inflated by that node's own paint reach) — which is what lets a layout
-// change stay a handful of rects instead of degrading the frame to
-// FULL_DAMAGE. Module state rather than a parameter because absolutize is
-// a hot recursive walk with overrides in three classes; null outside the
-// pass, and always restored through `finally`.
-let layoutDiffSink = null;
+// The two pieces of state a bounded frame's layout pass reports through.
+// One object rather than two `let`s: the pass runs through more than one
+// module, and a module cannot assign a binding it imported.
+const layoutDiff = {
+  // While a bounded frame's layout pass runs, every node whose absolute rect
+  // comes out different reports its old and new rects here (each already
+  // inflated by that node's own paint reach) — which is what lets a layout
+  // change stay a handful of rects instead of degrading the frame to
+  // FULL_DAMAGE. Module state rather than a parameter because absolutize is
+  // a hot recursive walk with overrides in three classes; null outside the
+  // pass, and always restored through `finally`.
+  sink: null,
 
-// The uniform translation the subtree currently being walked is riding: set
-// while a scroll container whose blit is armed lays its children out, so the
-// diff can tell "moved" from "scrolled" (issue #398). Every child of such a
-// container lands at its old rect plus this shift, which is precisely what
-// the blit is about to do to those pixels — so it is not a change, and the
-// diff reports only the children that landed somewhere else. Null everywhere
-// else, and restored through `finally` like the sink beside it.
-let layoutDiffShift = null;
+  // The uniform translation the subtree currently being walked is riding: set
+  // while a scroll container whose blit is armed lays its children out, so the
+  // diff can tell "moved" from "scrolled" (issue #398). Every child of such a
+  // container lands at its old rect plus this shift, which is precisely what
+  // the blit is about to do to those pixels — so it is not a change, and the
+  // diff reports only the children that landed somewhere else. Null everywhere
+  // else, and restored through `finally` like the sink beside it.
+  shift: null,
+};
 
 // What an invalidate() may name as its reason — a small closed set, so the
 // frame log, the tracer and the full-repaint warning can print "why" next
@@ -4587,9 +4609,9 @@ export class Node {
     // moving or resizing changes where this subtree can be hit, and the
     // cached unions all the way up with it
     this._clearHitBounds();
-    if (layoutDiffSink) {
+    if (layoutDiff.sink) {
       const grow = this._outlineExtent() + DAMAGE_SLOP;
-      const shift = layoutDiffShift;
+      const shift = layoutDiff.shift;
       const had = old.width > 0 && old.height > 0;
       if (shift) {
         // Riding a blit (issue #398): the rect this node *would* have had if
@@ -4613,17 +4635,17 @@ export class Node {
         ) {
           return;
         }
-        if (had) layoutDiffSink(insetRect(was, -grow));
+        if (had) layoutDiff.sink(insetRect(was, -grow));
         if (width > 0 && height > 0) {
-          layoutDiffSink(insetRect(this.abs, -grow));
+          layoutDiff.sink(insetRect(this.abs, -grow));
         }
         return;
       }
       if (had) {
-        layoutDiffSink(insetRect(old, -grow));
+        layoutDiff.sink(insetRect(old, -grow));
       }
       if (width > 0 && height > 0) {
-        layoutDiffSink(insetRect(this.abs, -grow));
+        layoutDiff.sink(insetRect(this.abs, -grow));
       }
     }
   }
@@ -7981,8 +8003,8 @@ export const Scrollable = (Base) =>
         }
         return;
       }
-      const outer = layoutDiffSink;
-      const outerShift = layoutDiffShift;
+      const outer = layoutDiff.sink;
+      const outerShift = layoutDiff.shift;
       const ledger = shifted && this._blitLedgerOpen();
       if (outer) {
         if (ledger) {
@@ -7995,18 +8017,18 @@ export const Scrollable = (Base) =>
           // goes to the ledger rather than to `outer`, whose claims are
           // what `layoutMoved` reads as "this frame is not a pure scroll".
           const vp = insetRect(this.abs, -DAMAGE_SLOP);
-          layoutDiffSink = (rect) => {
+          layoutDiff.sink = (rect) => {
             const clipped = intersectRects(rect, vp);
             if (clipped && !this._recordBlitClaim(clipped)) {
               this._pendingBlitFrom = BLIT_POISONED;
             }
           };
-          layoutDiffShift = { x: ox - wasOrigin.x, y: oy - wasOrigin.y };
+          layoutDiff.shift = { x: ox - wasOrigin.x, y: oy - wasOrigin.y };
         } else if (shifted) {
-          layoutDiffSink = null;
+          layoutDiff.sink = null;
         } else {
           const vp = insetRect(this.abs, -DAMAGE_SLOP);
-          layoutDiffSink = (rect) => {
+          layoutDiff.sink = (rect) => {
             const clipped = intersectRects(rect, vp);
             if (clipped) outer(clipped);
           };
@@ -8019,8 +8041,8 @@ export const Scrollable = (Base) =>
           }
         }
       } finally {
-        layoutDiffSink = outer;
-        layoutDiffShift = outerShift;
+        layoutDiff.sink = outer;
+        layoutDiff.shift = outerShift;
       }
     }
 
@@ -8891,21 +8913,6 @@ export class CanvasNode extends Node {
     }
   }
 }
-
-const XK_BACKSPACE = 0xff08;
-const XK_RETURN = 0xff0d;
-const XK_KP_ENTER = 0xff8d;
-const XK_HOME = 0xff50;
-const XK_LEFT = 0xff51;
-const XK_UP = 0xff52;
-const XK_RIGHT = 0xff53;
-const XK_DOWN = 0xff54;
-const XK_PAGE_UP = 0xff55;
-const XK_PAGE_DOWN = 0xff56;
-const XK_END = 0xff57;
-const XK_DELETE = 0xffff;
-const XK_ESCAPE = 0xff1b;
-const XK_SPACE = 0x0020;
 
 // An arrow key scrolls by a wheel notch — literally the one events.js
 // converts a notch into, so the two input routes agree about what one step
@@ -13886,7 +13893,7 @@ export class WindowNode extends Scrollable(Node) {
       // the bookkeeping — it repaints everything anyway.
       if (this._damage !== FULL_DAMAGE) {
         const cap = this._damageRectCap();
-        layoutDiffSink = (rect) => {
+        layoutDiff.sink = (rect) => {
           if (this._damage === FULL_DAMAGE) return;
           layoutMoved = true;
           this._damage = addDamageRect(this._damage, rect, cap);
@@ -13898,7 +13905,7 @@ export class WindowNode extends Scrollable(Node) {
         // and this is where its offset gets applied to the children
         this._absolutizeChildren(0, 0);
       } finally {
-        layoutDiffSink = null;
+        layoutDiff.sink = null;
       }
       // …and placed nodes against the arrangement that walk produced: where
       // one goes depends on where its pane and its parent landed
