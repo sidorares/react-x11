@@ -433,8 +433,12 @@ follow, and both are measured:
    during a live resize, with a menu open, and in the middle of a drag.
 
 Shape 3 is what macos.md's option 3 was for — JS never frozen by the
-platform's loops — without inverting anything, and it is available only
-because Win32 permits it. It is also how the browsers split the work, and
+platform's loops — without inverting anything, and it is available in this
+form only because Win32 permits it. AppKit does not, so macOS gets the same
+shape with the roles swapped — AppKit keeps the main thread and the JS moves
+to a worker — measured in
+[macos.md](macos.md#js-on-a-worker-a-ui-thread-of-the-bridges-own). It is
+also how the browsers split the work, and
 DirectComposition is documented to allow it: its objects are not bound to a
 thread, and a target needs only that the window belong to the calling
 process. Chromium's GPU process creates its window on a dedicated "window

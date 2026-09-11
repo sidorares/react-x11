@@ -745,6 +745,16 @@ Exit criterion for Phase 0: during a live window resize, a React
 state-driven relayout visibly tracks the drag — that single demo proves
 the drain works where it matters most.
 
+**What happened instead.** Option 2 was never built: doing a frame's work
+inside the delegate callbacks (`CocoaApp._afterInput`) met the exit
+criterion without it, and option 1 is what ships. When the drain was finally
+probed (2026-09-11) its re-entrancy risk turned out to be concrete rather
+than theoretical — a `uv_run` nested under a JS call runs timers and never
+drains the microtasks they queue — and the shape that removes both of option
+1's costs on stock Node and Bun is a fourth one: AppKit keeps the main thread
+in a real `[NSApp run]` and the JS moves to a worker. §"JS on a worker: a UI
+thread of the bridge's own" below.
+
 The frame clock rides the display link: `requestAnimationFrame`
 callbacks fire on link ticks, commits wrap in explicit `CATransaction`s,
 and the "answer the input" early-flush (`flushPendingFrames` on handler
@@ -774,6 +784,224 @@ cost — `CocoaWindow.present` reports the flip and its catch-up copy back
 to the node, because a damage-sized memcpy per frame is a millisecond the
 flush never saw. Off by default; `cocoa: { frameInterval }` stays the
 clock's own cap over everything on it.
+
+## JS on a worker: a UI thread of the bridge's own
+
+The run loop above leaves two costs standing, and the Windows PRD names
+them: input waits for the pump, and a modal loop freezes Node
+([windows.md](windows.md#what-the-cocoa-backend-does-and-what-it-costs)).
+Its answer on Windows is a UI thread of the addon's own — one thread creates
+every window and runs every modal loop, JS stays on Node's thread, and events
+cross through a `napi_threadsafe_function`
+([windows.md](windows.md#three-shapes-on-windows)). Win32 allows that because
+a window belongs to the thread that created it. AppKit does not: an
+`NSWindow` made anywhere but the main thread is an exception that ends the
+process — `createWindow2` called from a worker aborts with _"NSWindow should
+only be instantiated on the main thread!"_
+
+So on macOS the same shape runs with the roles swapped. **The UI thread is
+the process main thread, parked in a real `[NSApp run]` for the life of the
+app, and the renderer — React, layout, painting, CoreText — moves to a
+`worker_threads` Worker.** The rest of the Windows design carries over
+unchanged: the three rules that keep two threads from deadlocking
+([windows.md](windows.md#the-rules-that-keep-it-from-deadlocking)), one
+wake per frame for commands, events in batches, and the bounded resize
+handshake ([windows.md](windows.md#resize-where-the-threads-meet)). The
+bridge's half is filed as
+[windowkit/appkit#49](https://github.com/windowkit/appkit/issues/49),
+with the probe's code.
+
+### Why the JS has to leave the main thread
+
+Options 2 and 3 above keep the JS where it is and run libuv from inside
+AppKit's loops, and both nest: the addon is only ever entered from JS, so a
+`uv_run` it starts from inside `[NSApp run]` runs under the JS call that got
+it there. The probe below pumped the main thread's own loop that way, from a
+common-modes timer: the main thread's `setInterval` callbacks fired, three of
+three, and **none of the microtasks or next-ticks they queued ever ran**.
+Node drains them when the outermost callback scope closes, and a scope opened
+under a JS call is never the outermost — the failure
+[#484](https://github.com/sidorares/react-x11/pull/484) found inside the
+pump, now for every callback. An inversion that does not nest needs whoever
+owns `main()` to own the outer loop, which is why Electron patches libuv and
+NodeGui ships a forked Node; and Bun has no libuv loop to embed at all. On
+stock `node` and `bun`, a worker is the shape that frees the JS.
+
+A worker wakes on the same kind of threadsafe call, and its deliveries are
+outermost: a microtask queued inside one ran 0.01–0.02 ms later (p50), so a
+handler's `setState` commits on the event that caused it.
+
+### Measured: the probe
+
+2026-09-11, Apple M1 Pro, macOS 15.2, Node 26.0.0 and Bun 1.4.0, react-x11
+at e372289. The probe is an addon of its own, about 600 lines, in the shape
+proposed here: a command queue drained by a version-0 `CFRunLoopSource` in
+`kCFRunLoopCommonModes`, events out through one threadsafe call per wake
+with motion folded, a layer-hosting window like the bridge's, and the
+bounded resize wait. Its worker ran a 5 ms timer and posted a layer change
+every 16 ms through every phase.
+
+|                                               | today: the 8 ms pump                        | the probe: JS on a worker                                                |
+| --------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------ |
+| an event reaching JS                          | waits for the next tick, 0–8 ms             | 0.02 ms p50; p95 0.13 ms idle, 1.3–1.8 ms inside a modal loop            |
+| JS through menu tracking                      | frozen — a drag held a 25 ms timer for 31 s | the 5 ms timer's worst gap: 14.0 ms                                      |
+| JS through an `NSAlert`'s `runModal`          | frozen                                      | 9.7 ms                                                                   |
+| JS through a live resize                      | only the delegate callbacks run             | 12.5 ms                                                                  |
+| a layer change posted by JS                   | inline                                      | applied 0.02 ms later, p50, whatever mode the run loop is in             |
+| a frame at the new size, during a live resize | same thread, same call                      | 39 of 39 ticks inside a 50 ms wait; waited 3.1 ms p50 for 3 ms of layout |
+| the main thread busy for 300 ms               | JS frozen                                   | JS timers unaffected, worst gap 6.1 ms                                   |
+| JS busy for 200 ms                            | every window frozen                         | windows live; the 10 events JS missed arrive as one batch                |
+
+Layer changes landed inside the menu's `NSEventTrackingRunLoopMode` (72 of
+them) and the alert's `NSModalPanelRunLoopMode` (75), which is what a
+source in the common modes buys. The shipped bridge, loaded in a worker,
+answered the rest of the design's questions: all 182 verbs load, CoreGraphics
+drawing with readback and CoreText work from the worker, `createWindow2`
+aborts, and `measureControl` with `drawControlIntoSurface` draws correct
+pixels and then segfaults the process at exit — bezels stay on the UI
+thread.
+
+What the probe did not show: a hardware live resize (it posts mouse events
+into the same tracking loop), a real drag session (a real `beginDrag` holds
+the pointer for about 30 seconds), or anything on glass, which this
+machine's session cannot capture.
+
+### Who owns what
+
+| thread                    | owns                                                                                                                                                                                                                                                                                                   | reaches the other by                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| the main thread — UI      | `NSApplication` and its delegate; every `NSWindow`, view and panel and their delegates; the menu bar, the Dock, status items; the cursor; the pasteboard; drag sessions, file panels, the colour sampler; control bezels; the `CATransaction` that applies each frame's layer changes; the resize wait | batched events through one threadsafe function per environment; state it publishes under a lock |
+| the worker — the renderer | React, layout, the node tree; CoreGraphics into IOSurface-backed surfaces; CoreText and fonts; `<glarea>`'s CGL context                                                                                                                                                                                | commands queued to the UI thread, one wake per frame                                            |
+
+Pixels stay on the worker, and they are most of a frame. What crosses is
+the frame's layer changes, as one batch the UI thread applies in one
+transaction — one commit, so the frame and a resized window's geometry
+can land together, which a commit of the worker's own could not promise.
+EventKit, notifications, permissions and the colour sampler already answer
+through threadsafe functions from queues of their own and follow whichever
+environment calls them.
+
+### The bridge's half
+
+[windowkit/appkit#49](https://github.com/windowkit/appkit/issues/49)
+is the proposal, in five parts:
+
+- **The threading core**
+  ([#50](https://github.com/windowkit/appkit/issues/50)):
+  `runMain()`, the command queue, events built as plain records on the UI
+  thread and made into JS values on the worker, published state, exit
+  through `runMain`'s return value, signals forwarded. Pump mode stays, and
+  one verb body serves both: parsed on the calling thread, run inline on the
+  main thread and queued from any other.
+- **The AppKit verbs**
+  ([#51](https://github.com/windowkit/appkit/issues/51)):
+  of 182, the surfaces, drawing, layouts and fonts stay on the calling
+  thread untouched; the rest become commands, handles allocated at the call,
+  published reads, or answers that arrive later.
+- **Frames across the boundary**
+  ([#52](https://github.com/windowkit/appkit/issues/52)):
+  one batch of layer changes per frame, and IOSurface buffers that change
+  hands by event, because the flip now happens when the UI thread applies
+  the batch rather than when JS asks for it.
+- **The live-resize handshake**
+  ([#53](https://github.com/windowkit/appkit/issues/53)).
+- **Control bezels on the UI thread**
+  ([#54](https://github.com/windowkit/appkit/issues/54)),
+  answered asynchronously with `BezelStore`'s cache in front.
+
+The bridge is closer to this than its synchronous API suggests. Everything
+AppKit asks it synchronously is already answered from state the renderer set
+earlier — the drop response, the drag source's masks, the Dock menu,
+`windowShouldClose:` (always no, with a close request to JS) and
+`applicationShouldTerminate:` (always cancel, with a quit request) — which
+is rule two of the Windows design, followed before it was written down.
+
+### The renderer's half
+
+- **A launcher.** The app's entry has to run on the worker, and the main
+  thread has to be parked before the entry runs there. The proposal is a
+  preload — `node --import react-x11/cocoa-main app.jsx`, and `bun --preload`
+  the same — that on the main thread starts a Worker on the entry with the
+  same `execArgv` and a shared environment, then calls `runMain()` and never
+  returns, so the entry is never evaluated on the main thread. Inside the
+  worker the same module installs the bootstrap below. Without it,
+  `createRoot` keeps the pump. The probe used an explicit main script; the
+  preload is not probed yet.
+- **The worker's bootstrap.** A Worker's `process.stdout` forwards through
+  the main thread's event loop, which is parked, so the worker's
+  `console.log` is lost — measured, and under Bun the console bypasses
+  `process.stdout` altogether. The bootstrap swaps in streams that write
+  straight to fds 1 and 2, and a new global `Console` over them.
+  `process.exit` inside a Worker ends only the worker — measured: the probe
+  outlived it with `[NSApp run]` orphaned — so it becomes a request to the
+  main thread, which returns from `runMain()` and lets Node's own
+  `process.exit` stop the worker in order. The probe's first try, `exit()`
+  on the UI thread, raced static destructors and aborted. Signals arrive as
+  events from a dispatch source on the main thread and are re-emitted on the
+  worker's `process`, where Node never delivers them.
+- **`CocoaApp`** (`src/cocoa/app.js`). The pump goes — `start()`'s interval,
+  `pump2`, `_endLiveResizes` — and the frame timer loses the tick it was
+  fitted between; the display link can then tick from the UI thread through
+  the same channel, which is the Windows PRD's frame thread
+  ([windows.md](windows.md#the-frame-clock)). Events arrive in batches:
+  `_route` runs per event and `_afterInput` once per batch. The flushes that
+  exist because a modal loop starves microtasks — `_routeGeometry`'s
+  coalesced second flush, the discrete priority #484 gave a native drag's
+  handlers — become ordinary scheduling again.
+- **Thirteen call sites change shape**: the ones in `src/cocoa/` that use a
+  value AppKit returns. `createWindow2`, `windowNumber` and `windowRootLayer`
+  become handles allocated at the call, and `CocoaApp._windows` is keyed by
+  the bridge's handle instead of the window number, which arrives later;
+  `createStatusItem` and `requestUserAttention` likewise. `getWindowFrame`,
+  `windowIsVisible` and `listScreens` read published state. The rest become
+  answers that arrive later: `pasteboardReadText` (the clipboard contract is
+  a promise already), `snapshotWindow`, `beginDrag`'s `began` (an event),
+  `dragItemString` inside a drop (the payload's cheap forms are read into
+  `drag-perform` itself), and `measureControl` behind the bezel cache.
+- **Tests.** The 22 `test/cocoa-*.test.js` files drive fake bridges that
+  answer synchronously; with threaded mode behind a flag they keep passing
+  on the pump, and a threaded fake is a queue and a batch callback. The
+  contract the renderer needs is the X11 one, asynchronous from the start,
+  which [windows.md](windows.md#the-rules-that-keep-it-from-deadlocking)
+  makes the same point about.
+
+### What changes for an app
+
+- About **16 MB** of RSS for the worker's isolate (a bare `node` at 46.5 MB,
+  62.5 MB with one idle worker) and **26–31 ms** before the worker runs its
+  first line.
+- The idle app stops waking 125 times a second: the pump is an 8 ms
+  interval whether anything happens or not.
+- Inside a Worker, `process.chdir()` throws, `process.on('SIGINT')` is never
+  called (the launcher forwards signals), `process.env` is a copy unless it
+  is shared, and `process.stdin` forwards through the main thread the way
+  stdout does.
+- `--inspect` attaches to the main thread; the app is the worker target
+  beside it.
+- Packaging: a single-executable build has to carry the worker's entry
+  beside the main one ([packaging.md](packaging.md)), and
+  `bun build --compile` has to be given it as an entry point.
+
+### Not probed yet
+
+- A hardware live resize, a real drag session, and pixels on glass.
+- `<glarea>`'s `x11-dri` CGL context inside a worker.
+- `react-x11/refresh`'s module hooks inside a worker.
+- The buffer handoff under the paint cache and the scroll blit, which copy
+  from the buffer the last flip retired and so rely on today's ordering.
+- IME and NSAccessibility, neither built yet: both are questions AppKit asks
+  the view synchronously, and both take the answer the Windows design gives
+  them — the caret rect and a copy of the accessibility tree, pushed ahead
+  to the UI thread.
+
+### The order
+
+The bridge's core first, behind a flag, with pump mode unchanged and still
+the default; then the launcher and a batch-fed `CocoaApp`; then the verbs a
+group at a time, each group's tests passing in both modes. The default flips
+when the numbers say so — an input-to-photon measurement and the resize
+cell of the Cocoa bench — because perceived latency is the metric this
+project grades on, and latency is what the change is for.
 
 ## Native controls
 
@@ -2083,6 +2311,11 @@ run against today's renderer with no core changes.
 3. **Run-loop option 3** — is the drain (option 2) enough for menu
    tracking + live resize + drag sessions in practice, or does a real
    inversion become necessary? Phase 0/1 experience answers it.
+   Answered 2026-09-11, and neither: a nested drain never drains
+   microtasks, and an inversion needs whoever owns `main()`. The answer is
+   JS on a worker with AppKit parked on the main thread — §"JS on a worker:
+   a UI thread of the bridge's own", with the bridge's half filed as
+   [windowkit/appkit#49](https://github.com/windowkit/appkit/issues/49).
 4. **Transition semantics under CA** — retarget/interrupt parity with
    the JS loop needs a written spec before Phase 5 flips the default.
 5. **Cross-backend text metrics** — accepted divergence (per-backend
