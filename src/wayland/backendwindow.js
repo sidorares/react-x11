@@ -26,24 +26,14 @@ import { WaylandGLContext } from './glcontext.js';
 import { WaylandContext2D } from './context2d.js';
 import { Decorations } from './decorations.js';
 
-/** What this backend cannot do, and what would have to exist instead. */
-const NOT_ON_WAYLAND = {
-  setProperty:
-    'window properties are an X concept; the equivalents are xdg-shell requests and, for desktop integration, portals',
-  getProperty: 'window properties are an X concept',
-  selectXI2:
-    'XI2 does not exist here; input arrives on wl_seat (src/wayland/seat.js)',
-  grabKeyboard:
-    'a Wayland client cannot grab the keyboard; see keyboard-shortcuts-inhibit',
-  setBackgroundPixel: 'there is no server-side window background; paint it',
-  reparent: 'there is no window tree a client can see',
-};
-
-function refuse(name) {
-  return () => {
-    throw new Error(`react-x11 (wayland): ${name}() — ${NOT_ON_WAYLAND[name]}`);
-  };
-}
+// What the X11 window has and this one does not — `getProperty`,
+// `setProperty`, `selectXI2`, `grabKeyboard`, `setBackgroundPixel`,
+// `reparent` — is *absent* rather than stubbed. That is the contract the
+// tree already keeps for the cocoa backend: every caller probes
+// (`wnd.setProperty?.(…)`, `typeof wnd.selectXI2 === 'function'`) and takes
+// the absence as "not on this backend". A method that throws instead turns
+// each of those probes into a crash two layers away (`_NET_WM_DESKTOP` was
+// the first: src/windowstate.js reads it on every window).
 
 const STATE_NAMES = {
   [TOPLEVEL_STATE.MAXIMIZED]: ['maximized_vert', 'maximized_horz'],
@@ -51,6 +41,9 @@ const STATE_NAMES = {
   [TOPLEVEL_STATE.ACTIVATED]: ['focused'],
   [TOPLEVEL_STATE.SUSPENDED]: ['hidden'],
 };
+
+/** `REACT_X11_WAYLAND_TRACE=1`: a line on stderr per presented frame. */
+const TRACE = Boolean(process.env.REACT_X11_WAYLAND_TRACE);
 
 let nextId = 1;
 
@@ -75,12 +68,12 @@ export class WaylandBackendWindow extends EventEmitter {
     this._raf = [];
     this._frameArmed = false;
     this._everPresented = false;
+    this._eagerFired = false;
+    this._presentInFlight = false;
     this._frameSize = null;
     this._frameDirty = true;
     this._resized = true;
     this._reactX11Node = null;
-
-    for (const name of Object.keys(NOT_ON_WAYLAND)) this[name] = refuse(name);
 
     // Frame and content sizes. `attributes.width/height` are what the tree
     // measured, in device pixels of content; the surface adds the frame.
@@ -304,33 +297,53 @@ export class WaylandBackendWindow extends EventEmitter {
   /**
    * Get a frame in flight.
    *
-   * The first frame cannot be paced: a compositor only schedules frame
-   * callbacks for a surface it is showing, and a surface shows nothing until
-   * it has committed a buffer. So the first paint runs as soon as the first
-   * configure has arrived, and the clock takes over from the second. While a
-   * present is in flight its own callback re-arms, so nothing else may
-   * commit in between — a second frame request would only cost a vblank.
+   * Three rules, each learned from a spin:
+   *
+   * - **A frame stays armed from its callback until its present has been
+   *   handed over.** A callback that asks for the next frame (every
+   *   animation does) queues it for the next vsync, as in a browser; it does
+   *   not re-fire. The first version cleared the flag before running the
+   *   callback, and an animation re-entered itself from inside the frame.
+   * - **The first frame cannot be paced**, because a compositor only
+   *   schedules frame callbacks for a surface it is showing — so until the
+   *   first buffer has been presented, frames run from a *timer*. Never from
+   *   a microtask: presenting that first buffer needs the event loop (the
+   *   dma-buf import is a round trip), and a microtask chain that keeps
+   *   painting never yields to it. That was 100% of a core, nothing on
+   *   screen, and Ctrl+C ignored.
+   * - **Post-present, an empty frame re-arms through the compositor**, so
+   *   a renderer that keeps asking without drawing costs a commit per
+   *   refresh, not a spin.
    */
   _armFrame() {
     if (this._frameArmed || this._destroyed) return;
     this._frameArmed = true;
     this.wl.whenConfigured
       .then(() => {
-        if (this._destroyed) return 0;
-        if (!this._everPresented) return 0;
+        if (this._destroyed) return;
+        if (this._presentInFlight) return; // its vsync runs the next frame
+        if (!this._everPresented) {
+          const delay = this._eagerFired ? 16 : 0;
+          this._eagerFired = true;
+          setTimeout(() => this._fireRaf(0), delay);
+          return;
+        }
         const vsync = this.wl.scheduleFrame();
         this.wl.surface.$.commit();
-        return vsync;
+        vsync.then(
+          (t) => this._fireRaf(t),
+          () => this._frameIdle(),
+        );
       })
-      .then(
-        (t) => {
-          this._frameArmed = false;
-          if (!this._destroyed) this._fireRaf(t ?? 0);
-        },
-        () => {
-          this._frameArmed = false;
-        },
-      );
+      .catch(() => this._frameIdle());
+  }
+
+  /** The frame is over with nothing presented; run again only if asked. */
+  _frameIdle() {
+    this._frameArmed = false;
+    if (!this._destroyed && (this._raf.length || this._frameDirty)) {
+      this._armFrame();
+    }
   }
 
   /** Translate into the content area and clip to it. */
@@ -356,10 +369,13 @@ export class WaylandBackendWindow extends EventEmitter {
     if (this._destroyed) return;
     const due = this._raf.splice(0);
     const frameDirty = this._frameDirty;
-    if (due.length === 0 && !frameDirty) return;
+    if (due.length === 0 && !frameDirty) {
+      this._frameArmed = false;
+      return;
+    }
 
     const size = this.glctx.beginFrame();
-    if (!size) return;
+    if (!size) return this._frameIdle();
     const resized = size.resized || this._resized;
     this._resized = false;
     this._frameSize = { width: size.width, height: size.height, time };
@@ -370,6 +386,8 @@ export class WaylandBackendWindow extends EventEmitter {
       this._enterContent(ctx);
     }
 
+    // `_frameArmed` stays set: a callback that asks for the next frame is
+    // queued for the vsync after this present, not run again now.
     for (const fn of due) {
       try {
         fn(time);
@@ -380,23 +398,13 @@ export class WaylandBackendWindow extends EventEmitter {
 
     const painted = this._contexts.get('2d');
     if (painted) {
-      if (painted !== ctx) {
-        // created during the paint: it was caught up in getContext, and is
-        // inside the content clip
-      }
       painted.restore();
       painted.end();
     }
     this._frameSize = null;
 
     const drew = painted?.drew || frameDirty || resized;
-    if (!drew) {
-      // nothing changed: no buffer goes out, but the clock must keep ticking
-      // if anyone asked for a frame, and a present in flight does that
-      this._frameArmed = false;
-      if (this._raf.length) this._armFrame();
-      return;
-    }
+    if (!drew) return this._frameIdle();
     this._frameDirty = false;
     void this._present(resized || frameDirty ? 'all' : this._damageFor());
   }
@@ -427,18 +435,35 @@ export class WaylandBackendWindow extends EventEmitter {
     }));
   }
 
+  /** Hand the painted buffer to the compositor and re-arm the clock. */
   async _present(damage) {
     if (this._destroyed) return;
-    const vsync = await this.glctx.endFrame(damage);
+    this._presentInFlight = true;
+    let vsync;
+    try {
+      vsync = await this.glctx.endFrame(damage);
+    } catch (err) {
+      this._presentInFlight = false;
+      this.emit('error', err);
+      return this._frameIdle();
+    }
     this._everPresented = true;
     this.wl.mapped = true;
+    if (TRACE) {
+      this._presents = (this._presents ?? 0) + 1;
+      process.stderr.write(
+        `react-x11 wayland: window ${this.id} present #${this._presents} ` +
+          `${damage === 'all' ? 'full' : damage.length + ' rect(s)'}\n`,
+      );
+    }
     Promise.resolve(vsync).then(
       (t) => {
-        this._frameArmed = false;
-        this._fireRaf(t);
+        this._presentInFlight = false;
+        if (!this._destroyed) this._fireRaf(t);
       },
       () => {
-        this._frameArmed = false;
+        this._presentInFlight = false;
+        this._frameIdle();
       },
     );
   }
