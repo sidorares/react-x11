@@ -154,10 +154,15 @@ test('the pointer over the surface is dispatched at the <glarea>, and bubbles', 
   const app = node.app;
   assert.equal(node.forwardsPointer, true);
   pointerOver(app, node, { press: true });
-  assert.deepEqual(seen, [
-    ['area', 'mouseDown', node],
-    ['box', 'mouseDown', node],
-    ['area', 'click', node],
-  ]);
+  // targets by identity: a failed deepEqual over nodes util.inspects the
+  // whole tree, and hangs the file instead of failing it
+  assert.deepEqual(
+    seen.map(([who, type, target]) => [who, type, target === node]),
+    [
+      ['area', 'mouseDown', true],
+      ['box', 'mouseDown', true],
+      ['area', 'click', true],
+    ],
+  );
   void native;
 });

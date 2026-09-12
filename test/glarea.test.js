@@ -73,6 +73,28 @@ const getAttributes = (app, wid) =>
     ),
   );
 
+/**
+ * Nodes are compared by identity and named in the message, never handed to
+ * `assert.equal`: a failed comparison `util.inspect`s both sides, a node
+ * reaches the whole tree, the app and its connection, and the report then
+ * takes minutes — a regression hangs the suite instead of failing it. Found
+ * by planting one.
+ */
+const nameOf = (v) =>
+  v == null
+    ? String(v)
+    : v.kind
+      ? `<${v.kind}>`
+      : v.id != null
+        ? `window ${v.id}`
+        : typeof v;
+function same(actual, expected, what) {
+  assert.ok(
+    actual === expected,
+    `${what}: got ${nameOf(actual)}, want ${nameOf(expected)}`,
+  );
+}
+
 test('<glarea> gets a GL child window and draws a frame', async () => {
   const { app, backend, xErrors } = await createGlApp();
   const x11Root = await createRoot({ app });
@@ -255,7 +277,7 @@ test('a failed <glarea> leaves no X window over the fallback', async () => {
     );
     // …nor one for the hit test to answer with: a point there is the tree's
     assert.deepEqual(instance._reactX11Node._surfaces, []);
-    assert.equal(area.hitSurface(10, 10), null);
+    same(area.hitSurface(10, 10), null, 'a failed surface, under the pointer');
 
     await x11Root.unmount();
     await settle(app);
@@ -394,18 +416,18 @@ test('the pointer over the surface is dispatched at the <glarea>, and bubbles', 
     await waitFor(() => of('area', 'click').length > 0, 'the click');
 
     const [down] = of('area', 'mouseDown');
-    assert.equal(down.target, area, 'the <glarea>, not the box behind it');
+    same(down.target, area, 'the <glarea>, not the box behind it');
     // the owning window's coordinates, and the surface's own corner
     assert.deepEqual(down.at, [60, 70]);
     assert.deepEqual(down.local, [40, 50]);
     assert.equal(down.button, 1);
-    assert.equal(of('pane', 'mouseDown')[0]?.target, area, 'it bubbled');
+    same(of('pane', 'mouseDown')[0]?.target, area, 'it bubbled');
     assert.deepEqual(of('area', 'mouseMove').at(-1).at, [90, 100]);
     assert.equal(of('area', 'mouseUp').length, 1);
     const [click] = of('area', 'click');
-    assert.equal(click.target, area);
+    same(click.target, area, 'the click');
     assert.equal(click.detail, 1);
-    assert.equal(of('pane', 'click')[0]?.target, area);
+    same(of('pane', 'click')[0]?.target, area, 'the click, bubbled');
     // and the press focused the nearest focusable ancestor, as anywhere
     assert.equal(pane.focused, true);
   } finally {
@@ -476,22 +498,22 @@ test('a drag that leaves the surface keeps coming, to whatever holds it', async 
         seen.find((e) => e.who === who && e.type === 'mouseMove' && e.x === x);
       const click = seen.find((e) => e.type === 'click');
       if (capture) {
-        assert.equal(moveAt('area', 200)?.target, area, capture);
-        assert.equal(moveAt('area', 500)?.target, area);
-        assert.equal(moveAt('side', 200), undefined, 'the box heard nothing');
+        same(moveAt('area', 200)?.target, area, 'captured, beside it');
+        same(moveAt('area', 500)?.target, area, 'captured, outside');
+        assert.ok(!moveAt('side', 200), 'the box heard nothing');
         const up = seen.find((e) => e.type === 'mouseUp');
         assert.equal(up?.who, 'area');
-        assert.equal(up?.target, area);
-        assert.equal(click.target, area, 'released on the captor');
+        same(up?.target, area, 'the release');
+        same(click.target, area, 'released on the captor');
       } else {
         // uncaptured, a move is whatever it is over — the box beside, then
         // the window itself — as for a drag that started anywhere else
-        assert.equal(moveAt('side', 200)?.target, side);
-        assert.equal(moveAt('window', 500)?.target, windowNode.window);
-        assert.equal(moveAt('area', 500), undefined);
+        same(moveAt('side', 200)?.target, side, 'a move beside it');
+        same(moveAt('window', 500)?.target, windowNode.window, 'outside');
+        assert.ok(!moveAt('area', 500), 'not the surface’s, outside it');
         // and the click is the nearest common ancestor's, the window's
         assert.equal(click.who, 'window');
-        assert.equal(click.target, windowNode.window);
+        same(click.target, windowNode.window, 'the click');
       }
     } finally {
       await s.close();
@@ -529,10 +551,10 @@ test('a double click on the surface counts, and the right button asks for its co
     const clicks = () => seen.filter((e) => e.type === 'click');
     await waitFor(() => clicks().length === 2, 'two clicks');
     assert.deepEqual(
-      clicks().map((e) => [e.target, e.detail]),
+      clicks().map((e) => [e.target === s.area, e.detail]),
       [
-        [s.area, 1],
-        [s.area, 2],
+        [true, 1],
+        [true, 2],
       ],
     );
     s.press(3);
@@ -542,7 +564,7 @@ test('a double click on the surface counts, and the right button asks for its co
       'the context menu',
     );
     const menu = seen.find((e) => e.type === 'contextMenu');
-    assert.equal(menu.target, s.area);
+    same(menu.target, s.area, 'the context menu');
     assert.equal(menu.button, 3);
   } finally {
     await s.close();
@@ -582,7 +604,7 @@ test('a wheel notch over the surface is one Wheel at the <glarea>, and no press'
       seen.map((e) => e.type),
       ['wheel'],
     );
-    assert.equal(seen[0].target, s.area);
+    same(seen[0].target, s.area, 'the wheel');
     // pixels, not notches — the same conversion every other wheel gets
     assert.equal(seen[0].deltaY, WHEEL_NOTCH_PX);
   } finally {
@@ -729,7 +751,7 @@ test("pointerEvents: 'none' on the surface lets the pointer through to the tree 
     s.press();
     s.release();
     await waitFor(() => seen.length > 0, 'the press');
-    assert.equal(seen[0], s.area.parent, 'the box behind the surface took it');
+    same(seen[0], s.area.parent, 'the box behind the surface took it');
   } finally {
     await s.close();
   }
