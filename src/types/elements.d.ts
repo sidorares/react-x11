@@ -916,10 +916,14 @@ export interface SvgProps extends DrawnProps<DrawnNode> {
 export type FrameLoop = 'demand' | 'always';
 
 /**
- * `<glarea>`: a GL surface in the layout. The pointer over it is the tree's,
- * as over any node — the handlers it inherits (`onMouseDown`, `onClick`,
- * `onWheel`, …) fire at the `<glarea>` and bubble, on both backends — and
- * `GlAreaNode.forwardsPointer` says so at run time (docs/elements.md).
+ * `<glarea>`: a GL surface in the layout. Its **children** are 2D content
+ * drawn above the surface — laid out in its box like a `<box>`'s and cut to
+ * it, painted over the GL frame, hit before it — composited on the Cocoa
+ * backend and opaque on X11 (docs/elements.md); `useSupports('glOverlay')`
+ * asks whether they will be. The pointer over it is the tree's, as over any
+ * node: the handlers it inherits (`onMouseDown`, `onClick`, `onWheel`, …)
+ * fire at the child under the pointer or the `<glarea>` and bubble, on both
+ * backends, and `GlAreaNode.forwardsPointer` says so at run time.
  */
 export interface GlAreaProps extends DrawnProps<DrawnNode> {
   /** CSS colour, or `[r, g, b, a]` floats. Default black. */

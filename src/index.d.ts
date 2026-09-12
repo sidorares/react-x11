@@ -168,9 +168,16 @@ export function useClipboard(): Clipboard;
  * into its own — X11, never Cocoa or the headless mock. Ask it before
  * rendering a `<foreign>`, which refuses with one `onError` where it is
  * false. Also a property of the backend, and it never changes either.
+ *
+ * `'glOverlay'` is whether the children of a `<glarea>` are drawn above its
+ * GL surface — laid out in its box, painted on panes stacked over it, hit
+ * before it. Both backends draw them; translucency is the difference,
+ * composited by Core Animation on Cocoa and opaque on X11, where what a
+ * child leaves unpainted shows the surface's `clearColor` (docs/elements.md).
+ * Ask it before handing a surface its HUD. A property of the backend.
  */
 export type SupportsFeature =
-  'transparency' | 'shaders' | 'nativeControls' | 'embedding';
+  'transparency' | 'shaders' | 'nativeControls' | 'embedding' | 'glOverlay';
 
 /**
  * Can this **display** do something? `'transparency'` is true when the

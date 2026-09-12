@@ -196,6 +196,10 @@ export class WindowNode extends Scrollable(Node) {
     // tree (`EventManager._surfaceAt`). A surface joins when its window is
     // made and leaves when it goes (src/glnodes.js).
     this._surfaces = [];
+    // …and the ones with children, whose panes each frame syncs after layout
+    // and paints with its damage (nodes/window/flush.js, src/gloverlay.js).
+    // Empty is one `size` read a frame.
+    this._overlaid = new Set();
     this.events = new EventManager(this);
     // ids of the child windows in the order the *server* stacks them,
     // bottom to top — see _restackWindowChildren

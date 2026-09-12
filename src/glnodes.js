@@ -10,6 +10,7 @@ import { cssColorStraight } from 'ntk';
 // re-exported so the GL element layer stays one import for consumers
 export { directGLFailure, hasDirectGL } from './glbackend.js';
 
+import { GlOverlay, canOverlay } from './gloverlay.js';
 import { Node } from './nodes/node.js';
 import { FramePacer, resolveFrameRate } from './pacing.js';
 
@@ -105,17 +106,22 @@ const px = (v) => Math.max(1, Math.round(v || 0));
  *   vocabulary as `<window frameRate>`. Defaults to the owning window's.
  * - `glx` — a `chooseGLXConfig` spec, e.g. `{ DEPTH_SIZE: 24 }`.
  *
- * The X child window is stacked above everything drawn in the parent, so 2D
- * content cannot overlap it — put HUD content in a sibling `<popup>`.
+ * The X child window is stacked above everything drawn in the parent, so the
+ * parent's 2D content cannot overlap it — but this node's own children do:
+ * they are laid out in its box like a `<box>`'s and drawn above the surface,
+ * on panes of their own (src/gloverlay.js).
  *
  * Pointer input over the surface is the tree's, on both backends: a press,
- * a drag or a wheel over it is a synthetic event *at this node*, bubbling
- * to its ancestors like anyone else's (`hitSurface` says how).
+ * a drag or a wheel over it is a synthetic event at the child under the
+ * pointer, or at this node, bubbling to its ancestors like anyone else's
+ * (`hitSurface` says how).
  */
 export class GlAreaNode extends Node {
   constructor(props, app) {
     super('glarea', props, app);
     this.window = null;
+    // the panes the children are drawn on, while there are children
+    this._overlay = null;
     this.gl = null;
     this.rect = null; // geometry last sent to the X window
     this._realizing = false;
@@ -154,9 +160,19 @@ export class GlAreaNode extends Node {
 
   _setRoot(root) {
     super._setRoot(root);
+    // Children mounted along with this node — React builds a subtree before
+    // it attaches it — are drawn from the first frame of the window it joins.
+    if (this.children.length) root?._overlaid?.add(this);
     // the owning window may already exist (a <glarea> mounted into a live
     // tree); otherwise WindowNode.realize picks the subtree up
     if (root?.window) this.realize();
+  }
+
+  insertBefore(child, beforeChild) {
+    super.insertBefore(child, beforeChild);
+    // 2D content above the surface: the owning window's next frame gives it
+    // a pane (`_syncOverlay`), and the child-list claim asks for that frame
+    this.root?._overlaid?.add(this);
   }
 
   /** Create the GL child window. Async: the visual comes from the server. */
@@ -203,7 +219,9 @@ export class GlAreaNode extends Node {
     recordGlxFailure(this.app, err);
     this.gl = null;
     if (this.window) {
-      this._leaveSurfaces();
+      // the children's panes stay, over whatever the fallback draws, and
+      // stay hittable; with none, nothing of this node covers the rect
+      if (!this._overlay) this._leaveSurfaces();
       this.window.destroy?.();
       this.window = null;
       this.rect = null;
@@ -252,7 +270,7 @@ export class GlAreaNode extends Node {
     // its siblings, and Core Animation a layer added later over one at the
     // same zPosition. The window's hit test reads the list in that order
     // (`EventManager._surfaceAt`).
-    this.root?._surfaces?.push(this);
+    this._joinSurfaces();
     this.gl = wnd.getContext('opengl', config);
     // a buffer freed by the display is a frame that can be drawn again
     if (typeof this.gl?.onFrameAvailable !== 'undefined') {
@@ -267,6 +285,9 @@ export class GlAreaNode extends Node {
     });
     wnd.on?.('expose', () => this.requestFrame());
     wnd.map?.();
+    // made on top of its siblings — over the panes of children that were
+    // laid out and painted before the visual query answered
+    this._overlay?.restack();
     this.requestFrame();
   }
 
@@ -416,27 +437,30 @@ export class GlAreaNode extends Node {
   }
 
   /**
-   * This node, if a point in the owning window's space is over the surface.
+   * What a point in the owning window's space lands on, if it is over this
+   * surface: the child under it where there is one — the children are drawn
+   * above the surface (src/gloverlay.js) — and otherwise this node.
    *
-   * A point that is, is over it whatever the tree's own order says: X stacks
-   * the child window above the parent's drawing, and the Cocoa backend puts
-   * the layer at a zPosition over both presenters. So the window asks its
-   * surfaces before it hit-tests its tree (`EventManager._hit`), and a point
-   * inside lands here rather than on the box behind — which is all a tree
-   * walk can find, a window-owning node not being in its parent's paint
-   * order. It is the same answer X gives: the event it propagates to the
-   * owning window names this window as the child the pointer is in.
+   * A point that is over the surface is over it whatever the tree's own
+   * order says: X stacks the child window above the parent's drawing, and
+   * the Cocoa backend puts the layer at a zPosition over both presenters. So
+   * the window asks its surfaces before it hit-tests its tree
+   * (`EventManager._hit`), and a point inside lands here rather than on the
+   * box behind — which is all a tree walk can find, a window-owning node not
+   * being in its parent's paint order. It is the same answer X gives: the
+   * event it propagates to the owning window names this window, or a pane
+   * over it, as the child the pointer is in.
    *
-   * The rect is the one last sent to the surface rather than `abs`, since
-   * the surface covers whole pixels and the server decides by those. No
-   * surface, no answer: not made yet, given up after `onError`, or hidden
-   * with something around it — and `pointerEvents: 'none'` here or above
-   * lets the pointer through to what the tree has behind, as it does for
-   * any node.
+   * The rect is the surface's own, in whole pixels, since the server decides
+   * by those. With no GL surface — not made yet, or given up after
+   * `onError` — only the children answer, and a point between them is the
+   * tree's. Hidden, or `pointerEvents: 'none'` here or above, lets the
+   * pointer through to what the tree has behind, as it does for any node.
    */
   hitSurface(x, y) {
-    const rect = this.rect;
-    if (!this.window || !rect) return null;
+    const panes = this._overlay?.panes.length ?? 0;
+    if (!this.window && panes === 0) return null;
+    const rect = this.rect ?? this._geometry();
     if (
       x < rect.x ||
       y < rect.y ||
@@ -452,7 +476,22 @@ export class GlAreaNode extends Node {
       }
       if (n.isWindow) break;
     }
-    return this;
+    if (panes !== 0) {
+      // front to back, as the tree's own hit test walks a box's children
+      const order = this.paintOrder();
+      for (let i = order.length - 1; i >= 0; i--) {
+        const hit = order[i].hitTest(x, y);
+        if (hit) return hit;
+      }
+    }
+    return this.window ? this : null;
+  }
+
+  /** Into the owning window's hit test, once: a GL window or a pane covers
+   * the rect now (`EventManager._surfaceAt`). */
+  _joinSurfaces() {
+    const surfaces = this.root?._surfaces;
+    if (surfaces && !surfaces.includes(this)) surfaces.push(this);
   }
 
   /** Out of the owning window's hit test: nothing covers the rect any more,
@@ -461,6 +500,34 @@ export class GlAreaNode extends Node {
     const surfaces = this.root?._surfaces;
     const at = surfaces ? surfaces.indexOf(this) : -1;
     if (at !== -1) surfaces.splice(at, 1);
+  }
+
+  /**
+   * The owning window's frame, after layout (`WindowNode._syncOverlays`):
+   * panes for where the children are now. True when a pane was made,
+   * resized or dropped — a paint the frame then owes.
+   */
+  _syncOverlay() {
+    if (!this._overlay) {
+      if (this.children.length === 0 || !canOverlay(this.app)) {
+        this.root?._overlaid?.delete(this);
+        return false;
+      }
+      this._overlay = new GlOverlay(this);
+    }
+    const changed = this._overlay.sync();
+    if (this._overlay.panes.length) this._joinSurfaces();
+    if (this.children.length === 0 && this._overlay.panes.length === 0) {
+      this._overlay = null;
+      this.root?._overlaid?.delete(this);
+      if (!this.window) this._leaveSurfaces();
+    }
+    return changed;
+  }
+
+  /** …and the paint it owes them, with the frame's damage. */
+  _paintOverlay(damage) {
+    this._overlay?.paint(damage);
   }
 
   applyProps(newProps, oldProps) {
@@ -475,15 +542,27 @@ export class GlAreaNode extends Node {
     super.setHidden(hidden);
     if (hidden) this.window?.unmap?.();
     else this.window?.map?.();
+    this._overlay?.setHidden(hidden);
   }
 
-  // the child window covers this rect: nothing to paint into the parent's
-  // 2d context, and no drawn children are allowed under it
+  // The surface covers this rect: nothing of this node is painted into the
+  // parent's 2d context, and its children are painted above the surface on
+  // panes of their own (src/gloverlay.js) rather than in the window's walk.
   paint() {}
+
+  // …which is also why they are cut to its box: a pane never reaches past
+  // the surface, and the hit test and the damage model have to agree with
+  // the panes about where the children can be
+  clipsChildren() {
+    return true;
+  }
 
   destroySubtree() {
     if (this.destroyed) return;
     this._leaveSurfaces();
+    this.root?._overlaid?.delete(this);
+    this._overlay?.destroy();
+    this._overlay = null;
     super.destroySubtree();
     this._pacer.cancel();
     this.gl?.destroy?.();

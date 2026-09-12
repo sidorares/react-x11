@@ -1935,20 +1935,72 @@ display lists**: every immediate-mode vertex is a command on the wire, so a
 mesh re-sent per frame costs kilobytes per frame, while a compiled list
 costs one `CallList`.
 
-Layout treats it as a leaf: it is sized and positioned like any other node,
-and its X window follows that rect. The window is stacked above everything
-drawn in the parent, so 2D content cannot overlap it — a HUD needs a
-sibling `<popup>`.
+The surface is stacked above everything drawn in its window, so nothing the
+window paints can overlap it. **Its own children can: they are 2D content
+drawn above the surface.** Layout treats a `<glarea>` as a flex container
+like a `<box>` — it is sized and positioned like any node, its window follows
+that rect, and its children are laid out inside it and cut to its box: a
+legend in a corner, a toolbar along an edge, a label over the scene. They are
+ordinary nodes in every way but one. The window's own paint cannot reach
+above the surface, so they are painted on **panes** stacked over it, in the
+same frame and from the same damage as everything else.
+
+```jsx
+<glarea style={{ flexGrow: 1 }} clearColor="#0e1320" onDraw={drawMap}>
+  <box
+    style={{
+      position: 'absolute',
+      left: 12,
+      top: 12,
+      padding: 8,
+      backgroundColor: '#f4f5f8',
+    }}
+  >
+    <text>Legend</text>
+  </box>
+</glarea>
+```
+
+What a pane is depends on the backend, and so does what translucent means:
+
+|                      | Cocoa                                                                                                   | X11                                                                                                                                                                                                     |
+| -------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a pane               | one transparent layer over the whole surface, above the GL layer                                        | one child window per region the children reach — each child's paint reach, overlapping ones merged — stacked directly above the surface's window                                                        |
+| translucency         | composited by Core Animation: a translucent fill, an antialiased edge or a shadow blends with the frame | none: a pane is opaque, and whatever a child leaves unpainted inside its region — a rounded corner, a translucent fill, text with no box behind it — shows the surface's `clearColor`, not the GL frame |
+| between the children | the GL frame                                                                                            | the GL frame                                                                                                                                                                                            |
+
+So on X11 give each child a background, and expect a translucent one to be
+tinted by the `clearColor` rather than to show the scene. X11 cannot do
+better without a compositor, and a compositor would not help: it blends
+top-level windows, not the children inside one. A region per child, rather
+than one window cut to shape with the SHAPE extension, keeps each pane as
+small as what it holds and works on servers without SHAPE.
+`useSupports('glOverlay')` says whether a connection draws a surface's
+children at all (both backends do).
+
+Limits worth knowing:
+
+- **Overlapping surfaces:** where two surfaces overlap, both overlays are
+  above both frames on the Cocoa backend, and stack by when each was made
+  on X11.
+- **Scroll panes:** a surface scrolled partly out of a scroll pane is not
+  clipped by it. Its window and its panes are real windows placed at its
+  rect.
+- **Promotion:** a child of the surface is never lifted onto a layer of its
+  own for an animation on the Cocoa backend. That layer would sit under the
+  surface. Its transitions run on the frame clock instead.
 
 **The pointer over the surface is the tree's**, on both backends, exactly
 as over a `<box>`: `onMouseDown`, `onMouseMove`, `onMouseUp`, `onClick` (a
 double click is `detail: 2`), `onContextMenu`, `onMouseEnter` and
-`onMouseLeave`, `:hover` and `:active`, and `onWheel` fire at the
-`<glarea>` and bubble to its ancestors; a press focuses the nearest
-focusable one, and `ev.capturePointer()` keeps a drag that wanders off the
-surface. The window's hit test knows the surface is on top — a point inside
-its rect lands on the `<glarea>`, not on whatever the tree has behind it —
-and `pointerEvents: 'none'` on it lets the pointer through to that instead.
+`onMouseLeave`, `:hover` and `:active`, and `onWheel` fire at the child
+under the pointer, or at the `<glarea>` between its children, and bubble to
+the ancestors. A press focuses the nearest focusable one, and
+`ev.capturePointer()` keeps a drag that wanders off the surface. The
+window's hit test knows the surface and its children are on top: a point
+inside the rect lands on them, not on whatever the tree has behind.
+`pointerEvents: 'none'` on the surface lets the pointer through to that
+instead.
 
 ```jsx
 <glarea
@@ -1978,9 +2030,10 @@ was the only way to hear a press over a surface before core delivered it;
 (`GlAreaNode.prototype.forwardsPointer` from `react-x11/node`, to ask
 without rendering), and is the switch for dropping such a listener.
 
-`onDraw` is the raw escape hatch; for a scene, put 3D elements inside
-(below) and let the renderer drive the GL. See `examples/viewer3d.jsx` for
-the raw form, and `@react-x11/components/three` for a scene graph.
+`onDraw` is the raw escape hatch, and a scene graph over it is
+`@react-x11/components/three`. See `examples/viewer3d.jsx` for the raw
+form, and `examples/labs/gl-overlay.jsx` for a surface with a HUD over it on
+both backends.
 
 ---
 
@@ -2042,9 +2095,10 @@ for another application to lose its window.
 Layout treats it as a leaf, and its X window follows that rect; every change
 also sends the client the synthetic ICCCM 4.1.5 `ConfigureNotify` with
 root-relative coordinates. Stacking is `<glarea>`'s: the child window sits
-above everything drawn in the parent, so 2D content cannot overlap it — an
+above everything drawn in the parent, so 2D content cannot overlap it — and
+unlike a `<glarea>`, `<foreign>` takes no children to draw over it, so an
 overlay belongs in a sibling `<popup>` — and pointer events over it are the
-client's. `<foreign>` takes no children.
+client's.
 
 Keyboard focus is where this element has a rule of its own: **while a
 `<foreign>` holds focus, the application's handlers see every key first and

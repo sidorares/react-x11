@@ -118,8 +118,11 @@ replays the same protocol onto WebGL2.
 - Is there a depth-buffer-capable visual reachable via `GetVisualConfigs` on
   both XQuartz and Xvfb/llvmpipe?
 - Can a `<glarea>` be composited with 2D content drawn over it, or does the
-  GL child window always sit on top? (Likely always on top, so a HUD overlay
-  would need a sibling window.)
+  GL child window always sit on top? Answered: the GL window is always on
+  top of the parent's drawing, so the surface's own children are drawn on
+  windows of their own stacked above it — opaque ones, one per region they
+  reach, since a child window cannot be translucent without a compositor
+  (`src/gloverlay.js`, [elements.md](elements.md#glarea)).
 
 ## Scope discipline
 

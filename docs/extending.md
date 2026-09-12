@@ -1457,10 +1457,12 @@ it, so a window that selects nothing hands the pointer over it to the window
 the tree lives in — which is how a `<glarea>`'s presses reach the tree — and
 one that selects `ButtonPress` keeps every press for itself. Select only
 what the element needs from the server, and remember that ntk selects
-whatever a window is listened to for. The owning window's hit test knows
-about `<glarea>` surfaces and asks them before the tree
-(`GlAreaNode.hitSurface`); it does not know about a registered element's
-window, so a point over one lands on whatever the tree has behind it.
+whatever a window is listened to for. The panes a `<glarea>`'s children are
+drawn on (`src/gloverlay.js`) select nothing for the same reason. The owning
+window's hit test knows about `<glarea>` surfaces and their children and
+asks them before the tree (`GlAreaNode.hitSurface`); it does not know about
+a registered element's window, so a point over one lands on whatever the
+tree has behind it.
 
 `ForeignNode` (`src/foreignnodes.js`) is the same shape with the stakes
 raised, and it is the one to read if your element touches a resource you did
