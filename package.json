@@ -20,6 +20,8 @@
     "examples:appearance": "tsx examples/appearance.jsx",
     "examples:animation": "tsx examples/animation.jsx",
     "examples:simple": "tsx examples/simple.jsx",
+    "examples:wayland-gl": "node examples/wayland-gl.mjs",
+    "examples:wayland-ui": "node examples/wayland-ui.mjs",
     "examples:simple-nojsx": "node examples/simple-nojsx.js",
     "examples:xeyes": "tsx examples/xeyes.jsx",
     "examples:dashboard": "tsx examples/dashboard.jsx",

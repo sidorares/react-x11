@@ -1,0 +1,100 @@
+{
+ "wayland": [
+  "wl_display",
+  "wl_registry",
+  "wl_callback",
+  "wl_compositor",
+  "wl_shm_pool",
+  "wl_shm",
+  "wl_buffer",
+  "wl_data_offer",
+  "wl_data_source",
+  "wl_data_device",
+  "wl_data_device_manager",
+  "wl_shell",
+  "wl_shell_surface",
+  "wl_surface",
+  "wl_seat",
+  "wl_pointer",
+  "wl_keyboard",
+  "wl_touch",
+  "wl_output",
+  "wl_region",
+  "wl_subcompositor",
+  "wl_subsurface"
+ ],
+ "xdg-shell": [
+  "xdg_wm_base",
+  "xdg_positioner",
+  "xdg_surface",
+  "xdg_toplevel",
+  "xdg_popup"
+ ],
+ "linux-dmabuf-v1": [
+  "zwp_linux_dmabuf_v1",
+  "zwp_linux_buffer_params_v1",
+  "zwp_linux_dmabuf_feedback_v1"
+ ],
+ "presentation-time": [
+  "wp_presentation",
+  "wp_presentation_feedback"
+ ],
+ "viewporter": [
+  "wp_viewporter",
+  "wp_viewport"
+ ],
+ "tablet-v2": [
+  "zwp_tablet_manager_v2",
+  "zwp_tablet_seat_v2",
+  "zwp_tablet_tool_v2",
+  "zwp_tablet_v2",
+  "zwp_tablet_pad_ring_v2",
+  "zwp_tablet_pad_strip_v2",
+  "zwp_tablet_pad_group_v2",
+  "zwp_tablet_pad_v2",
+  "zwp_tablet_pad_dial_v2"
+ ],
+ "fractional-scale-v1": [
+  "wp_fractional_scale_manager_v1",
+  "wp_fractional_scale_v1"
+ ],
+ "cursor-shape-v1": [
+  "wp_cursor_shape_manager_v1",
+  "wp_cursor_shape_device_v1"
+ ],
+ "xdg-activation-v1": [
+  "xdg_activation_v1",
+  "xdg_activation_token_v1"
+ ],
+ "ext-idle-notify-v1": [
+  "ext_idle_notifier_v1",
+  "ext_idle_notification_v1"
+ ],
+ "xdg-toplevel-icon-v1": [
+  "xdg_toplevel_icon_manager_v1",
+  "xdg_toplevel_icon_v1"
+ ],
+ "xdg-decoration-unstable-v1": [
+  "zxdg_decoration_manager_v1",
+  "zxdg_toplevel_decoration_v1"
+ ],
+ "primary-selection-unstable-v1": [
+  "zwp_primary_selection_device_manager_v1",
+  "zwp_primary_selection_device_v1",
+  "zwp_primary_selection_offer_v1",
+  "zwp_primary_selection_source_v1"
+ ],
+ "text-input-unstable-v3": [
+  "zwp_text_input_v3",
+  "zwp_text_input_manager_v3"
+ ],
+ "pointer-constraints-unstable-v1": [
+  "zwp_pointer_constraints_v1",
+  "zwp_locked_pointer_v1",
+  "zwp_confined_pointer_v1"
+ ],
+ "relative-pointer-unstable-v1": [
+  "zwp_relative_pointer_manager_v1",
+  "zwp_relative_pointer_v1"
+ ]
+}
