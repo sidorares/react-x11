@@ -288,6 +288,10 @@ const POINTER_INPUT =
 async function mountSurface(build) {
   const { app, server } = await createGlApp();
   const x11Root = await createRoot({ app });
+  const close = async () => {
+    await x11Root.unmount();
+    await app.close();
+  };
   let drew = false;
   const instance = await render(
     build(() => {
@@ -295,14 +299,22 @@ async function mountSurface(build) {
     }),
     x11Root,
   );
-  // the GL window is made once the visual query answers
-  await waitFor(() => drew, 'the first frame');
-  await settle(app);
   const windowNode = instance._reactX11Node;
   const find = (n) =>
     n.kind === 'glarea' ? n : n.children.map(find).find(Boolean);
   const area = find(windowNode);
-  assert.ok(area?.window, 'the surface has a window of its own');
+  try {
+    // the GL window is made once the visual query answers
+    await waitFor(() => drew, 'the first frame');
+    await settle(app);
+    assert.ok(area?.window, 'the surface has a window of its own');
+  } catch (err) {
+    // A mount that never settled still holds a connection, and a process
+    // with one open never exits: a regression here would hang the suite
+    // rather than fail it.
+    await close();
+    throw err;
+  }
   const at = (x, y) => {
     const wnd = windowNode.window;
     const origin = wnd._screenOrigin ?? { x: wnd.x ?? 0, y: wnd.y ?? 0 };
