@@ -33,11 +33,17 @@
 import { XEMBED, XEmbedSocket } from 'ntk';
 
 import { isFocusable } from './a11y.js';
+import { canEmbed } from './embedding.js';
 import { lastInputTime } from './inputtime.js';
 import { Node } from './nodes/node.js';
 import { pixelFor } from './nodes/window/capabilities.js';
 
 const px = (v) => Math.max(1, Math.round(v || 0));
+
+// Apps already told, by a <foreign> with no `onError`, that they cannot
+// embed. Once per app: the answer belongs to the backend, so the second pane
+// to ask carries no news — the same rule as a display with no ARGB visual.
+const warnedCannotEmbed = new WeakSet();
 
 /**
  * `<foreign>` — another client's top-level window, laid out as an element.
@@ -89,6 +95,18 @@ const px = (v) => Math.max(1, Math.round(v || 0));
  * pointer is *over* the embedded client the client receives keys directly
  * and no handler of ours runs. Chords work everywhere else in the window,
  * which is the trade a proxy would make in reverse.
+ *
+ * ### Where there is no embedding
+ *
+ * All of this needs a connection that can reparent somebody else's window,
+ * and two apps this node meets have none: the Cocoa backend and the headless
+ * mock. Both carry an X stub and a `createWindow` that takes a parent, which
+ * used to be enough to build a socket over them — on Cocoa around a child GL
+ * surface whose `id` is undefined, handed out through `onReady` and spawned
+ * `xterm -into undefined` with; on the mock, a throw from inside the commit.
+ * So `realize()` asks `canEmbed` first, the question
+ * `useSupports('embedding')` answers too, and a no is final: no container, no
+ * `onReady`, one `onError`, and an empty box in the layout.
  */
 export class ForeignNode extends Node {
   constructor(props, app) {
@@ -97,8 +115,12 @@ export class ForeignNode extends Node {
     this.socket = null;
     /** `{ id, xembed, version }` while a client is in, else null */
     this.client = null;
-    /** the error that stopped an embed, if one did */
+    /** the error that stopped an embed, if one did — or, where this
+     * connection cannot embed at all, the refusal */
     this.error = null;
+    // set once `realize()` finds this connection cannot embed, and final:
+    // the backend does not change under a node
+    this._refused = false;
     /** geometry last sent to the X windows */
     this.rect = null;
     // an embedded client is a control the user can Tab to, like a
@@ -133,9 +155,10 @@ export class ForeignNode extends Node {
    * where React can discard the work.
    */
   realize() {
-    if (this.socket || this.destroyed) return;
+    if (this.socket || this.destroyed || this._refused) return;
     const parent = this.root?.window;
-    if (!parent || typeof this.app?.createWindow !== 'function') return;
+    if (!parent) return;
+    if (!canEmbed(this.app)) return this._refuse();
     const rect = this._geometry();
     this.rect = rect;
     const socket = new XEmbedSocket(parent, {
@@ -157,6 +180,36 @@ export class ForeignNode extends Node {
     // after `_start`, which maps the container itself — both paths do,
     // because a client cannot be viewable inside an unmapped one
     this._syncMapped();
+  }
+
+  /**
+   * This connection cannot embed: say so once, and be an empty box.
+   *
+   * On a microtask for `onReady`'s reason: this runs in the commit phase, and
+   * the ordinary answer to the news is to set state. Nothing else needs
+   * undoing — with no socket, every other path through this node (layout,
+   * props, focus, keys, teardown) already finds nothing to act on.
+   */
+  _refuse() {
+    this._refused = true;
+    const err = new Error(
+      'react-x11: <foreign> needs the X11 backend — this one has no ' +
+        'cross-process window embedding, so nothing can be put in it. Ask ' +
+        "useSupports('embedding') before rendering one.",
+    );
+    this.error = err;
+    // The client is the whole reason this node is a Tab stop by default, and
+    // one that can never arrive would leave a dead one. `focusable` still
+    // wins, as it does on a box.
+    this.focusableByDefault = false;
+    queueMicrotask(() => {
+      if (this.destroyed) return;
+      if (this.props.onError) this.props.onError(err);
+      else if (this.app && !warnedCannotEmbed.has(this.app)) {
+        warnedCannotEmbed.add(this.app);
+        console.warn(err.message);
+      }
+    });
   }
 
   /**

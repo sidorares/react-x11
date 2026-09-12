@@ -98,7 +98,9 @@ wayland.md declares its walls:
   the XEmbed half of `<Frame>`, `@react-x11/components`' tray-host and its
   mpv/VLC `--wid` embedding have no equivalent; `<Frame>` on macOS becomes
   a parented toplevel or an in-process pane, exactly the fate wayland.md
-  assigns it.
+  assigns it. A `<foreign>` rendered here says so — one `onError`, no
+  `onReady`, an empty box — and `useSupports('embedding')` is false, so a
+  component can ask before rendering one (#531).
 - **XQuartz is not deprecated by this.** react-x11 already runs on macOS
   today through XQuartz; that path remains the way to run the X11 backend
   (and the WM example) on a Mac. This backend is for shipping _native_
@@ -1766,8 +1768,8 @@ additive or mechanical:
    the usual corrective error). `createRoot({ app })` keeps working and
    is how tests inject mocks of either flavor.
 2. **Capabilities.** `useSupports` grows `'nativeControls'`,
-   `'globalMenu'`, `'transforms'` (when built) beside `'transparency'`
-   and `'shaders'`; same store-and-settle semantics.
+   `'embedding'` (false here), `'globalMenu'`, `'transforms'` (when built)
+   beside `'transparency'` and `'shaders'`; same store-and-settle semantics.
 3. **Inert props policy** (wayland.md open question 1, now decided the
    way it leaned): same JSX everywhere; a prop with no meaning on this
    backend (`wmClass`, `xi2`, `onClientMessage`, X-only states) is

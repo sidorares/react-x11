@@ -163,8 +163,14 @@ export function useClipboard(): Clipboard;
  * branches on it through the theme's `controls: 'auto'` policy; this is for
  * application code composing its own controls to sit beside native ones. It
  * is a property of the backend and never changes over the app's life.
+ *
+ * `'embedding'` is whether this connection can take another process's window
+ * into its own — X11, never Cocoa or the headless mock. Ask it before
+ * rendering a `<foreign>`, which refuses with one `onError` where it is
+ * false. Also a property of the backend, and it never changes either.
  */
-export type SupportsFeature = 'transparency' | 'shaders' | 'nativeControls';
+export type SupportsFeature =
+  'transparency' | 'shaders' | 'nativeControls' | 'embedding';
 
 /**
  * Can this **display** do something? `'transparency'` is true when the

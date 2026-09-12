@@ -7,6 +7,9 @@
 // thinks it is: a mock can only report the calls we chose to make, and the
 // bug this element is most able to cause is destroying somebody else's
 // window, which shows up as the window being *gone*, not as a call.
+//
+// The last few tests are the other side: backends with no embedding at all,
+// where the claim is what the element does *not* do.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -14,8 +17,15 @@ import React from 'react';
 import xserver from 'x11/lib/xserver/index.js';
 import { XEMBED, createClient, StaticFontSource } from 'ntk';
 
-import { createRoot } from '../src/index.js';
-import { act } from '../src/testing/index.js';
+import { isFocusable } from '../src/a11y.js';
+import { canEmbed } from '../src/embedding.js';
+import { createRoot, useSupports } from '../src/index.js';
+import {
+  act,
+  createMockApp,
+  renderX11,
+  waitFor,
+} from '../src/testing/index.js';
 
 const h = React.createElement;
 
@@ -739,4 +749,202 @@ test('<foreign> takes no children', async () => {
   } finally {
     await teardown(x11Root, app, other);
   }
+});
+
+// --- where there is no embedding -----------------------------------------
+//
+// A connection that cannot take in a window it does not own. The mock
+// backend is one, and it is what the headless tests of every library built
+// on this render on, so a component with a `<foreign>` in it has to mount
+// there. The Cocoa backend is the other: test/cocoa-foreign.test.js.
+
+const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('<foreign> refuses where there is no embedding: one onError, no onReady, an empty box', async () => {
+  const ready = [];
+  const errors = [];
+  const pane = (props = {}) =>
+    h('foreign', {
+      style: { width: 120, height: 80 },
+      onReady: (info) => ready.push(info),
+      onError: (err) => errors.push(err),
+      ...props,
+    });
+  // this used to throw from inside the commit, reading `X` off a mock
+  // window that has no `app`
+  const {
+    app,
+    window: wnd,
+    rerender,
+    unmount,
+  } = await renderX11(pane(), { backend: 'mock' });
+  try {
+    await nextTurn();
+    assert.equal(
+      ready.length,
+      0,
+      `onReady was called with windowId ${ready.map((r) => r.windowId)}`,
+    );
+    assert.equal(errors.length, 1, 'one onError');
+    assert.match(errors[0].message, /<foreign> needs the X11 backend/);
+    assert.match(errors[0].message, /useSupports\('embedding'\)/);
+
+    const node = foreignNode(wnd);
+    assert.ok(node.error === errors[0], 'the node carries the refusal');
+    // nothing was made to embed into: the toplevel is the only window
+    assert.equal(app.windows.length, 1);
+    // an empty box — laid out where its style puts it…
+    assert.deepEqual([node.abs.width, node.abs.height], [120, 80]);
+    // …and not a Tab stop, since the client that would make it one never
+    // arrives
+    assert.equal(isFocusable(node), false);
+
+    // a window id is not a second try: the refusal is the backend's
+    await rerender(pane({ windowId: 0x400001 }));
+    await nextTurn();
+    assert.equal(errors.length, 1, 'still one onError');
+    assert.equal(ready.length, 0);
+  } finally {
+    await unmount();
+  }
+});
+
+test('a <foreign> mounted into a live window refuses after the commit, not inside it', async () => {
+  // The other way in: a pane mounted into a window that already exists — the
+  // pane a new tab opens — realizes from `_setRoot` while React is still
+  // placing it. Its owner mounts in the same commit, and the ordinary answer
+  // to the news is to set the owner's state; from inside the commit, that is
+  // an update to a component React has not finished mounting, and React
+  // says so.
+  const logged = [];
+  const original = console.error;
+  console.error = (...args) => logged.push(args.join(' '));
+  let mounted = null;
+  try {
+    function Pane() {
+      const [status, setStatus] = React.useState('starting');
+      return h('box', { style: { flexGrow: 1 } }, [
+        h('text', { key: 'status' }, status),
+        h('foreign', {
+          key: 'pane',
+          style: { flexGrow: 1 },
+          onError: () => setStatus('no embedding here'),
+        }),
+      ]);
+    }
+    mounted = await renderX11(h('box', {}), { backend: 'mock' });
+    await mounted.rerender(h(Pane));
+    await waitFor(() => mounted.getByText('no embedding here'));
+  } finally {
+    console.error = original;
+    await mounted?.unmount();
+  }
+  assert.deepEqual(logged, []);
+});
+
+test('a keyed reorder is not a second try either', async () => {
+  const errors = [];
+  const row = (order) =>
+    h(
+      'box',
+      { style: { flexDirection: 'row', flexGrow: 1 } },
+      order.map((key) =>
+        key === 'pane'
+          ? h('foreign', {
+              key,
+              style: { flexGrow: 1 },
+              onError: (err) => errors.push(err),
+            })
+          : h('box', { key, style: { flexGrow: 1 } }),
+      ),
+    );
+  const { rerender, unmount } = await renderX11(row(['pane', 'side']), {
+    backend: 'mock',
+  });
+  try {
+    await nextTurn();
+    // React moves the pane rather than the box, and a moved node is re-rooted
+    // — which is where a <foreign> inserted into a live tree realizes
+    await rerender(row(['side', 'pane']));
+    await nextTurn();
+    assert.equal(errors.length, 1, 'one onError');
+  } finally {
+    await unmount();
+  }
+});
+
+test('a pane unmounted before its refusal is due hears nothing', async () => {
+  // An app that closes on the first refusal it hears. `unmount()` commits
+  // synchronously inside that handler, so the second pane is gone before its
+  // own refusal is delivered — and a handler for a pane that no longer
+  // exists has nobody left to tell.
+  const heard = [];
+  const x11Root = await createRoot({ app: createMockApp() });
+  x11Root.render(
+    h('window', { width: 320, height: 240 }, [
+      h('foreign', {
+        key: 'a',
+        style: { flexGrow: 1 },
+        onError: () => {
+          heard.push('a');
+          void x11Root.unmount();
+        },
+      }),
+      h('foreign', {
+        key: 'b',
+        style: { flexGrow: 1 },
+        onError: () => heard.push('b'),
+      }),
+    ]),
+  );
+  for (let i = 0; i < 20 && heard.length === 0; i++) await nextTurn();
+  await nextTurn();
+  assert.deepEqual(heard, ['a']);
+});
+
+test('with no onError, a backend that cannot embed warns once, however many panes ask', async () => {
+  const warnings = [];
+  const original = console.warn;
+  console.warn = (...args) => warnings.push(args.join(' '));
+  try {
+    const { unmount } = await renderX11(
+      h('box', { style: { flexDirection: 'row', flexGrow: 1 } }, [
+        h('foreign', { key: 'a', style: { flexGrow: 1 } }),
+        h('foreign', { key: 'b', style: { flexGrow: 1 } }),
+      ]),
+      { backend: 'mock' },
+    );
+    await nextTurn();
+    await unmount();
+  } finally {
+    console.warn = original;
+  }
+  const refusals = warnings.filter((w) =>
+    w.includes('<foreign> needs the X11 backend'),
+  );
+  assert.equal(refusals.length, 1, refusals.join('\n'));
+});
+
+test("useSupports('embedding') answers the question <foreign> asks", async () => {
+  const answer = async (options) => {
+    let seen = null;
+    function Probe() {
+      seen = useSupports('embedding');
+      return null;
+    }
+    const { unmount } = await renderX11(h(Probe), options);
+    await unmount();
+    return seen;
+  };
+  assert.equal(await answer({ backend: 'mock' }), false);
+  assert.equal(await answer({}), true, 'on the in-process X server');
+  // The save set is part of the answer, not a detail of it: a connection
+  // that could move somebody else's window in, but not keep it alive when
+  // this process dies, cannot keep the promise docs/embedding.md makes.
+  const createWindow = () => {};
+  assert.equal(canEmbed({ createWindow, X: { ReparentWindow() {} } }), false);
+  assert.equal(
+    canEmbed({ createWindow, X: { ReparentWindow() {}, ChangeSaveSet() {} } }),
+    true,
+  );
 });

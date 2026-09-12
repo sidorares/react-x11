@@ -3,10 +3,12 @@
 > **X11 only.** Cross-process window embedding does not exist on macOS:
 > there is no way to take another application's window into your own view
 > hierarchy, and this is not a gap waiting to be filled — the platform does
-> not offer the primitive. On the Cocoa backend `<foreign>` is inert. What
-> does work there is [`<Frame>`](frame.md), which embeds a pane of _your
-> own_ application, and reaches the same place through shared surfaces
-> instead of reparenting.
+> not offer the primitive. On the Cocoa backend `<foreign>` refuses: it lays
+> out as an empty box, never calls `onReady`, and calls `onError` once — and
+> `useSupports('embedding')` is false there, so a component can ask before
+> rendering one. What does work there is [`<Frame>`](frame.md), which embeds
+> a pane of _your own_ application, and reaches the same place through
+> shared surfaces instead of reparenting.
 
 Everything else react-x11 draws, it draws itself. `<foreign>` is the one
 element that shows somebody else's pixels: another process's top-level X

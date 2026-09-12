@@ -973,7 +973,9 @@ export interface ForeignProps extends DrawnProps<DrawnNode> {
    */
   windowId?: number;
   /** The container window's id, offered as soon as it exists, so a program
-   * can be spawned into it. Fires before there is anything embedded. */
+   * can be spawned into it. Fires before there is anything embedded — and
+   * never on a backend with no embedding (`useSupports('embedding')`), so the
+   * id is always a real window's. */
   onReady?: (info: { windowId: number; node: DrawnNode }) => void;
   /** A client is in. */
   onEmbedded?: (info: EmbeddedInfo) => void;
@@ -982,7 +984,8 @@ export interface ForeignProps extends DrawnProps<DrawnNode> {
   /** `XEMBED_REQUEST_FOCUS`: the client wants the focus. It is given through
    * the focus manager unless a handler prevents it by focusing elsewhere. */
   onRequestFocus?: (info: { node: DrawnNode }) => void;
-  /** The embed failed — no such window, or it went away mid-handshake.
+  /** The embed failed — no such window, or it went away mid-handshake — or
+   * this backend cannot embed at all, which is reported once, at mount.
    * Without a handler the failure is a console warning. */
   onError?: (err: Error) => void;
 }

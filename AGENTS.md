@@ -70,7 +70,7 @@ no override-redirect staging (issue #4).
   docs/glx.md.
 - `src/foreignnodes.js` — `<foreign>`: another process's window, embedded.
   A second `drawn: false` node, over ntk's `XEmbedSocket` (docs/embedding.md).
-  Two things here are not obvious and are commented at length. **Teardown is
+  Three things here are not obvious and are commented at length. **Teardown is
   synchronous** — `WindowNode` destroys its own X window in the same turn, and
   `DestroyWindow` takes every inferior with it, so a release that waits for a
   round trip releases a window that is already gone; the client is reparented
@@ -80,7 +80,12 @@ no override-redirect staging (issue #4).
   would read as the toplevel losing focus and would put every key past the
   React tree before any handler saw it. The X focus stays on our window and
   forwarding happens in `defaultKeyDown`/`defaultKeyUp`, which is what makes
-  the rule "app chords first, everything else forwards" mechanical.
+  the rule "app chords first, everything else forwards" mechanical. And **it
+  refuses where there is no embedding**: the Cocoa app and the headless mock
+  both carry an X stub and a `createWindow` that takes a parent, so "there
+  is an app" says nothing. `realize()` asks `canEmbed` (`src/embedding.js`,
+  shared with `useSupports('embedding')`), and a no is one `onError` and an
+  empty box — never an `onReady` with no id (#531).
 - `src/frame/` — `<Frame>`: a pane of the application in its own process,
   its window embedded over `<foreign>` (docs/frame.md). Four small files
   along the seams: `protocol.js` (pure — the six messages, the callback

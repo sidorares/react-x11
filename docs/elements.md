@@ -1971,7 +1971,15 @@ the raw form, and `@react-x11/components/three` for a scene graph.
 
 **X11 only.** Cross-process window embedding does not exist on macOS —
 there is no equivalent of handing another application's window to your
-layout, and none is planned. On the Cocoa backend this element is inert.
+layout, and none is planned. Where there is none — the Cocoa backend, and
+the headless mock tests render on — this element refuses: it lays out as an
+empty box and draws nothing, never calls `onReady`, and calls `onError` once
+to say why. Ask before rendering one:
+
+```jsx
+const embedding = useSupports('embedding');
+```
+
 `<Frame>`, which uses it on X11 to host a pane of your _own_ application,
 does work on both ([frame.md](frame.md)) — it just gets there another way.
 
@@ -1995,14 +2003,17 @@ a react-x11 app a _host_ rather than a drawer of its own pixels. Needs ntk
   this node instead, which is what `xterm -into WID` and `mpv --wid=WID`
   need.
 - `onReady({ windowId })` — this node's own container id, offered before
-  anything is embedded, so a program can be spawned into it.
+  anything is embedded, so a program can be spawned into it. Never called
+  where there is no embedding, so the id is always a real window's.
 - `onEmbedded({ id, xembed, version })` — a client is in. `xembed: false`
   is a client that set no `_XEMBED_INFO` and got plain reparenting, which
   is the common case rather than the fallback.
 - `onClientGone()` — destroyed, or reparented away by someone else.
 - `onRequestFocus()` — the client asked for the focus. It is then given
   through the focus manager, so the rest of the tree observes it normally.
-- `onError(err)` — the embed failed. Without a handler, a console warning.
+- `onError(err)` — the embed failed, or — once, at mount — this backend has
+  no embedding at all. Without a handler, a console warning; for the second
+  kind, one per app however many `<foreign>`s ask.
 - `focusable` — default `true`, like `<textinput>`.
 - `backgroundColor` in the `style` is what shows in the rect with no client
   in it: the container window's background, painted by the server.

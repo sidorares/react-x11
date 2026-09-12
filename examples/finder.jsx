@@ -21,7 +21,9 @@
 //                        same group vocabulary the drop uses, deliberately.
 //   Open terminal here   spawns `xterm -into` a `<foreign>` pane, so another
 //                        process's window sits in this window's layout. Ctrl+T
-//                        is the app's, not the terminal's — see below.
+//                        is the app's, not the terminal's — see below. X11
+//                        only: where `useSupports('embedding')` is false, on
+//                        Cocoa, neither the item nor the chord is there.
 //
 // ## Why there is no tree
 //
@@ -66,6 +68,7 @@ import {
   createRoot,
   createStyles,
   useClipboard,
+  useSupports,
 } from '../src/index.js';
 
 const ROW_H = 22; // fixed, because windowing needs it to be
@@ -442,6 +445,10 @@ export function FinderPanel({ backend, start }) {
   const [generation, setGeneration] = useState(0);
   const [status, setStatus] = useState('');
   const [terminal, setTerminal] = useState(false);
+  // A terminal pane is another process's window, which only a backend with
+  // cross-process embedding can host. Where there is none the pane is not
+  // offered at all, rather than opened with nothing that can ever fill it.
+  const embedding = useSupports('embedding');
   const [pending, startTransition] = useTransition();
 
   const places = useMemo(
@@ -528,12 +535,16 @@ export function FinderPanel({ backend, start }) {
       { label: 'Paste', onSelect: paste },
       { type: 'separator' },
       { label: 'Refresh', onSelect: () => setGeneration((g) => g + 1) },
-      {
-        label: terminal ? 'Close terminal' : 'Open terminal here',
-        onSelect: () => setTerminal((on) => !on),
-      },
+      ...(embedding
+        ? [
+            {
+              label: terminal ? 'Close terminal' : 'Open terminal here',
+              onSelect: () => setTerminal((on) => !on),
+            },
+          ]
+        : []),
     ],
-    [selected, copy, paste, go, terminal],
+    [selected, copy, paste, go, terminal, embedding],
   );
 
   return (
@@ -543,7 +554,7 @@ export function FinderPanel({ backend, start }) {
       // terminal eating it — docs/embedding.md. It still will not fire while
       // the pointer is inside the pane, which is X's rule rather than ours.
       onKeyDown={(ev) => {
-        if (ev.ctrlKey && ev.key === 't') {
+        if (embedding && ev.ctrlKey && ev.key === 't') {
           ev.preventDefault();
           setTerminal((on) => !on);
         }

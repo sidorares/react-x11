@@ -1263,15 +1263,17 @@ async function main() {
   void [n, perOpcode, one.stats.errors, one.stop()];
 }
 
-// the two things a display can be asked about, both plain booleans — one is
-// about the machine and the compositor, the other about the backend this
-// connection got
+// the things a display can be asked about, all plain booleans — about the
+// machine and the compositor, the backend this connection got, what that
+// backend draws controls with and whether it can host another app's window
 function _Supports() {
   const canBlend: boolean = useSupports('transparency');
   const shaders: boolean = useSupports('shaders');
+  const bezels: boolean = useSupports('nativeControls');
+  const embedding: boolean = useSupports('embedding');
   // @ts-expect-error — not a feature useSupports knows
   useSupports('webgpu');
-  void [canBlend, shaders];
+  void [canBlend, shaders, bezels, embedding];
   return null;
 }
 
