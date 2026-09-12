@@ -106,10 +106,27 @@ where round trips are the thing to avoid.
 
 The pointer over a surface is the tree's, on every backend: `onMouseDown`,
 `onMouseMove`, `onMouseUp`, `onClick`, `onWheel` and the rest fire at the
-`<glarea>` and bubble, with `ev.localX`/`localY` measured from its corner —
-which is what a scene picks with. Nothing needs to listen on the surface's
-own window, and nothing should: on X11 a listener there takes the event
-away from the tree ([elements.md](elements.md#glarea) says why).
+`<glarea>` — or at a child drawn over it (below) — and bubble, with
+`ev.localX`/`localY` measured from the target's corner, which is what a
+scene picks with. Nothing needs to listen on the surface's own window, and
+nothing should: on X11 a listener there takes the event away from the tree
+([elements.md](elements.md#glarea) says why).
+
+## 2D over the surface
+
+A `<glarea>`'s children are drawn above it — a legend, a toolbar, a label
+over the scene — laid out in its box and hit before it. They are ordinary
+elements. Core paints them on panes stacked over the surface, from the
+window's own frame. On the Cocoa backend Core Animation composites the
+panes with the GL frame, translucency and all. On X11 a pane is an opaque
+child window, so what a child leaves unpainted shows the surface's
+`clearColor` ([elements.md](elements.md#glarea) has the table).
+`useSupports('glOverlay')` asks whether a connection draws them;
+`examples/labs/gl-overlay.jsx` runs one on both backends.
+
+So a HUD is not GL's business: its text is set by the app's own text
+engine, its controls take their own input, and nothing is rasterized into a
+texture.
 
 ## When there is no surface at all
 

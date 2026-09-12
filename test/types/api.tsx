@@ -799,6 +799,24 @@ declare const surfaceNode: GlAreaNode;
 const _forwardsPointer: true = surfaceNode.forwardsPointer;
 void _forwardsPointer;
 
+// a surface's children are 2D content drawn above it: laid out in its box
+// like a box's, and taking the pointer before it
+function Hud({ overlay }: { overlay: boolean }) {
+  return (
+    <glarea style={{ flexGrow: 1, padding: 12 }} onDraw={() => {}}>
+      {overlay && (
+        <box
+          style={{ position: 'absolute', left: 12, top: 12 }}
+          onMouseDown={(ev) => void ev.localX}
+        >
+          <text>Legend</text>
+        </box>
+      )}
+    </glarea>
+  );
+}
+void Hud;
+
 function Embedded({ id }: { id: number }) {
   return (
     <foreign
@@ -1277,15 +1295,17 @@ async function main() {
 
 // the things a display can be asked about, all plain booleans — about the
 // machine and the compositor, the backend this connection got, what that
-// backend draws controls with and whether it can host another app's window
+// backend draws controls with, whether it can host another app's window and
+// whether a <glarea>'s children are drawn above its surface
 function _Supports() {
   const canBlend: boolean = useSupports('transparency');
   const shaders: boolean = useSupports('shaders');
   const bezels: boolean = useSupports('nativeControls');
   const embedding: boolean = useSupports('embedding');
+  const overlay: boolean = useSupports('glOverlay');
   // @ts-expect-error — not a feature useSupports knows
   useSupports('webgpu');
-  void [canBlend, shaders, bezels, embedding];
+  void [canBlend, shaders, bezels, embedding, overlay];
   return null;
 }
 

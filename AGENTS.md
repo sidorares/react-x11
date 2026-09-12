@@ -72,6 +72,19 @@ no override-redirect staging (issue #4).
   before its tree (`_surfaces`, `hitSurface`). So a listener on the
   surface's `window` is a bug — ntk selects what a window is listened to
   for, and the event stops reaching the tree.
+- `src/gloverlay.js` — a `<glarea>`'s children: 2D content drawn above the
+  surface. Laid out in its box and living in the owning window's tree like
+  anyone's — its damage list, its event manager, its focus — but painted on
+  _panes_ stacked over the surface, from the owning window's frame and with
+  its damage (`_syncOverlays`/`_paintOverlays` in nodes/window/flush.js). A
+  pane is one transparent layer on Cocoa (`app.createOverlayPane`,
+  `src/cocoa/overlay.js`), which Core Animation composites with the frame,
+  and one opaque child window per region the children reach on X11: no
+  SHAPE, which the in-process server lacks, and no pixmap the size of the
+  surface to show a legend in its corner. Two traps. A pane selects no input,
+  because the pointer reaches the tree by propagation the way it does over
+  the surface. And a child of a surface must never be promoted on Cocoa
+  (`promotableNode`): its layer would land under the GL layer.
 - `src/foreignnodes.js` — `<foreign>`: another process's window, embedded.
   A second `drawn: false` node, over ntk's `XEmbedSocket` (docs/embedding.md).
   Three things here are not obvious and are commented at length. **Teardown is

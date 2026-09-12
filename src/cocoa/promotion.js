@@ -143,6 +143,18 @@ function paintsSomething(node) {
 }
 
 /**
+ * Inside a `<glarea>`: drawn on a pane above the surface (src/gloverlay.js).
+ * A layer of its own would sit on the root layer *under* the GL layer, so a
+ * promoted node there would vanish behind the surface it is drawn over.
+ */
+function insideGlArea(node) {
+  for (let n = node.parent; n && !n.isWindow; n = n.parent) {
+    if (n.isGlArea) return true;
+  }
+  return false;
+}
+
+/**
  * Can this node be a property box on a layer at all — the static half of
  * the answer, the same whatever the scene around it does: a plain box by
  * its target style, not a scroller (its bars and clip host are the layer
@@ -150,6 +162,7 @@ function paintsSomething(node) {
  */
 function promotableNode(node) {
   if (node.destroyed || !plainBox(node)) return false;
+  if (insideGlArea(node)) return false;
   if (!stylePaintsPlain(node, node._targetStyle ?? node.style)) return false;
   if (node.isScroller?.()) return false;
   return !paintsOutline(node);

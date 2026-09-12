@@ -54,9 +54,15 @@ const findGLArea = (node) =>
 /**
  * A `<glarea>` inset 10px in a 200x120 `<window>` at scale 2, mounted, its
  * surface created and a frame run. `area` and `box` are extra props for the
- * surface and the box around it.
+ * surface and the box around it, `children` the surface's own, `sibling` one
+ * more child of the box, after the surface.
  */
-async function mountGLArea({ area = {}, box = {} } = {}) {
+async function mountGLArea({
+  area = {},
+  box = {},
+  children = null,
+  sibling = null,
+} = {}) {
   const { native, app } = fakeCocoaApp();
   // the runtime chooseGLConfig resolves, settled before anything asks: no
   // x11-dri and no CGL context, so this runs on any OS
@@ -72,7 +78,8 @@ async function mountGLArea({ area = {}, box = {} } = {}) {
       h(
         'box',
         { style: { flexGrow: 1, padding: 10 }, ...box },
-        h('glarea', { style: { flexGrow: 1 }, ...area }),
+        h('glarea', { key: 'gl', style: { flexGrow: 1 }, ...area }, children),
+        sibling,
       ),
     ),
   );
@@ -86,8 +93,22 @@ async function mountGLArea({ area = {}, box = {} } = {}) {
     app._presentAll();
   };
   frame();
-  return { native, wnd, node, frame };
+  return { native, app, root, wnd, node, frame };
 }
+
+/** A box at a corner of the surface, 20x10 points, half transparent. */
+const legend = (props = {}) =>
+  h('box', {
+    style: {
+      position: 'absolute',
+      left: 5,
+      top: 5,
+      width: 20,
+      height: 10,
+      backgroundColor: 'rgba(255, 0, 0, 0.5)',
+    },
+    ...props,
+  });
 
 /**
  * Every `setLayerProps` on `layer`, in order, each with whether a
@@ -165,4 +186,136 @@ test('the pointer over the surface is dispatched at the <glarea>, and bubbles', 
     ],
   );
   void native;
+});
+
+test('the children are drawn on a transparent layer above the surface', async () => {
+  // One pane over the whole surface, because Core Animation composites it:
+  // a translucent child blends with the GL frame, which X11 cannot do.
+  const { native, wnd, node, frame } = await mountGLArea({
+    children: legend(),
+  });
+  frame();
+  const gl = node.window.layer;
+  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  assert.ok(overlay, 'a layer over the GL layer');
+  assert.ok(overlay !== gl, 'not the GL layer itself');
+  assert.equal(gl.props.zPosition, 1e7);
+  // exactly over the surface, in points, and on show once painted
+  assert.deepEqual(overlay.props.frame, gl.props.frame);
+  assert.equal(overlay.props.hidden, false);
+  assert.ok(overlay.contents, 'the painted bitmap was pushed to it');
+  // the bitmap is the surface's size in device pixels — at scale 2
+  const [pane] = node._overlay.panes;
+  assert.deepEqual(
+    [pane.wnd._surfaceSize.width, pane.wnd._surfaceSize.height],
+    [360, 200],
+  );
+  // transparent: each pass is cleared, never filled with a ground colour
+  const surface = pane.wnd._surface;
+  const onPane = native.calls.filter((c) => c.args[0] === surface);
+  assert.ok(
+    onPane.some((c) => c.name === 'ctxClearRect'),
+    'cleared',
+  );
+  // every set on the layer went out with implicit animations off
+  const loose = layerSets(native, overlay).filter((s) => !s.still);
+  assert.deepEqual(loose, []);
+});
+
+test('the pointer over a child of the surface is the child’s', async () => {
+  const seen = [];
+  const { app, node } = await mountGLArea({
+    area: { onMouseDown: (ev) => seen.push(['area', ev.target]) },
+    children: legend({ onMouseDown: (ev) => seen.push(['legend', ev.target]) }),
+  });
+  const [child] = node.children;
+  pointerOver(app, child, { press: true });
+  assert.deepEqual(
+    seen.map(([who, target]) => [who, target === child]),
+    [
+      ['legend', true],
+      ['area', true],
+    ],
+  );
+});
+
+test('a child of the surface is never promoted onto a layer of its own', async () => {
+  // A promoted node's layer sits on the root layer at its paint order's
+  // zPosition — under the GL layer at 1e7 — so a child of the surface lifted
+  // there like any animated box would vanish behind the surface it is drawn
+  // over. The control, a sibling of the surface with the same transition, is
+  // promoted: the surface presenter promotes by default.
+  const fade = (backgroundColor, left) => ({
+    position: 'absolute',
+    left,
+    top: 5,
+    width: 20,
+    height: 10,
+    backgroundColor,
+    transition: { backgroundColor: 120 },
+  });
+  const tree = (color) =>
+    h(
+      'window',
+      { width: 200, height: 120 },
+      h(
+        'box',
+        { style: { flexGrow: 1, padding: 10 } },
+        h(
+          'glarea',
+          { key: 'gl', style: { flexGrow: 1 } },
+          h('box', { style: fade(color, 5) }),
+        ),
+        h('box', { key: 'control', style: fade(color, 150) }),
+      ),
+    );
+  const { root, wnd, node, frame } = await mountGLArea({
+    children: h('box', { style: fade('#ff0000', 5) }),
+    sibling: h('box', { key: 'control', style: fade('#ff0000', 150) }),
+  });
+  const [child] = node.children;
+  const control = node.parent.children[1];
+  root.render(tree('#0000ff'));
+  await tick();
+  assert.ok(wnd._promotion, 'this window promotes');
+  // Decided at the swap, not by the frame: the control's animation is taken
+  // off the frame clock and offered to a layer, the child's never is. A
+  // frame declines a node the paint walk never reaches anyway, so
+  // `_promoted` alone could not tell this rule from its absence.
+  assert.ok(child._anim?.get('backgroundColor'), 'the child’s is running');
+  assert.ok(
+    control._anim?.get('backgroundColor')?.offloaded,
+    'the control’s is offered to a layer',
+  );
+  assert.ok(
+    !child._anim.get('backgroundColor').offloaded,
+    'the child’s stays on the frame clock',
+  );
+  frame();
+  assert.equal(control._promoted, true, 'the control was promoted');
+  assert.equal(child._promoted, false, 'the child of the surface was not');
+});
+
+test('the layer goes with the last child', async () => {
+  const { root, wnd, node, frame } = await mountGLArea({
+    children: legend(),
+  });
+  frame();
+  const overlay = wnd._layer.sublayers.find((l) => l.props.zPosition > 1e7);
+  assert.ok(overlay);
+  root.render(
+    h(
+      'window',
+      { width: 200, height: 120 },
+      h(
+        'box',
+        { style: { flexGrow: 1, padding: 10 } },
+        h('glarea', { style: { flexGrow: 1 } }),
+      ),
+    ),
+  );
+  await tick();
+  frame();
+  assert.equal(overlay.parent, null, 'off the root layer');
+  assert.ok(node._overlay === null, 'no overlay left');
 });

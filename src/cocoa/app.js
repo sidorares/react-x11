@@ -26,6 +26,7 @@ import { setScreensForTests } from '../screens.js';
 import { setScaleForTests } from '../scale.js';
 import { BezelStore } from './bezels.js';
 import { CocoaGLArea, cocoaGLConfig, resolveCocoaGLRuntime } from './glarea.js';
+import { CocoaOverlayPane } from './overlay.js';
 import { CocoaDockMenu } from './dock.js';
 import { CocoaGlobalMenuExport } from './globalmenu.js';
 import { CocoaStatusItem } from './statusitem.js';
@@ -416,6 +417,16 @@ export class CocoaApp {
    */
   chooseGLConfig(spec) {
     return cocoaGLConfig(this, spec);
+  }
+
+  /**
+   * The pane a `<glarea>`'s children are drawn on (src/gloverlay.js): one
+   * transparent layer above the surface's, which Core Animation composites —
+   * so the overlay blends with the GL frame here, where an X11 pane is an
+   * opaque child window. Having this at all is how the overlay knows.
+   */
+  createOverlayPane(attributes) {
+    return new CocoaOverlayPane(this, attributes);
   }
 
   /**

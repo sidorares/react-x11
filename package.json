@@ -60,6 +60,7 @@
     "examples:frame": "tsx examples/frame.jsx",
     "labs:text-baseline": "tsx examples/labs/text-baseline.jsx",
     "labs:direct-gl": "tsx examples/labs/direct-gl.jsx",
+    "labs:gl-overlay": "tsx examples/labs/gl-overlay.jsx",
     "examples:viewer3d": "tsx examples/viewer3d.jsx",
     "examples:transparent": "tsx examples/transparent.jsx",
     "examples:windows": "tsx examples/windows.jsx",

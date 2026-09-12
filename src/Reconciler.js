@@ -138,17 +138,18 @@ const HostConfig = {
     return {
       isInsideText: false,
       isInsideSvg: false,
-      isInside3d: false,
     };
   },
 
   getChildHostContext(parentHostContext, type) {
+    // A `<glarea>`'s children are drawn nodes like any box's — 2D content
+    // above the surface (src/gloverlay.js) — so it opens no context of its
+    // own. A scene graph over the surface is `@react-x11/components/three`,
+    // with a reconciler of its own.
     return {
       isInsideText: parentHostContext.isInsideText || type === 'text',
       // <svg> children are declarative SVG elements, not react-x11 nodes
       isInsideSvg: parentHostContext.isInsideSvg || type === 'svg',
-      // inside <glarea> the children are scene nodes, not drawn nodes
-      isInside3d: parentHostContext.isInside3d || type === 'glarea',
     };
   },
 
@@ -192,17 +193,6 @@ const HostConfig = {
       throw new Error(
         `react-x11: <${type}> is not allowed inside <text>; only nested ` +
           '<text> spans and strings are.',
-      );
-    }
-    if (hostContext.isInside3d) {
-      // `<glarea>` is a leaf here: it owns the surface, the frame clock and
-      // the swap, and `onDraw` is the escape hatch. A *scene graph* over it
-      // — meshes, materials, lights, post-processing, on either backend —
-      // is `@react-x11/components/three`, which brings its own reconciler.
-      throw new Error(
-        `react-x11: <${type}> is not an element — <glarea> takes no ` +
-          'children. Draw through `onDraw`, or use ' +
-          '`@react-x11/components/three` for a scene graph. See docs/gl.md.',
       );
     }
     let node;

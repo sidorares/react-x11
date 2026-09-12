@@ -85,6 +85,29 @@ export class WindowFlush {
   }
 
   /**
+   * Panes for the children of every `<glarea>` here, where this frame's
+   * layout put them (src/gloverlay.js). True when one was made, resized or
+   * dropped, which the frame then owes a paint for.
+   */
+  _syncOverlays() {
+    let changed = false;
+    for (const area of this._overlaid) {
+      if (area.destroyed || area.root !== this) {
+        this._overlaid.delete(area);
+        continue;
+      }
+      if (area._syncOverlay()) changed = true;
+    }
+    return changed;
+  }
+
+  /** …and their paint, with the frame's own damage: a claim inside a
+   * `<glarea>`'s children is in that list like any other. */
+  _paintOverlays(damage) {
+    for (const area of this._overlaid) area._paintOverlay(damage);
+  }
+
+  /**
    * A frame: layout if owed, then the paint passes — or the presenter's
    * frame — then the backend's word. Runs on the window's clock through
    * `_scheduleFrame`, and early, synchronously, for a discrete input
@@ -254,6 +277,12 @@ export class WindowFlush {
     // …and the next commit's claims name the arrangement this frame leaves
     // behind again, from before whatever scroll comes with them
     this._laidOut = false;
+    // The children of a `<glarea>` get panes where they are now: after
+    // layout and the scroll's shift, before the damage is taken, so a pane
+    // made or resized in this frame is painted in it, whole
+    if (this._overlaid.size !== 0 && this._syncOverlays()) {
+      this.needsPaint = true;
+    }
     if (!this.needsPaint) return false;
     this.needsPaint = false;
     const damage = this._takeDamage(width, height);
@@ -276,6 +305,8 @@ export class WindowFlush {
     // list was still taken (its bookkeeping is what keeps the two paths one
     // code) and is simply not consumed; the presenter diffs at the layer.
     if (typeof this.window.presentFrame === 'function') {
+      // the panes are no presenter's: they paint from the damage either way
+      if (this._overlaid.size !== 0) this._paintOverlays(damage);
       this.window.presentFrame(this, damage);
       this.app._reactX11Startup?.painted();
       return true;
@@ -297,6 +328,10 @@ export class WindowFlush {
     for (const rect of damage ?? [null]) {
       this._paintRegion(ctx, rect, width, height);
     }
+    // …and the panes over the surfaces, with the same damage: a claim from
+    // a `<glarea>`'s children is theirs to repaint — the window's pass under
+    // the surface is one nobody sees. Inside the cache's frame, like a pass.
+    if (this._overlaid.size !== 0) this._paintOverlays(damage);
     // after every region: an entry drawn in one damage rect must not be
     // evicted before the next rect of the same frame asks for it
     this._paintCache?.endFrame();

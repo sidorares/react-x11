@@ -28,6 +28,7 @@ import {
 } from './compositing.js';
 import { canEmbed } from './embedding.js';
 import { hasDirectGL, watchDirectGL } from './glbackend.js';
+import { canOverlay } from './gloverlay.js';
 
 const AppContext = createContext(null);
 
@@ -58,9 +59,10 @@ export function useApp() {
   return app;
 }
 
-// 'nativeControls' and 'embedding' are properties of the backend, decided
-// before the first render and never changing after — so their subscription
-// has nothing to deliver and their snapshot is a property test.
+// 'nativeControls', 'embedding' and 'glOverlay' are properties of the
+// backend, decided before the first render and never changing after — so
+// their subscription has nothing to deliver and their snapshot is a property
+// test.
 const NEVER_CHANGES = () => () => {};
 
 // What `useSupports` watches and reads, per feature. `read` answers a
@@ -77,6 +79,7 @@ const FEATURES = {
     read: (app) => Boolean(app.nativeBezels),
   },
   embedding: { watch: NEVER_CHANGES, read: canEmbed },
+  glOverlay: { watch: NEVER_CHANGES, read: canOverlay },
 };
 
 /**
@@ -153,6 +156,20 @@ const FEATURES = {
  * ```
  *
  * Like `'nativeControls'`, it is a property of the backend and never changes.
+ *
+ * `'glOverlay'` is true when the children of a `<glarea>` are drawn above its
+ * GL surface on this connection — laid out in its box, painted on panes over
+ * the surface, hit before it. Both backends draw them; what differs is
+ * translucency, composited by Core Animation on the Cocoa backend and opaque
+ * on X11 (docs/elements.md says exactly how). It is the question to ask
+ * before handing a surface its HUD rather than drawing that some other way:
+ *
+ * ```jsx
+ * const overlay = useSupports('glOverlay');
+ * <glarea onDraw={drawMap}>{overlay && <Legend />}</glarea>
+ * ```
+ *
+ * A property of the backend too, and it never changes.
  */
 export function useSupports(feature) {
   const app = useApp();
