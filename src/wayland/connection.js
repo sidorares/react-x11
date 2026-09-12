@@ -41,6 +41,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
+const WAYLAND_CLIENT_DISPLAY = ['wayland-client', 'dist', 'display.js'].join(
+  '/',
+);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROTOCOL_DIR = path.join(here, 'protocols');
 
@@ -214,7 +217,11 @@ export class WaylandConnection extends EventEmitter {
       });
     }
 
-    const { default: Display } = await import('wayland-client/dist/display.js');
+    // A computed specifier on purpose: a bundler (the docs site's esbuild)
+    // resolves a literal `import('wayland-client/…')` at build time and fails
+    // where the package is not installed. The fork is consumed through a
+    // link until it is published, and this backend is optional either way.
+    const { default: Display } = await import(WAYLAND_CLIENT_DISPLAY);
     const display = new Display(socket);
     display.setMaxListeners(0);
     const conn = new WaylandConnection(display, socket, used);

@@ -10,7 +10,11 @@ import { test } from 'node:test';
 
 import { WaylandConnection } from '../../src/wayland/connection.js';
 import { WaylandSeat } from '../../src/wayland/seat.js';
-import { MockCompositor, until } from './mock-compositor.js';
+import {
+  MockCompositor,
+  until,
+  waylandClientAvailable,
+} from './mock-compositor.js';
 
 const require = createRequire(import.meta.url);
 
@@ -44,9 +48,10 @@ function nativeSocketAvailable() {
 test(
   'a keymap arrives as a descriptor over the native socket and decodes keys',
   {
-    skip:
-      !nativeSocketAvailable() &&
-      'x11-dri UnixSocket not available on this runtime',
+    skip: !waylandClientAvailable
+      ? 'wayland-client (the fork) is not installed'
+      : !nativeSocketAvailable() &&
+        'x11-dri UnixSocket not available on this runtime',
   },
   async () => {
     const dri = require('x11-dri');

@@ -27,8 +27,16 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { format_args, get_args, writeUInt, readUInt } =
-  await import('wayland-client/dist/args.js');
+// The fork of wayland-client is consumed through a link until it is
+// published; where it is not installed, the suite skips rather than fails.
+let codec = null;
+try {
+  codec = await import(import.meta.resolve('wayland-client/dist/args.js'));
+} catch {
+  codec = null;
+}
+export const waylandClientAvailable = codec !== null;
+const { format_args, get_args, writeUInt, readUInt } = codec ?? {};
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PROTOCOLS = path.join(here, '..', '..', 'src', 'wayland', 'protocols');

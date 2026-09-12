@@ -22,20 +22,40 @@ The backend is never chosen by `'auto'`: X11 stays the default on Linux
 because the remote case ([remote.md](remote.md)) is the flagship reason this
 project exists and Wayland has no network transparency.
 
+## How to tell it is not Xwayland
+
+A GNOME session answers `$DISPLAY` too, through Xwayland, so "the window
+appeared" proves nothing. Three checks that do:
+
+- **Unset `DISPLAY`.** The Wayland backend never opens it; the X11 backend
+  cannot start without it.
+  ```bash
+  env -u DISPLAY REACT_X11_BACKEND=wayland node app.mjs   # works only natively
+  ```
+- **Ask the app.** `root.app.backend === 'wayland'`, and `root.app.X` is the
+  stand-in from `app.js` — no `display.screen`, no `X.require`. The examples
+  print the transport they connected through (`connected via x11-dri` or
+  `fdpass-bun`) and never import an X module at all.
+- **Ask the desktop.** `xlsclients` and `xwininfo -root -tree` list Xwayland
+  clients; a native window is absent from both. GNOME's Looking Glass
+  (`Alt+F2`, `lg`, Windows tab) shows it as a `MetaWindowWayland`, and its
+  frame is this backend's own titlebar (`decorations.js`) rather than
+  mutter's Adwaita frame, which only Xwayland windows get.
+
 ## What runs
 
-| piece                | file               | what it does                                                        |
-| -------------------- | ------------------ | ------------------------------------------------------------------- |
-| connection           | `connection.js`    | fd-capable transport (native or bun:ffi), vendored protocol JSON    |
-| shell                | `window.js`        | xdg toplevels and popups, deferred `ack_configure`, fractional scale |
-| GPU presentation     | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf |
-| 2d context           | `context2d.js`, `glyphatlas.js` | rects/rounded rects (SDF), paths (stencil), gradients, images, text |
-| input                | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js` | pointer frames, keymap parsing, key repeat, routing |
-| decorations          | `decorations.js`   | titlebar, borders, resize edges, buttons — CSD for GNOME            |
-| offscreen surfaces   | `surface.js`       | the paint cache and scroll blits, over a render target              |
-| clipboard            | `clipboard.js`, `fdutil.js` | `wl_data_device` + primary selection, over pipes          |
-| the app              | `app.js`, `backendwindow.js` | what `createRoot({ backend: 'wayland' })` renders through |
-| tests                | `test/wayland/`    | an in-process compositor, and the pure parts                        |
+| piece              | file                                                     | what it does                                                         |
+| ------------------ | -------------------------------------------------------- | -------------------------------------------------------------------- |
+| connection         | `connection.js`                                          | fd-capable transport (native or bun:ffi), vendored protocol JSON     |
+| shell              | `window.js`                                              | xdg toplevels and popups, deferred `ack_configure`, fractional scale |
+| GPU presentation   | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf                         |
+| 2d context         | `context2d.js`, `glyphatlas.js`                          | rects/rounded rects (SDF), paths (stencil), gradients, images, text  |
+| input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                  |
+| decorations        | `decorations.js`                                         | titlebar, borders, resize edges, buttons — CSD for GNOME             |
+| offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target               |
+| clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                     |
+| the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through            |
+| tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                         |
 
 ## What was measured
 
@@ -49,13 +69,13 @@ Asked first, because it decides whether a native protocol bridge is
 justified. Measured with `wayland-client` (the fork), per request and per
 event:
 
-| measure                               | Bun            | Node (native socket) |
-| ------------------------------------- | -------------- | -------------------- |
-| encode + write, async API             | 0.32 M req/s   | 0.20 M req/s         |
-| encode + write, `$` synchronous API   | 0.49 M req/s   | **0.67 M req/s** (1.5 µs) |
-| decode + dispatch                     | 2.3 M ev/s     | **3.0 M ev/s** (0.33 µs) |
-| round trip `sync` → `done`, plain socket | 0.141 ms p50 | 0.119 ms p50         |
-| round trip, fd-capable socket         | 0.178 ms p50 (reader thread) | **0.097 ms p50** |
+| measure                                  | Bun                          | Node (native socket)      |
+| ---------------------------------------- | ---------------------------- | ------------------------- |
+| encode + write, async API                | 0.32 M req/s                 | 0.20 M req/s              |
+| encode + write, `$` synchronous API      | 0.49 M req/s                 | **0.67 M req/s** (1.5 µs) |
+| decode + dispatch                        | 2.3 M ev/s                   | **3.0 M ev/s** (0.33 µs)  |
+| round trip `sync` → `done`, plain socket | 0.141 ms p50                 | 0.119 ms p50              |
+| round trip, fd-capable socket            | 0.178 ms p50 (reader thread) | **0.097 ms p50**          |
 
 A frame issues a handful of requests and input peaks near a thousand events
 a second: the JavaScript protocol layer is one to two orders of magnitude
@@ -67,12 +87,12 @@ but not worth acting on.
 
 ### Where a frame goes
 
-| phase                                    | p50      |
-| ---------------------------------------- | -------- |
-| `makeCurrent`                            | 0.04 ms  |
-| draw                                     | 0.05 ms  |
-| Wayland (attach / damage / commit)       | 0.09 ms  |
-| **`Surface.swap()`**                     | 24.5 ms  |
+| phase                              | p50     |
+| ---------------------------------- | ------- |
+| `makeCurrent`                      | 0.04 ms |
+| draw                               | 0.05 ms |
+| Wayland (attach / damage / commit) | 0.09 ms |
+| **`Surface.swap()`**               | 24.5 ms |
 
 The cost is `swap()`, and it is environmental: with no compositor at all,
 `swap()` is 0.07 ms and `glFinish()` is ~10 ms — the same at 64×64 as at
@@ -92,7 +112,7 @@ X pixmap. A GBM swapchain rotates, so the buffer a frame lands in last showed
 the frame before last, and a partial repaint into it leaves stale pixels
 everywhere else. So the renderer paints into a persistent render target
 (`target.js`) and the changed rectangles are copied into whichever buffer
-comes round. GBM names the buffer only *after* the swap, so the copy uses the
+comes round. GBM names the buffer only _after_ the swap, so the copy uses the
 union of what every known buffer still owes — and everything, until a full
 rotation has passed without meeting a new buffer. The tests pin the rule
 (`swapchain.test.js`); a React counter ticking at 400 ms presents frames
@@ -149,7 +169,7 @@ arrive as fds, and Node's sockets abort on them
   first reply hangs until an unrelated timer turns the loop. `pipe()`,
   `socketpair()` and `memfdCreate()` came with it.
 - **node-x11's `fdpass-bun.js`**: `bun:ffi` to libc, with a reader thread.
-  Bun only. Bun *exports* libuv's symbol names but several are stubs that
+  Bun only. Bun _exports_ libuv's symbol names but several are stubs that
   abort the process (`uv_poll_init` among them), so the native socket is
   never attempted under Bun; there is nothing to probe for safely.
 
