@@ -191,6 +191,11 @@ export class WindowNode extends Scrollable(Node) {
     // behind one `size` read on the motion path, and a tree that never asked
     // for attention must not pay a property walk to find that out.
     this._attentionNodes = new Set();
+    // The GL surfaces in this window, bottom to top: `<glarea>`s, stacked
+    // above everything 2D here, which the hit test therefore asks before the
+    // tree (`EventManager._surfaceAt`). A surface joins when its window is
+    // made and leaves when it goes (src/glnodes.js).
+    this._surfaces = [];
     this.events = new EventManager(this);
     // ids of the child windows in the order the *server* stacks them,
     // bottom to top — see _restackWindowChildren

@@ -10,7 +10,7 @@ import React, { useRef, useState } from 'react';
 import { startTrace } from 'react-x11/debug';
 import { XK_MULTI_KEY, isDeadKeysym, keysymFromName } from 'react-x11/keysyms';
 import { Surface } from 'react-x11/ntk';
-import type { Context2D } from 'react-x11/node';
+import type { Context2D, GlAreaNode } from 'react-x11/node';
 import { onReload, performReactRefresh } from 'react-x11/refresh';
 import { registerRefresh, createTransformer } from 'react-x11/refresh/loader';
 import type { ReloadEvent } from 'react-x11/refresh';
@@ -780,12 +780,24 @@ function RawGl() {
       onCreated={(gl) => gl.Enable(gl.DEPTH_TEST)}
       onDraw={(gl, { width }) => gl.Viewport(0, 0, width, width)}
       onError={(err) => void err.message}
-      // the wheel reaches a GL surface (it selects it and hands it to the
-      // window's manager), and carries pixels like every other wheel
+      // the pointer over a GL surface is the tree's, as over any node: the
+      // wheel carries pixels, a press a button and a click count, and a
+      // drag can hold on to the surface
       onWheel={(ev) => void (ev.deltaY + ev.deltaX)}
+      onMouseDown={(ev) => {
+        ev.capturePointer();
+        void (ev.button + ev.detail + ev.localX);
+      }}
+      onClick={(ev) => void ev.detail}
     />
   );
 }
+
+// what an element built on <glarea> asks before listening on `node.window`
+// for the pointer itself — true wherever core delivers it to the tree
+declare const surfaceNode: GlAreaNode;
+const _forwardsPointer: true = surfaceNode.forwardsPointer;
+void _forwardsPointer;
 
 function Embedded({ id }: { id: number }) {
   return (

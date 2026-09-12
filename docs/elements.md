@@ -1940,26 +1940,43 @@ and its X window follows that rect. The window is stacked above everything
 drawn in the parent, so 2D content cannot overlap it — a HUD needs a
 sibling `<popup>`.
 
-**The wheel reaches it; the rest of the pointer does not, yet.** Pointer
-events over the surface are delivered to its own X window rather than to the
-one the tree is hit-tested in, which is why nothing over a `<glarea>` used to
-reach an application at all. The surface now selects the wheel there and
-hands it back to the window's event manager, naming itself as the target —
-so `onWheel` is an ordinary synthetic event at this node: deltas in pixels,
-bubbling to the ancestors, `preventDefault()` to keep it from the default
-scroll action. It is named rather than hit-tested because a window-owning
-child is not in its parent's paint order, so a hit test would answer with
-the box behind the surface.
+**The pointer over the surface is the tree's**, on both backends, exactly
+as over a `<box>`: `onMouseDown`, `onMouseMove`, `onMouseUp`, `onClick` (a
+double click is `detail: 2`), `onContextMenu`, `onMouseEnter` and
+`onMouseLeave`, `:hover` and `:active`, and `onWheel` fire at the
+`<glarea>` and bubble to its ancestors; a press focuses the nearest
+focusable one, and `ev.capturePointer()` keeps a drag that wanders off the
+surface. The window's hit test knows the surface is on top — a point inside
+its rect lands on the `<glarea>`, not on whatever the tree has behind it —
+and `pointerEvents: 'none'` on it lets the pointer through to that instead.
 
 ```jsx
-<glarea onWheel={(ev) => zoom(ev.deltaY)} />
+<glarea
+  onMouseDown={(ev) => {
+    ev.capturePointer();
+    orbit.start(ev.x, ev.y);
+  }}
+  onMouseMove={(ev) => orbit.drag(ev.x, ev.y)}
+  onWheel={(ev) => zoom(ev.deltaY)}
+/>
 ```
 
-Two limits worth knowing. Smooth deltas are not part of it: XI2 is selected
-on the window the manager owns rather than on this child, so a touchpad's
-fractions arrive as whole notches from buttons 4-7. And clicks, motion and
-hover still do not — a scene that needs picking has to read the pointer some
-other way.
+How it gets there differs underneath and nowhere above. On X11 the surface
+is a child window that **selects no input of its own**, so the server
+reports what happens over it to the window the tree lives in — in that
+window's coordinates, under that window's grab, and with its XI2 selection,
+so the wheel over a surface is the same wheel as anywhere else in the
+window. On the Cocoa backend the surface is a layer and the events were the
+window's all along.
+
+One rule follows for an element built on `<glarea>`: **do not listen for
+the pointer on `node.window`**. ntk selects whatever its window is listened
+to for, and X then delivers the event there instead of to the tree — every
+press, and the wheel with them, since both are ButtonPress. Listening there
+was the only way to hear a press over a surface before core delivered it;
+`node.forwardsPointer` is `true` where it does
+(`GlAreaNode.prototype.forwardsPointer` from `react-x11/node`, to ask
+without rendering), and is the switch for dropping such a listener.
 
 `onDraw` is the raw escape hatch; for a scene, put 3D elements inside
 (below) and let the renderer drive the GL. See `examples/viewer3d.jsx` for

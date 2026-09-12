@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 
 import { createRoot } from '../src/index.js';
-import { fakeCocoaApp, tick } from './helpers/cocoa-bridge.js';
+import { fakeCocoaApp, pointerOver, tick } from './helpers/cocoa-bridge.js';
 
 const h = React.createElement;
 
@@ -53,9 +53,10 @@ const findGLArea = (node) =>
 
 /**
  * A `<glarea>` inset 10px in a 200x120 `<window>` at scale 2, mounted, its
- * surface created and a frame run.
+ * surface created and a frame run. `area` and `box` are extra props for the
+ * surface and the box around it.
  */
-async function mountGLArea() {
+async function mountGLArea({ area = {}, box = {} } = {}) {
   const { native, app } = fakeCocoaApp();
   // the runtime chooseGLConfig resolves, settled before anything asks: no
   // x11-dri and no CGL context, so this runs on any OS
@@ -70,8 +71,8 @@ async function mountGLArea() {
       { width: 200, height: 120 },
       h(
         'box',
-        { style: { flexGrow: 1, padding: 10 } },
-        h('glarea', { style: { flexGrow: 1 } }),
+        { style: { flexGrow: 1, padding: 10 }, ...box },
+        h('glarea', { style: { flexGrow: 1 }, ...area }),
       ),
     ),
   );
@@ -136,4 +137,32 @@ test('a window resize moves the surface without an implicit animation', async ()
     'every set went out with actions off',
   );
   assert.deepEqual(layer.props.frame, [10, 10, 280, 160]);
+});
+
+test('the pointer over the surface is dispatched at the <glarea>, and bubbles', async () => {
+  // The layer takes no input — pointer events are the NSWindow's — and the
+  // window's hit test asks its surfaces before its tree, so a press over the
+  // surface lands on the <glarea>: the node X11's event propagation arrives
+  // at too. It used to land on the box *behind* the surface, which is all a
+  // tree walk can find, and the surface's own handlers never ran.
+  const seen = [];
+  const log = (who) => (ev) => seen.push([who, ev.type, ev.target]);
+  const { native, node } = await mountGLArea({
+    area: { onMouseDown: log('area'), onClick: log('area') },
+    box: { onMouseDown: log('box') },
+  });
+  const app = node.app;
+  assert.equal(node.forwardsPointer, true);
+  pointerOver(app, node, { press: true });
+  // targets by identity: a failed deepEqual over nodes util.inspects the
+  // whole tree, and hangs the file instead of failing it
+  assert.deepEqual(
+    seen.map(([who, type, target]) => [who, type, target === node]),
+    [
+      ['area', 'mouseDown', true],
+      ['box', 'mouseDown', true],
+      ['area', 'click', true],
+    ],
+  );
+  void native;
 });

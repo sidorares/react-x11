@@ -339,8 +339,17 @@ export function ViewerPanel({
     [model, shading, triangles, spin],
   );
 
+  // A drag is the one thing that has to redraw between renders: the moves
+  // write the camera ref, and a `'demand'` surface draws only when a prop
+  // changes — so the loop runs for as long as the drag does, and the press
+  // and the release are the drag's only two renders.
+  const [dragging, setDragging] = useState(false);
   const onMouseDown = useCallback((ev) => {
+    // the orbit keeps going when the pointer leaves the stage, and the
+    // release ends it wherever it lands
+    ev.capturePointer();
     drag.current = { x: ev.x, y: ev.y };
+    setDragging(true);
   }, []);
   const onMouseMove = useCallback((ev) => {
     const from = drag.current;
@@ -352,6 +361,7 @@ export function ViewerPanel({
   }, []);
   const onMouseUp = useCallback(() => {
     drag.current = null;
+    setDragging(false);
   }, []);
   const onWheel = useCallback((ev) => {
     const cam = camera.current;
@@ -388,7 +398,7 @@ export function ViewerPanel({
             style={{ flexGrow: 1 }}
             data-testname="stage"
             clearColor="#0b1021"
-            frameLoop={spin ? 'always' : 'demand'}
+            frameLoop={spin || dragging ? 'always' : 'demand'}
             glx={{ DEPTH_SIZE: 24 }}
             onCreated={onCreated}
             onDraw={onDraw}

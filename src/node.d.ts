@@ -820,5 +820,16 @@ export declare class WindowNode extends Node {}
 export declare class PopupNode extends WindowNode {}
 /** The precedents for an element owning a real child X window — a surface of
  * its own, and one holding somebody else's window. */
-export declare class GlAreaNode extends Node {}
+export declare class GlAreaNode extends Node {
+  /**
+   * `true`: the pointer over the surface is dispatched through the owning
+   * window's event manager, at this node, on this backend. So an element
+   * built on `<glarea>` must not listen for the pointer on `node.window` —
+   * on X11 that selects the event on the surface's own window, and X then
+   * delivers it there instead of to the tree. Readable without rendering,
+   * as `GlAreaNode.prototype.forwardsPointer`; absent on a core that does
+   * not deliver it.
+   */
+  readonly forwardsPointer: true;
+}
 export declare class ForeignNode extends Node {}
