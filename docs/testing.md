@@ -354,6 +354,12 @@ operations. No server, no connection, much faster, and no pixels — good for
 asserting on layout and on the node tree, which is most tests. Input
 injection is not available and says so.
 
+With no connection there is also nothing to embed into, so the mock answers
+the way the Cocoa backend does: `useSupports('embedding')` is false, and a
+`<foreign>` in the tree lays out as an empty box and reports one `onError`
+rather than failing the mount. A component that asks before rendering one
+mounts its fallback here; one that does not still mounts.
+
 A batch records as the fills it stands for: `ctx.fillRects([[x, y, w, h], …])`
 leaves one `fillRect` operation per rectangle, because the only difference
 between them is a request count and there is no server here to send it to. So

@@ -13,8 +13,10 @@ import assert from 'node:assert/strict';
 import React from 'react';
 
 import {
+  act,
   renderX11,
   cleanup,
+  fireEvent,
   screen,
   waitFor,
   userEvent,
@@ -172,6 +174,32 @@ describe('examples/finder', () => {
         backend.spawned[0].windowId > 0,
       `spawned into ${backend.spawned[0].windowId}`,
     );
+  });
+
+  test('no terminal is offered where the backend cannot host one', async () => {
+    const backend = fakeBackend({ '/home/me': [entry('notes.txt')] });
+    const { app, rerender } = await renderX11(h(FinderPanel, { backend }), {
+      width: 820,
+      height: 560,
+    });
+    // The Cocoa backend's shape — an X stub with no ReparentWindow in it —
+    // with input still injectable, which the mock backend cannot offer.
+    // Embedding is a property of the backend, read when the panel mounts, so
+    // the panel is mounted afresh under a new key.
+    app.X.ReparentWindow = undefined;
+    await rerender(h(FinderPanel, { key: 'no-embedding', backend }));
+    await waitFor(() => screen.getByText('notes.txt'));
+
+    await userEvent.click(row('notes.txt'));
+    await userEvent.key(0x74, { modifiers: ['Control'] }); // Ctrl+T
+    await act(() => fireEvent.contextMenu(row('notes.txt')));
+    await waitFor(() => screen.getByText('Refresh'));
+
+    // neither way in opens a pane: the chord does nothing, and the menu does
+    // not carry the item at all
+    assert.equal(screen.queryByText('Open terminal here'), null);
+    assert.equal(screen.queryByText('terminal — /home/me'), null);
+    assert.equal(backend.spawned.length, 0);
   });
 
   test('a listing is cached per backend, not globally', async () => {

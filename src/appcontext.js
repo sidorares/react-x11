@@ -26,6 +26,7 @@ import {
   compositingActive,
   watchCompositing,
 } from './compositing.js';
+import { canEmbed } from './embedding.js';
 import { hasDirectGL, watchDirectGL } from './glbackend.js';
 
 const AppContext = createContext(null);
@@ -57,16 +58,26 @@ export function useApp() {
   return app;
 }
 
-const SUPPORTS_FEATURES = new Set([
-  'transparency',
-  'shaders',
-  'nativeControls',
-]);
-
-// 'nativeControls' is a property of the backend, decided before the first
-// render and never changing after — so its subscription has nothing to
-// deliver and its snapshot is a property test.
+// 'nativeControls' and 'embedding' are properties of the backend, decided
+// before the first render and never changing after — so their subscription
+// has nothing to deliver and their snapshot is a property test.
 const NEVER_CHANGES = () => () => {};
+
+// What `useSupports` watches and reads, per feature. `read` answers a
+// boolean, so the snapshot is stable for a given state — returning the
+// visual object for 'transparency' would tear on every render.
+const FEATURES = {
+  transparency: {
+    watch: watchCompositing,
+    read: (app) => compositingActive(app) && Boolean(argbVisual(app)),
+  },
+  shaders: { watch: watchDirectGL, read: hasDirectGL },
+  nativeControls: {
+    watch: NEVER_CHANGES,
+    read: (app) => Boolean(app.nativeBezels),
+  },
+  embedding: { watch: NEVER_CHANGES, read: canEmbed },
+};
 
 /**
  * Can this **display** do something, as a value a component can branch on?
@@ -127,40 +138,41 @@ const NEVER_CHANGES = () => () => {};
  * first render already reads the final answer. A policy raised after
  * connecting has missed that probe, and re-renders its readers when it
  * settles rather than leaving them with two different answers.
+ *
+ * `'embedding'` is true when this connection can take another process's
+ * window into its own — the X11 backend; never Cocoa, which has no such
+ * primitive, and never the headless mock. It is the question to ask before
+ * rendering a `<foreign>`, which refuses with one `onError` where the answer
+ * is no:
+ *
+ * ```jsx
+ * const embedding = useSupports('embedding');
+ * <box style={{ flexGrow: 1 }}>
+ *   {embedding ? <foreign onReady={spawnInto} /> : <text>X11 only</text>}
+ * </box>
+ * ```
+ *
+ * Like `'nativeControls'`, it is a property of the backend and never changes.
  */
 export function useSupports(feature) {
   const app = useApp();
-  if (!SUPPORTS_FEATURES.has(feature)) {
+  const spec = Object.hasOwn(FEATURES, feature) ? FEATURES[feature] : null;
+  if (!spec) {
     throw new Error(
       `react-x11: useSupports(${JSON.stringify(feature)}) — unknown feature ` +
-        `(expected one of ${[...SUPPORTS_FEATURES].join(', ')})`,
+        `(expected one of ${Object.keys(FEATURES).join(', ')})`,
     );
   }
-  // Both features go through the same store, so the hooks below run in the
+  // Every feature goes through the same store, so the hooks below run in the
   // same order whatever is being asked about. Where compositing comes and
   // goes for as long as the app runs, the backend settles at most once — and
   // watching that one moment is what keeps two components rendered either
   // side of it from disagreeing (see watchDirectGL).
   const subscribe = useCallback(
-    (onChange) =>
-      feature === 'nativeControls'
-        ? NEVER_CHANGES()
-        : feature === 'shaders'
-          ? watchDirectGL(app, onChange)
-          : watchCompositing(app, onChange),
-    [app, feature],
+    (onChange) => spec.watch(app, onChange),
+    [app, spec],
   );
-  // a boolean, so the snapshot is stable for a given state — returning the
-  // visual object here would tear on every render
-  const snapshot = useCallback(
-    () =>
-      feature === 'nativeControls'
-        ? Boolean(app.nativeBezels)
-        : feature === 'shaders'
-          ? hasDirectGL(app)
-          : compositingActive(app) && Boolean(argbVisual(app)),
-    [app, feature],
-  );
+  const snapshot = useCallback(() => spec.read(app), [app, spec]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
