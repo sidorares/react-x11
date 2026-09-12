@@ -47,6 +47,10 @@ const WHEEL_BUTTONS = new Set([4, 5, 6, 7]);
  */
 export const WHEEL_NOTCH_PX = 48;
 const RIGHT_BUTTON = 3;
+// A LeaveNotify's detail (core protocol): the pointer went to an ancestor of
+// the window it left, or into a window inside it — see `_leftIntoSurface`.
+const NOTIFY_ANCESTOR = 0;
+const NOTIFY_INFERIOR = 2;
 
 /** How many leading entries two node paths share. */
 function sharedPrefix(a, b) {
@@ -637,8 +641,32 @@ export class EventManager {
     return node.isWindow ? node.window : node;
   }
 
+  /**
+   * The node a pointer event landed on: a surface first, then the tree,
+   * front to back. A `<glarea>` is stacked above every 2D thing in its
+   * window, so a point inside one is over it whatever the tree's order says
+   * (`GlAreaNode.hitSurface`).
+   */
   _hit(ev) {
-    return this.node.hitTest(ev.x, ev.y) ?? this.node;
+    return (
+      this._surfaceAt(ev.x, ev.y) ?? this.node.hitTest(ev.x, ev.y) ?? this.node
+    );
+  }
+
+  /**
+   * The frontmost of this window's surfaces a point is over, or null. The
+   * newest is on top on both backends (`GlAreaNode._create`). An empty list
+   * is one length read on the motion path, which is all a window with no
+   * `<glarea>` pays for this.
+   */
+  _surfaceAt(x, y) {
+    const surfaces = this.node._surfaces;
+    if (!surfaces?.length) return null;
+    for (let i = surfaces.length - 1; i >= 0; i--) {
+      const hit = surfaces[i].hitSurface(x, y);
+      if (hit) return hit;
+    }
+    return null;
   }
 
   _path(target) {
@@ -742,16 +770,7 @@ export class EventManager {
    * way somewhere rather than one, and React must be free to interrupt the
    * render it started for the notch before.
    */
-  /**
-   * @param {object} native ntk's wheel event, in this window's coordinates
-   * @param {object} [over] the node the wheel happened over, when the caller
-   *   already knows. A `<glarea>` owns its own X window, so the server
-   *   delivers the event *there* and the surface hands it back translated
-   *   (src/glnodes.js) — and a hit test would answer with the box behind it,
-   *   because a window-owning child is not in its parent's paint order.
-   *   Knowing beats guessing; everything after this line is the same.
-   */
-  _onWheel(native, over = null) {
+  _onWheel(native) {
     // The first wheel is what says this window wants smooth scrolling. It was
     // created on core events — an XI2 selection costs four times as many
     // bytes per *pointer move*, which a window that is never scrolled would
@@ -765,7 +784,7 @@ export class EventManager {
     // outside gets, and for the same reason (`_pressOutside`).
     if (this._dismissOutside(native)) return;
     runWithPriority(ContinuousEventPriority, () => {
-      const target = over ?? this._hit(native);
+      const target = this._hit(native);
       // Shift turns a vertical wheel sideways — the convention for the mouse
       // and the touchpad that have no horizontal axis. Read off the delta
       // rather than off the source: a plain wheel mouse on an XI2 connection
@@ -1043,6 +1062,13 @@ export class EventManager {
   }
 
   _onMouseOut(native) {
+    // The pointer went into one of this window's surfaces, not out of the
+    // window: X reports crossing into a child window as leaving this one,
+    // but the input over a surface still arrives here — it selects none of
+    // its own — and the next motion names it. Answered as a leave, every
+    // ancestor was told the pointer had gone and then that it was back, and
+    // `onMouseOut` that it had left a window it was still in.
+    if (this._leftIntoSurface(native)) return;
     runWithPriority(ContinuousEventPriority, () => {
       this._updateHover([], native);
       // the pointer is somewhere else entirely: whatever it was heading for
@@ -1059,6 +1085,40 @@ export class EventManager {
         this._makeEvent('mouseOut', native, this.node),
       );
     });
+  }
+
+  /**
+   * Whether a LeaveNotify leaves the pointer in one of this window's
+   * surfaces rather than out of the window.
+   *
+   * A real server says "into a window inside this one" with detail
+   * NotifyInferior, and says it twice over a surface: when the pointer moves
+   * onto it, and when a grab ends with the pointer on it (mode NotifyUngrab)
+   * — which every click and every wheel notch over a surface does, since the
+   * press's implicit grab is this window's. node-x11's in-process server
+   * says it with detail NotifyAncestor and the child named instead, and
+   * sends no crossings for grabs at all.
+   *
+   * Either way the point says which inferior, and only a surface's rect
+   * makes it ours: a nested `<window>` or a `<foreign>` takes its own input,
+   * so leaving for one of those is still a leave. So is a grab taken
+   * elsewhere while the pointer is over a surface — detail NotifyVirtual or
+   * NonlinearVirtual, the surface named as the child it left from — since
+   * the pointer is the grab's now. The Cocoa backend's leave carries no
+   * detail, and is always one.
+   */
+  _leftIntoSurface(native) {
+    if (!native) return false;
+    const into =
+      native.detail === NOTIFY_INFERIOR ||
+      (native.detail === NOTIFY_ANCESTOR && Boolean(native.child));
+    if (!into) return false;
+    const wnd = this.node.window;
+    const { x, y } = native;
+    if (x < 0 || y < 0 || x >= (wnd?.width ?? 0) || y >= (wnd?.height ?? 0)) {
+      return false;
+    }
+    return this._surfaceAt(x, y) !== null;
   }
 
   /**

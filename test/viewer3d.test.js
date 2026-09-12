@@ -86,7 +86,7 @@ async function glApp() {
     fontSource: source,
     onXError: () => {},
   });
-  return { app, backend };
+  return { app, backend, server };
 }
 
 const render = (element, root) =>
@@ -106,7 +106,7 @@ const count = (backend, name) =>
   names(backend).filter((c) => c === name).length;
 
 async function mountViewer(extra = {}) {
-  const { app, backend } = await glApp();
+  const { app, backend, server } = await glApp();
   const root = await createRoot({ app });
   const instance = await render(
     h(
@@ -117,8 +117,13 @@ async function mountViewer(extra = {}) {
     root,
   );
   await waitFor(() => count(backend, 'clear') > 0, 'the first frame');
-  return { app, backend, root, instance };
+  return { app, backend, server, root, instance };
 }
+
+const findKind = (node, kind) =>
+  node.kind === kind
+    ? node
+    : node.children.map((c) => findKind(c, kind)).find(Boolean);
 
 describe('examples/viewer3d', () => {
   test('one-time GL state is set once, not per frame', async () => {
@@ -194,5 +199,37 @@ describe('examples/viewer3d', () => {
       settled,
       'on demand, nothing redraws until something changes',
     );
+  });
+
+  test('a drag over the stage orbits the model, even with Spin off', async () => {
+    // The handlers are on the <glarea>, and on X11 they never ran: the
+    // surface selected the wheel's button presses, and with them every
+    // press. Injected through the server, so this is the route a real drag
+    // takes. Spin is off, so the frames showing the new pitch are the drag's
+    // own — a `'demand'` surface draws on a prop change, and the camera is a
+    // ref, which is why the viewer loops for as long as a drag lasts.
+    const { backend, server, instance } = await mountViewer({
+      initialSpin: false,
+    });
+    const stage = findKind(instance._reactX11Node, 'glarea');
+    const degrees = (rad) => (rad * 180) / Math.PI;
+    // the pitch is the rotation about x; yaw is about y
+    const pitch = () =>
+      backend.calls.findLast(
+        (c) => c[0] === 'rotate' && c[2] === 1 && c[3] === 0 && c[4] === 0,
+      )?.[1];
+    assert.ok(Math.abs(pitch() - degrees(0.35)) < 1e-3, `from ${pitch()}`);
+    // the window sits at the screen's origin: there is no WM to move it
+    const x = Math.round(stage.abs.x + stage.abs.width / 2);
+    const y = Math.round(stage.abs.y + stage.abs.height / 2);
+    server.injectPointerMove(x, y);
+    server.injectButton(1, true);
+    // 50px down is half a radian of pitch (examples/viewer3d.jsx)
+    server.injectPointerMove(x, y + 50);
+    await waitFor(
+      () => Math.abs(pitch() - degrees(0.85)) < 1e-3,
+      'a frame at the dragged pitch',
+    );
+    server.injectButton(1, false);
   });
 });

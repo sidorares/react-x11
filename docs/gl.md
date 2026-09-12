@@ -102,6 +102,15 @@ costs kilobytes per frame while a compiled list costs one `CallList`. Names
 are yours to choose — `GenLists` is a round trip, and this is the backend
 where round trips are the thing to avoid.
 
+## Input
+
+The pointer over a surface is the tree's, on every backend: `onMouseDown`,
+`onMouseMove`, `onMouseUp`, `onClick`, `onWheel` and the rest fire at the
+`<glarea>` and bubble, with `ev.localX`/`localY` measured from its corner —
+which is what a scene picks with. Nothing needs to listen on the surface's
+own window, and nothing should: on X11 a listener there takes the event
+away from the tree ([elements.md](elements.md#glarea) says why).
+
 ## When there is no surface at all
 
 `onError(err)` fires when no GL context could be made: no GLX, indirect

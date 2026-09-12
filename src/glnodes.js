@@ -107,6 +107,10 @@ const px = (v) => Math.max(1, Math.round(v || 0));
  *
  * The X child window is stacked above everything drawn in the parent, so 2D
  * content cannot overlap it — put HUD content in a sibling `<popup>`.
+ *
+ * Pointer input over the surface is the tree's, on both backends: a press,
+ * a drag or a wheel over it is a synthetic event *at this node*, bubbling
+ * to its ancestors like anyone else's (`hitSurface` says how).
  */
 export class GlAreaNode extends Node {
   constructor(props, app) {
@@ -199,6 +203,7 @@ export class GlAreaNode extends Node {
     recordGlxFailure(this.app, err);
     this.gl = null;
     if (this.window) {
+      this._leaveSurfaces();
       this.window.destroy?.();
       this.window = null;
       this.rect = null;
@@ -222,26 +227,32 @@ export class GlAreaNode extends Node {
       // GL draws into the window itself: no 2d backing pixmap, and the
       // frame clock is ours to drive
       backingStore: false,
-      // The wheel, and only the wheel. A GL surface owns a real X window, so
-      // the pointer events over it are delivered *there* rather than to the
-      // window the rest of the tree is hit-tested in — which is why nothing
-      // over a `<glarea>` reached an application before. Selecting it here
-      // and handing it back to the owning window's manager (`_onWheel`
-      // below) is the whole of it: from there the event is an ordinary
-      // synthetic `Wheel` at this node, so it bubbles, `preventDefault()`
-      // takes it back for a scene that zooms instead, and the default action
-      // scrolls the nearest container the way it does anywhere else.
+      // No pointer input is selected here, and that is the whole of how the
+      // pointer over the surface reaches the tree. X reports a device event
+      // to the first window up the hierarchy that selected it, so a press,
+      // a motion or a wheel over this window arrives at the owning window
+      // instead — in its coordinates and under its implicit grab, so a drag
+      // that leaves the surface keeps coming — and its event manager takes
+      // it from there like any other (`hitSurface` names this node).
       //
-      // Selected unconditionally rather than when a handler is declared: the
-      // default action is what a reader expects from a wheel over a page,
-      // and an element that wants it back has `preventDefault()`. One
-      // ButtonPress per notch is not a cost worth a conditional.
-      onWheel: (ev) => this._onWheel(ev),
+      // Selecting one here takes it away from the tree, which is how the
+      // wheel alone used to be handled: the surface selected ButtonPress to
+      // hear it and handed it back, and so every *press* on the surface
+      // ended here too, with the drag and the release that should have
+      // followed it. A listener on `node.window` does the same — ntk selects
+      // what a window is listened to for — which is what `forwardsPointer`
+      // exists to tell an element built on this one.
     });
     this.window = wnd;
     this.rect = rect;
     this.config = config;
     wnd._reactX11Node = this;
+    // Above everything 2D in the owning window on both backends, and above
+    // every surface made before this one: X stacks a new child window over
+    // its siblings, and Core Animation a layer added later over one at the
+    // same zPosition. The window's hit test reads the list in that order
+    // (`EventManager._surfaceAt`).
+    this.root?._surfaces?.push(this);
     this.gl = wnd.getContext('opengl', config);
     // a buffer freed by the display is a frame that can be drawn again
     if (typeof this.gl?.onFrameAvailable !== 'undefined') {
@@ -385,31 +396,71 @@ export class GlAreaNode extends Node {
   }
 
   /**
-   * A wheel over the surface, handed to the window the tree lives in.
+   * `true`: pointer input over this surface is the tree's on this backend —
+   * dispatched through the owning window's event manager, at this node, and
+   * bubbling from it like anyone else's.
    *
-   * ntk reports the position inside *this* window; the manager hit-tests in
-   * the owning window's space, so the node's own origin goes back on. Both
-   * are device pixels — the scale is applied at the far end, where a handler
-   * reads `ev.x` (src/events.js).
+   * It is here to be asked by an element built on `<glarea>` that listens on
+   * `node.window` for the pointer, which it had to do before core delivered
+   * it. That listener has to go wherever this is true: on X11 it selects the
+   * event on the surface's own window, and X then delivers it *there*
+   * instead of to the tree (see `_create`) — every press, and the wheel with
+   * them, since both are ButtonPress.
    *
-   * Smooth deltas are not part of this yet: XI2 is selected on the window
-   * the manager owns, not on this child, so a touchpad's fractions arrive
-   * here as whole notches from buttons 4-7.
+   * A getter on the class rather than a flag on each instance, so it can be
+   * read without rendering anything: `GlAreaNode.prototype.forwardsPointer`,
+   * from `react-x11/node`.
    */
-  _onWheel(native) {
-    const events = this.root?.events;
-    if (!events || this.destroyed) return;
-    events._onWheel(
-      {
-        ...native,
-        x: (native.x ?? 0) + this.abs.x,
-        y: (native.y ?? 0) + this.abs.y,
-      },
-      // named rather than hit-tested: a window-owning child is not in its
-      // parent's paint order, so the hit test would answer with the box
-      // behind this surface
-      this,
-    );
+  get forwardsPointer() {
+    return true;
+  }
+
+  /**
+   * This node, if a point in the owning window's space is over the surface.
+   *
+   * A point that is, is over it whatever the tree's own order says: X stacks
+   * the child window above the parent's drawing, and the Cocoa backend puts
+   * the layer at a zPosition over both presenters. So the window asks its
+   * surfaces before it hit-tests its tree (`EventManager._hit`), and a point
+   * inside lands here rather than on the box behind — which is all a tree
+   * walk can find, a window-owning node not being in its parent's paint
+   * order. It is the same answer X gives: the event it propagates to the
+   * owning window names this window as the child the pointer is in.
+   *
+   * The rect is the one last sent to the surface rather than `abs`, since
+   * the surface covers whole pixels and the server decides by those. No
+   * surface, no answer: not made yet, given up after `onError`, or hidden
+   * with something around it — and `pointerEvents: 'none'` here or above
+   * lets the pointer through to what the tree has behind, as it does for
+   * any node.
+   */
+  hitSurface(x, y) {
+    const rect = this.rect;
+    if (!this.window || !rect) return null;
+    if (
+      x < rect.x ||
+      y < rect.y ||
+      x >= rect.x + rect.width ||
+      y >= rect.y + rect.height
+    ) {
+      return null;
+    }
+    for (let n = this; n; n = n.parent) {
+      if (n.destroyed || n.hidden) return null;
+      if (n.style?.display === 'none' || n.style?.pointerEvents === 'none') {
+        return null;
+      }
+      if (n.isWindow) break;
+    }
+    return this;
+  }
+
+  /** Out of the owning window's hit test: nothing covers the rect any more,
+   * and what the tree has behind it answers again. */
+  _leaveSurfaces() {
+    const surfaces = this.root?._surfaces;
+    const at = surfaces ? surfaces.indexOf(this) : -1;
+    if (at !== -1) surfaces.splice(at, 1);
   }
 
   applyProps(newProps, oldProps) {
@@ -432,6 +483,7 @@ export class GlAreaNode extends Node {
 
   destroySubtree() {
     if (this.destroyed) return;
+    this._leaveSurfaces();
     super.destroySubtree();
     this._pacer.cancel();
     this.gl?.destroy?.();

@@ -67,7 +67,11 @@ no override-redirect staging (issue #4).
 - `src/glnodes.js` — `<glarea>`: the GL surface. A child X window on a
   GLX visual (ntk's `chooseGLXConfig`), positioned by the parent's yoga
   rect, drawing `onDraw` frames on its own frame clock. First step of
-  docs/glx.md.
+  docs/glx.md. It **selects no pointer input**: X then reports the pointer
+  over it to the owning window, whose hit test asks the window's surfaces
+  before its tree (`_surfaces`, `hitSurface`). So a listener on the
+  surface's `window` is a bug — ntk selects what a window is listened to
+  for, and the event stops reaching the tree.
 - `src/foreignnodes.js` — `<foreign>`: another process's window, embedded.
   A second `drawn: false` node, over ntk's `XEmbedSocket` (docs/embedding.md).
   Three things here are not obvious and are commented at length. **Teardown is

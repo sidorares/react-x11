@@ -14,7 +14,10 @@
 // `destroy()`, `requestAnimationFrame`. On X11 that child is a real X
 // window stacked above the parent's drawing; here it is a sublayer of the
 // window's root layer with a high zPosition — the same "GL sits above the
-// 2D" semantics, by the same mechanism the platform gives us.
+// 2D" semantics, by the same mechanism the platform gives us. The layer
+// takes no input: pointer events are the NSWindow's, and the window's hit
+// test answers the surface for a point over it (`GlAreaNode.hitSurface`),
+// which is where X11's event propagation ends up too.
 //
 // ## The API ladder
 //
@@ -142,7 +145,6 @@ export class CocoaGLArea {
     this.scale = this.parent.scale ?? app.scale ?? 1;
     this.destroyed = false;
     this._reactX11Node = null;
-    this.onWheel = options.onWheel ?? null;
     this.layer = this._native.createLayer();
     this._native.addSublayer(this.parent._layer, this.layer);
     this.rect = null;

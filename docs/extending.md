@@ -1451,6 +1451,17 @@ and the owning `WindowNode` realizes it in the commit phase
 start. The ordering constraint — no X calls in the render phase, because the
 render phase is discardable — is the part that is easy to get wrong.
 
+Input is the other thing a child window decides without being asked. X
+delivers a device event to the first window up the hierarchy that selected
+it, so a window that selects nothing hands the pointer over it to the window
+the tree lives in — which is how a `<glarea>`'s presses reach the tree — and
+one that selects `ButtonPress` keeps every press for itself. Select only
+what the element needs from the server, and remember that ntk selects
+whatever a window is listened to for. The owning window's hit test knows
+about `<glarea>` surfaces and asks them before the tree
+(`GlAreaNode.hitSurface`); it does not know about a registered element's
+window, so a point over one lands on whatever the tree has behind it.
+
 `ForeignNode` (`src/foreignnodes.js`) is the same shape with the stakes
 raised, and it is the one to read if your element touches a resource you did
 not create. Three things it has to do that a GL surface does not:

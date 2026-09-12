@@ -8,11 +8,13 @@ import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
 import React from 'react';
+import x11 from 'x11';
 import xserver from 'x11/lib/xserver/index.js';
 import { createClient, StaticFontSource } from 'ntk';
 
 import { createRoot } from '../src/index.js';
 import { WHEEL_NOTCH_PX } from '../src/events.js';
+import { GlAreaNode } from '../src/glnodes.js';
 
 const require = createRequire(import.meta.url);
 const { createGlxExtension, RecordingBackend } = require('x11/browser/glx');
@@ -39,7 +41,7 @@ async function createGlApp({ indirectContexts = true } = {}) {
     fontSource: new StaticFontSource(),
     onXError: (err) => xErrors.push(err),
   });
-  return { app, backend, xErrors };
+  return { app, backend, xErrors, server };
 }
 
 const render = (element, x11Root) =>
@@ -251,6 +253,9 @@ test('a failed <glarea> leaves no X window over the fallback', async () => {
       null,
       'and no child window: an unpainted one would cover whatever replaces it',
     );
+    // …nor one for the hit test to answer with: a point there is the tree's
+    assert.deepEqual(instance._reactX11Node._surfaces, []);
+    assert.equal(area.hitSurface(10, 10), null);
 
     await x11Root.unmount();
     await settle(app);
@@ -259,56 +264,462 @@ test('a failed <glarea> leaves no X window over the fallback', async () => {
   }
 });
 
-test('a wheel over the surface is a synthetic Wheel at the <glarea>', async () => {
-  // The surface owns its own X window, so the server delivers the wheel
-  // there and nothing in the parent's hit testing can see it — the element
-  // selects it and hands it back, naming itself as the target. Without the
-  // naming, the box *behind* the surface is what a hit test answers with (a
-  // window-owning child is not in its parent's paint order), which is
-  // silently wrong rather than broken: the handler simply never runs.
-  const { app } = await createGlApp();
+// --- the pointer over the surface ---------------------------------------------
+//
+// Every test below injects through the in-process server rather than
+// emitting on an ntk window, because *where X delivers each event* is the
+// whole of this feature: the surface selects no pointer input, so the server
+// reports what happens over it to the window the tree lives in — in that
+// window's coordinates, under that window's implicit grab — and the window's
+// hit test names the <glarea>. An `emit` on a window would skip the one step
+// that used to go wrong: the surface selected ButtonPress to hear the wheel,
+// and every press over it then ended at the surface.
+
+const POINTER_INPUT =
+  x11.eventMask.ButtonPress |
+  x11.eventMask.ButtonRelease |
+  x11.eventMask.PointerMotion;
+
+/**
+ * `build(onDraw)` mounted, its surface made and a frame drawn. `at(x, y)`
+ * parks the pointer at a point of the window, `press`/`release` a button —
+ * all through the server.
+ */
+async function mountSurface(build) {
+  const { app, server } = await createGlApp();
   const x11Root = await createRoot({ app });
-  try {
-    const seen = [];
-    let drew = false;
-    const instance = await render(
+  let drew = false;
+  const instance = await render(
+    build(() => {
+      drew = true;
+    }),
+    x11Root,
+  );
+  // the GL window is made once the visual query answers
+  await waitFor(() => drew, 'the first frame');
+  await settle(app);
+  const windowNode = instance._reactX11Node;
+  const find = (n) =>
+    n.kind === 'glarea' ? n : n.children.map(find).find(Boolean);
+  const area = find(windowNode);
+  assert.ok(area?.window, 'the surface has a window of its own');
+  const at = (x, y) => {
+    const wnd = windowNode.window;
+    const origin = wnd._screenOrigin ?? { x: wnd.x ?? 0, y: wnd.y ?? 0 };
+    server.injectPointerMove(origin.x + x, origin.y + y);
+  };
+  return {
+    app,
+    windowNode,
+    area,
+    at,
+    press: (button = 1) => server.injectButton(button, true),
+    release: (button = 1) => server.injectButton(button, false),
+    async close() {
+      await x11Root.unmount();
+      await app.close();
+    },
+  };
+}
+
+test('the pointer over the surface is dispatched at the <glarea>, and bubbles', async () => {
+  const seen = [];
+  const log = (who) => (ev) =>
+    seen.push({
+      who,
+      type: ev.type,
+      target: ev.target,
+      at: [ev.x, ev.y],
+      local: [ev.localX, ev.localY],
+      button: ev.button,
+      detail: ev.detail,
+    });
+  const s = await mountSurface((onDraw) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
       h(
-        'window',
-        { width: 320, height: 240 },
+        'box',
+        {
+          style: { flexGrow: 1, padding: 20 },
+          focusable: true,
+          onMouseDown: log('pane'),
+          onClick: log('pane'),
+        },
         h('glarea', {
           style: { flexGrow: 1 },
-          onWheel: (ev) => seen.push(ev),
-          onDraw: () => {
-            drew = true;
-          },
+          onDraw,
+          onMouseDown: log('area'),
+          onMouseMove: log('area'),
+          onMouseUp: log('area'),
+          onClick: log('area'),
         }),
       ),
-      x11Root,
+    ),
+  );
+  try {
+    const { area } = s;
+    const pane = area.parent;
+    const of = (who, type) =>
+      seen.filter((e) => e.who === who && e.type === type);
+    assert.equal(area.forwardsPointer, true);
+    assert.equal(
+      GlAreaNode.prototype.forwardsPointer,
+      true,
+      'askable without rendering anything',
     );
-    // the GL window is made once the visual query answers, so wait for the
-    // first frame the way the tests above do
-    await waitFor(() => drew, 'the first frame');
-    await settle(app);
-    const area = instance._reactX11Node.children[0];
-    assert.equal(area.kind, 'glarea');
-    assert.ok(area.window, 'the surface has a window of its own');
+    // the mechanism, pinned: the surface's own window selects no pointer
+    // input, so none of it stops there
+    assert.equal(area.window.eventMask & POINTER_INPUT, 0);
 
-    area.window.emit('wheel', {
-      x: 20,
-      y: 30,
-      deltaX: 0,
-      deltaY: 1,
-      buttons: 0,
+    s.at(60, 70);
+    await waitFor(() => of('area', 'mouseMove').length > 0, 'a move over it');
+    s.press();
+    await waitFor(() => of('area', 'mouseDown').length > 0, 'the press');
+    s.at(90, 100);
+    await waitFor(() => of('area', 'mouseMove').length > 1, 'the drag');
+    s.release();
+    await waitFor(() => of('area', 'click').length > 0, 'the click');
+
+    const [down] = of('area', 'mouseDown');
+    assert.equal(down.target, area, 'the <glarea>, not the box behind it');
+    // the owning window's coordinates, and the surface's own corner
+    assert.deepEqual(down.at, [60, 70]);
+    assert.deepEqual(down.local, [40, 50]);
+    assert.equal(down.button, 1);
+    assert.equal(of('pane', 'mouseDown')[0]?.target, area, 'it bubbled');
+    assert.deepEqual(of('area', 'mouseMove').at(-1).at, [90, 100]);
+    assert.equal(of('area', 'mouseUp').length, 1);
+    const [click] = of('area', 'click');
+    assert.equal(click.target, area);
+    assert.equal(click.detail, 1);
+    assert.equal(of('pane', 'click')[0]?.target, area);
+    // and the press focused the nearest focusable ancestor, as anywhere
+    assert.equal(pane.focused, true);
+  } finally {
+    await s.close();
+  }
+});
+
+test('a drag that leaves the surface keeps coming, to whatever holds it', async () => {
+  // The press lands on the owning window, so the implicit grab is that
+  // window's: motion and the release keep arriving however far the pointer
+  // goes. Before, the grab was the surface's — it had taken the press — and
+  // it had selected neither, so a drag off a <glarea> was simply lost.
+  for (const capture of [false, true]) {
+    const seen = [];
+    const log = (who) => (ev) =>
+      seen.push({ who, type: ev.type, target: ev.target, x: ev.x });
+    const s = await mountSurface((onDraw) =>
+      h(
+        'window',
+        {
+          width: 320,
+          height: 240,
+          onMouseMove: log('window'),
+          onClick: log('window'),
+        },
+        h(
+          'box',
+          { style: { flexDirection: 'row', flexGrow: 1 } },
+          h('glarea', {
+            key: 'gl',
+            style: { width: 150 },
+            onDraw,
+            onMouseDown: (ev) => {
+              if (capture) ev.capturePointer();
+              log('area')(ev);
+            },
+            onMouseMove: log('area'),
+            onMouseUp: log('area'),
+            onClick: log('area'),
+          }),
+          h('box', {
+            key: 'side',
+            style: { flexGrow: 1 },
+            onMouseMove: log('side'),
+          }),
+        ),
+      ),
+    );
+    try {
+      const { area, windowNode } = s;
+      const side = area.parent.children[1];
+      const moved = (x) =>
+        seen.some((e) => e.type === 'mouseMove' && e.x === x);
+      s.at(40, 40);
+      await waitFor(() => moved(40), 'a move over the surface');
+      s.press();
+      await waitFor(() => seen.some((e) => e.type === 'mouseDown'), 'press');
+      s.at(200, 40); // over the box beside the surface
+      await waitFor(() => moved(200), 'a move beside it');
+      s.at(500, 400); // out of the window altogether
+      await waitFor(() => moved(500), 'a move outside the window');
+      s.release();
+      await waitFor(
+        () => seen.some((e) => e.type === 'click'),
+        'the click the release makes',
+      );
+      const moveAt = (who, x) =>
+        seen.find((e) => e.who === who && e.type === 'mouseMove' && e.x === x);
+      const click = seen.find((e) => e.type === 'click');
+      if (capture) {
+        assert.equal(moveAt('area', 200)?.target, area, capture);
+        assert.equal(moveAt('area', 500)?.target, area);
+        assert.equal(moveAt('side', 200), undefined, 'the box heard nothing');
+        const up = seen.find((e) => e.type === 'mouseUp');
+        assert.equal(up?.who, 'area');
+        assert.equal(up?.target, area);
+        assert.equal(click.target, area, 'released on the captor');
+      } else {
+        // uncaptured, a move is whatever it is over — the box beside, then
+        // the window itself — as for a drag that started anywhere else
+        assert.equal(moveAt('side', 200)?.target, side);
+        assert.equal(moveAt('window', 500)?.target, windowNode.window);
+        assert.equal(moveAt('area', 500), undefined);
+        // and the click is the nearest common ancestor's, the window's
+        assert.equal(click.who, 'window');
+        assert.equal(click.target, windowNode.window);
+      }
+    } finally {
+      await s.close();
+    }
+  }
+});
+
+test('a double click on the surface counts, and the right button asks for its context menu', async () => {
+  const seen = [];
+  const log = (ev) =>
+    seen.push({
+      type: ev.type,
+      target: ev.target,
+      button: ev.button,
+      detail: ev.detail,
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+  const s = await mountSurface((onDraw) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h('glarea', {
+        style: { flexGrow: 1 },
+        onDraw,
+        onClick: log,
+        onContextMenu: log,
+      }),
+    ),
+  );
+  try {
+    s.at(100, 100);
+    s.press();
+    s.release();
+    s.press();
+    s.release();
+    const clicks = () => seen.filter((e) => e.type === 'click');
+    await waitFor(() => clicks().length === 2, 'two clicks');
+    assert.deepEqual(
+      clicks().map((e) => [e.target, e.detail]),
+      [
+        [s.area, 1],
+        [s.area, 2],
+      ],
+    );
+    s.press(3);
+    s.release(3);
+    await waitFor(
+      () => seen.some((e) => e.type === 'contextMenu'),
+      'the context menu',
+    );
+    const menu = seen.find((e) => e.type === 'contextMenu');
+    assert.equal(menu.target, s.area);
+    assert.equal(menu.button, 3);
+  } finally {
+    await s.close();
+  }
+});
 
-    assert.equal(seen.length, 1, 'the handler on the <glarea> ran');
+test('a wheel notch over the surface is one Wheel at the <glarea>, and no press', async () => {
+  // Buttons 4-7 are the core protocol's wheel. ntk makes a `wheel` of the
+  // press on the owning window and the manager drops the press itself on the
+  // button path, so a notch over a surface is one event — not a Wheel plus a
+  // click nobody made.
+  const seen = [];
+  const log = (ev) =>
+    seen.push({ type: ev.type, target: ev.target, deltaY: ev.deltaY });
+  const s = await mountSurface((onDraw) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h('glarea', {
+        style: { flexGrow: 1 },
+        onDraw,
+        onWheel: log,
+        onMouseDown: log,
+        onMouseUp: log,
+        onClick: log,
+      }),
+    ),
+  );
+  try {
+    s.at(100, 100);
+    s.press(5);
+    s.release(5);
+    await waitFor(() => seen.length > 0, 'the wheel');
+    await settle(s.app);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(
+      seen.map((e) => e.type),
+      ['wheel'],
+    );
+    assert.equal(seen[0].target, s.area);
     // pixels, not notches — the same conversion every other wheel gets
     assert.equal(seen[0].deltaY, WHEEL_NOTCH_PX);
-    assert.equal(seen[0].deltaX, 0);
   } finally {
-    await x11Root.unmount();
-    await app.close();
+    await s.close();
+  }
+});
+
+test('the pointer crossing onto the surface is not a leave', async () => {
+  // X reports the crossing into a child window as the parent's LeaveNotify.
+  // Over a surface that is not the pointer leaving anything the tree can
+  // see: the motion still arrives at the window and names the <glarea>. So
+  // the ancestors stay hovered — they used to be told the pointer had gone
+  // and then that it was back — and the window hears no mouseOut.
+  const counts = {
+    paneEnter: 0,
+    paneLeave: 0,
+    areaEnter: 0,
+    areaLeave: 0,
+    windowOut: 0,
+  };
+  const bump = (key) => () => {
+    counts[key] += 1;
+  };
+  const s = await mountSurface((onDraw) =>
+    h(
+      'window',
+      { width: 320, height: 240, onMouseOut: bump('windowOut') },
+      h(
+        'box',
+        {
+          style: { flexGrow: 1, padding: 40 },
+          onMouseEnter: bump('paneEnter'),
+          onMouseLeave: bump('paneLeave'),
+        },
+        h('glarea', {
+          style: { flexGrow: 1 },
+          onDraw,
+          onMouseEnter: bump('areaEnter'),
+          onMouseLeave: bump('areaLeave'),
+        }),
+      ),
+    ),
+  );
+  try {
+    const { area } = s;
+    const pane = area.parent;
+    s.at(10, 10); // the pane's padding
+    await waitFor(() => counts.paneEnter === 1, 'the pane hovered');
+    s.at(100, 100); // onto the surface
+    await waitFor(() => counts.areaEnter === 1, 'the surface hovered');
+    assert.equal(counts.paneLeave, 0, 'the pane was never left');
+    assert.equal(counts.windowOut, 0, 'nor the window');
+    assert.equal(area.states[':hover'], true);
+    assert.equal(pane.states[':hover'], true);
+    s.at(10, 10); // and back off it
+    await waitFor(() => counts.areaLeave === 1, 'the surface left');
+    assert.deepEqual(
+      [counts.paneEnter, counts.paneLeave, counts.windowOut],
+      [1, 0, 0],
+    );
+  } finally {
+    await s.close();
+  }
+});
+
+test('a grab that ends over the surface is not a leave; one taken elsewhere is', async () => {
+  // The one test here that emits rather than injects: the in-process server
+  // sends no crossings for grabs, so these are the LeaveNotify shapes Xvfb
+  // sent the owning window, replayed on it.
+  //
+  // Every click and wheel notch over a surface ends the press's implicit
+  // grab — the owning window's — with the pointer still on the surface:
+  // detail NotifyInferior, mode NotifyUngrab, no child. Taken for a leave,
+  // hover went out from under the pointer after every click. A grab taken
+  // by another window while the pointer is on the surface is a real leave:
+  // detail NotifyNonlinearVirtual, mode NotifyGrab, the surface as child.
+  const counts = { paneLeave: 0, areaEnter: 0, areaLeave: 0, windowOut: 0 };
+  const bump = (key) => () => {
+    counts[key] += 1;
+  };
+  const s = await mountSurface((onDraw) =>
+    h(
+      'window',
+      { width: 320, height: 240, onMouseOut: bump('windowOut') },
+      h(
+        'box',
+        {
+          style: { flexGrow: 1, padding: 40 },
+          onMouseLeave: bump('paneLeave'),
+        },
+        h('glarea', {
+          style: { flexGrow: 1 },
+          onDraw,
+          onMouseEnter: bump('areaEnter'),
+          onMouseLeave: bump('areaLeave'),
+        }),
+      ),
+    ),
+  );
+  try {
+    s.at(100, 100);
+    await waitFor(() => counts.areaEnter === 1, 'the surface hovered');
+    const wnd = s.windowNode.window;
+    const leave = (fields) =>
+      wnd.emit('mouseout', { x: 100, y: 100, buttons: 0, ...fields });
+    leave({ detail: 2, mode: 2, child: 0 }); // the ungrab after a click
+    assert.deepEqual(
+      [counts.areaLeave, counts.paneLeave, counts.windowOut],
+      [0, 0, 0],
+      'still over the surface',
+    );
+    leave({ detail: 4, mode: 1, child: s.area.window.id }); // a grab elsewhere
+    assert.deepEqual(
+      [counts.areaLeave, counts.paneLeave, counts.windowOut],
+      [1, 1, 1],
+      'the pointer is the grab’s now',
+    );
+  } finally {
+    await s.close();
+  }
+});
+
+test("pointerEvents: 'none' on the surface lets the pointer through to the tree behind it", async () => {
+  const seen = [];
+  const s = await mountSurface((onDraw) =>
+    h(
+      'window',
+      { width: 320, height: 240 },
+      h(
+        'box',
+        {
+          style: { flexGrow: 1, padding: 20 },
+          onMouseDown: (ev) => seen.push(ev.target),
+        },
+        h('glarea', {
+          style: { flexGrow: 1, pointerEvents: 'none' },
+          onDraw,
+        }),
+      ),
+    ),
+  );
+  try {
+    s.at(100, 100);
+    s.press();
+    s.release();
+    await waitFor(() => seen.length > 0, 'the press');
+    assert.equal(seen[0], s.area.parent, 'the box behind the surface took it');
+  } finally {
+    await s.close();
   }
 });
 
