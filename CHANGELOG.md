@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.13.0](https://github.com/sidorares/react-x11/compare/v2.12.0...v2.13.0) (2026-09-12)
+
+
+### Features
+
+* **foreign:** refuse where there is no embedding; useSupports('embedding') asks first ([#543](https://github.com/sidorares/react-x11/issues/543)) ([c9e09cf](https://github.com/sidorares/react-x11/commit/c9e09cf8121c77e482f6a1098ee9b19806ac29b5)), closes [#531](https://github.com/sidorares/react-x11/issues/531)
+* **glarea:** its children are 2D content drawn above the surface — a HUD over GL, on both backends ([#546](https://github.com/sidorares/react-x11/issues/546)) ([f1fc464](https://github.com/sidorares/react-x11/commit/f1fc4643d562006c4f4e7197154730db20c4e82b))
+* **glarea:** the pointer over a surface is the tree's — presses, drags and clicks at the &lt;glarea&gt;, on both backends ([#545](https://github.com/sidorares/react-x11/issues/545)) ([8a01c36](https://github.com/sidorares/react-x11/commit/8a01c366dda6b81e8c919b681d52a33b689e0aab))
+
+
+### Bug Fixes
+
+* **deps:** take x11-dri 0.8 — ^0.7.0 stops short of it in 0.x semver ([#547](https://github.com/sidorares/react-x11/issues/547)) ([5e8159d](https://github.com/sidorares/react-x11/commit/5e8159d70b79d46714015f813b40be4254ab6ba3))
+
 ## [2.12.0](https://github.com/sidorares/react-x11/compare/v2.11.0...v2.12.0) (2026-09-11)
 
 
