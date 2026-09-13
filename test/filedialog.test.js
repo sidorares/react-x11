@@ -41,6 +41,7 @@ import {
 } from '../src/testing/index.js';
 import { fakePortal } from './helpers/fake-portal.js';
 import {
+  offTheDesktopBus,
   transportAvailable,
   until,
   withBus,
@@ -51,6 +52,15 @@ const haveTransport = await transportAvailable();
 const needsBroker = haveTransport
   ? {}
   : { skip: 'dbus-native is not installed (expected on Node < 22.12)' };
+
+// **Nothing here may reach the developer's own session bus.** On a desktop
+// the portal rung is the real FileChooser, and a call that slips out of
+// `withBus`/`withNoBus` finds it: an open puts a dialog on the screen and
+// waits for a human, as one did while this file was being written. The
+// ladder's backend probe was such a call — it ran bare, and answered for
+// whichever desktop the suite happened to run on. The whole file runs with
+// no bus, as CI does, and `withBus()` is the only way onto one.
+offTheDesktopBus();
 
 afterEach(() => {
   _resetServiceCache();
