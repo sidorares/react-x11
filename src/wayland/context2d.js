@@ -141,7 +141,7 @@ void main() {
   } else if (uMode == 1) {
     gl_FragColor = vColor * sampleTex(vUV);
   } else if (uMode == 2) {
-    gl_FragColor = vColor * texture2D(uTex, vUV).a;
+    gl_FragColor = vColor * texture2D(uTex, vUV).r; // an R8 atlas
   } else if (uMode == 3) {
     // vUV is the offset from the rect centre, in pixels; vParams.w selects
     // fill (0), stroke of that width (> 0) or a shadow feathered by that

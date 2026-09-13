@@ -181,17 +181,22 @@ export class GlyphAtlas {
     } else {
       gl.bindTexture(gl.TEXTURE_2D, this.texture);
     }
+    // One byte of coverage per texel, as R8 — GLES 3's own single-channel
+    // format — rather than the legacy ALPHA, which drivers emulate. On
+    // virgl the emulation let an upload into the mask atlas reach what the
+    // glyph atlas sampled: text drawn after a frame's coverage masks showed
+    // pieces of them (a select's chevron where a title's "R" belonged).
     // A8 rows are tightly packed and almost never a multiple of 4.
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     if (this._fresh) {
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
-        gl.ALPHA,
+        gl.R8,
         this.size,
         this.size,
         0,
-        gl.ALPHA,
+        gl.RED,
         gl.UNSIGNED_BYTE,
         this._pixels,
       );
@@ -215,7 +220,7 @@ export class GlyphAtlas {
         y0,
         w,
         h,
-        gl.ALPHA,
+        gl.RED,
         gl.UNSIGNED_BYTE,
         rows,
       );

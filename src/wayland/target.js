@@ -63,7 +63,7 @@ export class GLTarget {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     // Always RGBA8. An 'a8' surface is a coverage mask and could be R8, but
-    // the 2d context has one glyph/mask path and it samples `.a`; the memory
+    // the 2d context has one glyph/mask path, over R8 atlases; the memory
     // difference is not worth a second shader mode.
     gl.texImage2D(
       gl.TEXTURE_2D,
