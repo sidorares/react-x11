@@ -38,6 +38,7 @@ import { setScaleForTests } from '../src/scale.js';
 import { setScreensForTests } from '../src/screens.js';
 import { fakePortal } from './helpers/fake-portal.js';
 import {
+  offTheDesktopBus,
   transportAvailable,
   until,
   withBus,
@@ -51,6 +52,16 @@ const haveTransport = await transportAvailable();
 const needsBroker = haveTransport
   ? {}
   : { skip: 'dbus-native is not installed (expected on Node < 22.12)' };
+
+// **Nothing here may reach the developer's own desktop.** A root built with
+// `createRoot()` rather than through `react-x11/test` starts the AT-SPI
+// bridge as an app's would, climbing toward the desktop's accessibility
+// registry — so it is off here, as the harness has it. And the whole file
+// runs with no session bus, as CI does: under the sampler is the portal
+// rung, a real PickColor wherever the portal has Screenshot v2, and a bare
+// `pickScreenColor()` falls through to it if the cocoa rung stops answering.
+process.env.NO_AT_BRIDGE ??= '1';
+offTheDesktopBus();
 
 /** The loupe is up and the user has not answered it — the state AppKit gives
  *  no way out of from code, and the one an abort has to survive. */
