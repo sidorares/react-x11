@@ -44,21 +44,44 @@ appeared" proves nothing. Three checks that do:
 
 ## What runs
 
-| piece              | file                                                     | what it does                                                          |
-| ------------------ | -------------------------------------------------------- | --------------------------------------------------------------------- |
-| connection         | `connection.js`                                          | fd-capable transport (native or bun:ffi), vendored protocol JSON      |
-| shell              | `window.js`                                              | xdg toplevels and popups, deferred `ack_configure`, fractional scale  |
-| GPU presentation   | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf                          |
-| 2d context         | `context2d.js`, `glyphatlas.js`                          | rects/rounded rects (SDF), paths (stencil), gradients, images, text   |
-| input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                   |
-| touch and tablet   | `touch.js`, `tablet.js`                                  | `wl_touch` and `zwp_tablet_v2`, emulating the pointer; raw touches    |
-| decorations        | `decorations.js`                                         | titlebar, borders, resize edges, buttons — CSD for GNOME              |
-| offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target                |
-| clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                      |
-| screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap   |
-| input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events |
-| the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through             |
-| tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                          |
+| piece              | file                                                     | what it does                                                                                      |
+| ------------------ | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| connection         | `connection.js`                                          | fd-capable transport (native or bun:ffi), vendored protocol JSON                                  |
+| shell              | `window.js`                                              | xdg toplevels and popups, deferred `ack_configure`, fractional scale                              |
+| GPU presentation   | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf                                                      |
+| 2d context         | `context2d.js`, `glyphatlas.js`                          | rects/rounded rects (SDF), paths (coverage masks, stencil), exact clips, gradients, images, text  |
+| `<glarea>`         | `glarea.js`                                              | a rect of the window's backing target as the area's GL surface; composited panes for its children |
+| input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                                               |
+| touch and tablet   | `touch.js`, `tablet.js`                                  | `wl_touch` and `zwp_tablet_v2`, emulating the pointer; raw touches                                |
+| decorations        | `decorations.js`                                         | titlebar, borders, resize edges, buttons — CSD for GNOME                                          |
+| offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target                                            |
+| clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                                                  |
+| screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap                               |
+| input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events                             |
+| the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through                                         |
+| tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                                                      |
+
+### Running the examples
+
+Every example runs on this backend the way it runs on X11, with the display
+taken away so nothing can fall back:
+
+```bash
+env -u DISPLAY REACT_X11_BACKEND=wayland bun examples/widgets.jsx   # or node --import tsx
+```
+
+Two are X11 by nature and say so: `examples/wm.jsx` is a window manager and
+`examples/xeyes.jsx` reads the root window's pointer — neither has a
+Wayland counterpart. `examples/viewer3d.jsx` runs but draws its model only
+through indirect GLX (it is fixed-function GL by design) and shows its own
+note here, as it does under `glPolicy: 'direct'` on X11.
+
+Two environment variables help when a desktop offers no screenshot API:
+`REACT_X11_WAYLAND_TRACE=1` writes a line per presented frame, and
+`REACT_X11_WAYLAND_SNAPSHOT=/tmp/frame.png` writes the backing target of
+the first window at its 30th present (`REACT_X11_WAYLAND_SNAPSHOT_AT`
+changes which) — the pixels the compositor was handed, read back from the
+GPU.
 
 ## What was measured
 
@@ -213,6 +236,32 @@ later; and where a compositor offers neither fractional-scale-v1 nor
 `preferred_buffer_scale`, a surface's buffer scale is that of the output it
 entered.
 
+**A `<glarea>` is a rectangle of the backing target.** On X11 it is a child
+window and on macOS a sublayer; a subsurface here would be a second
+swapchain, a second frame clock and a second dma-buf import per frame for
+what is already one GL context drawing into one target. So `glarea.js`
+hands the area the shared GLES table with `viewport`, `scissor` and
+`bindFramebuffer(null)` re-based on its rect (the Cocoa backend's own
+trick, prototype-delegated), and the frame loop orders the three layers:
+the tree's 2D is flushed under, the area draws over, and the panes its
+children were painted on — offscreen targets, `createOverlayPane` — are
+blended over that, translucent. One thing a shared target needs that a
+child window never did: when the tree repaints under a static scene, the
+scene is asked for its frame before the present, so the background never
+shows through for a frame.
+
+**Paths are antialiased on the CPU, and clips are exact on the stencil.**
+A solid fill that fits the budget (512×512 after cutting to the clip) goes
+through ntk's analytic coverage rasteriser — the same pixels the X11
+backend's local raster and every glyph get — into a per-frame mask atlas,
+drawn like a glyph; gradients and bigger shapes stay on stencil-then-cover.
+`clip()` with anything but one axis-aligned rectangle sets bit 7 of the
+stencil where the shape is (the low seven bits stay the winding count) and
+every batch under it tests that bit; nested clips intersect in place,
+`restore()` re-renders the restored list. The scissor still narrows to the
+bounds, so the test is only paid inside them. `test/wayland/context2d-gpu.test.js`
+reads the pixels back on any machine with a render node.
+
 ## The transports, and Node
 
 Descriptors are the protocol: the keymap, shm pools and clipboard pipes all
@@ -234,15 +283,25 @@ arrive as fds, and Node's sockets abort on them
 
 ## What is left
 
-- **`<glarea>` on the backing target.** Raw GL content that binds
-  framebuffer 0 draws at the swapchain, not the target. Wants the
-  `bindFramebuffer(null)` redirection x11-dri's Apple targets already do.
-- **Antialiased paths.** Stencil-then-cover is aliased. A multisampled
-  target with a resolve blit is a few lines (`renderbufferStorageMultisample`
-  is there); virgl reports `MAX_SAMPLES` of 1, so it could not be measured
-  here.
-- **Non-rectangular clips** fall back to the bounding box
-  (`ctx.clipApproximations` counts them). A stencil clip layer is the fix.
+- **Multisampling.** Stencil-then-cover (gradients, shapes past the CPU
+  budget) and stencil clips are aliased at the edge. MSAA is the fix, and it
+  is not the few lines it looks like: GLES 3.0 cannot `blitFramebuffer`
+  _into_ a multisampled framebuffer, so the scroll blits and the partial
+  repaints the backing target exists for would have to be re-expressed as
+  textured draws, and every read of the target (a present, `getImageData`,
+  a `drawImage` of a surface) as a resolve first. virgl here reports
+  `MAX_SAMPLES` of 1, so none of it could be validated; it waits for a
+  machine that can run it.
+- **`<Frame>` panes.** The out-of-process pane path (`createPaneHost`) is
+  macOS-only today — the pane presents an IOSurface id. Linux wants the same
+  over a memfd or dma-buf fd on the pane channel; until then `<Frame>` here
+  degrades the way it does without embedding.
+- **Bun's fd transport, upstream.** node-x11's `fdpass-bun.js` gave up on a
+  healthy socket when Bun's GC interrupted its `poll(2)` sixty-four times
+  in a row (EINTR is a retry, not a failure); the fix is applied to the
+  installed copy here and prepared for node-x11. Until it ships, an
+  `npm install` brings the bug back under Bun (Node's native transport is
+  unaffected).
 - **Drag-and-drop.** The data device is bound and the clipboard uses it;
   the DnD half (`wl_data_device.start_drag`, enter/motion/drop) is not
   wired to `dnd.js`.
