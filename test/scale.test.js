@@ -22,6 +22,8 @@ import {
   beginScale,
   scaleOf,
   scaleSourceOf,
+  pinnedScale,
+  isVirtualDisplay,
 } from '../src/scale.js';
 
 // -------------------------------------------------------------- fixtures
@@ -299,6 +301,72 @@ test('without physical data only the confident retina call is made', () => {
     }).scale,
     1,
   );
+});
+
+test('a short side past 1600 is retina-class: the lids, and a VM window over one', () => {
+  // what a GNOME guest in a UTM window on a 14" MacBook reports: QEMU's
+  // EDID, its ~100dpi fiction, and a grid no 1x panel ships with
+  const vm = monitorScaleFromMetadata({
+    name: 'Virtual-1',
+    width: 2488,
+    height: 1668,
+    widthMM: 630,
+    heightMM: 420,
+    edid: parseEdid(QEMU_EDID),
+  });
+  assert.strictEqual(vm.scale, 2);
+  assert.strictEqual(vm.source, 'resolution');
+  // a MacBook Air lid behind an adapter that dropped the EDID
+  assert.strictEqual(
+    monitorScaleFromMetadata({
+      name: 'DP-2',
+      width: 2560,
+      height: 1664,
+      widthMM: 0,
+      heightMM: 0,
+    }).scale,
+    2,
+  );
+  // 2560x1600 is a 30" desk monitor as often as anything: without
+  // millimetres it stays 1, like 2560x1440
+  assert.strictEqual(
+    monitorScaleFromMetadata({
+      name: 'DP-1',
+      width: 2560,
+      height: 1600,
+      widthMM: 0,
+      heightMM: 0,
+    }).scale,
+    1,
+  );
+});
+
+test('pinnedScale: REACT_X11_SCALE, then a numeric option, clamped; auto pins nothing', () => {
+  const was = process.env.REACT_X11_SCALE;
+  try {
+    delete process.env.REACT_X11_SCALE;
+    assert.strictEqual(pinnedScale(undefined), null);
+    assert.strictEqual(pinnedScale('auto'), null);
+    assert.deepStrictEqual(pinnedScale(1.5), { scale: 1.5, source: 'option' });
+    assert.deepStrictEqual(pinnedScale(20), { scale: 8, source: 'option' });
+    process.env.REACT_X11_SCALE = '2';
+    assert.deepStrictEqual(pinnedScale(1.5), {
+      scale: 2,
+      source: 'REACT_X11_SCALE',
+    });
+    process.env.REACT_X11_SCALE = 'nonsense';
+    assert.deepStrictEqual(pinnedScale(1), { scale: 1, source: 'option' });
+  } finally {
+    if (was === undefined) delete process.env.REACT_X11_SCALE;
+    else process.env.REACT_X11_SCALE = was;
+  }
+});
+
+test('isVirtualDisplay reads a wl_output make and model as it reads an EDID', () => {
+  assert.strictEqual(isVirtualDisplay('RHT', 'QEMU Monitor'), true);
+  assert.strictEqual(isVirtualDisplay('Mock', 'VirtualBox Display'), true);
+  assert.strictEqual(isVirtualDisplay('BOE', '0x0bca'), false);
+  assert.strictEqual(isVirtualDisplay(null, null), false);
 });
 
 // ---------------------------------------------------------------- snapping

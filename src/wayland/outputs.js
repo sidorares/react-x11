@@ -46,7 +46,11 @@
 
 import { EventEmitter } from 'node:events';
 import { setScreensForTests } from '../screens.js';
-import { monitorScalesOf } from '../scale.js';
+import {
+  isVirtualDisplay,
+  monitorScaleFromMetadata,
+  monitorScalesOf,
+} from '../scale.js';
 
 /** `wl_output.mode` flags. */
 const MODE_CURRENT = 0x1;
@@ -115,6 +119,54 @@ export function effectiveScaleOf(rec) {
     if (ratio > 0) return Math.round(ratio * SCALE_DENOM) / SCALE_DENOM;
   }
   return rec.scale > 0 ? rec.scale : 1;
+}
+
+/**
+ * The scale ladder's resolution class (src/scale.js, rung 5) for a
+ * compositor that scales nothing: `{ zoom: 2 }` where the largest output is
+ * a retina-class grid with no millimetres worth believing, `{ zoom: 1 }`
+ * everywhere else, with the verdict's reason for `REACT_X11_DEBUG_SCALE`.
+ *
+ * The case is a VM window over a retina panel. QEMU describes the guest's
+ * screen as a ~100dpi monitor, mutter believes it and settles on 100%, and
+ * every app laid out at the compositor's word comes up half the size it is
+ * on the host. The X11 ladder answers that screen 2x through Xwayland; this
+ * is the same rung giving the same answer here. A compositor that scales
+ * any output has decided for itself — 133% on that same VM is someone's
+ * choice — and credible millimetres were the compositor's own evidence, so
+ * both keep their word.
+ */
+export function resolutionZoom(records) {
+  let pick = null;
+  for (const rec of records) {
+    const mode = turnedMode(rec);
+    if (!(mode?.width > 0 && mode?.height > 0)) continue;
+    const s = effectiveScaleOf(rec);
+    if (s !== 1) {
+      return {
+        zoom: 1,
+        name: rec.name,
+        reason: `the compositor scales it ${s}x`,
+      };
+    }
+    if (!pick || mode.width * mode.height > pick.w * pick.h)
+      pick = { rec, w: mode.width, h: mode.height };
+  }
+  if (!pick) return { zoom: 1, name: null, reason: 'no outputs yet' };
+  const { rec, w, h } = pick;
+  const verdict = monitorScaleFromMetadata({
+    name: rec.name ?? rec.xdgName ?? '',
+    width: w,
+    height: h,
+    widthMM: rec.physicalWidth,
+    heightMM: rec.physicalHeight,
+    edid: { virtual: isVirtualDisplay(rec.make || null, rec.model || null) },
+  });
+  return {
+    zoom: verdict.source === 'resolution' ? verdict.scale : 1,
+    name: rec.name ?? rec.xdgName ?? null,
+    reason: `${verdict.reason}; the compositor says 1x`,
+  };
 }
 
 /**
@@ -463,6 +515,11 @@ export class WaylandOutputs extends EventEmitter {
     for (const rec of this.byName.values())
       s = Math.max(s, fractional ? effectiveScaleOf(rec) : rec.scale || 1);
     return s;
+  }
+
+  /** `resolutionZoom` over the outputs as they stand. */
+  resolutionZoom() {
+    return resolutionZoom([...this.byName.values()]);
   }
 
   /** The layout in `screens.js`'s shape, at the app's current scale. */
