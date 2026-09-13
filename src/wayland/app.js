@@ -41,6 +41,7 @@ import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
 import { WaylandGLArea, WaylandOverlayPane, GLAREA_VISUAL } from './glarea.js';
 import { setScaleForTests } from '../scale.js';
+import { setCompositingForTests } from '../compositing.js';
 
 const require = createRequire(import.meta.url);
 
@@ -197,6 +198,12 @@ export class WaylandApp extends EventEmitter {
     });
     app.gl = app.gpu.gl;
     app._glCapsResolved = { direct: true };
+    // Every Wayland surface is composited: the compositor blends each
+    // buffer by its alpha, so `useSupports('transparency')` and the
+    // `'@supports transparency'` style block are true — the answer the cocoa
+    // backend gives too. Without it, tooltips and menus took the square,
+    // opaque look meant for an X server with no compositor running.
+    setCompositingForTests(app, true);
     return app;
   }
 
