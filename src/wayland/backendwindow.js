@@ -441,6 +441,14 @@ export class WaylandBackendWindow extends EventEmitter {
 
     const size = this.glctx.beginFrame();
     if (!size) return this._frameIdle();
+    // This window's GBM surface is current now, and stays the app's notion of
+    // "current" for the frame: an offscreen render, a pane, a context made
+    // lazily inside the paint — each asks `app.makeCurrent()` — must not
+    // switch to another window's surface mid-frame, or the blit lands on
+    // that window and `eglSwapBuffers` on this one is EGL_BAD_SURFACE (the
+    // popup crash: its first frame made its context, and `makeCurrent`
+    // reached for the toplevel's surface it had cached).
+    if (this.glctx.chain?.gbm) this.app._currentSurface = this.glctx.chain.gbm;
     const resized = size.resized || this._resized;
     this._resized = false;
     this._frameSize = { width: size.width, height: size.height, time };
