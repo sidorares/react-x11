@@ -57,6 +57,9 @@ const DEFS = loadDefs([
   'cursor-shape-v1',
   'viewporter',
   'fractional-scale-v1',
+  'xdg-decoration-unstable-v1',
+  'wlr-layer-shell-unstable-v1',
+  'wlr-screencopy-unstable-v1',
 ]);
 
 /** Globals the mock advertises: name -> [interface, version]. */
@@ -68,9 +71,27 @@ const GLOBALS = [
   ['wp_viewporter', 1],
   ['wp_fractional_scale_manager_v1', 1],
   ['wp_cursor_shape_manager_v1', 1],
+  // the wlroots-shaped extras: a compositor with everything, so a client
+  // can be seen negotiating each; a test that wants one absent just never
+  // binds it
+  ['wl_shm', 1],
+  ['wl_output', 4],
+  ['zxdg_decoration_manager_v1', 1],
+  ['zwlr_layer_shell_v1', 4],
+  ['zwlr_screencopy_manager_v1', 3],
 ];
 
 const SERVER_ID_BASE = 0xff000000;
+
+/** `wl_shm.format`: what a screencopy frame is offered in. */
+const XRGB8888 = 1;
+
+/**
+ * The frame a screencopy hands back unless a test scripts one: a gradient
+ * whose pixel at (x, y) is (x, y, 0x55), so a test can name the pixel it
+ * expects without a lookup table.
+ */
+const defaultFrame = (x, y) => [x & 255, y & 255, 0x55];
 
 export class MockCompositor extends EventEmitter {
   constructor(opts = {}) {
@@ -220,7 +241,9 @@ export class MockCompositor extends EventEmitter {
         { name: 'id', type: 'new_id' },
       ]);
     } else {
-      args = get_args(body, req.args);
+      // an `fd` argument (wl_shm.create_pool) rides as ancillary data, which
+      // only the pair() transport carries; elsewhere it reads as -1
+      args = get_args(body, req.args, () => this._takeFd());
     }
     const record = { id, iface: obj.iface, name: req.name, args };
     this.requests.push(record);
@@ -254,6 +277,122 @@ export class MockCompositor extends EventEmitter {
         this.seat = newId;
         this.send(newId, 'capabilities', 3);
         if (version >= 2) this.send(newId, 'name', 'seat0');
+      } else if (ifaceName === 'wl_shm') {
+        this.send(newId, 'format', XRGB8888);
+        this.send(newId, 'format', 0 /* argb8888 */);
+      } else if (ifaceName === 'wl_output') {
+        // one output, the size of the mock's screen, scale 1
+        this.output = newId;
+        this.send(newId, 'geometry', 0, 0, 300, 200, 0, 'mock', 'MOCK-1', 0);
+        this.send(newId, 'mode', 3, this.opts.width, this.opts.height, 60000);
+        if (version >= 2) this.send(newId, 'scale', 1);
+        if (version >= 4) {
+          this.send(newId, 'name', 'MOCK-1');
+          this.send(newId, 'description', 'the mock output');
+        }
+        if (version >= 2) this.send(newId, 'done');
+      }
+      return;
+    }
+    if (iface === 'wl_shm' && name === 'create_pool') {
+      Object.assign(this.objects.get(args[0]), { fd: args[1], size: args[2] });
+      return;
+    }
+    if (iface === 'wl_shm_pool') {
+      if (name === 'create_buffer') {
+        const [id, offset, width, height, stride, format] = args;
+        Object.assign(this.objects.get(id), {
+          pool: obj,
+          offset,
+          width,
+          height,
+          stride,
+          format,
+        });
+      } else if (name === 'destroy') {
+        if (obj.fd >= 0) {
+          try {
+            fs.closeSync(obj.fd);
+          } catch {
+            /* */
+          }
+        }
+        this.objects.delete(id);
+      }
+      return;
+    }
+    if (iface === 'wl_buffer' && name === 'destroy') {
+      this.objects.delete(id);
+      return;
+    }
+    if (iface === 'zxdg_decoration_manager_v1') {
+      if (name === 'get_toplevel_decoration') {
+        const role = this.objects.get(args[1])?.role;
+        this.objects.get(args[0]).role = role;
+        if (role) role.decoration = args[0];
+      }
+      return;
+    }
+    if (iface === 'zxdg_toplevel_decoration_v1') {
+      const role = obj.role;
+      if (name === 'set_mode') role.decorationRequested = args[0];
+      else if (name === 'unset_mode') role.decorationRequested = null;
+      else if (name === 'destroy') {
+        if (role) role.decoration = null;
+        this.objects.delete(id);
+      }
+      return;
+    }
+    if (iface === 'zwlr_layer_shell_v1') {
+      if (name === 'get_layer_surface') {
+        const [newId, surfaceId, output, layer, namespace] = args;
+        const s = this.surfaces.get(surfaceId);
+        const role = {
+          kind: 'layer',
+          layerSurface: newId,
+          surface: surfaceId,
+          output,
+          layer,
+          namespace,
+          configured: false,
+          props: {},
+          popups: [],
+        };
+        if (s) s.role = role;
+        this.objects.get(newId).role = role;
+      }
+      return;
+    }
+    if (iface === 'zwlr_layer_surface_v1') {
+      const role = obj.role;
+      if (name === 'ack_configure') {
+        role.acked = args[0];
+        this.emit('ack', args[0]);
+      } else if (name === 'get_popup') {
+        role.popups.push(args[0]);
+      } else if (name === 'destroy') {
+        this.objects.delete(id);
+      } else {
+        role.props[name] = args;
+      }
+      return;
+    }
+    if (iface === 'zwlr_screencopy_manager_v1') {
+      if (name === 'capture_output' || name === 'capture_output_region') {
+        const frame = this.objects.get(args[0]);
+        frame.version = obj.version;
+        frame.capture = { cursor: args[1], output: args[2] };
+        const { width, height } = this.opts;
+        this.send(args[0], 'buffer', XRGB8888, width, height, width * 4);
+        if (obj.version >= 3) this.send(args[0], 'buffer_done');
+      }
+      return;
+    }
+    if (iface === 'zwlr_screencopy_frame_v1') {
+      if (name === 'copy' || name === 'copy_with_damage') {
+        this._copyFrame(id, args[0]);
+      } else if (name === 'destroy') {
+        this.objects.delete(id);
       }
       return;
     }
@@ -369,10 +508,58 @@ export class MockCompositor extends EventEmitter {
     }
   }
 
+  _takeFd() {
+    const fds = this.socket?.takeFds?.(1);
+    return typeof fds?.[0] === 'number' ? fds[0] : -1;
+  }
+
+  /**
+   * Fill a client's buffer with the scripted frame and say it is ready.
+   * Rows go in bottom-up when `opts.yInvert` is set, with the flag to say
+   * so, which is how a GL-rendering compositor hands frames over.
+   */
+  _copyFrame(frameId, bufferId) {
+    const buf = this.objects.get(bufferId);
+    if (this.opts.captureFails || !buf?.pool || buf.pool.fd < 0) {
+      this.send(frameId, 'failed');
+      return;
+    }
+    const { width, height, stride, offset } = buf;
+    const frame = this.opts.frame ?? defaultFrame;
+    const bytes = Buffer.alloc(stride * height);
+    for (let y = 0; y < height; y++) {
+      const row = this.opts.yInvert ? height - 1 - y : y;
+      for (let x = 0; x < width; x++) {
+        const [r, g, b] = frame(x, y);
+        const o = row * stride + x * 4;
+        bytes[o] = b;
+        bytes[o + 1] = g;
+        bytes[o + 2] = r;
+        bytes[o + 3] = 0xff;
+      }
+    }
+    fs.writeSync(buf.pool.fd, bytes, 0, bytes.length, offset);
+    this.send(frameId, 'flags', this.opts.yInvert ? 1 : 0);
+    this.send(frameId, 'ready', 0, 1, 0);
+  }
+
   /** The configure pair a role gets after its first commit. */
   _configure(s) {
     const role = s.role;
     const serial = this.serial++;
+    if (role.kind === 'layer') {
+      // 0 on an axis is "stretch": the output's extent stands in
+      const [w, h] = role.props.set_size ?? [0, 0];
+      this.send(
+        role.layerSurface,
+        'configure',
+        serial,
+        w || this.opts.width,
+        h || this.opts.height,
+      );
+      role.lastSerial = serial;
+      return;
+    }
     if (role.kind === 'toplevel') {
       const states = this.opts.states ?? [4]; // activated
       this.send(
@@ -382,6 +569,18 @@ export class MockCompositor extends EventEmitter {
         this.opts.height,
         statesArray(states),
       );
+      // a decoration mode rides the same configure sequence: the mode a
+      // test set, else what the client asked for, else client-side
+      if (role.decoration) {
+        this.send(
+          role.decoration,
+          'configure',
+          role.decorationMode ??
+            this.opts.decorationMode ??
+            role.decorationRequested ??
+            1,
+        );
+      }
     } else if (role.kind === 'popup') {
       const size = role.positioner?.set_size ?? [100, 50];
       const anchor = role.positioner?.set_anchor_rect ?? [0, 0, 1, 1];
@@ -414,6 +613,36 @@ export class MockCompositor extends EventEmitter {
   requestClose(surfaceId) {
     const s = this.surfaces.get(surfaceId);
     this.send(s.role.toplevel, 'close');
+  }
+
+  /** Change a toplevel's decoration mode: a decoration configure, then the surface's. */
+  setDecorationMode(surfaceId, mode) {
+    const s = this.surfaces.get(surfaceId);
+    if (!s?.role?.decoration) throw new Error('mock: no decoration object');
+    s.role.decorationMode = mode;
+    this._configure(s);
+    return s.role.lastSerial;
+  }
+
+  /** Reconfigure a layer surface at a size of the compositor's choosing. */
+  configureLayer(surfaceId, { width, height }) {
+    const s = this.surfaces.get(surfaceId);
+    if (s?.role?.kind !== 'layer') throw new Error('mock: not a layer surface');
+    const serial = this.serial++;
+    this.send(s.role.layerSurface, 'configure', serial, width, height);
+    s.role.lastSerial = serial;
+    return serial;
+  }
+
+  /** The compositor takes a layer surface down. */
+  closeLayer(surfaceId) {
+    const s = this.surfaces.get(surfaceId);
+    this.send(s.role.layerSurface, 'closed');
+  }
+
+  /** The surfaces with a layer role, newest last — how a test finds an overlay. */
+  layerSurfaces() {
+    return [...this.surfaces.values()].filter((s) => s.role?.kind === 'layer');
   }
 
   /** The requests recorded for one interface name, or one request name. */

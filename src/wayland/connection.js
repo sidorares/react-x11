@@ -74,6 +74,10 @@ export const PROTOCOLS = [
   'relative-pointer-unstable-v1',
   'ext-idle-notify-v1',
   'xdg-toplevel-icon-v1',
+  'wlr-layer-shell-unstable-v1',
+  'wlr-screencopy-unstable-v1',
+  'ext-image-capture-source-v1',
+  'ext-image-copy-capture-v1',
 ];
 
 const definitions = new Map();

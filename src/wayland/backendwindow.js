@@ -19,12 +19,22 @@
 // which nothing can pace), the callback runs the renderer's paint into the
 // backing target, and the result is copied to a swapchain buffer and
 // committed with the next frame request in the same commit.
+//
+// The frame is drawn here only until a compositor agrees to draw it:
+// where xdg-decoration is offered the window asks for server-side
+// decorations (ssd.js) and, granted them, switches its own off, which the
+// tree sees as the content growing. And a window whose `windowType` is a
+// dock, a wallpaper, a notification or a splash is not a toplevel at all
+// where the compositor has layer-shell (layershell.js) — same surface, same
+// loop, no frame.
 
 import { EventEmitter } from 'node:events';
 import { WaylandWindow, TOPLEVEL_STATE } from './window.js';
 import { WaylandGLContext } from './glcontext.js';
 import { WaylandContext2D } from './context2d.js';
 import { Decorations } from './decorations.js';
+import { decorationPolicy } from './ssd.js';
+import { layerRoleFor } from './layershell.js';
 
 // What the X11 window has and this one does not — `getProperty`,
 // `setProperty`, `selectXI2`, `grabKeyboard`, `setBackgroundPixel`,
@@ -61,6 +71,13 @@ export class WaylandBackendWindow extends EventEmitter {
     this.X = app.X;
     this.ownerDocument = null;
     this.isPopup = attributes.overrideRedirect === true;
+    // A dock, a wallpaper, a notification: a layer surface where the
+    // compositor has layer-shell, an ordinary toplevel where it does not.
+    this.layerRole =
+      !this.isPopup && app.layerShell
+        ? layerRoleFor(attributes, { scale: app.scale })
+        : null;
+    this.isLayer = this.layerRole !== null;
     /** the cursor the tree last asked for over the content */
     this.treeCursor = 'default';
     this._destroyed = false;
@@ -77,14 +94,23 @@ export class WaylandBackendWindow extends EventEmitter {
 
     // Frame and content sizes. `attributes.width/height` are what the tree
     // measured, in device pixels of content; the surface adds the frame.
-    this.decor = this.isPopup
-      ? null
-      : new Decorations({ enabled: app.options.decorations !== false });
+    // Popups and layer surfaces have none; a toplevel's is switched off once
+    // a compositor agrees to draw it (`_setDecorationMode`).
+    this._decorPolicy = decorationPolicy(
+      app.options.decorations,
+      attributes.decorations,
+    );
+    this.decor =
+      this.isPopup || this.isLayer
+        ? null
+        : new Decorations({ enabled: this._decorPolicy.draw });
     if (this.decor) this.decor.title = attributes.title ?? 'react-x11';
     const scale = app.scale;
     const insets = this.insets;
     const contentW = Math.max(1, (attributes.width ?? 640) / scale);
     const contentH = Math.max(1, (attributes.height ?? 480) / scale);
+    /** the content size the tree asked for, in logical pixels */
+    this._contentWish = { width: contentW, height: contentH };
     const surfaceW = Math.round(contentW + insets.left + insets.right);
     const surfaceH = Math.round(contentH + insets.top + insets.bottom);
 
@@ -103,6 +129,15 @@ export class WaylandBackendWindow extends EventEmitter {
         height: surfaceH,
       });
       this.parentWindow = parent;
+    } else if (this.isLayer) {
+      this.wl = WaylandWindow.createLayerSync({
+        conn: app.conn,
+        compositor: app.compositor,
+        layerShell: app.layerShell,
+        width: surfaceW,
+        height: surfaceH,
+        ...this.layerRole,
+      });
     } else {
       this.wl = WaylandWindow.createSync({
         conn: app.conn,
@@ -117,6 +152,9 @@ export class WaylandBackendWindow extends EventEmitter {
         width: surfaceW,
         height: surfaceH,
         parent: app.parentFor(attributes, { toplevelOnly: true })?.wl ?? null,
+        decorations: app.decorationManager
+          ? { manager: app.decorationManager, prefer: this._decorPolicy.prefer }
+          : null,
       });
     }
     this.wl.scale = scale;
@@ -163,6 +201,7 @@ export class WaylandBackendWindow extends EventEmitter {
       // adopting a configure needs a frame even when nothing else changed
       this._armFrame();
     });
+    wl.on('decorationmode', (mode) => this._setDecorationMode(mode));
     wl.on('statechange', () => this.emit('statechange', this.getWmStates()));
     wl.on('close', () => this.requestClose());
     wl.on('scale', () => {
@@ -177,6 +216,33 @@ export class WaylandBackendWindow extends EventEmitter {
       });
     });
     wl.on('error', (err) => this.emit('error', err));
+  }
+
+  /**
+   * The compositor's answer to who draws the frame. 'server' switches the
+   * client-side frame off: the insets go to zero, no titlebar is painted,
+   * and the content grows into the whole surface — a resize, as far as the
+   * tree is concerned, and `set_window_geometry` already covers the buffer.
+   * Before the first frame, where the compositor has not imposed a size,
+   * the surface is refitted to the content the tree asked for instead, so a
+   * floating window comes up the size it was declared rather than a
+   * titlebar taller. The answer can change later (a compositor's setting
+   * flips) and the same switch runs the other way.
+   */
+  _setDecorationMode(mode) {
+    if (!this.decor) return;
+    const enabled = this._decorPolicy.draw && mode !== 'server';
+    if (this.decor.enabled === enabled) return;
+    this.decor.enabled = enabled;
+    if (!this._everPresented && !this.wl.sizeImposed) {
+      const i = this.insets;
+      const wish = this._contentWish;
+      this.wl.width = Math.max(1, Math.round(wish.width + i.left + i.right));
+      this.wl.height = Math.max(1, Math.round(wish.height + i.top + i.bottom));
+    }
+    this._resized = true;
+    this._frameDirty = true;
+    this.emit('resize', { width: this.width, height: this.height, x: 0, y: 0 });
   }
 
   // ---- geometry ---------------------------------------------------------
@@ -524,8 +590,8 @@ export class WaylandBackendWindow extends EventEmitter {
     }
     const i = this.insets;
     const s = this.wl.scale;
-    const w = Math.max(1, Math.round(width / s + i.left + i.right));
-    const h = Math.max(1, Math.round(height / s + i.top + i.bottom));
+    let w = Math.max(1, Math.round(width / s + i.left + i.right));
+    let h = Math.max(1, Math.round(height / s + i.top + i.bottom));
     if (this.isPopup) {
       this.wl.reposition(this.app.wmBase, {
         x: this.wl.x,
@@ -533,6 +599,13 @@ export class WaylandBackendWindow extends EventEmitter {
         width: w,
         height: h,
       });
+    }
+    if (this.isLayer) {
+      // A stretched axis is the compositor's; the wish on it is not granted.
+      const role = this.wl.layer;
+      if (role.stretchX) w = this.wl.width;
+      if (role.stretchY) h = this.wl.height;
+      if (w !== this.wl.width || h !== this.wl.height) role.resize(w, h);
     }
     if (w === this.wl.width && h === this.wl.height) return this;
     this.wl.width = w;

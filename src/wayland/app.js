@@ -31,6 +31,7 @@ import { WaylandBackendWindow } from './backendwindow.js';
 import { WaylandSurface } from './surface.js';
 import { InputRouter } from './input.js';
 import { createWaylandClipboard } from './clipboard.js';
+import { createScreenCapture } from './screencopy.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
 import { setScaleForTests } from '../scale.js';
@@ -87,6 +88,12 @@ export class WaylandApp extends EventEmitter {
     this.viewporter = null;
     this.fractionalScale = null;
     this.activation = null;
+    /** xdg-decoration, layer-shell, shm: null where the compositor has none */
+    this.decorationManager = null;
+    this.layerShell = null;
+    this.shm = null;
+    /** screen capture and the eyedropper (screencopy.js); null on GNOME */
+    this.screenCapture = null;
     this.X = new XStandIn(this);
     this.display = this.X.display;
     this.gpu = null;
@@ -118,6 +125,9 @@ export class WaylandApp extends EventEmitter {
     app.viewporter = await conn.bind('wp_viewporter');
     app.fractionalScale = await conn.bind('wp_fractional_scale_manager_v1');
     app.activation = await conn.bind('xdg_activation_v1');
+    app.decorationManager = await conn.bind('zxdg_decoration_manager_v1');
+    app.layerShell = await conn.bind('zwlr_layer_shell_v1');
+    app.shm = await conn.bind('wl_shm');
     app.seat = await WaylandSeat.bind(conn);
     app.input = new InputRouter(app);
     app.clipboard = await createWaylandClipboard({
@@ -125,6 +135,7 @@ export class WaylandApp extends EventEmitter {
       seat: app.seat.seat,
       serial: () => app.seat.lastSerial,
     });
+    app.screenCapture = await createScreenCapture(app);
 
     const ntk = require('ntk');
     // `app.fonts` is the name the renderer reaches for (src/fonts.js): one
@@ -318,6 +329,7 @@ export class WaylandApp extends EventEmitter {
     this.windows.clear();
     this.toplevels.length = 0;
     this.input?.destroy();
+    this.screenCapture?.destroy();
     this.seat?.destroy();
     if (this._holder) {
       try {
