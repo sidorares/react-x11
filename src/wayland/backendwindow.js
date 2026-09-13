@@ -147,6 +147,8 @@ export class WaylandBackendWindow extends EventEmitter {
       fractionalScaleManager: app.fractionalScale,
       viewporter: app.viewporter,
     });
+    // which monitor it is on, its bounds, and the output-scale fallback
+    app.outputs?.watchWindow(this.wl);
     this.glctx = WaylandGLContext.createSync({
       conn: app.conn,
       window: this.wl,
@@ -213,6 +215,17 @@ export class WaylandBackendWindow extends EventEmitter {
 
   get scale() {
     return this.wl.scale;
+  }
+
+  /**
+   * The monitor this window is on — the output the surface has entered
+   * (the densest one when it straddles two), as a `screens.js`-shaped
+   * record with the output's `name`, `description`, `scale` and
+   * `refreshRate`; null before the first present, when no compositor has
+   * said yet.
+   */
+  get output() {
+    return this.app.outputs?.monitorFor(this.wl.outputs) ?? null;
   }
 
   /** Content width in device pixels — what the tree lays out to. */

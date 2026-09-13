@@ -74,6 +74,7 @@ export const PROTOCOLS = [
   'relative-pointer-unstable-v1',
   'ext-idle-notify-v1',
   'xdg-toplevel-icon-v1',
+  'xdg-output-unstable-v1',
 ];
 
 const definitions = new Map();
@@ -160,6 +161,8 @@ export class WaylandConnection extends EventEmitter {
     this.transport = transport;
     /** interface name -> bound proxy, for the singletons everyone shares */
     this._bound = new Map();
+    /** the {@link Registry} view, once something has asked for it */
+    this._registry = null;
     this.destroyed = false;
   }
 
@@ -327,6 +330,31 @@ export class WaylandConnection extends EventEmitter {
   }
 
   /**
+   * The registry as a list rather than a dictionary: every global with the
+   * numeric name the compositor gave it, and the arrivals and departures
+   * after startup.
+   *
+   * `bind()` above is enough for the singletons, but the library files
+   * globals by interface name, so of three `wl_output`s it remembers the
+   * last — and its own registry consumed the initial announcement inside
+   * `init()`, before anything here could listen. A second `wl_registry` is
+   * the protocol's own answer: the compositor replays its globals to each
+   * registry it hands out and sends `global`/`global_remove` to all of them
+   * afterwards, which is also what makes hot-plug visible. One round trip,
+   * paid by the first caller, then shared.
+   */
+  async registry() {
+    if (!this._registry) {
+      this._registry = (async () => {
+        const view = new Registry(this);
+        await view._open();
+        return view;
+      })();
+    }
+    return this._registry;
+  }
+
+  /**
    * Wait for everything sent so far to have been processed.
    *
    * `wl_display.sync` is the only ordering primitive Wayland has — there are
@@ -364,5 +392,71 @@ export class WaylandConnection extends EventEmitter {
     // net.Socket does, and a reader thread keeps the process alive until the
     // descriptor is actually gone — so tear down rather than half-close.
     this.socket.destroy();
+  }
+}
+
+/**
+ * What {@link WaylandConnection.registry} hands out.
+ *
+ * Emits `global(name, interface, version)` and `global_remove(name)` for
+ * changes after the initial list — the initial list itself is in `globals`
+ * by the time the promise resolves, so a caller reads first and listens
+ * second without a gap between the two.
+ */
+export class Registry extends EventEmitter {
+  constructor(conn) {
+    super();
+    this.setMaxListeners(0);
+    this.conn = conn;
+    /** numeric name -> { interface, version } */
+    this.globals = new Map();
+    this.proxy = null;
+  }
+
+  async _open() {
+    const display = this.conn.display;
+    // Synchronous on purpose: the listeners have to be on before the first
+    // announcement can be parsed, and the request's bytes go out now.
+    this.proxy = display.wl_display.$.get_registry();
+    this.proxy.setMaxListeners?.(0);
+    this.proxy.on('global', (name, iface, version) => {
+      this.globals.set(name, { interface: iface, version });
+      if (this._opened) this.emit('global', name, iface, version);
+    });
+    this.proxy.on('global_remove', (name) => {
+      this.globals.delete(name);
+      if (this._opened) this.emit('global_remove', name);
+    });
+    await this.conn.roundtrip();
+    this._opened = true;
+  }
+
+  /** Every global of one interface: `[{ name, interface, version }]`. */
+  of(iface) {
+    const out = [];
+    for (const [name, g] of this.globals)
+      if (g.interface === iface) out.push({ name, ...g });
+    return out;
+  }
+
+  /**
+   * Bind one global by its numeric name, at the highest version both sides
+   * speak (or `version`, when lower). A fresh proxy each time, the caller's
+   * to release; null once the global has gone.
+   */
+  bind(name, iface, version) {
+    const entry = this.globals.get(name);
+    if (!entry || entry.interface !== iface) return null;
+    const display = this.conn.display;
+    const def = display.getDefinition(iface);
+    const negotiated = Math.min(
+      def.version,
+      entry.version,
+      version ?? Infinity,
+    );
+    const proxy = display.createInterface(iface, negotiated);
+    proxy.setMaxListeners?.(0);
+    this.proxy.$.bind(name, iface, negotiated, proxy.id);
+    return proxy;
   }
 }

@@ -54,6 +54,7 @@ appeared" proves nothing. Three checks that do:
 | decorations        | `decorations.js`                                         | titlebar, borders, resize edges, buttons — CSD for GNOME             |
 | offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target               |
 | clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                     |
+| screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap  |
 | the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through            |
 | tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                         |
 
@@ -154,6 +155,25 @@ asynchrony — a request is one-way and the client allocates ids — so the
 library grew a synchronous namespace (`Wl_interface.$`) and the only
 genuinely asynchronous step, binding globals, happens once in `open()`.
 
+**The monitors are a fold over the registry.** Each `wl_output` is its own
+global, so `outputs.js` binds every one (through a second `wl_registry`,
+because the library files globals by interface name and keeps one) and
+publishes the layout into `screens.js` the way the cocoa backend does:
+names from `wl_output.name` (`DP-1`, `eDP-1`), logical rects from
+xdg_output where the compositor has it and from the mode over the scale
+where it does not, converted to the renderer's device pixels at
+`app.scale`. Hot-plug is `global`/`global_remove` on that registry. Two
+things the protocol does not have are stood in for: a **primary** (the
+output at the origin), and a **work area** — `xdg_toplevel.configure_bounds`
+is the monitor less its panels, sent to a window ahead of its configure, so
+a window's bounds become the usable rect of the output it has entered, and
+every monitor carries its own rect so no head is clamped by another's. The
+densest output also seeds `app.scale` before the first window exists, which
+is the difference between a first layout at 2x and one corrected a frame
+later; and where a compositor offers neither fractional-scale-v1 nor
+`preferred_buffer_scale`, a surface's buffer scale is that of the output it
+entered.
+
 ## The transports, and Node
 
 Descriptors are the protocol: the keymap, shm pools and clipboard pipes all
@@ -190,9 +210,9 @@ arrive as fds, and Node's sockets abort on them
 - **Text input v3.** IME composition goes through `compose.js`'s dead-key
   tables; `zwp_text_input_v3` would give real preedit.
 - **Touch and tablet.** The seat handles pointer and keyboard only.
-- **Screens.** `wl_output` geometry and names are not fed into
-  `screens.js`; `availableArea` answers null (no limit) rather than the
-  work area.
+- **`useScreens().source` reads `'test'`**, as it does on macOS: both
+  backends publish through `setScreensForTests`, the one seam `screens.js`
+  has, and it stamps the source. A `source` argument on it is the fix.
 - **`fillText` only sees the first font family** of a `font` shorthand and
   strokes text as a fill.
 - **Server-side decorations** where a compositor offers `xdg-decoration`

@@ -31,6 +31,7 @@ import { WaylandBackendWindow } from './backendwindow.js';
 import { WaylandSurface } from './surface.js';
 import { InputRouter } from './input.js';
 import { createWaylandClipboard } from './clipboard.js';
+import { WaylandOutputs } from './outputs.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
 import { WaylandGLArea, WaylandOverlayPane, GLAREA_VISUAL } from './glarea.js';
@@ -88,6 +89,8 @@ export class WaylandApp extends EventEmitter {
     this.viewporter = null;
     this.fractionalScale = null;
     this.activation = null;
+    /** the monitors, published into src/screens.js (outputs.js) */
+    this.outputs = null;
     this.X = new XStandIn(this);
     this.display = this.X.display;
     this.gpu = null;
@@ -119,6 +122,14 @@ export class WaylandApp extends EventEmitter {
     app.viewporter = await conn.bind('wp_viewporter');
     app.fractionalScale = await conn.bind('wp_fractional_scale_manager_v1');
     app.activation = await conn.bind('xdg_activation_v1');
+    // The scale session first, so the outputs have a per-monitor map to
+    // fill; then the outputs, awaited like the X11 backend's Xinerama tier:
+    // an auto-sized window clamps to a monitor synchronously inside
+    // realize(), and the first window is laid out at whatever `app.scale`
+    // says by then — which the densest output seeds (`noteScale`).
+    setScaleForTests(app, app.scale, 'wayland');
+    app.outputs = new WaylandOutputs(conn, app);
+    await app.outputs.open();
     app.seat = await WaylandSeat.bind(conn);
     app.input = new InputRouter(app);
     app.clipboard = await createWaylandClipboard({
@@ -149,8 +160,6 @@ export class WaylandApp extends EventEmitter {
     });
     app.gl = app.gpu.gl;
     app._glCapsResolved = { direct: true };
-
-    setScaleForTests(app, app.scale, 'wayland');
     return app;
   }
 
@@ -251,9 +260,14 @@ export class WaylandApp extends EventEmitter {
     );
   }
 
-  /** Called by windows when an output scale changes. */
+  /** Called by windows when an output scale changes, and by outputs.js. */
   noteScale() {
-    let scale = 1;
+    // Until a window exists the outputs are the only word on the scale, and
+    // the first window is laid out at whatever this says — so their
+    // densest one seeds it. Once a window has heard its own, the windows'
+    // is the truth: fractional-scale says 1.5 where `wl_output.scale`
+    // rounds up to 2.
+    let scale = this.windows.size === 0 ? (this.outputs?.maxScale ?? 1) : 1;
     for (const w of this.windows.values()) scale = Math.max(scale, w.wl.scale);
     if (scale !== this.scale) {
       this.scale = scale;
@@ -288,7 +302,11 @@ export class WaylandApp extends EventEmitter {
   }
 
   frameIntervalFor() {
-    // The compositor paces us; there is no interval to guess at.
+    // The compositor paces us through `wl_surface.frame`, and nothing in
+    // the shared renderer reads this (only the cocoa window does, to pace
+    // itself). The refresh rate is known — `win.output.refreshRate`, from
+    // the output's current mode — but an interval here would only invite a
+    // second clock beside the compositor's.
     return 0;
   }
 
@@ -382,6 +400,7 @@ export class WaylandApp extends EventEmitter {
     this.toplevels.length = 0;
     this.input?.destroy();
     this.seat?.destroy();
+    this.outputs?.destroy();
     if (this._holder) {
       try {
         this._holder.destroy();
