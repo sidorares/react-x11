@@ -14,9 +14,27 @@
 // longer closes the socket, so without it a connection would survive between
 // tests carrying match rules and exported objects. That is the harness
 // closing what the harness caused, not a seam into production code.
+//
+// **Neither helper covers anything outside `fn`.** A call made after one
+// returns — or by an effect or a timer that fires later — reads the
+// process's own environment, and on a logged-in desktop that is the real
+// session bus with the real portal on it. CI has no session bus, so such a
+// test stays green there and misbehaves only on a developer's machine. The
+// eyedropper suite had one: a pick one line below `withNoBus` found GNOME's
+// Screenshot portal, the shell put its colour picker on the screen, and the
+// file hung waiting for a click — and while that request stayed open, later
+// runs were refused with "There is an ongoing operation for this sender".
+// `offTheDesktopBus()` at the top of a file takes all of it off the
+// developer's bus, so a dial that slips out finds nothing.
+
+import { after, before } from 'node:test';
 
 import { _resetBusState, closeBus } from '../../src/bus.js';
 import { _resetServiceCache } from '../../src/portal.js';
+
+/** An address that names nothing: where `withNoBus()` and
+ *  `offTheDesktopBus()` point the session bus. */
+const NO_BUS = 'unix:path=/nonexistent/no-bus-here';
 
 /**
  * The transport, loaded on demand — this file is imported by a suite that has
@@ -83,6 +101,10 @@ function restore(name, value) {
  * and a test that skipped this on a developer's own desktop would reach the
  * real portal and put a dialog on their screen, then wait for a human. That
  * is exactly what happened while writing the file-dialog tests.
+ *
+ * **And only inside `fn`.** The environment goes back on the way out, so an
+ * assertion that still needs "no bus here" — a second pick, a late probe —
+ * belongs inside the callback, not on the line after it.
  */
 export async function withNoBus(fn) {
   const saved = {
@@ -93,7 +115,7 @@ export async function withNoBus(fn) {
   await closeBus('session').catch(() => {});
   _resetBusState();
   _resetServiceCache();
-  process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/nonexistent/no-bus-here';
+  process.env.DBUS_SESSION_BUS_ADDRESS = NO_BUS;
   delete process.env.XDG_RUNTIME_DIR;
   Object.defineProperty(process, 'platform', { value: 'linux' });
   try {
@@ -109,6 +131,46 @@ export async function withNoBus(fn) {
     _resetBusState();
     _resetServiceCache();
   }
+}
+
+/**
+ * Take a whole file off the developer's session bus.
+ *
+ * ```js
+ * offTheDesktopBus(); // at the top level of a test file, once
+ * ```
+ *
+ * From the first test to the last, `DBUS_SESSION_BUS_ADDRESS` names nothing
+ * and `XDG_RUNTIME_DIR` is gone, so a dial that slips out of `withBus()` or
+ * `withNoBus()` finds no bus — the answer CI gives — rather than the desktop
+ * the suite happens to be running on. Both helpers still work under it: each
+ * saves what it finds, which is now this, and puts that back.
+ *
+ * The session bus only, since it is the one with a portal on it — the one
+ * that can put a dialog on the screen and wait for a human.
+ */
+export function offTheDesktopBus() {
+  const saved = {};
+  before(async () => {
+    saved.address = process.env.DBUS_SESSION_BUS_ADDRESS;
+    saved.runtime = process.env.XDG_RUNTIME_DIR;
+    // Closed first, for withNoBus()'s reason: a live connection is handed
+    // back whatever the environment says now.
+    await closeBus('session').catch(() => {});
+    _resetBusState();
+    _resetServiceCache();
+    process.env.DBUS_SESSION_BUS_ADDRESS = NO_BUS;
+    // src/bus.js falls back to `$XDG_RUNTIME_DIR/bus` when the address is
+    // unset, and on a desktop that is the real bus again.
+    delete process.env.XDG_RUNTIME_DIR;
+  });
+  after(async () => {
+    restore('DBUS_SESSION_BUS_ADDRESS', saved.address);
+    restore('XDG_RUNTIME_DIR', saved.runtime);
+    await closeBus('session').catch(() => {});
+    _resetBusState();
+    _resetServiceCache();
+  });
 }
 
 /** A listening broker, with a live client count attached. */
