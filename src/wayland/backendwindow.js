@@ -161,6 +161,12 @@ export class WaylandBackendWindow extends EventEmitter {
         commit: false,
       });
       this.parentWindow = parent;
+      /** where the tree asked for the popup, in its parent's surface
+       * coordinates — the compositor's configure may have slid it */
+      this._popupAt = {
+        x: (attributes.x ?? 0) / ps + pi.left,
+        y: (attributes.y ?? 0) / ps + pi.top,
+      };
     } else if (this.isLayer) {
       this.wl = WaylandWindow.createLayerSync({
         conn: app.conn,
@@ -719,6 +725,14 @@ export class WaylandBackendWindow extends EventEmitter {
    */
   setState(state) {
     if (state && typeof state === 'object') {
+      // A popup's rect is one placement: the tree places a popup through
+      // here whenever the window has a `setState`, and a tooltip that
+      // measured itself hidden at (0, 0) is moved to its trigger this way.
+      // Dropping `x`/`y` left it in its parent's corner.
+      if (this.isPopup && ('x' in state || 'y' in state)) {
+        this._placePopup(state);
+        return this;
+      }
       if ('width' in state || 'height' in state)
         this.resize(state.width ?? this.width, state.height ?? this.height);
       return this;
@@ -753,8 +767,8 @@ export class WaylandBackendWindow extends EventEmitter {
     let h = Math.max(1, Math.round(height / s + i.top + i.bottom));
     if (this.isPopup) {
       this.wl.reposition(this.app.wmBase, {
-        x: this.wl.x,
-        y: this.wl.y,
+        x: this._popupAt.x,
+        y: this._popupAt.y,
         width: w,
         height: h,
       });
@@ -777,20 +791,45 @@ export class WaylandBackendWindow extends EventEmitter {
 
   move(x, y) {
     if (this.isPopup) {
-      const p = this.parentWindow;
-      const pi = p?.insets ?? { left: 0, top: 0 };
-      const ps = p?.scale ?? this.scale;
-      this.wl.reposition(this.app.wmBase, {
-        x: x / ps + pi.left,
-        y: y / ps + pi.top,
-        width: this.wl.width,
-        height: this.wl.height,
-      });
+      this._placePopup({ x, y });
       return this;
     }
     // A toplevel cannot place itself. Not an error: the tree asks on every
     // controlled position, and the compositor's answer is final.
     return this;
+  }
+
+  /**
+   * Place a popup: `x`/`y` in its parent's content device pixels, `width`/
+   * `height` in its own, any of them omitted to keep what it has. One
+   * reposition for the whole rect, from the position the tree asked for —
+   * not the one the compositor reported, which it may have slid to keep the
+   * popup on screen, and which drifted further with every resize.
+   */
+  _placePopup({ x, y, width, height }) {
+    const p = this.parentWindow;
+    const pi = p?.insets ?? { left: 0, top: 0 };
+    const ps = p?.scale ?? this.scale;
+    if (x != null) this._popupAt.x = x / ps + pi.left;
+    if (y != null) this._popupAt.y = y / ps + pi.top;
+    const s = this.wl.scale;
+    const w =
+      width != null ? Math.max(1, Math.round(width / s)) : this.wl.width;
+    const h =
+      height != null ? Math.max(1, Math.round(height / s)) : this.wl.height;
+    this.wl.reposition(this.app.wmBase, {
+      x: this._popupAt.x,
+      y: this._popupAt.y,
+      width: w,
+      height: h,
+    });
+    if (w !== this.wl.width || h !== this.wl.height) {
+      this.wl.width = w;
+      this.wl.height = h;
+      this._resized = true;
+      this._frameDirty = true;
+      this._armFrame();
+    }
   }
 
   getWmStates() {
