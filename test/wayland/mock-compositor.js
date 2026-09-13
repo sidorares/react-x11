@@ -57,6 +57,7 @@ const DEFS = loadDefs([
   'cursor-shape-v1',
   'viewporter',
   'fractional-scale-v1',
+  'xdg-output-unstable-v1',
 ]);
 
 /** Globals the mock advertises: name -> [interface, version]. */
@@ -72,7 +73,54 @@ const GLOBALS = [
 
 const SERVER_ID_BASE = 0xff000000;
 
+/**
+ * An output as a test states it. Everything but `name` has a default:
+ * `{ name, description, x, y, width, height, refresh, scale, transform,
+ * mm: [w, h], make, model, logical: { x, y, width, height } }` — `width` and
+ * `height` are the mode's pixels, `refresh` is millihertz, and `logical`
+ * (what xdg_output reports) defaults to the mode over the scale, turned by
+ * the transform, at the geometry's position.
+ */
+function outputSpec(spec) {
+  const out = {
+    description: `${spec.name} monitor`,
+    x: 0,
+    y: 0,
+    width: 1920,
+    height: 1080,
+    refresh: 60000,
+    scale: 1,
+    transform: 0,
+    mm: [0, 0],
+    make: 'Mock',
+    model: 'M1',
+    ...spec,
+  };
+  if (!out.logical) {
+    const [w, h] =
+      out.transform & 1 ? [out.height, out.width] : [out.width, out.height];
+    out.logical = {
+      x: out.x,
+      y: out.y,
+      width: Math.round(w / out.scale),
+      height: Math.round(h / out.scale),
+    };
+  }
+  return out;
+}
+
 export class MockCompositor extends EventEmitter {
+  /**
+   * @param {object} [opts]
+   * @param {object[]} [opts.outputs] `wl_output` globals to advertise, see
+   *   `outputSpec`; with any, `zxdg_output_manager_v1` is advertised too
+   *   unless `xdgOutput: false`
+   * @param {number} [opts.outputVersion] the `wl_output` version to
+   *   advertise (4)
+   * @param {number} [opts.xdgOutputVersion] the manager's version (3)
+   * @param {{width: number, height: number}} [opts.bounds] sent as
+   *   `configure_bounds` ahead of every toplevel configure
+   */
   constructor(opts = {}) {
     super();
     this.opts = { width: 640, height: 480, ...opts };
@@ -88,7 +136,26 @@ export class MockCompositor extends EventEmitter {
     this.pointer = null;
     this.keyboard = null;
     this.seat = null;
+    /** every wl_registry the client asked for (the last one, and all) */
     this.registry = null;
+    this.registries = [];
+    /** what the registry currently lists: { name, iface, version, output? } */
+    this.globals = GLOBALS.map(([iface, version], i) => ({
+      name: i + 1,
+      iface,
+      version,
+    }));
+    this._nextGlobal = GLOBALS.length + 1;
+    /** output name -> { spec, global, bound: Set<proxy id>, xdg: Set<id> } */
+    this.outputs = new Map();
+    for (const spec of opts.outputs ?? []) this._addOutputGlobal(spec);
+    if (opts.outputs?.length && opts.xdgOutput !== false) {
+      this.globals.push({
+        name: this._nextGlobal++,
+        iface: 'zxdg_output_manager_v1',
+        version: opts.xdgOutputVersion ?? 3,
+      });
+    }
     this.objects.set(1, { iface: 'wl_display' });
   }
 
@@ -241,9 +308,11 @@ export class MockCompositor extends EventEmitter {
         this.send(1, 'delete_id', args[0]);
         this.objects.delete(args[0]);
       } else if (name === 'get_registry') {
+        // every registry gets the whole list, and announcements after
         this.registry = args[0];
-        for (let i = 0; i < GLOBALS.length; i++)
-          this.send(args[0], 'global', i + 1, GLOBALS[i][0], GLOBALS[i][1]);
+        this.registries.push(args[0]);
+        for (const g of this.globals)
+          this.send(args[0], 'global', g.name, g.iface, g.version);
       }
       return;
     }
@@ -254,6 +323,41 @@ export class MockCompositor extends EventEmitter {
         this.seat = newId;
         this.send(newId, 'capabilities', 3);
         if (version >= 2) this.send(newId, 'name', 'seat0');
+      } else if (ifaceName === 'wl_output') {
+        const out = this._outputByGlobal(gname);
+        if (out) {
+          out.bound.add(newId);
+          this._sendOutputState(newId, out, version);
+        }
+      }
+      return;
+    }
+    if (iface === 'wl_output') {
+      if (name === 'release') {
+        for (const out of this.outputs.values()) out.bound.delete(id);
+        this.objects.delete(id);
+      }
+      return;
+    }
+    if (iface === 'zxdg_output_manager_v1') {
+      if (name === 'get_xdg_output') {
+        const [xdgId, outputId] = args;
+        const out = this._outputByProxy(outputId);
+        if (!out) return;
+        out.xdg.add(xdgId);
+        this.objects.get(xdgId).output = out;
+        this._sendXdgState(xdgId, out, obj.version);
+        // xdg_output's own `done` is deprecated from v3: the atom is then
+        // wl_output.done, which real compositors send after these events
+        if (obj.version >= 3) this.send(outputId, 'done');
+        else this.send(xdgId, 'done');
+      }
+      return;
+    }
+    if (iface === 'zxdg_output_v1') {
+      if (name === 'destroy') {
+        obj.output?.xdg.delete(id);
+        this.objects.delete(id);
       }
       return;
     }
@@ -375,6 +479,15 @@ export class MockCompositor extends EventEmitter {
     const serial = this.serial++;
     if (role.kind === 'toplevel') {
       const states = this.opts.states ?? [4]; // activated
+      const bounds = this.opts.bounds;
+      if (bounds) {
+        this.send(
+          role.toplevel,
+          'configure_bounds',
+          bounds.width,
+          bounds.height,
+        );
+      }
       this.send(
         role.toplevel,
         'configure',
@@ -400,15 +513,146 @@ export class MockCompositor extends EventEmitter {
 
   // ---- test helpers -----------------------------------------------------------
 
-  /** Reconfigure a toplevel: a new size and/or states. */
-  configure(surfaceId, { width, height, states }) {
+  /** Reconfigure a toplevel: a new size, states and/or bounds. */
+  configure(surfaceId, { width, height, states, bounds }) {
     const s = this.surfaces.get(surfaceId);
     if (!s?.role) throw new Error('mock: surface has no role');
     if (width) this.opts.width = width;
     if (height) this.opts.height = height;
     if (states) this.opts.states = states;
+    if (bounds) this.opts.bounds = bounds;
     this._configure(s);
     return s.role.lastSerial;
+  }
+
+  // ---- outputs -------------------------------------------------------------
+
+  _addOutputGlobal(spec) {
+    const out = {
+      spec: outputSpec(spec),
+      global: this._nextGlobal++,
+      bound: new Set(),
+      xdg: new Set(),
+    };
+    this.outputs.set(out.spec.name, out);
+    this.globals.push({
+      name: out.global,
+      iface: 'wl_output',
+      version: this.opts.outputVersion ?? 4,
+      output: out,
+    });
+    return out;
+  }
+
+  _outputByGlobal(gname) {
+    for (const out of this.outputs.values())
+      if (out.global === gname) return out;
+    return null;
+  }
+
+  _outputByProxy(proxyId) {
+    for (const out of this.outputs.values())
+      if (out.bound.has(proxyId)) return out;
+    return null;
+  }
+
+  /** What a compositor says to a freshly bound wl_output. */
+  _sendOutputState(id, out, version, only = null) {
+    const s = out.spec;
+    const want = (k) => !only || only.has(k);
+    if (want('geometry'))
+      this.send(
+        id,
+        'geometry',
+        s.x,
+        s.y,
+        s.mm[0],
+        s.mm[1],
+        0,
+        s.make,
+        s.model,
+        s.transform,
+      );
+    if (want('mode')) this.send(id, 'mode', 3, s.width, s.height, s.refresh);
+    if (version >= 2 && want('scale')) this.send(id, 'scale', s.scale);
+    if (version >= 4 && want('name')) {
+      this.send(id, 'name', s.name);
+      this.send(id, 'description', s.description);
+    }
+    if (version >= 2 && !only) this.send(id, 'done');
+  }
+
+  _sendXdgState(xdgId, out, version) {
+    const l = out.spec.logical;
+    this.send(xdgId, 'logical_position', l.x, l.y);
+    this.send(xdgId, 'logical_size', l.width, l.height);
+    if (version >= 2) {
+      this.send(xdgId, 'name', out.spec.name);
+      this.send(xdgId, 'description', out.spec.description);
+    }
+  }
+
+  /** Plug a monitor in: a new global, announced to every registry. */
+  addOutput(spec) {
+    const out = this._addOutputGlobal(spec);
+    const g = this.globals[this.globals.length - 1];
+    for (const r of this.registries)
+      this.send(r, 'global', g.name, g.iface, g.version);
+    return out;
+  }
+
+  /** Unplug one: `global_remove` to every registry. */
+  removeOutput(name) {
+    const out = this.outputs.get(name);
+    if (!out) throw new Error(`mock: no output ${name}`);
+    this.outputs.delete(name);
+    this.globals = this.globals.filter((g) => g.output !== out);
+    for (const r of this.registries) this.send(r, 'global_remove', out.global);
+  }
+
+  /**
+   * Change an output — a new mode, scale or position — and tell every proxy
+   * bound to it, as a compositor does: only the events that changed, then
+   * `done` on each wl_output (xdg_output's logical rect follows the mode).
+   */
+  updateOutput(name, patch) {
+    const out = this.outputs.get(name);
+    if (!out) throw new Error(`mock: no output ${name}`);
+    const keep = patch.logical ? { logical: patch.logical } : {};
+    out.spec = outputSpec({ ...out.spec, ...patch, logical: null, ...keep });
+    const only = new Set();
+    for (const k of Object.keys(patch)) {
+      if (['x', 'y', 'mm', 'make', 'model', 'transform'].includes(k))
+        only.add('geometry');
+      else if (['width', 'height', 'refresh'].includes(k)) only.add('mode');
+      else if (k === 'scale') only.add('scale');
+      else if (k === 'name' || k === 'description') only.add('name');
+    }
+    for (const id of out.bound) {
+      const version = this.objects.get(id)?.version ?? 4;
+      this._sendOutputState(id, out, version, only);
+      for (const xdgId of out.xdg) {
+        const manager = this.objects.get(xdgId);
+        this._sendXdgState(xdgId, out, manager?.version ?? 3);
+      }
+      if (version >= 2) this.send(id, 'done');
+    }
+  }
+
+  /** The client's proxy ids for one output. */
+  outputProxies(name) {
+    return [...(this.outputs.get(name)?.bound ?? [])];
+  }
+
+  /** `wl_surface.enter`/`leave`: the surface now overlaps this output. */
+  enterOutput(surfaceId, name) {
+    for (const id of this.outputProxies(name))
+      this.send(surfaceId, 'enter', id);
+  }
+
+  leaveOutput(surfaceId, name) {
+    for (const id of this.outputProxies(name))
+      this.send(surfaceId, 'leave', id);
   }
 
   requestClose(surfaceId) {

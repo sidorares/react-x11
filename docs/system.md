@@ -101,6 +101,19 @@ window on the screen and intersecting the reservations that land on each head
 — a full window-tree walk, redone whenever any panel changes. If you need
 that, `useApp().X` is the escape hatch.
 
+### On Wayland
+
+The same shape, from `wl_output` ([wayland-backend.md](wayland-backend.md)):
+`name` is the compositor's connector name (`DP-1`, `eDP-1`) and arrives with
+the geometry rather than after it; the rects are xdg_output's logical ones.
+The protocol has no primary — the entry at the origin is flagged — and no
+work area: `available` is each monitor's own rect, less what the compositor
+told a window on it to fit in (`xdg_toplevel.configure_bounds`, the monitor
+minus its panels), so it is exact per monitor, as on macOS, once a window has
+appeared there. `scale` is the monitor's own, the fraction under fractional
+scaling. `source` reads `'test'` on both native backends — the stamp of the
+seam they publish through.
+
 **On macOS it is exact.** `NSScreen.visibleFrame` is per screen already — that
 display's own menu bar and Dock taken off — so each monitor carries its real
 usable rect and no approximation runs. `workArea` there is still one rect,

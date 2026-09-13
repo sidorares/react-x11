@@ -115,12 +115,22 @@ export class WaylandWindow extends EventEmitter {
      */
     this.scale = 1;
     this.states = new Set();
+    /**
+     * The `wl_output` proxies (by id) this surface currently overlaps, from
+     * `wl_surface.enter`/`leave` — the only word a client gets on where it
+     * is. Empty until the surface is mapped; outputs.js turns ids into
+     * monitors.
+     */
+    this.outputs = new Set();
+    /** `xdg_toplevel.configure_bounds`: the logical size to fit in, or null */
+    this.bounds = null;
     /** a configure has arrived: a buffer may be committed once it is acked */
     this.configured = false;
     this.mapped = false;
     this.destroyed = false;
 
     this._pendingSerial = null;
+    this._preferredBufferScale = null;
     this._configured = new Promise((resolve) => {
       this._onConfigured = resolve;
     });
@@ -292,11 +302,17 @@ export class WaylandWindow extends EventEmitter {
     });
     this.surface.on('preferred_buffer_scale', (scale) => {
       // Only authoritative when fractional scale is not in play.
+      if (scale > 0) this._preferredBufferScale = scale;
       if (!this._fractional && scale > 0 && scale !== this.scale)
         this._setScale(scale);
     });
-    this.surface.on('enter', () => {});
-    this.surface.on('leave', () => {});
+    this.surface.on('enter', (output) => {
+      this.outputs.add(output);
+      this.emit('outputs', this.outputs);
+    });
+    this.surface.on('leave', (output) => {
+      if (this.outputs.delete(output)) this.emit('outputs', this.outputs);
+    });
     this.surface.on('preferred_buffer_transform', () => {});
   }
 
@@ -316,7 +332,11 @@ export class WaylandWindow extends EventEmitter {
     });
     this.toplevel.on('close', () => this.emit('close'));
     this.toplevel.on('configure_bounds', (w, h) => {
+      // The size the compositor recommends fitting in — a monitor less its
+      // panels, on GNOME. 0×0 withdraws it. The closest thing this protocol
+      // has to a work area, so outputs.js listens.
       this.bounds = w > 0 && h > 0 ? { width: w, height: h } : null;
+      this.emit('bounds', this.bounds);
     });
     this.toplevel.on('wm_capabilities', (caps) => {
       this.wmCapabilities = decodeStates(caps);
@@ -337,6 +357,20 @@ export class WaylandWindow extends EventEmitter {
         if (scale > 0 && scale !== this.scale) this._setScale(scale);
       });
     }
+  }
+
+  /**
+   * The scale of the output(s) under the surface, as the last resort.
+   *
+   * Three sources, in order of authority: fractional-scale-v1 (a fraction,
+   * per surface), `wl_surface.preferred_buffer_scale` (an integer, per
+   * surface, wl_compositor 6), and this — the integer `wl_output.scale` of
+   * whatever the surface has entered, which is all a compositor with neither
+   * of the first two offers. Ignored the moment either of them has spoken.
+   */
+  noteOutputScale(scale) {
+    if (this._fractional || this._preferredBufferScale != null) return;
+    if (scale > 0 && scale !== this.scale) this._setScale(scale);
   }
 
   _setScale(scale) {
