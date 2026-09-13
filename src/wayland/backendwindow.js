@@ -243,7 +243,10 @@ export class WaylandBackendWindow extends EventEmitter {
     });
     wl.on('decorationmode', (mode) => this._setDecorationMode(mode));
     wl.on('statechange', () => this.emit('statechange', this.getWmStates()));
-    wl.on('close', () => this.requestClose());
+    wl.on('close', () => {
+      if (this.isPopup) this._dismissedByCompositor();
+      else this.requestClose();
+    });
     wl.on('scale', () => {
       this._resized = true;
       this._frameDirty = true;
@@ -881,11 +884,12 @@ export class WaylandBackendWindow extends EventEmitter {
    */
   grabPointer(_opts, callback) {
     let error = null;
-    if (this.isPopup && this.wl.popup) {
+    if (this.isPopup) {
       const serial = this.app.seat.lastPressSerial || this.app.seat.lastSerial;
       try {
-        // False once the popup is set up: a grab it took then is in force
-        // for as long as it is mapped, and there is no second one to take.
+        // Recorded for the initial commit, and false once that is over: a
+        // grab taken then holds for as long as the popup is mapped, and
+        // there is no second one to take.
         this.wl.takeGrab(this.app.seat.seat, serial);
       } catch (err) {
         error = err;
@@ -925,6 +929,29 @@ export class WaylandBackendWindow extends EventEmitter {
   unmap() {
     this.wl.unmap();
     return this;
+  }
+
+  /**
+   * `xdg_popup.popup_done`: the compositor has dismissed this popup — a
+   * press outside it, Escape, the parent losing focus — and already hidden
+   * it. On X11 the grab brings that press here, outside the window, and the
+   * event manager answers it with `onDismiss` (`_dismissOutside`); here the
+   * compositor keeps the press, so the same press is made up, outside, for
+   * the same answer. Without it the tree still thought the menu open while
+   * the screen showed it gone, and the next click on its button closed
+   * nothing.
+   */
+  _dismissedByCompositor() {
+    this.emit('mousedown', {
+      x: -1,
+      y: -1,
+      rootx: -1,
+      rooty: -1,
+      button: 1,
+      buttons: 0,
+      time: Date.now() >>> 0,
+      dismissed: true,
+    });
   }
 
   /** The compositor (or the frame's close button) asked; the tree decides. */

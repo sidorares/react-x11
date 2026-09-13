@@ -142,7 +142,7 @@ test(
 );
 
 test(
-  'a move before the map goes out right after the initial commit',
+  'a move before the map is the placement the role is created with',
   { skip: SKIP },
   async () => {
     const t = await open();
@@ -155,19 +155,23 @@ test(
       );
       await t.conn.roundtrip();
       assert.equal(
-        t.since(start).filter((r) => r.name === 'reposition').length,
+        t.since(start).filter((r) => r.name === 'get_popup').length,
         0,
-        'held while there is no placement to change',
+        'no role until the initial commit',
       );
       p.commitInitial();
       await p.whenConfigured;
       await t.conn.roundtrip();
       const log = t.since(start);
-      const commit = log.findIndex(isCommitOf(p.surface));
-      const reposition = log.findIndex(
-        (r) => r.iface === 'xdg_popup' && r.name === 'reposition',
+      const rect = log.filter(
+        (r) => r.iface === 'xdg_positioner' && r.name === 'set_anchor_rect',
       );
-      assert.ok(commit >= 0 && reposition > commit);
+      assert.deepEqual(rect.at(-1).args, [30, 40, 1, 1], 'placed where moved');
+      assert.equal(
+        log.filter((r) => r.name === 'reposition').length,
+        0,
+        'with nothing left to reposition',
+      );
       assert.deepEqual(t.errors, []);
       p.destroy();
     } finally {

@@ -366,6 +366,24 @@ export function parseFont(font) {
 
 // ---- the context --------------------------------------------------------------
 
+/**
+ * A font's identity for the glyph cache. ntk's `font.key` is its file and
+ * face, plus the axis values of a variable-font instance, so Adwaita Sans at
+ * 400 and at 700 are two keys. The PostScript name used before is shared by
+ * every instance of a variable font and missing from some faces — and two
+ * faces with one key share bitmaps, which is text drawn in another face's
+ * glyphs. A key ntk derived from the name alone (`mem:#…`) gets the object's
+ * identity added.
+ */
+const fontIds = new WeakMap();
+let nextFontId = 1;
+function fontKey(font) {
+  let id = fontIds.get(font);
+  if (!id) fontIds.set(font, (id = `f${nextFontId++}`));
+  const key = typeof font.key === 'string' ? font.key : '';
+  return key && !key.startsWith('mem:') ? key : `${key}@${id}`;
+}
+
 export class WaylandContext2D {
   /**
    * @param {object} gl the GLES entry points
@@ -1580,7 +1598,7 @@ export class WaylandContext2D {
       const size = run.size ?? font.size ?? 16;
       const color = this._color(run.color ?? this.fillStyle);
       if (color[3] === 0) continue;
-      const key = font.postscriptName ?? font.familyName ?? 'f';
+      const key = fontKey(font);
       const tex = this.atlas.bind();
       this._setMode(MODE_GLYPH, tex, SWIZZLE_RGBA);
       for (const g of run.glyphs) {
@@ -1840,6 +1858,13 @@ export class WaylandContext2D {
     gl.uniform1i(this._loc.uMode, this._mode);
     gl.uniform1i(this._loc.uSwizzle, this._swizzle);
     if (this._texture) {
+      // Glyphs and masks placed since their atlas was last bound live only
+      // in its CPU copy. A batch can be drawn before the run that placed
+      // them ends — it fills up, or the atlas grows and flushes first — and
+      // then it samples texels those glyphs never reached: garbled text,
+      // kept until that region is next repainted.
+      if (this._texture === this.atlas.texture) this.atlas.bind();
+      else if (this._texture === this.masks.texture) this.masks.bind();
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._texture);
       gl.uniform1i(this._loc.uTex, 0);
