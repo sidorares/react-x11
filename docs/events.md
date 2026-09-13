@@ -470,6 +470,27 @@ own and its churn is marked as text the user did not type, so the accent is
 not read out and the character it commits is —
 [accessibility.md](accessibility.md#while-a-composition-is-open).
 
+### Input methods
+
+On the [Wayland backend](wayland-backend.md) the compositor's input method
+(IBus under GNOME) drives the same three events over `zwp_text_input_v3`:
+its preedit arrives on `onCompositionUpdate` and the text it commits on
+`onCompositionEnd`, inserted the way a typed character is. Two things are
+only there:
+
+- `ev.cursorBegin` / `ev.cursorEnd` on an update — code-point offsets into
+  `data` — when the engine says where inside its preedit the cursor is, or
+  which segment of a phrase it is converting (drawn with a heavier
+  underline). A dead key never sets them.
+- a commit with no preedit before it — an emoji picker, an engine that
+  commits directly — is a start and an end in one.
+
+Keys the input method consumes never reach the application, so a dead key
+composed by IBus does not also reach the client-side table; a key that does
+arrive is one the input method declined. `<textinput sensitive>` offers the
+input method none of its text, and `inputMode` on a `<textinput>` tells it
+what to expect ([elements.md](elements.md#textinput)).
+
 ### Changing the table
 
 ```js

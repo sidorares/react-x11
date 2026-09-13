@@ -1466,16 +1466,17 @@ Single-line editable text. Caret and selection geometry come from ntk's
 `TextLayout.caretPosition`/`indexAt` (ntk ≥ 3.3.0), so positions are exact
 across kerning, shaping boundaries and trailing whitespace.
 
-| prop                              |                                            |
-| --------------------------------- | ------------------------------------------ |
-| `value` + `onChange(ev)`          | controlled mode (display follows the prop) |
-| `defaultValue`                    | uncontrolled mode                          |
-| `onSubmit(ev)`                    | Enter                                      |
-| `name`                            | field name, echoed on the event            |
-| `placeholder`, `placeholderColor` | shown when empty                           |
-| `maxLength`                       | code-point limit                           |
-| `selectionColor`, `caretColor`    | selection/caret paint                      |
-| text style props                  | as `<text>`                                |
+| prop                              |                                                                                                                                   |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `value` + `onChange(ev)`          | controlled mode (display follows the prop)                                                                                        |
+| `defaultValue`                    | uncontrolled mode                                                                                                                 |
+| `onSubmit(ev)`                    | Enter                                                                                                                             |
+| `name`                            | field name, echoed on the event                                                                                                   |
+| `placeholder`, `placeholderColor` | shown when empty                                                                                                                  |
+| `maxLength`                       | code-point limit                                                                                                                  |
+| `selectionColor`, `caretColor`    | selection/caret paint                                                                                                             |
+| `inputMode`                       | what an input method should expect — the DOM's `numeric`, `decimal`, `tel`, `email`, `url` ([events.md](events.md#input-methods)) |
+| text style props                  | as `<text>`                                                                                                                       |
 
 The text style props include `textAlign`, and the field is laid out at its
 box's **direction** the way a `<text>` is: the value, the placeholder and the
@@ -1587,7 +1588,10 @@ The first stops being visible when the field is hidden or the window closes;
 the second is readable by every client on the display until something else
 takes the selection, and a clipboard manager will have written it down.
 `PasswordInput` sets it on the input it shows while the secret is revealed —
-see [components.md](components.md#passwordinput).
+see [components.md](components.md#passwordinput). An input method is on the
+same side of the line: on Wayland a `sensitive` field is declared
+`sensitive_data` and none of its text is offered as surrounding text
+([events.md](events.md#input-methods)).
 
 **Ref**: the node, plus `value`, `undo()` / `redo()` and `canUndo` /
 `canRedo` — enough for a toolbar button beside the field.

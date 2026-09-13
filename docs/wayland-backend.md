@@ -44,19 +44,20 @@ appeared" proves nothing. Three checks that do:
 
 ## What runs
 
-| piece              | file                                                     | what it does                                                         |
-| ------------------ | -------------------------------------------------------- | -------------------------------------------------------------------- |
-| connection         | `connection.js`                                          | fd-capable transport (native or bun:ffi), vendored protocol JSON     |
-| shell              | `window.js`                                              | xdg toplevels and popups, deferred `ack_configure`, fractional scale |
-| GPU presentation   | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf                         |
-| 2d context         | `context2d.js`, `glyphatlas.js`                          | rects/rounded rects (SDF), paths (stencil), gradients, images, text  |
-| input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                  |
-| decorations        | `decorations.js`                                         | titlebar, borders, resize edges, buttons — CSD for GNOME             |
-| offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target               |
-| clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                     |
-| screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap  |
-| the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through            |
-| tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                         |
+| piece              | file                                                     | what it does                                                          |
+| ------------------ | -------------------------------------------------------- | --------------------------------------------------------------------- |
+| connection         | `connection.js`                                          | fd-capable transport (native or bun:ffi), vendored protocol JSON      |
+| shell              | `window.js`                                              | xdg toplevels and popups, deferred `ack_configure`, fractional scale  |
+| GPU presentation   | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf                          |
+| 2d context         | `context2d.js`, `glyphatlas.js`                          | rects/rounded rects (SDF), paths (stencil), gradients, images, text   |
+| input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                   |
+| decorations        | `decorations.js`                                         | titlebar, borders, resize edges, buttons — CSD for GNOME              |
+| offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target                |
+| clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                      |
+| screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap   |
+| input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events |
+| the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through             |
+| tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                          |
 
 ## What was measured
 
@@ -149,6 +150,22 @@ both the X core `keycode2keysyms` table the accelerator code already speaks
 and a full `decode()` for levels 3 and 4. Key repeat is synthesised at the
 seat's advertised rate; compositors do not repeat.
 
+**The input method is told at the end of the frame.** `zwp_text_input_v3`
+wants to know which field has focus, what kind of text it holds, where its
+caret is and what surrounds it, and every one of those changes repaints the
+field — so the backend window calls `textInput.sync()` once per frame after
+the renderer has painted, when the layout is current, and only what changed
+since the last commit is sent. There is no hook into the event manager and
+nothing per field. What comes back — `preedit_string`, `commit_string`,
+`delete_surrounding_text`, applied together on `done` in the order the spec
+fixes — lands on the same `CompositionStart/Update/End` a dead key raises,
+so `<textinput>` and an application's `onCompositionUpdate` cannot tell IBus
+from `compose.js`. Keys the IME consumes never reach `wl_keyboard.key`, so
+key delivery is untouched; a key that arrives is one the IME declined, and
+the client-side composer has its usual go at it. A `sensitive` field offers
+no surrounding text and says `sensitive_data`; `inputMode` on a
+`<textinput>` becomes the content purpose (`email`, `url`, `tel`, …).
+
 **`createWindow` is synchronous.** React's commit phase cannot await, and
 that is where windows are realised. Nothing about Wayland needs the
 asynchrony — a request is one-way and the client allocates ids — so the
@@ -207,8 +224,11 @@ arrive as fds, and Node's sockets abort on them
 - **Drag-and-drop.** The data device is bound and the clipboard uses it;
   the DnD half (`wl_data_device.start_drag`, enter/motion/drop) is not
   wired to `dnd.js`.
-- **Text input v3.** IME composition goes through `compose.js`'s dead-key
-  tables; `zwp_text_input_v3` would give real preedit.
+- **Input methods, the rest of it.** The preedit's cursor is drawn (a
+  heavier underline under the segment being converted) but nothing is done
+  with a hidden cursor beyond putting the caret at the end, and the only
+  content hints sent are `multiline` and `sensitive_data` — no
+  `spellcheck`/`auto_capitalization`, which the tree has no notion of.
 - **Touch and tablet.** The seat handles pointer and keyboard only.
 - **`useScreens().source` reads `'test'`**, as it does on macOS: both
   backends publish through `setScreensForTests`, the one seam `screens.js`
@@ -237,6 +257,11 @@ GNOME does not advertise.
 - `src/Reconciler.js` — a `'wayland'` rung in `resolveBackend()`. Additive;
   `'auto'` never selects it.
 - `src/nodes/boxpaint.js` — prefers `ctx.fillShadow` when a context has it.
+- `src/nodes/preedit.js` — the composition may carry a cursor
+  (`cursorBegin`/`cursorEnd` on the composition event); without one the
+  caret is at the end of the preedit, as before. `src/events.js` —
+  `_composition` passes those extra fields through. Additive on both
+  backends.
 - `wayland-client` (fork) — fd send/receive, the `$` synchronous request
   namespace, and callback requests returning their `done` payload. 229
   tests pass.
