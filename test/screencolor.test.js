@@ -25,6 +25,7 @@ import { useEyedropper } from '../src/screencolorhooks.js';
 import { act, cleanup, fireEvent, renderX11 } from '../src/testing/index.js';
 import { fakePortal } from './helpers/fake-portal.js';
 import {
+  offTheDesktopBus,
   transportAvailable,
   until,
   withBus,
@@ -35,6 +36,13 @@ const haveTransport = await transportAvailable();
 const needsBroker = haveTransport
   ? {}
   : { skip: 'dbus-native is not installed (expected on Node < 22.12)' };
+
+// **Nothing here may reach the developer's own session bus.** Where the
+// portal has Screenshot v2 — GNOME, KDE — the portal rung is a real
+// PickColor, so a pick that slips out of `withNoBus` puts the shell's picker
+// on the screen and hangs the file waiting for a click. The whole file runs
+// with no bus, as CI does, and `withBus()` is the only way onto one.
+offTheDesktopBus();
 
 afterEach(() => {
   _resetServiceCache();
@@ -638,10 +646,17 @@ describe('useEyedropper', () => {
       await act(async () => {
         await new Promise((r) => setTimeout(r, 30));
       });
+      assert.equal(eyedropper.supported, false);
+      // And the pick a test or a keyboard shortcut can still reach rejects
+      // typed rather than throwing a TypeError from inside the promise.
+      //
+      // Inside the block, not after it: `pick()` climbs the ladder from the
+      // top again rather than trusting `supported`, so it needs "no bus
+      // here" as much as the probe did. It once sat one line below, where
+      // the developer's own bus was back — on GNOME, a real PickColor: the
+      // shell's picker on the screen, waiting for a click the suite could
+      // not give.
+      await assert.rejects(() => eyedropper.pick(), NoScreenColorError);
     });
-    assert.equal(eyedropper.supported, false);
-    // And the pick a test or a keyboard shortcut can still reach rejects
-    // typed rather than throwing a TypeError from inside the promise.
-    await assert.rejects(() => eyedropper.pick(), NoScreenColorError);
   });
 });
