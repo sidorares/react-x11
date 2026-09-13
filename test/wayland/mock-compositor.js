@@ -57,6 +57,7 @@ const DEFS = loadDefs([
   'cursor-shape-v1',
   'viewporter',
   'fractional-scale-v1',
+  'tablet-v2',
 ]);
 
 /** Globals the mock advertises: name -> [interface, version]. */
@@ -68,7 +69,11 @@ const GLOBALS = [
   ['wp_viewporter', 1],
   ['wp_fractional_scale_manager_v1', 1],
   ['wp_cursor_shape_manager_v1', 1],
+  ['zwp_tablet_manager_v2', 1],
 ];
+
+/** `wl_seat.capability` bits, as the mock's `capabilities` option spells them. */
+const CAP = { POINTER: 1, KEYBOARD: 2, TOUCH: 4 };
 
 const SERVER_ID_BASE = 0xff000000;
 
@@ -87,7 +92,10 @@ export class MockCompositor extends EventEmitter {
     this.surfaces = new Map(); // surface id -> state
     this.pointer = null;
     this.keyboard = null;
+    this.touch = null;
     this.seat = null;
+    /** the `zwp_tablet_seat_v2` the client asked for, or null */
+    this.tabletSeat = null;
     this.registry = null;
     this.objects.set(1, { iface: 'wl_display' });
   }
@@ -252,9 +260,19 @@ export class MockCompositor extends EventEmitter {
       this.objects.set(newId, { iface: ifaceName, version, global: gname });
       if (ifaceName === 'wl_seat') {
         this.seat = newId;
-        this.send(newId, 'capabilities', 3);
+        // pointer and keyboard unless the test says otherwise; `capabilities:
+        // 7` adds a touchscreen
+        this.send(
+          newId,
+          'capabilities',
+          this.opts.capabilities ?? CAP.POINTER | CAP.KEYBOARD,
+        );
         if (version >= 2) this.send(newId, 'name', 'seat0');
       }
+      return;
+    }
+    if (iface === 'zwp_tablet_manager_v2' && name === 'get_tablet_seat') {
+      this.tabletSeat = args[0];
       return;
     }
     if (iface === 'wl_compositor' && name === 'create_surface') {
@@ -347,6 +365,7 @@ export class MockCompositor extends EventEmitter {
     }
     if (iface === 'wl_seat') {
       if (name === 'get_pointer') this.pointer = args[0];
+      else if (name === 'get_touch') this.touch = args[0];
       else if (name === 'get_keyboard') {
         this.keyboard = args[0];
         if (
@@ -482,6 +501,107 @@ export class MockCompositor extends EventEmitter {
       evdev,
       pressed ? 1 : 0,
     );
+  }
+
+  /** A later `capabilities` event: a device came or went. */
+  capabilities(caps) {
+    this.send(this.seat, 'capabilities', caps);
+  }
+
+  // touch injection: surface-local logical coordinates. Events group under
+  // `touchFrame()`, as a compositor's do; the serials come back so a test can
+  // check a move or resize was started with the right one.
+  touchDown(surfaceId, id, x, y) {
+    const serial = this.serial++;
+    this.send(
+      this.touch,
+      'down',
+      serial,
+      (this.time += 8),
+      surfaceId,
+      id,
+      x,
+      y,
+    );
+    return serial;
+  }
+  touchMotion(id, x, y) {
+    this.send(this.touch, 'motion', (this.time += 8), id, x, y);
+  }
+  touchUp(id) {
+    const serial = this.serial++;
+    this.send(this.touch, 'up', serial, (this.time += 8), id);
+    return serial;
+  }
+  touchShape(id, major, minor) {
+    this.send(this.touch, 'shape', id, major, minor);
+  }
+  touchFrame() {
+    this.send(this.touch, 'frame');
+  }
+  touchCancel() {
+    this.send(this.touch, 'cancel');
+  }
+
+  // tablet injection. Tablets and tools are server-created objects announced
+  // through the tablet seat, described, and finished with `done`; the ids
+  // returned are what the tool events are sent on.
+  tabletAdded({
+    name = 'Mock Tablet',
+    vid = 0x056a,
+    pid = 0x0357,
+    path = '/dev/input/event9',
+  } = {}) {
+    const id = this._newServerObject('zwp_tablet_v2');
+    this.send(this.tabletSeat, 'tablet_added', id);
+    this.send(id, 'name', name);
+    this.send(id, 'id', vid, pid);
+    this.send(id, 'path', path);
+    this.send(id, 'done');
+    return id;
+  }
+  toolAdded({ type = 0x140, capabilities = [2, 1], serial = [0, 42] } = {}) {
+    const id = this._newServerObject('zwp_tablet_tool_v2');
+    this.send(this.tabletSeat, 'tool_added', id);
+    this.send(id, 'type', type);
+    this.send(id, 'hardware_serial', serial[0], serial[1]);
+    for (const c of capabilities) this.send(id, 'capability', c);
+    this.send(id, 'done');
+    return id;
+  }
+  toolProximityIn(toolId, tabletId, surfaceId) {
+    const serial = this.serial++;
+    this.send(toolId, 'proximity_in', serial, tabletId, surfaceId);
+    return serial;
+  }
+  toolProximityOut(toolId) {
+    this.send(toolId, 'proximity_out');
+  }
+  toolMotion(toolId, x, y) {
+    this.send(toolId, 'motion', x, y);
+  }
+  /** `pressure`, `distance`, `tilt`, `rotation`, `slider`, `wheel`, with their arguments */
+  toolAxis(toolId, axis, ...args) {
+    this.send(toolId, axis, ...args);
+  }
+  toolDown(toolId) {
+    const serial = this.serial++;
+    this.send(toolId, 'down', serial);
+    return serial;
+  }
+  toolUp(toolId) {
+    this.send(toolId, 'up');
+  }
+  toolButton(toolId, evdev, pressed) {
+    const serial = this.serial++;
+    this.send(toolId, 'button', serial, evdev, pressed ? 1 : 0);
+    return serial;
+  }
+  toolFrame(toolId) {
+    this.send(toolId, 'frame', (this.time += 8));
+  }
+  toolRemoved(toolId) {
+    this.send(toolId, 'removed');
   }
 }
 

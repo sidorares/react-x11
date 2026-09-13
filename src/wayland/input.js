@@ -41,6 +41,8 @@ export class InputRouter {
     this.focusWindow = null;
     /** what the frame's hover last asked the cursor to be, or null */
     this._frameCursor = null;
+    /** touch points that began on the frame, which the tree never sees */
+    this._frameTouches = new Set();
     this._wire();
   }
 
@@ -56,6 +58,10 @@ export class InputRouter {
     s.on('keyup', (ev) => this._onKey('keyup', ev));
     s.on('focus', (ev) => this._onFocus(ev, true));
     s.on('blur', (ev) => this._onFocus(ev, false));
+    // touch.js and tablet.js emit the pointer events above for the finger or
+    // tool that is standing in for the pointer; only the raw points are new
+    for (const n of ['touchstart', 'touchmove', 'touchend', 'touchcancel'])
+      s.on(n, (ev) => this._onTouch(ev));
     s.on('keymap', (_km, xkb) => {
       if (xkb) this.app.X.keycode2keysyms = xkb.keycode2keysyms;
       this.app.X.emit('mapping');
@@ -100,6 +106,9 @@ export class InputRouter {
       rooty: p.y,
       buttons: this._state(),
       time: 0,
+      // a finger or a pen standing in for the pointer says so (touch.js,
+      // tablet.js); a mouse adds nothing, as on the other backends
+      ...ev.device,
     });
   }
 
@@ -119,6 +128,7 @@ export class InputRouter {
       rooty: 0,
       buttons: this._state(),
       time: 0,
+      ...ev.device,
     });
   }
 
@@ -134,6 +144,7 @@ export class InputRouter {
       rooty: p.y,
       buttons: this._state(),
       time: ev.time,
+      ...ev.device,
     });
   }
 
@@ -181,6 +192,7 @@ export class InputRouter {
       buttons: ev.state | XkbKeymap.stateOf(this.seat.mods, this.seat.group),
       time: ev.time,
       serial: ev.serial,
+      ...ev.device,
     });
   }
 
@@ -246,6 +258,52 @@ export class InputRouter {
       smooth: ev.smooth,
       source: ev.smooth ? 'valuator' : 'button',
       time: ev.time,
+      ...ev.device,
+    });
+  }
+
+  // ---- touch ------------------------------------------------------------
+
+  /**
+   * Raw touch points — `touchstart`/`touchmove`/`touchend`/`touchcancel` on
+   * the window, each with every active point over it. No emulation here:
+   * touch.js makes the first finger the pointer, and those events arrived
+   * above as the pointer's own. A point that began on the frame belongs to
+   * the frame (its emulated press already started the move or resize) and
+   * is kept from the tree for its whole life.
+   */
+  _onTouch(ev) {
+    const win = this._window(ev.surface);
+    if (!win) return;
+    if (ev.type === 'touchstart' && win.decor) {
+      const hit = win.decor.hitTest(ev.x, ev.y, win.wl.width, win.wl.height);
+      if (hit.kind !== 'content') this._frameTouches.add(ev.id);
+    }
+    if (this._frameTouches.has(ev.id)) {
+      if (ev.type === 'touchend' || ev.type === 'touchcancel')
+        this._frameTouches.delete(ev.id);
+      return;
+    }
+    const p = this._point(win, ev.x, ev.y);
+    const s = win.scale;
+    this._emit(win, ev.type, {
+      ...p,
+      rootx: p.x,
+      rooty: p.y,
+      id: ev.id,
+      touchId: ev.id,
+      radiusX: ev.radiusX * s,
+      radiusY: ev.radiusY * s,
+      rotationAngle: ev.rotationAngle,
+      touches: ev.touches
+        .filter(
+          (t) => t.surface === ev.surface && !this._frameTouches.has(t.id),
+        )
+        .map((t) => ({ id: t.id, ...this._point(win, t.x, t.y) })),
+      buttons: ev.state | XkbKeymap.stateOf(this.seat.mods, this.seat.group),
+      pointerType: 'touch',
+      time: ev.time,
+      serial: ev.serial,
     });
   }
 

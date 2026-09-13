@@ -30,6 +30,8 @@ import { WaylandSeat } from './seat.js';
 import { WaylandBackendWindow } from './backendwindow.js';
 import { WaylandSurface } from './surface.js';
 import { InputRouter } from './input.js';
+import { WaylandTouch } from './touch.js';
+import { WaylandTablet } from './tablet.js';
 import { createWaylandClipboard } from './clipboard.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
@@ -78,6 +80,9 @@ export class WaylandApp extends EventEmitter {
     this.toplevels = [];
     this.seat = null;
     this.input = null;
+    /** the seat's touch and tablet devices; the tablet is null without the protocol */
+    this.touch = null;
+    this.tablet = null;
     this.fonts = null;
     this.fontManager = null;
     this.clipboard = null;
@@ -120,6 +125,9 @@ export class WaylandApp extends EventEmitter {
     app.activation = await conn.bind('xdg_activation_v1');
     app.seat = await WaylandSeat.bind(conn);
     app.input = new InputRouter(app);
+    // both drive the router through the seat's own pointer events
+    app.touch = WaylandTouch.attach(app.seat);
+    app.tablet = await WaylandTablet.bind(conn, app.seat);
     app.clipboard = await createWaylandClipboard({
       conn,
       seat: app.seat.seat,
@@ -318,6 +326,8 @@ export class WaylandApp extends EventEmitter {
     this.windows.clear();
     this.toplevels.length = 0;
     this.input?.destroy();
+    this.tablet?.destroy();
+    this.touch?.destroy();
     this.seat?.destroy();
     if (this._holder) {
       try {

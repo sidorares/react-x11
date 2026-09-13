@@ -44,7 +44,7 @@ export const BTN = {
 };
 
 /** evdev -> the 1-based numbering the rest of react-x11 speaks. */
-const BUTTON_NUMBER = {
+export const BUTTON_NUMBER = {
   [BTN.LEFT]: 1,
   [BTN.MIDDLE]: 2,
   [BTN.RIGHT]: 3,
@@ -53,7 +53,7 @@ const BUTTON_NUMBER = {
 };
 
 /** X state-mask bits for held pointer buttons (Button1Mask..). */
-const BUTTON_MASK = {
+export const BUTTON_MASK = {
   1: 1 << 8,
   2: 1 << 9,
   3: 1 << 10,
@@ -164,6 +164,9 @@ export class WaylandSeat extends EventEmitter {
     this.capabilities = 0;
     this.pointer = null;
     this.keyboard = null;
+    /** touch.js and tablet.js attach themselves here; both emulate the pointer */
+    this.touch = null;
+    this.tablet = null;
     this._cursorShapes = cursorShapes;
     this._cursorDevice = null;
     this._cursor = 'default';
@@ -382,6 +385,8 @@ export class WaylandSeat extends EventEmitter {
   setCursor(name) {
     this._cursor = name ?? 'default';
     if (this.pointerSurface != null) this._applyCursor(this.lastSerial);
+    // a tablet tool in proximity has a cursor of its own and follows this one
+    this.emit('cursor', this._cursor);
   }
 
   _applyCursor(serial) {
