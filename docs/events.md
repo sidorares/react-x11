@@ -119,6 +119,15 @@ const root = await createRoot({
 `nativeEvent.rootx/rooty` are screen coordinates — useful for anchoring a
 `<popup>` at the pointer.
 
+On the Wayland backend a finger or a tablet tool drives the same mouse
+events, and those events alone carry `nativeEvent.pointerType` (`'touch'`,
+`'pen'`, `'eraser'` or `'mouse'`) with `pressure`, `tiltX`/`tiltY`,
+`rotation`, `distance` and `tangentialPressure` in the DOM's ranges; a mouse
+adds nothing, so a handler that never looks is unaffected. Every finger also
+arrives raw on the window as `touchstart`/`touchmove`/`touchend`/
+`touchcancel` (`wnd.on(...)`, not React props) — see
+[wayland-backend.md](wayland-backend.md).
+
 `x`/`y`/`localX`/`localY` and the wheel deltas are logical pixels in **the
 target's** unit — the display scale, times any `scale` prop above it
 ([scale.md](scale.md#a-subtree-of-its-own)). With no `scale` in the tree

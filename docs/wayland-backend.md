@@ -51,6 +51,7 @@ appeared" proves nothing. Three checks that do:
 | GPU presentation   | `swapchain.js`, `dmabuf.js`, `glcontext.js`, `target.js` | backing target → per-buffer damage → dma-buf                          |
 | 2d context         | `context2d.js`, `glyphatlas.js`                          | rects/rounded rects (SDF), paths (stencil), gradients, images, text   |
 | input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                   |
+| touch and tablet   | `touch.js`, `tablet.js`                                  | `wl_touch` and `zwp_tablet_v2`, emulating the pointer; raw touches    |
 | decorations        | `decorations.js`                                         | titlebar, borders, resize edges, buttons — CSD for GNOME              |
 | offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target                |
 | clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                      |
@@ -166,6 +167,27 @@ the client-side composer has its usual go at it. A `sensitive` field offers
 no surrounding text and says `sensitive_data`; `inputMode` on a
 `<textinput>` becomes the content purpose (`email`, `url`, `tel`, …).
 
+**A finger and a pen are the pointer.** On X11 a tablet is an XI2 slave of
+the master pointer and a touch emulates it, so every control in the tree is
+written against `mousedown`/`mousemove`/`mouseup` and nothing else. The
+Wayland seat keeps `wl_touch` and the tablet tools as devices of their own,
+so `touch.js` and `tablet.js` make them the pointer here: the first finger
+of a gesture and a tool in proximity emit the seat's own `enter`/`motion`/
+`buttonpress`/`buttonrelease`/`leave`, carrying the touch `down` or tool
+`down` serial (what `xdg_toplevel.move` wants when the press lands on the
+titlebar), and `input.js` routes them through exactly the path the mouse
+takes — frame hit-testing, popup grabs, the cursor, which a tool in
+proximity follows through cursor-shape's tablet device. The emulated events
+alone carry `pointerType` (`'touch'`, `'pen'`, `'eraser'`, `'mouse'`),
+`pressure`, `tiltX`/`tiltY`, `rotation`, `distance` and
+`tangentialPressure` in the DOM's names and ranges, so a mouse event is
+unchanged and the X11 backend never sees a field it did not send. A second
+finger emulates nothing; every finger also arrives raw on the window as
+`touchstart`/`touchmove`/`touchend`/`touchcancel` — ntk's XI2 names, with
+its `touchId` — each with the active `touches`, batched at `wl_touch.frame`.
+Barrel buttons map as the desktop does: BTN_STYLUS is button 3, BTN_STYLUS2
+button 2; `proximity_out` releases whatever is still held.
+
 **`createWindow` is synchronous.** React's commit phase cannot await, and
 that is where windows are realised. Nothing about Wayland needs the
 asynchrony — a request is one-way and the client allocates ids — so the
@@ -229,7 +251,11 @@ arrive as fds, and Node's sockets abort on them
   with a hidden cursor beyond putting the caret at the end, and the only
   content hints sent are `multiline` and `sensitive_data` — no
   `spellcheck`/`auto_capitalization`, which the tree has no notion of.
-- **Touch and tablet.** The seat handles pointer and keyboard only.
+- **Tablet pads.** The buttons, rings and strips on the tablet itself
+  (`zwp_tablet_pad_v2`) are accepted and ignored: the tree has no vocabulary
+  for them. Hiding a tool's cursor (`cursor: 'none'`) wants a null surface in
+  `set_cursor`, which the client library's argument check refuses today, so
+  the last shape stays; the pointer's own `'none'` has the same gap.
 - **`useScreens().source` reads `'test'`**, as it does on macOS: both
   backends publish through `setScreensForTests`, the one seam `screens.js`
   has, and it stamps the source. A `source` argument on it is the fix.
