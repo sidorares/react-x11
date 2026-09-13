@@ -152,6 +152,21 @@ export class GlyphAtlas {
     return true;
   }
 
+  /**
+   * Forget every entry, keeping the texture and its size — for an atlas of
+   * transient masks, emptied at the start of each frame. Old pixels stay in
+   * the CPU copy until new entries overwrite them; nothing names them.
+   */
+  reset() {
+    if (this.entries.size === 0) return;
+    this.entries.clear();
+    this._shelfX = PAD;
+    this._shelfY = PAD;
+    this._shelfH = 0;
+    this._dirty = null;
+    this.generation++;
+  }
+
   /** Make the atlas current on the active texture unit, uploading anything new. */
   bind() {
     const gl = this.gl;

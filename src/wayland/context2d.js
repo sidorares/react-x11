@@ -53,12 +53,31 @@ const ntkLib = path.dirname(require.resolve('ntk'));
 const { flattenPath } = await import(
   pathToFileURL(path.join(ntkLib, 'path.js'))
 );
+const { rasterizePolys } = await import(
+  pathToFileURL(path.join(ntkLib, 'rasterize.js'))
+);
 
 const MODE_SOLID = 0;
 const MODE_TEXTURE = 1;
 const MODE_GLYPH = 2;
 const MODE_RRECT = 3;
 const MODE_GRADIENT = 4;
+
+/**
+ * The stencil buffer, shared between two uses: bit 7 is the clip (set where
+ * drawing may land while a non-rectangular clip is in force) and the low
+ * seven bits are the winding count stencil-then-cover works in. A path's
+ * passes write with `WINDING_MASK` and never disturb the clip; the clip's
+ * passes write with `CLIP_BIT` and leave the counts to their cleanup.
+ */
+const CLIP_BIT = 0x80;
+const WINDING_MASK = 0x7f;
+/**
+ * The largest fill the CPU rasteriser takes (see `_fillCoverage`): a
+ * 512×512 raster is well under a millisecond; a screen-sized one is not, and
+ * it goes through the stencil instead.
+ */
+const COVERAGE_MAX_PIXELS = 512 * 512;
 
 /** `uSwizzle`: how the bound texture's bytes are to be read. */
 const SWIZZLE_RGBA = 0; // premultiplied RGBA (render targets)
@@ -204,6 +223,7 @@ export function parseColor(value) {
 
 const BLACK = Object.freeze([0, 0, 0, 1]);
 const CLEAR = Object.freeze([0, 0, 0, 0]);
+const OPAQUE = Object.freeze([1, 1, 1, 1]);
 
 function parseColorUncached(value) {
   const s = value.trim();
@@ -363,6 +383,15 @@ export class WaylandContext2D {
     // Quads already buffered against the atlas must be drawn before the
     // atlas re-lays itself out under them.
     this.atlas.onBeforeGrow = () => this._flush();
+    // Path fills that go through the CPU rasteriser land here as A8 masks,
+    // drawn like glyphs; emptied every frame, since a mask is one draw.
+    this.masks = new GlyphAtlas(gl, { size: 256 });
+    this.masks.onBeforeGrow = () => this._flush();
+    this._maskSeq = 0;
+    /** the non-rectangular clips in force, device space, outermost first */
+    this._clipPath = null;
+    /** inside a stencil pass: `_flush` leaves the stencil state alone */
+    this._stencilling = false;
     this._target = target;
 
     this.fillStyle = '#000000';
@@ -481,7 +510,15 @@ export class WaylandContext2D {
     this.timestamp = timestamp;
     this.shapeStats = { quads: 0, batches: 0, glyphs: 0, paths: 0 };
     this.clipApproximations = 0;
+    this._clipPath = null;
+    this._stencilling = false;
+    this._maskSeq = 0;
+    this.masks.reset();
     this._applyState();
+    // scratch for paths and clips: a frame starts with it clean
+    const gl = this.gl;
+    gl.stencilMask(0xff);
+    gl.clear(gl.STENCIL_BUFFER_BIT);
   }
 
   /**
@@ -541,6 +578,7 @@ export class WaylandContext2D {
     this._stack.push({
       m: this._m,
       clip: this._clip,
+      clipPath: this._clipPath,
       fill: this.fillStyle,
       stroke: this.strokeStyle,
       lw: this.lineWidth,
@@ -557,6 +595,8 @@ export class WaylandContext2D {
   restore() {
     const s = this._stack.pop();
     if (!s) return;
+    if (s.clipPath !== this._clipPath)
+      this._rebuildClipStencil(s.clipPath, s.clip);
     if (s.clip !== this._clip) this._flush();
     this._m = s.m;
     this._clip = s.clip;
@@ -743,36 +783,43 @@ export class WaylandContext2D {
   }
 
   /**
-   * Intersect the clip with the current path's bounds.
+   * Intersect the clip with the current path.
    *
-   * Exact for an axis-aligned rectangle; everything else is its bounding box,
-   * counted in `clipApproximations`.
+   * One axis-aligned rectangle is the scissor, as before, and costs nothing
+   * per draw. Anything else — a rounded rectangle (`overflow: hidden` with
+   * a radius), a path, several rectangles — is exact through the stencil's
+   * clip bit (`_applyClipPath`), and every batch drawn while it is in force
+   * tests that bit. The scissor still narrows to the shape's bounds, so the
+   * test is only ever paid inside them.
    */
-  clip(a) {
+  clip(a, b) {
     const external = a instanceof Path2D ? a : null;
-    let bounds = null;
-    let exact = true;
-    if (!external && this._rectOnly && isAxisAligned(this._m)) {
-      for (const r of this._rects) {
-        const d = this._deviceRect(r.x, r.y, r.w, r.h);
-        bounds = bounds ? unionRect(bounds, d) : d;
-        if (r.r > 0) exact = false;
-      }
-    } else {
-      exact = false;
-      const polys = flattenPath(
-        external ? external._cmds : this._path._cmds,
-        this._m,
-      );
-      bounds = polysBounds(polys);
+    const rule = (external ? b : a) === 'evenodd' ? 'evenodd' : 'nonzero';
+    if (
+      !external &&
+      this._rectOnly &&
+      this._rects.length === 1 &&
+      !(this._rects[0].r > 0) &&
+      isAxisAligned(this._m)
+    ) {
+      const r = this._rects[0];
+      const bounds = this._deviceRect(r.x, r.y, r.w, r.h);
+      this._flush();
+      this._clip = this._clip ? intersectRect(this._clip, bounds) : bounds;
+      return;
     }
-    if (!bounds) {
+    const polys = flattenPath(
+      external ? external._cmds : this._path._cmds,
+      this._m,
+    );
+    const bounds = polysBounds(polys);
+    if (!bounds || !(bounds.w > 0) || !(bounds.h > 0)) {
       // an empty path clips everything
-      bounds = { x: 0, y: 0, w: 0, h: 0 };
+      this._flush();
+      this._clip = { x: 0, y: 0, w: 0, h: 0 };
+      return;
     }
-    if (!exact) this.clipApproximations++;
-    this._flush();
-    this._clip = this._clip ? intersectRect(this._clip, bounds) : bounds;
+    this._applyClipPath(polys, rule, bounds);
   }
 
   isPointInPath(x, y) {
@@ -995,33 +1042,145 @@ export class WaylandContext2D {
     this._flush();
   }
 
-  // ---- stencil-then-cover -----------------------------------------------
+  // ---- path fills -------------------------------------------------------
 
   /**
    * Fill device-space polygons with a paint.
    *
-   * Pass 1 counts winding into the stencil buffer with colour writes off:
-   * one triangle fan per subpath, incrementing for one facing and
-   * decrementing for the other (two draws with culling, since the binding
-   * has no `stencilOpSeparate`), or inverting for even-odd. Pass 2 covers
+   * Two routes. A solid fill of a shape that fits the CPU budget is
+   * **coverage**: ntk's own rasteriser — the one the X11 backend's local
+   * raster policy and every glyph use — turns the polygons into an A8 mask,
+   * which is drawn like a glyph. Antialiased, deterministic, the same
+   * pixels as X11, at ~25µs for an icon. Everything else — a gradient, or a
+   * shape bigger than `COVERAGE_MAX_PIXELS` — is **stencil-then-cover**:
+   * pass 1 counts winding into the stencil buffer with colour writes off
+   * (one triangle fan per subpath, incrementing for one facing and
+   * decrementing for the other, or inverting for even-odd), pass 2 covers
    * the bounds with the paint wherever the count is non-zero, zeroing the
-   * stencil as it goes so the next path starts clean. The scissor applies to
-   * both, which is what keeps a clipped path from leaving counts outside the
-   * clip.
+   * count as it goes. Aliased at the edge; MSAA is the fix, when a target
+   * that can be validated has it.
+   *
+   * Under a path clip (`_clipPath`) the cover also requires the clip bit,
+   * and a third pass clears the counts the cover did not reach.
    */
   _fillPolys(polys, rule, style) {
     const bounds = polysBounds(polys);
     if (!bounds || bounds.w <= 0 || bounds.h <= 0) return;
+    let color = null;
     if (!(style instanceof Gradient)) {
-      const c = this._color(style);
-      if (c[3] === 0) return;
+      color = this._color(style);
+      if (color[3] === 0) return;
+      if (this._fillCoverage(polys, rule, bounds, color)) return;
     }
     const gl = this.gl;
     this._flush();
     this.shapeStats.paths++;
+    this._stencilling = true;
+    this._windingPass(polys, rule);
 
+    // cover: where the count is non-zero — and, under a clip, the bit is set
+    gl.colorMask(true, true, true, true);
+    if (this._clipPath) gl.stencilFunc(gl.LESS, CLIP_BIT, 0xff);
+    else gl.stencilFunc(gl.NOTEQUAL, 0, WINDING_MASK);
+    // the mask is still WINDING_MASK: the count goes, the clip bit stays
+    gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
+    const { x, y, w, h } = bounds;
+    const saved = this._m;
+    this._m = IDENTITY;
+    if (style instanceof Gradient) {
+      this._m = saved; // gradient endpoints are in user space
+      this._useGradient(style);
+      this._m = IDENTITY;
+      const a = this.globalAlpha;
+      this._quad(
+        [x, y, x + w, y, x + w, y + h, x, y + h],
+        UV_UNIT,
+        [a, a, a, a],
+        ZERO4,
+      );
+    } else {
+      this._emitRect(x, y, w, h, color);
+    }
+    this._flush();
+    this._m = saved;
+    if (this._clipPath) {
+      // counts outside the clip, which the cover did not reach
+      gl.colorMask(false, false, false, false);
+      gl.stencilFunc(gl.NOTEQUAL, 0, WINDING_MASK);
+      this._stencilQuad(x, y, w, h);
+      gl.colorMask(true, true, true, true);
+    }
+    gl.disable(gl.STENCIL_TEST);
+    this._stencilling = false;
+  }
+
+  /**
+   * The coverage route. The raster is cut to the clip and the target first:
+   * pixels outside are never seen, and a large path that is mostly clipped
+   * away — a chart line scrolled half out of view — is a small raster.
+   *
+   * @returns {boolean} false when the stencil route should take the fill
+   */
+  _fillCoverage(polys, rule, bounds, color) {
+    const c = this._clip;
+    const x0 = Math.max(0, Math.floor(bounds.x) - 1, c ? Math.floor(c.x) : 0);
+    const y0 = Math.max(0, Math.floor(bounds.y) - 1, c ? Math.floor(c.y) : 0);
+    const x1 = Math.min(
+      this._width,
+      Math.ceil(bounds.x + bounds.w) + 1,
+      c ? Math.ceil(c.x + c.w) : this._width,
+    );
+    const y1 = Math.min(
+      this._height,
+      Math.ceil(bounds.y + bounds.h) + 1,
+      c ? Math.ceil(c.y + c.h) : this._height,
+    );
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (w <= 0 || h <= 0) return true; // nothing of it is visible
+    if (w * h > COVERAGE_MAX_PIXELS) return false;
+    const data = rasterizePolys(
+      polys.map((poly) => poly.pts),
+      w,
+      h,
+      rule,
+      { dx: -x0, dy: -y0 },
+    );
+    const entry = this.masks.get(`m${this._maskSeq++}`, () => ({
+      width: w,
+      height: h,
+      left: 0,
+      top: 0,
+      data,
+    }));
+    // no room even after growing: the stencil takes this one
+    if (entry.empty) return false;
+    this.shapeStats.paths++;
+    this._setMode(MODE_GLYPH, this.masks.bind(), SWIZZLE_RGBA);
+    this._quad(
+      [x0, y0, x1, y0, x1, y1, x0, y1],
+      [
+        entry.u0,
+        entry.v0,
+        entry.u1,
+        entry.v0,
+        entry.u1,
+        entry.v1,
+        entry.u0,
+        entry.v1,
+      ],
+      color,
+      ZERO4,
+    );
+    return true;
+  }
+
+  /** Pass 1 of stencil-then-cover: winding counts into the low seven bits,
+   * colour writes off. Leaves the stencil test on and colour writes off. */
+  _windingPass(polys, rule) {
+    const gl = this.gl;
     gl.enable(gl.STENCIL_TEST);
-    gl.stencilMask(0xff);
+    gl.stencilMask(WINDING_MASK);
     gl.colorMask(false, false, false, false);
     gl.stencilFunc(gl.ALWAYS, 0, 0xff);
     this._mode = MODE_SOLID;
@@ -1042,6 +1201,7 @@ export class WaylandContext2D {
       gl.stencilOp(gl.KEEP, gl.KEEP, gl.INVERT);
       fans();
     } else {
+      // two draws with culling, since the binding has no stencilOpSeparate
       gl.enable(gl.CULL_FACE);
       gl.cullFace(gl.BACK);
       gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR_WRAP);
@@ -1051,31 +1211,90 @@ export class WaylandContext2D {
       fans();
       gl.disable(gl.CULL_FACE);
     }
+  }
 
-    // cover
-    gl.colorMask(true, true, true, true);
-    gl.stencilFunc(gl.NOTEQUAL, 0, 0xff);
-    gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
-    const { x, y, w, h } = bounds;
+  /** A device-space rectangle drawn for its stencil effect alone. */
+  _stencilQuad(x, y, w, h) {
     const saved = this._m;
     this._m = IDENTITY;
-    if (style instanceof Gradient) {
-      this._m = saved; // gradient endpoints are in user space
-      this._useGradient(style);
-      this._m = IDENTITY;
-      const a = this.globalAlpha;
-      this._quad(
-        [x, y, x + w, y, x + w, y + h, x, y + h],
-        UV_UNIT,
-        [a, a, a, a],
-        ZERO4,
-      );
-    } else {
-      this._emitRect(x, y, w, h, this._color(style));
-    }
+    this._emitRect(x, y, w, h, OPAQUE);
     this._flush();
     this._m = saved;
+  }
+
+  /**
+   * Put a shape into the clip.
+   *
+   * The first clip sets the bit where the shape's count is non-zero. A
+   * nested one intersects instead: across the clip so far, the bit is
+   * *cleared* where the new count is zero — which covers the region outside
+   * the new shape's bounds too, so the pass runs over the old clip rect,
+   * before the scissor narrows. Either way the counts are then cleared, and
+   * the scissor narrows to the bounds.
+   */
+  _applyClipPath(polys, rule, bounds) {
+    const gl = this.gl;
+    this._flush();
+    this._stencilling = true;
+    this._windingPass(polys, rule);
+    if (!this._clipPath) {
+      gl.stencilMask(CLIP_BIT);
+      gl.stencilFunc(gl.NOTEQUAL, CLIP_BIT, WINDING_MASK);
+      gl.stencilOp(gl.REPLACE, gl.REPLACE, gl.REPLACE);
+      this._stencilQuad(bounds.x, bounds.y, bounds.w, bounds.h);
+    } else {
+      const old = this._clip ?? {
+        x: 0,
+        y: 0,
+        w: this._width,
+        h: this._height,
+      };
+      gl.stencilMask(CLIP_BIT);
+      gl.stencilFunc(gl.EQUAL, CLIP_BIT, 0xff);
+      gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
+      this._stencilQuad(old.x, old.y, old.w, old.h);
+    }
+    gl.stencilMask(WINDING_MASK);
+    gl.stencilFunc(gl.NOTEQUAL, 0, WINDING_MASK);
+    gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
+    this._stencilQuad(bounds.x, bounds.y, bounds.w, bounds.h);
+    gl.colorMask(true, true, true, true);
     gl.disable(gl.STENCIL_TEST);
+    this._stencilling = false;
+    this._clipPath = [...(this._clipPath ?? []), { polys, rule, bounds }];
+    this._clip = this._clip ? intersectRect(this._clip, bounds) : bounds;
+  }
+
+  /**
+   * `restore()` to a state with a different clip path: the bit is dropped
+   * everywhere the current clip could have set it — its rect — and the
+   * restored list is applied again from the restored rect. Clips nest
+   * rarely and shallowly; re-rendering beats keeping a bit per level.
+   */
+  _rebuildClipStencil(list, rect) {
+    const gl = this.gl;
+    this._flush();
+    if (this._clipPath) {
+      const old = this._clip ?? {
+        x: 0,
+        y: 0,
+        w: this._width,
+        h: this._height,
+      };
+      this._stencilling = true;
+      gl.enable(gl.STENCIL_TEST);
+      gl.colorMask(false, false, false, false);
+      gl.stencilMask(CLIP_BIT);
+      gl.stencilFunc(gl.ALWAYS, 0, 0xff);
+      gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
+      this._stencilQuad(old.x, old.y, old.w, old.h);
+      gl.colorMask(true, true, true, true);
+      gl.disable(gl.STENCIL_TEST);
+      this._stencilling = false;
+    }
+    this._clipPath = null;
+    this._clip = rect;
+    for (const c of list ?? []) this._applyClipPath(c.polys, c.rule, c.bounds);
   }
 
   // ---- images -----------------------------------------------------------
@@ -1643,6 +1862,17 @@ export class WaylandContext2D {
       gl.disable(gl.SCISSOR_TEST);
     }
 
+    if (!this._stencilling) {
+      if (this._clipPath) {
+        gl.enable(gl.STENCIL_TEST);
+        gl.stencilFunc(gl.EQUAL, CLIP_BIT, CLIP_BIT);
+        gl.stencilMask(0);
+        gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+      } else {
+        gl.disable(gl.STENCIL_TEST);
+      }
+    }
+
     gl.drawArrays(gl.TRIANGLES, 0, this._n);
     this._n = 0;
     this._drew = true;
@@ -1665,6 +1895,7 @@ export class WaylandContext2D {
 
   destroy() {
     this.atlas.destroy();
+    this.masks.destroy();
     if (this._buffer) this.gl.deleteBuffer(this._buffer);
     if (this._program) this.gl.deleteProgram(this._program);
     this._buffer = null;
@@ -1683,17 +1914,6 @@ function intersectRect(a, b) {
   const r = Math.min(a.x + a.w, b.x + b.w);
   const bt = Math.min(a.y + a.h, b.y + b.h);
   return { x, y, w: Math.max(0, r - x), h: Math.max(0, bt - y) };
-}
-
-function unionRect(a, b) {
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  return {
-    x,
-    y,
-    w: Math.max(a.x + a.w, b.x + b.w) - x,
-    h: Math.max(a.y + a.h, b.y + b.h) - y,
-  };
 }
 
 function polysBounds(polys) {
