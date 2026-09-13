@@ -31,6 +31,7 @@ import { WaylandBackendWindow } from './backendwindow.js';
 import { WaylandSurface } from './surface.js';
 import { InputRouter } from './input.js';
 import { createWaylandClipboard } from './clipboard.js';
+import { WaylandDnd } from './dnd.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
 import { setScaleForTests } from '../scale.js';
@@ -81,6 +82,7 @@ export class WaylandApp extends EventEmitter {
     this.fonts = null;
     this.fontManager = null;
     this.clipboard = null;
+    this.dnd = null;
     this.compositor = null;
     this.wmBase = null;
     this.dmabuf = null;
@@ -125,6 +127,16 @@ export class WaylandApp extends EventEmitter {
       seat: app.seat.seat,
       serial: () => app.seat.lastSerial,
     });
+    // Drag and drop shares the clipboard's `wl_data_device` — the DnD events
+    // arrive on the same object its selection events do (src/wayland/dnd.js).
+    if (app.clipboard?.dataDevice && app.clipboard?.manager) {
+      app.dnd = new WaylandDnd({
+        app,
+        device: app.clipboard.dataDevice,
+        manager: app.clipboard.manager,
+        seat: app.seat,
+      });
+    }
 
     const ntk = require('ntk');
     // `app.fonts` is the name the renderer reaches for (src/fonts.js): one

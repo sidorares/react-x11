@@ -26,6 +26,8 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
+import { readAll } from '../../src/wayland/fdutil.js';
+
 const require = createRequire(import.meta.url);
 // The fork of wayland-client is consumed through a link until it is
 // published; where it is not installed, the suite skips rather than fails.
@@ -89,6 +91,12 @@ export class MockCompositor extends EventEmitter {
     this.keyboard = null;
     this.seat = null;
     this.registry = null;
+    // drag and drop: the client's data device and source, the server's
+    // current data offer, and what a `receive` answers with, by MIME.
+    this.dataDevice = null;
+    this.dataSource = null;
+    this._dndOffer = null;
+    this.dndPayload = {};
     this.objects.set(1, { iface: 'wl_display' });
   }
 
@@ -220,7 +228,18 @@ export class MockCompositor extends EventEmitter {
         { name: 'id', type: 'new_id' },
       ]);
     } else {
-      args = get_args(body, req.args);
+      // A request may carry a descriptor (wl_data_offer.receive hands us a
+      // pipe): pull it from the transport's ancillary queue in argument order,
+      // the same rule the client parses events with.
+      const takeFd =
+        req.args.some((a) => a.type === 'fd') &&
+        typeof this.socket?.takeFds === 'function'
+          ? () => {
+              const [fd] = this.socket.takeFds(1);
+              return typeof fd === 'number' ? fd : -1;
+            }
+          : undefined;
+      args = get_args(body, req.args, takeFd);
     }
     const record = { id, iface: obj.iface, name: req.name, args };
     this.requests.push(record);
@@ -367,6 +386,54 @@ export class MockCompositor extends EventEmitter {
       }
       return;
     }
+    if (iface === 'wl_data_device_manager') {
+      if (name === 'create_data_source') {
+        this.dataSource = args[0];
+        this.objects.get(args[0]).offers = [];
+      } else if (name === 'get_data_device') {
+        this.dataDevice = args[0];
+      }
+      return;
+    }
+    if (iface === 'wl_data_source') {
+      const src = this.objects.get(id);
+      if (name === 'offer') (src.offers ??= []).push(args[0]);
+      else if (name === 'destroy') this.objects.delete(id);
+      return;
+    }
+    if (iface === 'wl_data_device') {
+      // start_drag / set_selection / release are recorded in this.requests;
+      // start_drag's origin/icon/serial are what a source test asserts on.
+      return;
+    }
+    if (iface === 'wl_data_offer') {
+      if (name === 'receive') this._answerReceive(args[0], args[1]);
+      else if (name === 'destroy') this.objects.delete(id);
+      return;
+    }
+  }
+
+  /** Answer a `wl_data_offer.receive`: write the payload for the MIME to the
+   * pipe the client handed us, and close it. */
+  _answerReceive(mime, fd) {
+    if (typeof fd !== 'number' || fd < 0) return;
+    const value = this.dndPayload?.[mime];
+    const bytes =
+      value == null
+        ? Buffer.alloc(0)
+        : Buffer.isBuffer(value)
+          ? value
+          : Buffer.from(String(value), 'utf8');
+    try {
+      fs.writeSync(fd, bytes);
+    } catch {
+      /* the reader may have gone */
+    }
+    try {
+      fs.closeSync(fd);
+    } catch {
+      /* already closed */
+    }
   }
 
   /** The configure pair a role gets after its first commit. */
@@ -482,6 +549,64 @@ export class MockCompositor extends EventEmitter {
       evdev,
       pressed ? 1 : 0,
     );
+  }
+
+  // ---- drag and drop injection (the compositor as the other application) ----
+
+  /**
+   * Begin an incoming drag over a surface: hand the client a data offer that
+   * lists `mimes`, then `enter` at surface-local (x, y). Returns the server
+   * offer id, which later action/finish events name.
+   */
+  dndEnter(surfaceId, mimes, { x = 0, y = 0, sourceActions = 1 } = {}) {
+    const offer = this._newServerObject('wl_data_offer');
+    this._dndOffer = offer;
+    this.send(this.dataDevice, 'data_offer', offer);
+    for (const mime of mimes) this.send(offer, 'offer', mime);
+    this.send(offer, 'source_actions', sourceActions);
+    this.send(this.dataDevice, 'enter', this.serial++, surfaceId, x, y, offer);
+    return offer;
+  }
+  dndMotion(x, y) {
+    this.send(this.dataDevice, 'motion', (this.time += 8), x, y);
+  }
+  dndOfferAction(action) {
+    if (this._dndOffer) this.send(this._dndOffer, 'action', action);
+  }
+  dndLeave() {
+    this.send(this.dataDevice, 'leave');
+  }
+  dndDrop() {
+    this.send(this.dataDevice, 'drop');
+  }
+
+  /** The MIME types the client's data source offered, in order. */
+  sourceOffers() {
+    return this.objects.get(this.dataSource)?.offers ?? [];
+  }
+  /** Tell the source the current target accepts `mime` (empty string = none). */
+  sourceTarget(mime) {
+    this.send(this.dataSource, 'target', mime ?? '');
+  }
+  sourceAction(action) {
+    this.send(this.dataSource, 'action', action);
+  }
+  /** Ask the source to send `mime` down a pipe; resolves with the bytes it
+   * wrote. */
+  async sourceSend(mime) {
+    const dri = require('x11-dri');
+    const { read, write } = dri.pipe();
+    this.send(this.dataSource, 'send', mime, write);
+    return readAll(read);
+  }
+  sourceDropPerformed() {
+    this.send(this.dataSource, 'dnd_drop_performed');
+  }
+  sourceFinished() {
+    this.send(this.dataSource, 'dnd_finished');
+  }
+  sourceCancelled() {
+    this.send(this.dataSource, 'cancelled');
   }
 }
 

@@ -184,9 +184,13 @@ arrive as fds, and Node's sockets abort on them
   here.
 - **Non-rectangular clips** fall back to the bounding box
   (`ctx.clipApproximations` counts them). A stencil clip layer is the fix.
-- **Drag-and-drop.** The data device is bound and the clipboard uses it;
-  the DnD half (`wl_data_device.start_drag`, enter/motion/drop) is not
-  wired to `dnd.js`.
+- **Drag-and-drop.** Wired (`src/wayland/dnd.js`): the drop side answers
+  another application's drag over `wl_data_device` enter/motion/leave/drop,
+  and the source side offers a payload and hands the gesture to
+  `start_drag`, with an in-app drop keeping `e.items` by reference. What is
+  left is the drag _icon_: `start_drag` is given a bare (invisible) surface,
+  and rendering the tree's `<popup dragPreview>` into an icon surface the
+  frame loop paints is a follow-up.
 - **Text input v3.** IME composition goes through `compose.js`'s dead-key
   tables; `zwp_text_input_v3` would give real preedit.
 - **Touch and tablet.** The seat handles pointer and keyboard only.
