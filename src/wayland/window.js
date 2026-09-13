@@ -98,6 +98,16 @@ const DEFAULT_SIZE = { width: 800, height: 600 };
 const SCALE_DENOM = 120;
 
 /**
+ * How far outside the window the input region reaches, into the margin a
+ * client-side shadow is drawn in: the band a resize grab still lands in
+ * (decorations.js `RESIZE_MARGIN`). Beyond it, input goes to whatever is
+ * under the shadow, as it does beside a GTK window.
+ */
+const INPUT_BAND = 8;
+
+const NO_MARGINS = Object.freeze({ left: 0, top: 0, right: 0, bottom: 0 });
+
+/**
  * A positioner for a popup at a point (its top-left at `x`, `y` in the
  * parent's window geometry) or under an anchor rectangle, sliding and
  * flipping to stay on screen the way `anchor.js` would have done it.
@@ -189,6 +199,17 @@ export class WaylandWindow extends EventEmitter {
     this._setupDone = false;
     /** a popup's role-to-be: placement and grab, until its initial commit */
     this._popupSetup = null;
+    /**
+     * The margin around the window a client-side shadow is drawn in, part of
+     * the surface and not of the window: `width`/`height` are the surface's,
+     * and window geometry (what the compositor configures, places and tiles)
+     * is the surface less this. `marginsFor(states)` answers it per state —
+     * a maximised or tiled window has none.
+     */
+    this.margins = NO_MARGINS;
+    this.marginsFor = null;
+    /** `wl_compositor`, for the input region; set by whoever made the window */
+    this.compositor = null;
   }
 
   // ---- creation --------------------------------------------------------------
@@ -412,16 +433,26 @@ export class WaylandWindow extends EventEmitter {
     this.toplevel.on('configure', (width, height, states) => {
       // 0x0 is "pick your own" — the compositor is not imposing a size.
       this.sizeImposed = width > 0 && height > 0;
-      if (width > 0 && height > 0) {
-        const changed = width !== this.width || height !== this.height;
-        this.width = width;
-        this.height = height;
-        if (changed) this.emit('resize', { width, height });
-      }
       const next = decodeStates(states);
-      const was = this.states;
+      // The configured size is the window geometry's. The surface is that
+      // plus the shadow's margin, which depends on the states in this same
+      // configure: a window that is being maximised loses its margin in the
+      // configure that maximises it.
+      const was = this.margins;
+      const m = this.marginsFor?.(next) ?? was;
+      const gw = width > 0 ? width : this.width - was.left - was.right;
+      const gh = height > 0 ? height : this.height - was.top - was.bottom;
+      const w = Math.max(1, gw + m.left + m.right);
+      const h = Math.max(1, gh + m.top + m.bottom);
+      this.margins = m;
+      if (w !== this.width || h !== this.height) {
+        this.width = w;
+        this.height = h;
+        this.emit('resize', { width: w, height: h });
+      }
+      const wasStates = this.states;
       this.states = next;
-      if (!sameSet(was, next)) this.emit('statechange', [...next]);
+      if (!sameSet(wasStates, next)) this.emit('statechange', [...next]);
     });
     this.toplevel.on('close', () => this.emit('close'));
     this.toplevel.on('configure_bounds', (w, h) => {
@@ -514,13 +545,62 @@ export class WaylandWindow extends EventEmitter {
       );
       this._pendingSerial = null;
     }
+    const m = this.margins;
     const g = this._geometry;
-    if (!g || g.width !== this.width || g.height !== this.height) {
-      this._geometry = { width: this.width, height: this.height };
-      // a layer surface has no window geometry: the surface is the window
-      this.xdgSurface?.$.set_window_geometry(0, 0, this.width, this.height);
+    if (!g || g.width !== this.width || g.height !== this.height || g.m !== m) {
+      this._geometry = { width: this.width, height: this.height, m };
+      // The window is the surface less a client-side shadow's margin; a
+      // layer surface has no window geometry — the surface is the window.
+      const gw = Math.max(1, this.width - m.left - m.right);
+      const gh = Math.max(1, this.height - m.top - m.bottom);
+      this.xdgSurface?.$.set_window_geometry(m.left, m.top, gw, gh);
+      this._applyInputRegion(m, gw, gh);
       this._applyScale();
     }
+  }
+
+  /**
+   * New margins, keeping the window geometry: the surface grows or shrinks
+   * round the window, which the compositor sized and placed. Margins change
+   * outside a configure too — a decoration mode the compositor settled after
+   * the first frame (sway answers server-side, then client-side), and the
+   * size has to follow, or the window shrinks by its own shadow.
+   */
+  setMargins(m) {
+    const was = this.margins;
+    if (!m || m === was) return;
+    const w = Math.max(1, this.width - was.left - was.right + m.left + m.right);
+    const h = Math.max(
+      1,
+      this.height - was.top - was.bottom + m.top + m.bottom,
+    );
+    this.margins = m;
+    if (w !== this.width || h !== this.height) {
+      this.width = w;
+      this.height = h;
+      this.emit('resize', { width: w, height: h });
+    }
+  }
+
+  /**
+   * Input goes to the window and a resize band round it, not to the rest of
+   * the shadow — a press on the soft edge of a shadow belongs to what is
+   * under it. With no margin, the whole surface.
+   */
+  _applyInputRegion(m, gw, gh) {
+    if (!this.compositor || !this.xdgSurface) return;
+    const shadowed = m.left || m.top || m.right || m.bottom;
+    if (!shadowed && !this._inputRegionSet) return;
+    const band = shadowed ? INPUT_BAND : 0;
+    const x = Math.max(0, m.left - band);
+    const y = Math.max(0, m.top - band);
+    const right = Math.min(this.width, m.left + gw + band);
+    const bottom = Math.min(this.height, m.top + gh + band);
+    const region = this.compositor.$.create_region();
+    region.$.add(x, y, right - x, bottom - y);
+    this.surface.$.set_input_region(region.id);
+    region.$.destroy();
+    this._inputRegionSet = true;
   }
 
   /** Who draws the frame: 'server' once a compositor has agreed to, else 'client'. */
@@ -578,17 +658,21 @@ export class WaylandWindow extends EventEmitter {
     this.toplevel?.$.set_app_id(String(appId ?? ''));
   }
 
+  /** Size limits, in surface pixels like everything else here; the
+   * compositor is told the window's, without the shadow's margin. */
   setMinSize(width, height) {
+    const m = this.margins;
     this.toplevel?.$.set_min_size(
-      Math.max(0, width | 0),
-      Math.max(0, height | 0),
+      Math.max(0, (width - m.left - m.right) | 0),
+      Math.max(0, (height - m.top - m.bottom) | 0),
     );
   }
 
   setMaxSize(width, height) {
+    const m = this.margins;
     this.toplevel?.$.set_max_size(
-      Math.max(0, width | 0),
-      Math.max(0, height | 0),
+      Math.max(0, (width - m.left - m.right) | 0),
+      Math.max(0, (height - m.top - m.bottom) | 0),
     );
   }
 
@@ -631,8 +715,15 @@ export class WaylandWindow extends EventEmitter {
     this.toplevel?.$.resize(seatProxy.id, serial, edges);
   }
 
+  /** `x`/`y` surface-local; the request wants them in window geometry. */
   showWindowMenu(seatProxy, serial, x, y) {
-    this.toplevel?.$.show_window_menu(seatProxy.id, serial, x | 0, y | 0);
+    const m = this.margins;
+    this.toplevel?.$.show_window_menu(
+      seatProxy.id,
+      serial,
+      (x - m.left) | 0,
+      (y - m.top) | 0,
+    );
   }
 
   /** Reposition a popup (xdg_popup v3): a new positioner, same surface. */

@@ -21,7 +21,6 @@ import {
   BTN_STYLUS2,
 } from '../../src/wayland/tablet.js';
 import { InputRouter } from '../../src/wayland/input.js';
-import { TITLEBAR_HEIGHT, BORDER } from '../../src/wayland/decorations.js';
 import { createRoot } from '../../src/index.js';
 import { createMockApp } from '../helpers/mock-app.js';
 import {
@@ -35,6 +34,8 @@ import {
   routerApp,
   record,
   POINTER_EVENTS,
+  floatingFrame,
+  SHADOW_MARGINS,
 } from './harness.js';
 
 const SKIP = waylandClientAvailable
@@ -45,8 +46,10 @@ const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const BUTTON1 = BUTTON_MASK[1];
 const BUTTON2 = BUTTON_MASK[2];
-/** content point (x, y) in surface-local logical coordinates */
-const at = (x, y) => [BORDER + x, TITLEBAR_HEIGHT + BORDER + y];
+// content (x, y) in surface coordinates: past the frame's insets, the
+// shadow's margin among them
+const INSETS = floatingFrame().insets();
+const at = (x, y) => [INSETS.left + x, INSETS.top + y];
 const near = (a, b) => Math.abs(a - b) < 1e-4;
 
 let mock;
@@ -311,7 +314,7 @@ test(
     ]);
 
     // the titlebar: the compositor's move, with the serial of this down
-    mock.toolMotion(penId, 200, 10);
+    mock.toolMotion(penId, SHADOW_MARGINS.left + 200, SHADOW_MARGINS.top + 10);
     mock.toolFrame(penId);
     const down = mock.toolDown(penId);
     mock.toolFrame(penId);

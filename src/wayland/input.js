@@ -206,18 +206,44 @@ export class InputRouter {
       win.decor.pressed = hit.id;
       return;
     }
-    // titlebar
+    // titlebar: what a click means is the desktop's to say (framestyle.js)
+    const style = this.app.frameStyle?.value;
     if (ev.button === 1) {
       const now = ev.time;
       if (win._lastTitlePress && now - win._lastTitlePress < 400) {
         win._lastTitlePress = 0;
-        win.wl.maximize(!win.decor.maximized);
+        this._titlebarAction(win, style?.doubleClick ?? 'toggle-maximize', ev);
         return;
       }
       win._lastTitlePress = now;
       win.wl.startMove(seat, ev.serial);
+    } else if (ev.button === 2) {
+      this._titlebarAction(win, style?.middleClick ?? 'none', ev);
     } else if (ev.button === 3) {
-      win.wl.showWindowMenu(seat, ev.serial, ev.x, ev.y);
+      this._titlebarAction(win, style?.rightClick ?? 'menu', ev);
+    }
+  }
+
+  /**
+   * One of `org.gnome.desktop.wm.preferences`' titlebar actions. `lower` and
+   * `toggle-shade` have no xdg-shell request, and a maximise in one
+   * direction is a maximise here: they do what the protocol allows, which
+   * for the first two is nothing.
+   */
+  _titlebarAction(win, action, ev) {
+    switch (action) {
+      case 'toggle-maximize':
+      case 'toggle-maximize-horizontally':
+      case 'toggle-maximize-vertically':
+        win.wl.maximize(!win.decor.maximized);
+        return;
+      case 'minimize':
+        win.wl.minimize();
+        return;
+      case 'menu':
+        win.wl.showWindowMenu(this.seat.seat, ev.serial, ev.x, ev.y);
+        return;
+      default:
     }
   }
 

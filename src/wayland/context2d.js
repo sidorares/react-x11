@@ -709,8 +709,17 @@ export class WaylandContext2D {
   }
 
   roundRect(x, y, w, h, radii) {
-    const r = Array.isArray(radii) ? Number(radii[0]) || 0 : Number(radii) || 0;
-    this._rects.push({ x, y, w, h, r });
+    // One radius for all four corners is the analytic rounded rectangle;
+    // anything else — `[0, 0, r, r]`, a box with one corner rounded — is a
+    // path. Taking the first radius for all four drew the wrong shape, and
+    // as a clip made `[0, 0, r, r]` a plain rectangle.
+    const list = Array.isArray(radii) ? radii : [radii];
+    const first = Number(list[0]) || 0;
+    if (list.every((v) => (Number(v) || 0) === first)) {
+      this._rects.push({ x, y, w, h, r: first });
+    } else {
+      this._rectOnly = false;
+    }
     this._path.roundRect(x, y, w, h, radii);
   }
 

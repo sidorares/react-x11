@@ -35,6 +35,7 @@ import { WaylandWindow, TOPLEVEL_STATE } from './window.js';
 import { WaylandGLContext } from './glcontext.js';
 import { WaylandContext2D } from './context2d.js';
 import { Decorations } from './decorations.js';
+import { appearanceSnapshot } from '../appearance.js';
 import { decorationPolicy } from './ssd.js';
 import { layerRoleFor } from './layershell.js';
 
@@ -134,7 +135,22 @@ export class WaylandBackendWindow extends EventEmitter {
       this.isPopup || this.isLayer
         ? null
         : new Decorations({ enabled: this._decorPolicy.draw });
-    if (this.decor) this.decor.title = attributes.title ?? 'react-x11';
+    if (this.decor) {
+      const decor = this.decor;
+      decor.title = attributes.title ?? 'react-x11';
+      decor.measure = app.frameText;
+      decor.setStyle(app.frameStyle?.value, appearanceSnapshot());
+      // the shell window's margins once it exists; the same answer before
+      decor.marginsOf = () =>
+        this.wl?.margins ?? Decorations.marginsFor(new Set(), decor.enabled);
+      decor.onNeedsRepaint = () => {
+        if (this._titleRetry) return;
+        this._titleRetry = setTimeout(() => {
+          this._titleRetry = null;
+          this.repaintFrame();
+        }, 60);
+      };
+    }
     const scale = app.scale;
     const insets = this.insets;
     const contentW = Math.max(1, (attributes.width ?? 640) / scale);
@@ -146,7 +162,7 @@ export class WaylandBackendWindow extends EventEmitter {
 
     if (this.isPopup) {
       const parent = app.parentFor(attributes);
-      const pi = parent?.insets ?? { left: 0, top: 0 };
+      const pi = parent?.geometryInsets ?? { left: 0, top: 0 };
       const ps = parent?.scale ?? scale;
       this.wl = WaylandWindow.createPopupSync({
         conn: app.conn,
@@ -196,6 +212,13 @@ export class WaylandBackendWindow extends EventEmitter {
       });
     }
     this.wl.scale = scale;
+    this.wl.compositor = app.compositor;
+    if (this.decor) {
+      const decor = this.decor;
+      this.wl.marginsFor = (states) =>
+        Decorations.marginsFor(states, decor.enabled);
+      this.wl.margins = this.wl.marginsFor(this.wl.states);
+    }
     this.wl.useScaling({
       fractionalScaleManager: app.fractionalScale,
       viewporter: app.viewporter,
@@ -283,6 +306,9 @@ export class WaylandBackendWindow extends EventEmitter {
     const enabled = this._decorPolicy.draw && mode !== 'server';
     if (this.decor.enabled === enabled) return;
     this.decor.enabled = enabled;
+    // no frame, no shadow: the margin goes with it, and the surface round
+    // the window with the margin
+    this.wl.setMargins(this.wl.marginsFor?.(this.wl.states));
     if (!this._everPresented && !this.wl.sizeImposed) {
       const i = this.insets;
       const wish = this._contentWish;
@@ -301,6 +327,22 @@ export class WaylandBackendWindow extends EventEmitter {
     return this.decor
       ? this.decor.insets()
       : { top: 0, left: 0, right: 0, bottom: 0 };
+  }
+
+  /**
+   * The content's offset inside the window geometry: the insets without the
+   * shadow's margin. What a popup's position is relative to — xdg-shell
+   * places popups in their parent's window geometry, not its surface.
+   */
+  get geometryInsets() {
+    const i = this.insets;
+    const m = this.wl?.margins ?? { left: 0, top: 0, right: 0, bottom: 0 };
+    return {
+      top: i.top - m.top,
+      left: i.left - m.left,
+      right: i.right - m.right,
+      bottom: i.bottom - m.bottom,
+    };
   }
 
   get scale() {
@@ -502,7 +544,11 @@ export class WaylandBackendWindow extends EventEmitter {
     ctx.save();
     ctx.translate(o.x, o.y);
     ctx.beginPath();
-    ctx.rect(0, 0, this.width, this.height);
+    // A floating window's bottom corners are rounded like its top ones, and
+    // the content is what fills them.
+    const r = this.decor?.enabled ? this.decor.radius * this.wl.scale : 0;
+    if (r > 0) ctx.roundRect(0, 0, this.width, this.height, [0, 0, r, r]);
+    else ctx.rect(0, 0, this.width, this.height);
     ctx.clip();
   }
 
@@ -808,7 +854,7 @@ export class WaylandBackendWindow extends EventEmitter {
    */
   _placePopup({ x, y, width, height }) {
     const p = this.parentWindow;
-    const pi = p?.insets ?? { left: 0, top: 0 };
+    const pi = p?.geometryInsets ?? { left: 0, top: 0 };
     const ps = p?.scale ?? this.scale;
     if (x != null) this._popupAt.x = x / ps + pi.left;
     if (y != null) this._popupAt.y = y / ps + pi.top;
@@ -991,6 +1037,32 @@ export class WaylandBackendWindow extends EventEmitter {
       time: Date.now() >>> 0,
       dismissed: true,
     });
+  }
+
+  /**
+   * The desktop's frame style or its colours changed (app.js). The frame
+   * repaints; if the titlebar's height moved with the title's font, the
+   * content keeps its size where the compositor lets it and the surface
+   * grows or shrinks round it, and the tree hears a resize where it does
+   * not.
+   */
+  _frameStyleChanged() {
+    if (!this.decor) return;
+    const before = this.insets.top;
+    this.decor.setStyle(this.app.frameStyle?.value, appearanceSnapshot());
+    const delta = this.insets.top - before;
+    this._frameDirty = true;
+    if (delta) {
+      if (!this.wl.sizeImposed) this.wl.height += delta;
+      this._resized = true;
+      this.emit('resize', {
+        width: this.width,
+        height: this.height,
+        x: 0,
+        y: 0,
+      });
+    }
+    this._armFrame();
   }
 
   /** The compositor (or the frame's close button) asked; the tree decides. */

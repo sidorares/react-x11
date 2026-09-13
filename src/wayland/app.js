@@ -39,6 +39,8 @@ import { WaylandDnd } from './dnd.js';
 import { createScreenCapture } from './screencopy.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
+import { FrameStyle } from './framestyle.js';
+import { watchAppearance } from '../appearance.js';
 import { WaylandGLArea, WaylandOverlayPane, GLAREA_VISUAL } from './glarea.js';
 import { setScaleForTests } from '../scale.js';
 import { setCompositingForTests } from '../compositing.js';
@@ -183,8 +185,15 @@ export class WaylandApp extends EventEmitter {
     app.fonts = new ntk.FontManager({ source: options.fontSource ?? 'system' });
     app.fontManager = app.fonts;
     app._shaper = new TextShaper(app.fonts);
-    app.frameText = (text, size, weight) =>
-      app._shaper.measureSync(text, { family: 'sans-serif', size, weight });
+    app.frameText = (text, size, weight, family = 'sans-serif') =>
+      app._shaper.measureSync(text, { family, size, weight });
+    // What the desktop says a frame looks like and does (framestyle.js):
+    // read before the first window is sized — the title's font sets the
+    // titlebar's height — and followed after, with the light or dark the
+    // frame takes from the appearance.
+    app.frameStyle = await new FrameStyle().start();
+    app.frameStyle.on('change', () => app._frameStyleChanged());
+    app._unwatchAppearance = watchAppearance(() => app._frameStyleChanged());
 
     // The GPU context is shared by every window and surface; make it now so
     // an offscreen surface created before the first window has one to use.
@@ -320,6 +329,12 @@ export class WaylandApp extends EventEmitter {
     }
   }
 
+  /** The desktop's frame style or colours changed: every frame repaints,
+   * and resizes if its titlebar did. */
+  _frameStyleChanged() {
+    for (const w of this.windows.values()) w._frameStyleChanged?.();
+  }
+
   /** Hook for the input router: a discrete event may want a paint now. */
   afterInput() {}
 
@@ -443,6 +458,8 @@ export class WaylandApp extends EventEmitter {
     this.windows.clear();
     this.toplevels.length = 0;
     this.textInput?.destroy();
+    this.frameStyle?.stop();
+    this._unwatchAppearance?.();
     this.input?.destroy();
     this.tablet?.destroy();
     this.touch?.destroy();
