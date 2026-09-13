@@ -46,7 +46,12 @@ import { setScreensForTests } from '../src/screens.js';
 import { _resetBusState } from '../src/bus.js';
 import { _resetServiceCache } from '../src/portal.js';
 import { fakeEds, NOTIFY_INITIAL } from './helpers/fake-eds.js';
-import { transportAvailable, withBus, withNoBus } from './helpers/with-bus.js';
+import {
+  offTheDesktopBus,
+  transportAvailable,
+  withBus,
+  withNoBus,
+} from './helpers/with-bus.js';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setTimeout(resolve, 2));
@@ -55,6 +60,16 @@ const haveTransport = await transportAvailable();
 const needsBroker = haveTransport
   ? {}
   : { skip: 'dbus-native is not installed (expected on Node < 22.12)' };
+
+// **Nothing here may reach the developer's own desktop.** A root built with
+// `createRoot()` rather than through `react-x11/test` starts the AT-SPI
+// bridge as an app's would, climbing toward the desktop's accessibility
+// registry — so it is off here, as the harness has it. And the whole file
+// runs with no session bus, as CI does: on a desktop the EDS rung is the
+// developer's own calendars, and a ladder that slips out of
+// `withBus`/`withNoBus` would read them.
+process.env.NO_AT_BRIDGE ??= '1';
+offTheDesktopBus();
 
 /** Poll until `check` answers, flushing timers and microtasks between tries.
  *  Every rung here settles across ticks — a bus round trip, a pipe, a
