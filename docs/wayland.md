@@ -416,19 +416,88 @@ Each phase has an exit that makes the next one safe to start.
   timestamps. _Exit: the number the project optimizes for, finally
   measured rather than modeled._
 
+## Needs validation
+
+What the backend does today was built and checked on one machine — a
+virtual GNOME/mutter desktop on virgl, one virtual monitor, a mouse and a
+keyboard — and some of it was built to the specification because this
+machine cannot exercise it. Each item names the check that would close it;
+[wayland-backend.md](wayland-backend.md) has the design behind each.
+
+- **Monitors.** Two outputs, one at 200% and one at 100%: `useScreens()`
+  lists both in left-to-right order with per-screen `scale`; the first
+  window lays out at the densest output's scale (`app.scale` is seeded
+  before any window); dragging a window between heads changes `win.output`
+  and its `available` rect once. Plug and unplug an output while running:
+  one re-render per event. GNOME at 150%: `screens[0].scale === 1.5` with
+  no 2→1.5 correction visible on the first frame. A compositor without
+  fractional-scale-v1 and `wl_surface` v6 (older wlroots, Weston): the
+  buffer scale follows the output's integer scale on `enter`.
+- **Touch.** A touchscreen, `examples/widgets.jsx`: a tap clicks, a finger
+  drags a slider live, a second finger clicks nothing; a finger on the
+  titlebar moves the window and on a corner resizes it (the touch `down`
+  serial is what `xdg_toplevel.move` gets); `onMouseDown`'s
+  `nativeEvent.pointerType === 'touch'`.
+- **Tablet.** A pen: hovering shows the arrow (I-beam over text), the tip
+  clicks and drags, the side button is button 3, `nativeEvent.pressure`
+  varies, and pulling the pen away mid-press releases the control. Pads
+  (rings, strips) are accepted and ignored by design.
+- **Input methods.** An IBus engine installed (`ibus-anthy`, `ibus-libpinyin`;
+  `gsettings set org.gnome.desktop.input-sources sources
+"[('xkb','us'),('ibus','anthy')]"`, restored afterwards), `examples/form/index.jsx`
+  under `REACT_X11_WAYLAND_TRACE=1`: typing `nihongo` shows an underlined
+  preedit, Space a segment underline, Enter the committed text and one
+  `onChange`; `Ctrl+Shift+U e9 Space` exercises the same path without an
+  engine. Only the protocol half — `enter`, `enable`, `done`, `leave` —
+  could be seen here; the compositor never composed, because nothing here
+  types.
+- **Drag and drop.** A real pointer, two react-x11 processes
+  (`examples/dnd-source.jsx`, `examples/dnd-target.jsx`) and a GNOME app:
+  a file from Files onto the target, text from the source into Text Editor,
+  and a drag between the two windows of one process (`e.source ===
+'internal'`, items by reference) and of two.
+- **Other compositors.** The backend has run against mutter alone.
+  wlroots (sway, labwc — both installed here and runnable nested) is where
+  server-side decorations, layer-shell and screen capture exist; whether
+  each was validated nested or only written to the protocol is recorded in
+  wayland-backend.md's "what is left".
+- **The GPU path on real hardware.** `test/wayland/context2d-gpu.test.js`
+  reads antialiased fills and stencil clips back from a render node; it
+  has run on virgl only. Intel, AMD and NVIDIA (Mesa and proprietary) each
+  want one run — the stencil arithmetic is the kind of thing a driver
+  disagrees about. And the frame-time number: `Surface.swap()` costs
+  24.5 ms here, of which ~10 ms is virgl's host round trip on `glFinish`
+  and none is the protocol layer; only bare metal says what Tier D costs.
+- **Multisampling** is designed and not built (GLES 3.0 cannot blit into a
+  multisampled framebuffer, so the target's partial repaints would become
+  textured draws); `MAX_SAMPLES` is 1 here. It needs a machine that reports
+  4 or more.
+- **Bun after an `npm install`.** Until node-x11 ships the EINTR fix for
+  `fdpass-bun.js`, a fresh install loses the local patch and every example
+  under Bun closes its connection ~0.3 s in; Node is unaffected. Re-check
+  `env -u DISPLAY REACT_X11_BACKEND=wayland bun examples/simple.jsx` stays
+  up once the dependency moves.
+
 ## Open questions
 
 1. **API surface.** Is the Wayland backend API-compatible-minus-features
    (same JSX, some props inert, `<foreign>` absent) or a declared subset?
    Current lean: same JSX, loud dev-mode warnings on inert props, feature
-   detection à la `app.capabilities`.
+   detection à la `app.capabilities`. _As built: same JSX; the X-only
+   methods are absent rather than stubbed, so the tree's own probes
+   (`wnd.setProperty?.()`, `useSupports('embedding')`) answer for it._
 2. **Where the code lives.** ntk grows `WaylandWindow` beside `Window`
    behind the same `App`/`Drawable` contracts vs. a sibling package.
    Current lean: inside ntk — the factory seam and the portable raster
-   half are already there.
+   half are already there. _As built: `src/wayland/` in this repository,
+   behind the same app/window contract the cocoa backend keeps; ntk is
+   still the long-term home._
 3. **Runtime floor.** Bun-only until when? Current lean: prototype through
    Phase 2 on Bun alone; decide on the Node addon when someone needs it,
-   not before.
+   not before. _As built: Node works through x11-dri's `UnixSocket`
+   (uv_poll, fd passing); Bun through node-x11's `bun:ffi` transport. The
+   protocol layer stayed pure JS, having been measured not to be the
+   cost._
 4. **x11-dri's name.** Its GBM/EGL core is display-server-neutral and this
    plan leans on it twice (GPU tier, and possibly the Node fd/xkb shims).
    Splitting a `dri-core` out is upstream's call; noted here so the
@@ -436,7 +505,8 @@ Each phase has an exit that makes the next one safe to start.
 5. **libxkbcommon.** `dlopen` it (compiled, but universally present on
    Wayland systems) vs. a pure-JS keymap interpreter. Current lean:
    dlopen — a keymap parser is the kind of code this project writes well,
-   but not before a working backend exists.
+   but not before a working backend exists. _As built: the pure-JS parser
+   (`xkb.js`), against the compositor's own keymap text; no libxkbcommon._
 
 ## References
 
