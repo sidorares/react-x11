@@ -297,9 +297,15 @@ arrive as fds, and Node's sockets abort on them
   over a memfd or dma-buf fd on the pane channel; until then `<Frame>` here
   degrades the way it does without embedding.
 - **Bun's fd transport, upstream.** node-x11's `fdpass-bun.js` gave up on a
-  healthy socket when Bun's GC interrupted its `poll(2)` sixty-four times
-  in a row (EINTR is a retry, not a failure); the fix is applied to the
-  installed copy here and prepared for node-x11. Until it ships, an
+  healthy socket when its reader thread's `poll(2)` was interrupted
+  sixty-four times in a row. The interrupter is JavaScriptCore's
+  thread-suspend signal (SIGPWR, `tgkill`ed to every JS thread — the poller
+  worker included) during **WebAssembly compilation**: yoga-layout's wasm
+  tiering up ~0.3 s into any react-x11 app produces exactly that burst;
+  `strace -f -e ppoll,tgkill` shows it, and a wasm-free process never sees
+  one. EINTR is a retry, not a failure. The fix is applied to the installed
+  copy here and prepared for node-x11 (a branch with a regression test that
+  compiles a wasm module beside an idle connection). Until it ships, an
   `npm install` brings the bug back under Bun (Node's native transport is
   unaffected).
 - **Drag-and-drop.** The data device is bound and the clipboard uses it;
