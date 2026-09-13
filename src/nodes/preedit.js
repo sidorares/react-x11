@@ -43,12 +43,18 @@ export class TextInputPreedit {
 
   /** A value index in the displayed string. The caret is at the composition
    * while it is open, so it maps to the *end* of the preedit — which is
-   * where the next keystroke of the sequence appears. */
+   * where the next keystroke of the sequence appears — unless the input
+   * method said where inside its preedit the cursor is (`_preeditCursor`,
+   * a compositor IME converting one segment of a longer phrase). */
   _displayIndex(index) {
     if (!this._preedit) return index;
-    return index >= this._preeditStart()
-      ? index + Array.from(this._preedit).length
-      : index;
+    const start = this._preeditStart();
+    if (index < start) return index;
+    const length = Array.from(this._preedit).length;
+    if (index === start && this._preeditCursor) {
+      return start + Math.min(length, this._preeditCursor.begin);
+    }
+    return index + length;
   }
 
   /** The inverse, for indices that come back out of a layout. A hit inside
@@ -61,10 +67,20 @@ export class TextInputPreedit {
     return Math.max(start, index - Array.from(this._preedit).length);
   }
 
-  _setPreedit(text) {
-    if (text === this._preedit) return;
+  /**
+   * `cursor` is `{ begin, end }` in code points into `text` — where an input
+   * method wants the caret inside its preedit, or a segment of it
+   * highlighted when the two differ — and null for the end, which is where
+   * the client-side composer's caret always is.
+   */
+  _setPreedit(text, cursor = null) {
+    const range = text && cursor ? cursor : null;
+    if (text === this._preedit && sameRange(range, this._preeditCursor)) {
+      return;
+    }
     if (!this._preedit) this._preeditAt = this._selection()[0];
     this._preedit = text;
+    this._preeditCursor = range;
     this._repaint();
   }
 
@@ -79,7 +95,18 @@ export class TextInputPreedit {
    */
   defaultComposition(ev) {
     if (ev.type !== 'compositionEnd') {
-      this._setPreedit(ev.data);
+      // `cursorBegin`/`cursorEnd` ride the event only when an input method
+      // put them there (src/wayland/textinput.js); a dead key carries none
+      const begin = ev.cursorBegin;
+      const cursor = Number.isInteger(begin)
+        ? {
+            begin,
+            end: Number.isInteger(ev.cursorEnd)
+              ? Math.max(begin, ev.cursorEnd)
+              : begin,
+          }
+        : null;
+      this._setPreedit(ev.data, cursor);
       return;
     }
     this._setPreedit('');
@@ -114,14 +141,37 @@ export class TextInputPreedit {
     // this and a composition at a wrap point is two spans — drawn as one
     // batch, so the underline costs one request however it wraps
     const rects = [];
-    for (let li = from.line; li <= to.line; li++) {
-      const line = layout.lines[li];
-      if (!line) break;
-      const x0 = li === from.line ? from.x : line.x;
-      const x1 = li === to.line ? to.x : line.x + line.width;
-      if (x1 <= x0) continue;
-      rects.push(originX + x0, originY + line.y + line.ascent + 1, x1 - x0, 1);
+    const underline = (from, to, thickness) => {
+      for (let li = from.line; li <= to.line; li++) {
+        const line = layout.lines[li];
+        if (!line) break;
+        const x0 = li === from.line ? from.x : line.x;
+        const x1 = li === to.line ? to.x : line.x + line.width;
+        if (x1 <= x0) continue;
+        rects.push(
+          originX + x0,
+          originY + line.y + line.ascent + 1,
+          x1 - x0,
+          thickness,
+        );
+      }
+    };
+    underline(from, to, 1);
+    // The segment an input method is converting, when it named one: the
+    // convention (GTK, Qt, the browsers) is a heavier line under the part of
+    // the phrase the candidates are for, and a plain one under the rest.
+    const cursor = this._preeditCursor;
+    if (cursor && cursor.end > cursor.begin) {
+      underline(
+        layout.caretPosition(start + cursor.begin),
+        layout.caretPosition(start + cursor.end),
+        2,
+      );
     }
     if (rects.length) ctx.fillRects(rects);
   }
+}
+
+function sameRange(a, b) {
+  return a === b || (!!a && !!b && a.begin === b.begin && a.end === b.end);
 }

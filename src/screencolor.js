@@ -1,7 +1,7 @@
 // Sample one pixel from the screen — the eyedropper, through whatever this
 // machine actually has.
 //
-// The file dialog's ladder again (docs/filedialog.md), three rungs:
+// The file dialog's ladder again (docs/filedialog.md), four rungs:
 //
 //   1. **the system sampler** — `NSColorSampler` on the cocoa backend
 //      (src/cocoa/screencolor.js). macOS draws the loupe out of process, so
@@ -11,24 +11,31 @@
 //   2. **the portal** — `org.freedesktop.portal.Screenshot.PickColor`. The
 //      desktop draws its own magnifier and hands back the colour, which is
 //      also the only route that works under a compositor that would refuse a
-//      root read, and the only route Wayland has at all. Needs version 2 of
+//      root read, and GNOME's only route on Wayland. Needs version 2 of
 //      the Screenshot interface — XFCE ships none, GNOME and KDE ship 2 —
 //      so the gate is the interface's `version` property, not `hasService()`.
-//   3. **X11** — grab the pointer with a crosshair, wait for the click,
+//   3. **the Wayland backend's own picker** — where the compositor offers a
+//      screen capture protocol and layer-shell (wlroots: sway, labwc, …)
+//      but no portal, the backend freezes the output into a capture, shows
+//      it as an overlay and takes the click on that
+//      (src/wayland/screencopy.js). Below the portal because the portal is
+//      the desktop's picker and user-consented; guarded by the backend's
+//      name because the capability is a Wayland object through and through.
+//   4. **X11** — grab the pointer with a crosshair, wait for the click,
 //      `GetImage` a 1×1 at it, decode by the server's own pixel layout.
 //      Reached under a bare WM, over ssh, on XQuartz: everywhere there is a
 //      display and nothing else, which is the case react-x11 exists for.
 //
-// Rungs 1 and 2 are the same shape — ask the system, it draws the picker,
-// it hands back an sRGB triple — which is why the sampler goes on top of the
-// portal rather than under the crosshair: where the OS will do this for us,
-// it does it better, and `hexFromPortalColor()` converts for both.
+// Rungs 1 to 3 are the same shape — ask, a picker is drawn, an sRGB triple
+// comes back — which is why the sampler goes on top of the portal rather
+// than under the crosshair: where the OS will do this for us, it does it
+// better, and `hexFromPortalColor()` converts for all three.
 //
 // There is no rung to *draw*, because the thing being read — the whole
 // screen — is precisely what an application cannot draw itself. So unlike
 // `useFileDialog()`, `useEyedropper()` adds no rung; it adds the binding a
 // component wants (`picking`, `supported`, the owner window) over these
-// three.
+// four.
 //
 // Which means the ladder really can run out, and where it does the floor has
 // to be the typed rejection rather than a crash. A cocoa app on a bridge
@@ -83,8 +90,9 @@ export class NoScreenColorError extends Error {
         message ??
         'no way to sample a colour from the screen — no cocoa app with a ' +
           'system sampler, no Screenshot portal with PickColor (interface ' +
-          'version 2) on the session bus, and no X connection was given for ' +
-          'the fallback. Pass `app` (from createRoot() or useApp()), or use ' +
+          'version 2) on the session bus, no Wayland compositor with screen ' +
+          'capture and layer-shell, and no X connection was given for the ' +
+          'fallback. Pass `app` (from createRoot() or useApp()), or use ' +
           'useEyedropper().'
       }`,
       { cause },
@@ -212,7 +220,14 @@ async function portalPick(opts, ref) {
     // options)` — no title — which is the whole reason portalRequest takes a
     // signature now.
     signature: 'sa{sv}',
-    args: [parentWindowHandle(windowIdOf(opts.parentWindow))],
+    // The handle names an X window. A Wayland toplevel has none to name —
+    // an xdg-foreign export would be the equivalent — so there the dialog
+    // floats, which the portal allows.
+    args: [
+      appFor(opts)?.backend === 'wayland'
+        ? ''
+        : parentWindowHandle(windowIdOf(opts.parentWindow)),
+    ],
     options: {},
     signal: opts.signal,
   });
@@ -237,7 +252,49 @@ async function portalCanPick(ref) {
 }
 
 // --------------------------------------------------------------------------
-// Rung 3: X11
+// Rung 3: the Wayland backend's own picker
+// --------------------------------------------------------------------------
+
+/**
+ * The Wayland app whose compositor can freeze and show the screen, or null.
+ *
+ * Guarded by the backend's name, unlike the sampler: `screenCapture` is the
+ * capability, but it is a Wayland object through and through — the pick is
+ * a layer-shell overlay over a screencopy frame (src/wayland/screencopy.js)
+ * — and `canPick` is the compositor's answer, not the app's. GNOME's is no:
+ * it advertises neither protocol, and the portal above is its route.
+ */
+function waylandApp(opts) {
+  const app = appFor(opts);
+  return app?.backend === 'wayland' && app.screenCapture?.canPick ? app : null;
+}
+
+/**
+ * Freeze, show, click — the sampler's contract: `'#rrggbb'`, null on Escape,
+ * a rejection on abort. Unlike the sampler the overlay is ours, and it is
+ * down before the promise settles either way, so an abort leaves nothing on
+ * screen.
+ */
+function waylandPick(opts, app) {
+  const signal = opts.signal;
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new PortalCancelledError());
+  }
+  return app.screenCapture.pickColor({ signal }).then((color) => {
+    if (color == null) return null;
+    const hex = hexFromPortalColor([color.r, color.g, color.b]);
+    if (!hex) {
+      throw new Error(
+        'react-x11: the Wayland screen pick answered without a colour — ' +
+          `expected sRGB { r, g, b } in 0–1, got ${JSON.stringify(color)}.`,
+      );
+    }
+    return hex;
+  });
+}
+
+// --------------------------------------------------------------------------
+// Rung 4: X11
 // --------------------------------------------------------------------------
 
 // x11.eventMask bits, spelled out the way xsettings.js spells its one. No
@@ -680,6 +737,16 @@ function canGrabOn(app) {
  * fixes, and only one of them is the caller's.
  */
 function noX11Reason(app, backend) {
+  if (app?.backend === 'wayland') {
+    return (
+      'this tree renders through the Wayland backend, and its compositor ' +
+      'offers neither a Screenshot portal with PickColor nor a screen ' +
+      'capture protocol (wlr-screencopy, ext-image-copy-capture) together ' +
+      'with wlr-layer-shell to draw the picker on. ' +
+      '`useEyedropper().supported` is false, which is the signal to leave ' +
+      'the eyedropper button undrawn (docs/wayland-backend.md).'
+    );
+  }
   if (app) {
     return (
       'this tree does not render through an X connection — a cocoa-backend ' +
@@ -710,15 +777,17 @@ function noX11Reason(app, backend) {
  * Screenshot interface at version 2 — the probe reads the interface's
  * `version` property, because `hasService()` cannot see which interfaces a
  * portal's backends actually provide (XFCE's provides no Screenshot at
- * all). `'x11'` needs a connection to answer with, so pass `app` (or a
- * `parentWindow` that resolves to one) — and one that can actually grab,
- * which a cocoa-backend app cannot. With none of the three the honest
- * answer is `null`.
+ * all). `'wayland'` is a Wayland-backend app (`app`, or a `parentWindow`
+ * in one) whose compositor advertises a screen capture protocol and
+ * layer-shell — wlroots without a portal. `'x11'` needs a connection to
+ * answer with, so pass `app` (or a `parentWindow` that resolves to one) —
+ * and one that can actually grab, which a cocoa-backend app cannot. With
+ * none of the four the honest answer is `null`.
  *
  * Acquires a bus reference and releases it, so it is cheap but not free —
  * `useEyedropper().supported` caches it for you.
  *
- * @returns {Promise<'cocoa'|'portal'|'x11'|null>}
+ * @returns {Promise<'cocoa'|'portal'|'wayland'|'x11'|null>}
  */
 export async function screenColorBackend(options = {}) {
   const backend = options.backend;
@@ -736,6 +805,10 @@ export async function screenColorBackend(options = {}) {
       }
     }
     if (backend === 'portal') return null;
+  }
+  if (!backend || backend === 'wayland') {
+    if (waylandApp(options)) return 'wayland';
+    if (backend === 'wayland') return null;
   }
   return canGrabOn(appFor(options)) ? 'x11' : null;
 }
@@ -771,6 +844,20 @@ async function runPick(opts) {
         'no Screenshot portal with PickColor here — the session bus has no ' +
           `${SCREENSHOT_IFACE} at version ${PICK_COLOR_VERSION} or newer — ` +
           "and backend: 'portal' rules out the X11 fallback.",
+      );
+    }
+  }
+
+  const wantWayland = !opts.backend || opts.backend === 'wayland';
+  if (wantWayland) {
+    const app = waylandApp(opts);
+    if (app) return await waylandPick(opts, app);
+    if (opts.backend === 'wayland') {
+      throw new NoScreenColorError(
+        "backend: 'wayland' — no screen pick here: this tree does not " +
+          'render through the Wayland backend, or its compositor offers ' +
+          'neither a screen capture protocol (wlr-screencopy, ' +
+          'ext-image-copy-capture) nor wlr-layer-shell.',
       );
     }
   }

@@ -5,11 +5,10 @@ XQuartz) and Cocoa (a native Mac app, no X server anywhere). The same tree,
 components, styles and hooks run on both, and `createRoot()` picks — Cocoa
 on macOS where the bridge is installed, X11 otherwise. Every page below is
 about both unless it says otherwise; where a backend changes the answer, it
-is called out where the answer is. Two more backends are coming, toward
-full cross-platform support — Windows ([windows.md](windows.md)) and
-native Wayland ([wayland.md](wayland.md)) — and until they land, those two
-pages are design documents and everything else describes the two that
-ship.
+is called out where the answer is. A native Wayland backend exists and is
+opt-in ([wayland-backend.md](wayland-backend.md), with its research RFC in
+[wayland.md](wayland.md)); Windows ([windows.md](windows.md)) is still a
+design document, and everything else describes the backends that ship.
 
 - [macos.md](macos.md) — the Cocoa backend: what a retained layer tree
   changes about a renderer built for a drawing protocol, the two presenters
@@ -161,6 +160,11 @@ ship.
   actually changes, the fd transport (why the prototype is Bun-first), the
   rendering tiers from a pure-JS span compositor to GPU 2d over x11-dri,
   what maps and what is gone by design, and the phased plan.
+- [wayland-backend.md](wayland-backend.md) — the Wayland backend as built:
+  GLES over dma-buf into a backing target, xdg-shell with deferred acks,
+  client-side decorations, the XKB keymap reader, the in-process test
+  compositor; what was measured (the protocol layer is not the cost, and
+  no native protocol bridge was built), and what is still open.
 - [windows.md](windows.md) — the research PRD for a native Windows
   backend, the next step toward full cross-platform support. Where Windows
   sits between the Wayland and macOS inversions (the client rasterizes, into

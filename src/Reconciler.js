@@ -574,11 +574,11 @@ const isNtkApp = (v) =>
  */
 function resolveBackend(options) {
   const asked = options.backend ?? process.env.REACT_X11_BACKEND ?? 'auto';
-  if (asked === 'x11' || asked === 'cocoa') return asked;
+  if (asked === 'x11' || asked === 'cocoa' || asked === 'wayland') return asked;
   if (asked !== 'auto') {
     throw new Error(
       `react-x11: unknown backend ${JSON.stringify(asked)} — expected ` +
-        "'x11', 'cocoa' or 'auto'.",
+        "'x11', 'cocoa', 'wayland' or 'auto'.",
     );
   }
   // Naming an X endpoint is choosing X11: a `display` or a `stream` (the
@@ -715,25 +715,34 @@ export async function createRoot(options = {}) {
     rest.backend === 'cocoa' || process.env.REACT_X11_BACKEND === 'cocoa';
   const connecting = !owned
     ? Promise.resolve(borrowed)
-    : backend === 'cocoa'
-      ? import('./cocoa/app.js')
-          .then(({ createCocoaApp }) => createCocoaApp(rest))
-          .catch((err) => {
-            // Asked for by name, the bridge is required and its absence is
-            // the error (it says how to install). Reached by 'auto', a mac
-            // without it falls back to X11 so an XQuartz setup keeps
-            // working — said once, because a silent fallback would look
-            // like the native backend being broken rather than absent.
-            if (cocoaAsked) throw err;
-            if (process.env.NODE_ENV !== 'production') {
-              console.warn(
-                'react-x11: no @windowkit/appkit bridge — falling back to the ' +
-                  `X11 backend. (${err.message.split('\n')[0]})`,
-              );
-            }
-            return connectX11();
-          })
-      : connectX11();
+    : backend === 'wayland'
+      ? // Opt-in only, never through 'auto': X11 stays the default on Linux
+        // because the remote case (docs/remote.md) is the flagship reason
+        // this project exists and Wayland has no network transparency. The
+        // backend is opt-in; docs/wayland-backend.md says what it does
+        // and does not do.
+        import('./wayland/app.js').then(({ createWaylandApp }) =>
+          createWaylandApp(rest),
+        )
+      : backend === 'cocoa'
+        ? import('./cocoa/app.js')
+            .then(({ createCocoaApp }) => createCocoaApp(rest))
+            .catch((err) => {
+              // Asked for by name, the bridge is required and its absence is
+              // the error (it says how to install). Reached by 'auto', a mac
+              // without it falls back to X11 so an XQuartz setup keeps
+              // working — said once, because a silent fallback would look
+              // like the native backend being broken rather than absent.
+              if (cocoaAsked) throw err;
+              if (process.env.NODE_ENV !== 'production') {
+                console.warn(
+                  'react-x11: no @windowkit/appkit bridge — falling back to the ' +
+                    `X11 backend. (${err.message.split('\n')[0]})`,
+                );
+              }
+              return connectX11();
+            })
+        : connectX11();
   const layout = loadLayout();
   const integrations = loadIntegrations(); // null when there is nothing to install
   const [app] = await Promise.all([connecting, layout, integrations]);
