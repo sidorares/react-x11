@@ -1083,7 +1083,7 @@ export class WaylandContext2D {
     if (this._clipPath) gl.stencilFunc(gl.LESS, CLIP_BIT, 0xff);
     else gl.stencilFunc(gl.NOTEQUAL, 0, WINDING_MASK);
     // the mask is still WINDING_MASK: the count goes, the clip bit stays
-    gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.ZERO);
     const { x, y, w, h } = bounds;
     const saved = this._m;
     this._m = IDENTITY;
@@ -1240,7 +1240,8 @@ export class WaylandContext2D {
     if (!this._clipPath) {
       gl.stencilMask(CLIP_BIT);
       gl.stencilFunc(gl.NOTEQUAL, CLIP_BIT, WINDING_MASK);
-      gl.stencilOp(gl.REPLACE, gl.REPLACE, gl.REPLACE);
+      // `stencilOp(sfail, dpfail, dppass)`: only the selected pixels change
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
       this._stencilQuad(bounds.x, bounds.y, bounds.w, bounds.h);
     } else {
       const old = this._clip ?? {
@@ -1251,12 +1252,12 @@ export class WaylandContext2D {
       };
       gl.stencilMask(CLIP_BIT);
       gl.stencilFunc(gl.EQUAL, CLIP_BIT, 0xff);
-      gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.ZERO);
       this._stencilQuad(old.x, old.y, old.w, old.h);
     }
     gl.stencilMask(WINDING_MASK);
     gl.stencilFunc(gl.NOTEQUAL, 0, WINDING_MASK);
-    gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.ZERO);
     this._stencilQuad(bounds.x, bounds.y, bounds.w, bounds.h);
     gl.colorMask(true, true, true, true);
     gl.disable(gl.STENCIL_TEST);
@@ -1286,7 +1287,7 @@ export class WaylandContext2D {
       gl.colorMask(false, false, false, false);
       gl.stencilMask(CLIP_BIT);
       gl.stencilFunc(gl.ALWAYS, 0, 0xff);
-      gl.stencilOp(gl.ZERO, gl.ZERO, gl.ZERO);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.ZERO);
       this._stencilQuad(old.x, old.y, old.w, old.h);
       gl.colorMask(true, true, true, true);
       gl.disable(gl.STENCIL_TEST);
