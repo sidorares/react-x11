@@ -35,6 +35,7 @@ import { WaylandTablet } from './tablet.js';
 import { createWaylandClipboard } from './clipboard.js';
 import { WaylandOutputs } from './outputs.js';
 import { WaylandTextInput } from './textinput.js';
+import { WaylandDnd } from './dnd.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
 import { WaylandGLArea, WaylandOverlayPane, GLAREA_VISUAL } from './glarea.js';
@@ -91,6 +92,7 @@ export class WaylandApp extends EventEmitter {
     this.clipboard = null;
     /** the seat's `zwp_text_input_v3`, or null where the compositor has none */
     this.textInput = null;
+    this.dnd = null;
     this.compositor = null;
     this.wmBase = null;
     this.dmabuf = null;
@@ -151,6 +153,16 @@ export class WaylandApp extends EventEmitter {
     // The compositor's input method (textinput.js): enter/leave follow the
     // keyboard, and the windows keep it told about their focused field.
     app.textInput = await WaylandTextInput.create(app);
+    // Drag and drop shares the clipboard's `wl_data_device` — the DnD events
+    // arrive on the same object its selection events do (src/wayland/dnd.js).
+    if (app.clipboard?.dataDevice && app.clipboard?.manager) {
+      app.dnd = new WaylandDnd({
+        app,
+        device: app.clipboard.dataDevice,
+        manager: app.clipboard.manager,
+        seat: app.seat,
+      });
+    }
 
     const ntk = require('ntk');
     // `app.fonts` is the name the renderer reaches for (src/fonts.js): one

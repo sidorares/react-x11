@@ -308,9 +308,13 @@ arrive as fds, and Node's sockets abort on them
   compiles a wasm module beside an idle connection). Until it ships, an
   `npm install` brings the bug back under Bun (Node's native transport is
   unaffected).
-- **Drag-and-drop.** The data device is bound and the clipboard uses it;
-  the DnD half (`wl_data_device.start_drag`, enter/motion/drop) is not
-  wired to `dnd.js`.
+- **Drag-and-drop.** Wired (`src/wayland/dnd.js`): the drop side answers
+  another application's drag over `wl_data_device` enter/motion/leave/drop,
+  and the source side offers a payload and hands the gesture to
+  `start_drag`, with an in-app drop keeping `e.items` by reference. What is
+  left is the drag _icon_: `start_drag` is given a bare (invisible) surface,
+  and rendering the tree's `<popup dragPreview>` into an icon surface the
+  frame loop paints is a follow-up.
 - **Input methods, the rest of it.** The preedit's cursor is drawn (a
   heavier underline under the segment being converted) but nothing is done
   with a hidden cursor beyond putting the caret at the end, and the only

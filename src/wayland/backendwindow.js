@@ -77,6 +77,13 @@ export class WaylandBackendWindow extends EventEmitter {
     this.X = app.X;
     this.ownerDocument = null;
     this.isPopup = attributes.overrideRedirect === true;
+    // A `<popup dragPreview>` is the picture of a drag. On Wayland it has
+    // nothing to be: a popup cannot follow a drag (start_drag's icon surface
+    // is the mechanism, and rendering the preview into one is a follow-up —
+    // src/wayland/dnd.js), so the preview is inert here — it presents no
+    // frame and holds no buffer, staying invisible rather than a static
+    // xdg_popup frozen where the drag began.
+    this.isDragPreview = attributes.dragPreview === true;
     /** the cursor the tree last asked for over the content */
     this.treeCursor = 'default';
     this._destroyed = false;
@@ -371,6 +378,9 @@ export class WaylandBackendWindow extends EventEmitter {
    *   refresh, not a spin.
    */
   _armFrame() {
+    // A drag preview never presents (see the constructor): no frame loop, so
+    // no buffer is ever committed and the surface stays invisible.
+    if (this.isDragPreview) return;
     if (this._frameArmed || this._destroyed) return;
     this._frameArmed = true;
     this.wl.whenConfigured
@@ -731,8 +741,26 @@ export class WaylandBackendWindow extends EventEmitter {
     return this;
   }
 
-  attachDropTransport() {
+  /**
+   * The drop side (src/wayland/dnd.js): the window node hands over its
+   * DropSession at realize (`_initDnd`), and from then on the app-wide
+   * `WaylandDnd` routes this surface's data-device events into it. The
+   * method's presence is what tells the tree this backend has drop machinery
+   * of its own.
+   */
+  attachDropTransport(session, node) {
+    this.app.dnd?.attach(this, session, node);
     return this;
+  }
+
+  /**
+   * The source side: hand a `DragSession`'s gesture to a `wl_data_source`
+   * (see src/wayland/dnd.js). Called by `DragSession._start` once the
+   * threshold is crossed; returns at once, and the session reports back on
+   * the source's own events.
+   */
+  beginDrag(session) {
+    return this.app.dnd?.beginDrag(this, session) ?? null;
   }
 
   /** The tree's cursor over the content. */
@@ -815,6 +843,7 @@ export class WaylandBackendWindow extends EventEmitter {
     if (this._destroyed) return;
     this._destroyed = true;
     this._raf.length = 0;
+    this.app.dnd?.detach(this);
     this.app.makeCurrent();
     for (const ctx of this._contexts.values()) ctx.destroy?.();
     this._contexts.clear();
