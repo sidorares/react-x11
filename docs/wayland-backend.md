@@ -424,10 +424,11 @@ arrive as fds, and Node's sockets abort on them
   tiering up ~0.3 s into any react-x11 app produces exactly that burst;
   `strace -f -e ppoll,tgkill` shows it, and a wasm-free process never sees
   one. EINTR is a retry, not a failure. The fix is applied to the installed
-  copy here and prepared for node-x11 (a branch with a regression test that
-  compiles a wasm module beside an idle connection). Until it ships, an
-  `npm install` brings the bug back under Bun (Node's native transport is
-  unaffected).
+  copy here and is
+  [sidorares/node-x11#297](https://github.com/sidorares/node-x11/pull/297)
+  upstream, with a regression test that compiles a wasm module beside an
+  idle connection. Until it ships, an `npm install` brings the bug back
+  under Bun (Node's native transport is unaffected).
 - **Drag-and-drop.** Wired (`src/wayland/dnd.js`): the drop side answers
   another application's drag over `wl_data_device` enter/motion/leave/drop,
   and the source side offers a payload and hands the gesture to
