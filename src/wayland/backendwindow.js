@@ -395,6 +395,9 @@ export class WaylandBackendWindow extends EventEmitter {
         this.emit('error', err);
       }
     }
+    // The input method hears about the focused field now, after the paint
+    // has laid the tree out and the caret rectangle is current (textinput.js).
+    this.app.textInput?.sync(this);
 
     const painted = this._contexts.get('2d');
     if (painted) {

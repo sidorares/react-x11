@@ -57,6 +57,7 @@ const DEFS = loadDefs([
   'cursor-shape-v1',
   'viewporter',
   'fractional-scale-v1',
+  'text-input-unstable-v3',
 ]);
 
 /** Globals the mock advertises: name -> [interface, version]. */
@@ -68,6 +69,7 @@ const GLOBALS = [
   ['wp_viewporter', 1],
   ['wp_fractional_scale_manager_v1', 1],
   ['wp_cursor_shape_manager_v1', 1],
+  ['zwp_text_input_manager_v3', 1],
 ];
 
 const SERVER_ID_BASE = 0xff000000;
@@ -89,6 +91,10 @@ export class MockCompositor extends EventEmitter {
     this.keyboard = null;
     this.seat = null;
     this.registry = null;
+    /** the client's `zwp_text_input_v3`, once it asked for one */
+    this.textInput = null;
+    /** `commit` requests received on it — what a `done` echoes */
+    this.textInputCommits = 0;
     this.objects.set(1, { iface: 'wl_display' });
   }
 
@@ -367,6 +373,21 @@ export class MockCompositor extends EventEmitter {
       }
       return;
     }
+    if (iface === 'zwp_text_input_manager_v3' && name === 'get_text_input') {
+      this.textInput = args[0];
+      this.textInputCommits = 0;
+      return;
+    }
+    if (iface === 'zwp_text_input_v3') {
+      // the requests themselves are on record (`sent`); the count of commits
+      // is the serial the protocol has the compositor echo back
+      if (name === 'commit') this.textInputCommits++;
+      else if (name === 'destroy') {
+        if (this.textInput === id) this.textInput = null;
+        this.objects.delete(id);
+      }
+      return;
+    }
   }
 
   /** The configure pair a role gets after its first commit. */
@@ -482,6 +503,37 @@ export class MockCompositor extends EventEmitter {
       evdev,
       pressed ? 1 : 0,
     );
+  }
+
+  // text-input v3: the input method's side. The three state events are
+  // buffered by the client until `done`, exactly as a compositor sends them.
+  textInputEnter(surfaceId) {
+    this.send(this.textInput, 'enter', surfaceId);
+  }
+  textInputLeave(surfaceId) {
+    this.send(this.textInput, 'leave', surfaceId);
+  }
+  /** `cursorBegin`/`cursorEnd` are byte offsets into `text`; -1 hides it. */
+  preeditString(text, cursorBegin = -1, cursorEnd = -1) {
+    this.send(this.textInput, 'preedit_string', text, cursorBegin, cursorEnd);
+  }
+  commitString(text) {
+    this.send(this.textInput, 'commit_string', text);
+  }
+  /** Bytes to delete before and after the selection. */
+  deleteSurroundingText(before, after = 0) {
+    this.send(this.textInput, 'delete_surrounding_text', before, after);
+  }
+  /** Apply what was buffered; the serial defaults to the commits seen. */
+  textInputDone(serial = this.textInputCommits) {
+    this.send(this.textInput, 'done', serial);
+  }
+
+  /** The requests on the text input, by name, oldest first. */
+  textInputRequests(since = 0) {
+    return this.requests
+      .filter((r) => r.iface === 'zwp_text_input_v3')
+      .slice(since);
   }
 }
 

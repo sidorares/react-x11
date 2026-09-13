@@ -31,6 +31,7 @@ import { WaylandBackendWindow } from './backendwindow.js';
 import { WaylandSurface } from './surface.js';
 import { InputRouter } from './input.js';
 import { createWaylandClipboard } from './clipboard.js';
+import { WaylandTextInput } from './textinput.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
 import { setScaleForTests } from '../scale.js';
@@ -81,6 +82,8 @@ export class WaylandApp extends EventEmitter {
     this.fonts = null;
     this.fontManager = null;
     this.clipboard = null;
+    /** the seat's `zwp_text_input_v3`, or null where the compositor has none */
+    this.textInput = null;
     this.compositor = null;
     this.wmBase = null;
     this.dmabuf = null;
@@ -125,6 +128,9 @@ export class WaylandApp extends EventEmitter {
       seat: app.seat.seat,
       serial: () => app.seat.lastSerial,
     });
+    // The compositor's input method (textinput.js): enter/leave follow the
+    // keyboard, and the windows keep it told about their focused field.
+    app.textInput = await WaylandTextInput.create(app);
 
     const ntk = require('ntk');
     // `app.fonts` is the name the renderer reaches for (src/fonts.js): one
@@ -317,6 +323,7 @@ export class WaylandApp extends EventEmitter {
     for (const w of [...this.windows.values()]) w.destroy();
     this.windows.clear();
     this.toplevels.length = 0;
+    this.textInput?.destroy();
     this.input?.destroy();
     this.seat?.destroy();
     if (this._holder) {
