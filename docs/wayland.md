@@ -456,11 +456,14 @@ machine cannot exercise it. Each item names the check that would close it;
   a file from Files onto the target, text from the source into Text Editor,
   and a drag between the two windows of one process (`e.source ===
 'internal'`, items by reference) and of two.
-- **Other compositors.** The backend has run against mutter alone.
-  wlroots (sway, labwc — both installed here and runnable nested) is where
-  server-side decorations, layer-shell and screen capture exist; whether
-  each was validated nested or only written to the protocol is recorded in
-  wayland-backend.md's "what is left".
+- **Other compositors.** Server-side decorations, layer-shell and
+  wlr-screencopy were validated on this machine under **sway 1.10.1** and
+  **labwc 0.8.3** (nested and headless, screenshots by grim; `capture()`
+  agreed with grim on every pixel, and the eyedropper picked the exact box
+  colour). Still to see: `ext-image-copy-capture` (written to the spec; no
+  compositor here has it — sway 1.11 / wlroots 0.19 will), KDE Plasma
+  (xdg-decoration and its own capture portal), and a dock on a compositor
+  with two outputs (`layerShell.output`).
 - **The GPU path on real hardware.** `test/wayland/context2d-gpu.test.js`
   reads antialiased fills and stencil clips back from a render node; it
   has run on virgl only. Intel, AMD and NVIDIA (Mesa and proprietary) each
