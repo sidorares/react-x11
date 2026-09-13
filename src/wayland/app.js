@@ -36,6 +36,7 @@ import { createWaylandClipboard } from './clipboard.js';
 import { WaylandOutputs } from './outputs.js';
 import { WaylandTextInput } from './textinput.js';
 import { WaylandDnd } from './dnd.js';
+import { createScreenCapture } from './screencopy.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
 import { WaylandGLArea, WaylandOverlayPane, GLAREA_VISUAL } from './glarea.js';
@@ -101,6 +102,12 @@ export class WaylandApp extends EventEmitter {
     this.activation = null;
     /** the monitors, published into src/screens.js (outputs.js) */
     this.outputs = null;
+    /** xdg-decoration, layer-shell, shm: null where the compositor has none */
+    this.decorationManager = null;
+    this.layerShell = null;
+    this.shm = null;
+    /** screen capture and the eyedropper (screencopy.js); null on GNOME */
+    this.screenCapture = null;
     this.X = new XStandIn(this);
     this.display = this.X.display;
     this.gpu = null;
@@ -140,6 +147,9 @@ export class WaylandApp extends EventEmitter {
     setScaleForTests(app, app.scale, 'wayland');
     app.outputs = new WaylandOutputs(conn, app);
     await app.outputs.open();
+    app.decorationManager = await conn.bind('zxdg_decoration_manager_v1');
+    app.layerShell = await conn.bind('zwlr_layer_shell_v1');
+    app.shm = await conn.bind('wl_shm');
     app.seat = await WaylandSeat.bind(conn);
     app.input = new InputRouter(app);
     // both drive the router through the seat's own pointer events
@@ -163,6 +173,7 @@ export class WaylandApp extends EventEmitter {
         seat: app.seat,
       });
     }
+    app.screenCapture = await createScreenCapture(app);
 
     const ntk = require('ntk');
     // `app.fonts` is the name the renderer reaches for (src/fonts.js): one
@@ -428,6 +439,7 @@ export class WaylandApp extends EventEmitter {
     this.input?.destroy();
     this.tablet?.destroy();
     this.touch?.destroy();
+    this.screenCapture?.destroy();
     this.seat?.destroy();
     this.outputs?.destroy();
     if (this._holder) {

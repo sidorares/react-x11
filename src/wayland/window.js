@@ -30,8 +30,18 @@
 // React's commit phase is synchronous and `WindowNode.realize()` calls
 // `createWindow` inside it. The one genuinely asynchronous step — binding
 // globals — is done once by the app at startup.
+//
+// Two more things hang off the same class. A *layer surface* (layershell.js)
+// is what a dock or a wallpaper is: no xdg_surface, a `zwlr_layer_surface_v1`
+// whose configure carries a size and is acked through it. And a toplevel may
+// carry a *decoration* object (ssd.js) whose mode — who draws the frame —
+// rides the same configure sequence and is adopted just before 'configure'
+// is emitted, so the frame that acks it is painted at the right insets.
 
 import { EventEmitter } from 'node:events';
+import { ServerDecoration } from './ssd.js';
+import { createLayerSurface } from './layershell.js';
+import { requestNullable } from './nullable.js';
 
 /** `xdg_toplevel.state` values. */
 export const TOPLEVEL_STATE = {
@@ -137,6 +147,13 @@ export class WaylandWindow extends EventEmitter {
     this._viewport = null;
     this._fractional = null;
     this._geometry = null;
+    /** the xdg-decoration object, where the compositor has the protocol (ssd.js) */
+    this.decoration = null;
+    /** a layer surface's role (layershell.js); null on a toplevel or popup */
+    this.layer = null;
+    this.layerSurface = null;
+    /** the last toplevel configure named a size: maximised, tiled, mid-resize */
+    this.sizeImposed = false;
   }
 
   // ---- creation --------------------------------------------------------------
@@ -147,6 +164,11 @@ export class WaylandWindow extends EventEmitter {
    * The window is not yet usable for painting: the first buffer may only be
    * attached after the first `configure` has been acked. `configured` says
    * when, and `whenConfigured` is the promise for anyone who can wait.
+   *
+   * @param {object} opts
+   * @param {{ manager: object, prefer: 'server'|'client' }} [opts.decorations]
+   *   the `zxdg_decoration_manager_v1` proxy and which side should draw the
+   *   frame; omitted where the compositor has no such protocol
    */
   static createSync({
     conn,
@@ -159,6 +181,7 @@ export class WaylandWindow extends EventEmitter {
     minSize,
     maxSize,
     parent = null,
+    decorations = null,
   }) {
     wirePing(wmBase);
     const surface = compositor.$.create_surface();
@@ -185,9 +208,27 @@ export class WaylandWindow extends EventEmitter {
     if (parent?.toplevel) toplevel.$.set_parent(parent.toplevel.id);
     if (minSize) toplevel.$.set_min_size(minSize.width | 0, minSize.height | 0);
     if (maxSize) toplevel.$.set_max_size(maxSize.width | 0, maxSize.height | 0);
+    // Who draws the frame is asked before the first commit; the answer rides
+    // the first configure (ssd.js).
+    if (decorations?.manager) {
+      win.decoration = new ServerDecoration({
+        manager: decorations.manager,
+        toplevel,
+        prefer: decorations.prefer,
+      });
+    }
     // the empty commit that asks for the first configure
     surface.$.commit();
     return win;
+  }
+
+  /**
+   * A layer surface — a dock, a panel, a wallpaper, an overlay — where the
+   * compositor has wlr-layer-shell. The body, and the meaning of the
+   * options, live in layershell.js.
+   */
+  static createLayerSync(opts) {
+    return createLayerSurface(WaylandWindow, opts);
   }
 
   /**
@@ -221,7 +262,7 @@ export class WaylandWindow extends EventEmitter {
     grab = null,
     anchorRect = null,
   }) {
-    if (!parent?.xdgSurface)
+    if (!parent?.xdgSurface && !parent?.layerSurface)
       throw new Error('a popup needs a parent window on this connection');
     wirePing(wmBase);
     const positioner = wmBase.$.create_positioner();
@@ -251,8 +292,13 @@ export class WaylandWindow extends EventEmitter {
 
     const surface = compositor.$.create_surface();
     const xdgSurface = wmBase.$.get_xdg_surface(surface.id);
-    const popup = xdgSurface.$.get_popup(parent.xdgSurface.id, positioner.id);
+    // A layer surface is not an xdg_surface: its popups are created with no
+    // parent and adopted by the layer surface before their first commit.
+    const popup = parent.xdgSurface
+      ? xdgSurface.$.get_popup(parent.xdgSurface.id, positioner.id)
+      : requestNullable(xdgSurface, 'get_popup', null, positioner.id);
     positioner.$.destroy();
+    if (!parent.xdgSurface) parent.layerSurface.$.get_popup(popup.id);
 
     const win = new WaylandWindow({
       conn,
@@ -288,18 +334,9 @@ export class WaylandWindow extends EventEmitter {
   // ---- events --------------------------------------------------------------
 
   _wireCommon() {
-    this.xdgSurface.on('configure', (serial) => {
-      this._pendingSerial = serial;
-      const first = !this.configured;
-      this.configured = true;
-      if (first) this._onConfigured?.();
-      this.emit('configure', {
-        width: this.width,
-        height: this.height,
-        states: this.states,
-        serial,
-      });
-    });
+    this.xdgSurface?.on('configure', (serial) =>
+      this._onShellConfigure(serial),
+    );
     this.surface.on('preferred_buffer_scale', (scale) => {
       // Only authoritative when fractional scale is not in play.
       if (scale > 0) this._preferredBufferScale = scale;
@@ -316,9 +353,32 @@ export class WaylandWindow extends EventEmitter {
     this.surface.on('preferred_buffer_transform', () => {});
   }
 
+  /**
+   * The shell's configure — xdg_surface's, or the layer surface's with its
+   * size already taken — holds the serial for the frame that adopts it. A
+   * decoration mode that arrived with it is adopted first, so a listener
+   * hears 'decorationmode' before 'configure' and paints at the new insets.
+   */
+  _onShellConfigure(serial) {
+    this._pendingSerial = serial;
+    if (this.decoration?.adopt()) {
+      this.emit('decorationmode', this.decoration.mode);
+    }
+    const first = !this.configured;
+    this.configured = true;
+    if (first) this._onConfigured?.();
+    this.emit('configure', {
+      width: this.width,
+      height: this.height,
+      states: this.states,
+      serial,
+    });
+  }
+
   _wireToplevel() {
     this.toplevel.on('configure', (width, height, states) => {
       // 0x0 is "pick your own" — the compositor is not imposing a size.
+      this.sizeImposed = width > 0 && height > 0;
       if (width > 0 && height > 0) {
         const changed = width !== this.width || height !== this.height;
         this.width = width;
@@ -416,15 +476,23 @@ export class WaylandWindow extends EventEmitter {
    */
   ackPending() {
     if (this._pendingSerial != null) {
-      this.xdgSurface.$.ack_configure(this._pendingSerial);
+      (this.xdgSurface ?? this.layerSurface).$.ack_configure(
+        this._pendingSerial,
+      );
       this._pendingSerial = null;
     }
     const g = this._geometry;
     if (!g || g.width !== this.width || g.height !== this.height) {
       this._geometry = { width: this.width, height: this.height };
-      this.xdgSurface.$.set_window_geometry(0, 0, this.width, this.height);
+      // a layer surface has no window geometry: the surface is the window
+      this.xdgSurface?.$.set_window_geometry(0, 0, this.width, this.height);
       this._applyScale();
     }
+  }
+
+  /** Who draws the frame: 'server' once a compositor has agreed to, else 'client'. */
+  get decorationMode() {
+    return this.decoration?.mode ?? 'client';
   }
 
   /** Whether the compositor has sent a configure we have not adopted yet. */
@@ -492,7 +560,9 @@ export class WaylandWindow extends EventEmitter {
   }
 
   setParent(parent) {
-    this.toplevel?.$.set_parent(parent?.toplevel?.id ?? 0);
+    if (!this.toplevel) return;
+    // null clears the parent; nullable.js says why the plain call cannot
+    requestNullable(this.toplevel, 'set_parent', parent?.toplevel ?? null);
   }
 
   maximize(on = true) {
@@ -503,7 +573,8 @@ export class WaylandWindow extends EventEmitter {
 
   fullscreen(on = true) {
     if (!this.toplevel) return;
-    if (on) this.toplevel.$.set_fullscreen(0);
+    // a null output: whichever the compositor puts a fullscreen window on
+    if (on) requestNullable(this.toplevel, 'set_fullscreen', null);
     else this.toplevel.$.unset_fullscreen();
   }
 
@@ -565,12 +636,14 @@ export class WaylandWindow extends EventEmitter {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
-    // Order matters: the role comes down before the surface it wraps.
+    // Order matters: the decoration before the toplevel it decorates, the
+    // role before the surface it wraps.
     try {
+      this.decoration?.destroy();
       this._fractional?.$.destroy?.();
       this._viewport?.$.destroy?.();
       this.role.$.destroy?.();
-      this.xdgSurface.$.destroy?.();
+      this.xdgSurface?.$.destroy?.();
       this.surface.$.destroy?.();
     } catch {
       /* the connection may already be gone */

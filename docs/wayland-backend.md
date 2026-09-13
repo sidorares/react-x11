@@ -1,10 +1,12 @@
 # The Wayland backend
 
 **Status: a working backend, opt-in.** react-x11's own reconciler renders a
-window on a real Wayland compositor (mutter/GNOME) with client-side
-decorations, text, shadows, paths, images, live partial repaints, pointer and
-keyboard input decoded against the compositor's keymap, a clipboard, and
-popups — drawn on the GPU and handed over as dma-buf, on **Node or Bun**, with
+window on a real Wayland compositor (mutter/GNOME, sway, labwc) with
+decorations — the compositor's where it draws them, client-side where it
+does not — text, shadows, paths, images, live partial repaints, pointer and
+keyboard input decoded against the compositor's keymap, a clipboard, popups,
+layer-shell docks and panels, and a screen capture with an eyedropper on
+top — drawn on the GPU and handed over as dma-buf, on **Node or Bun**, with
 no X server and no Xwayland anywhere in the path.
 
 This is the companion to [wayland.md](wayland.md), the research RFC it
@@ -53,12 +55,14 @@ appeared" proves nothing. Three checks that do:
 | `<glarea>`         | `glarea.js`                                              | a rect of the window's backing target as the area's GL surface; composited panes for its children |
 | input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                                               |
 | touch and tablet   | `touch.js`, `tablet.js`                                  | `wl_touch` and `zwp_tablet_v2`, emulating the pointer; raw touches                                |
-| decorations        | `decorations.js`                                         | titlebar, borders, resize edges, buttons — CSD for GNOME                                          |
+| decorations        | `decorations.js`, `ssd.js`                               | the client-side frame, and xdg-decoration to hand it to the compositor                            |
+| layer surfaces     | `layershell.js`                                          | docks, panels, wallpapers, overlays — wlr-layer-shell                                             |
+| screen capture     | `screencopy.js`, `shm.js`                                | wlr-screencopy / ext-image-copy-capture into `wl_shm`; the eyedropper                             |
 | offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target                                            |
 | clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                                                  |
 | screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap                               |
 | input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events                             |
-| the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through                                         |
+| the app            | `app.js`, `backendwindow.js`, `nullable.js`              | what `createRoot({ backend: 'wayland' })` renders through                                         |
 | tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                                                      |
 
 ### Running the examples
@@ -262,6 +266,122 @@ every batch under it tests that bit; nested clips intersect in place,
 bounds, so the test is only paid inside them. `test/wayland/context2d-gpu.test.js`
 reads the pixels back on any machine with a render node.
 
+## Decorations: whose frame
+
+`decorations.js` draws a titlebar because mutter will not, and that stays
+the default where nothing better is offered. Where a compositor advertises
+`zxdg_decoration_manager_v1` — wlroots (sway, labwc), KDE — each toplevel
+creates a decoration object before its first commit and asks for
+server-side decorations (`ssd.js`). The compositor's answer is a
+`configure(mode)` that is part of the surface's configure sequence, so it
+is adopted on the same ack as the size it arrived with: 'server' switches
+the client-side frame off (insets to zero, no titlebar painted, the content
+grows into the whole surface, which the tree sees as a resize), 'client'
+leaves it on. Before the first frame, where the compositor imposed no size,
+the surface is refitted to the content the tree asked for, so a floating
+window comes up the size it was declared and not a titlebar taller.
+
+`createRoot({ decorations })` says what to ask for: `undefined`/`true`/
+`'server'` prefer the compositor's frame, `'client'` never asks for it, and
+`false` — as does `<window decorations={false}>` — wants no frame at all.
+A frameless window still creates the decoration object where the protocol
+exists, to _decline_ server-side: sway frames every toplevel that has not
+said `client_side`.
+
+## Layer surfaces: docks, panels, wallpapers
+
+Where the compositor advertises `zwlr_layer_shell_v1`, a `<window>` whose
+`windowType` is one of these is not an `xdg_toplevel` but a layer surface
+(`layershell.js`), the same `wl_surface`, frame loop and input underneath:
+
+| `windowType`     | layer        | anchored to                                       | exclusive zone |
+| ---------------- | ------------ | ------------------------------------------------- | -------------- |
+| `'dock'`         | `top`        | the edge its shape and position imply (see below) | its thickness  |
+| `'desktop'`      | `background` | all four edges                                    | -1             |
+| `'notification'` | `top`        | top and right, 12px in                            | 0              |
+| `'splash'`       | `overlay`    | nothing — the compositor centres it               | 0              |
+
+A dock's edge is read the way an X window manager reads the same window:
+wide and at `y={0}` is a top panel, wide otherwise a bottom one; tall and at
+`x={0}` a left dock, tall otherwise a right one. Its size is what the tree
+measured (or `width`/`height`), so a 560×56 dock sits centred on its edge
+with 56px reserved; anchoring it to both ends of the edge stretches it:
+
+```jsx
+<window windowType="dock" height={56}>…</window>
+<window windowType="dock" height={40} layerShell={{ anchor: ['bottom', 'left', 'right'] }}>…</window>
+<window layerShell={{ layer: 'overlay', anchor: 'bottom', margin: { bottom: 40 } }}>an OSD</window>
+```
+
+`layerShell` names anything the type's default gets wrong — `layer`,
+`anchor` (an edge, an array of edges, `'all'`, `'none'`), `exclusiveZone`
+(a number, `'auto'` for the thickness, `-1`), `margin`,
+`keyboardInteractivity` (`'none'`, `'on-demand'`, `'exclusive'`),
+`namespace`, `output` — and `layerShell={false}` keeps a dock-typed window
+an ordinary toplevel. Popups from a layer surface work (a dock's menus): the
+`xdg_popup` is created parentless and adopted through
+`zwlr_layer_surface_v1.get_popup`. A stretched axis is the compositor's:
+`resize()` on it is not granted, and the configured size wins. Without
+layer-shell — GNOME — the same JSX is a toplevel, as before.
+
+## Screen capture, and the eyedropper
+
+`app.screenCapture` (`screencopy.js`) is there when the compositor offers
+either `ext_image_copy_capture_manager_v1` (wlroots 0.19+, KDE 6.2+) or
+`zwlr_screencopy_manager_v1` (sway 1.10 has this one), and null otherwise
+(GNOME). `capture()` answers one frame of the output as straight RGBA, the
+shape `readback.js`'s `encodePNG` takes; `pixelAt(x, y)` one device pixel
+of it. The pixels land in a `wl_shm` pool (`shm.js`) whose memory is a
+memfd (or an unlinked `/dev/shm` file without x11-dri), read back with
+`fs.readSync` — there is no mmap in Node or Bun, and one copy of one screen
+on a path nobody runs per frame is the cheaper trade than a native binding.
+
+`pickColor()` is the eyedropper, and it is what every wlroots colour picker
+does: freeze the output into a capture, show that capture as a layer-shell
+overlay anchored to every edge with an exclusive keyboard, take the click
+_on the overlay_ — whose coordinates are the output's — read the pixel out
+of the capture, and take the overlay down. Escape cancels; Return, space and
+KP_Enter pick at the pointer. It answers `{ r, g, b }` in 0–1, the portal's
+units, so `src/screencolor.js` converts it with the same function as the
+portal's and the cocoa sampler's. There it is rung 3 of the ladder: below
+the Screenshot portal (the desktop's own picker, user-consented — GNOME's
+only route, and what sway with xdg-desktop-portal-wlr uses too) and above
+the X11 grab. `useEyedropper().supported` is true on a bare sway; the rung
+is guarded by `app.backend === 'wayland'` because the capability is a
+Wayland object through and through.
+
+Two protocol gaps are worth knowing. The `wayland-client` fork keeps one
+global per interface name, so the output bound here is the one advertised
+last; `capture({ output })` and `layerShell.output` take another proxy, but
+enumerating them waits on `outputs.js`. And the portal's `parent_window`
+handle names an X window; a Wayland toplevel has none without xdg-foreign,
+so the portal dialog floats.
+
+## Under a second compositor
+
+mutter was the only compositor this backend had met until sway 1.10.1 and
+labwc 0.8.3 ran here, nested (`WLR_BACKENDS=wayland`) and headless
+(`WLR_BACKENDS=headless`), which is also the first time a screenshot of the
+whole path was possible — `grim` needs wlr-screencopy, which mutter
+refuses:
+
+```bash
+WLR_BACKENDS=headless sway -c sway.conf &          # output * resolution 1280x800
+WAYLAND_DISPLAY=wayland-1 REACT_X11_BACKEND=wayland node --import tsx examples/simple.jsx &
+WAYLAND_DISPLAY=wayland-1 grim shot.png
+```
+
+What it showed: the window comes up in sway's own frame (title bar and 2px
+border, `default_border normal 2`) with the client-side bar gone and the
+content filling the surface; a `windowType="dock"` window is a bottom layer
+surface with a reserved strip the tiled toplevel keeps clear of; the
+capture matches what grim sees; and the eyedropper's overlay maps and the
+pick resolves from a synthesised click. The one protocol bug it surfaced is
+in the client library rather than the compositor: the fork refuses a null
+object argument (`set_parent(null)`, `set_fullscreen(null)`,
+`get_popup(null, …)`, `get_layer_surface(…, null, …)`), which
+`nullable.js` encodes around until the fork accepts `allow-null`.
+
 ## The transports, and Node
 
 Descriptors are the protocol: the keymap, shm pools and clipboard pipes all
@@ -330,8 +450,9 @@ arrive as fds, and Node's sockets abort on them
   has, and it stamps the source. A `source` argument on it is the fix.
 - **`fillText` only sees the first font family** of a `font` shorthand and
   strokes text as a fill.
-- **Server-side decorations** where a compositor offers `xdg-decoration`
-  (KDE, wlroots) could replace the client-side frame; GNOME does not.
+- **`ext-image-copy-capture`** is implemented to the protocol text but has
+  not run against a compositor: sway 1.10 advertises only wlr-screencopy,
+  and GNOME neither. wlroots 0.19 (sway 1.11) is where to try it.
 - **Publishing.** The fork of `wayland-client` (fd support, `$`) and x11-dri
   0.9 (`UnixSocket`) are local checkouts; react-x11 consumes both through
   `node_modules` symlinks that an `npm install` prunes:
@@ -344,8 +465,9 @@ arrive as fds, and Node's sockets abort on them
 
 Window managers (`examples/wm.jsx`), global grabs, reading other windows,
 screen coordinates, `GetImage`, XEmbed/`<foreign>`, and `ssh -X` are
-compositor-private by design. Panels and docks want `layer-shell`, which
-GNOME does not advertise.
+compositor-private by design. Panels and docks are `layer-shell`, and a
+screen read is `screencopy` — both wlroots and KDE, neither GNOME, where the
+same JSX is a toplevel and the same pick is the portal's.
 
 ## Changes outside `src/wayland/`
 
@@ -357,6 +479,10 @@ GNOME does not advertise.
   caret is at the end of the preedit, as before. `src/events.js` —
   `_composition` passes those extra fields through. Additive on both
   backends.
+- `src/screencolor.js` — rung 3 of the eyedropper's ladder, the Wayland
+  backend's own picker, guarded by `app.backend === 'wayland'`; and the
+  portal's `parent_window` handle is left empty on that backend, where an
+  X window id would be a lie.
 - `wayland-client` (fork) — fd send/receive, the `$` synchronous request
   namespace, and callback requests returning their `done` payload. 229
   tests pass.
