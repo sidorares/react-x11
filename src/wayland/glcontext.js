@@ -233,9 +233,11 @@ export class WaylandGLContext {
    *
    * @param {Array<{x,y,width,height}>|'all'} [damage] what the frame changed,
    *   in buffer coordinates. Defaults to everything.
-   * @returns {Promise<Promise<number>>} awaiting the outer promise waits for
-   *   the frame to be committed; awaiting the inner one waits for the
-   *   compositor to say it is time to draw again.
+   * @returns {Promise<number>} the frame callback's timestamp, once the
+   *   compositor says it is time to draw again. An async function cannot
+   *   hand back a promise unsettled — returning `vsync` makes the caller's
+   *   `await` wait for it — which is what keeps one present in flight in
+   *   `_present`, and why a connection closing mid-frame rejects there.
    */
   async endFrame(damage = 'all') {
     // Always a promise for the frame clock, even when there is no frame:
@@ -262,6 +264,10 @@ export class WaylandGLContext {
     // request, the configure ack, and the buffer.
     const vsync = win.scheduleFrame();
     win.ackPending();
+    // Another window's frame may have run in the await above and made its
+    // own surface current. eglSwapBuffers on a surface that is not current
+    // is EGL_BAD_SURFACE (0x300d): the second window of examples/windows.jsx.
+    this.gpu.makeCurrent(this._surface);
     const presented = await this.chain.swap(damage);
     // `swap` attached and damaged but did not commit; and when nothing went
     // out — every buffer busy — the frame request still needs a commit to be

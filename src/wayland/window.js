@@ -154,6 +154,13 @@ export class WaylandWindow extends EventEmitter {
     this.layerSurface = null;
     /** the last toplevel configure named a size: maximised, tiled, mid-resize */
     this.sizeImposed = false;
+    /** a popup made with `commit: false`, waiting for its map to commit */
+    this._initialCommitPending = false;
+    /** a popup's setup is over — its initial commit went out — and so is its
+     * chance to take a grab */
+    this._setupDone = false;
+    /** the placement asked for before that commit, sent right after it */
+    this._pendingReposition = null;
   }
 
   // ---- creation --------------------------------------------------------------
@@ -261,6 +268,7 @@ export class WaylandWindow extends EventEmitter {
     height,
     grab = null,
     anchorRect = null,
+    commit = true,
   }) {
     if (!parent?.xdgSurface && !parent?.layerSurface)
       throw new Error('a popup needs a parent window on this connection');
@@ -327,7 +335,15 @@ export class WaylandWindow extends EventEmitter {
     if (grab?.seat && grab.serial != null) {
       popup.$.grab(grab.seat.id, grab.serial);
     }
-    surface.$.commit();
+    // `commit: false` leaves the initial commit to `commitInitial()`, so a
+    // grab asked for later — the tree takes it when it maps the popup — can
+    // still go out ahead of it (see `takeGrab`).
+    if (commit) {
+      surface.$.commit();
+      win._setupDone = true;
+    } else {
+      win._initialCommitPending = true;
+    }
     return win;
   }
 
@@ -605,6 +621,12 @@ export class WaylandWindow extends EventEmitter {
   /** Reposition a popup (xdg_popup v3): a new positioner, same surface. */
   reposition(wmBase, { x, y, width, height }) {
     if (!this.popup || this.popup.version < 3) return false;
+    if (this._initialCommitPending) {
+      // No placement to change yet. The latest one goes out right after the
+      // initial commit — where a move before the map always went out.
+      this._pendingReposition = { wmBase, rect: { x, y, width, height } };
+      return true;
+    }
     const p = wmBase.$.create_positioner();
     p.$.set_size(
       Math.max(1, Math.round(width)),
@@ -623,6 +645,39 @@ export class WaylandWindow extends EventEmitter {
     );
     p.$.destroy();
     return true;
+  }
+
+  /**
+   * A popup's explicit grab. Only possible before its initial commit: the
+   * compositor finishes a popup's setup on that commit, and a grab after it
+   * is `invalid_grab` — a fatal protocol error, "tried to grab after popup
+   * was mapped". Every `<popup grab>` hit it while the grab rode the tree's
+   * map and the commit rode creation.
+   *
+   * @returns {boolean} whether the grab was sent
+   */
+  takeGrab(seat, serial) {
+    if (!this.popup || this._setupDone || this.destroyed) return false;
+    this.popup.$.grab(seat.id, serial);
+    return true;
+  }
+
+  /** The initial commit of a popup made with `commit: false`. */
+  commitInitial() {
+    if (!this._initialCommitPending || this.destroyed) return;
+    this._initialCommitPending = false;
+    this._setupDone = true;
+    this.surface.$.commit();
+    const pending = this._pendingReposition;
+    if (pending) {
+      this._pendingReposition = null;
+      this.reposition(pending.wmBase, pending.rect);
+    }
+  }
+
+  /** Whether a popup is still waiting for its initial commit. */
+  get initialCommitPending() {
+    return this._initialCommitPending;
   }
 
   /** Hide without destroying: a null buffer unmaps the surface. */

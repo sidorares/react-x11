@@ -157,6 +157,8 @@ export class WaylandBackendWindow extends EventEmitter {
         y: (attributes.y ?? 0) / ps + pi.top,
         width: surfaceW,
         height: surfaceH,
+        // the initial commit waits for the map — see map()
+        commit: false,
       });
       this.parentWindow = parent;
     } else if (this.isLayer) {
@@ -230,7 +232,13 @@ export class WaylandBackendWindow extends EventEmitter {
           });
         }
       }
-      // adopting a configure needs a frame even when nothing else changed
+      // Adopting a configure needs a frame even when nothing else changed:
+      // it is the commit after the ack that applies it. `_fireRaf` ends a
+      // frame with nothing due and nothing dirty without committing, so
+      // without this a popup's reposition — position only, no decorations
+      // to repaint — was never acked, and a tooltip stayed where it was
+      // first placed: the parent's top-left corner.
+      this._frameDirty = true;
       this._armFrame();
     });
     wl.on('decorationmode', (mode) => this._setDecorationMode(mode));
@@ -447,7 +455,9 @@ export class WaylandBackendWindow extends EventEmitter {
     // A drag preview never presents (see the constructor): no frame loop, so
     // no buffer is ever committed and the surface stays invisible.
     if (this.isDragPreview) return;
-    if (this._frameArmed || this._destroyed) return;
+    // A closed connection arms nothing: a frame request on it rejects at
+    // once, the rejection re-arms, and that loop never yields.
+    if (this._frameArmed || this._destroyed || this.app.conn?.destroyed) return;
     this._frameArmed = true;
     this.wl.whenConfigured
       .then(() => {
@@ -646,6 +656,13 @@ export class WaylandBackendWindow extends EventEmitter {
       vsync = await this.glctx.endFrame(damage);
     } catch (err) {
       this._presentInFlight = false;
+      // The connection going away rejects the frame request this present was
+      // waiting on (the library aborts in-flight callbacks on close). That is
+      // the app closing, not this window failing — and an 'error' nobody
+      // listens for throws: closing a window with a frame in flight, which is
+      // any window just resized, crashed with "wl_surface.frame: display
+      // closed".
+      if (this._destroyed || this.app.conn?.destroyed) return;
       this.emit('error', err);
       return this._frameIdle();
     }
@@ -863,15 +880,18 @@ export class WaylandBackendWindow extends EventEmitter {
    * callback answers on the next tick.
    */
   grabPointer(_opts, callback) {
+    let error = null;
     if (this.isPopup && this.wl.popup) {
       const serial = this.app.seat.lastPressSerial || this.app.seat.lastSerial;
       try {
-        this.wl.popup.$.grab(this.app.seat.seat.id, serial);
+        // False once the popup is set up: a grab it took then is in force
+        // for as long as it is mapped, and there is no second one to take.
+        this.wl.takeGrab(this.app.seat.seat, serial);
       } catch (err) {
-        return void queueMicrotask(() => callback?.(err));
+        error = err;
       }
     }
-    queueMicrotask(() => callback?.(null));
+    queueMicrotask(() => callback?.(error));
     return this;
   }
 
@@ -890,6 +910,14 @@ export class WaylandBackendWindow extends EventEmitter {
 
   map() {
     this._wantMapped = true;
+    // A popup's initial commit waits for its map. The grab the tree takes
+    // straight after mapping (`PopupNode._mapNow`) must reach the compositor
+    // before that commit, and a popup the tree never maps — born `hidden`,
+    // or anchored off screen — should never be configured, let alone shown.
+    // A microtask, so that grab lands first.
+    if (this.wl.initialCommitPending) {
+      queueMicrotask(() => this.wl.commitInitial());
+    }
     this._armFrame();
     return this;
   }
