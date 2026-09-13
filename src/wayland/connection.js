@@ -271,6 +271,15 @@ export class WaylandConnection extends EventEmitter {
         conn._closed();
         return;
       }
+      if (err?.name === 'WaylandProtocolError') {
+        // Fatal by definition: the compositor has closed its end already.
+        // Nothing may write to it from here — the next frame's commit would
+        // die of EPIPE, which was the error a user saw second, after the one
+        // that mattered — so the connection is dead before anyone hears
+        // why, and the keep-alive goes with it.
+        conn.destroyed = true;
+        conn._release();
+      }
       conn.emit('error', err);
     });
     display.on('warning', (w) => conn.emit('warning', w));

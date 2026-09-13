@@ -157,8 +157,16 @@ export class WaylandBackendWindow extends EventEmitter {
         y: (attributes.y ?? 0) / ps + pi.top,
         width: surfaceW,
         height: surfaceH,
+        // the initial commit waits for the map — see map()
+        commit: false,
       });
       this.parentWindow = parent;
+      /** where the tree asked for the popup, in its parent's surface
+       * coordinates — the compositor's configure may have slid it */
+      this._popupAt = {
+        x: (attributes.x ?? 0) / ps + pi.left,
+        y: (attributes.y ?? 0) / ps + pi.top,
+      };
     } else if (this.isLayer) {
       this.wl = WaylandWindow.createLayerSync({
         conn: app.conn,
@@ -230,12 +238,21 @@ export class WaylandBackendWindow extends EventEmitter {
           });
         }
       }
-      // adopting a configure needs a frame even when nothing else changed
+      // Adopting a configure needs a frame even when nothing else changed:
+      // it is the commit after the ack that applies it. `_fireRaf` ends a
+      // frame with nothing due and nothing dirty without committing, so
+      // without this a popup's reposition — position only, no decorations
+      // to repaint — was never acked, and a tooltip stayed where it was
+      // first placed: the parent's top-left corner.
+      this._frameDirty = true;
       this._armFrame();
     });
     wl.on('decorationmode', (mode) => this._setDecorationMode(mode));
     wl.on('statechange', () => this.emit('statechange', this.getWmStates()));
-    wl.on('close', () => this.requestClose());
+    wl.on('close', () => {
+      if (this.isPopup) this._dismissedByCompositor();
+      else this.requestClose();
+    });
     wl.on('scale', () => {
       this._resized = true;
       this._frameDirty = true;
@@ -447,7 +464,9 @@ export class WaylandBackendWindow extends EventEmitter {
     // A drag preview never presents (see the constructor): no frame loop, so
     // no buffer is ever committed and the surface stays invisible.
     if (this.isDragPreview) return;
-    if (this._frameArmed || this._destroyed) return;
+    // A closed connection arms nothing: a frame request on it rejects at
+    // once, the rejection re-arms, and that loop never yields.
+    if (this._frameArmed || this._destroyed || this.app.conn?.destroyed) return;
     this._frameArmed = true;
     this.wl.whenConfigured
       .then(() => {
@@ -646,6 +665,13 @@ export class WaylandBackendWindow extends EventEmitter {
       vsync = await this.glctx.endFrame(damage);
     } catch (err) {
       this._presentInFlight = false;
+      // The connection going away rejects the frame request this present was
+      // waiting on (the library aborts in-flight callbacks on close). That is
+      // the app closing, not this window failing — and an 'error' nobody
+      // listens for throws: closing a window with a frame in flight, which is
+      // any window just resized, crashed with "wl_surface.frame: display
+      // closed".
+      if (this._destroyed || this.app.conn?.destroyed) return;
       this.emit('error', err);
       return this._frameIdle();
     }
@@ -699,6 +725,14 @@ export class WaylandBackendWindow extends EventEmitter {
    */
   setState(state) {
     if (state && typeof state === 'object') {
+      // A popup's rect is one placement: the tree places a popup through
+      // here whenever the window has a `setState`, and a tooltip that
+      // measured itself hidden at (0, 0) is moved to its trigger this way.
+      // Dropping `x`/`y` left it in its parent's corner.
+      if (this.isPopup && ('x' in state || 'y' in state)) {
+        this._placePopup(state);
+        return this;
+      }
       if ('width' in state || 'height' in state)
         this.resize(state.width ?? this.width, state.height ?? this.height);
       return this;
@@ -733,8 +767,8 @@ export class WaylandBackendWindow extends EventEmitter {
     let h = Math.max(1, Math.round(height / s + i.top + i.bottom));
     if (this.isPopup) {
       this.wl.reposition(this.app.wmBase, {
-        x: this.wl.x,
-        y: this.wl.y,
+        x: this._popupAt.x,
+        y: this._popupAt.y,
         width: w,
         height: h,
       });
@@ -757,20 +791,45 @@ export class WaylandBackendWindow extends EventEmitter {
 
   move(x, y) {
     if (this.isPopup) {
-      const p = this.parentWindow;
-      const pi = p?.insets ?? { left: 0, top: 0 };
-      const ps = p?.scale ?? this.scale;
-      this.wl.reposition(this.app.wmBase, {
-        x: x / ps + pi.left,
-        y: y / ps + pi.top,
-        width: this.wl.width,
-        height: this.wl.height,
-      });
+      this._placePopup({ x, y });
       return this;
     }
     // A toplevel cannot place itself. Not an error: the tree asks on every
     // controlled position, and the compositor's answer is final.
     return this;
+  }
+
+  /**
+   * Place a popup: `x`/`y` in its parent's content device pixels, `width`/
+   * `height` in its own, any of them omitted to keep what it has. One
+   * reposition for the whole rect, from the position the tree asked for —
+   * not the one the compositor reported, which it may have slid to keep the
+   * popup on screen, and which drifted further with every resize.
+   */
+  _placePopup({ x, y, width, height }) {
+    const p = this.parentWindow;
+    const pi = p?.insets ?? { left: 0, top: 0 };
+    const ps = p?.scale ?? this.scale;
+    if (x != null) this._popupAt.x = x / ps + pi.left;
+    if (y != null) this._popupAt.y = y / ps + pi.top;
+    const s = this.wl.scale;
+    const w =
+      width != null ? Math.max(1, Math.round(width / s)) : this.wl.width;
+    const h =
+      height != null ? Math.max(1, Math.round(height / s)) : this.wl.height;
+    this.wl.reposition(this.app.wmBase, {
+      x: this._popupAt.x,
+      y: this._popupAt.y,
+      width: w,
+      height: h,
+    });
+    if (w !== this.wl.width || h !== this.wl.height) {
+      this.wl.width = w;
+      this.wl.height = h;
+      this._resized = true;
+      this._frameDirty = true;
+      this._armFrame();
+    }
   }
 
   getWmStates() {
@@ -863,15 +922,19 @@ export class WaylandBackendWindow extends EventEmitter {
    * callback answers on the next tick.
    */
   grabPointer(_opts, callback) {
-    if (this.isPopup && this.wl.popup) {
+    let error = null;
+    if (this.isPopup) {
       const serial = this.app.seat.lastPressSerial || this.app.seat.lastSerial;
       try {
-        this.wl.popup.$.grab(this.app.seat.seat.id, serial);
+        // Recorded for the initial commit, and false once that is over: a
+        // grab taken then holds for as long as the popup is mapped, and
+        // there is no second one to take.
+        this.wl.takeGrab(this.app.seat.seat, serial);
       } catch (err) {
-        return void queueMicrotask(() => callback?.(err));
+        error = err;
       }
     }
-    queueMicrotask(() => callback?.(null));
+    queueMicrotask(() => callback?.(error));
     return this;
   }
 
@@ -890,6 +953,14 @@ export class WaylandBackendWindow extends EventEmitter {
 
   map() {
     this._wantMapped = true;
+    // A popup's initial commit waits for its map. The grab the tree takes
+    // straight after mapping (`PopupNode._mapNow`) must reach the compositor
+    // before that commit, and a popup the tree never maps — born `hidden`,
+    // or anchored off screen — should never be configured, let alone shown.
+    // A microtask, so that grab lands first.
+    if (this.wl.initialCommitPending) {
+      queueMicrotask(() => this.wl.commitInitial());
+    }
     this._armFrame();
     return this;
   }
@@ -897,6 +968,29 @@ export class WaylandBackendWindow extends EventEmitter {
   unmap() {
     this.wl.unmap();
     return this;
+  }
+
+  /**
+   * `xdg_popup.popup_done`: the compositor has dismissed this popup — a
+   * press outside it, Escape, the parent losing focus — and already hidden
+   * it. On X11 the grab brings that press here, outside the window, and the
+   * event manager answers it with `onDismiss` (`_dismissOutside`); here the
+   * compositor keeps the press, so the same press is made up, outside, for
+   * the same answer. Without it the tree still thought the menu open while
+   * the screen showed it gone, and the next click on its button closed
+   * nothing.
+   */
+  _dismissedByCompositor() {
+    this.emit('mousedown', {
+      x: -1,
+      y: -1,
+      rootx: -1,
+      rooty: -1,
+      button: 1,
+      buttons: 0,
+      time: Date.now() >>> 0,
+      dismissed: true,
+    });
   }
 
   /** The compositor (or the frame's close button) asked; the tree decides. */

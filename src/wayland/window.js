@@ -97,6 +97,34 @@ const DEFAULT_SIZE = { width: 800, height: 600 };
 /** fractional-scale-v1 reports scale × 120. */
 const SCALE_DENOM = 120;
 
+/**
+ * A positioner for a popup at a point (its top-left at `x`, `y` in the
+ * parent's window geometry) or under an anchor rectangle, sliding and
+ * flipping to stay on screen the way `anchor.js` would have done it.
+ */
+function popupPositioner(wmBase, { x, y, width, height, anchorRect = null }) {
+  const p = wmBase.$.create_positioner();
+  p.$.set_size(Math.max(1, Math.round(width)), Math.max(1, Math.round(height)));
+  if (anchorRect) {
+    p.$.set_anchor_rect(
+      Math.round(anchorRect.x),
+      Math.round(anchorRect.y),
+      Math.max(1, Math.round(anchorRect.width)),
+      Math.max(1, Math.round(anchorRect.height)),
+    );
+    p.$.set_anchor(ANCHOR.BOTTOM_LEFT);
+  } else {
+    p.$.set_anchor_rect(Math.round(x), Math.round(y), 1, 1);
+    p.$.set_anchor(ANCHOR.TOP_LEFT);
+  }
+  p.$.set_gravity(ANCHOR.BOTTOM_RIGHT);
+  p.$.set_constraint_adjustment(
+    ADJUST.SLIDE_X | ADJUST.SLIDE_Y | ADJUST.FLIP_Y,
+  );
+  if (p.version >= 3) p.$.set_reactive();
+  return p;
+}
+
 export class WaylandWindow extends EventEmitter {
   constructor({ conn, surface, xdgSurface, role, kind, size, parent = null }) {
     super();
@@ -154,6 +182,13 @@ export class WaylandWindow extends EventEmitter {
     this.layerSurface = null;
     /** the last toplevel configure named a size: maximised, tiled, mid-resize */
     this.sizeImposed = false;
+    /** a popup made with `commit: false`, waiting for its map to commit */
+    this._initialCommitPending = false;
+    /** a popup's setup is over — its initial commit went out — and so is its
+     * chance to take a grab */
+    this._setupDone = false;
+    /** a popup's role-to-be: placement and grab, until its initial commit */
+    this._popupSetup = null;
   }
 
   // ---- creation --------------------------------------------------------------
@@ -261,50 +296,20 @@ export class WaylandWindow extends EventEmitter {
     height,
     grab = null,
     anchorRect = null,
+    commit = true,
   }) {
     if (!parent?.xdgSurface && !parent?.layerSurface)
       throw new Error('a popup needs a parent window on this connection');
     wirePing(wmBase);
-    const positioner = wmBase.$.create_positioner();
     const w = Math.max(1, Math.round(width || 1));
     const h = Math.max(1, Math.round(height || 1));
-    positioner.$.set_size(w, h);
-    if (anchorRect) {
-      positioner.$.set_anchor_rect(
-        Math.round(anchorRect.x),
-        Math.round(anchorRect.y),
-        Math.max(1, Math.round(anchorRect.width)),
-        Math.max(1, Math.round(anchorRect.height)),
-      );
-      positioner.$.set_anchor(ANCHOR.BOTTOM_LEFT);
-      positioner.$.set_gravity(ANCHOR.BOTTOM_RIGHT);
-    } else {
-      // A point: the popup's top-left goes at (x, y), sliding and flipping
-      // to stay on screen the way `anchor.js` would have done it.
-      positioner.$.set_anchor_rect(Math.round(x), Math.round(y), 1, 1);
-      positioner.$.set_anchor(ANCHOR.TOP_LEFT);
-      positioner.$.set_gravity(ANCHOR.BOTTOM_RIGHT);
-    }
-    positioner.$.set_constraint_adjustment(
-      ADJUST.SLIDE_X | ADJUST.SLIDE_Y | ADJUST.FLIP_Y,
-    );
-    if (positioner.version >= 3) positioner.$.set_reactive();
-
     const surface = compositor.$.create_surface();
     const xdgSurface = wmBase.$.get_xdg_surface(surface.id);
-    // A layer surface is not an xdg_surface: its popups are created with no
-    // parent and adopted by the layer surface before their first commit.
-    const popup = parent.xdgSurface
-      ? xdgSurface.$.get_popup(parent.xdgSurface.id, positioner.id)
-      : requestNullable(xdgSurface, 'get_popup', null, positioner.id);
-    positioner.$.destroy();
-    if (!parent.xdgSurface) parent.layerSurface.$.get_popup(popup.id);
-
     const win = new WaylandWindow({
       conn,
       surface,
       xdgSurface,
-      role: popup,
+      role: null,
       kind: 'popup',
       parent,
       size: { width: w, height: h },
@@ -312,23 +317,51 @@ export class WaylandWindow extends EventEmitter {
     win.x = x;
     win.y = y;
     win._wireCommon();
+    // The role — positioner, `get_popup`, grab — is assigned at the initial
+    // commit, from the placement and grab the popup has by then.
+    // `commit: false` leaves that commit to `commitInitial()`, which the
+    // tree's map calls: a grab asked for at map time still precedes it (see
+    // `takeGrab`), and a popup moved before it is shown — a tooltip that
+    // measured itself at (0, 0) — is placed right the first time instead of
+    // flashing in its parent's corner until a reposition lands.
+    win._popupSetup = {
+      wmBase,
+      parent,
+      placement: { x, y, width: w, height: h, anchorRect },
+      grab: grab?.seat && grab.serial != null ? grab : null,
+    };
+    win._initialCommitPending = true;
+    if (commit) win.commitInitial();
+    return win;
+  }
+
+  /** The xdg_popup role, from the placement and grab asked for so far. */
+  _assignPopupRole() {
+    const { wmBase, parent, placement, grab } = this._popupSetup;
+    this._popupSetup = null;
+    const positioner = popupPositioner(wmBase, placement);
+    // A layer surface is not an xdg_surface: its popups are created with no
+    // parent and adopted by the layer surface before their first commit.
+    const popup = parent.xdgSurface
+      ? this.xdgSurface.$.get_popup(parent.xdgSurface.id, positioner.id)
+      : requestNullable(this.xdgSurface, 'get_popup', null, positioner.id);
+    positioner.$.destroy();
+    if (!parent.xdgSurface) parent.layerSurface.$.get_popup(popup.id);
+    this.role = popup;
+    this.popup = popup;
     popup.on('configure', (px, py, pw, ph) => {
-      win.x = px;
-      win.y = py;
+      this.x = px;
+      this.y = py;
       if (pw > 0 && ph > 0) {
-        const changed = pw !== win.width || ph !== win.height;
-        win.width = pw;
-        win.height = ph;
-        if (changed) win.emit('resize', { width: pw, height: ph });
+        const changed = pw !== this.width || ph !== this.height;
+        this.width = pw;
+        this.height = ph;
+        if (changed) this.emit('resize', { width: pw, height: ph });
       }
     });
-    popup.on('popup_done', () => win.emit('close'));
+    popup.on('popup_done', () => this.emit('close'));
     popup.on('repositioned', () => {});
-    if (grab?.seat && grab.serial != null) {
-      popup.$.grab(grab.seat.id, grab.serial);
-    }
-    surface.$.commit();
-    return win;
+    if (grab) popup.$.grab(grab.seat.id, grab.serial);
   }
 
   // ---- events --------------------------------------------------------------
@@ -604,25 +637,49 @@ export class WaylandWindow extends EventEmitter {
 
   /** Reposition a popup (xdg_popup v3): a new positioner, same surface. */
   reposition(wmBase, { x, y, width, height }) {
+    if (this._popupSetup) {
+      // No role yet: this is the placement the initial commit will use.
+      this._popupSetup.placement = { x, y, width, height, anchorRect: null };
+      return true;
+    }
     if (!this.popup || this.popup.version < 3) return false;
-    const p = wmBase.$.create_positioner();
-    p.$.set_size(
-      Math.max(1, Math.round(width)),
-      Math.max(1, Math.round(height)),
-    );
-    p.$.set_anchor_rect(Math.round(x), Math.round(y), 1, 1);
-    p.$.set_anchor(ANCHOR.TOP_LEFT);
-    p.$.set_gravity(ANCHOR.BOTTOM_RIGHT);
-    p.$.set_constraint_adjustment(
-      ADJUST.SLIDE_X | ADJUST.SLIDE_Y | ADJUST.FLIP_Y,
-    );
-    p.$.set_reactive();
+    const p = popupPositioner(wmBase, { x, y, width, height });
     this.popup.$.reposition(
       p.id,
       ++this._repositionToken || (this._repositionToken = 1),
     );
     p.$.destroy();
     return true;
+  }
+
+  /**
+   * A popup's explicit grab. Only possible before its initial commit: the
+   * compositor finishes a popup's setup on that commit, and a grab after it
+   * is `invalid_grab` — a fatal protocol error, "tried to grab after popup
+   * was mapped". Every `<popup grab>` hit it while the grab rode the tree's
+   * map and the commit rode creation.
+   *
+   * @returns {boolean} whether the grab was sent
+   */
+  takeGrab(seat, serial) {
+    if (this.kind !== 'popup' || !this._popupSetup || this.destroyed)
+      return false;
+    this._popupSetup.grab = { seat, serial };
+    return true;
+  }
+
+  /** The initial commit of a popup made with `commit: false`. */
+  commitInitial() {
+    if (!this._initialCommitPending || this.destroyed) return;
+    this._initialCommitPending = false;
+    if (this._popupSetup) this._assignPopupRole();
+    this._setupDone = true;
+    this.surface.$.commit();
+  }
+
+  /** Whether a popup is still waiting for its initial commit. */
+  get initialCommitPending() {
+    return this._initialCommitPending;
   }
 
   /** Hide without destroying: a null buffer unmaps the surface. */
@@ -642,7 +699,7 @@ export class WaylandWindow extends EventEmitter {
       this.decoration?.destroy();
       this._fractional?.$.destroy?.();
       this._viewport?.$.destroy?.();
-      this.role.$.destroy?.();
+      this.role?.$.destroy?.();
       this.xdgSurface?.$.destroy?.();
       this.surface.$.destroy?.();
     } catch {

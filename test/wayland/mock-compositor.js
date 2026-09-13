@@ -612,6 +612,12 @@ export class MockCompositor extends EventEmitter {
     if (iface === 'xdg_toplevel' || iface === 'xdg_popup') {
       const role = obj.role;
       if (!role) return;
+      if (iface === 'xdg_popup' && name === 'grab' && role.configured) {
+        // mutter's rule: a popup's setup ends with its initial commit, and a
+        // grab after it is fatal
+        this.send(1, 'error', id, 0, 'tried to grab after popup was mapped');
+        return;
+      }
       (role.requests ??= []).push({ name, args });
       return;
     }

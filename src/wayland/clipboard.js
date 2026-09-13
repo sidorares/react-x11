@@ -21,6 +21,7 @@
 // against either finds what it expects.
 
 import { makePipe, readAll, writeAll, closeFd } from './fdutil.js';
+import { requestNullable } from './nullable.js';
 
 const TEXT_MIMES = [
   'text/plain;charset=utf-8',
@@ -50,12 +51,16 @@ class Selection {
    * @param {string} opts.name 'CLIPBOARD' | 'PRIMARY'
    * @param {object} opts.device a `wl_data_device` or `zwp_primary_selection_device_v1`
    * @param {object} opts.manager the manager that creates sources
+   * @param {string} opts.createSource the manager's request for a source:
+   *   `create_data_source` on wl_data_device_manager, `create_source` on the
+   *   primary-selection manager
    * @param {() => number} opts.serial the latest input serial
    */
-  constructor({ name, device, manager, serial }) {
+  constructor({ name, device, manager, createSource, serial }) {
     this.name = name;
     this.device = device;
     this.manager = manager;
+    this.createSource = createSource;
     this.serial = serial;
     /** the current offer from someone else, with its advertised types */
     this.offer = null;
@@ -175,7 +180,10 @@ class Selection {
     }
     if (Object.keys(map).length === 0) return;
     this._dropSource();
-    const source = this.manager.$.create_source();
+    // The two managers name it differently; calling the primary selection's
+    // name on wl_data_device_manager threw, so copying to the clipboard
+    // never worked here.
+    const source = this.manager.$[this.createSource]();
     for (const t of Object.keys(map)) source.$.offer(t);
     source.on('send', (mime, fd) => {
       const v =
@@ -208,7 +216,9 @@ class Selection {
 
   async clear() {
     this._dropSource();
-    this.device.$.set_selection(0, this.serial());
+    // a null source clears it — an `allow-null` object the fork's encoder
+    // refuses as 0, so it goes through requestNullable (nullable.js)
+    requestNullable(this.device, 'set_selection', null, this.serial());
   }
 
   async targets() {
@@ -260,7 +270,13 @@ export async function createWaylandClipboard({ conn, seat, serial }) {
     const device = ddm.$.get_data_device(seat.id);
     selections.set(
       'CLIPBOARD',
-      new Selection({ name: 'CLIPBOARD', device, manager: ddm, serial }),
+      new Selection({
+        name: 'CLIPBOARD',
+        device,
+        manager: ddm,
+        createSource: 'create_data_source',
+        serial,
+      }),
     );
   }
   const psm = await conn.bind('zwp_primary_selection_device_manager_v1');
@@ -268,7 +284,13 @@ export async function createWaylandClipboard({ conn, seat, serial }) {
     const device = psm.$.get_device(seat.id);
     selections.set(
       'PRIMARY',
-      new Selection({ name: 'PRIMARY', device, manager: psm, serial }),
+      new Selection({
+        name: 'PRIMARY',
+        device,
+        manager: psm,
+        createSource: 'create_source',
+        serial,
+      }),
     );
   }
 
