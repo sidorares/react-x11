@@ -354,11 +354,17 @@ export function Select({
     );
     const chosenRowTop = MENU_BORDER + metrics.pad + chosen * metrics.row;
     const top = triggerCapsBottom - chosenRowTop - rowCapsBottom;
+    // `top` is where the menu starts against the trigger's own top, so it
+    // goes in as an `offset` back past the trigger's bottom — not as an `at`.
+    // Tracking asks whether `at` is still in view, and a menu opened over a
+    // trigger near the window's top edge starts above that edge: the popup
+    // is a real window and may, but the rect asked about was then "scrolled
+    // out", and the menu closed on the next unrelated layout pass (#552).
+    // What has to stay visible is the trigger.
     return {
       placement: 'bottom',
-      offset: 0,
+      offset: top - triggerHeight,
       flip: false,
-      at: { x: 0, y: top, width: node ? node.abs.width / scale : 0, height: 0 },
       alignOffset: -metrics.hang.left,
       height,
       width,
