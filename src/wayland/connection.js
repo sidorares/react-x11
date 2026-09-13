@@ -177,6 +177,30 @@ export class WaylandConnection extends EventEmitter {
     transport,
     socket: injected,
   } = {}) {
+    // An open connection keeps the process alive, as a net.Socket would. The
+    // fd transports do not: Bun's reads happen on a worker the runtime does
+    // not count, so an app with nothing else pending — no timer, no server —
+    // exited the moment its module finished evaluating, before `connect`
+    // had even fired (`bun examples/simple.jsx` ran for 0.36 s and returned
+    // 0). A ref'd interval is the one portable handle that says "still
+    // running" to both runtimes; it starts before the first await and is
+    // cleared with the connection.
+    const keepAlive = setInterval(() => {}, 0x7fffffff);
+    try {
+      return await WaylandConnection._open(
+        { display: name, protocols, transport, socket: injected },
+        keepAlive,
+      );
+    } catch (err) {
+      clearInterval(keepAlive);
+      throw err;
+    }
+  }
+
+  static async _open(
+    { display: name, protocols, transport, socket: injected },
+    keepAlive,
+  ) {
     let socket;
     let used;
     let socketPath = '(injected socket)';
@@ -225,6 +249,7 @@ export class WaylandConnection extends EventEmitter {
     const display = new Display(socket);
     display.setMaxListeners(0);
     const conn = new WaylandConnection(display, socket, used);
+    conn._keepAlive = keepAlive;
 
     display.on('error', (err) => {
       // Nothing after destroy() is news, and Bun's reader thread reports its
@@ -236,8 +261,7 @@ export class WaylandConnection extends EventEmitter {
           err?.message ?? '',
         )
       ) {
-        conn.destroyed = true;
-        conn.emit('close');
+        conn._closed();
         return;
       }
       conn.emit('error', err);
@@ -245,8 +269,7 @@ export class WaylandConnection extends EventEmitter {
     display.on('warning', (w) => conn.emit('warning', w));
     display.on('close', () => {
       if (conn.destroyed) return;
-      conn.destroyed = true;
-      conn.emit('close');
+      conn._closed();
     });
 
     await display.init();
@@ -314,9 +337,29 @@ export class WaylandConnection extends EventEmitter {
     await this.display.sync();
   }
 
+  /** The compositor went away, or the socket did: one 'close', then quiet. */
+  _closed() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this._release();
+    this.emit('close');
+  }
+
+  _release() {
+    if (this._keepAlive) {
+      clearInterval(this._keepAlive);
+      this._keepAlive = null;
+    }
+  }
+
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this._release();
+    // The reader worker reports the descriptor closing under it as an
+    // error, on the socket, after this returns; with no listener left that
+    // is an uncaught exception at exit (examples/app.jsx died of it).
+    this.socket.on?.('error', () => {});
     // `end(cb)` on the fd transports does not take a callback the way
     // net.Socket does, and a reader thread keeps the process alive until the
     // descriptor is actually gone — so tear down rather than half-close.

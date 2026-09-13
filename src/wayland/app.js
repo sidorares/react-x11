@@ -33,6 +33,7 @@ import { InputRouter } from './input.js';
 import { createWaylandClipboard } from './clipboard.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
+import { WaylandGLArea, WaylandOverlayPane, GLAREA_VISUAL } from './glarea.js';
 import { setScaleForTests } from '../scale.js';
 
 const require = createRequire(import.meta.url);
@@ -147,6 +148,7 @@ export class WaylandApp extends EventEmitter {
       devicePath: options.glPolicy?.devicePath,
     });
     app.gl = app.gpu.gl;
+    app._glCapsResolved = { direct: true };
 
     setScaleForTests(app, app.scale, 'wayland');
     return app;
@@ -200,6 +202,16 @@ export class WaylandApp extends EventEmitter {
    * `x`/`y` the tree's anchoring computed, relative to its parent.
    */
   createWindow(attributes = {}) {
+    // A `<glarea>`'s child "window" is a rect of its parent's backing target
+    // (glarea.js); `chooseGLConfig` marked the visual so it can be told apart.
+    if (attributes.visual === GLAREA_VISUAL) {
+      if (!attributes.parent?.glctx) {
+        throw new Error(
+          'react-x11 (wayland): a <glarea> needs a window of this backend to draw into',
+        );
+      }
+      return new WaylandGLArea(attributes.parent, attributes);
+    }
     const win = new WaylandBackendWindow(this, attributes);
     this.windows.set(win.wl.surface.id, win);
     if (!win.isPopup) this.toplevels.push(win);
@@ -259,13 +271,20 @@ export class WaylandApp extends EventEmitter {
     return new WaylandSurface(this, options);
   }
 
-  glCapabilities() {
-    return {
+  /**
+   * What the machine can do, as a promise like the X11 and Cocoa answers
+   * (src/glbackend.js chains on it): here the answer was settled when the
+   * GPU context came up in `open()`.
+   */
+  async glCapabilities() {
+    const caps = {
       direct: true,
       indirect: false,
       backend: 'gles',
       version: this.gpu?.glVersion?.string ?? null,
     };
+    this._glCapsResolved = caps;
+    return caps;
   }
 
   frameIntervalFor() {
@@ -277,8 +296,52 @@ export class WaylandApp extends EventEmitter {
     return { depth: 32 };
   }
 
-  chooseGLConfig() {
-    return { backend: 'gles' };
+  /**
+   * What a `<glarea>` draws with: the window's own GLES context, into a rect
+   * of its backing target (glarea.js). A promise, as the X11 and Cocoa
+   * answers are — `GlAreaNode.realize` chains on it.
+   *
+   * `spec.api` is the `<glarea glx>` prop's rung: `'auto'` and `'gles'` are
+   * this; `'gl'` (desktop GL) and `'webgpu'` are named so the ladder is
+   * visible before it is built.
+   */
+  async chooseGLConfig(spec) {
+    const mode = this.options.glPolicy?.mode ?? 'auto';
+    if (mode === 'off') {
+      const err = new Error(
+        "glPolicy is 'off' on this connection, so no GL context is created at all",
+      );
+      err.code = 'GL_DISABLED';
+      throw err;
+    }
+    if (mode === 'indirect') {
+      const err = new Error(
+        "glPolicy is 'indirect', which is GLX — there is no X server here to speak it to. Use 'auto' or 'direct'.",
+      );
+      err.code = 'GL_POLICY_INDIRECT';
+      throw err;
+    }
+    const api = spec?.api ?? 'auto';
+    if (api !== 'auto' && api !== 'gles') {
+      const err = new Error(
+        api === 'gl' || api === 'webgpu'
+          ? `<glarea> api '${api}' is a named rung this backend has not built yet — today's rungs are auto, gles (GLES 3 on the window's own context)`
+          : `<glarea> api '${api}' is not a rung — expected one of auto, gles, gl, webgpu.`,
+      );
+      err.code = 'GL_API_UNAVAILABLE';
+      throw err;
+    }
+    return { backend: 'direct', api: 'gles', visual: GLAREA_VISUAL, depth: 32 };
+  }
+
+  /**
+   * The pane a `<glarea>`'s children are drawn on (src/gloverlay.js): an
+   * offscreen target the window blends over the surface, so the overlay is
+   * translucent here as on the Cocoa backend. Having this at all is how the
+   * overlay knows the backend composites.
+   */
+  createOverlayPane(attributes) {
+    return new WaylandOverlayPane(this, attributes);
   }
 
   /**

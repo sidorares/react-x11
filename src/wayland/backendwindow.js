@@ -21,6 +21,8 @@
 // committed with the next frame request in the same commit.
 
 import { EventEmitter } from 'node:events';
+import { writeSync, writeFileSync } from 'node:fs';
+import { snapshotPNG } from './readback.js';
 import { WaylandWindow, TOPLEVEL_STATE } from './window.js';
 import { WaylandGLContext } from './glcontext.js';
 import { WaylandContext2D } from './context2d.js';
@@ -44,8 +46,22 @@ const STATE_NAMES = {
 
 /** `REACT_X11_WAYLAND_TRACE=1`: a line on stderr per presented frame. */
 const TRACE = Boolean(process.env.REACT_X11_WAYLAND_TRACE);
+/**
+ * `REACT_X11_WAYLAND_SNAPSHOT=<file.png>`: the backing target of the first
+ * window, written at its present number `REACT_X11_WAYLAND_SNAPSHOT_AT`
+ * (default 30) — what the compositor was handed, read back from the GPU. The
+ * one way to see a frame on a desktop that offers no screenshot API.
+ */
+const SNAPSHOT = process.env.REACT_X11_WAYLAND_SNAPSHOT || null;
+const SNAPSHOT_AT = Number(process.env.REACT_X11_WAYLAND_SNAPSHOT_AT) || 30;
 
 let nextId = 1;
+
+const overlaps = (a, b) =>
+  a.x < b.x + b.width &&
+  b.x < a.x + a.width &&
+  a.y < b.y + b.height &&
+  b.y < a.y + a.height;
 
 export class WaylandBackendWindow extends EventEmitter {
   /**
@@ -74,6 +90,13 @@ export class WaylandBackendWindow extends EventEmitter {
     this._frameDirty = true;
     this._resized = true;
     this._reactX11Node = null;
+    /** `<glarea>`s drawing into this window's target (glarea.js) */
+    this._surfaces = new Set();
+    /** the panes their children are painted on */
+    this._panes = new Set();
+    this._surfaceRaf = [];
+    /** rects (content px) a surface or pane changed since the last present */
+    this._surfaceDamage = [];
 
     // Frame and content sizes. `attributes.width/height` are what the tree
     // measured, in device pixels of content; the surface adds the frame.
@@ -289,6 +312,25 @@ export class WaylandBackendWindow extends EventEmitter {
   }
 
   /** Ask for a repaint of the decorations at the next frame. */
+  /**
+   * A `<glarea>`'s frame: after the tree's paint, in the same frame of this
+   * window, so the GL goes over the 2D and out with the same present.
+   */
+  requestSurfaceFrame(fn) {
+    this._surfaceRaf.push(fn);
+    this._armFrame();
+  }
+
+  /** A surface drew: its rect is owed to the compositor. */
+  _surfaceDrew(area) {
+    this._surfaceDamage.push({ ...area.rect });
+  }
+
+  /** A pane was painted: it is composited over its surface this frame. */
+  _paneDrew(pane) {
+    this._surfaceDamage.push({ ...pane.rect });
+  }
+
   repaintFrame() {
     this._frameDirty = true;
     this._armFrame();
@@ -369,7 +411,7 @@ export class WaylandBackendWindow extends EventEmitter {
     if (this._destroyed) return;
     const due = this._raf.splice(0);
     const frameDirty = this._frameDirty;
-    if (due.length === 0 && !frameDirty) {
+    if (due.length === 0 && !frameDirty && this._surfaceRaf.length === 0) {
       this._frameArmed = false;
       return;
     }
@@ -397,16 +439,65 @@ export class WaylandBackendWindow extends EventEmitter {
     }
 
     const painted = this._contexts.get('2d');
+    if (this._surfaces.size || this._surfaceRaf.length || this._panes.size) {
+      this._runSurfaces(painted, time, resized || frameDirty);
+    }
     if (painted) {
       painted.restore();
       painted.end();
     }
     this._frameSize = null;
 
-    const drew = painted?.drew || frameDirty || resized;
+    const drew =
+      painted?.drew || frameDirty || resized || this._surfaceDamage.length > 0;
     if (!drew) return this._frameIdle();
     this._frameDirty = false;
     void this._present(resized || frameDirty ? 'all' : this._damageFor());
+  }
+
+  /**
+   * The `<glarea>`s' turn, after the tree has painted: flush the 2D under
+   * them, let each draw into its rect, put the 2d context's GL state back,
+   * and blend the children's panes over the surfaces.
+   *
+   * One thing a shared target needs that a child window never did: where
+   * the tree repainted *under* a surface that has no frame of its own this
+   * time — a background fill reaching under a static scene — the surface's
+   * pixels are gone with the repaint, so its node is asked for the frame
+   * now, before the present, rather than showing the fill for a frame.
+   */
+  _runSurfaces(ctx, time, wholeFrame) {
+    ctx?.flush();
+    for (const area of this._surfaces) area.drewThisFrame = false;
+    this._drainSurfaceFrames(time);
+    if (this._surfaces.size) {
+      const damage = wholeFrame ? null : this._reactX11Node?._lastDamageRects;
+      for (const area of this._surfaces) {
+        if (area.drewThisFrame || !area.mapped || area.destroyed) continue;
+        if (damage && !damage.some((r) => overlaps(r, area.rect))) continue;
+        area._reactX11Node?.requestFrame?.();
+      }
+      this._drainSurfaceFrames(time);
+    }
+    if (!ctx) return;
+    ctx.restoreGLState();
+    if (this._surfaceDamage.length === 0) return;
+    for (const pane of this._panes) {
+      if (pane.hidden || !pane.presented || pane.destroyed) continue;
+      ctx.drawImage(pane.target, pane.rect.x, pane.rect.y);
+    }
+  }
+
+  _drainSurfaceFrames(time) {
+    // a callback may queue the next frame; that one is for the next present
+    const due = this._surfaceRaf.splice(0);
+    for (const fn of due) {
+      try {
+        fn(time);
+      } catch (err) {
+        this.emit('error', err);
+      }
+    }
   }
 
   _paintFrame(ctx) {
@@ -425,9 +516,10 @@ export class WaylandBackendWindow extends EventEmitter {
   _damageFor() {
     const node = this._reactX11Node;
     const rects = node?._lastDamageRects;
+    const extra = this._surfaceDamage.splice(0);
     if (!rects) return 'all';
     const o = this.contentOrigin;
-    return rects.map((r) => ({
+    return [...rects, ...extra].map((r) => ({
       x: r.x + o.x,
       y: r.y + o.y,
       width: r.width,
@@ -439,6 +531,16 @@ export class WaylandBackendWindow extends EventEmitter {
   async _present(damage) {
     if (this._destroyed) return;
     this._presentInFlight = true;
+    if (SNAPSHOT && (this._presents ?? 0) + 1 === SNAPSHOT_AT) {
+      try {
+        this.glctx.bindBacking();
+        const { width, height } = this.glctx.backing;
+        writeFileSync(SNAPSHOT, snapshotPNG(this.glctx.gl, width, height));
+        writeSync(2, `react-x11 wayland: wrote ${SNAPSHOT}\n`);
+      } catch (err) {
+        writeSync(2, `react-x11 wayland: snapshot failed: ${err.message}\n`);
+      }
+    }
     let vsync;
     try {
       vsync = await this.glctx.endFrame(damage);
@@ -449,9 +551,12 @@ export class WaylandBackendWindow extends EventEmitter {
     }
     this._everPresented = true;
     this.wl.mapped = true;
+    this._presents = (this._presents ?? 0) + 1;
     if (TRACE) {
-      this._presents = (this._presents ?? 0) + 1;
-      process.stderr.write(
+      // a synchronous write: Bun buffers process.stderr to a file, and a
+      // buffer is what a SIGINT leaves behind
+      writeSync(
+        2,
         `react-x11 wayland: window ${this.id} present #${this._presents} ` +
           `${damage === 'all' ? 'full' : damage.length + ' rect(s)'}\n`,
       );

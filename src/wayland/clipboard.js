@@ -64,6 +64,8 @@ class Selection {
     this.source = null;
     this.ownData = null;
     this._pendingOffers = new Map(); // offer id -> types
+    /** `watch()` handlers, told when the selection changes hands */
+    this.watchers = new Set();
 
     device.on('data_offer', (offer) => {
       const types = [];
@@ -82,6 +84,7 @@ class Selection {
       if (!offer || offer === 0) {
         this.offer = null;
         this.offerTypes = [];
+        this._notify('closed');
         return;
       }
       this.offer = offer;
@@ -90,7 +93,49 @@ class Selection {
       // an offer from our own source means we still own it; anyone else's
       // means we lost it
       if (this.source && !this._isOurs(offer)) this._dropSource();
+      this._notify('new-owner');
     });
+  }
+
+  /**
+   * The event ntk's XFixes watch delivers, `{ selection, owner, timestamp,
+   * selectionTimestamp, reason }`, from the compositor's `selection` event —
+   * which is the same subscription with nothing to register: every client
+   * with a data device is told. There is no owner *window* to name here, so
+   * `owner` is the one thing an edit menu reads it for: nonzero while
+   * something is on the selection (our own source included, as X reports
+   * our own window), 0 once it is empty.
+   */
+  _notify(reason) {
+    if (this.watchers.size === 0) return;
+    const now = Date.now();
+    const ev = {
+      selection: this.name,
+      owner: this.offer ? 1 : 0,
+      timestamp: now,
+      selectionTimestamp: now,
+      reason,
+    };
+    for (const fn of [...this.watchers]) {
+      try {
+        fn(ev);
+      } catch (err) {
+        queueMicrotask(() => {
+          throw err;
+        });
+      }
+    }
+  }
+
+  /** @returns {() => void} stops watching */
+  watch(handler) {
+    this.watchers.add(handler);
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      this.watchers.delete(handler);
+    };
   }
 
   _isOurs() {
@@ -246,6 +291,14 @@ export async function createWaylandClipboard({ conn, seat, serial }) {
     clear: (selection) => sel(selection).clear(),
     targets: ({ selection } = {}) => sel(selection).targets(),
     read: ({ selection, target } = {}) => sel(selection).read(target),
+    // async like ntk's, whose registration is a round trip; a caller awaits
+    // the unwatch function either way
+    watch: async (selection, handler) => {
+      if (typeof handler !== 'function') {
+        throw new TypeError('clipboard: watch needs a handler function');
+      }
+      return sel(selection).watch(handler);
+    },
     /** the data device, for drag-and-drop to build on */
     dataDevice: selections.get('CLIPBOARD')?.device ?? null,
     manager: ddm,

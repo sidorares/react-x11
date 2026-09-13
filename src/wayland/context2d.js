@@ -462,7 +462,6 @@ export class WaylandContext2D {
    */
   begin(width, height, timestamp = 0) {
     this.init();
-    const gl = this.gl;
     const t = this._target;
     if (t) {
       t.bind();
@@ -482,9 +481,19 @@ export class WaylandContext2D {
     this.timestamp = timestamp;
     this.shapeStats = { quads: 0, batches: 0, glyphs: 0, paths: 0 };
     this.clipApproximations = 0;
+    this._applyState();
+  }
 
+  /**
+   * The GL state every draw here assumes. `begin()` sets it; a `<glarea>`
+   * that drew in the middle of the frame may have changed any of it, and
+   * `restoreGLState()` puts it back without starting a new frame.
+   */
+  _applyState() {
+    const gl = this.gl;
+    this._target?.bind();
     gl.useProgram(this._program);
-    gl.uniform2f(this._loc.uViewport, width, height);
+    gl.uniform2f(this._loc.uViewport, this._width, this._height);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.STENCIL_TEST);
@@ -494,6 +503,25 @@ export class WaylandContext2D {
     // Premultiplied alpha throughout — colours are premultiplied on the way
     // in, and the glyph and texture paths both produce premultiplied output.
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  }
+
+  /** After foreign GL drew — a `<glarea>`'s frame — before drawing again. */
+  restoreGLState() {
+    const gl = this.gl;
+    this._flush();
+    this._applyState();
+    // …and what `begin()` never had to say, because nothing here changes it
+    if (typeof gl.bindVertexArray === 'function') gl.bindVertexArray(null);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.stencilMask(0xff);
+    gl.frontFace(gl.CCW);
+    gl.depthMask(true);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /** Flush what is buffered without ending the frame. */
+  flush() {
+    this._flush();
   }
 
   /** Flush anything still buffered. Call before presenting. */
@@ -1567,6 +1595,10 @@ export class WaylandContext2D {
     const gl = this.gl;
     const { aPos, aUV, aColor, aParams } = this._loc;
 
+    // Two contexts interleave inside one frame — a window's and the pane a
+    // `<glarea>`'s children are painted on — so the target is bound here,
+    // per batch, rather than trusted to still be bound from `begin()`.
+    this._target?.bind();
     gl.useProgram(this._program);
     gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
     gl.bufferSubData(
