@@ -1040,6 +1040,27 @@ export class WaylandBackendWindow extends EventEmitter {
   }
 
   /**
+   * Where this popup's surface lies in the surface of the toplevel its chain
+   * hangs from, in logical pixels: each configure's offset from its parent's
+   * window geometry down the chain, plus the toplevel's shadow margin (a
+   * popup's geometry is its whole surface). What turns a rectangle in the
+   * toplevel into one in the popup — the text-input caret, when mutter has
+   * given a grabbing popup the keyboard.
+   */
+  offsetInRoot() {
+    let x = 0;
+    let y = 0;
+    let w = this;
+    for (let i = 0; w?.isPopup && w.parentWindow && i < 16; i++) {
+      x += w.wl?.x ?? 0;
+      y += w.wl?.y ?? 0;
+      w = w.parentWindow;
+    }
+    const m = w?.wl?.margins ?? { left: 0, top: 0 };
+    return { x: x + m.left, y: y + m.top, root: w };
+  }
+
+  /**
    * The desktop's frame style or its colours changed (app.js). The frame
    * repaints; if the titlebar's height moved with the title's font, the
    * content keeps its size where the compositor lets it and the surface
