@@ -223,3 +223,52 @@ test.after(() => {
     /* gone */
   }
 });
+
+test(
+  'glyphs placed in a run that grows the atlas are all drawn',
+  { skip },
+  () => {
+    // 400 distinct 30px glyphs: the first 512² atlas holds 256, so it grows in
+    // the middle of the run and flushes the quads it already holds first.
+    // Those glyphs were only in the CPU copy; drawn before an upload they
+    // sampled nothing and came out transparent — "garbled text". Every glyph
+    // is at its own place, so a lost one cannot be hidden by a later one.
+    const size = 512;
+    const target = new GLTarget(env.gpu.gl, { width: size, height: size });
+    const ctx = new WaylandContext2D(env.gpu.gl, { fontManager: null, target });
+    ctx.init();
+    const font = {
+      key: 'test-solid-squares',
+      rasterize: () => ({
+        width: 30,
+        height: 30,
+        left: 0,
+        top: -30,
+        data: new Uint8Array(30 * 30).fill(255),
+      }),
+    };
+    const glyphs = [];
+    for (let i = 0; i < 400; i++) {
+      glyphs.push({
+        id: i + 1,
+        x: (i % 20) * 25,
+        y: Math.floor(i / 20) * 25 + 30,
+      });
+    }
+    ctx.begin(size, size);
+    ctx.clearRect(0, 0, size, size);
+    ctx.drawTextRuns([{ font, size: 30, glyphs, color: '#ffffff' }]);
+    ctx.end();
+    assert.ok(ctx.atlas.size > 512, 'the atlas grew during the run');
+    for (const [x, y] of [
+      [5, 5], // the first glyph, placed before the atlas grew
+      [130, 105],
+      [255, 255],
+      [490, 490], // the last, placed after
+    ]) {
+      assert.deepEqual(pixel(ctx, x, y), [255, 255, 255, 255], `at ${x},${y}`);
+    }
+    ctx.destroy();
+    target.destroy();
+  },
+);
