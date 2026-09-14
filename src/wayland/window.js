@@ -39,7 +39,7 @@
 // is emitted, so the frame that acks it is painted at the right insets.
 
 import { EventEmitter } from 'node:events';
-import { ServerDecoration } from './ssd.js';
+import { createServerDecoration } from './ssd.js';
 import { createLayerSurface } from './layershell.js';
 
 /** `xdg_toplevel.state` values. */
@@ -264,14 +264,17 @@ export class WaylandWindow extends EventEmitter {
     if (minSize) toplevel.$.set_min_size(minSize.width | 0, minSize.height | 0);
     if (maxSize) toplevel.$.set_max_size(maxSize.width | 0, maxSize.height | 0);
     // Who draws the frame is asked before the first commit; the answer rides
-    // the first configure (ssd.js).
-    if (decorations?.manager) {
-      win.decoration = new ServerDecoration({
-        manager: decorations.manager,
-        toplevel,
-        prefer: decorations.prefer,
-      });
-    }
+    // the first configure (ssd.js). Whichever protocol the compositor has is
+    // asked — the standard one first — and only a compositor with neither
+    // leaves the frame to this backend.
+    win.decoration = createServerDecoration({
+      manager: decorations?.manager,
+      kdeManager: decorations?.kdeManager,
+      toplevel,
+      surface,
+      prefer: decorations?.prefer,
+    });
+    win._wireDecoration();
     // the empty commit that asks for the first configure
     surface.$.commit();
     return win;
@@ -404,6 +407,30 @@ export class WaylandWindow extends EventEmitter {
       if (this.outputs.delete(output)) this.emit('outputs', this.outputs);
     });
     this.surface.on('preferred_buffer_transform', () => {});
+  }
+
+  /**
+   * The KDE protocol's `mode` event is not part of a configure sequence
+   * (ssd.js), so a change of heart after the window is up would otherwise
+   * sit in `pending` waiting for a configure that nothing promises. Flush it
+   * in a microtask: a configure in the same batch of messages still gets
+   * there first and adopts it the ordinary way, and only a mode that really
+   * arrived alone is applied on its own — `setMargins` already knows how to
+   * resize outside a configure.
+   *
+   * Before the first configure there is nothing to flush: that configure is
+   * coming, and riding it keeps the first frame at the right insets.
+   */
+  _wireDecoration() {
+    const decoration = this.decoration;
+    if (!decoration?.flushesOutsideConfigure) return;
+    decoration.on('pending', () => {
+      if (!this.configured) return;
+      queueMicrotask(() => {
+        if (this.destroyed) return;
+        if (decoration.adopt()) this.emit('decorationmode', decoration.mode);
+      });
+    });
   }
 
   /**

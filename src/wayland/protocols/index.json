@@ -78,6 +78,10 @@
   "zxdg_decoration_manager_v1",
   "zxdg_toplevel_decoration_v1"
  ],
+ "kde-server-decoration": [
+  "org_kde_kwin_server_decoration_manager",
+  "org_kde_kwin_server_decoration"
+ ],
  "primary-selection-unstable-v1": [
   "zwp_primary_selection_device_manager_v1",
   "zwp_primary_selection_device_v1",

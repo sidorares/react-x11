@@ -61,7 +61,7 @@ appeared" proves nothing. Three checks that do:
 | `<glarea>`         | `glarea.js`                                              | a rect of the window's backing target as the area's GL surface; composited panes for its children |
 | input              | `seat.js`, `xkb.js`, `keysymnames.js`, `input.js`        | pointer frames, keymap parsing, key repeat, routing                                               |
 | touch and tablet   | `touch.js`, `tablet.js`                                  | `wl_touch` and `zwp_tablet_v2`, emulating the pointer; raw touches                                |
-| decorations        | `decorations.js`, `ssd.js`                               | the client-side frame, and xdg-decoration to hand it to the compositor                            |
+| decorations        | `decorations.js`, `ssd.js`                               | xdg-decoration or KDE's, to hand the frame to the compositor; the client-side frame where neither |
 | layer surfaces     | `layershell.js`                                          | docks, panels, wallpapers, overlays — wlr-layer-shell                                             |
 | screen capture     | `screencopy.js`, `shm.js`                                | wlr-screencopy / ext-image-copy-capture into `wl_shm`; the eyedropper                             |
 | offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target                                            |

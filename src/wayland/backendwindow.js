@@ -20,10 +20,10 @@
 // backing target, and the result is copied to a swapchain buffer and
 // committed with the next frame request in the same commit.
 //
-// The frame is drawn here only until a compositor agrees to draw it:
-// where xdg-decoration is offered the window asks for server-side
-// decorations (ssd.js) and, granted them, switches its own off, which the
-// tree sees as the content growing. And a window whose `windowType` is a
+// The frame is drawn here only as a last resort: where either decoration
+// protocol is offered the window asks for server-side decorations (ssd.js)
+// and, granted them, switches its own off, which the tree sees as the
+// content growing. And a window whose `windowType` is a
 // dock, a wallpaper, a notification or a splash is not a toplevel at all
 // where the compositor has layer-shell (layershell.js) — same surface, same
 // loop, no frame.
@@ -206,9 +206,14 @@ export class WaylandBackendWindow extends EventEmitter {
         width: surfaceW,
         height: surfaceH,
         parent: app.parentFor(attributes, { toplevelOnly: true })?.wl ?? null,
-        decorations: app.decorationManager
-          ? { manager: app.decorationManager, prefer: this._decorPolicy.prefer }
-          : null,
+        decorations:
+          app.decorationManager || app.kdeDecorationManager
+            ? {
+                manager: app.decorationManager,
+                kdeManager: app.kdeDecorationManager,
+                prefer: this._decorPolicy.prefer,
+              }
+            : null,
       });
     }
     this.wl.scale = scale;

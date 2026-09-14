@@ -63,6 +63,7 @@ const DEFS = loadDefs([
   'text-input-unstable-v3',
   'tablet-v2',
   'xdg-decoration-unstable-v1',
+  'kde-server-decoration',
   'wlr-layer-shell-unstable-v1',
   'wlr-screencopy-unstable-v1',
 ]);
@@ -83,6 +84,7 @@ const GLOBALS = [
   // binds it
   ['wl_shm', 1],
   ['zxdg_decoration_manager_v1', 1],
+  ['org_kde_kwin_server_decoration_manager', 1],
   ['zwlr_layer_shell_v1', 4],
   ['zwlr_screencopy_manager_v1', 3],
 ];
@@ -148,6 +150,9 @@ export class MockCompositor extends EventEmitter {
    * @param {number} [opts.xdgOutputVersion] the manager's version (3)
    * @param {{width: number, height: number}} [opts.bounds] sent as
    *   `configure_bounds` ahead of every toplevel configure
+   * @param {string[]} [opts.without] interfaces to leave out of the registry,
+   *   for a client that has to cope with a compositor missing one — a
+   *   decoration protocol, say
    */
   constructor(opts = {}) {
     super();
@@ -171,12 +176,11 @@ export class MockCompositor extends EventEmitter {
     this.registry = null;
     this.registries = [];
     /** what the registry currently lists: { name, iface, version, output? } */
-    this.globals = GLOBALS.map(([iface, version], i) => ({
-      name: i + 1,
-      iface,
-      version,
-    }));
-    this._nextGlobal = GLOBALS.length + 1;
+    const without = new Set(opts.without ?? []);
+    this.globals = GLOBALS.filter(([iface]) => !without.has(iface)).map(
+      ([iface, version], i) => ({ name: i + 1, iface, version }),
+    );
+    this._nextGlobal = this.globals.length + 1;
     /** output name -> { spec, global, bound: Set<proxy id>, xdg: Set<id> } */
     this.outputs = new Map();
     // One screen-sized output unless a test lists its own (`outputs: []` for
@@ -437,6 +441,33 @@ export class MockCompositor extends EventEmitter {
       else if (name === 'unset_mode') role.decorationRequested = null;
       else if (name === 'destroy') {
         if (role) role.decoration = null;
+        this.objects.delete(id);
+      }
+      return;
+    }
+    if (iface === 'org_kde_kwin_server_decoration_manager') {
+      if (name === 'create') {
+        // this protocol decorates the surface, not the toplevel
+        const role = this.surfaces.get(args[1])?.role;
+        this.objects.get(args[0]).role = role;
+        if (role) role.kdeDecoration = args[0];
+      }
+      return;
+    }
+    if (iface === 'org_kde_kwin_server_decoration') {
+      const role = obj.role;
+      if (name === 'request_mode') {
+        role.kdeRequested = args[0];
+        // Answered on its own, with no configure behind it — which is the
+        // whole difference from xdg-decoration and what the client has to
+        // cope with.
+        this.send(
+          id,
+          'mode',
+          role.kdeDecorationMode ?? this.opts.kdeDecorationMode ?? args[0],
+        );
+      } else if (name === 'release') {
+        if (role) role.kdeDecoration = null;
         this.objects.delete(id);
       }
       return;
@@ -991,6 +1022,17 @@ export class MockCompositor extends EventEmitter {
     s.role.decorationMode = mode;
     this._configure(s);
     return s.role.lastSerial;
+  }
+
+  /**
+   * Change a toplevel's KDE decoration mode: the `mode` event alone, with no
+   * configure after it, which is all that protocol promises.
+   */
+  setKdeDecorationMode(surfaceId, mode) {
+    const s = this.surfaces.get(surfaceId);
+    if (!s?.role?.kdeDecoration) throw new Error('mock: no kde decoration');
+    s.role.kdeDecorationMode = mode;
+    this.send(s.role.kdeDecoration, 'mode', mode);
   }
 
   /** Reconfigure a layer surface at a size of the compositor's choosing. */
