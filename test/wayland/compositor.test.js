@@ -320,6 +320,11 @@ test(
       null,
       'after leave nothing is under the pointer',
     );
+    // The client sent set_shape while it handled the enter, but the
+    // compositor reads its socket on its own schedule. A roundtrip puts a
+    // sync behind the request on the same stream, so by its answer the
+    // request has been read and recorded.
+    await conn.roundtrip();
     assert.ok(
       mock.sent('wp_cursor_shape_device_v1', 'set_shape').length >= 1,
       'a cursor was set on enter',
