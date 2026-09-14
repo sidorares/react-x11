@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.15.0](https://github.com/sidorares/react-x11/compare/v2.14.0...v2.15.0) (2026-09-14)
+
+
+### Features
+
+* **wayland:** ask KDE's server-decoration where xdg-decoration is missing ([#563](https://github.com/sidorares/react-x11/issues/563)) ([5092a3a](https://github.com/sidorares/react-x11/commit/5092a3a14dc2b91276ee8397559f1ceee2604244))
+* **wayland:** notice a compositor that has stopped sending frame callbacks, and publish it as useWindowState().presenting ([#570](https://github.com/sidorares/react-x11/issues/570)) ([e944ccf](https://github.com/sidorares/react-x11/commit/e944ccf6073d27332ccc9bea24693a9abbc83fbf)), closes [#567](https://github.com/sidorares/react-x11/issues/567)
+
+
+### Bug Fixes
+
+* **glarea:** draw a still surface once, not again each time the display hands its buffer back — frameLoop 'demand' looped at display rate on macOS ([#561](https://github.com/sidorares/react-x11/issues/561)) ([b9f8887](https://github.com/sidorares/react-x11/commit/b9f8887412098fce58dc28e13ab2b2f10bb8649c))
+* **wayland:** accept the flat rectangle list in fillRects ([#564](https://github.com/sidorares/react-x11/issues/564)) ([#568](https://github.com/sidorares/react-x11/issues/568)) ([9a4b289](https://github.com/sidorares/react-x11/commit/9a4b289b3f22109f9444b8edd07a004be6fd21cf))
+* **wayland:** answer createSolidPicture, so drawGlyphs can be spelled the documented way ([#569](https://github.com/sidorares/react-x11/issues/569)) ([a73030c](https://github.com/sidorares/react-x11/commit/a73030ce2629416f2b28b993f746747f466f90d9)), closes [#565](https://github.com/sidorares/react-x11/issues/565)
+* **wayland:** let an offscreen Surface's context be held and drawn through, not only used inside render() ([#566](https://github.com/sidorares/react-x11/issues/566)) ([#571](https://github.com/sidorares/react-x11/issues/571)) ([a07d8d5](https://github.com/sidorares/react-x11/commit/a07d8d5afa3eca6817c50349b02da80da96e7696))
+
 ## [2.14.0](https://github.com/sidorares/react-x11/compare/v2.13.0...v2.14.0) (2026-09-14)
 
 
