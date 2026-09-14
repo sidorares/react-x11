@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.14.0](https://github.com/sidorares/react-x11/compare/v2.13.0...v2.14.0) (2026-09-14)
+
+
+### Features
+
+* **wayland:** a native Wayland backend — GLES over dma-buf, xdg-shell, CSD, xkb input, on Node and Bun ([#548](https://github.com/sidorares/react-x11/issues/548)) ([1c87ba3](https://github.com/sidorares/react-x11/commit/1c87ba3b1c5a1028d48fe8024b9f082544205866))
+* **wayland:** fall back to a card node when there is no render node ([#559](https://github.com/sidorares/react-x11/issues/559)) ([67c6c83](https://github.com/sidorares/react-x11/commit/67c6c8389748780cba9f938c42b0b72bce4226a2))
+
+
+### Bug Fixes
+
+* define suspendOnActiveViewTransition, which react-reconciler 0.34 calls on every transition commit ([#560](https://github.com/sidorares/react-x11/issues/560)) ([81d6681](https://github.com/sidorares/react-x11/commit/81d66811afeb3ffddd034f85560345c61d622bc0))
+* **select:** a native menu near the window top stays open across unrelated re-renders ([#553](https://github.com/sidorares/react-x11/issues/553)) ([10bef75](https://github.com/sidorares/react-x11/commit/10bef75219f695daef1d1da126a9ca05841ae001)), closes [#552](https://github.com/sidorares/react-x11/issues/552)
+* **wayland:** edge cases from running every example on Wayland ([#550](https://github.com/sidorares/react-x11/issues/550)) ([4a7b491](https://github.com/sidorares/react-x11/commit/4a7b4911b8c1ecd51e50cf3b496f62118b6baa2d))
+* **wayland:** pass null for nullable protocol arguments, on @windowkit/wayland 3.1.1 ([#558](https://github.com/sidorares/react-x11/issues/558)) ([830dc8b](https://github.com/sidorares/react-x11/commit/830dc8b02ebee082b42eb655267e7fecba788fd2))
+
 ## [2.13.0](https://github.com/sidorares/react-x11/compare/v2.12.0...v2.13.0) (2026-09-12)
 
 
