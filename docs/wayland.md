@@ -217,7 +217,7 @@ The shopping list, mapped to what each protocol replaces here:
 | -------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | core (`wl_compositor`, `wl_shm`, `wl_seat`, `wl_output`, `wl_data_device`) | connection, buffers, input, screens, clipboard/DnD                |
 | [xdg-shell](https://wayland.app/protocols/xdg-shell)                       | `WM_*`/EWMH window lifecycle, `<popup>` placement                 |
-| xdg-decoration                                                             | asking for server-side decorations (often refused)                |
+| xdg-decoration (+ kde-server-decoration)                                   | asking for server-side decorations (often refused)                |
 | [linux-dmabuf](https://wayland.app/protocols/linux-dmabuf-v1)              | the GPU tier's buffer handoff                                     |
 | fractional-scale-v1 + viewporter                                           | the whole of `scale.js`'s ladder                                  |
 | [presentation-time](https://wayland.app/protocols/presentation-time)       | Present completions; adds real photon timestamps                  |

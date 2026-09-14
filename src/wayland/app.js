@@ -107,6 +107,8 @@ export class WaylandApp extends EventEmitter {
     this.outputs = null;
     /** xdg-decoration, layer-shell, shm: null where the compositor has none */
     this.decorationManager = null;
+    /** the older KDE decoration protocol; only bound if the above is missing */
+    this.kdeDecorationManager = null;
     this.layerShell = null;
     this.shm = null;
     /** screen capture and the eyedropper (screencopy.js); null on GNOME */
@@ -159,6 +161,13 @@ export class WaylandApp extends EventEmitter {
     // defers to it: the pin is read here instead, from the same options.
     await app._beginOutputs(conn, options);
     app.decorationManager = await conn.bind('zxdg_decoration_manager_v1');
+    // The older KDE protocol says the same thing, and some compositors have
+    // only that one. Bound where the standard one is missing, which is the
+    // only time it would be used — a frame the compositor draws beats one
+    // this backend imitates (ssd.js).
+    app.kdeDecorationManager = app.decorationManager
+      ? null
+      : await conn.bind('org_kde_kwin_server_decoration_manager');
     app.layerShell = await conn.bind('zwlr_layer_shell_v1');
     app.shm = await conn.bind('wl_shm');
     app.seat = await WaylandSeat.bind(conn);

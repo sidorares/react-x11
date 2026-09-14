@@ -66,6 +66,9 @@ export const PROTOCOLS = [
   'tablet-v2',
   'xdg-activation-v1',
   'xdg-decoration-unstable-v1',
+  // the older KDE protocol that does the same job, for the compositors that
+  // have only that one (ssd.js picks between them)
+  'kde-server-decoration',
   'primary-selection-unstable-v1',
   'text-input-unstable-v3',
   'pointer-constraints-unstable-v1',
