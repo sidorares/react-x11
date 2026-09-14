@@ -21,6 +21,8 @@
 // asking EGL for it means the window's own config no longer has to carry
 // stencil bits at all; the request in glcontext.js stays as belt and braces.
 
+import { releaseDevice } from './device.js';
+
 export class GLTarget {
   /**
    * @param {object} gl the GLES entry points
@@ -164,6 +166,9 @@ export class GLTarget {
       );
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    // The framebuffer and the scissor were the 2d contexts' to say; they are
+    // not any more, so the next one to draw re-establishes them (device.js).
+    releaseDevice(gl);
   }
 
   /**
@@ -229,6 +234,7 @@ export class GLTarget {
       gl.NEAREST,
     );
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    releaseDevice(gl);
     return true;
   }
 

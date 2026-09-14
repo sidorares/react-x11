@@ -693,6 +693,13 @@ export class WaylandBackendWindow extends EventEmitter {
    * time — a background fill reaching under a static scene — the surface's
    * pixels are gone with the repaint, so its node is asked for the frame
    * now, before the present, rather than showing the fill for a frame.
+   *
+   * `restoreGLState()` is here for the foreign GL specifically: a
+   * `<glarea>` draws with entry points nobody is tracking, so the state it
+   * left has to be assumed lost. An *offscreen* surface painted in the
+   * middle of the frame needs nothing said about it — its context and this
+   * one hand the device back and forth on their own (device.js), so a node
+   * that drew into one does not have to know the window has GL state.
    */
   _runSurfaces(ctx, time, wholeFrame) {
     ctx?.flush();
