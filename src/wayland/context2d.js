@@ -203,6 +203,17 @@ function scaleOf(m) {
   return Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
 }
 
+/**
+ * The Render ops a `drawGlyphs` call can name, numbered as XRender numbers
+ * them — the same table the Cocoa backend answers (`src/cocoa/context2d.js`),
+ * so `ctx.Render.PictOp.Over` reads the same on every backend. The op is
+ * ignored here: text composites Over, and for the opaque inks text uses Src
+ * and Over agree.
+ */
+const RENDER = Object.freeze({ PictOp: Object.freeze({ Src: 1, Over: 3 }) });
+
+const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
+
 const colorCache = new Map();
 
 /**
@@ -396,7 +407,7 @@ export class WaylandContext2D {
     this.fontManager = fontManager;
     // `TextLayout.draw` opens with `ctx.window.app.display.Render` and reads
     // one constant from it. Satisfy the shape rather than fork the layout.
-    this.window = { app: { display: { Render: { PictOp: { Over: 3 } } } } };
+    this.window = { app: { display: { Render: RENDER } } };
     this.atlas = new GlyphAtlas(gl);
     // Quads already buffered against the atlas must be drawn before the
     // atlas re-lays itself out under them.
@@ -1564,6 +1575,44 @@ export class WaylandContext2D {
 
   // ---- text -------------------------------------------------------------
 
+  /** ntk's Render extension object, as much of it as glyph runs need. */
+  get Render() {
+    return RENDER;
+  }
+
+  /**
+   * A solid ink for `drawGlyphs`. ntk answers an XRender `Picture` here and
+   * the Cocoa backend the colour itself; this answers the same stand-in
+   * `_stylePicture` builds, so the way ntk documents the call
+   *
+   *     ctx.drawGlyphs(ctx.Render.PictOp.Over,
+   *                    ctx.createSolidPicture(r, g, b, a), runs)
+   *
+   * draws on every backend unchanged. Half the pair — `drawGlyphs` without
+   * this — left every caller that positions its own glyphs (a terminal
+   * grid, a tabular column) feature-detecting, and a feature test that came
+   * back false drew a frame with no text in it rather than throwing (issue
+   * #565).
+   *
+   * The channels are **premultiplied** 0..1, as XRender solids are, which
+   * is the form this context carries colours in — so they pass through
+   * `parseColor` untouched. A channel brighter than the alpha is not a
+   * premultiplied colour; it is clamped down to it, which is the same
+   * colour the Cocoa backend lands on for that input (it un-premultiplies
+   * and clamps to 1).
+   */
+  createSolidPicture(r, g, b, a) {
+    const alpha = clamp01(a);
+    return {
+      color: Object.freeze([
+        Math.min(clamp01(r), alpha),
+        Math.min(clamp01(g), alpha),
+        Math.min(clamp01(b), alpha),
+        alpha,
+      ]),
+    };
+  }
+
   /**
    * ntk's glyph-drawing contract, which is how `TextLayout.draw` reaches a
    * context — and therefore how every `<text>`, `<textinput>` and
@@ -1572,16 +1621,17 @@ export class WaylandContext2D {
    * The signature is XRender's: a `PictOp`, a source `Picture`, and glyph
    * runs already placed at absolute baselines. The op is always `Over` for
    * text and the source is always a solid colour, so what this does is take
-   * the colour back out of the stand-in `_stylePicture` handed over and draw
-   * the runs through the atlas.
+   * the colour back out of the ink handed over (`_inkOf`) and draw the runs
+   * through the atlas.
    *
    * @param {number} op ignored — text is always drawn `Over`
-   * @param {{color?:string}} src what `_stylePicture` returned
+   * @param {object|string|number[]|null} src a `createSolidPicture` ink, a
+   *   `_stylePicture` stand-in, a colour, or null for the fill style
    * @param {Array<{run:object, x:number, y:number}>} positioned
    */
   drawGlyphs(op, src, positioned) {
     if (!Array.isArray(positioned)) return;
-    const color = src?.color ?? this.fillStyle;
+    const color = this._inkOf(src);
     const runs = [];
     for (const p of positioned) {
       const run = p.run;
@@ -1602,6 +1652,22 @@ export class WaylandContext2D {
   /** A solid-colour stand-in for the XRender `Picture` a source would be. */
   _stylePicture(color) {
     return { color };
+  }
+
+  /**
+   * The colour a `drawGlyphs` source paints with: a `createSolidPicture`
+   * ink or a `_stylePicture` stand-in (both carry `.color`), a CSS colour
+   * string, a premultiplied `[r, g, b, a]` — or, for anything this context
+   * cannot ink glyphs with (a gradient), the fill style in force. The same
+   * set the Cocoa backend takes, so a caller that skips the picture and
+   * names a colour draws here too.
+   */
+  _inkOf(src) {
+    if (typeof src === 'string' || Array.isArray(src)) return src;
+    const color = src?.color;
+    return typeof color === 'string' || Array.isArray(color)
+      ? color
+      : this.fillStyle;
   }
 
   get _backgroundPicture() {
