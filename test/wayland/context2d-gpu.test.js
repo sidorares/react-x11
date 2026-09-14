@@ -190,6 +190,35 @@ test('a clip survives a flush and a foreign-GL state restore', { skip }, () => {
   target.destroy();
 });
 
+// The flat rectangle list is what `Render.FillRectangles` takes on the wire,
+// and what every batching caller in react-x11 builds — selection bands, the
+// small-text strip, preedit underlines. Read as one rectangle per element it
+// painted nothing, and nothing is what `pure.test.js` cannot see: these are
+// the pixels (#564).
+test(
+  'fillRects paints the flat list, the same as the nested one',
+  { skip },
+  () => {
+    const { ctx, target } = makeContext(env);
+    fresh(ctx);
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRects([0, 0, 16, 16, 32, 32, 16, 16]);
+    ctx.fillStyle = '#00ff00';
+    ctx.fillRects([
+      [0, 32, 16, 16],
+      [32, 0, 16, 16],
+    ]);
+    ctx.end();
+    assert.deepEqual(pixel(ctx, 8, 8), [255, 0, 0, 255], 'flat, first');
+    assert.deepEqual(pixel(ctx, 40, 40), [255, 0, 0, 255], 'flat, second');
+    assert.deepEqual(pixel(ctx, 8, 40), [0, 255, 0, 255], 'nested, first');
+    assert.deepEqual(pixel(ctx, 40, 8), [0, 255, 0, 255], 'nested, second');
+    assert.equal(pixel(ctx, 24, 24)[3], 0, 'between them, untouched');
+    ctx.destroy();
+    target.destroy();
+  },
+);
+
 test('a stroke is antialiased', { skip }, () => {
   const { ctx, target } = makeContext(env);
   fresh(ctx);
