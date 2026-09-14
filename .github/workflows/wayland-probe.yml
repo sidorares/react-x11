@@ -111,13 +111,17 @@ jobs:
           mkdir -p "$RUNNER_TEMP/kwin-logs"
           devices=()
           for d in /dev/dri /dev/udmabuf; do [ -e "$d" ] && devices+=(--device "$d"); done
+          # Arch ships kwin_wayland with file capabilities for realtime
+          # scheduling; exec fails with EPERM unless the container may hold them.
           docker run --rm "${devices[@]}" \
+            --cap-add SYS_NICE \
             -v "$PWD/scripts:/src:ro" \
             -v "$RUNNER_TEMP/kwin-logs:/logs" \
             -v "$GITHUB_STEP_SUMMARY:/summary.md" \
             -e HOST_UID="$(id -u)" \
             archlinux:latest bash -euo pipefail -c '
               pacman -Syu --noconfirm --needed kwin wayland-utils wayland-protocols nodejs npm mesa dbus >/dev/null
+              getcap /usr/bin/kwin_wayland || true
               kwin_wayland --version || true
               # Inside the container the nodes keep the host groups (video,
               # kvm), which no user here is in.
