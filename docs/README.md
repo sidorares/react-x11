@@ -349,13 +349,14 @@ else's app, a `.desktop` launcher, an A/B run.
 
 **Choosing a backend and a display**
 
-| variable                     | effect                                                                 |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| `DISPLAY`                    | X server to connect to (standard X11)                                  |
-| `REACT_X11_BACKEND`          | `x11` or `cocoa`, overriding `backend` and the default                 |
-| `REACT_X11_SCALE`            | device pixels per logical pixel; outranks even a pinned `scale` number |
-| `REACT_X11_FRAME_RATE`       | `display` or `adaptive`, overriding `frameRate` and the props          |
-| `REACT_X11_TEXT_STRIP_BELOW` | the `textStripBelow` size, for a process that cannot pass the option   |
+| variable                     | effect                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| `DISPLAY`                    | X server to connect to (standard X11)                                    |
+| `REACT_X11_BACKEND`          | `x11`, `cocoa` or `wayland`, overriding `backend` and the default        |
+| `REACT_X11_GL_DEVICE`        | Wayland: the DRM node to render on, where `glPolicy.devicePath` is unset |
+| `REACT_X11_SCALE`            | device pixels per logical pixel; outranks even a pinned `scale` number   |
+| `REACT_X11_FRAME_RATE`       | `display` or `adaptive`, overriding `frameRate` and the props            |
+| `REACT_X11_TEXT_STRIP_BELOW` | the `textStripBelow` size, for a process that cannot pass the option     |
 
 **Turning desktop integration off**
 

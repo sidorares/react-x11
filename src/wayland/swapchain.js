@@ -306,7 +306,7 @@ export class WaylandSwapchain {
     this._fail(
       new Error(
         `${err.message}. Client and compositor are probably on different DRM devices; ` +
-          "name the compositor's device with glPolicy: { devicePath: '/dev/dri/renderD###' }.",
+          "name the compositor's device with glPolicy: { devicePath: '/dev/dri/renderD###' } or REACT_X11_GL_DEVICE.",
         { cause: err },
       ),
     );
