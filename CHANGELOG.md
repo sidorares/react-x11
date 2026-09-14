@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.1](https://github.com/sidorares/react-x11/compare/v2.15.0...v2.15.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **wayland:** read libxkbcommon's `symbols[1]` group subscript, not only xkbcomp's `symbols[Group1]` — every printable key typed `1` ([#572](https://github.com/sidorares/react-x11/issues/572)) ([57572f0](https://github.com/sidorares/react-x11/commit/57572f0e7156a8a06cdcc1a50786d434111c44f3))
+
 ## [2.15.0](https://github.com/sidorares/react-x11/compare/v2.14.0...v2.15.0) (2026-09-14)
 
 
