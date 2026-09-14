@@ -272,9 +272,18 @@ export class GlAreaNode extends Node {
     // (`EventManager._surfaceAt`).
     this._joinSurfaces();
     this.gl = wnd.getContext('opengl', config);
-    // a buffer freed by the display is a frame that can be drawn again
+    // A buffer freed by the display is a frame that can be drawn again — for
+    // a frame that was waiting for one. The Cocoa surface and the CGL
+    // context reopen their gate one display period after *every* swap, not
+    // only after a refused one, and a request per reopening turned
+    // frameLoop 'demand' into a loop at display rate: a still scene drew
+    // every frame, forever.
     if (typeof this.gl?.onFrameAvailable !== 'undefined') {
-      this.gl.onFrameAvailable = () => this.requestFrame();
+      this.gl.onFrameAvailable = () => {
+        if (!this._frameRefused) return;
+        this._frameRefused = false;
+        this.requestFrame();
+      };
     }
     // The context is only usable once MakeCurrent has answered, and that is
     // where a server refusing indirect GLX says so (ntk gives the rejection
@@ -384,7 +393,10 @@ export class GlAreaNode extends Node {
     // On the direct backend every buffer may still be held by the display,
     // and drawing into one before it comes back would paint what is on
     // screen. `onFrameAvailable` asks for this frame again when one frees.
-    if (direct && gl.canRender && !gl.canRender()) return false;
+    if (direct && gl.canRender && !gl.canRender()) {
+      this._frameRefused = true;
+      return false;
+    }
     // binds this surface — the GPU context is shared between every <glarea>
     // on the connection — and picks up a resize
     gl.makeCurrent?.();
