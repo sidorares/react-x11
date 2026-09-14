@@ -1345,8 +1345,14 @@ export class EventManager {
    * then the element's own `defaultComposition` unless one of them called
    * `preventDefault()`. Same seam, same order as `defaultKeyDown`.
    */
-  _composition(phase, target, data, native) {
-    const ev = this.dispatch('Composition' + phase, target, native, { data });
+  _composition(phase, target, data, native, extra) {
+    // `extra` is what an input method knows beyond the text — the cursor
+    // inside its preedit (`cursorBegin`/`cursorEnd`, src/wayland/textinput.js);
+    // the client-side composer has none, and the event is the same shape
+    const ev = this.dispatch('Composition' + phase, target, native, {
+      data,
+      ...extra,
+    });
     if (!ev.defaultPrevented) target.defaultComposition?.(ev);
     return ev;
   }

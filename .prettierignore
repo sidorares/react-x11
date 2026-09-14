@@ -15,3 +15,7 @@ website/.docusaurus/
 website/static/demo/
 website/docs/reference/
 website/static/img/docs/
+
+# Vendored Wayland protocol definitions (src/wayland/protocols/): generated
+# from wayland-protocols XML by the client library's own parser, kept compact.
+src/wayland/protocols/

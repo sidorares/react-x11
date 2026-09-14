@@ -119,6 +119,15 @@ const root = await createRoot({
 `nativeEvent.rootx/rooty` are screen coordinates — useful for anchoring a
 `<popup>` at the pointer.
 
+On the Wayland backend a finger or a tablet tool drives the same mouse
+events, and those events alone carry `nativeEvent.pointerType` (`'touch'`,
+`'pen'`, `'eraser'` or `'mouse'`) with `pressure`, `tiltX`/`tiltY`,
+`rotation`, `distance` and `tangentialPressure` in the DOM's ranges; a mouse
+adds nothing, so a handler that never looks is unaffected. Every finger also
+arrives raw on the window as `touchstart`/`touchmove`/`touchend`/
+`touchcancel` (`wnd.on(...)`, not React props) — see
+[wayland-backend.md](wayland-backend.md).
+
 `x`/`y`/`localX`/`localY` and the wheel deltas are logical pixels in **the
 target's** unit — the display scale, times any `scale` prop above it
 ([scale.md](scale.md#a-subtree-of-its-own)). With no `scale` in the tree
@@ -469,6 +478,27 @@ A screen reader is told the same story: the preedit is a text run of its
 own and its churn is marked as text the user did not type, so the accent is
 not read out and the character it commits is —
 [accessibility.md](accessibility.md#while-a-composition-is-open).
+
+### Input methods
+
+On the [Wayland backend](wayland-backend.md) the compositor's input method
+(IBus under GNOME) drives the same three events over `zwp_text_input_v3`:
+its preedit arrives on `onCompositionUpdate` and the text it commits on
+`onCompositionEnd`, inserted the way a typed character is. Two things are
+only there:
+
+- `ev.cursorBegin` / `ev.cursorEnd` on an update — code-point offsets into
+  `data` — when the engine says where inside its preedit the cursor is, or
+  which segment of a phrase it is converting (drawn with a heavier
+  underline). A dead key never sets them.
+- a commit with no preedit before it — an emoji picker, an engine that
+  commits directly — is a start and an end in one.
+
+Keys the input method consumes never reach the application, so a dead key
+composed by IBus does not also reach the client-side table; a key that does
+arrive is one the input method declined. `<textinput sensitive>` offers the
+input method none of its text, and `inputMode` on a `<textinput>` tells it
+what to expect ([elements.md](elements.md#textinput)).
 
 ### Changing the table
 

@@ -254,6 +254,15 @@ export class NodeBoxPaint {
         ctx.fill();
         continue;
       }
+      // A context that can feather a rounded rectangle itself — the GPU
+      // backend's distance-field shadow — skips the coverage surface, the
+      // CPU blur and the paint cache entirely. Feature-detected, like
+      // `presentFrame`: an ntk context has no such method and takes the
+      // path below.
+      if (typeof ctx.fillShadow === 'function') {
+        ctx.fillShadow(rect, r, shadow.blur, color);
+        continue;
+      }
       this._paintBlurredShadow(ctx, rect, r, shadow.blur, color);
     }
   }

@@ -4,6 +4,17 @@ Runnable demos, each a single file you can read top to bottom. They all need
 an X server — a Linux desktop, XQuartz on macOS, or `Xvfb`/`Xephyr` for
 something disposable — and they all read `$DISPLAY`.
 
+On a Wayland desktop the same files run on the native backend, with the X
+display taken away so nothing can fall back — every example except the two
+that are X11 by nature (`wm.jsx`, `xeyes.jsx`):
+
+```bash
+env -u DISPLAY REACT_X11_BACKEND=wayland bun examples/simple.jsx   # or node --import tsx
+```
+
+See [docs/wayland-backend.md](../docs/wayland-backend.md) for what that
+needs and how to tell it apart from Xwayland.
+
 ```sh
 npm run examples:simple        # start here
 ```
