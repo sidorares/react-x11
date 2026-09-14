@@ -453,6 +453,10 @@ const HostConfig = {
   },
   startSuspendingCommit() {},
   suspendInstance() {},
+  // react-reconciler 0.34 calls this on every commit whose lanes are all
+  // transition, retry or idle lanes, whether or not the tree has a
+  // <ViewTransition>. There is no view transition here to wait on.
+  suspendOnActiveViewTransition() {},
   waitForCommitToBeReady() {
     return null;
   },
