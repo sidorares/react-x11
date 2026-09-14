@@ -1,6 +1,6 @@
 // The clipboard over wl_data_device: clearing it sends `set_selection` with a
-// null source, an `allow-null` object @windowkit/wayland refused as 0 before 3.1.1.
-// examples/clipboard.jsx's "clear it" button crashed the app on it.
+// null source, an `allow-null` object @windowkit/wayland refused before
+// 3.1.1. examples/clipboard.jsx's "clear it" button crashed the app on it.
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { test } from 'node:test';

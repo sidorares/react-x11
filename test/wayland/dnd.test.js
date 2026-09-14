@@ -275,6 +275,11 @@ test(
         [0, 0],
         'no action offered over the frame',
       );
+      assert.equal(
+        mock.sent('wl_data_offer', 'accept').at(-1).args[1],
+        null,
+        'and a null mime: none of the types, rather than an empty one',
+      );
     } finally {
       conn.destroy();
       mock.close();

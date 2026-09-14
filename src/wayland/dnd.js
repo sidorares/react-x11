@@ -14,9 +14,8 @@
 // `localDrop`, driven with an offer flagged `source: 'external'`, so the path
 // diffing, `:drag-over`, `dropAccept` matching and the handler dispatch are
 // the one implementation across every backend. The answer goes straight back
-// on the offer: `wl_data_offer.accept(serial, mime)` (or an empty mime to
-// refuse — the wire codec cannot encode a true null string, and an empty one
-// names no type the source offered) and `set_actions`.
+// on the offer: `wl_data_offer.accept(serial, mime)`, with a null mime to
+// refuse, and `set_actions`.
 //
 // Coordinates arrive surface-local and logical, measured from the whole
 // surface including the client-side frame; the tree wants content-relative
@@ -390,13 +389,16 @@ export class WaylandDnd {
   /** Tell the source we take the drag, and how. */
   _accept(state, action) {
     this._setActions(state, action);
-    this._offerAccept(state, state.types[0] ?? '');
+    this._offerAccept(state, state.types[0] ?? null);
   }
 
-  /** Tell the source we do not: no action, and a mime that names nothing. */
+  /**
+   * Tell the source we do not: no action, and a null mime, which names no
+   * type, where "" would name an empty one.
+   */
   _reject(state) {
     this._setActions(state, null);
-    this._offerAccept(state, '');
+    this._offerAccept(state, null);
   }
 
   _setActions(state, action) {
@@ -411,9 +413,7 @@ export class WaylandDnd {
 
   _offerAccept(state, mime) {
     try {
-      // No true null on the wire (the codec cannot encode one), so a refusal
-      // is an empty mime — a name no source offers, which reads as "none".
-      state.offer.$.accept(state.enterSerial, mime ?? '');
+      state.offer.$.accept(state.enterSerial, mime);
     } catch {
       /* the offer may be gone */
     }
@@ -421,7 +421,7 @@ export class WaylandDnd {
 
   _finishOffer(state, action) {
     this._setActions(state, action);
-    this._offerAccept(state, state.types[0] ?? '');
+    this._offerAccept(state, state.types[0] ?? null);
     try {
       if (typeof state.offer.$.finish === 'function') state.offer.$.finish();
     } catch {

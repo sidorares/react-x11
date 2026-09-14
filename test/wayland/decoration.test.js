@@ -1,8 +1,8 @@
 // xdg-decoration against the in-process compositor: the request goes out
 // before the first commit, the answer is adopted with the configure it rode
 // in on (and heard before it), and a later change of heart by the
-// compositor arrives the same way. Plus the nullable-object requests
-// @windowkit/wayland cannot encode on its own.
+// compositor arrives the same way. Plus the nullable-object requests, which
+// go out as null and reach the compositor as the id 0.
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { after, before, test } from 'node:test';
@@ -226,6 +226,29 @@ test(
       other.toplevel.id,
     ]);
     other.destroy();
+    win.destroy();
+  },
+);
+
+test(
+  'unmap: a null buffer, committed, and the window is no longer mapped',
+  { skip: SKIP },
+  async () => {
+    const win = WaylandWindow.createSync({
+      conn,
+      compositor,
+      wmBase,
+      title: 'U',
+      width: 100,
+      height: 100,
+    });
+    await win.whenConfigured;
+    // as the first presented frame leaves it
+    win.mapped = true;
+    win.unmap();
+    await conn.roundtrip();
+    assert.deepEqual(mock.sent('wl_surface', 'attach').pop().args, [0, 0, 0]);
+    assert.equal(win.mapped, false);
     win.destroy();
   },
 );

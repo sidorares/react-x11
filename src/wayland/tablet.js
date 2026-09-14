@@ -478,12 +478,15 @@ export class TabletTool {
   /**
    * The cursor over the surface the tool is in, by the same names the
    * pointer uses. Without cursor-shape there is no way to name one, as for
-   * the pointer; and hiding it wants a null surface in `set_cursor`, which
-   * the client library's argument check refuses today, so `'none'` keeps
-   * the last shape.
+   * the pointer; `'none'` hides it with a null surface.
    */
   applyCursor(name) {
-    if (this.surface == null || !this.cursorDevice || name === 'none') return;
+    if (this.surface == null) return;
+    if (name === 'none') {
+      this.proxy.$.set_cursor(this.proximitySerial, null, 0, 0);
+      return;
+    }
+    if (!this.cursorDevice) return;
     const shape = CURSOR_SHAPES[name] ?? CURSOR_SHAPES.default;
     this.cursorDevice.$.set_shape(this.proximitySerial, shape);
   }

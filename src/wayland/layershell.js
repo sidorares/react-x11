@@ -26,8 +26,6 @@
 // otherwise a bottom one; tall at x 0 is a left dock, tall otherwise a right
 // one.
 
-import { requestNullable } from './nullable.js';
-
 /** `zwlr_layer_shell_v1.layer`. */
 export const LAYER = { BACKGROUND: 0, BOTTOM: 1, TOP: 2, OVERLAY: 3 };
 /** `zwlr_layer_surface_v1.anchor` bits. */
@@ -313,9 +311,8 @@ export function createLayerSurface(
       : (exclusiveZone ?? 0) | 0;
 
   const surface = compositor.$.create_surface();
-  const proxy = requestNullable(
-    layerShell,
-    'get_layer_surface',
+  // a null output: the one the compositor prefers
+  const proxy = layerShell.$.get_layer_surface(
     surface.id,
     output ?? null,
     layerId,
