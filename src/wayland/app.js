@@ -26,6 +26,7 @@
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { WaylandConnection } from './connection.js';
+import { releaseDevice } from './device.js';
 import { WaylandSeat } from './seat.js';
 import { WaylandBackendWindow } from './backendwindow.js';
 import { WaylandSurface } from './surface.js';
@@ -264,6 +265,10 @@ export class WaylandApp extends EventEmitter {
 
   /** After an offscreen render, put the window's backing target back. */
   rebindWindowTarget() {
+    // The framebuffer changes here without any 2d context being told, so
+    // none of them owns the device's state any more and the next one to
+    // draw re-establishes its own (device.js).
+    if (this.gl) releaseDevice(this.gl);
     for (const w of this.windows.values()) {
       if (w._frameSize) {
         w.glctx.bindBacking();

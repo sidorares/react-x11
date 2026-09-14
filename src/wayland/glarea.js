@@ -336,6 +336,7 @@ export class WaylandOverlayPane {
       this._ctx = new WaylandContext2D(this.app.gl, {
         fontManager: this.app.fonts,
         target: this.target,
+        makeCurrent: () => this.app.makeCurrent(),
       });
       this._ctx.init();
       this._ctx.begin(this.target.width, this.target.height);

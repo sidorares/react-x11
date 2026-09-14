@@ -244,6 +244,27 @@ test('a stroke is antialiased', { skip }, () => {
   target.destroy();
 });
 
+test(
+  'restoreGLState() draws what was still buffered under the restored state',
+  { skip },
+  () => {
+    const { ctx, target } = makeContext(env);
+    fresh(ctx);
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(0, 0, SIZE, SIZE); // buffered, not flushed
+    // what a <glarea> leaves behind, with a batch still in hand: another
+    // framebuffer bound and a blend function that would halve the quad
+    const gl = env.gpu.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+    ctx.restoreGLState();
+    ctx.end();
+    assert.deepEqual(pixel(ctx, 32, 32), [255, 0, 0, 255], 'landed, opaque');
+    ctx.destroy();
+    target.destroy();
+  },
+);
+
 test.after(() => {
   if (!env) return;
   try {

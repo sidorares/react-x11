@@ -1070,14 +1070,39 @@ buffer, a jump to the far end and a resize all take. It is one `CopyArea`
 inside the pixmap: nothing crosses the wire but the request, the overlap is
 safe, and no exposure events come back.
 
-The same element runs unchanged on the Cocoa backend. `react-x11/ntk`'s
-`Surface` asks the app it is handed for the implementation — ntk's pixmap
-on an X connection, a CG bitmap on a Cocoa app — so the surface above is a
-bitmap there, `copyWithin` is one in-place copy of the band, and
-`drawImage` is one composite, with the element naming neither backend. The
-one thing to know: a bitmap has one graphics state, so `getContext('2d')`
-there answers the same context every time and its `destroy()` is a no-op
-(docs/macos.md "Custom drawing on a layer tree").
+The same element runs unchanged on the Cocoa and Wayland backends.
+`react-x11/ntk`'s `Surface` asks the app it is handed for the
+implementation — ntk's pixmap on an X connection, a CG bitmap on a Cocoa
+app, a GL render target on a Wayland one — so the surface above is a bitmap
+there, `copyWithin` is one in-place copy of the band, and `drawImage` is
+one composite, with the element naming neither backend. The one thing to
+know: where a surface has one graphics state rather than a context per
+call — a bitmap, a render target — `getContext('2d')` answers the same
+context every time and its `destroy()` is a no-op (docs/macos.md "Custom
+drawing on a layer tree").
+
+**Drawing into a surface, whichever backend.** ntk's advice — a caller
+doing many draws takes `getContext('2d')` once and holds it, rather than
+one context per frame — holds everywhere, including the backends where the
+surface is a GPU target and every context in the process shares one GL
+device. A held context there takes the device back whenever it finds it in
+someone else's hands, so its draws land in its own surface even in the
+middle of the window's own paint, and the window's context does the same on
+its way back (issue #566). Nothing to branch on, and nothing to restore:
+
+```js
+drawRows(rows) {
+  const ctx = (this.ctx ??= this.surface.getContext('2d'));
+  for (const row of rows) this.paintRow(ctx, row);
+}
+```
+
+`surface.render(fn)` is the scoped alternative: it hands `fn` a context
+whose transform and clip start clean and flushes when `fn` returns. Use it
+for a whole-surface repaint; hold a context for a grid that is touched a
+few cells at a time. The one thing not to do is mix them and expect the
+held context's transform to survive a `render()` — it is the same context,
+and `render` resets it.
 
 If the surface is **opaque** — every pixel of it written, which a terminal's
 grid or a tiled scene is — say so, and the present stops blending:

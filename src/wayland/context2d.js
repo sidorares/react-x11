@@ -43,6 +43,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Path2D, Image as NtkImage } from 'ntk';
+import { glDevice } from './device.js';
 import { GlyphAtlas } from './glyphatlas.js';
 import { GLTarget } from './target.js';
 
@@ -401,10 +402,17 @@ export class WaylandContext2D {
    * @param {object} [opts]
    * @param {object} [opts.fontManager] an ntk FontManager, for `fillText`
    * @param {import('./target.js').GLTarget} [opts.target] where to draw
+   * @param {() => void} [opts.makeCurrent] called before this context takes
+   *   the device back, for an owner that has to make a GL surface current
+   *   first — an offscreen surface, whose context may be drawn through at
+   *   any time, not only inside a window's frame
    */
-  constructor(gl, { fontManager = null, target = null } = {}) {
+  constructor(gl, { fontManager = null, target = null, makeCurrent } = {}) {
     this.gl = gl;
     this.fontManager = fontManager;
+    /** @see ./device.js — the state this context shares with its siblings */
+    this._device = glDevice(gl);
+    this._makeCurrent = makeCurrent ?? null;
     // `TextLayout.draw` opens with `ctx.window.app.display.Render` and reads
     // one constant from it. Satisfy the shape rather than fork the layout.
     this.window = { app: { display: { Render: RENDER } } };
@@ -506,8 +514,12 @@ export class WaylandContext2D {
 
   /** Where this context draws. A window's backing, or a surface's target. */
   attach(target) {
-    if (this._target !== target) this._flush();
+    if (this._target === target) return;
+    this._flush();
     this._target = target;
+    // The projection and the bound framebuffer both belonged to the old
+    // target; the next draw re-establishes them against this one.
+    this._release();
   }
 
   get target() {
@@ -520,6 +532,7 @@ export class WaylandContext2D {
    */
   begin(width, height, timestamp = 0) {
     this.init();
+    this._device.owner = this;
     const t = this._target;
     if (t) {
       t.bind();
@@ -551,9 +564,11 @@ export class WaylandContext2D {
   }
 
   /**
-   * The GL state every draw here assumes. `begin()` sets it; a `<glarea>`
-   * that drew in the middle of the frame may have changed any of it, and
-   * `restoreGLState()` puts it back without starting a new frame.
+   * The GL state every draw here assumes: the target bound, the projection
+   * sized to it, and the rest of the device saying what the shader was
+   * written against. `begin()` sets it; `_claim()` sets it again whenever
+   * something else has been drawing — another context, or a `<glarea>`'s
+   * foreign GL — since this one last did.
    */
   _applyState() {
     const gl = this.gl;
@@ -569,20 +584,59 @@ export class WaylandContext2D {
     // Premultiplied alpha throughout — colours are premultiplied on the way
     // in, and the glyph and texture paths both produce premultiplied output.
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  }
-
-  /** After foreign GL drew — a `<glarea>`'s frame — before drawing again. */
-  restoreGLState() {
-    const gl = this.gl;
-    this._flush();
-    this._applyState();
-    // …and what `begin()` never had to say, because nothing here changes it
+    // …and what a frame of this context's own never has to say, because
+    // nothing here changes it. Foreign GL does.
     if (typeof gl.bindVertexArray === 'function') gl.bindVertexArray(null);
     gl.blendEquation(gl.FUNC_ADD);
     gl.stencilMask(0xff);
     gl.frontFace(gl.CCW);
     gl.depthMask(true);
     gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /**
+   * Take the device before touching GL (device.js).
+   *
+   * Contexts on this backend share one GLES context, so the framebuffer and
+   * the state a draw needs are whatever the last one to draw left behind.
+   * This is the one place that notices and puts them back — which is what
+   * makes a held offscreen-surface context work the way ntk documents it,
+   * rather than only inside `Surface#render` (#566), and what spares a node
+   * that painted into a surface mid-frame from having to restore the
+   * window's context by hand afterwards.
+   *
+   * Nothing happens in the common case: a property compare against a
+   * context that is already the owner.
+   */
+  _claim() {
+    // Mid stencil-then-cover the state is set up for the pass, not for a
+    // plain batch, and the device cannot have changed hands under it.
+    if (this._device.owner === this || this._stencilling) return;
+    this._device.owner = this;
+    this._makeCurrent?.();
+    this.init();
+    // As `begin()` has it: a target's size *is* the projection.
+    const t = this._target;
+    if (t) {
+      this._width = t.width;
+      this._height = t.height;
+    }
+    this._applyState();
+  }
+
+  /** Give the device up, so the next draw through this context re-takes it. */
+  _release() {
+    if (this._device.owner === this) this._device.owner = null;
+  }
+
+  /** After foreign GL drew — a `<glarea>`'s frame — before drawing again. */
+  restoreGLState() {
+    // Foreign GL leaves no trace in the bookkeeping, so say so and re-take
+    // the device. State first, then the flush: anything still buffered is
+    // drawn under this context's state rather than under what was left.
+    this._release();
+    this._claim();
+    this._flush();
   }
 
   /** Flush what is buffered without ending the frame. */
@@ -1125,6 +1179,10 @@ export class WaylandContext2D {
   _fillPolys(polys, rule, style) {
     const bounds = polysBounds(polys);
     if (!bounds || bounds.w <= 0 || bounds.h <= 0) return;
+    // Before `_fillCoverage`, which cuts its raster to `_width`/`_height`:
+    // on a context that has never opened a frame those are the target's
+    // only once the device has been claimed.
+    this._claim();
     let color = null;
     if (!(style instanceof Gradient)) {
       color = this._color(style);
@@ -1366,6 +1424,7 @@ export class WaylandContext2D {
    * `(img, sx, sy, sw, sh, dx, dy, dw, dh)`, as canvas.
    */
   drawImage(img, ...args) {
+    this._claim();
     const src = this._textureFor(img);
     if (!src) return;
     let sx = 0;
@@ -1453,6 +1512,9 @@ export class WaylandContext2D {
   getImageData(x, y, w, h) {
     this._flush();
     const gl = this.gl;
+    // `readPixels` reads the bound framebuffer, and a blit or another
+    // context may have left it pointing elsewhere since the last draw.
+    this._target?.bind();
     const W = Math.max(0, w | 0);
     const H = Math.max(0, h | 0);
     const raw = new Uint8Array(W * H * 4);
@@ -1925,6 +1987,11 @@ export class WaylandContext2D {
   }
 
   _flush() {
+    // Before the early return, not after: `clearRect` and `putImageData`
+    // flush, change the blend function and flush again, and the second
+    // flush must not be the one that re-takes the device and puts the
+    // blending back.
+    this._claim();
     if (this._n === 0) return;
     const gl = this.gl;
     const { aPos, aUV, aColor, aParams } = this._loc;
@@ -2016,6 +2083,9 @@ export class WaylandContext2D {
   }
 
   destroy() {
+    // Nothing of this context's is installed any more, and the device
+    // record should not be the one thing still holding on to it.
+    this._release();
     this.atlas.destroy();
     this.masks.destroy();
     if (this._buffer) this.gl.deleteBuffer(this._buffer);

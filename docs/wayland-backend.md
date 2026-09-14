@@ -64,7 +64,7 @@ appeared" proves nothing. Three checks that do:
 | decorations        | `decorations.js`, `ssd.js`                               | xdg-decoration or KDE's, to hand the frame to the compositor; the client-side frame where neither |
 | layer surfaces     | `layershell.js`                                          | docks, panels, wallpapers, overlays — wlr-layer-shell                                             |
 | screen capture     | `screencopy.js`, `shm.js`                                | wlr-screencopy / ext-image-copy-capture into `wl_shm`; the eyedropper                             |
-| offscreen surfaces | `surface.js`                                             | the paint cache and scroll blits, over a render target                                            |
+| offscreen surfaces | `surface.js`, `device.js`                                | the paint cache and scroll blits, over a render target; a held context works                      |
 | clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                                                  |
 | screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap                               |
 | input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events                             |
@@ -271,6 +271,23 @@ blended over that, translucent. One thing a shared target needs that a
 child window never did: when the tree repaints under a static scene, the
 scene is asked for its frame before the present, so the background never
 shows through for a frame.
+
+**One GL device, several contexts, and whoever draws takes it.** A window's
+2d context, the pane a `<glarea>`'s children are painted on and every
+offscreen `Surface` are the same GLES context, differing only in which
+framebuffer they bind and what they left the blend, scissor and stencil
+state saying — unlike an XRender context, which is an encoder aimed at a
+drawable, or a Cocoa one, which carries its state in its bitmap. So
+`device.js` gives the device an owner: a context claims it before it
+touches GL, and claiming is where the target is bound and the state the
+shader was written against is put back. That is what makes ntk's advice —
+hold a surface's context and draw into it whenever you like — true here
+too, where a held context used to draw wherever the device was last pointed
+and say nothing about it (#566); it is also why a node that painted into a
+surface in the middle of the frame does not have to restore the window's
+context afterwards. Foreign GL is the exception it cannot see: a
+`<glarea>` draws through entry points nobody tracks, so the frame loop
+still calls `restoreGLState()` after one.
 
 **Paths are antialiased on the CPU, and clips are exact on the stencil.**
 A solid fill that fits the budget (512×512 after cutting to the clip) goes

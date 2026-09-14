@@ -13,6 +13,16 @@
 // only one surface is current at a time. Every target here shares the app's
 // one EGL context, so `render()` asks the app to make it current before
 // binding the target — which normally costs nothing, because it already is.
+//
+// Sharing one device is also why `getContext('2d')` used to be a trap. ntk
+// tells callers who draw often to hold a context rather than take one per
+// frame, and a held context here drew wherever the device was last pointed
+// — which, outside `render()`, was the window: the draws went nowhere
+// visible and nothing said so (#566). The context now takes the device back
+// whenever it finds it in someone else's hands (device.js), so holding one
+// works as ntk documents, and a node that painted into a surface in the
+// middle of the window's frame no longer has to put the window's GL state
+// back by hand either.
 
 import { WaylandContext2D } from './context2d.js';
 import { GLTarget } from './target.js';
@@ -57,6 +67,10 @@ export class WaylandSurface {
       this._ctx = new WaylandContext2D(this.app.gl, {
         fontManager: this.app.fonts,
         target: this.target,
+        // A surface may be drawn into between frames, when the app's notion
+        // of a current GL surface is whatever it last was; the context asks
+        // for one before it re-takes the device, as `render()` does.
+        makeCurrent: () => this.app.makeCurrent(),
       });
       this.app.makeCurrent();
       this._ctx.init();
@@ -67,6 +81,10 @@ export class WaylandSurface {
   /**
    * Draw into the surface through a context that starts clean — identity
    * transform, no clip — and is flushed when the callback returns.
+   *
+   * Drawing through `getContext('2d')` directly works too, and keeps the
+   * transform and clip it was left with; this is the scoped form, for a
+   * caller that wants a frame's worth of state rather than a canvas's.
    */
   render(fn) {
     if (this._destroyed) return this;

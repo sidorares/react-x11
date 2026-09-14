@@ -9,6 +9,7 @@ import {
   parseColor,
   parseFont,
 } from '../../src/wayland/context2d.js';
+import { glDevice, releaseDevice } from '../../src/wayland/device.js';
 import { unionDamage } from '../../src/wayland/swapchain.js';
 import { Decorations, RESIZE_MARGIN } from '../../src/wayland/decorations.js';
 import { RESIZE_EDGE, TOPLEVEL_STATE } from '../../src/wayland/window.js';
@@ -179,4 +180,28 @@ test('fillRects: the three argument shapes are the same drawing', () => {
     [expected[0]],
     'a trailing partial rectangle is not one',
   );
+});
+
+// The bookkeeping the contexts share, without any of them: one record per
+// `gl`, an owner that `releaseDevice` drops, and — the case every seam
+// above the first draw depends on — a context built with no GL at all
+// (`new WaylandContext2D(null)`, the two tests above) getting a record of
+// its own instead of an error out of the WeakMap (#566).
+test('glDevice: one record per gl, and none to share without one', () => {
+  const gl = {};
+  assert.equal(glDevice(gl), glDevice(gl), 'the same gl, the same record');
+  assert.notEqual(glDevice(gl), glDevice({}), 'another gl, another record');
+
+  const owner = {};
+  glDevice(gl).owner = owner;
+  assert.equal(glDevice(gl).owner, owner, 'the owner is what was set');
+  releaseDevice(gl);
+  assert.equal(glDevice(gl).owner, null, 'and released is nobody');
+
+  for (const none of [null, undefined]) {
+    const device = glDevice(none);
+    assert.deepEqual(device, { owner: null }, `${none}: a record of its own`);
+    assert.notEqual(device, glDevice(none), `${none}: shared with nothing`);
+    releaseDevice(none); // and saying so of one is not an error
+  }
 });
