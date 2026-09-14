@@ -22,6 +22,7 @@
 // — the target carries them — though they are still requested, cheaply, for
 // anything that draws straight at the swapchain (a `<glarea>`).
 
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { WaylandSwapchain } from './swapchain.js';
 import { GLTarget } from './target.js';
@@ -36,8 +37,50 @@ const require = createRequire(import.meta.url);
  * means textures and programs are shared between surfaces, as they are
  * between canvases in a browser tab. The cost is that exactly one surface is
  * current at a time, which `beginFrame` takes care of.
+ *
+ * Kept per x11-dri module, which is one object in practice and a fresh fake
+ * in each test.
  */
-const gpuCache = new Map();
+const gpuCaches = new WeakMap();
+
+function cacheFor(dri) {
+  let cache = gpuCaches.get(dri);
+  if (!cache) gpuCaches.set(dri, (cache = new Map()));
+  return cache;
+}
+
+/** `/dev/dri/card*`, in numeric order. */
+export function listCardNodes(readdir = fs.readdirSync) {
+  let names;
+  try {
+    names = readdir('/dev/dri');
+  } catch {
+    return [];
+  }
+  return names
+    .map((name) => /^card(\d+)$/.exec(name))
+    .filter(Boolean)
+    .sort((a, b) => Number(a[1]) - Number(b[1]))
+    .map((m) => `/dev/dri/${m[0]}`);
+}
+
+/**
+ * The DRM nodes to try for the shared context, in order; `undefined` is
+ * x11-dri's own choice, the first render node.
+ *
+ * A named device is the only one tried: asking for a device and getting
+ * another would be a worse surprise than the error. Otherwise the render
+ * node, as ever. A machine with no render node at all — a GitHub-hosted
+ * runner, a Hyper-V or VirtualBox guest — can still have a card node Mesa
+ * renders on in software, through kms_swrast, so those are tried in turn.
+ * With neither, x11-dri's default once more, so its own reason is the one
+ * reported.
+ */
+export function gpuCandidates({ requested, renderNodes, cardNodes }) {
+  if (requested) return [requested];
+  if (renderNodes.length) return [undefined];
+  return cardNodes.length ? cardNodes : [undefined];
+}
 
 function requireDri() {
   try {
@@ -50,28 +93,54 @@ function requireDri() {
   }
 }
 
-export function sharedGpu(dri, { format, depthSize, stencilSize, devicePath }) {
-  const key = `${format}|${depthSize}|${stencilSize}|${devicePath ?? ''}`;
-  const existing = gpuCache.get(key);
+/**
+ * The GPU context for a pixel format, made once and shared.
+ *
+ * The device is `devicePath` (`glPolicy.devicePath`), else
+ * `REACT_X11_GL_DEVICE`, else whatever {@link gpuCandidates} finds. The
+ * cache is keyed by what was asked for rather than what was found, so the
+ * app's context and every window's resolve to the same one.
+ *
+ * @param {object} [seams] for the tests: the environment, and the card nodes
+ */
+export function sharedGpu(
+  dri,
+  { format, depthSize, stencilSize, devicePath },
+  { env = process.env, cardNodes = listCardNodes } = {},
+) {
+  const requested = devicePath || env.REACT_X11_GL_DEVICE || null;
+  const cache = cacheFor(dri);
+  const key = `${format}|${depthSize}|${stencilSize}|${requested ?? ''}`;
+  const existing = cache.get(key);
   if (existing) return existing;
-  let gpu;
-  try {
-    gpu = new dri.Gpu({
-      format,
-      depthSize,
-      stencilSize,
-      ...(devicePath ? { devicePath } : {}),
-    });
-  } catch (err) {
-    throw new Error(
-      `could not create a GPU context on ${devicePath ?? 'the default render node'}: ${err.message}`,
-      {
-        cause: err,
-      },
-    );
+  const candidates = gpuCandidates({
+    requested,
+    renderNodes: requested ? [] : dri.listRenderNodes(),
+    cardNodes: requested ? [] : cardNodes(),
+  });
+  const failures = [];
+  for (const path of candidates) {
+    try {
+      const gpu = new dri.Gpu({
+        format,
+        depthSize,
+        stencilSize,
+        ...(path ? { devicePath: path } : {}),
+      });
+      cache.set(key, gpu);
+      return gpu;
+    } catch (err) {
+      failures.push({ path, err });
+    }
   }
-  gpuCache.set(key, gpu);
-  return gpu;
+  const tried = failures
+    .map(
+      ({ path, err }) => `${path ?? 'the default render node'}: ${err.message}`,
+    )
+    .join('; ');
+  throw new Error(`could not create a GPU context on ${tried}`, {
+    cause: failures.at(-1).err,
+  });
 }
 
 export class WaylandGLContext {

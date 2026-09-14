@@ -300,6 +300,11 @@ export interface RootOptions {
     | 'off'
     | {
         mode?: 'auto' | 'direct' | 'indirect' | 'off';
+        /**
+         * Wayland: the DRM node to render on. Defaults to
+         * `REACT_X11_GL_DEVICE`, then the first render node, then, on a
+         * machine with no render node, each card node in turn.
+         */
         devicePath?: string | null;
         maxInFlight?: number;
         linearFallback?: boolean;

@@ -93,6 +93,15 @@ the first window at its 30th present (`REACT_X11_WAYLAND_SNAPSHOT_AT`
 changes which) — the pixels the compositor was handed, read back from the
 GPU.
 
+The GPU context is made on `glPolicy.devicePath`, else on
+`REACT_X11_GL_DEVICE`, else on the first render node, and a device named
+either way is the only one tried. A machine with no render node at all — a
+GitHub-hosted runner, a Hyper-V or VirtualBox guest — usually still has a
+card node Mesa renders on in software through kms_swrast, so the backend
+then tries each `/dev/dri/card*` in turn. On a hosted runner that is
+`card1`, and headless weston with its GL renderer accepts the buffers it
+makes, as `scripts/wayland-ci-probe.mjs` measured.
+
 ## What was measured
 
 Everything below was run on this machine (mutter, virtio-gpu/virgl over an
