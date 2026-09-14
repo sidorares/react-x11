@@ -14,7 +14,6 @@ import { WaylandWindow, RESIZE_EDGE } from '../../src/wayland/window.js';
 import { WaylandSeat, BUTTON_MASK } from '../../src/wayland/seat.js';
 import { WaylandTouch } from '../../src/wayland/touch.js';
 import { InputRouter } from '../../src/wayland/input.js';
-import { TITLEBAR_HEIGHT, BORDER } from '../../src/wayland/decorations.js';
 import { createRoot } from '../../src/index.js';
 import { createMockApp } from '../helpers/mock-app.js';
 import {
@@ -29,6 +28,8 @@ import {
   record,
   POINTER_EVENTS,
   TOUCH_EVENTS,
+  floatingFrame,
+  SHADOW_MARGINS,
 } from './harness.js';
 
 const SKIP = waylandClientAvailable
@@ -38,8 +39,12 @@ const SKIP = waylandClientAvailable
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const BUTTON1 = BUTTON_MASK[1];
-/** content point (x, y) in surface-local logical coordinates */
-const at = (x, y) => [BORDER + x, TITLEBAR_HEIGHT + BORDER + y];
+// content (x, y) in surface coordinates: past the frame's insets, the
+// shadow's margin among them
+const INSETS = floatingFrame().insets();
+const at = (x, y) => [INSETS.left + x, INSETS.top + y];
+/** (x, y) from the window's own corner, frame included: titlebar, band */
+const frameAt = (x, y) => [SHADOW_MARGINS.left + x, SHADOW_MARGINS.top + y];
 
 let mock;
 let conn;
@@ -220,7 +225,7 @@ test(
     win.removeAllListeners();
     const got = record(win, EVENTS);
     const sid = wl.surface.id;
-    const move = mock.touchDown(sid, 2, 200, 10);
+    const move = mock.touchDown(sid, 2, ...frameAt(200, 10));
     mock.touchFrame();
     await until(() => mock.sent('xdg_toplevel', 'move').length === 1, {
       what: 'the move request',
@@ -233,7 +238,8 @@ test(
     // the sequence is cancelled, and nothing more arrives for it
     mock.touchCancel();
     await until(() => seat.buttonMask === 0, { what: 'the cancel' });
-    const resize = mock.touchDown(sid, 3, 2, 200);
+    // just outside the left edge: the band the input region keeps
+    const resize = mock.touchDown(sid, 3, ...frameAt(-2, 200));
     mock.touchFrame();
     await until(() => mock.sent('xdg_toplevel', 'resize').length === 1, {
       what: 'the resize request',

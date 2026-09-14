@@ -167,6 +167,18 @@ const VIRTUAL_EDID_VENDORS = new Set([
 const VIRTUAL_MODEL = /qemu|virtual|vbox|vmware|parallels|bochs|bhyve/i;
 
 /**
+ * Whether an EDID's vendor and model name software — or a compositor's
+ * `wl_output` make and model, which are the same two strings read off the
+ * same EDID (mutter says 'RHT' / 'QEMU Monitor' for a QEMU guest's screen).
+ */
+export function isVirtualDisplay(vendor, model) {
+  return (
+    (vendor != null && VIRTUAL_EDID_VENDORS.has(vendor)) ||
+    (model != null && VIRTUAL_MODEL.test(model))
+  );
+}
+
+/**
  * The 128-byte EDID base block → what the scale ladder wants from it:
  * vendor, model name, the physical size, and the one derived judgement —
  * `virtual` — that says the size is invented.
@@ -202,9 +214,7 @@ export function parseEdid(buffer) {
       break;
     }
   }
-  const virtual =
-    (vendor !== null && VIRTUAL_EDID_VENDORS.has(vendor)) ||
-    (model !== null && VIRTUAL_MODEL.test(model));
+  const virtual = isVirtualDisplay(vendor, model);
   return { vendor, model, mmWidth, mmHeight, virtual };
 }
 
@@ -352,13 +362,17 @@ export function monitorScaleFromMetadata(monitor, { perPanel = true } = {}) {
   }
 
   // No physical truth to reason from. The pixel grid alone still separates
-  // "unmistakably a retina panel" from everything else: the smallest grids
-  // this matches are 2880x1800 and 3024x1964, both shipped only as 2x
-  // panels, and every VM window covering one lands here too. 2560-wide
-  // grids stay at 1 on purpose — 2560x1440 is the commonest *1x* desk
-  // monitor there is, and only millimetres could tell it from a 13" retina
-  // lid, which is exactly the data this branch does not have.
-  if (perPanel && (Math.min(pxW, pxH) >= 1800 || Math.max(pxW, pxH) >= 3000)) {
+  // "unmistakably a retina panel" from everything else. 2560x1600, a 30"
+  // desk monitor, is the tallest grid a 1x panel ships with, and nothing is
+  // sold as 1x with a short side between that and 1800 — so a short side
+  // past 1600 is a 2x grid: the 2560x1664 and 2880x1800 laptop lids, and a
+  // VM *window* over a retina panel, which is all a guest sees of its host
+  // (2488x1668 is a UTM window on a 14" MacBook). A long side of 3000 or
+  // more catches the wide ones. 2560x1440 and 2560x1600 stay at 1 on
+  // purpose — the commonest *1x* desk monitors there are, and only
+  // millimetres could tell them from a 13" retina lid, which is exactly the
+  // data this branch does not have.
+  if (perPanel && (Math.min(pxW, pxH) > 1600 || Math.max(pxW, pxH) >= 3000)) {
     return {
       scale: 2,
       source: 'resolution',
@@ -378,6 +392,26 @@ export function monitorScaleFromMetadata(monitor, { perPanel = true } = {}) {
 // --------------------------------------------------------------------------
 // The desktop-configuration rungs
 // --------------------------------------------------------------------------
+
+/**
+ * The factor a person or the app pinned, or null for `'auto'`:
+ * `REACT_X11_SCALE` (0.5–8) first, then a numeric `createRoot({ scale })`
+ * clamped to [0.5, 8]. The ladder's first word, and the only one a backend
+ * with a scale of its own (a Wayland compositor's) lets outrank that scale.
+ */
+export function pinnedScale(option) {
+  const own = Number(process.env.REACT_X11_SCALE);
+  if (Number.isFinite(own) && own >= 0.5 && own <= 8) {
+    return { scale: own, source: 'REACT_X11_SCALE' };
+  }
+  if (typeof option === 'number' && Number.isFinite(option)) {
+    return { scale: Math.min(8, Math.max(0.5, option)), source: 'option' };
+  }
+  return null;
+}
+
+/** `REACT_X11_DEBUG_SCALE`'s line, for the backends that decide their own. */
+export const traceScale = trace;
 
 function envScale() {
   const own = Number(process.env.REACT_X11_SCALE);
@@ -609,18 +643,14 @@ export async function beginScale(app, option) {
   session = new ScaleSession();
   sessions.set(app, session);
 
-  const own = Number(process.env.REACT_X11_SCALE);
-  if (Number.isFinite(own) && own >= 0.5 && own <= 8) {
-    session.scale = own;
-    session.source = 'REACT_X11_SCALE';
-    trace(`${session.scale}x from REACT_X11_SCALE`);
-    return session;
-  }
-
-  if (typeof option === 'number' && Number.isFinite(option)) {
-    session.scale = Math.min(8, Math.max(0.5, option));
-    session.source = 'option';
-    trace(`${session.scale}x from createRoot({ scale })`);
+  const pinned = pinnedScale(option);
+  if (pinned) {
+    session.scale = pinned.scale;
+    session.source = pinned.source;
+    trace(
+      `${pinned.scale}x from ` +
+        (pinned.source === 'option' ? 'createRoot({ scale })' : pinned.source),
+    );
     return session;
   }
 

@@ -5,12 +5,7 @@ import { test } from 'node:test';
 
 import { parseColor, parseFont } from '../../src/wayland/context2d.js';
 import { unionDamage } from '../../src/wayland/swapchain.js';
-import {
-  Decorations,
-  TITLEBAR_HEIGHT,
-  BORDER,
-  RESIZE_MARGIN,
-} from '../../src/wayland/decorations.js';
+import { Decorations, RESIZE_MARGIN } from '../../src/wayland/decorations.js';
 import { RESIZE_EDGE, TOPLEVEL_STATE } from '../../src/wayland/window.js';
 
 const close = (a, b, eps = 1 / 255) => Math.abs(a - b) <= eps;
@@ -85,15 +80,16 @@ test('unionDamage: all wins, null is nothing, sets stay small', () => {
 
 test('decorations: insets, geometry and hit-testing', () => {
   const d = new Decorations();
+  // no shell window yet: no margin, just the 47px headerbar and its hairline
+  assert.deepEqual(d.insets(), { top: 48, left: 0, right: 0, bottom: 0 });
+  const m = { left: 24, top: 20, right: 24, bottom: 30 };
+  d.marginsOf = () => m;
   assert.deepEqual(d.insets(), {
-    top: TITLEBAR_HEIGHT + BORDER,
-    left: BORDER,
-    right: BORDER,
-    bottom: BORDER,
+    top: 20 + 48,
+    left: 24,
+    right: 24,
+    bottom: 30,
   });
-  d.setState(new Set([TOPLEVEL_STATE.MAXIMIZED]));
-  assert.equal(d.insets().left, 0, 'maximised windows drop the border');
-  assert.equal(d.insets().top, TITLEBAR_HEIGHT);
   d.setState(new Set([TOPLEVEL_STATE.FULLSCREEN]));
   assert.deepEqual(
     d.insets(),
@@ -102,38 +98,30 @@ test('decorations: insets, geometry and hit-testing', () => {
   );
   d.setState(new Set([TOPLEVEL_STATE.ACTIVATED]));
 
-  const W = 400;
-  const H = 300;
-  assert.deepEqual(d.hitTest(2, 2, W, H), {
+  const W = 400 + 48;
+  const H = 300 + 50;
+  // the band outside the window resizes, corners both ways
+  assert.deepEqual(d.hitTest(24 - 2, 20 - 2, W, H), {
     kind: 'resize',
     edges: RESIZE_EDGE.TOP_LEFT,
   });
-  assert.deepEqual(d.hitTest(W - 2, H - 2, W, H), {
+  assert.deepEqual(d.hitTest(24 - RESIZE_MARGIN + 1, 20 + 150, W, H), {
     kind: 'resize',
-    edges: RESIZE_EDGE.BOTTOM_RIGHT,
+    edges: RESIZE_EDGE.LEFT,
   });
-  assert.deepEqual(d.hitTest(200, 2, W, H), {
+  assert.deepEqual(d.hitTest(24 + 200, 20 + 300 + 3, W, H), {
     kind: 'resize',
-    edges: RESIZE_EDGE.TOP,
+    edges: RESIZE_EDGE.BOTTOM,
   });
-  assert.deepEqual(d.hitTest(RESIZE_MARGIN + 30, 18, W, H), {
-    kind: 'titlebar',
+  // GNOME's default layout, 'appmenu:close': one button, 24px from the right
+  assert.deepEqual(d.hitTest(24 + 400 - 24, 20 + 23, W, H), {
+    kind: 'button',
+    id: 'close',
   });
-  assert.deepEqual(d.hitTest(200, 150, W, H), { kind: 'content' });
-  const close = d.hitTest(W - 20, 18, W, H);
-  assert.equal(close.kind, 'button');
-  assert.equal(close.id, 'close', 'the rightmost button closes');
+  assert.deepEqual(d.hitTest(24 + 100, 20 + 20, W, H), { kind: 'titlebar' });
+  assert.deepEqual(d.hitTest(24 + 100, 20 + 100, W, H), { kind: 'content' });
   assert.equal(
-    Decorations.cursorFor({ kind: 'resize', edges: RESIZE_EDGE.LEFT }),
-    'ew-resize',
+    Decorations.cursorFor({ kind: 'resize', edges: RESIZE_EDGE.TOP_LEFT }),
+    'nwse-resize',
   );
-  assert.equal(
-    Decorations.cursorFor({ kind: 'resize', edges: RESIZE_EDGE.TOP_RIGHT }),
-    'nesw-resize',
-  );
-  assert.equal(Decorations.cursorFor({ kind: 'titlebar' }), 'default');
-
-  const off = new Decorations({ enabled: false });
-  assert.deepEqual(off.insets(), { top: 0, left: 0, right: 0, bottom: 0 });
-  assert.deepEqual(off.hitTest(1, 1, W, H), { kind: 'content' });
 });

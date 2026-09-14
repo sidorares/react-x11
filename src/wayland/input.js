@@ -19,10 +19,11 @@
 //   content hands the cursor back to whatever the tree last set.
 // - **Which window.** A seat event names a `wl_surface`; the map from
 //   surface to window lives on the app. Keys go to the keyboard-focused
-//   surface, pointer events to the one under the pointer, and a popup with a
-//   grab receives the outside press that should dismiss it as an ordinary
-//   `mousedown` outside its bounds — which is what its `<popup grab>` logic
-//   on X11 expects from a grab.
+//   surface's window — its toplevel, when that is one of our popups, which
+//   mutter gives the keyboard to when it grabs — pointer events to the one
+//   under the pointer, and a popup with a grab receives the outside press
+//   that should dismiss it as an ordinary `mousedown` outside its bounds —
+//   which is what its `<popup grab>` logic on X11 expects from a grab.
 
 import { Decorations } from './decorations.js';
 import { XkbKeymap } from './xkb.js';
@@ -37,8 +38,10 @@ export class InputRouter {
     this.seat = app.seat;
     /** the backend window under the pointer */
     this.pointerWindow = null;
-    /** the backend window with keyboard focus */
+    /** the backend window with keyboard focus — a toplevel, never a popup */
     this.focusWindow = null;
+    /** a window whose keyboard leave is held to see if an enter follows */
+    this._heldBlur = null;
     /** what the frame's hover last asked the cursor to be, or null */
     this._frameCursor = null;
     /** touch points that began on the frame, which the tree never sees */
@@ -206,18 +209,44 @@ export class InputRouter {
       win.decor.pressed = hit.id;
       return;
     }
-    // titlebar
+    // titlebar: what a click means is the desktop's to say (framestyle.js)
+    const style = this.app.frameStyle?.value;
     if (ev.button === 1) {
       const now = ev.time;
       if (win._lastTitlePress && now - win._lastTitlePress < 400) {
         win._lastTitlePress = 0;
-        win.wl.maximize(!win.decor.maximized);
+        this._titlebarAction(win, style?.doubleClick ?? 'toggle-maximize', ev);
         return;
       }
       win._lastTitlePress = now;
       win.wl.startMove(seat, ev.serial);
+    } else if (ev.button === 2) {
+      this._titlebarAction(win, style?.middleClick ?? 'none', ev);
     } else if (ev.button === 3) {
-      win.wl.showWindowMenu(seat, ev.serial, ev.x, ev.y);
+      this._titlebarAction(win, style?.rightClick ?? 'menu', ev);
+    }
+  }
+
+  /**
+   * One of `org.gnome.desktop.wm.preferences`' titlebar actions. `lower` and
+   * `toggle-shade` have no xdg-shell request, and a maximise in one
+   * direction is a maximise here: they do what the protocol allows, which
+   * for the first two is nothing.
+   */
+  _titlebarAction(win, action, ev) {
+    switch (action) {
+      case 'toggle-maximize':
+      case 'toggle-maximize-horizontally':
+      case 'toggle-maximize-vertically':
+        win.wl.maximize(!win.decor.maximized);
+        return;
+      case 'minimize':
+        win.wl.minimize();
+        return;
+      case 'menu':
+        win.wl.showWindowMenu(this.seat.seat, ev.serial, ev.x, ev.y);
+        return;
+      default:
     }
   }
 
@@ -310,7 +339,7 @@ export class InputRouter {
   // ---- keyboard ---------------------------------------------------------
 
   _onKey(name, ev) {
-    const win = this.focusWindow ?? this._window(ev.surface);
+    const win = this.focusWindow ?? this._focusRoot(this._window(ev.surface));
     if (!win) return;
     this._emit(win, name, {
       keycode: ev.keycode,
@@ -324,8 +353,53 @@ export class InputRouter {
     });
   }
 
+  /**
+   * The window whose tree has the keyboard when `win`'s surface does: `win`
+   * itself, or — for one of our popups — the toplevel its chain hangs from.
+   * Mutter gives the keyboard to a popup that grabs (a menu, a Select's
+   * list); X never focuses an override-redirect window, and the tree's focus
+   * model is X's: keys reach the focused node through its toplevel, wherever
+   * in the tree that node is.
+   */
+  _focusRoot(win) {
+    let w = win;
+    for (let i = 0; w?.isPopup && w.parentWindow && i < 16; i++) {
+      w = w.parentWindow;
+    }
+    return w;
+  }
+
+  /**
+   * `wl_keyboard` enter and leave. A move inside one window's family — the
+   * keyboard onto its grabbing popup and back, which mutter sends as a leave
+   * and an enter together — is no focus change at all: a leave is held
+   * until the events already read have been handled, and an enter for the
+   * same window drops it. Before this the toplevel heard a blur the moment a
+   * Select's list was configured, the Select closed the list on it, and on
+   * GNOME no dropdown ever showed. A leave naming a surface already gone —
+   * the popup that had the keyboard — is a leave of the window that had it.
+   */
   _onFocus(ev, focused) {
-    const win = this._window(ev.surface);
+    const win = this._focusRoot(this._window(ev.surface));
+    if (!focused) {
+      const lost = win ?? this.focusWindow;
+      if (!lost) return;
+      this._heldBlur = lost;
+      setImmediate(() => {
+        if (this._heldBlur !== lost) return;
+        this._heldBlur = null;
+        this._setFocus(lost, false);
+      });
+      return;
+    }
+    const held = this._heldBlur;
+    this._heldBlur = null;
+    if (held && held !== win) this._setFocus(held, false);
+    if (held === win && this.focusWindow === win) return;
+    this._setFocus(win, true);
+  }
+
+  _setFocus(win, focused) {
     if (focused) this.focusWindow = win;
     else if (this.focusWindow === win) this.focusWindow = null;
     if (!win) return;

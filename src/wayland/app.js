@@ -39,8 +39,11 @@ import { WaylandDnd } from './dnd.js';
 import { createScreenCapture } from './screencopy.js';
 import { sharedGpu } from './glcontext.js';
 import { TextShaper } from './text.js';
+import { FrameStyle } from './framestyle.js';
+import { watchAppearance } from '../appearance.js';
 import { WaylandGLArea, WaylandOverlayPane, GLAREA_VISUAL } from './glarea.js';
-import { setScaleForTests } from '../scale.js';
+import { pinnedScale, setScaleForTests, traceScale } from '../scale.js';
+import { setCompositingForTests } from '../compositing.js';
 
 const require = createRequire(import.meta.url);
 
@@ -114,8 +117,16 @@ export class WaylandApp extends EventEmitter {
     this.gl = null;
     this._holder = null;
     this._currentSurface = null;
-    /** the app-wide output scale the renderer lays out with */
+    /** the app-wide output scale: buffer pixels per surface pixel, which
+     * windows size their buffers and convert input by (`layoutScale` is
+     * what the renderer lays out with) */
     this.scale = 1;
+    /** REACT_X11_SCALE, else a numeric createRoot({ scale }): pinned */
+    this._pinnedScale = null;
+    /** the resolution class's factor over a compositor that says 1 */
+    this._zoom = 1;
+    /** `layoutScale` as last published to src/scale.js */
+    this._publishedScale = null;
     this._shaper = null;
     this.frameText = null;
   }
@@ -143,10 +154,10 @@ export class WaylandApp extends EventEmitter {
     // fill; then the outputs, awaited like the X11 backend's Xinerama tier:
     // an auto-sized window clamps to a monitor synchronously inside
     // realize(), and the first window is laid out at whatever `app.scale`
-    // says by then — which the densest output seeds (`noteScale`).
-    setScaleForTests(app, app.scale, 'wayland');
-    app.outputs = new WaylandOutputs(conn, app);
-    await app.outputs.open();
+    // says by then — which the densest output seeds (`noteScale`). The
+    // session exists before createRoot's `beginScale`, which therefore
+    // defers to it: the pin is read here instead, from the same options.
+    await app._beginOutputs(conn, options);
     app.decorationManager = await conn.bind('zxdg_decoration_manager_v1');
     app.layerShell = await conn.bind('zwlr_layer_shell_v1');
     app.shm = await conn.bind('wl_shm');
@@ -182,8 +193,15 @@ export class WaylandApp extends EventEmitter {
     app.fonts = new ntk.FontManager({ source: options.fontSource ?? 'system' });
     app.fontManager = app.fonts;
     app._shaper = new TextShaper(app.fonts);
-    app.frameText = (text, size, weight) =>
-      app._shaper.measureSync(text, { family: 'sans-serif', size, weight });
+    app.frameText = (text, size, weight, family = 'sans-serif') =>
+      app._shaper.measureSync(text, { family, size, weight });
+    // What the desktop says a frame looks like and does (framestyle.js):
+    // read before the first window is sized — the title's font sets the
+    // titlebar's height — and followed after, with the light or dark the
+    // frame takes from the appearance.
+    app.frameStyle = await new FrameStyle().start();
+    app.frameStyle.on('change', () => app._frameStyleChanged());
+    app._unwatchAppearance = watchAppearance(() => app._frameStyleChanged());
 
     // The GPU context is shared by every window and surface; make it now so
     // an offscreen surface created before the first window has one to use.
@@ -197,6 +215,12 @@ export class WaylandApp extends EventEmitter {
     });
     app.gl = app.gpu.gl;
     app._glCapsResolved = { direct: true };
+    // Every Wayland surface is composited: the compositor blends each
+    // buffer by its alpha, so `useSupports('transparency')` and the
+    // `'@supports transparency'` style block are true — the answer the cocoa
+    // backend gives too. Without it, tooltips and menus took the square,
+    // opaque look meant for an X server with no compositor running.
+    setCompositingForTests(app, true);
     return app;
   }
 
@@ -306,11 +330,84 @@ export class WaylandApp extends EventEmitter {
     // rounds up to 2.
     let scale = this.windows.size === 0 ? (this.outputs?.maxScale ?? 1) : 1;
     for (const w of this.windows.values()) scale = Math.max(scale, w.wl.scale);
-    if (scale !== this.scale) {
-      this.scale = scale;
-      setScaleForTests(this, scale, 'wayland');
-      this.emit('scale', scale);
+    const moved = scale !== this.scale;
+    this.scale = scale;
+    if (this._publishScale() || moved) this.emit('scale', scale);
+  }
+
+  /**
+   * What the renderer lays out with: device pixels per logical pixel, the
+   * number src/scale.js keeps for the tree. The compositor's scale, except
+   * where it is pinned — `REACT_X11_SCALE`, then `createRoot({ scale })`,
+   * absolute exactly as on X11 — or where the compositor says 1 over a
+   * retina-class grid it has no real millimetres for (`resolutionZoom`).
+   * A window's buffer is always in these pixels and its surface is them
+   * over the compositor's scale, so a zoom is a bigger window drawn at full
+   * resolution, never a smaller one stretched.
+   */
+  get layoutScale() {
+    if (this._pinnedScale) return this._pinnedScale.scale;
+    return this.scale === 1 ? this._zoom : this.scale;
+  }
+
+  /** Hand `layoutScale` to src/scale.js; whether it moved. */
+  _publishScale() {
+    const layout = this.layoutScale;
+    const source =
+      this._pinnedScale?.source ??
+      (this.scale === 1 && this._zoom !== 1 ? 'resolution' : 'wayland');
+    setScaleForTests(this, layout, source);
+    const moved = layout !== this._publishedScale;
+    this._publishedScale = layout;
+    return moved;
+  }
+
+  /**
+   * The scale's pin, then the outputs — awaited, because the first window
+   * is sized against them — then what they say about the scale. The middle
+   * of `open()`, apart so a test runs exactly this against a mock.
+   */
+  async _beginOutputs(conn, options = {}) {
+    this._pinnedScale = pinnedScale(options.scale);
+    this._publishScale();
+    this.outputs = new WaylandOutputs(conn, this);
+    await this.outputs.open();
+    this._zoomFromOutputs();
+  }
+
+  /** Once the outputs are known: the resolution class, unless pinned. */
+  _zoomFromOutputs() {
+    const pinned = this._pinnedScale;
+    if (pinned) {
+      traceScale(
+        `${pinned.scale}x from ` +
+          (pinned.source === 'option'
+            ? 'createRoot({ scale })'
+            : pinned.source) +
+          `, over the compositor's ${this.scale}x`,
+      );
+    } else {
+      const v = this.outputs?.resolutionZoom?.() ?? {
+        zoom: 1,
+        name: null,
+        reason: 'no outputs',
+      };
+      this._zoom = v.zoom;
+      traceScale(`  ${v.name ?? 'output'}: ${v.zoom}x over it — ${v.reason}`);
+      traceScale(
+        `${this.layoutScale}x from ` +
+          (this.scale === 1 && v.zoom !== 1
+            ? 'the resolution class'
+            : `the compositor (${this.scale}x)`),
+      );
     }
+    if (this._publishScale()) this.emit('scale', this.scale);
+  }
+
+  /** The desktop's frame style or colours changed: every frame repaints,
+   * and resizes if its titlebar did. */
+  _frameStyleChanged() {
+    for (const w of this.windows.values()) w._frameStyleChanged?.();
   }
 
   /** Hook for the input router: a discrete event may want a paint now. */
@@ -436,6 +533,8 @@ export class WaylandApp extends EventEmitter {
     this.windows.clear();
     this.toplevels.length = 0;
     this.textInput?.destroy();
+    this.frameStyle?.stop();
+    this._unwatchAppearance?.();
     this.input?.destroy();
     this.tablet?.destroy();
     this.touch?.destroy();

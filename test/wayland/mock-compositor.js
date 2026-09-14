@@ -612,6 +612,13 @@ export class MockCompositor extends EventEmitter {
     if (iface === 'xdg_toplevel' || iface === 'xdg_popup') {
       const role = obj.role;
       if (!role) return;
+      if (iface === 'xdg_popup' && name === 'grab' && role.configured) {
+        // mutter's rule: a popup's setup ends with its initial commit, and a
+        // grab after it is fatal
+        this.send(1, 'error', id, 0, 'tried to grab after popup was mapped');
+        return;
+      }
+      if (iface === 'xdg_popup' && name === 'destroy') this._popupGone(role);
       (role.requests ??= []).push({ name, args });
       return;
     }
@@ -799,6 +806,33 @@ export class MockCompositor extends EventEmitter {
     }
     this.send(role.xdgSurface, 'configure', serial);
     role.lastSerial = serial;
+    // mutter's other rule: a popup that grabs takes the keyboard when its
+    // setup finishes — a leave for whatever had it, an enter for the popup —
+    // and hands it back to its parent when it goes (`_popupGone`)
+    if (
+      role.kind === 'popup' &&
+      this.opts.popupTakesKeyboard !== false &&
+      role.requests?.some((r) => r.name === 'grab')
+    ) {
+      this._moveKeyboard(role.surface);
+    }
+  }
+
+  /** Keyboard focus to surface `to` (or null), leave first, as mutter moves it. */
+  _moveKeyboard(to) {
+    if (this.keyboard == null || this.keyboardFocus === to) return;
+    if (this.keyboardFocus != null) {
+      this.send(this.keyboard, 'leave', this.serial++, this.keyboardFocus);
+    }
+    this.keyboardFocus = to;
+    if (to == null) return;
+    this.send(this.keyboard, 'enter', this.serial++, to, new Uint8Array(0));
+    this.send(this.keyboard, 'modifiers', this.serial++, 0, 0, 0, 0);
+  }
+
+  _popupGone(role) {
+    if (this.keyboardFocus !== role.surface) return;
+    this._moveKeyboard(this.objects.get(role.parent)?.role?.surface ?? null);
   }
 
   // ---- test helpers -----------------------------------------------------------
@@ -1018,6 +1052,7 @@ export class MockCompositor extends EventEmitter {
     this.send(this.pointer, 'frame');
   }
   keyboardEnter(surfaceId) {
+    this.keyboardFocus = surfaceId;
     this.send(
       this.keyboard,
       'enter',
@@ -1025,6 +1060,10 @@ export class MockCompositor extends EventEmitter {
       surfaceId,
       new Uint8Array(0),
     );
+  }
+  keyboardLeave(surfaceId) {
+    if (this.keyboardFocus === surfaceId) this.keyboardFocus = null;
+    this.send(this.keyboard, 'leave', this.serial++, surfaceId);
   }
   modifiers(depressed, latched = 0, locked = 0, group = 0) {
     this.send(

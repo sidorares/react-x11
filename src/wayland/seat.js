@@ -27,6 +27,7 @@
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import { XkbKeymap } from './xkb.js';
+import { requestNullable } from './nullable.js';
 
 /** `wl_seat.capability` bits. */
 export const SEAT_CAP = { POINTER: 1, KEYBOARD: 2, TOUCH: 4 };
@@ -393,7 +394,8 @@ export class WaylandSeat extends EventEmitter {
     if (!this.pointer) return;
     const name = this._cursor;
     if (name === 'none') {
-      this.pointer.$.set_cursor(serial, 0, 0, 0);
+      // a null surface hides the cursor; see nullable.js
+      requestNullable(this.pointer, 'set_cursor', serial, null, 0, 0);
       return;
     }
     if (this._cursorDevice) {

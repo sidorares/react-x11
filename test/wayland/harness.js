@@ -9,7 +9,19 @@
 // protocol, with nothing painted.
 
 import { EventEmitter } from 'node:events';
-import { Decorations } from '../../src/wayland/decorations.js';
+import { Decorations, SHADOW_MARGINS } from '../../src/wayland/decorations.js';
+
+export { SHADOW_MARGINS };
+
+/**
+ * A floating window's frame — the shadow's margin round it — for turning
+ * content coordinates into the surface's the way a routed window does.
+ */
+export function floatingFrame() {
+  const d = new Decorations();
+  d.marginsOf = () => SHADOW_MARGINS;
+  return d;
+}
 
 /**
  * Make `target` look like a backend window over the shell window `wl`.
@@ -20,9 +32,17 @@ import { Decorations } from '../../src/wayland/decorations.js';
  * @returns {T}
  */
 export function asBackendWindow(target, wl, { decorations = true } = {}) {
+  const decor = decorations ? new Decorations() : null;
+  if (decor) {
+    // as the backend wires it: the shell window owns the shadow's margin,
+    // per state, and the frame reads it from there
+    wl.marginsFor ??= (states) => Decorations.marginsFor(states, true);
+    wl.setMargins(wl.marginsFor(wl.states));
+    decor.marginsOf = () => wl.margins;
+  }
   Object.assign(target, {
     wl,
-    decor: decorations ? new Decorations() : null,
+    decor,
     treeCursor: 'default',
     _destroyed: false,
     repaintFrame() {},

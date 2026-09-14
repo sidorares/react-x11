@@ -87,12 +87,14 @@ above said nothing, ordered by "who is closest to a human having decided":
    1x; a 27″ 4K computes 163dpi → 1.5x; a 16″ MacBook panel computes
    255dpi → 2x, matching macOS.
 5. **The resolution class** — when the millimetres are absent or caught
-   lying, the pixel grid itself is the last signal: nothing ships a 1x
-   panel with a ≥3000-wide or ≥1800-short-side grid, so those are called 2x
-   and everything else 1x. Only the confident call is made without physical
-   data — 2560×1440 stays 1x on purpose, because it is the commonest 1x
-   desk monitor there is and only millimetres could tell it from a 13″
-   retina lid.
+   lying, the pixel grid itself is the last signal: nothing ships as a 1x
+   panel with a grid ≥3000 wide or taller than 1600 on its short side, so
+   those are called 2x and everything else 1x. That takes in the 2560×1664
+   and 2880×1800 lids, and a VM window over any retina panel (a UTM window
+   on a 14″ MacBook is 2488×1668). Only the confident call is made without
+   physical data — 2560×1440 and 2560×1600 stay 1x on purpose, because
+   they are the commonest 1x desk monitors there are and only millimetres
+   could tell them from a 13″ retina lid.
 6. **1.**
 
 Two readings deserve their asterisks. **96 is not an answer**: `Xft.dpi: 96`
@@ -155,6 +157,33 @@ that makes the maths land on ~100dpi — and every configured source is an
 untouched default. Run `node scripts/scale-probe.mjs` against any display
 to see the same table for it, or `REACT_X11_DEBUG_SCALE=1` in an app to
 watch the ladder resolve.
+
+## On Wayland
+
+A compositor has a scale protocol, and its answer is the display scale:
+fractional-scale-v1 where it is offered (1.25, 1.5…), else
+`wl_surface.preferred_buffer_scale`, else the integer `wl_output.scale` of
+the output a window is on. Buffers are drawn at that density, so text is
+as sharp at 1.5 as at 2. Two things still outrank it, as on X11:
+
+- **`REACT_X11_SCALE`, then `createRoot({ scale })`** pin the factor,
+  absolutely: device (buffer) pixels per logical pixel. On a compositor at
+  1x, `REACT_X11_SCALE=2` is a window twice the size drawn at full
+  resolution, not a small one stretched.
+- **The resolution class, when the compositor says 1.** A VM window over a
+  retina panel is the case: QEMU's EDID describes the guest's screen as a
+  ~100dpi monitor, mutter believes it and runs at 100%, and every app laid
+  out at the compositor's word comes up half the size it is on the host.
+  When every output is at 1x and the largest has no credible millimetres
+  (`classifyMm`) but a retina-class grid, the layout is 2x — what the X11
+  ladder answers for the same screen through Xwayland. A compositor that
+  scales any output has decided for itself (133% on that same VM is
+  someone's choice), and credible millimetres were the compositor's own
+  evidence, so both keep their answer.
+
+The frame a window draws for itself follows the compositor, not the
+layout: it is drawn at the desktop's scale, beside every other window's.
+`REACT_X11_DEBUG_SCALE=1` prints which of these answered.
 
 ## Several monitors
 

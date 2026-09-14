@@ -183,10 +183,39 @@ export class WaylandTextInput {
     return surfaceId == null ? null : (this.app.windows.get(surfaceId) ?? null);
   }
 
+  /**
+   * The toplevel whose tree a window's focus belongs to: a popup of ours is
+   * its parent's, all the way up. Mutter moves text-input focus onto a
+   * popup that grabs, as it does the keyboard (input.js `_focusRoot`); the
+   * field being typed into is still the toplevel's.
+   */
+  _root(win) {
+    let w = win;
+    for (let i = 0; w?.isPopup && w.parentWindow && i < 16; i++) {
+      w = w.parentWindow;
+    }
+    return w;
+  }
+
+  /**
+   * A rectangle in `win`'s surface, moved into the surface that has the
+   * text-input focus: the same surface, unless it is one of `win`'s popups,
+   * against which the compositor then reads the caret.
+   */
+  _inEntered(win, rect) {
+    if (!rect) return rect;
+    const entered = this._window(this.entered);
+    if (!entered?.isPopup || typeof entered.offsetInRoot !== 'function')
+      return rect;
+    const off = entered.offsetInRoot();
+    if (off.root !== win) return rect;
+    return { ...rect, x: rect.x - off.x, y: rect.y - off.y };
+  }
+
   _onEnter(surfaceId) {
     if (TRACE) trace(`enter surface ${surfaceId}`);
     this.entered = surfaceId;
-    const win = this._window(surfaceId);
+    const win = this._root(this._window(surfaceId));
     if (!win) return;
     // Now, with whatever layout the tree has — a field focused before the
     // window got the keyboard should be composing from the first key — and
@@ -202,7 +231,10 @@ export class WaylandTextInput {
     // The spec has the client drop its preedit here. The compositor
     // considers nothing enabled on a surface it has left, but saying so
     // costs one request and leaves no compositor guessing.
-    if (this.active?.win === this._window(surfaceId) || !this.entered) {
+    if (
+      this.active?.win === this._root(this._window(surfaceId)) ||
+      !this.entered
+    ) {
       this._disable();
     }
   }
@@ -232,7 +264,8 @@ export class WaylandTextInput {
    */
   sync(win) {
     if (this._destroyed || !win) return;
-    if (this.entered == null || this._window(this.entered) !== win) return;
+    if (this.entered == null) return;
+    if (this._root(this._window(this.entered)) !== win) return;
     const node = win._destroyed ? null : this._focusedTextControl(win);
     if (node !== this.active?.node) {
       if (this.active) this._disable();
@@ -271,7 +304,7 @@ export class WaylandTextInput {
     return {
       hint,
       purpose,
-      rect: caretRectangle(win, node, caret),
+      rect: this._inEntered(win, caretRectangle(win, node, caret)),
       value,
       caret,
       anchor,
