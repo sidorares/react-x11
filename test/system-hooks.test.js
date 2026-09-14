@@ -486,6 +486,61 @@ describe('useWindowState', () => {
     );
   });
 
+  // Wayland's half of "can anyone see this window": the compositor stops
+  // sending frame callbacks to a surface it is not showing, the backend's
+  // frame loop notices the silence, and it arrives here (#567). The window
+  // object below is shaped the way `src/wayland/backendwindow.js` shapes
+  // one — the method is the feature test, so an X11 or Cocoa window, which
+  // has none, keeps `presenting: true` for good.
+  test('presenting: a parked frame loop folds into visible', async () => {
+    const { app } = await renderX11(h('box'), { backend: 'mock' });
+    let tell = null;
+    const node = {
+      isWindow: true,
+      window: {
+        presenting: true,
+        onPresentingChange(fn) {
+          tell = fn;
+          return () => {
+            tell = null;
+          };
+        },
+      },
+    };
+    let renders = 0;
+    watchWindowState(app, node, () => renders++);
+    assert.equal(typeof tell, 'function', 'the store subscribed');
+    assert.equal(windowStateSnapshot(app, node).presenting, true);
+
+    tell(false);
+    const parked = windowStateSnapshot(app, node);
+    assert.equal(parked.presenting, false);
+    assert.equal(
+      parked.visible,
+      false,
+      'a surface the compositor has stopped scheduling frames for is one ' +
+        'nobody is looking at',
+    );
+    assert.equal(parked.minimized, false, 'and it is not minimized either');
+
+    tell(true);
+    assert.equal(windowStateSnapshot(app, node).visible, true);
+    assert.equal(renders, 2, 'once each way, and not for the re-statement');
+    tell(true);
+    assert.equal(renders, 2);
+  });
+
+  test('a window with no frame signal is presenting for good', async () => {
+    const { app } = await renderX11(h('box'), { backend: 'mock' });
+    const node = app._rootChildren[0];
+    watchWindowState(app, node, () => {});
+    assert.equal(windowStateSnapshot(app, node).presenting, true);
+    assert.equal(
+      setWindowStateForTests(app, node, { obscured: true }).presenting,
+      true,
+    );
+  });
+
   test('a state rewrite that changes nothing notifies nobody', async () => {
     const { app } = await renderX11(h('box'), { backend: 'mock' });
     const node = app._rootChildren[0];

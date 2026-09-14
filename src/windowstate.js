@@ -16,6 +16,7 @@
 // | `minimized` `maximized` `fullscreen` `states` | `_NET_WM_STATE`, as ntk's `statechange` event |
 // | `obscured` | VisibilityNotify |
 // | `desktop` | `_NET_WM_DESKTOP` |
+// | `presenting` | the Wayland frame clock, where the backend has one |
 //
 // Nothing here is asked for until something subscribes. `_NET_WM_STATE`
 // costs a PropertyChange selection and a round trip per change,
@@ -35,6 +36,18 @@
 // is the field to branch on. An animation paused on `visible` stops when the
 // window is minimized everywhere, and additionally when it is buried on a
 // desktop with no compositor.
+//
+// ## Wayland answers the same question from the other end
+//
+// A Wayland compositor never says a surface is covered either — but it stops
+// sending it frame callbacks, and the backend's frame loop notices the
+// silence (`src/wayland/framewatch.js`, #567). That arrives here as
+// `presenting`, which folds into `visible` the way `minimized` does: a
+// surface the compositor has stopped scheduling frames for is one nobody is
+// looking at, and an animation paused on `visible` is right to stop. It
+// costs a couple of seconds of silence to be sure, so it is a signal to stop
+// work on, not a frame-accurate one — and it is `true` on every backend
+// whose windows have no such signal, X11 and Cocoa among them.
 
 import { useCallback, useSyncExternalStore } from 'react';
 
@@ -62,6 +75,7 @@ const UNKNOWN = Object.freeze({
   focused: true,
   visible: true,
   obscured: false,
+  presenting: true,
   minimized: false,
   maximized: false,
   fullscreen: false,
@@ -75,6 +89,7 @@ const SAME = (a, b) =>
   a.focused === b.focused &&
   a.visible === b.visible &&
   a.obscured === b.obscured &&
+  a.presenting === b.presenting &&
   a.minimized === b.minimized &&
   a.maximized === b.maximized &&
   a.fullscreen === b.fullscreen &&
@@ -119,7 +134,7 @@ class WindowStateSession {
     });
     const settled = Object.freeze({
       ...next,
-      visible: !next.minimized && !next.obscured,
+      visible: !next.minimized && !next.obscured && next.presenting,
     });
     if (SAME(settled, this.snapshot)) return;
     this.snapshot = settled;
@@ -262,7 +277,31 @@ function arm(session) {
     );
   }
 
+  watchPresenting(session);
   watchVisibility(session);
+}
+
+/**
+ * The Wayland backend's frame-loop liveness, where the window has it — the
+ * X11 and Cocoa windows do not, and the absence of the method is the answer
+ * (`presenting` stays true, as it does on a backend whose frames are paced
+ * by anything but the compositor's goodwill).
+ *
+ * Nothing is selected and nothing is asked: the window is already watching
+ * its own frame callbacks, so this is a listener on a signal that exists
+ * whether or not a component ever reads it.
+ */
+function watchPresenting(session) {
+  const wnd = session.node.window;
+  if (typeof wnd?.onPresentingChange !== 'function') return;
+  session._offs.push(
+    wnd.onPresentingChange((presenting) => {
+      if (!session.stopped) session.publish({ presenting });
+    }),
+  );
+  // Whatever it is now: a window can have parked before anything subscribed.
+  if (typeof wnd.presenting === 'boolean')
+    session.publish({ presenting: wnd.presenting });
 }
 
 function readDesktop(session) {
@@ -370,6 +409,7 @@ export function endWindowState(node) {
  * | `maximized` | both axes; one axis alone shows up in `states` |
  * | `fullscreen` | what the WM actually did, not what `<window fullscreen>` asked for |
  * | `obscured` | fully covered by other windows — **always false under a compositor** |
+ * | `presenting` | the display is still scheduling frames for this window — Wayland; always true elsewhere |
  * | `states` | the raw `_NET_WM_STATE` names, e.g. `['maximized_vert', 'focused']` |
  * | `desktop` | the workspace index, or null (a sticky window shows up in `states`) |
  *
