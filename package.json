@@ -113,7 +113,7 @@
     "@babel/plugin-transform-react-jsx": "^8.0.0",
     "hot-module-replacement": "^4.0.1",
     "react": "^19.0.0",
-    "react-refresh": "^0.18.0"
+    "react-refresh": "^0.19.0"
   },
   "peerDependenciesMeta": {
     "@babel/core": {
@@ -147,8 +147,8 @@
     "katex": "^0.18.1",
     "prettier": "^3.6.0",
     "react": "^19.2.8",
-    "react-devtools-core": "^7.0.1",
-    "react-refresh": "^0.18.0",
+    "react-devtools-core": "^8.0.0",
+    "react-refresh": "^0.19.0",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",
     "ws": "^8.21.1"
