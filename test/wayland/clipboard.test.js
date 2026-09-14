@@ -1,5 +1,5 @@
 // The clipboard over wl_data_device: clearing it sends `set_selection` with a
-// null source, an `allow-null` object the wayland-client fork refuses as 0.
+// null source, an `allow-null` object @windowkit/wayland refused as 0 before 3.1.1.
 // examples/clipboard.jsx's "clear it" button crashed the app on it.
 import assert from 'node:assert/strict';
 import net from 'node:net';
@@ -11,7 +11,7 @@ import { MockCompositor, waylandClientAvailable } from './mock-compositor.js';
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 test(
   'write, then clear: the selection goes to a source, then to nothing',

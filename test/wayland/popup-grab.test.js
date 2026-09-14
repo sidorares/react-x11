@@ -18,7 +18,7 @@ import {
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 async function open() {
   const mock = new MockCompositor({ width: 640, height: 480 });

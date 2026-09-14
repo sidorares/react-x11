@@ -18,7 +18,7 @@ import { MockCompositor, waylandClientAvailable } from './mock-compositor.js';
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 /** what mutter reports for a UTM guest's screen: QEMU's EDID, at 100% */
 const QEMU_SCREEN = {

@@ -29,7 +29,7 @@ import { MockCompositor, waylandClientAvailable } from './mock-compositor.js';
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 test('button layouts: sides, unknown names dropped, each button once', () => {
   assert.deepEqual(parseButtonLayout('appmenu:close'), {

@@ -22,7 +22,7 @@ import { record, routedWindow, routerApp } from './harness.js';
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 const FOCUS_EVENTS = ['focus', 'blur', 'keydown', 'keyup'];
 /** past the moment a keyboard leave is held for */
