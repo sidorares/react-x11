@@ -1,8 +1,24 @@
-// The XKB keymap reader (src/wayland/xkb.js), against a keymap in the shape
-// libxkbcommon serialises: keycodes, types with modifier→level maps, symbols
-// with two groups and an AltGr level, and the compat/modmap lines that bind
-// the LevelThree virtual modifier to a real one. Pure — no compositor.
+// The XKB keymap reader (src/wayland/xkb.js): keycodes, types with
+// modifier→level maps, symbols with two groups and an AltGr level, and the
+// compat/modmap lines that bind the LevelThree virtual modifier to a real
+// one. Pure — no compositor.
+//
+// Two fixtures, because the grammar has two spellings in the wild and only
+// one of them ever reaches this parser for real:
+//
+//  - `KEYMAP` below is hand-written in **xkbcomp's** spelling, the one
+//    `xkbcomp -xkb :0` prints — keysyms by name, `symbols[Group1]`. It is
+//    where the level, group and modifier rules are asserted, because it can
+//    be read.
+//  - `test/fixtures/xkb-libxkbcommon-us-de.xkb` is **libxkbcommon's** output,
+//    byte for byte, which is what every compositor sends over
+//    `wl_keyboard.keymap`: hex keysyms, and the group subscript as a bare
+//    number (`symbols[1]`). Hand-writing that shape is how it went wrong the
+//    first time — the parser read only `symbols[Group1]`, fell through to
+//    the bare-form fallback, and took the subscript `[1]` for the symbol
+//    list, so every key on the keyboard typed `1`.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import { XkbKeymap, REAL_MODS } from '../../src/wayland/xkb.js';
@@ -232,4 +248,90 @@ test('the X state word carries modifiers low and the group in bits 13-14', () =>
   assert.equal(XkbKeymap.stateOf(REAL_MODS.Shift | REAL_MODS.Control, 0), 5);
   assert.equal(XkbKeymap.stateOf(0, 1), 1 << 13);
   assert.equal(XkbKeymap.stateOf(REAL_MODS.Lock, 2), 2 | (2 << 13));
+});
+
+// --- the real thing ------------------------------------------------------
+//
+// `us,de` on pc105: two groups, so every printable key gets the subscripted
+// form; German brings a per-group `type[2]=` and an AltGr level; and the
+// function keys carry an explicit `type=`, which is what makes libxkbcommon
+// write *them* subscripted even for a single-layout keymap. See
+// `test/fixtures/README.md` for how it was generated.
+const LIBXKBCOMMON = readFileSync(
+  new URL('../fixtures/xkb-libxkbcommon-us-de.xkb', import.meta.url),
+  'utf8',
+);
+
+test('the fixture is really in libxkbcommon spelling', () => {
+  // Regenerating it with `xkbcomp -xkb` instead would quietly turn every
+  // assertion below back into a test of the spelling that already worked.
+  assert.match(LIBXKBCOMMON, /symbols\[1\]=/);
+  assert.match(LIBXKBCOMMON, /type\[2\]=/);
+  assert.doesNotMatch(LIBXKBCOMMON, /symbols\[Group\d\]/);
+  assert.match(LIBXKBCOMMON, /maximum = 708/, 'the extended keycode range');
+});
+
+test('libxkbcommon: a bare group subscript is a group, not a symbol list', () => {
+  const km = XkbKeymap.parse(LIBXKBCOMMON);
+  const ab01 = km.names.get('AB01');
+  // The key US calls `z` and Germany calls `y` — one key, both groups, the
+  // whole point of the subscripted form.
+  assert.equal(km.decode(ab01, 0, 0).keysym, 0x7a, 'z on the US group');
+  assert.equal(km.decode(ab01, REAL_MODS.Shift, 0).keysym, 0x5a, 'Z');
+  assert.equal(km.decode(ab01, 0, 1).keysym, 0x79, 'y on the German group');
+  assert.equal(km.decode(ab01, 0, 0).codepoint, 0x7a);
+  // …and the X core table gets both groups, which is what ntk's decodeKey
+  // and the accelerator path read.
+  assert.deepEqual(km.keycode2keysyms[ab01], [0x7a, 0x5a, 0x79, 0x59]);
+
+  // Nothing is left to the bare-form fallback: before the fix every one of
+  // these decoded to the keysym named `1`, which is the bug this fixture is
+  // here to keep out. `AE01` is the only key that may legitimately say 0x31.
+  const one = km.names.get('AE01');
+  const wrong = [...km.keys.keys()].filter(
+    (code) => code !== one && km.decode(code, 0, 0)?.keysym === 0x31,
+  );
+  assert.deepEqual(wrong, [], 'no key decodes to the keysym named `1`');
+});
+
+test('libxkbcommon: a per-group type subscript, and an implicit type beside it', () => {
+  const km = XkbKeymap.parse(LIBXKBCOMMON);
+  const ae11 = km.names.get('AE11');
+  const groups = km.keys.get(ae11).groups;
+  assert.equal(
+    groups[1].type.name,
+    'FOUR_LEVEL_PLUS_LOCK',
+    'group 2 names its type as `type[2]=`',
+  );
+  assert.equal(
+    groups[0].type.name,
+    'TWO_LEVEL',
+    'group 1 names none and falls to the implicit type for two symbols',
+  );
+  assert.equal(km.decode(ae11, 0, 0).keysym, 0x2d, '- on the US group');
+  assert.equal(km.decode(ae11, 0, 1).keysym, 0xdf, 'ß on the German group');
+});
+
+test('libxkbcommon: an explicit type subscripts a single-group key too', () => {
+  const km = XkbKeymap.parse(LIBXKBCOMMON);
+  // F1 has one group, but `type= "CTRL+ALT"` makes libxkbcommon write it
+  // `symbols[1]= [ ... ]` — so the function keys decode wrong on *every*
+  // setup, single layout or not, where the letters only break at two.
+  assert.equal(km.decode(km.names.get('FK01'), 0, 0).keysym, 0xffbe, 'F1');
+  assert.equal(km.decode(km.names.get('FK12'), 0, 0).keysym, 0xffc9, 'F12');
+  assert.equal(
+    km.decode(km.names.get('KPDV'), 0, 0).keysym,
+    0xffaf,
+    'the keypad divide, same shape',
+  );
+});
+
+test('libxkbcommon: the bare one-line form still reads', () => {
+  const km = XkbKeymap.parse(LIBXKBCOMMON);
+  // A key with one group and no explicit type is written `key <ESC> { [ ... ] };`
+  // — no subscript anywhere. These kept working throughout, which is why the
+  // bug looked like "typing is broken but Return and the arrows are fine".
+  assert.equal(km.decode(km.names.get('ESC'), 0, 0).keysym, 0xff1b);
+  assert.equal(km.decode(km.names.get('RTRN'), 0, 0).keysym, 0xff0d);
+  assert.equal(km.decode(km.names.get('SPCE'), 0, 0).codepoint, 0x20);
 });

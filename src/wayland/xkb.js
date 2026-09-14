@@ -17,7 +17,7 @@
 //   xkb_types      `type "FOUR_LEVEL" { modifiers= Shift+LevelThree;
 //                     map[Shift]= 2; ... }`       modifier set -> level
 //   xkb_symbols    `key <AD01> { [ q, Q ] };`     keycode -> keysyms per level,
-//                  with `symbols[Group2]` and `type=` where given
+//                  with `symbols[Group2]`/`symbols[2]` and `type=` where given
 //                  `modifier_map Mod5 { <LVL3> }` real modifier -> keycodes
 //   xkb_compat     `interpret ISO_Level3_Shift { virtualModifier= LevelThree; }`
 //                                                keysym -> virtual modifier
@@ -187,17 +187,32 @@ export class XkbKeymap {
       // explicit per-group or global type
       const typeAll = body.match(/(?:^|[,{\s])type\s*=\s*"([^"]+)"/);
       const typeByGroup = new Map();
-      for (const t of body.matchAll(/type\[Group(\d)\]\s*=\s*"([^"]+)"/g))
+      for (const t of body.matchAll(/type\[(?:Group)?(\d)\]\s*=\s*"([^"]+)"/g))
         typeByGroup.set(+t[1], t[2]);
       // symbols[GroupN]= [ a, b ]  and the bare form { [ a, b ] }
+      //
+      // The group subscript has two spellings, and the one this file was
+      // written against is the one a compositor never sends. `xkbcomp -xkb`
+      // writes `symbols[Group1]`; **libxkbcommon writes `symbols[1]`**, and
+      // libxkbcommon is what serialises the keymap on the other end of
+      // `wl_keyboard.keymap` — so every keymap that reaches this parser for
+      // real uses the bare number. Both are accepted, because a keymap also
+      // arrives here from `xkbcomp` output in a test or a bug report.
       const lists = [];
       for (const g of body.matchAll(
-        /symbols\[Group(\d)\]\s*=\s*\[([^\]]*)\]/g,
+        /symbols\[(?:Group)?(\d)\]\s*=\s*\[([^\]]*)\]/g,
       )) {
         lists[+g[1] - 1] = g[2];
       }
       if (lists.length === 0) {
-        const bare = body.match(/\[([^\]]*)\]/);
+        // The bare form, `key <ESC> { [ Escape ] };` — the list is the one
+        // bracket that is *not* a subscript, which is what the leading
+        // delimiter says: a subscript is always glued to the word in front
+        // of it (`symbols[`, `type[`, `actions[`). Matching any bracket at
+        // all is how an unrecognised subscript spelling used to end up here
+        // and take `[1]` for the symbol list, which decodes every key on the
+        // keyboard to the keysym named `1`.
+        const bare = body.match(/(?:^|[,{\s])\[([^\]]*)\]/);
         if (bare) lists[0] = bare[1];
       }
       for (let gi = 0; gi < lists.length; gi++) {
