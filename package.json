@@ -102,7 +102,7 @@
     "ical.js": "^2.2.1",
     "linebreak": "^1.1.0",
     "ntk": "^8.7.0",
-    "react-reconciler": "^0.33.0",
+    "react-reconciler": "^0.34.0",
     "yoga-layout": "^3.2.1"
   },
   "optionalDependencies": {
@@ -115,7 +115,7 @@
     "@babel/core": "^8.0.0",
     "@babel/plugin-transform-react-jsx": "^8.0.0",
     "hot-module-replacement": "^4.0.1",
-    "react": "^19.0.0",
+    "react": "^19.3.0",
     "react-refresh": "^0.19.0"
   },
   "peerDependenciesMeta": {
@@ -149,7 +149,7 @@
     "hot-module-replacement": "^4.0.1",
     "katex": "^0.18.1",
     "prettier": "^3.6.0",
-    "react": "^19.2.8",
+    "react": "^19.3.0",
     "react-devtools-core": "^8.0.0",
     "react-refresh": "^0.19.0",
     "tsx": "^4.23.1",
