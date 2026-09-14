@@ -32,7 +32,7 @@ import {
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 /**
  * A mock with these outputs, a connection to it, and an app around the

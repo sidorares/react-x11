@@ -9,7 +9,7 @@
 // events. That is all this does, and it records every request it receives so
 // a test can assert on what the client said.
 //
-// The wire codec is the client library's own (`wayland-client`'s args.js) and
+// The wire codec is the client library's own (`@windowkit/wayland`'s args.js) and
 // the interface definitions are the vendored JSON, so the mock cannot drift
 // from the client's idea of the protocol.
 //
@@ -29,11 +29,11 @@ import { fileURLToPath } from 'node:url';
 import { readAll } from '../../src/wayland/fdutil.js';
 
 const require = createRequire(import.meta.url);
-// The fork of wayland-client is consumed through a link until it is
-// published; where it is not installed, the suite skips rather than fails.
+// @windowkit/wayland is an optional dependency; where it is not installed,
+// the suite skips rather than fails.
 let codec = null;
 try {
-  codec = await import(import.meta.resolve('wayland-client/dist/args.js'));
+  codec = await import(import.meta.resolve('@windowkit/wayland/dist/args.js'));
 } catch {
   codec = null;
 }

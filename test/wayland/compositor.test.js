@@ -21,7 +21,7 @@ import {
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 let mock;
 let conn;

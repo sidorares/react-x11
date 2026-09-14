@@ -17,8 +17,14 @@ REACT_X11_BACKEND=wayland node your-app.mjs     # x11-dri >= 0.9 (native socket)
 REACT_X11_BACKEND=wayland bun  your-app.mjs     # or Bun's bun:ffi transport
 node examples/wayland-gl.mjs                    # GPU plasma, paced by the compositor
 node examples/wayland-ui.mjs                    # every drawing primitive, no React
-node --import tsx --test test/wayland/          # the suite: no display needed
+node --import tsx --test 'test/wayland/*.test.js'   # the suite: no display needed
 ```
+
+The two packages it needs beyond react-x11's own are optional dependencies,
+installed with it: [`@windowkit/wayland`](https://github.com/windowkit/wayland),
+the protocol layer — a fork of `wayland-client` that passes file descriptors
+— and [`x11-dri`](https://github.com/sidorares/node-x11-dri) 0.9 or later,
+the GPU context and, on Node, the socket.
 
 The backend is never chosen by `'auto'`: X11 stays the default on Linux
 because the remote case ([remote.md](remote.md)) is the flagship reason this
@@ -96,7 +102,7 @@ the protocol numbers are not.
 ### The protocol layer is not the cost
 
 Asked first, because it decides whether a native protocol bridge is
-justified. Measured with `wayland-client` (the fork), per request and per
+justified. Measured with `@windowkit/wayland`, per request and per
 event:
 
 | measure                                  | Bun                          | Node (native socket)      |
@@ -350,7 +356,7 @@ the X11 grab. `useEyedropper().supported` is true on a bare sway; the rung
 is guarded by `app.backend === 'wayland'` because the capability is a
 Wayland object through and through.
 
-Two protocol gaps are worth knowing. The `wayland-client` fork keeps one
+Two protocol gaps are worth knowing. `@windowkit/wayland` keeps one
 global per interface name, so the output bound here is the one advertised
 last; `capture({ output })` and `layerShell.output` take another proxy, but
 enumerating them waits on `outputs.js`. And the portal's `parent_window`
@@ -377,10 +383,10 @@ content filling the surface; a `windowType="dock"` window is a bottom layer
 surface with a reserved strip the tiled toplevel keeps clear of; the
 capture matches what grim sees; and the eyedropper's overlay maps and the
 pick resolves from a synthesised click. The one protocol bug it surfaced is
-in the client library rather than the compositor: the fork refuses a null
-object argument (`set_parent(null)`, `set_fullscreen(null)`,
+in the client library rather than the compositor: `@windowkit/wayland`
+refuses a null object argument (`set_parent(null)`, `set_fullscreen(null)`,
 `get_popup(null, …)`, `get_layer_surface(…, null, …)`), which
-`nullable.js` encodes around until the fork accepts `allow-null`.
+`nullable.js` encodes around until the library accepts `allow-null`.
 
 ## The transports, and Node
 
@@ -399,7 +405,14 @@ arrive as fds, and Node's sockets abort on them
 - **node-x11's `fdpass-bun.js`**: `bun:ffi` to libc, with a reader thread.
   Bun only. Bun _exports_ libuv's symbol names but several are stubs that
   abort the process (`uv_poll_init` among them), so the native socket is
-  never attempted under Bun; there is nothing to probe for safely.
+  never attempted under Bun; there is nothing to probe for safely. Its
+  reader thread gave up on a healthy socket when `poll(2)` was interrupted
+  sixty-four times in a row, and JavaScriptCore's thread-suspend signal
+  (SIGPWR, `tgkill`ed to every JS thread, the poller included) during
+  **WebAssembly compilation** — yoga-layout's wasm tiering up ~0.3 s into
+  any react-x11 app — produces exactly that burst, as
+  `strace -f -e ppoll,tgkill` shows. EINTR is a retry since x11 4.2.1
+  ([sidorares/node-x11#297](https://github.com/sidorares/node-x11/pull/297)).
 
 ## What is left
 
@@ -416,19 +429,6 @@ arrive as fds, and Node's sockets abort on them
   macOS-only today — the pane presents an IOSurface id. Linux wants the same
   over a memfd or dma-buf fd on the pane channel; until then `<Frame>` here
   degrades the way it does without embedding.
-- **Bun's fd transport, upstream.** node-x11's `fdpass-bun.js` gave up on a
-  healthy socket when its reader thread's `poll(2)` was interrupted
-  sixty-four times in a row. The interrupter is JavaScriptCore's
-  thread-suspend signal (SIGPWR, `tgkill`ed to every JS thread — the poller
-  worker included) during **WebAssembly compilation**: yoga-layout's wasm
-  tiering up ~0.3 s into any react-x11 app produces exactly that burst;
-  `strace -f -e ppoll,tgkill` shows it, and a wasm-free process never sees
-  one. EINTR is a retry, not a failure. The fix is applied to the installed
-  copy here and is
-  [sidorares/node-x11#297](https://github.com/sidorares/node-x11/pull/297)
-  upstream, with a regression test that compiles a wasm module beside an
-  idle connection. Until it ships, an `npm install` brings the bug back
-  under Bun (Node's native transport is unaffected).
 - **Drag-and-drop.** Wired (`src/wayland/dnd.js`): the drop side answers
   another application's drag over `wl_data_device` enter/motion/leave/drop,
   and the source side offers a payload and hands the gesture to
@@ -454,13 +454,6 @@ arrive as fds, and Node's sockets abort on them
 - **`ext-image-copy-capture`** is implemented to the protocol text but has
   not run against a compositor: sway 1.10 advertises only wlr-screencopy,
   and GNOME neither. wlroots 0.19 (sway 1.11) is where to try it.
-- **Publishing.** The fork of `wayland-client` (fd support, `$`) and x11-dri
-  0.9 (`UnixSocket`) are local checkouts; react-x11 consumes both through
-  `node_modules` symlinks that an `npm install` prunes:
-  ```bash
-  ln -sfn /home/andrey/wayland      node_modules/wayland-client
-  ln -sfn /home/andrey/node-x11-dri node_modules/x11-dri
-  ```
 
 ## Things that are gone, not missing
 
@@ -484,8 +477,10 @@ same JSX is a toplevel and the same pick is the portal's.
   backend's own picker, guarded by `app.backend === 'wayland'`; and the
   portal's `parent_window` handle is left empty on that backend, where an
   X window id would be a lie.
-- `wayland-client` (fork) — fd send/receive, the `$` synchronous request
-  namespace, and callback requests returning their `done` payload. 229
-  tests pass.
-- `x11-dri` — `UnixSocket`, `pipe`, `socketpair`, `memfdCreate`; a
+- [`@windowkit/wayland`](https://github.com/windowkit/wayland) 3.1.0 — a
+  fork of [`wayland-client`](https://github.com/sdumetz/node-wayland-client)
+  3.0.0: fd send/receive, the `$` synchronous request namespace, and
+  callback requests returning their `done` payload. 229 tests pass.
+- `x11-dri` 0.9.0 — `UnixSocket`, `pipe`, `socketpair`, `memfdCreate`; a
   self-test that passes a real descriptor through a socketpair.
+- `x11` 4.2.1 — `fdpass-bun.js` retries a `poll(2)` that EINTR interrupted.

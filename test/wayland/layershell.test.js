@@ -26,7 +26,7 @@ import {
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 // ---- the mapping, no compositor needed ------------------------------------
 

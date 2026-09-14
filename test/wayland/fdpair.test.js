@@ -49,7 +49,7 @@ test(
   'a keymap arrives as a descriptor over the native socket and decodes keys',
   {
     skip: !waylandClientAvailable
-      ? 'wayland-client (the fork) is not installed'
+      ? '@windowkit/wayland is not installed'
       : !nativeSocketAvailable() &&
         'x11-dri UnixSocket not available on this runtime',
   },

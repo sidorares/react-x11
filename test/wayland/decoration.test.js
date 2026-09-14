@@ -1,8 +1,8 @@
 // xdg-decoration against the in-process compositor: the request goes out
 // before the first commit, the answer is adopted with the configure it rode
 // in on (and heard before it), and a later change of heart by the
-// compositor arrives the same way. Plus the nullable-object requests the
-// fork of wayland-client cannot encode on its own.
+// compositor arrives the same way. Plus the nullable-object requests
+// @windowkit/wayland cannot encode on its own.
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { after, before, test } from 'node:test';
@@ -18,7 +18,7 @@ import {
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 let mock;
 let conn;

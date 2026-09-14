@@ -33,7 +33,7 @@ import {
 
 const SKIP = waylandClientAvailable
   ? false
-  : 'wayland-client (the fork) is not installed';
+  : '@windowkit/wayland is not installed';
 
 const h = React.createElement;
 const tick = () => new Promise((resolve) => setImmediate(resolve));

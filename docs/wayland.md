@@ -206,6 +206,10 @@ Adopt-first is the default; the fork-shaped risk — the project is one
 person's — is mitigated by its size: this is a library we could absorb,
 not a dependency we would be stuck on. Either way the per-protocol cost
 after that is ~zero, because every interface is generated from XML.
+_As built: adopted, and forked as
+[`@windowkit/wayland`](https://github.com/windowkit/wayland) —
+`wayland-client` 3.0.0 plus descriptor passing both ways, a synchronous `$`
+request path and callback payloads, offered back upstream._
 
 The shopping list, mapped to what each protocol replaces here:
 

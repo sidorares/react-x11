@@ -1,5 +1,5 @@
-// Requests with a nullable object argument, encoded here because the fork
-// of wayland-client refuses them.
+// Requests with a nullable object argument, encoded here because
+// @windowkit/wayland refuses them.
 //
 // `xdg_toplevel.set_parent(null)`, `set_fullscreen(null)` ("whichever
 // output"), `xdg_surface.get_popup(null, …)` (a popup whose parent is a layer
@@ -12,7 +12,7 @@
 // definition in which the nullable argument is a plain `uint` — the identical
 // four bytes on the wire, minus the check.
 //
-// Delete when the fork accepts `null` for `allow-null` objects.
+// Delete when @windowkit/wayland accepts `null` for `allow-null` objects.
 
 /**
  * Send `proxy.<name>(...args)` the way `proxy.$.<name>` would, allowing
