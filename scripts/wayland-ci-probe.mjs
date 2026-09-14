@@ -465,7 +465,8 @@ async function probeClient(socketPath) {
   try {
     rows.push(
       await withConnection(socketPath, async (display) => {
-        advertised = display.listGlobals().includes('zwp_linux_dmabuf_v1');
+        // an iterator over the registry's interface names, not an array
+        advertised = [...display.listGlobals()].includes('zwp_linux_dmabuf_v1');
         if (!advertised) return no('zwp_linux_dmabuf_v1', 'not advertised');
         const dmabuf = await bindDmabuf(display);
         const modifiers = new Map();

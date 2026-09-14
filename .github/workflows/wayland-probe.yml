@@ -115,16 +115,32 @@ jobs:
             -v "$PWD/scripts:/src:ro" \
             -v "$RUNNER_TEMP/kwin-logs:/logs" \
             -v "$GITHUB_STEP_SUMMARY:/summary.md" \
-            -e GITHUB_STEP_SUMMARY=/summary.md \
-            -e PROBE_LOGS=/logs \
+            -e HOST_UID="$(id -u)" \
             archlinux:latest bash -euo pipefail -c '
               pacman -Syu --noconfirm --needed kwin wayland-utils wayland-protocols nodejs npm mesa dbus >/dev/null
-              mkdir -p /probe && cp /src/wayland-ci-probe.mjs /probe/ && cd /probe
-              npm init -y >/dev/null
-              npm install --no-audit --no-fund @windowkit/wayland@^3.1.1 x11-dri@^0.9.0 >/dev/null
+              kwin_wayland --version || true
+              # Inside the container the nodes keep the host groups (video,
+              # kvm), which no user here is in.
+              chmod a+rw /dev/dri/* /dev/udmabuf 2>/dev/null || true
               ls -l /dev/dri /dev/udmabuf 2>&1 || true
-              node wayland-ci-probe.mjs gpu
-              node wayland-ci-probe.mjs compositor kwin
+              # The first run exited 1 with an empty log: once as root, with
+              # its output in the job log, before the probe runs it.
+              echo "--- kwin_wayland directly, as root"
+              (
+                export XDG_RUNTIME_DIR="$(mktemp -d)"
+                chmod 700 "$XDG_RUNTIME_DIR"
+                timeout 15 dbus-run-session -- kwin_wayland --virtual --no-lockscreen --socket wl-direct 2>&1 | head -60
+              ) || true
+              # The probe as an ordinary user, with the host runner uid so it can
+              # write the step summary mounted from the host.
+              useradd -m -u "$HOST_UID" probe
+              as_probe() { runuser -u probe -- env HOME=/home/probe GITHUB_STEP_SUMMARY=/summary.md PROBE_LOGS=/logs "$@"; }
+              mkdir -p /probe && cp /src/wayland-ci-probe.mjs /probe/ && chown -R probe /probe /logs
+              cd /probe
+              as_probe npm init -y >/dev/null
+              as_probe npm install --no-audit --no-fund @windowkit/wayland@^3.1.1 x11-dri@^0.9.0 >/dev/null
+              as_probe node wayland-ci-probe.mjs gpu
+              as_probe node wayland-ci-probe.mjs compositor kwin
             '
       - uses: actions/upload-artifact@v4
         if: always()
