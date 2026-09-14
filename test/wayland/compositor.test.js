@@ -329,6 +329,43 @@ test(
 );
 
 test(
+  "the pointer's 'none' cursor is set_cursor with a null surface",
+  { skip: SKIP },
+  async () => {
+    const win = WaylandWindow.createSync({
+      conn,
+      compositor,
+      wmBase,
+      title: 'N',
+      width: 100,
+      height: 100,
+    });
+    await win.whenConfigured;
+    const seenPointer = mock.pointer;
+    const seat = await WaylandSeat.bind(conn);
+    await until(() => mock.pointer !== seenPointer, {
+      what: 'the seat to hand out a pointer',
+    });
+    mock.pointerEnter(win.surface.id, 10, 10);
+    await until(() => seat.pointerSurface === win.surface.id, {
+      what: 'the pointer to enter',
+    });
+    const before = mock.sent('wl_pointer', 'set_cursor').length;
+    seat.setCursor('none');
+    await until(() => mock.sent('wl_pointer', 'set_cursor').length > before, {
+      what: 'a hidden cursor',
+    });
+    const [serial, surface, hx, hy] = mock
+      .sent('wl_pointer', 'set_cursor')
+      .pop().args;
+    assert.equal(serial, seat.lastSerial, "the enter's serial");
+    assert.deepEqual([surface, hx, hy], [0, 0, 0], 'a null surface');
+    mock.pointerLeave(win.surface.id);
+    win.destroy();
+  },
+);
+
+test(
   'the seat: keys carry the modifier state and repeat until released',
   { skip: SKIP },
   async () => {

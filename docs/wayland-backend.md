@@ -68,7 +68,7 @@ appeared" proves nothing. Three checks that do:
 | clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                                                  |
 | screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap                               |
 | input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events                             |
-| the app            | `app.js`, `backendwindow.js`, `nullable.js`              | what `createRoot({ backend: 'wayland' })` renders through                                         |
+| the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through                                         |
 | tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                                                      |
 
 ### Running the examples
@@ -382,11 +382,12 @@ border, `default_border normal 2`) with the client-side bar gone and the
 content filling the surface; a `windowType="dock"` window is a bottom layer
 surface with a reserved strip the tiled toplevel keeps clear of; the
 capture matches what grim sees; and the eyedropper's overlay maps and the
-pick resolves from a synthesised click. The one protocol bug it surfaced is
-in the client library rather than the compositor: `@windowkit/wayland`
-refuses a null object argument (`set_parent(null)`, `set_fullscreen(null)`,
-`get_popup(null, …)`, `get_layer_surface(…, null, …)`), which
-`nullable.js` encodes around until the library accepts `allow-null`.
+pick resolves from a synthesised click. The one protocol bug it surfaced was
+in the client library rather than the compositor: it refused a null object
+argument (`set_parent(null)`, `set_fullscreen(null)`, `get_popup(null, …)`,
+`get_layer_surface(…, null, …)`). `@windowkit/wayland` 3.1.1 takes `null`
+wherever the protocol marks an argument `allow-null`, and the backend passes
+it directly.
 
 ## The transports, and Node
 
@@ -443,9 +444,7 @@ arrive as fds, and Node's sockets abort on them
   `spellcheck`/`auto_capitalization`, which the tree has no notion of.
 - **Tablet pads.** The buttons, rings and strips on the tablet itself
   (`zwp_tablet_pad_v2`) are accepted and ignored: the tree has no vocabulary
-  for them. Hiding a tool's cursor (`cursor: 'none'`) wants a null surface in
-  `set_cursor`, which the client library's argument check refuses today, so
-  the last shape stays; the pointer's own `'none'` has the same gap.
+  for them.
 - **`useScreens().source` reads `'test'`**, as it does on macOS: both
   backends publish through `setScreensForTests`, the one seam `screens.js`
   has, and it stamps the source. A `source` argument on it is the fix.
@@ -477,10 +476,11 @@ same JSX is a toplevel and the same pick is the portal's.
   backend's own picker, guarded by `app.backend === 'wayland'`; and the
   portal's `parent_window` handle is left empty on that backend, where an
   X window id would be a lie.
-- [`@windowkit/wayland`](https://github.com/windowkit/wayland) 3.1.0 — a
+- [`@windowkit/wayland`](https://github.com/windowkit/wayland) 3.1.1 — a
   fork of [`wayland-client`](https://github.com/sdumetz/node-wayland-client)
-  3.0.0: fd send/receive, the `$` synchronous request namespace, and
-  callback requests returning their `done` payload. 229 tests pass.
+  3.0.0: fd send/receive, the `$` synchronous request namespace, callback
+  requests returning their `done` payload, and `null` for `allow-null`
+  arguments.
 - `x11-dri` 0.9.0 — `UnixSocket`, `pipe`, `socketpair`, `memfdCreate`; a
   self-test that passes a real descriptor through a socketpair.
 - `x11` 4.2.1 — `fdpass-bun.js` retries a `poll(2)` that EINTR interrupted.

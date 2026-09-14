@@ -21,7 +21,6 @@
 // against either finds what it expects.
 
 import { makePipe, readAll, writeAll, closeFd } from './fdutil.js';
-import { requestNullable } from './nullable.js';
 
 const TEXT_MIMES = [
   'text/plain;charset=utf-8',
@@ -216,9 +215,8 @@ class Selection {
 
   async clear() {
     this._dropSource();
-    // a null source clears it — an `allow-null` object the fork's encoder
-    // refuses as 0, so it goes through requestNullable (nullable.js)
-    requestNullable(this.device, 'set_selection', null, this.serial());
+    // a null source clears it
+    this.device.$.set_selection(null, this.serial());
   }
 
   async targets() {

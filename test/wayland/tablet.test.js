@@ -194,6 +194,20 @@ test(
     seat.setCursor('text');
     await until(() => toolShapes(penId).pop()[1] === 9, { what: 'an I-beam' });
     assert.deepEqual(toolShapes(penId).pop(), [prox, 9]);
+    // 'none' is no shape at all: the tool's own set_cursor with a null
+    // surface, which the client library refused before 3.1.1
+    seat.setCursor('none');
+    await until(
+      () => mock.sent('zwp_tablet_tool_v2', 'set_cursor').length >= 1,
+      {
+        what: 'a hidden cursor',
+      },
+    );
+    assert.deepEqual(
+      mock.sent('zwp_tablet_tool_v2', 'set_cursor').pop().args,
+      [prox, 0, 0, 0],
+      'a null surface, with the proximity serial',
+    );
     seat.setCursor('default');
   },
 );

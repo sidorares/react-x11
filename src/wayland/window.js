@@ -41,7 +41,6 @@
 import { EventEmitter } from 'node:events';
 import { ServerDecoration } from './ssd.js';
 import { createLayerSurface } from './layershell.js';
-import { requestNullable } from './nullable.js';
 
 /** `xdg_toplevel.state` values. */
 export const TOPLEVEL_STATE = {
@@ -365,7 +364,7 @@ export class WaylandWindow extends EventEmitter {
     // parent and adopted by the layer surface before their first commit.
     const popup = parent.xdgSurface
       ? this.xdgSurface.$.get_popup(parent.xdgSurface.id, positioner.id)
-      : requestNullable(this.xdgSurface, 'get_popup', null, positioner.id);
+      : this.xdgSurface.$.get_popup(null, positioner.id);
     positioner.$.destroy();
     if (!parent.xdgSurface) parent.layerSurface.$.get_popup(popup.id);
     this.role = popup;
@@ -678,8 +677,8 @@ export class WaylandWindow extends EventEmitter {
 
   setParent(parent) {
     if (!this.toplevel) return;
-    // null clears the parent; nullable.js says why the plain call cannot
-    requestNullable(this.toplevel, 'set_parent', parent?.toplevel ?? null);
+    // null clears the parent
+    this.toplevel.$.set_parent(parent?.toplevel ?? null);
   }
 
   maximize(on = true) {
@@ -691,7 +690,7 @@ export class WaylandWindow extends EventEmitter {
   fullscreen(on = true) {
     if (!this.toplevel) return;
     // a null output: whichever the compositor puts a fullscreen window on
-    if (on) requestNullable(this.toplevel, 'set_fullscreen', null);
+    if (on) this.toplevel.$.set_fullscreen(null);
     else this.toplevel.$.unset_fullscreen();
   }
 
@@ -776,7 +775,7 @@ export class WaylandWindow extends EventEmitter {
   /** Hide without destroying: a null buffer unmaps the surface. */
   unmap() {
     if (this.destroyed || !this.mapped) return;
-    this.surface.$.attach(0, 0, 0);
+    this.surface.$.attach(null, 0, 0);
     this.surface.$.commit();
     this.mapped = false;
   }
