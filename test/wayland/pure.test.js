@@ -1,9 +1,14 @@
-// The Wayland backend's pure pieces: colour and font parsing, damage
-// merging, the decorations' geometry and hit-testing. No compositor, no GPU.
+// The Wayland backend's pure pieces: colour and font parsing, the rectangle
+// batch's argument shapes, damage merging, the decorations' geometry and
+// hit-testing. No compositor, no GPU.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { parseColor, parseFont } from '../../src/wayland/context2d.js';
+import {
+  WaylandContext2D,
+  parseColor,
+  parseFont,
+} from '../../src/wayland/context2d.js';
 import { unionDamage } from '../../src/wayland/swapchain.js';
 import { Decorations, RESIZE_MARGIN } from '../../src/wayland/decorations.js';
 import { RESIZE_EDGE, TOPLEVEL_STATE } from '../../src/wayland/window.js';
@@ -123,5 +128,55 @@ test('decorations: insets, geometry and hit-testing', () => {
   assert.equal(
     Decorations.cursorFor({ kind: 'resize', edges: RESIZE_EDGE.TOP_LEFT }),
     'nwse-resize',
+  );
+});
+
+// `fillRects` is the one call react-x11's own paint paths batch through —
+// text selection bands, the small-text strip, textarea highlights, preedit
+// underlines — and every one of them builds the flat list
+// `Render.FillRectangles` takes on the wire. ntk and the Cocoa context both
+// accept it, so this backend reading it as one rectangle per element drew
+// nothing at all, with no throw to say so (#564).
+test('fillRects: the three argument shapes are the same drawing', () => {
+  // no GL entry point is touched before the first draw, and `_rect` — the
+  // funnel every fill in the context goes through — is stubbed out here
+  const drawn = (rects) => {
+    const ctx = new WaylandContext2D(null);
+    const seen = [];
+    ctx._rect = (x, y, w, h, radius, style) =>
+      seen.push([x, y, w, h, radius, style]);
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRects(rects);
+    return seen;
+  };
+
+  const expected = [
+    [0, 0, 64, 64, 0, '#ff0000'],
+    [8, 8, 4, 4, 0, '#ff0000'],
+  ];
+  assert.deepEqual(drawn([0, 0, 64, 64, 8, 8, 4, 4]), expected, 'flat');
+  assert.deepEqual(
+    drawn([
+      [0, 0, 64, 64],
+      [8, 8, 4, 4],
+    ]),
+    expected,
+    'one array per rectangle',
+  );
+  assert.deepEqual(
+    drawn([
+      { x: 0, y: 0, width: 64, height: 64 },
+      { x: 8, y: 8, w: 4, h: 4 },
+    ]),
+    expected,
+    'objects, width/height or w/h',
+  );
+
+  assert.deepEqual(drawn([]), [], 'an empty batch draws nothing');
+  assert.deepEqual(drawn(undefined), [], 'and neither does no batch at all');
+  assert.deepEqual(
+    drawn([0, 0, 64, 64, 8, 8]),
+    [expected[0]],
+    'a trailing partial rectangle is not one',
   );
 });

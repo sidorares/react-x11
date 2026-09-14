@@ -866,8 +866,29 @@ export class WaylandContext2D {
     this._rect(x, y, w, h, 0, this.strokeStyle, Math.max(0.5, this.lineWidth));
   }
 
-  /** The batched form react-x11 uses for backgrounds and selection bands. */
+  /**
+   * The batched form react-x11 uses for backgrounds and selection bands.
+   *
+   * Three shapes, because all three are in use: `[[x,y,w,h],…]`,
+   * `[{x,y,width,height},…]`, and the flat `[x,y,w,h,x,y,w,h,…]` that
+   * `Render.FillRectangles` takes on the wire. ntk and the Cocoa context
+   * both accept the flat list, so it is what a caller written against
+   * either of them hands us; reading it as one rectangle per element makes
+   * every field `undefined` and draws nothing at all.
+   */
   fillRects(rects) {
+    if (!rects?.length) return;
+    if (typeof rects[0] === 'number') {
+      // a trailing partial rectangle is not one, so stop four short
+      for (let i = 0; i + 3 < rects.length; i += 4) {
+        const x = rects[i];
+        const y = rects[i + 1];
+        const w = rects[i + 2];
+        const h = rects[i + 3];
+        this._rect(x, y, w, h, 0, this.fillStyle, 0);
+      }
+      return;
+    }
     for (const r of rects) {
       const x = r.x ?? r[0];
       const y = r.y ?? r[1];
