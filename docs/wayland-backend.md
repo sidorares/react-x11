@@ -68,7 +68,7 @@ appeared" proves nothing. Three checks that do:
 | clipboard          | `clipboard.js`, `fdutil.js`                              | `wl_data_device` + primary selection, over pipes                                                  |
 | screens            | `outputs.js`                                             | `wl_output` + xdg_output into `screens.js`: `useScreens()`, the cap                               |
 | input methods      | `textinput.js`                                           | `zwp_text_input_v3`: the compositor's IME into the composition events                             |
-| the app            | `app.js`, `backendwindow.js`                             | what `createRoot({ backend: 'wayland' })` renders through                                         |
+| the app            | `app.js`, `backendwindow.js`, `framewatch.js`            | what `createRoot({ backend: 'wayland' })` renders through                                         |
 | tests              | `test/wayland/`                                          | an in-process compositor, and the pure parts                                                      |
 
 ### Running the examples
@@ -91,7 +91,10 @@ Two environment variables help when a desktop offers no screenshot API:
 `REACT_X11_WAYLAND_SNAPSHOT=/tmp/frame.png` writes the backing target of
 the first window at its 30th present (`REACT_X11_WAYLAND_SNAPSHOT_AT`
 changes which) — the pixels the compositor was handed, read back from the
-GPU.
+GPU. A third, `REACT_X11_WAYLAND_FRAME_STALL_MS`, is how long a frame
+callback may go unanswered before the backend says the compositor has
+stopped showing the window (2000; `0` turns that off) — see
+[A surface the compositor stops showing stops drawing](#a-surface-the-compositor-stops-showing-stops-drawing).
 
 The GPU context is made on `glPolicy.devicePath`, else on
 `REACT_X11_GL_DEVICE`, else on the first render node, and a device named
@@ -295,6 +298,36 @@ X11, the premultiplied colour itself here — but a CSS colour string, a
 premultiplied `[r, g, b, a]` and `null` (meaning the fill style in force)
 are all accepted as sources as well, which is the set the Cocoa backend
 takes.
+
+### A surface the compositor stops showing stops drawing
+
+After the first present the frame loop has exactly one source of liveness:
+`wl_surface.frame`. A compositor is entitled never to send one to a surface
+it is not showing — covered, on another workspace, minimised, the screen
+locked — and that is the right way to drive a client, because painting into a
+surface nobody sees is work for nothing. There is no timer-driven fallback
+here and there should not be one.
+
+What it costs is that the silence is **not an error**. Nothing rejects, the
+frame stays armed, and every later repaint request returns at its guard while
+React goes on re-rendering; from outside the process, an app that has drawn
+one frame and gone quiet is indistinguishable from a hang (#567 — 135 state
+ticks, one present, exit code 0). So the loop is watched (`framewatch.js`),
+and the parked state is reported twice over:
+
+- **On stderr, once per window, in development**, when the window still had
+  something to draw. One line, naming the compositor as the reason and saying
+  the app is not hung.
+- **In the tree**, as [`useWindowState().presenting`](system.md#presenting-and-the-wayland-frame-clock),
+  which also folds into `visible` — so an app can stop animating and
+  simulating rather than feeding a loop nobody is turning, which is what
+  every map, chart and game on this backend wants anyway.
+
+Nothing is re-armed or polled to recover: the frame callback we asked for is
+still queued with the compositor and fires the moment the surface is shown
+again, which un-parks the loop and flips `presenting` back. The deadline is
+two seconds, and `REACT_X11_WAYLAND_FRAME_STALL_MS` changes it — `0` turns the
+watch off entirely, timer, warning and all.
 
 ## Decorations: whose frame
 

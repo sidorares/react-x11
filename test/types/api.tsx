@@ -1660,6 +1660,9 @@ function _System() {
   const exact: WindowState = useWindowState(win);
   const states: readonly WindowStateName[] = state.states;
   const desktop: number | null = state.desktop;
+  // Wayland's frame-callback liveness; true everywhere else.
+  const presenting: boolean = state.presenting;
+  void presenting;
   // @ts-expect-error — `visible` is a boolean, not a rect
   const bad: object = exact.visible;
   void [states, desktop, bad];

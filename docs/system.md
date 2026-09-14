@@ -145,16 +145,17 @@ useEffect(() => {
 }, [visible]);
 ```
 
-|              |                                                                    |
-| ------------ | ------------------------------------------------------------------ |
-| `focused`    | this window has the keyboard                                       |
-| `visible`    | **the one to branch on** — not minimized, not fully covered        |
-| `minimized`  | `_NET_WM_STATE_HIDDEN`: iconified, or shaded away                  |
-| `maximized`  | both axes; one axis alone shows up in `states`                     |
-| `fullscreen` | what the WM actually did, not what `<window fullscreen>` asked for |
-| `obscured`   | fully covered — **always false under a compositor**                |
-| `states`     | the raw `_NET_WM_STATE` names                                      |
-| `desktop`    | the workspace index, or null                                       |
+|              |                                                                        |
+| ------------ | ---------------------------------------------------------------------- |
+| `focused`    | this window has the keyboard                                           |
+| `visible`    | **the one to branch on** — not minimized, not covered, still drawing   |
+| `minimized`  | `_NET_WM_STATE_HIDDEN`: iconified, or shaded away                      |
+| `maximized`  | both axes; one axis alone shows up in `states`                         |
+| `fullscreen` | what the WM actually did, not what `<window fullscreen>` asked for     |
+| `obscured`   | fully covered — **always false under a compositor**                    |
+| `presenting` | the display is still scheduling frames — Wayland; true everywhere else |
+| `states`     | the raw `_NET_WM_STATE` names                                          |
+| `desktop`    | the workspace index, or null                                           |
 
 `<window states>` is what a window **asks for**; this is what it **got**. The
 two part company routinely — a user hits a maximize hotkey, a tiling WM
@@ -195,6 +196,45 @@ So `obscured` is a bare-WM optimisation, and `visible` — which folds in
 `minimized`, the signal that _does_ survive compositing — is the field to
 branch on. An animation paused on `visible` stops when the window is minimized
 everywhere, and additionally when it is buried on a desktop with no compositor.
+
+### `presenting`, and the Wayland frame clock
+
+A Wayland compositor will not tell you a surface is covered either — but it
+stops sending it **frame callbacks**, and on that backend a frame callback is
+the only thing that paces the frame loop. So a window nobody is showing draws
+once and then stops, while React above it goes on re-rendering into a tree
+that reaches no screen. That is the compositor being right (painting into a
+surface nobody sees is work for nothing) and it used to be invisible: no
+error, no warning, and nothing an app could ask.
+
+`presenting` is that state, published. It goes false after a couple of
+seconds of silence with a repaint waiting, and true again on the very next
+frame callback — the compositor still holds the one we asked for, and answers
+it the moment the surface is shown again. It folds into `visible`, so an
+animation already paused on `visible` pauses here too:
+
+```jsx
+const { visible, presenting } = useWindowState();
+
+// nothing this draws would reach the screen; stop simulating as well
+useEffect(() => {
+  if (!visible) return;
+  const id = setInterval(step, 16);
+  return () => clearInterval(id);
+}, [visible]);
+
+// and the reason, where a status line would rather say it than go blank
+const status = presenting ? 'live' : 'paused — this window is not on screen';
+```
+
+It is a signal to **stop work** on, not a frame-accurate one: two seconds of
+silence is what makes it certain, so nothing that has to be exact should read
+it. On X11, macOS and the headless mock it is `true` and stays there — their
+frame clocks do not depend on a compositor's goodwill, and `obscured` is the
+question to ask there instead. The backend also says it once on stderr in
+development, because "the app is alive and has drawn once" is otherwise an
+unguessable state; see
+[wayland-backend.md](wayland-backend.md#a-surface-the-compositor-stops-showing-stops-drawing).
 
 ---
 

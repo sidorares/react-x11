@@ -18,7 +18,10 @@
 // `wl_surface.frame` callback (or paints straight away for the first frame,
 // which nothing can pace), the callback runs the renderer's paint into the
 // backing target, and the result is copied to a swapchain buffer and
-// committed with the next frame request in the same commit.
+// committed with the next frame request in the same commit. A compositor
+// stops answering those for a surface it is not showing, and the loop then
+// parks with nothing to say for itself — so it is watched (framewatch.js),
+// which is where `presenting` comes from.
 //
 // The frame is drawn here only as a last resort: where either decoration
 // protocol is offered the window asks for server-side decorations (ssd.js)
@@ -33,6 +36,7 @@ import { writeSync, writeFileSync } from 'node:fs';
 import { snapshotPNG } from './readback.js';
 import { WaylandWindow, TOPLEVEL_STATE } from './window.js';
 import { WaylandGLContext } from './glcontext.js';
+import { FrameWatch } from './framewatch.js';
 import { WaylandContext2D } from './context2d.js';
 import { Decorations } from './decorations.js';
 import { appearanceSnapshot } from '../appearance.js';
@@ -122,6 +126,17 @@ export class WaylandBackendWindow extends EventEmitter {
     this._surfaceRaf = [];
     /** rects (content px) a surface or pane changed since the last present */
     this._surfaceDamage = [];
+    /**
+     * The frame loop's liveness (framewatch.js). A compositor is entitled to
+     * stop sending frame callbacks to a surface it is not showing, and that
+     * silence is the only thing that says so — it is not an error, and
+     * nothing above here can see it (#567).
+     */
+    this._frameWatch = new FrameWatch({
+      id: this.id,
+      pending: () => this._hasFrameWork(),
+      onChange: (presenting) => this.emit('presenting', presenting),
+    });
 
     // Frame and content sizes. `attributes.width/height` are what the tree
     // measured, in device pixels of content; the surface adds the frame.
@@ -486,6 +501,15 @@ export class WaylandBackendWindow extends EventEmitter {
     this._armFrame();
   }
 
+  /** Is there a repaint waiting on the next frame? The three ways there can
+   *  be one: the renderer's callbacks, a `<glarea>`'s, and the frame the
+   *  decorations ask for. */
+  _hasFrameWork() {
+    return (
+      this._raf.length > 0 || this._surfaceRaf.length > 0 || this._frameDirty
+    );
+  }
+
   /**
    * Get a frame in flight.
    *
@@ -513,7 +537,14 @@ export class WaylandBackendWindow extends EventEmitter {
     if (this.isDragPreview) return;
     // A closed connection arms nothing: a frame request on it rejects at
     // once, the rejection re-arms, and that loop never yields.
-    if (this._frameArmed || this._destroyed || this.app.conn?.destroyed) return;
+    if (this._destroyed || this.app.conn?.destroyed) return;
+    if (this._frameArmed) {
+      // The repaint rides the frame already in flight — unless that flight is
+      // the compositor's silence, in which case this is the moment the app
+      // started drawing for nobody (framewatch.js).
+      this._frameWatch.workArrived();
+      return;
+    }
     this._frameArmed = true;
     this.wl.whenConfigured
       .then(() => {
@@ -527,8 +558,12 @@ export class WaylandBackendWindow extends EventEmitter {
         }
         const vsync = this.wl.scheduleFrame();
         this.wl.surface.$.commit();
+        this._frameWatch.waiting();
         vsync.then(
-          (t) => this._fireRaf(t),
+          (t) => {
+            this._frameWatch.arrived();
+            this._fireRaf(t);
+          },
           () => this._frameIdle(),
         );
       })
@@ -538,9 +573,32 @@ export class WaylandBackendWindow extends EventEmitter {
   /** The frame is over with nothing presented; run again only if asked. */
   _frameIdle() {
     this._frameArmed = false;
+    // Nothing is outstanding now — which is not the same as being shown, so
+    // the watch stops counting rather than declaring anything.
+    this._frameWatch.idle();
     if (!this._destroyed && (this._raf.length || this._frameDirty)) {
       this._armFrame();
     }
+  }
+
+  /**
+   * Is the compositor still scheduling frames for this surface?
+   *
+   * False once a frame callback has gone unanswered for long enough to mean
+   * the surface is not being shown (framewatch.js) — the app's own animation
+   * and simulation are drawing for nobody until this is true again. The tree
+   * reads it through `useWindowState().presenting`, which also folds it into
+   * `visible`; this is the window-object half of that.
+   */
+  get presenting() {
+    return this._frameWatch.presenting;
+  }
+
+  /** Subscribe to it. The X11 and Cocoa windows have no such signal, and
+   *  `windowstate.js` takes the absence of this method as "always true". */
+  onPresentingChange(fn) {
+    this.on('presenting', fn);
+    return () => this.off('presenting', fn);
   }
 
   /** Translate into the content area and clip to it. */
@@ -738,9 +796,14 @@ export class WaylandBackendWindow extends EventEmitter {
           `${damage === 'all' ? 'full' : damage.length + ' rect(s)'}\n`,
       );
     }
+    // The frame request `endFrame` put in this commit is the loop's only
+    // liveness from here on: the compositor answers it when it next shows
+    // this surface, and never if it stops (framewatch.js).
+    this._frameWatch.waiting();
     Promise.resolve(vsync).then(
       (t) => {
         this._presentInFlight = false;
+        this._frameWatch.arrived();
         if (!this._destroyed) this._fireRaf(t);
       },
       () => {
@@ -1116,6 +1179,7 @@ export class WaylandBackendWindow extends EventEmitter {
     if (this._destroyed) return;
     this._destroyed = true;
     this._raf.length = 0;
+    this._frameWatch.stop();
     this.app.dnd?.detach(this);
     this.app.makeCurrent();
     for (const ctx of this._contexts.values()) ctx.destroy?.();

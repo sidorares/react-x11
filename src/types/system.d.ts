@@ -100,7 +100,8 @@ export function useScale(): number;
 export interface WindowState {
   /** This window has the keyboard. */
   readonly focused: boolean;
-  /** **The one to branch on**: not minimized, and not fully covered. */
+  /** **The one to branch on**: not minimized, not fully covered, and still
+   *  being given frames to draw. */
   readonly visible: boolean;
   /**
    * Fully covered by other windows — **always false when a compositing
@@ -109,6 +110,18 @@ export interface WindowState {
    * entirely visible. Prefer `visible`.
    */
   readonly obscured: boolean;
+  /**
+   * The display is still scheduling frames for this window.
+   *
+   * False on the **Wayland** backend once the compositor has stopped sending
+   * frame callbacks — a surface it is not showing gets none, so nothing the
+   * app draws reaches the screen until it starts again. It is how that
+   * backend answers the question `obscured` answers on a bare X server, it
+   * folds into `visible` the same way, and it takes a couple of seconds of
+   * silence to be sure. Always true where the backend has no such signal:
+   * X11, Cocoa, and the headless mock.
+   */
+  readonly presenting: boolean;
   /** `_NET_WM_STATE_HIDDEN`: iconified, or shaded away. */
   readonly minimized: boolean;
   /** Both axes. One axis alone shows up in `states`. */
