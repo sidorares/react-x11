@@ -272,3 +272,52 @@ test(
     target.destroy();
   },
 );
+
+test(
+  'the documented drawGlyphs spelling inks glyphs in the solid it names',
+  { skip },
+  () => {
+    // What a caller that positions its own glyphs writes on every backend:
+    // `drawGlyphs(ctx.Render.PictOp.Over, ctx.createSolidPicture(…), runs)`.
+    // With no `createSolidPicture` here that call threw, and the feature
+    // test callers wrote instead came back false and drew a frame with
+    // every cell in its colour and no text in any of them (issue #565).
+    const { ctx, target } = makeContext(env);
+    fresh(ctx);
+    const font = {
+      key: 'test-solid-squares',
+      rasterize: () => ({
+        width: 10,
+        height: 10,
+        left: 0,
+        top: -10,
+        data: new Uint8Array(10 * 10).fill(255),
+      }),
+    };
+    ctx.fillStyle = '#00ff00'; // not the ink: the source names it
+    ctx.drawGlyphs(ctx.Render.PictOp.Over, ctx.createSolidPicture(1, 0, 0, 1), [
+      {
+        run: {
+          font,
+          size: 10,
+          glyphs: [
+            { id: 1, ax: 12 },
+            { id: 2, ax: 12 },
+          ],
+        },
+        x: 4,
+        y: 14,
+      },
+    ]);
+    ctx.end();
+    assert.deepEqual(pixel(ctx, 8, 8), [255, 0, 0, 255], 'the first glyph');
+    assert.deepEqual(
+      pixel(ctx, 20, 8),
+      [255, 0, 0, 255],
+      'the second, a pen advance along',
+    );
+    assert.equal(pixel(ctx, 15, 8)[3], 0, 'the gap between them');
+    ctx.destroy();
+    target.destroy();
+  },
+);

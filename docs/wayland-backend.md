@@ -281,6 +281,21 @@ every batch under it tests that bit; nested clips intersect in place,
 bounds, so the test is only paid inside them. `test/wayland/context2d-gpu.test.js`
 reads the pixels back on any machine with a render node.
 
+**The glyph seam is public, and spelled the same way on every backend.**
+`drawGlyphs(op, src, positioned)` is how `TextLayout.draw` reaches a
+context, and ntk documents it for callers that place their own glyphs too —
+a terminal grid, a tabular column. The source in that call is spelled
+`ctx.createSolidPicture(r, g, b, a)` and the op `ctx.Render.PictOp.Over`,
+so both of those answer here as they do on X11 and on Cocoa. Implementing
+`drawGlyphs` alone was not half a seam but a silent one: callers
+feature-detected, the test came back false, and the frame drew with every
+cell in its colour and no text in any of them rather than throwing (issue
+#565). What a solid _is_ stays backend-private — an XRender `Picture` on
+X11, the premultiplied colour itself here — but a CSS colour string, a
+premultiplied `[r, g, b, a]` and `null` (meaning the fill style in force)
+are all accepted as sources as well, which is the set the Cocoa backend
+takes.
+
 ## Decorations: whose frame
 
 `decorations.js` draws a titlebar because mutter will not, and that stays
