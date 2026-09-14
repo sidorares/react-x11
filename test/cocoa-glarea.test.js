@@ -319,3 +319,42 @@ test('the layer goes with the last child', async () => {
   assert.equal(overlay.parent, null, 'off the root layer');
   assert.ok(node._overlay === null, 'no overlay left');
 });
+
+test('a still surface is not drawn again when the display hands its buffer back', async () => {
+  // The surface reopens its gate one display period after every swap and
+  // says so through onFrameAvailable. That is a frame that *can* be drawn,
+  // not one that is wanted: asking for one each time turned frameLoop
+  // 'demand' into a loop at display rate — a still map drew 75 frames a
+  // second on macOS, forever.
+  let drawn = 0;
+  const { node, frame } = await mountGLArea({
+    area: {
+      onDraw: () => {
+        drawn += 1;
+      },
+    },
+  });
+  // several gate periods (16ms here), each followed by a frame tick
+  const periods = async (n = 4) => {
+    for (let i = 0; i < n; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      frame();
+    }
+  };
+  await periods();
+  const still = drawn;
+  assert.ok(still > 0, 'the first frame was drawn');
+  await periods();
+  assert.equal(drawn, still, 'and nothing after it');
+
+  // A frame asked for while the gate is closed is refused — and is the one
+  // onFrameAvailable is for: it is drawn when the gate opens.
+  node.requestFrame();
+  frame();
+  assert.equal(drawn, still + 1, 'drawn at once, which closes the gate');
+  node.requestFrame();
+  frame();
+  assert.equal(drawn, still + 1, 'refused while it is closed');
+  await periods();
+  assert.equal(drawn, still + 2, 'drawn once it opens, and then left alone');
+});
