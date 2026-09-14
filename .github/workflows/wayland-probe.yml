@@ -1,0 +1,134 @@
+name: Wayland CI probe
+
+# A diagnostic, not a gate. The Wayland backend renders with GLES on a DRM
+# node and presents only through zwp_linux_dmabuf_v1; a GitHub-hosted runner
+# has no render node. This records what a runner does offer: which device
+# nodes exist before and after `modprobe`, whether x11-dri can open a GPU
+# context on any of them, and which headless compositors advertise
+# linux-dmabuf and take a buffer — a GPU one, or a udmabuf, which needs no
+# GPU. The answers decide what the backend's e2e job can test.
+#
+# Every step records rather than fails. The job summary is the output, and
+# each compositor's log and `wayland-info` are uploaded. The work is in
+# scripts/wayland-ci-probe.mjs.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/wayland-probe.yml
+      - scripts/wayland-ci-probe.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  hosted:
+    name: hosted runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Compositors and tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q weston sway wayland-utils wayland-protocols mesa-utils
+      # The probe's own packages rather than the repository's lockfile: it
+      # asks what the published @windowkit/wayland and x11-dri can do.
+      - name: Probe packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/probe"
+          cp scripts/wayland-ci-probe.mjs "$RUNNER_TEMP/probe/"
+          cd "$RUNNER_TEMP/probe"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund @windowkit/wayland@^3.1.1 x11-dri@^0.9.0
+      - name: Devices as the runner boots
+        run: |
+          uname -r
+          ls -l /dev/dri /dev/udmabuf 2>&1 || true
+          for d in /sys/class/drm/*/device/driver; do
+            echo "$d -> $(basename "$(readlink -f "$d")")"
+          done
+          lsmod | grep -E '^(vkms|vgem|udmabuf|hyperv_drm|virtio_gpu) ' || true
+      - name: Load vkms, vgem and udmabuf
+        run: |
+          for m in vkms vgem udmabuf; do
+            if sudo modprobe "$m"; then echo "modprobe $m: loaded"; else echo "modprobe $m: failed"; fi
+          done
+          ls -l /dev/dri /dev/udmabuf 2>&1 || true
+          # the runner's user is in neither the video nor the render group
+          sudo chmod a+rw /dev/dri/* /dev/udmabuf 2>/dev/null || true
+      - name: EGL
+        run: eglinfo -B 2>&1 | head -120 || true
+      - name: x11-dri on every DRM node
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/probe
+        run: node wayland-ci-probe.mjs gpu
+      - name: weston, GL renderer
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/probe
+        run: node wayland-ci-probe.mjs compositor weston-gl
+      - name: weston, pixman renderer
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/probe
+        run: node wayland-ci-probe.mjs compositor weston-pixman
+      - name: sway, gles2 renderer
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/probe
+        run: node wayland-ci-probe.mjs compositor sway-gles2
+      - name: sway, pixman renderer
+        continue-on-error: true
+        working-directory: ${{ runner.temp }}/probe
+        run: node wayland-ci-probe.mjs compositor sway-pixman
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wayland-probe-hosted
+          path: ${{ runner.temp }}/probe/logs
+          if-no-files-found: ignore
+
+  # KWin 6 builds a software render device from llvmpipe and /dev/udmabuf,
+  # which makes it the stock compositor most likely to take a client's
+  # dma-buf on a machine without a GPU. Ubuntu 24.04's KWin 5.27 predates
+  # that, hence an Arch container, with the host's DRM nodes passed in.
+  kwin:
+    name: KWin, in an Arch container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - name: Load vkms and udmabuf on the host
+        run: |
+          sudo modprobe vkms || echo "modprobe vkms: failed"
+          sudo modprobe udmabuf || echo "modprobe udmabuf: failed"
+          ls -l /dev/dri /dev/udmabuf 2>&1 || true
+      - name: Probe inside the container
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/kwin-logs"
+          devices=()
+          for d in /dev/dri /dev/udmabuf; do [ -e "$d" ] && devices+=(--device "$d"); done
+          docker run --rm "${devices[@]}" \
+            -v "$PWD/scripts:/src:ro" \
+            -v "$RUNNER_TEMP/kwin-logs:/logs" \
+            -v "$GITHUB_STEP_SUMMARY:/summary.md" \
+            -e GITHUB_STEP_SUMMARY=/summary.md \
+            -e PROBE_LOGS=/logs \
+            archlinux:latest bash -euo pipefail -c '
+              pacman -Syu --noconfirm --needed kwin wayland-utils wayland-protocols nodejs npm mesa dbus >/dev/null
+              mkdir -p /probe && cp /src/wayland-ci-probe.mjs /probe/ && cd /probe
+              npm init -y >/dev/null
+              npm install --no-audit --no-fund @windowkit/wayland@^3.1.1 x11-dri@^0.9.0 >/dev/null
+              ls -l /dev/dri /dev/udmabuf 2>&1 || true
+              node wayland-ci-probe.mjs gpu
+              node wayland-ci-probe.mjs compositor kwin
+            '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wayland-probe-kwin
+          path: ${{ runner.temp }}/kwin-logs
+          if-no-files-found: ignore
