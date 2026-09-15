@@ -68,7 +68,6 @@ export const REGISTRAR_PATH = '/com/canonical/AppMenu/Registrar';
 const KDE_SERVICE_PROPERTY = '_KDE_NET_WM_APPMENU_SERVICE_NAME';
 const KDE_PATH_PROPERTY = '_KDE_NET_WM_APPMENU_OBJECT_PATH';
 
-
 /**
  * How long the registrar gets to answer.
  *
@@ -426,7 +425,6 @@ export class GlobalMenuExport extends DbusMenuExport {
     await this.ref?.release();
     this.ref = null;
   }
-
 }
 
 /**

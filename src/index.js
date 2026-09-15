@@ -14,12 +14,7 @@ export {
   registerApplication,
 } from './application.js';
 export { useAppActivate, useAppOpen } from './apphooks.js';
-export {
-  setBadge,
-  setProgress,
-  setQuicklist,
-  setUrgent,
-} from './launcher.js';
+export { setBadge, setProgress, setQuicklist, setUrgent } from './launcher.js';
 export { useBadge, useDockMenu, useProgress } from './launcherhooks.js';
 export { useTray } from './trayhooks.js';
 export {
