@@ -168,9 +168,10 @@ export default function App({ initial = 'available', onQuit = () => {} }) {
 
         <text style={{ color: DIM, fontSize: 11 }}>
           {available
-            ? 'In the menu bar — click the icon up top.'
-            : 'No menu-bar tray here (X11, #353) — this window is the app.'}
-          {trayLive ? '' : ''}
+            ? trayLive
+              ? 'In the menu bar — click the icon up top.'
+              : 'In the tray — click the icon in your panel.'
+            : 'Nothing is hosting a tray here — this window is the app.'}
         </text>
       </box>
     </window>

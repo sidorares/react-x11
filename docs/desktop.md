@@ -412,6 +412,19 @@ Three rules, in the order they matter:
    machine. Nothing is logged and nothing throws; the feature is simply not
    there. Reserve `error` for a service that answered and then refused.
 
+### All of it, in one app
+
+`examples/desktop.jsx` (`npm run examples:desktop`) is a backup agent that
+uses every hook on this page at once — the tray icon with its attention state
+and its overlay, the badge, the progress bar, the quicklist, the urgency flag,
+and a banner whose buttons are offered only where the daemon has `actions` —
+and whose second pane renders `useDesktopCapability()` for each of
+`CAPABILITIES` beside the live answers, so the prediction and the measurement
+are on screen together. It is the one to read when the question is what an app
+will get on a machine you do not have. The three feature-sized examples are
+`badge.jsx` (the launcher), `tray.jsx` (the tray) and `notify.jsx` (the
+notification).
+
 ## Turning the desktop off
 
 Three things react-x11 turns on for you reach the **session bus**, and none
