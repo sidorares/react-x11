@@ -33,6 +33,100 @@ function parseColor(value) {
   return parsed;
 }
 
+/** Bytes as a Buffer over the same memory — for a view, its own window of
+ * the ArrayBuffer, not the whole buffer from offset 0. */
+function toBuffer(data) {
+  if (Buffer.isBuffer(data)) return data;
+  if (ArrayBuffer.isView(data)) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  }
+  return Buffer.from(data);
+}
+
+// --- ntk Images as drawImage sources -----------------------------------------
+//
+// An ntk `Image` is straight RGBA in JS memory. On X, ntk uploads it to a
+// pixmap per connection and caches that on the Image; here the upload is a
+// CG bitmap made on the first draw and kept in this map, then composited
+// through `ctxDrawSurface` like any surface, scaling and cropping included.
+// The bridge's `ctxPutImageData` does the conversion — it premultiplies the
+// straight bytes into the bitmap's BGRA (ByteOrder32Host + AlphaFirst) —
+// so the bytes go over as the Image holds them.
+//
+// Images are immutable content (ntk's contract, and `<image>`'s), so an
+// entry is never refreshed. The map is keyed weakly: an Image that is
+// dropped takes its entry along and the handle's finalizer frees the
+// bitmap; an owner that is done with one frees it on the call instead,
+// through `releaseImageUpload` (the app's `releaseImage` seam).
+
+/** Image -> { native, handle } */
+const imageUploads = new WeakMap();
+
+/** An ntk `Image`: the duck type `isDirectImageSource` and ntk's own
+ * `drawImage` accept, plus the pixels this backend reads in place of the
+ * picture. A bare `{ width, height, data }` is not one — `ImageData` is
+ * written between draws, and caching it by identity would show stale
+ * pixels. */
+function isImagePixels(image) {
+  const { width, height, data } = image;
+  return (
+    typeof image.picture === 'function' &&
+    Number.isInteger(width) &&
+    Number.isInteger(height) &&
+    width > 0 &&
+    height > 0 &&
+    data?.length === width * height * 4
+  );
+}
+
+function uploadImage(native, image) {
+  const held = imageUploads.get(image);
+  if (held?.native === native) return held.handle;
+  const { width, height } = image;
+  const handle = native.createSurface(width, height, 1);
+  native.ctxPutImageData(handle, toBuffer(image.data), width, height, 0, 0);
+  imageUploads.set(image, { native, handle });
+  return handle;
+}
+
+/** Free an Image's bitmap now, if it has one; drawing it again uploads it
+ * again, as ntk's `destroy()` promises for its own copies. */
+export function releaseImageUpload(image) {
+  const held = image != null && imageUploads.get(image);
+  if (!held) return;
+  imageUploads.delete(image);
+  if (typeof held.native.releaseSurface === 'function') {
+    held.native.releaseSurface(held.handle);
+  }
+}
+
+const warnedSources = new Set();
+
+/** A source this backend has no pixels for, said once per kind in
+ * development — the alternative is an empty box and no reason. */
+function warnUndrawable(image) {
+  if (process.env.NODE_ENV === 'production') return;
+  const kind =
+    typeof image === 'object'
+      ? (image.constructor?.name ?? 'object')
+      : typeof image;
+  if (warnedSources.has(kind)) return;
+  warnedSources.add(kind);
+  const serverSide = typeof image === 'object' && 'id' in image;
+  const article = /^[aeiou]/i.test(kind) ? 'an' : 'a';
+  console.warn(
+    `react-x11: drawImage on the cocoa backend has no pixels for ${article} ${kind}, ` +
+      'and draws nothing. ' +
+      (serverSide
+        ? 'It names an X server-side Picture or Drawable — <image picture>, ' +
+          '<image drawable>, an ntk Picture — and this backend has no X ' +
+          'server to composite from, so those are X11-only. Hand <image src> ' +
+          'the pixels instead: encoded PNG/JPEG bytes, raw RGBA, or an ntk Image.'
+        : 'This backend draws a Surface (react-x11/ntk) or an ntk Image; wrap ' +
+          'raw RGBA as new Image({ width, height, data }).'),
+  );
+}
+
 class LinearGradient {
   constructor(x0, y0, x1, y1) {
     this._coords = [x0, y0, x1, y1];
@@ -953,8 +1047,8 @@ export class CocoaContext2D {
   }
 
   drawImage(image, ...args) {
-    const src = image?._surfaceHandle ?? image?._surface?._surfaceHandle;
-    if (!src) return; // ntk Images/Pictures are not on this backend yet
+    const src = this._sourceHandle(image);
+    if (!src) return;
     const size = this._native.surfaceSize(src);
     let sx = 0;
     let sy = 0;
@@ -988,6 +1082,25 @@ export class CocoaContext2D {
       );
     }
     this._dirty();
+  }
+
+  /**
+   * The bitmap a `drawImage` source composites from: a surface's own, an
+   * ntk Image's upload (made on its first draw, see `uploadImage`), or
+   * none. A destroyed surface is none, silently — it had pixels once; any
+   * other source is one this backend cannot draw at all, and development
+   * says so once per kind.
+   */
+  _sourceHandle(image) {
+    if (image == null) return null;
+    if (typeof image === 'object') {
+      if ('_surfaceHandle' in image || image._surface) {
+        return image._surfaceHandle ?? image._surface?._surfaceHandle ?? null;
+      }
+      if (isImagePixels(image)) return uploadImage(this._native, image);
+    }
+    warnUndrawable(image);
+    return null;
   }
 
   /**
@@ -1081,12 +1194,9 @@ export class CocoaContext2D {
 
   putImageData(data, x, y) {
     if (!data?.data) return;
-    const buf = Buffer.isBuffer(data.data)
-      ? data.data
-      : Buffer.from(data.data.buffer ?? data.data);
     this._native.ctxPutImageData(
       this._s(),
-      buf,
+      toBuffer(data.data),
       data.width,
       data.height,
       Math.round(x),

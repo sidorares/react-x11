@@ -1684,6 +1684,13 @@ An ntk `Image` is used as-is and never destroyed by the element — identity
 is yours, which is also the sharing idiom: one `Image` shown by many
 `<image>`s is one decode and one upload, however many places composite it.
 
+On the Cocoa backend (macOS's default) the upload is a CoreGraphics bitmap
+rather than a pixmap — made once per `Image` at its first paint and
+composited, scaled, from there — so the cost is the same one upload. The
+element frees it with an `Image` it decoded; for an `Image` of yours it is
+freed when the `Image` is garbage-collected, since ntk's `destroy()` frees
+only its X copies.
+
 ### `cacheKey` — when the buffer is new but the picture is not
 
 A component that re-derives its bytes per render — decoding a protocol
@@ -1733,6 +1740,10 @@ it is composited through: 24 — the screen's default depth, what a window
 pixmap from Composite is — is the default, 32 is argb, and 8 composites as
 ink through its alpha, which is what previewing a mask looks like. A
 `picture` needs no depth: its format was fixed when it was created.
+
+Both name X server resources, so both are X11-only: the Cocoa backend has no
+X server to composite from, and there they draw nothing (development warns
+once). Hand `src` the pixels instead.
 
 Both descriptors also accept the richer objects that already carry these
 fields — an ntk `Pixmap` is `{ id, width, height, depth }` and goes straight

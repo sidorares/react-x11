@@ -6,6 +6,7 @@ import {
   PictureSource,
   acquireImageSource,
   decodeImageSource,
+  freeImage,
   imageSourceChanged,
   isDirectImageSource,
   isPathImageSource,
@@ -215,7 +216,7 @@ export class ImageNode extends Node {
     }
     if (this._ownedImage) {
       // frees the per-app upload; the caller's own Images are never here
-      this._ownedImage.destroy();
+      freeImage(this.app, this._ownedImage);
       this._ownedImage = null;
     }
     if (this._serverSource) {

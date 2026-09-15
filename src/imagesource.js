@@ -250,7 +250,7 @@ export function acquireImageSource(app, key, load) {
         entry.promise = null;
         // every holder unmounted while it decoded — free, don't adopt
         if (entry.released) {
-          image?.destroy();
+          freeImage(app, image);
           return null;
         }
         entry.image = image;
@@ -269,8 +269,21 @@ export function releaseImageSource(app, entry) {
   if (--entry.refs > 0) return;
   sourceCaches.get(app)?.delete(entry.key);
   entry.released = true;
-  entry.image?.destroy();
+  freeImage(app, entry.image);
   entry.image = null;
+}
+
+/**
+ * Free an `Image` this module or a node owns, on every backend it may have
+ * been drawn on: ntk's `destroy()` frees the pixmaps it uploaded per X
+ * connection, and knows nothing of an upload a backend keeps for itself —
+ * the Cocoa app's CG bitmap — which that app's `releaseImage` seam frees.
+ * An X app has no such seam, so there it is `destroy()` alone.
+ */
+export function freeImage(app, image) {
+  if (!image) return;
+  image.destroy();
+  app?.releaseImage?.(image);
 }
 
 // --- server-side sources ----------------------------------------------------
