@@ -30,6 +30,7 @@ xkb_keycodes "(unnamed)" {
 	maximum = 255;
 	<ESC>                = 9;
 	<AE01>               = 10;
+	<AE02>               = 11;
 	<AD01>               = 24;
 	<AD03>               = 26;
 	<AC01>               = 38;
@@ -136,6 +137,11 @@ xkb_symbols "(unnamed)" {
 		symbols[Group1]= [               1,          exclam,      onesuperior,      exclamdown ],
 		symbols[Group2]= [               1,          exclam ]
 	};
+	key <AE02>               {
+		type= "FOUR_LEVEL",
+		symbols[Group1]= [          eacute,               2,       asciitilde,           breve ],
+		symbols[Group2]= [        Cyrillic_tse,    Cyrillic_TSE ]
+	};
 	key <AD01>               {
 		symbols[Group1]= [               q,               Q ],
 		symbols[Group2]= [     Cyrillic_shorti, Cyrillic_SHORTI ]
@@ -193,7 +199,7 @@ test('keycodes, aliases and the X core table', () => {
   assert.deepEqual(km.keycode2keysyms[24], [0x71, 0x51, 0x6ca, 0x6ea]);
   assert.deepEqual(km.keycode2keysyms[10].slice(0, 2), [0x31, 0x21]);
   assert.equal(km.keysym2keycode.get(0x71), 24);
-  assert.equal(km.keys.size, 12);
+  assert.equal(km.keys.size, 13);
 });
 
 test('virtual modifiers resolve through interpret + modifier_map', () => {
@@ -402,6 +408,41 @@ test('a decoded key carries the character it types, whatever block it is in', ()
   );
 });
 
+test('Caps Lock case-maps the keysym, it does not pair levels', () => {
+  const km = XkbKeymap.parse(KEYMAP);
+  // AZERTY's `é` key is `[é, 2, ~, ˘]` — level 2 is a digit, so there is no
+  // uppercase sibling to find, and Caps Lock used to do nothing at all here.
+  // FOUR_LEVEL never mentions Lock, so Lock is not consumed and the
+  // capitalisation is still owed.
+  const e = km.names.get('AE02');
+  assert.equal(km.decode(e, 0, 0).keysym, 0xe9, 'é');
+  assert.equal(km.decode(e, REAL_MODS.Lock, 0).keysym, 0xc9, 'Caps: É');
+  assert.equal(km.decode(e, REAL_MODS.Lock, 0).codepoint, 0xc9);
+  assert.equal(km.decode(e, REAL_MODS.Shift, 0).keysym, 0x32, 'Shift: 2');
+
+  // Cyrillic capitalises too, which needed `charOf` to be able to spell it
+  // before it could case-map it. Here the key is ALPHABETIC, so `map[Lock]`
+  // has already picked level 2 and the transform must *not* run again.
+  const q = km.names.get('AD01');
+  assert.equal(km.keys.get(q).groups[1].type.name, 'ALPHABETIC');
+  assert.equal(km.decode(q, REAL_MODS.Lock, 1).keysym, 0x6ea, 'Caps: Й');
+  assert.equal(
+    km.decode(q, REAL_MODS.Lock | REAL_MODS.Shift, 1).keysym,
+    0x6ca,
+    'Shift under Caps is lowercase again, and stays lowercase',
+  );
+  assert.equal(
+    km.decode(km.names.get('AC01'), REAL_MODS.Lock, 0).keysym,
+    0x41,
+    'a plain ALPHABETIC key is capitalised once, not twice',
+  );
+  assert.equal(
+    km.decode(km.names.get('ESC'), REAL_MODS.Lock, 0).keysym,
+    0xff1b,
+    'a key with no case is untouched',
+  );
+});
+
 test('the X state word carries modifiers low and the group in bits 13-14', () => {
   assert.equal(XkbKeymap.stateOf(REAL_MODS.Shift | REAL_MODS.Control, 0), 5);
   assert.equal(XkbKeymap.stateOf(0, 1), 1 << 13);
@@ -542,6 +583,61 @@ test('libxkbcommon: AltGr reaches the third level of the second layout', () => {
     km.decode(km.names.get('AE11'), REAL_MODS.Mod5, 1).keysym,
     0x5c,
     'AltGr+ß is a backslash',
+  );
+});
+
+test('libxkbcommon: whether Caps Lock still owes a capitalisation is `preserve`', () => {
+  const km = XkbKeymap.parse(LIBXKBCOMMON);
+  const lock = REAL_MODS.Lock;
+  const altgr = REAL_MODS.Mod5;
+  const de = 1; // the German group
+
+  // `[s, S, ſ, ẞ]` — two lower/upper pairs, so FOUR_LEVEL_ALPHABETIC, whose
+  // `map[Lock+LevelThree]= 4` has already chosen the capital and consumes
+  // Lock doing it. Capitalising on top would be doing it twice.
+  const s = km.names.get('AC02');
+  assert.equal(km.keys.get(s).groups[de].type.name, 'FOUR_LEVEL_ALPHABETIC');
+  assert.equal(km.decode(s, altgr, de).keysym, 0x0100017f, 'AltGr: ſ');
+  assert.equal(
+    km.decode(s, altgr | lock, de).keysym,
+    0x01001e9e,
+    'Caps+AltGr: ẞ',
+  );
+
+  // `[w, W, ſ, §]` — `§` is not an uppercase letter, so
+  // FOUR_LEVEL_SEMIALPHABETIC, whose `preserve[Lock+LevelThree]= Lock` hands
+  // Lock back: level 3 is `ſ` and the capitalisation is still owed. There is
+  // no key anywhere with `ſ` and `S` side by side, so no amount of pairing
+  // levels could ever have found this one.
+  const w = km.names.get('AD02');
+  assert.equal(
+    km.keys.get(w).groups[de].type.name,
+    'FOUR_LEVEL_SEMIALPHABETIC',
+  );
+  assert.equal(km.decode(w, altgr, de).keysym, 0x0100017f, 'AltGr: ſ');
+  assert.equal(km.decode(w, altgr | lock, de).keysym, 0x53, 'Caps+AltGr: S');
+  assert.equal(
+    km.decode(w, altgr | lock | REAL_MODS.Shift, de).keysym,
+    0xa7,
+    '§',
+  );
+
+  // The same preserved Lock over a level with no case at all leaves it alone.
+  assert.equal(
+    km.decode(km.names.get('AD01'), altgr | lock, de).keysym,
+    0x40,
+    'Caps+AltGr+q is still @',
+  );
+  // …and the ALPHABETIC ladder one rung up still picks the level itself.
+  assert.equal(
+    km.decode(km.names.get('AC01'), altgr | lock, de).keysym,
+    0xc6,
+    'Caps+AltGr+a is Æ, chosen by the type',
+  );
+  assert.equal(
+    km.decode(km.names.get('AC01'), lock, de).keysym,
+    0x41,
+    'Caps: A',
   );
 });
 

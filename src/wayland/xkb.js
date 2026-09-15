@@ -31,8 +31,10 @@
 // that does not say.
 //
 // What is not read: key actions (the compositor applies those; we only see
-// their effect in the modifier state), indicators, geometry, and the
-// per-type `preserve` rules.
+// their effect in the modifier state), indicators and geometry. The per-type
+// `preserve` rules *are* read, for the one thing they decide here: whether
+// Caps Lock still has a capitalisation to do after the type has chosen a
+// level (`_capitalises`).
 //
 // The output is two things. `keycode2keysyms` is the X core shape —
 // `[g1l1, g1l2, g2l1, g2l2, …]` — because that is what `keyboard.js`'s
@@ -40,7 +42,7 @@
 // `decode()` is the full answer, using the key's real type so that level 3
 // and 4 (AltGr) resolve where the two-level core shape cannot express them.
 
-import { charOf } from '../keysyms.js';
+import { charOf, keysymToUpper } from '../keysyms.js';
 import { keysymFromName } from './keysymnames.js';
 
 /** Real modifier bits, as X and XKB both number them. */
@@ -137,7 +139,7 @@ export class XkbKeymap {
     while ((m = re.exec(s))) {
       const body = balanced(s, m.index + m[0].length - 1);
       re.lastIndex = m.index + m[0].length + body.length;
-      const type = { name: m[1], mods: [], map: [], levels: 1 };
+      const type = { name: m[1], mods: [], map: [], preserve: [], levels: 1 };
       const mods = body.match(/modifiers\s*=\s*([^;]+);/);
       if (mods)
         type.mods = mods[1]
@@ -154,6 +156,17 @@ export class XkbKeymap {
         const level = +e[2];
         type.map.push({ set, level });
         if (level > type.levels) type.levels = level;
+      }
+      // `preserve[Lock+LevelThree]= Lock;` — the modifiers this state does
+      // *not* consume, which is the whole of whether Caps Lock still applies
+      // on a key whose type otherwise swallows Lock.
+      for (const e of body.matchAll(/preserve\[([^\]]+)\]\s*=\s*([^;]+);/gi)) {
+        const split = (x) =>
+          x
+            .split('+')
+            .map((y) => y.trim())
+            .filter((y) => y && y !== 'none' && y !== 'None');
+        type.preserve.push({ set: split(e[1]), kept: split(e[2]) });
       }
       for (const e of body.matchAll(/level_name\[(?:Level)?(\d+)\]/gi)) {
         if (+e[1] > type.levels) type.levels = +e[1];
@@ -324,6 +337,13 @@ export class XkbKeymap {
     return this.vmods.get(name) ?? 0;
   }
 
+  /** A list of modifier names as one real mask. */
+  _maskOf(names) {
+    let mask = 0;
+    for (const name of names) mask |= this._modMask(name);
+    return mask;
+  }
+
   /**
    * The X core keyboard mapping — two keysyms per group, up to four groups —
    * which is what `GetKeyboardMapping` would have answered.
@@ -357,15 +377,35 @@ export class XkbKeymap {
    */
   _levelFor(type, mods) {
     if (!type) return mods & REAL_MODS.Shift ? 1 : 0;
-    let relevant = 0;
-    for (const m of type.mods) relevant |= this._modMask(m);
+    const relevant = this._maskOf(type.mods);
     const masked = mods & relevant;
     for (const { set, level } of type.map) {
-      let want = 0;
-      for (const m of set) want |= this._modMask(m);
-      if (want === masked) return level - 1;
+      if (this._maskOf(set) === masked) return level - 1;
     }
     return 0;
+  }
+
+  /**
+   * Whether Caps Lock still has a capitalisation to do.
+   *
+   * XKB's rule: Lock is effective, and the key's type did not **consume** it.
+   * A type that names Lock among its modifiers consumed it — `ALPHABETIC`'s
+   * `map[Lock]= 2` has already picked the level Caps Lock wanted, and
+   * capitalising on top would be doing it twice. Unless the type says
+   * otherwise: `preserve[Lock+LevelThree]= Lock` hands Lock back, which is how
+   * German's AltGr levels capitalise (`ſ` -> `S`) while its Shift levels,
+   * reached through `map[Lock]`, do not.
+   */
+  _capitalises(type, mods) {
+    if (!(mods & REAL_MODS.Lock)) return false;
+    if (!type) return true;
+    const relevant = this._maskOf(type.mods);
+    if (!(relevant & REAL_MODS.Lock)) return true;
+    const masked = mods & relevant;
+    for (const { set, kept } of type.preserve)
+      if (this._maskOf(set) === masked)
+        return (this._maskOf(kept) & REAL_MODS.Lock) !== 0;
+    return false;
   }
 
   /**
@@ -387,31 +427,17 @@ export class XkbKeymap {
     let level = this._levelFor(g.type, mods);
     if (level >= g.syms.length || !g.syms[level]) {
       // Lock on a one-level key, or Shift on a key with no upper level:
-      // fall back the way the core protocol does — the first symbol,
-      // uppercased when it has a case.
+      // fall back the way the core protocol does, to the first symbol. Any
+      // capitalisation it has coming is the separate step below.
       level = 0;
     }
     let keysym = g.syms[level] ?? 0;
-    // Caps Lock on a plain two-level alphabetic key whose type does not
-    // fold Lock (a keymap with only "TWO_LEVEL" for letters): X core rule.
-    if (
-      level === 0 &&
-      mods & REAL_MODS.Lock &&
-      g.syms.length >= 2 &&
-      !(mods & REAL_MODS.Shift)
-    ) {
-      const lower = charOf(g.syms[0]);
-      const upper = charOf(g.syms[1]);
-      if (
-        lower &&
-        upper &&
-        lower !== upper &&
-        lower.toUpperCase() === upper &&
-        g.type?.mods?.includes('Lock') === false
-      ) {
-        keysym = g.syms[1];
-      }
-    }
+    // Caps Lock capitalises the keysym the type already chose, rather than
+    // reaching for an uppercase sibling level. Pairing levels works for
+    // `[a, A]` and nothing else: AZERTY's `é` key is `[é, 2, ~, ˘]`, where
+    // level 2 is a digit, and German's AltGr `ſ` has no sibling at all — so
+    // `é`, `à`, `è`, `ç`, `ù` and every Cyrillic letter stayed lowercase.
+    if (this._capitalises(g.type, mods)) keysym = keysymToUpper(keysym);
     if (!keysym) return undefined;
     const ch = charOf(keysym);
     const codepoint = ch ? ch.codePointAt(0) : undefined;
@@ -445,6 +471,27 @@ function isKeypad(sym) {
 }
 
 /**
+ * `XkbKSIsLower` and `XkbKSIsUpper`: a keysym has a case, and is the lower or
+ * the upper one of the pair.
+ *
+ * Two independent questions rather than one pairing — which is the same
+ * mistake `decode()` used to make about Caps Lock, in the one other place it
+ * was made. German's `s` is `[s, S, ſ, ẞ]`, and `ſ` does not *pair* with `ẞ`
+ * (`'ſ'.toUpperCase()` is `'S'`), but `ſ` is a lowercase letter and `ẞ` is an
+ * uppercase one, which is all the type ladder asks. Pairing them made the key
+ * FOUR_LEVEL_SEMIALPHABETIC, whose `preserve[Lock+LevelThree]` hands Lock back
+ * — so Caps+AltGr capitalised a level that was already capital.
+ */
+function isLower(sym) {
+  const ch = charOf(sym);
+  return !!ch && ch.toLowerCase() === ch && ch.toUpperCase() !== ch;
+}
+function isUpper(sym) {
+  const ch = charOf(sym);
+  return !!ch && ch.toUpperCase() === ch && ch.toLowerCase() !== ch;
+}
+
+/**
  * The type XKB assigns a key that names none — xkbcomp's `FindAutomaticType`,
  * which libxkbcommon inherits. Two symbols are ALPHABETIC when they are a
  * case pair, **KEYPAD when either of them is a keypad keysym**, and TWO_LEVEL
@@ -469,18 +516,14 @@ function implicitType(syms) {
   let n = syms.length;
   while (n > 0 && !syms[n - 1]) n--;
   if (n <= 1) return 'ONE_LEVEL';
-  const casePair = (a, b) => {
-    const la = charOf(a);
-    const lb = charOf(b);
-    return la && lb && la !== lb && la.toUpperCase() === lb;
-  };
+  const cased = (a, b) => isLower(a) && isUpper(b);
   const keypad = isKeypad(syms[0]) || isKeypad(syms[1]);
   if (n === 2) {
-    if (casePair(syms[0], syms[1])) return 'ALPHABETIC';
+    if (cased(syms[0], syms[1])) return 'ALPHABETIC';
     return keypad ? 'KEYPAD' : 'TWO_LEVEL';
   }
-  if (casePair(syms[0], syms[1]))
-    return casePair(syms[2], syms[3])
+  if (cased(syms[0], syms[1]))
+    return cased(syms[2], syms[3])
       ? 'FOUR_LEVEL_ALPHABETIC'
       : 'FOUR_LEVEL_SEMIALPHABETIC';
   return keypad ? 'FOUR_LEVEL_KEYPAD' : 'FOUR_LEVEL';

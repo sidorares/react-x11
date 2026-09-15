@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
 
-import { charOf, keysymOf } from '../src/keysyms.js';
+import { charOf, keysymOf, keysymToUpper } from '../src/keysyms.js';
 import { KEYSYM_CHAR_RUNS } from '../src/keysymchars.js';
 
 const require = createRequire(import.meta.url);
@@ -130,6 +130,52 @@ test('charOf still answers nothing for a key that types nothing', () => {
   assert.equal(charOf(0x8f), '', 'the unassigned stretch of the Latin-1 range');
   assert.equal(charOf(0x01000000), '', 'the Unicode form of U+0000');
   assert.equal(charOf(0), '');
+});
+
+test('keysymToUpper answers in the spelling it was given', () => {
+  // Caps Lock capitalises by case-mapping the keysym, so the answer has to be
+  // comparable against the keysyms the keymap itself carries: a Cyrillic
+  // keymap is written in the legacy block and wants the legacy answer.
+  assert.equal(keysymToUpper(0x6ca), 0x6ea, 'й -> Й, in the Cyrillic block');
+  assert.equal(keysymToUpper(0x7f3), 0x7d2, 'σ -> Σ, in the Greek block');
+  assert.equal(keysymToUpper(0xe9), 0xc9, 'é -> É, Latin-1');
+  assert.equal(keysymToUpper(0x1b1), 0x1a1, 'ą -> Ą, Latin-2');
+  assert.equal(
+    keysymToUpper(0xb5),
+    0x7cc,
+    'µ -> Greek_MU: Latin-1 in, legacy out',
+  );
+  assert.equal(
+    keysymToUpper(0x010003b5),
+    0x01000395,
+    'ε -> Ε: a keysym written in the Unicode form keeps it',
+  );
+  assert.equal(
+    keysymToUpper(0x0100017f),
+    0x53,
+    'ſ -> S: no key anywhere carries those two side by side',
+  );
+
+  // A keysym with no case comes back untouched, including the keys that have
+  // a character but no case at all.
+  for (const keysym of [0x51, 0x32, 0x20ac, 0xffb7, 0xff95, 0xffe1, 0])
+    assert.equal(keysymToUpper(keysym), keysym, `0x${keysym.toString(16)}`);
+  assert.equal(keysymToUpper(0x71), 0x51, 'q -> Q');
+
+  // Idempotent: an uppercase keysym is its own uppercase, whichever block.
+  for (const keysym of [0x6ca, 0x7f3, 0xe9, 0x1b1, 0xb5, 0x010003b5, 0x71])
+    assert.equal(keysymToUpper(keysymToUpper(keysym)), keysymToUpper(keysym));
+});
+
+test('keysymToUpper takes the first code point where the case map grows one', () => {
+  // `'ß'.toUpperCase()` is `'SS'`, two characters, and a key has one to give.
+  // libxkbcommon's narrower table answers `ẞ` (U+1E9E) here; `S` is the more
+  // useful of the two for a key about to insert a character, and this is the
+  // whole of the disagreement between the two — it and the ligatures.
+  assert.equal('ß'.toUpperCase(), 'SS');
+  assert.equal(keysymToUpper(0xdf), 0x53, 'ß -> S');
+  assert.equal('ﬁ'.toUpperCase(), 'FI');
+  assert.equal(keysymToUpper(0x0100fb01), 0x46, 'ﬁ -> F');
 });
 
 test('the two rules still hold, and round-trip with keysymOf', () => {

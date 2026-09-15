@@ -36,6 +36,7 @@ import {
   XK_ESCAPE,
   keysymOf,
   charOf,
+  keysymToUpper,
   MOD,
 } from '../../src/keysyms.js';
 
@@ -140,6 +141,7 @@ async function suite() {
   const _k: number = keysymOf('é');
   const _c: string = charOf(0xe9);
   const _cyrillic: string = charOf(0x6ca);
+  const _upper: number = keysymToUpper(0x6ca);
 
   // the server is null on the mock backend, so it has to be narrowed
   if (server) server.injectPointerMove(1, 1);
