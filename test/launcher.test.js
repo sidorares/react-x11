@@ -20,7 +20,11 @@ import {
   launcherAppUri,
   launcherEntryPath,
   setBadge,
+  setProgress,
+  setQuicklist,
+  setUrgent,
 } from '../src/launcher.js';
+import { sessionBus } from '../src/bus.js';
 import { transportAvailable, until, withBus } from './helpers/with-bus.js';
 
 const haveTransport = await transportAvailable();
@@ -129,6 +133,126 @@ describe('the LauncherEntry rung', { ...needsBroker }, () => {
         assert.equal(await setBadge(null), false);
         await reg.release();
       } finally {
+        await launcher.stop();
+      }
+    });
+  });
+
+  test('progress, urgency and the quicklist ride the same entry', async () => {
+    await withBus(async (address) => {
+      const appUri = launcherAppUri(APP_ID);
+      const launcher = await fakeLauncher(address, appUri);
+      try {
+        const reg = await registerApplication({ appId: APP_ID });
+
+        assert.equal(await setProgress(0.42), true);
+        await until(() => launcher.seen.length === 1, 'the progress Update');
+        let p = plain(launcher.seen[0][1]);
+        assert.equal(Number(p.progress).toFixed(2), '0.42');
+        assert.equal(p['progress-visible'], true);
+
+        // Every Update carries the whole state, so a launcher that restarted
+        // and missed one is corrected by the next of any kind.
+        assert.equal(await setUrgent(true), true);
+        await until(() => launcher.seen.length === 2, 'the urgent Update');
+        p = plain(launcher.seen[1][1]);
+        assert.equal(p.urgent, true);
+        assert.equal(Number(p.progress).toFixed(2), '0.42');
+
+        // Out of range is clamped rather than refused: a caller dividing by a
+        // total that briefly went to zero should not get an exception.
+        assert.equal(await setProgress(5), true);
+        await until(() => launcher.seen.length === 3, 'the clamped Update');
+        assert.equal(Number(plain(launcher.seen[2][1]).progress), 1);
+
+        assert.equal(await setQuicklist([{ label: 'New Window' }]), true);
+        await until(() => launcher.seen.length === 4, 'the quicklist Update');
+        p = plain(launcher.seen[3][1]);
+        assert.ok(String(p.quicklist).endsWith('/Menu'), 'a menu object path');
+
+        await setProgress(null);
+        await setUrgent(false);
+        await setQuicklist(null);
+        await reg.release();
+        await _resetLauncher();
+      } finally {
+        await launcher.stop();
+      }
+    });
+  });
+
+  test('the quicklist is a real dbusmenu a launcher can walk and click', async () => {
+    await withBus(async (address) => {
+      const appUri = launcherAppUri(APP_ID);
+      const launcher = await fakeLauncher(address, appUri);
+      const dbus = (await import('dbus-native')).default;
+      const client = dbus.createClient({ busAddress: address });
+      await new Promise((resolve, reject) => {
+        client.connection.once('connect', resolve);
+        client.connection.once('error', reject);
+      });
+      try {
+        const reg = await registerApplication({ appId: APP_ID });
+        const picked = [];
+        assert.equal(
+          await setQuicklist([
+            { label: 'New Window', onSelect: () => picked.push('new') },
+            { type: 'separator' },
+            {
+              label: 'Recent',
+              items: [
+                { label: 'notes.md', onSelect: () => picked.push('notes') },
+              ],
+            },
+          ]),
+          true,
+        );
+        await until(() => launcher.seen.length === 1, 'the quicklist Update');
+        const menuPath = String(plain(launcher.seen[0][1]).quicklist);
+
+        // The menu is exported on the app's *shared* connection — one identity
+        // on the bus for the tray, the panel menu and the launcher menu.
+        const ref = await sessionBus();
+        const destination = ref.uniqueName;
+        await ref.release();
+
+        const call = (member, signature, body) =>
+          client.invoke({
+            destination,
+            path: menuPath,
+            interface: 'com.canonical.dbusmenu',
+            member,
+            signature,
+            body,
+            timeout: 4000,
+          });
+
+        const [, layout] = await call('GetLayout', 'iias', [0, -1, []]);
+        // `dbus-native` resolves the variants, so a property is its value.
+        const rows = (layout[2] ?? []).map(([id, props]) => ({
+          id,
+          label: props.label,
+          type: props.type,
+        }));
+        assert.deepEqual(
+          rows.map((r) => r.label ?? r.type),
+          ['New Window', 'separator', 'Recent'],
+        );
+
+        await call('Event', 'isvu', [
+          rows[0].id,
+          'clicked',
+          new dbus.Variant('s', ''),
+          0,
+        ]);
+        await until(() => picked.length === 1, 'the handler to run');
+        assert.deepEqual(picked, ['new']);
+
+        await setQuicklist(null);
+        await reg.release();
+        await _resetLauncher();
+      } finally {
+        client.close();
         await launcher.stop();
       }
     });

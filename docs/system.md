@@ -399,9 +399,10 @@ two desktop standards with a claim on core — are now built: **notifications**
 ([notifications.md](notifications.md)), and the **tray**, whose menu is
 [dbusmenu](globalmenu.md) this renderer already speaks — on the cocoa backend
 [`useTray()`](desktop.md) over `NSStatusItem`
-([#463](https://github.com/sidorares/react-x11/issues/463)), with the
-freedesktop StatusNotifierItem half still tracked in
-[#353](https://github.com/sidorares/react-x11/issues/353).
+([#463](https://github.com/sidorares/react-x11/issues/463)), and on a
+freedesktop session over `org.kde.StatusNotifierItem`
+([#353](https://github.com/sidorares/react-x11/issues/353)) — D-Bus only, so
+the same rung serves X11, XWayland and Wayland.
 
 **The user's calendar.** Their real events, from the accounts the desktop
 already holds — EventKit on macOS, Evolution Data Server on a freedesktop

@@ -754,6 +754,82 @@ baseline rather than box alignment, unhinted mush at 12px, and an icon name
 routed through text layout and the accessibility tree. Revisit only if a
 profile of a large Tree shows composite count dominating.
 
+## Talking to the desktop: ladders, capabilities, degradation
+
+Everything an app does _outside_ its own windows — notifications, the tray,
+the launcher icon, the global menu, the file dialog, permissions, the
+eyedropper, the calendar — is a **ladder**: a list of mechanisms tried in
+order, each found by capability and never by naming a platform. The rungs for
+one feature live in one module (`notifications.js`, `statusnotifier.js`,
+`launcher.js`), and the module header lists them in order with the reason
+each exists. Read one before adding a feature to this family; they are all
+the same shape on purpose.
+
+Four rules, each of which exists because getting it wrong fails somewhere
+else:
+
+**Find the mechanism, not the platform.** `typeof app.createStatusItem ===
+'function'`, not `process.platform === 'darwin'`. A backend is named after
+its mechanism — `statusnotifier`, `launcherentry`, `cocoa`, `notify-send` —
+so that a second Linux mechanism does not need a second name for Linux. This
+is also what lets the cocoa rung be tested from a mock app object.
+
+**A missing desktop service is not an error.** No bus, no notification
+daemon, no tray host, no launcher, no portal: all ordinary states of a
+perfectly healthy machine. Nothing is logged, nothing throws, the feature is
+simply not there. Reserve errors for a service that _answered and then
+refused_ — that is a different fact with a different fix, and collapsing the
+two into one `available: false` throws away the only one an app could act on.
+`useTray()` returns `error` separately for exactly this reason.
+
+**A live owner, not an activatable name.** `hasService()` counts an
+activatable name as present, and for portals that is right — activation is
+what makes them appear. For anything that is a _directory something else
+reads_ it is exactly wrong: `com.canonical.AppMenu.Registrar` and
+`org.kde.StatusNotifierWatcher` both ship as activatable services, and
+starting one ourselves registers the menu or the icon into a directory no
+panel is reading. The symptom is total and silent — a menu that vanishes from
+the window and appears nowhere else. Use `nameHasOwner`, follow
+`NameOwnerChanged`, and never cache the answer: a panel is exactly the kind
+of thing that gets restarted.
+
+**Availability is a feature set, not a flag.** This is the rule the others
+are in service of, and the one most easily skipped. "Does this desktop have
+notifications" is true on machines that mean four different things by it — a
+daemon with `actions` is a conversation, a daemon without is a sign, and
+`notify-send` is neither and cannot be updated or closed. An app that reads
+one boolean posts reply buttons that silently never appear. So every
+capability resolves to `{ available, backend, features }`
+(`capabilities.js`), the feature names are portable across backends, and an
+app branches on `features.actions` rather than on the platform or the
+backend. When you add a rung, add its honest feature map at the same time —
+including the fields it _cannot_ do, which is the half that gets forgotten
+(`clickModifiers` is false on the freedesktop tray because the protocol has
+no modifier state, and an app that dims a shift-click affordance reads it).
+
+### Where the answer comes from
+
+Two ways to ask, and they are not interchangeable:
+
+- **the feature hook measures** — `useTray(options)` tried to put an icon in
+  a tray, so its `available` is what actually happened;
+- **`useDesktopCapability(name)` predicts** — "would it work if I asked",
+  which is what a settings screen needs, because a "Show tray icon" checkbox
+  must render correctly without putting an icon in the tray to find out.
+
+Prefer the hook wherever the feature is mounted. Both read the same probe so
+they cannot disagree; that sharing is the point, and a second probe written
+alongside one of them is the bug this note is here to prevent.
+
+### Degrading in the right direction
+
+Desktop answers take a round trip, so the first frame never has one. Every
+one of these settles: `false` first, true a tick later. **Render the fallback
+first and upgrade** — upgrading is invisible, and downgrading a feature the
+user has already reached for is not. Never latch a `false`: a panel restarts,
+an extension is enabled, a daemon is installed, and an app that cached the
+first answer outlives every one of those fixes.
+
 ## Protocol efficiency
 
 X11 is a network protocol even on a local socket. The three libraries have

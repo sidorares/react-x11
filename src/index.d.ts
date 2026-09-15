@@ -25,6 +25,7 @@ export * from './types/screencolor.js';
 export * from './types/appearance.js';
 export * from './types/fonts.js';
 export * from './types/system.js';
+export * from './types/capabilities.js';
 export * from './types/launcher.js';
 export * from './types/tray.js';
 export * from './types/permissions.js';

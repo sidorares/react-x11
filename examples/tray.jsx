@@ -1,7 +1,7 @@
 // A status menu — an app that lives in the menu bar, not in a window.
 //
 //   REACT_X11_BACKEND=cocoa npm run examples:tray   # a real menu-bar item
-//   npm run examples:tray                           # X11: the window, tray inert
+//   npm run examples:tray                           # freedesktop: a real tray icon
 //
 // The tray is the one piece of desktop furniture an app can own that is not a
 // window: an icon in the system status bar with a menu hanging off it. This
@@ -22,14 +22,20 @@
 //                  ⌘-Tab entry, just the status item. That is the shape a
 //                  tray app usually wants, and why the two features pair.
 //
-// ## What to try (X11)
+// ## What to try (X11 / Wayland)
 //
-//   The window     there is no `NSStatusItem` on X11 — the freedesktop tray
-//                  (StatusNotifierItem) is not built yet
-//                  ([#353](https://github.com/sidorares/react-x11/issues/353))
-//                  — so `useTray` is inert and `available` is false. The app
+//   The tray       the same call reaches `org.kde.StatusNotifierItem` over
+//                  D-Bus ([#353](https://github.com/sidorares/react-x11/issues/353)),
+//                  which is transport-only — so this works identically under
+//                  X11, XWayland and Wayland. It needs something *hosting* a
+//                  tray: Plasma and most panels do, GNOME needs an
+//                  AppIndicator extension.
+//
+//   The window     with no tray host, `available` stays false and the app
 //                  falls back to its window, which does the same job with
-//                  buttons. The footer says which world it is in.
+//                  buttons. The footer says which world it is in — and that
+//                  fallback is the point: it is not a macOS/Linux branch but
+//                  a "did a tray take my icon" one.
 //
 // ## No seam here, on purpose
 //
