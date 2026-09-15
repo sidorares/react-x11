@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.3](https://github.com/sidorares/react-x11/compare/v2.15.2...v2.15.3) (2026-09-15)
+
+
+### Bug Fixes
+
+* **cocoa:** draw ntk Images in drawImage, so &lt;image src&gt; is not an empty box on macOS ([#582](https://github.com/sidorares/react-x11/issues/582)) ([f508cd9](https://github.com/sidorares/react-x11/commit/f508cd99ece269849c0b76c86c52c80257c08e18))
+
 ## [2.15.2](https://github.com/sidorares/react-x11/compare/v2.15.1...v2.15.2) (2026-09-15)
 
 
