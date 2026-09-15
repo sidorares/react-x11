@@ -91,8 +91,26 @@ export function useTray(options) {
   const [remote, setRemote] = useState(false);
   const [error, setError] = useState(null);
   // The feature vocabulary for whichever rung answered. Probed once per
-  // backend rather than per render — it describes the mechanism, not the item.
+  // backend rather than per render — it describes the mechanism, not the
+  // item — and for *both* rungs: the cocoa one is synchronous about whether
+  // it has a tray, but not about what that tray can do, and an app reading
+  // `features.clickModifiers` to dim a shift-click affordance would
+  // otherwise be told `undefined` on the one backend that has modifiers.
   const [caps, setCaps] = useState(NO_CAPABILITY);
+
+  useEffect(() => {
+    if (!options) return undefined;
+    let cancelled = false;
+    // `app` explicitly rather than letting the probe find the sole one: a
+    // process with several connections has several trays, and this hook
+    // belongs to one of them.
+    void desktopCapability('tray', { app }).then((c) => {
+      if (!cancelled) setCaps(c);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [app, native, options == null]);
 
   // the options a click or a pick reads are the current render's, not the
   // ones the item was created with three minutes ago
@@ -156,9 +174,6 @@ export function useTray(options) {
     previous.current = { ...live.current };
     void item.start().then((ok) => {
       if (!cancelled) setRemote(ok);
-    });
-    void desktopCapability('tray').then((c) => {
-      if (!cancelled) setCaps(c);
     });
     return () => {
       cancelled = true;
