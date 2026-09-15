@@ -9,7 +9,13 @@
  */
 export function keysymOf(char: string): number;
 
-/** The character a keysym produces, or `''` for a non-printing key. */
+/**
+ * The character a keysym produces, or `''` for a key that types nothing — a
+ * modifier, a function key, an arrow, or a dead key waiting for the letter it
+ * decorates. Latin-1 and the Unicode form are rules; the legacy blocks a real
+ * keymap is written in — Cyrillic, Greek, Latin-2/3/4, Arabic, Hebrew, Thai,
+ * the keypad, `EuroSign` — come out of a generated table.
+ */
 export function charOf(keysym: number): string;
 
 /**

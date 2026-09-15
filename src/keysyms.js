@@ -5,13 +5,28 @@
 // `ev.keysym`. The full X11 set is several thousand names; this is the part
 // a GUI actually handles, plus the rule for everything else.
 //
-// Two facts make the long tail unnecessary:
+// Two rules cover most of it:
 //
 // - **Latin-1 is identity.** For U+0020 to U+00FF the keysym *is* the code
 //   point, so `'a'` is `0x61` and `'é'` is `0xe9`. That is the whole ASCII
 //   and Latin-1 range, no table needed.
-// - **Everything else is `0x01000000 + codePoint`.** That is the Unicode
-//   keysym rule, and `keysymOf` below applies both.
+// - **The Unicode form is `0x01000000 + codePoint`.** That is what `keysymOf`
+//   below produces for everything outside Latin-1.
+//
+// What the two rules do *not* cover is the **legacy keysym blocks**, and a
+// real keymap is written in them: Cyrillic is `0x6xx`, Greek `0x7xx`,
+// Latin-2/3/4 `0x1xx`–`0x3xx`, Hebrew `0x8xx`, Arabic `0x5xx`, `EuroSign` is
+// `0x20ac` and the keypad digits are `0xffbx`. Those are a table, and it is
+// `src/keysymchars.js` — generated from X11's `keysymdef.h`, which is where
+// libxkbcommon's own table comes from (`scripts/keysym-chars.mjs`).
+//
+// It is only `charOf` that needs it. On X11 ntk supplies the code point and
+// this function is never reached; the Wayland backend decodes the keymap
+// itself (`src/wayland/xkb.js`) and is the first caller that needs `charOf`
+// to be complete, which is why a Russian, Greek or Czech layout typed
+// nothing at all and AltGr+E produced no Euro sign.
+
+import { KEYSYM_CHAR_RUNS } from './keysymchars.js';
 
 /** The keysym for a single character, by the two rules above. */
 export function keysymOf(char) {
@@ -21,13 +36,44 @@ export function keysymOf(char) {
   return 0x01000000 + code;
 }
 
-/** The character a keysym produces, or `''` for a non-printing key. */
-export function charOf(keysym) {
-  if (keysym >= 0x20 && keysym <= 0xff) return String.fromCodePoint(keysym);
-  if (keysym >= 0x01000100 && keysym <= 0x0110ffff) {
-    return String.fromCodePoint(keysym - 0x01000000);
+/** keysym -> code point for the legacy blocks, expanded once, on first use. */
+let legacyChars;
+function legacyChar(keysym) {
+  if (!legacyChars) {
+    legacyChars = new Map();
+    for (const line of KEYSYM_CHAR_RUNS)
+      for (const run of line.split(' ')) {
+        const [keysyms, cp] = run.split(':');
+        const [first, span] = keysyms.split('+');
+        const from = parseInt(first, 16);
+        const to = parseInt(cp, 16);
+        for (let i = 0; i <= (span ? +span : 0); i++)
+          legacyChars.set(from + i, to + i);
+      }
   }
-  return '';
+  return legacyChars.get(keysym);
+}
+
+/**
+ * The character a keysym produces, or `''` for a key that types nothing —
+ * a modifier, a function key, an arrow, or a dead key waiting for the letter
+ * it decorates.
+ *
+ * "Types nothing" includes the keys whose code point is a control character:
+ * `keysymdef.h` gives BackSpace U+0008 and Delete U+007F, and a text field
+ * that inserted those would be inserting a control byte rather than deleting
+ * anything. The same goes for the unassigned 0x7f–0x9f stretch of the
+ * Latin-1 range, which is not a keysym at all.
+ */
+export function charOf(keysym) {
+  if (keysym >= 0x20 && keysym <= 0x7e) return String.fromCodePoint(keysym);
+  if (keysym >= 0xa0 && keysym <= 0xff) return String.fromCodePoint(keysym);
+  if (keysym >= 0x01000000 && keysym <= 0x0110ffff) {
+    const cp = keysym - 0x01000000;
+    return cp >= 0x20 && cp !== 0x7f ? String.fromCodePoint(cp) : '';
+  }
+  const cp = legacyChar(keysym);
+  return cp === undefined ? '' : String.fromCodePoint(cp);
 }
 
 // --- editing and navigation ------------------------------------------------

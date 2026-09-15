@@ -333,6 +333,41 @@ test('decode: levels by type, shift, caps and AltGr', () => {
   );
 });
 
+test('a decoded key carries the character it types, whatever block it is in', () => {
+  const km = XkbKeymap.parse(KEYMAP);
+  // The keysym was always right and the code point was always missing, so a
+  // Russian, Greek, Czech, Polish, Hebrew, Arabic or Thai layout had live
+  // keys that typed nothing at all — `charOf` spelled Latin-1 and the
+  // Unicode form and neither of those is what a keymap is written in.
+  assert.equal(km.decode(24, 0, 1).codepoint, 0x439, 'й on the Russian group');
+  assert.equal(
+    km.decode(24, REAL_MODS.Shift, 1).codepoint,
+    0x419,
+    'Й with shift',
+  );
+  assert.equal(
+    km.decode(26, REAL_MODS.Mod5, 0).codepoint,
+    0x20ac,
+    'AltGr+e types a Euro sign rather than nothing',
+  );
+  assert.equal(km.decode(24, 0, 0).codepoint, 0x71, 'and Latin-1 is unmoved');
+
+  // The keypad is the same defect without a script behind it: the levels are
+  // right (the KEYPAD type) and the digits typed nothing.
+  const kp7 = km.names.get('KP7');
+  assert.equal(km.decode(kp7, REAL_MODS.Mod2, 0).codepoint, 0x37, 'KP_7 is 7');
+  assert.equal(
+    km.decode(kp7, 0, 0).codepoint,
+    undefined,
+    'KP_Home still types nothing',
+  );
+  assert.equal(
+    km.decode(km.names.get('KPDL'), REAL_MODS.Mod2, 0).codepoint,
+    0x2e,
+    'KP_Decimal is a full stop',
+  );
+});
+
 test('the X state word carries modifiers low and the group in bits 13-14', () => {
   assert.equal(XkbKeymap.stateOf(REAL_MODS.Shift | REAL_MODS.Control, 0), 5);
   assert.equal(XkbKeymap.stateOf(0, 1), 1 << 13);
