@@ -1264,9 +1264,12 @@ on X11 instead of replaying its whole scene into a clip.
   identity; and `format: 'a8'` throws — the coverage surfaces the paint
   cache and the shadows use stay on their X path until a consumer needs
   them here. The subpath's other drawing-adjacent names
-  (`cssColorStraight`, `decodeImage`, `Image`) are pure JS already;
-  `Image` as a `drawImage` source is not wired on this backend yet, and
-  the X-only names stay X-only. An element that composites such a surface
+  (`cssColorStraight`, `decodeImage`, `Image`) are pure JS already, and an
+  `Image` is a `drawImage` source here as well: its straight RGBA goes into
+  a CG bitmap once per `Image` (the bridge's `ctxPutImageData`
+  premultiplies) and composites like a surface, scaling included. The
+  X-only names stay X-only — `Picture`, and with it `<image picture>` and
+  `<image drawable>`, draw nothing here and warn once in development. An element that composites such a surface
   over its box on **every** frame — a terminal, a chart on a socket — pays
   that composite and the window swapchain's catch-up copy behind it to move
   pixels it already has; making the element's surface its own layer instead,

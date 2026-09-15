@@ -38,6 +38,7 @@ import { CocoaPaneWindow } from './panewindow.js';
 import { CocoaColorSampler } from './screencolor.js';
 import { CocoaFilePanels } from './filepanels.js';
 import { CocoaFontManager } from './fonts.js';
+import { releaseImageUpload } from './context2d.js';
 import { CocoaSurface } from './surface.js';
 import { CocoaWindow } from './window.js';
 import { decodeKey, modifierMask } from './keymap.js';
@@ -447,6 +448,18 @@ export class CocoaApp {
    */
   createSurface(options) {
     return new CocoaSurface(this, options);
+  }
+
+  /**
+   * The release seam for an `Image`'s upload (`freeImage`, src/imagesource.js).
+   * `ctx.drawImage(image)` here composites from a CG bitmap made for the
+   * Image on its first draw, which ntk's `Image.destroy()` — written for X,
+   * where the upload is a pixmap it tracks itself — cannot see; an owner
+   * letting go of an Image calls this too, and the bitmap is freed on the
+   * call. An Image nobody releases takes its bitmap with it when collected.
+   */
+  releaseImage(image) {
+    releaseImageUpload(image);
   }
 
   /**
