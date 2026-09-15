@@ -48,6 +48,13 @@ function openGpu() {
 
 const env = openGpu();
 const skip = env ? false : 'no GPU render node on this machine';
+// The scroll blit needs `glBlitFramebuffer`, which not every GLES build this
+// runs against exposes; `flushDevice`'s own contract is pinned in pure.test.js.
+const skipBlit =
+  skip ||
+  (typeof env.gpu.gl.blitFramebuffer === 'function'
+    ? false
+    : 'this GLES build has no glBlitFramebuffer');
 
 /**
  * As much of `WaylandApp` as a surface asks for: the shared GL, a current
@@ -202,6 +209,94 @@ test(
     win.destroy();
   },
 );
+
+/**
+ * A 4x4 block of opaque white, as a `drawImage` source. Anything sampled
+ * from a texture will do: what matters is that it draws in a different
+ * batch mode from a plain fill, which is what a glyph does, and so is what
+ * used to be the only thing that got the fills before it drawn (#578).
+ */
+function ink() {
+  return { width: 4, height: 4, data: new Uint8Array(4 * 4 * 4).fill(255) };
+}
+
+test(
+  "a composite sees the held context's frame, not the one before it",
+  { skip },
+  () => {
+    const app = fakeApp();
+    const win = new GLTarget(env.gpu.gl, {
+      width: 64,
+      height: 64,
+      stencil: true,
+    });
+    app.windowTarget = win;
+    const wctx = new WaylandContext2D(env.gpu.gl, {
+      fontManager: null,
+      target: win,
+    });
+    wctx.init();
+
+    // The vt terminal's shape: a grid retained in a surface, drawn through a
+    // held context, composited onto the window once per frame. Its draws are
+    // buffered, and a batch is only drawn when its mode changes, when the
+    // buffer fills, or when someone flushes — so the frame could still be
+    // sitting in the vertex buffer when `drawImage` read the texture, and
+    // stay there for as long as the frames after it were all fills — which
+    // a delete is, so typing into the terminal and erasing it left the
+    // erased text on screen for good (#578).
+    const surface = new WaylandSurface(app, { width: 32, height: 32 });
+    const ctx = surface.getContext('2d');
+    const composite = () => {
+      wctx.begin(64, 64);
+      wctx.clearRect(0, 0, 64, 64);
+      wctx.drawImage(surface, 0, 0, 32, 32, 0, 0, 32, 32);
+      wctx.end();
+      return Array.from(wctx.getImageData(8, 8, 1, 1).data);
+    };
+
+    // a cell filled, and something over it in a second batch mode
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(0, 0, 32, 32);
+    ctx.drawImage(ink(), 6, 6);
+    assert.deepEqual(composite(), [255, 255, 255, 255], 'drawn over the fill');
+
+    // …and now the cell is filled again and nothing is drawn over it
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(0, 0, 32, 32);
+    assert.deepEqual(composite(), [255, 0, 0, 255], 'covered again');
+
+    // the frames that follow are fills too, which is what kept the batch in
+    // one mode and the stale pixels on screen
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = '#ff0000';
+      ctx.fillRect(0, 0, 32, 32);
+      assert.deepEqual(composite(), [255, 0, 0, 255], `still covered (${i})`);
+    }
+
+    surface.destroy();
+    wctx.destroy();
+    win.destroy();
+  },
+);
+
+test('a scroll copies what the held context drew', { skip: skipBlit }, () => {
+  const surface = new WaylandSurface(fakeApp(), { width: 32, height: 32 });
+  const ctx = surface.getContext('2d');
+  ctx.fillStyle = '#ff0000';
+  ctx.fillRect(0, 0, 32, 32);
+  ctx.fillStyle = '#0000ff';
+  ctx.fillRect(0, 16, 32, 16);
+  // `copyWithin` blits the target behind the contexts' backs, so the band it
+  // moves has to be the one just drawn rather than whatever reached the
+  // texture before the batch was buffered.
+  assert.equal(
+    surface.copyWithin({ x: 0, y: 0, width: 32, height: 32 }, 0, -16),
+    true,
+  );
+  assert.deepEqual(pixel(surface, 4, 4), [0, 0, 255, 255], 'the band moved up');
+  surface.destroy();
+});
 
 test('a released device is taken back before the next draw', { skip }, () => {
   const surface = new WaylandSurface(fakeApp(), { width: 32, height: 32 });

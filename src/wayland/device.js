@@ -16,6 +16,15 @@
 // back. Whoever drew in between does not have to know who comes next, and a
 // caller does not have to know there is a device at all.
 //
+// Claiming is also a *batch boundary*: a 2d context buffers its quads and
+// draws them in one call later, so the outgoing owner is flushed on the way
+// out. That is what makes the invariant this module offers true — **only the
+// owner can have work still buffered** — and the invariant is what lets
+// anyone about to read a target's pixels get them by flushing one context
+// (`flushDevice`) rather than by knowing which one drew them. Without it a
+// held surface context's whole frame could sit in a vertex buffer while the
+// `drawImage` that should show it sampled the texture behind it (#578).
+//
 // One record per `gl`, keyed weakly: a GPU that goes away takes its record
 // with it.
 const devices = new WeakMap();
@@ -52,4 +61,18 @@ export function glDevice(gl) {
 export function releaseDevice(gl) {
   const device = shared(gl) ? devices.get(gl) : null;
   if (device) device.owner = null;
+}
+
+/**
+ * Draw what is still buffered, so that a target's texture holds everything
+ * that has been drawn into it.
+ *
+ * The owner is the only context that can be holding anything (see above), so
+ * flushing it is flushing the device. Call before *reading* a target's pixels
+ * behind the contexts' backs — a framebuffer blit, a scroll copy — the way
+ * `releaseDevice` is called after writing them.
+ */
+export function flushDevice(gl) {
+  const device = shared(gl) ? devices.get(gl) : null;
+  device?.owner?.flush();
 }

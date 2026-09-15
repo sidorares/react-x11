@@ -532,7 +532,7 @@ export class WaylandContext2D {
    */
   begin(width, height, timestamp = 0) {
     this.init();
-    this._device.owner = this;
+    this._take();
     const t = this._target;
     if (t) {
       t.bind();
@@ -612,7 +612,7 @@ export class WaylandContext2D {
     // Mid stencil-then-cover the state is set up for the pass, not for a
     // plain batch, and the device cannot have changed hands under it.
     if (this._device.owner === this || this._stencilling) return;
-    this._device.owner = this;
+    this._take();
     this._makeCurrent?.();
     this.init();
     // As `begin()` has it: a target's size *is* the projection.
@@ -622,6 +622,26 @@ export class WaylandContext2D {
       this._height = t.height;
     }
     this._applyState();
+  }
+
+  /**
+   * Take the device, drawing whatever the last owner still had buffered.
+   *
+   * A context batches: its quads sit in a vertex buffer until the mode
+   * changes, the buffer fills, or someone flushes. So the handover is where
+   * the outgoing owner's batch is drawn — otherwise a frame's worth of work
+   * can sit there while the pixels it was meant to produce are read by
+   * whoever comes next, and stay there until that context happens to draw
+   * something of a different kind (#578). The state is still the outgoing
+   * owner's at this point, which is what the flush needs.
+   *
+   * It is also what device.js's invariant rests on: the owner is the only
+   * context that can be holding anything.
+   */
+  _take() {
+    const previous = this._device.owner;
+    if (previous && previous !== this) previous._flush();
+    this._device.owner = this;
   }
 
   /** Give the device up, so the next draw through this context re-takes it. */
@@ -1950,6 +1970,11 @@ export class WaylandContext2D {
 
   /** Two triangles from four corners, in order TL, TR, BR, BL. */
   _quad(pos, uv, color, params) {
+    // Buffering is taking the device, not a step before it: the quad is GL
+    // work that has been decided on and not yet issued, and the handover in
+    // `_take` is the only thing that can get it issued before someone reads
+    // the pixels it makes. A property compare in the common case.
+    this._claim();
     if (this._n + 6 > MAX_VERTS) this._flush();
     const v = this._verts;
     let o = this._n * STRIDE;
@@ -1974,6 +1999,7 @@ export class WaylandContext2D {
 
   /** One triangle, for the stencil pass. Colour and params are irrelevant. */
   _tri(x0, y0, x1, y1, x2, y2) {
+    this._claim();
     if (this._n + 3 > MAX_VERTS) this._flush();
     const v = this._verts;
     let o = this._n * STRIDE;
