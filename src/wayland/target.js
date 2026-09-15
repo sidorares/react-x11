@@ -21,7 +21,7 @@
 // asking EGL for it means the window's own config no longer has to carry
 // stencil bits at all; the request in glcontext.js stays as belt and braces.
 
-import { releaseDevice } from './device.js';
+import { flushDevice, releaseDevice } from './device.js';
 
 export class GLTarget {
   /**
@@ -133,6 +133,9 @@ export class GLTarget {
    */
   blitTo(drawFbo, rects, dstWidth = this.width, dstHeight = this.height) {
     const gl = this.gl;
+    // Reading these pixels, so everything drawn into them has to be in the
+    // texture and not still in a context's vertex buffer (device.js).
+    flushDevice(gl);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fbo);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, drawFbo);
     gl.disable(gl.SCISSOR_TEST);
@@ -201,6 +204,11 @@ export class GLTarget {
     const sy = dstY0 - dy;
 
     const gl = this.gl;
+    // A scroll reads this target before it writes it, so anything a context
+    // still has buffered has to land first — or the band that moves is the
+    // frame before last's, and the buffered quads arrive afterwards at the
+    // position the scroll just left (device.js).
+    flushDevice(gl);
     const scratch = scratchFor(gl, bw, bh);
     // out: this[sx,sy,bw,bh] -> scratch[0,0]
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.fbo);

@@ -9,7 +9,11 @@ import {
   parseColor,
   parseFont,
 } from '../../src/wayland/context2d.js';
-import { glDevice, releaseDevice } from '../../src/wayland/device.js';
+import {
+  flushDevice,
+  glDevice,
+  releaseDevice,
+} from '../../src/wayland/device.js';
 import { unionDamage } from '../../src/wayland/swapchain.js';
 import { Decorations, RESIZE_MARGIN } from '../../src/wayland/decorations.js';
 import { RESIZE_EDGE, TOPLEVEL_STATE } from '../../src/wayland/window.js';
@@ -204,4 +208,31 @@ test('glDevice: one record per gl, and none to share without one', () => {
     assert.notEqual(device, glDevice(none), `${none}: shared with nothing`);
     releaseDevice(none); // and saying so of one is not an error
   }
+});
+
+// The other half of the record: a context buffers its quads, so a target's
+// texture is only as current as the last flush. Anything about to *read*
+// those pixels flushes the device first — which is one context, because the
+// owner is the only one that can be holding anything (#578).
+test('flushDevice: the owner draws what it still had buffered', () => {
+  const gl = {};
+  let flushed = 0;
+  const owner = {
+    flush() {
+      flushed++;
+    },
+  };
+
+  flushDevice(gl); // nobody owns it: nothing to draw, and not an error
+  assert.equal(flushed, 0);
+
+  glDevice(gl).owner = owner;
+  flushDevice(gl);
+  assert.equal(flushed, 1, 'the owner was asked to draw');
+
+  releaseDevice(gl);
+  flushDevice(gl);
+  assert.equal(flushed, 1, 'and released, it is not asked again');
+
+  for (const none of [null, undefined]) flushDevice(none); // not an error
 });
