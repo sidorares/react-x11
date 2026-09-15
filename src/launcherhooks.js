@@ -1,17 +1,21 @@
-// `useBadge()` and `useDockMenu()` — the launcher's view of the app, as
-// things a component declares rather than manages.
+// `useBadge()`, `useProgress()` and `useDockMenu()` — the launcher's view of
+// the app, as things a component declares rather than manages.
 //
-// The badge lives in `launcher.js` and is cross-backend; the Dock menu is
-// the cocoa backend's alone, because its freedesktop counterpart — desktop
-// actions in the `.desktop` file — is an install step and not runtime code.
-// Where a hook has no mechanism it is inert, with a one-time development
-// note naming the backend: the inert-props policy of docs/macos.md, so
-// shared app code stays branch-free.
+// All three now have a rung on both backends except progress, which has one
+// only on Linux (`NSDockTile` has no progress bar; see `setProgress`). Where
+// a hook has no mechanism it is inert and silent: a mark on an icon is not a
+// feature an app should branch on, and a development warning for every
+// desktop that lacks one is a warning nobody can act on.
+//
+// The one that changed shape is `useDockMenu`. It used to be cocoa-only on
+// the grounds that the freedesktop counterpart was an install step — see
+// `launcher.js`, where that reasoning is corrected: the launcher protocol
+// carries a `quicklist` dbusmenu, so the Dock menu is runtime code on both.
 
 import { useEffect, useRef } from 'react';
 
 import { useAppOrNull } from './appcontext.js';
-import { setBadge } from './launcher.js';
+import { setBadge, setProgress, setQuicklist } from './launcher.js';
 
 /**
  * Show `value` on the app's icon while this component is mounted, and clear
@@ -37,12 +41,31 @@ export function useBadge(value) {
   }, [app]);
 }
 
-let warnedInert = false;
+/**
+ * A progress bar across the app's icon, `0`…`1`, cleared on unmount.
+ *
+ * ```jsx
+ * useProgress(done / total); // null or undefined clears it
+ * ```
+ *
+ * Linux launchers only — the Dock has no progress bar of its own.
+ */
+export function useProgress(value) {
+  const app = useAppOrNull();
+  useEffect(() => {
+    setProgress(value, { app }).catch(() => {});
+  }, [value, app]);
+  useEffect(() => {
+    return () => {
+      setProgress(null, { app }).catch(() => {});
+    };
+  }, [app]);
+}
 
 /**
- * The menu behind a right-click on the Dock icon, from the same `items`
- * vocabulary `MenuBar` and `ContextMenu` take — an item's `onSelect` fires
- * when the user picks it.
+ * The menu behind a right-click on the app's icon in the Dock or launcher,
+ * from the same `items` vocabulary `MenuBar` and `ContextMenu` take — an
+ * item's `onSelect` fires when the user picks it.
  *
  * ```jsx
  * useDockMenu([
@@ -53,8 +76,10 @@ let warnedInert = false;
  * ```
  *
  * Installed for as long as the component is mounted, replaced when `items`
- * changes, and taken down on unmount. Inert off the cocoa backend, with a
- * development note the first time.
+ * changes, and taken down on unmount. `NSDockTile`'s menu on the cocoa
+ * backend; the launcher protocol's `quicklist` on Linux, which needs the
+ * identity `registerApplication({ appId })` establishes and a `.desktop` file
+ * of that name for a launcher to attach it to.
  */
 export function useDockMenu(items) {
   const app = useAppOrNull();
@@ -64,18 +89,12 @@ export function useDockMenu(items) {
   live.current = items;
 
   useEffect(() => {
-    if (typeof app?.setDockMenu !== 'function') {
-      if (process.env.NODE_ENV !== 'production' && !warnedInert && app) {
-        warnedInert = true;
-        console.warn(
-          'react-x11: useDockMenu() is inert on this backend — only the ' +
-            'cocoa backend has a Dock. On a Linux desktop the counterpart ' +
-            'is desktop actions in the .desktop file (docs/desktop.md).',
-        );
-      }
-      return undefined;
-    }
-    app.setDockMenu(items ?? null);
-    return () => app.setDockMenu(null);
+    setQuicklist(items ?? null, { app }).catch(() => {});
   }, [items, app]);
+
+  useEffect(() => {
+    return () => {
+      setQuicklist(null, { app }).catch(() => {});
+    };
+  }, [app]);
 }

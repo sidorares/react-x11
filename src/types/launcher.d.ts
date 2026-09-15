@@ -35,9 +35,55 @@ export declare function setBadge(
 export declare function useBadge(value: BadgeValue): void;
 
 /**
- * The menu behind a right-click on the Dock icon, from the same item
- * vocabulary `MenuBar` takes; an item's `onSelect` fires when picked.
- * Installed while mounted, replaced when `items` changes, taken down on
- * unmount. Inert off the cocoa backend.
+ * The menu behind a right-click on the app's icon in the Dock or launcher,
+ * from the same item vocabulary `MenuBar` takes; an item's `onSelect` fires
+ * when picked. Installed while mounted, replaced when `items` changes, taken
+ * down on unmount.
+ *
+ * `NSDockTile`'s menu on the cocoa backend; the launcher protocol's
+ * **quicklist** on Linux — a `com.canonical.dbusmenu` tree, the same menu
+ * protocol the tray and the global menu speak. Needs the identity
+ * `registerApplication({ appId })` establishes and a `.desktop` file of that
+ * name, like the badge.
  */
 export declare function useDockMenu(items: MenuItem[] | null): void;
+
+/**
+ * A progress bar across the app's icon, `0`…`1`. `null` clears it; values
+ * outside the range are clamped rather than refused.
+ *
+ * The launcher protocol's `progress`. **Linux launchers only** — `NSDockTile`
+ * has no progress bar, so this is inert on the cocoa backend and
+ * `useDesktopCapability('launcher').features.progress` is the honest answer.
+ */
+export declare function setProgress(
+  value: number | null | false | undefined,
+  options?: SetBadgeOptions,
+): Promise<boolean>;
+
+/** {@link setProgress} while mounted; cleared on unmount. */
+export declare function useProgress(
+  value: number | null | false | undefined,
+): void;
+
+/**
+ * Ask the launcher for the user's attention, or stop asking.
+ *
+ * Distinct from `<window states={['demands_attention']}>`, which is the
+ * *window's* urgency hint: this marks the app's icon in the launcher whether
+ * or not any window is open. Inert on the cocoa backend, where the window
+ * state is the mechanism.
+ */
+export declare function setUrgent(
+  urgent: boolean,
+  options?: SetBadgeOptions,
+): Promise<boolean>;
+
+/**
+ * {@link useDockMenu}'s imperative twin, for code with no component. `null`
+ * takes the menu down.
+ */
+export declare function setQuicklist(
+  items: MenuItem[] | null,
+  options?: SetBadgeOptions,
+): Promise<boolean>;

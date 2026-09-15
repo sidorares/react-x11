@@ -164,11 +164,13 @@ it is the mark on its icon — an unread count on the Dock tile, a dot on the
 taskbar entry. Three things live here, and they are on both backends only
 where both have a mechanism:
 
-|                   | Linux                                                                                              | macOS (cocoa backend)                                |
+|                   | Linux (`launcherentry`)                                                                            | macOS (`cocoa`)                                      |
 | ----------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | a **badge**       | `com.canonical.Unity.LauncherEntry` — KDE, elementary, Cairo-Dock listen; GNOME needs an extension | `NSDockTile.badgeLabel`                              |
-| **attention**     | `states={['demands_attention']}` — the urgency the taskbar blinks for                              | the same prop: the Dock icon bounces until activated |
-| the **Dock menu** | desktop actions in the `.desktop` file — an install step                                           | `useDockMenu(items)`                                 |
+| badge **text**    | — the protocol carries a count and nothing else                                                    | any label                                            |
+| **progress**      | `useProgress(0…1)` — a bar across the tile                                                         | — `NSDockTile` has none                              |
+| **attention**     | `states={['demands_attention']}`, or `setUrgent()` for the launcher entry itself                   | the same prop: the Dock icon bounces until activated |
+| the **Dock menu** | `useDockMenu(items)` — the launcher protocol's quicklist                                           | `useDockMenu(items)`                                 |
 
 ### The badge
 
@@ -195,6 +197,24 @@ count to and `setBadge` resolves `false`. The entry stays on the bus while
 a badge is shown and is released when it is cleared. A launcher that starts
 after the badge was set will not see it until the next `setBadge`; the
 protocol has no query.
+
+### Progress
+
+```jsx
+import { useProgress, setProgress } from 'react-x11';
+
+useProgress(downloaded / total); // 0…1; null or undefined clears it
+await setProgress(null); // the imperative twin
+```
+
+A bar drawn across the app's icon, for a download, an export, a long build.
+Out-of-range values are clamped rather than refused — a caller dividing by a
+total that briefly went to zero should not get an exception.
+
+**Linux launchers only.** `NSDockTile` has no progress bar; an app that wants
+one on a Mac draws it into a custom tile view, which is app-side art rather
+than a call. `useDesktopCapability('launcher').features.progress` is the
+honest answer to branch on.
 
 ### Attention
 
@@ -223,9 +243,22 @@ useDockMenu([
 The same `items` vocabulary `MenuBar` and `ContextMenu` take ([menuitem
 names](globalmenu.md)), so one authoring model covers the window's menu, the
 panel's, the tray's and the Dock's. Installed while the component is mounted,
-replaced when `items` changes, taken down on unmount. Inert off the cocoa
-backend, with a development note the first time: the freedesktop counterpart
-— `Actions=` in the `.desktop` file — is an install step, not runtime code.
+replaced when `items` changes, taken down on unmount.
+
+`NSDockTile`'s menu on the cocoa backend; on Linux it is the launcher
+protocol's **quicklist** — an object path to a `com.canonical.dbusmenu` tree,
+which is the same menu protocol the tray and the global menu already speak.
+ubuntu-dock/Dash-to-Dock, Plank and the Unity-heritage launchers render it.
+
+> An earlier version of this page said the freedesktop counterpart was
+> `Actions=` in the `.desktop` file, an install step rather than runtime code.
+> That is a different feature wearing a similar hat: desktop actions are the
+> right place for entries that must work **while the app is not running**, and
+> the quicklist is the right place for a menu that follows the app's state.
+
+Like the badge, it needs the identity
+[`registerApplication({ appId })`](uri-schemes.md) establishes and a
+`.desktop` file of that name for a launcher to attach it to.
 
 ### The app's presence
 
@@ -252,8 +285,8 @@ already have flashed its icon — so it is a root option rather than a hook.
 ```jsx
 import { useTray } from 'react-x11';
 
-const { available } = useTray({
-  icon: 'bell.badge', // an SF Symbol name, or the bytes of a PNG
+const { available, backend, features, error } = useTray({
+  icon: 'mail-unread', // a themed icon name (an SF Symbol on macOS), or PNG bytes
   tooltip: 'Notifications',
   menu: [
     { label: 'Open', onSelect: open },
@@ -266,26 +299,131 @@ const { available } = useTray({
 An icon in the system tray for as long as the component is mounted. With
 `menu` a click opens it — the same `items` vocabulary as `MenuBar` and the
 Dock menu, so the three menus an app puts on the desktop are one authoring
-model. Without one, `onClick` gets the button and the item's screen rect,
-which is where to anchor a popup of your own. `title` shows text beside the
-icon or alone; `visible`, `tooltip` and the rest follow their values while
+model. Without one, `onClick` gets the button and, where the backend knows
+it, the item's screen rect. `title` shows text beside the icon or alone;
+`visible`, `tooltip`, `attention` and the rest follow their values while
 mounted, and the item is removed on unmount. `null` means no item.
 
-A PNG icon is drawn as a **template** — its shape in the bar's ink, so it
-follows light and dark the way a symbol does; `template: false` keeps its
-colours. Several trays coexist: each is its own item.
+Several trays coexist: each is its own item.
+
+|                 | Linux (`statusnotifier`)                | macOS (`cocoa`)              |
+| --------------- | --------------------------------------- | ---------------------------- |
+| mechanism       | `org.kde.StatusNotifierItem` over D-Bus | `NSStatusItem`               |
+| menu            | `com.canonical.dbusmenu`                | `NSMenu`                     |
+| icon by name    | the desktop's icon theme                | SF Symbols                   |
+| icon by bytes   | ARGB32 pixmap                           | a template image             |
+| attention       | `Status = NeedsAttention`               | —                            |
+| click rect      | —                                       | the item's frame             |
+| click modifiers | —                                       | shift/control/option/command |
+| scroll          | `Scroll(delta, orientation)`            | —                            |
+
+**On Linux** this is StatusNotifierItem, which is D-Bus only — so it works
+identically under X11, XWayland and Wayland. It needs something _hosting_ a
+tray: KDE Plasma and most panels do out of the box, and GNOME needs an
+AppIndicator extension. A stock GNOME session with no extension has no tray,
+`available` is `false`, and nothing is logged, because that is a
+configuration rather than a fault.
 
 **On the cocoa backend** this is `NSStatusItem`, the menu-bar extra. A
 menu-bar app that wants no Dock tile pairs it with
-`createRoot({ cocoa: { activationPolicy: 'accessory' } })` above.
+`createRoot({ cocoa: { activationPolicy: 'accessory' } })` above. A PNG icon
+is drawn as a **template** — its shape in the bar's ink, so it follows light
+and dark the way a symbol does; `template: false` keeps its colours.
 
-**On X11 it is inert**, and says so: `available` is `false` and the hook
-warns once in development. The freedesktop tray is StatusNotifierItem over
-D-Bus, whose menu is the [dbusmenu](globalmenu.md) this renderer already
-speaks — that half is
-[#353](https://github.com/sidorares/react-x11/issues/353)'s open question,
-and `available` is the seam that keeps an app's tray feature behind the
-answer until it lands.
+### What the hook hands back
+
+`available` **settles**. Finding a freedesktop tray takes a bus round trip, so
+it is `false` on the first frame and `true` a tick later if a host is there —
+render the fallback first and upgrade, never the other way round. It follows
+the host for the life of the item, so a panel that exits flips it back.
+
+`features` is the same vocabulary [feature discovery](#feature-discovery)
+uses, for the rung that answered. Read it instead of testing the platform:
+
+```jsx
+// Right: ask about the thing you need.
+{
+  features.clickModifiers && <ShiftClickHint />;
+}
+```
+
+`error` is the fourth field because **"this desktop has no tray" and "there is
+a tray and it refused me" are different facts**, and only one of them has a
+fix. A missing tray leaves `error` null; a host that rejected the registration
+puts the reason there.
+
+## Feature discovery
+
+Everything on this page is a _ladder_, and which rung a machine lands on
+changes what the app may do. `available` alone is not enough to branch on,
+because it is true on machines that mean very different things by it — a
+notification daemon with `actions` gives you a banner with buttons that call
+back, and `notify-send` gives you one-way text with an urgency and an icon.
+An app that posts reply buttons on the second one gets a banner with no
+buttons and no callback, silently.
+
+So the unit of discovery is a **feature set**, not a flag:
+
+```jsx
+import { useDesktopCapability } from 'react-x11';
+
+const notifications = useDesktopCapability('notifications');
+
+if (notifications.features.actions) return <ReplyFromBanner />;
+if (notifications.available) return <BannerThenOpenApp />;
+return <InAppToastOnly />;
+```
+
+`{ available, backend, features }`. `backend` names the **mechanism** —
+`'dbus'`, `'cocoa'`, `'statusnotifier'`, `'launcherentry'`, `'notify-send'`,
+`'osascript'` — and never the platform, so that a second Linux mechanism does
+not need a second name for Linux. Branch on `features`; `backend` is for logs
+and bug reports.
+
+Capability names are `'notifications'`, `'tray'` and `'launcher'`.
+`desktopCapability(name)` is the imperative twin for code with no component.
+
+### Which one to ask
+
+A hook that _does_ the thing already knows whether it worked, and that
+measurement beats any prediction:
+
+- **`useTray(options)`** — "did my icon get taken?" It tried; it knows.
+- **`useDesktopCapability('tray')`** — "would one be taken if I asked?" This
+  is what a settings screen needs: a "Show tray icon" checkbox has to render
+  correctly _without_ putting an icon in the tray to find out.
+
+Prefer the feature hook wherever the feature is actually mounted. Both read
+the same probe, so they cannot disagree.
+
+### Degrading well
+
+Three rules, in the order they matter:
+
+1. **Render the fallback first.** Every desktop answer takes a round trip, so
+   the first frame has none. Upgrading a fallback is invisible; downgrading a
+   feature the user already reached for is not.
+2. **Never disable a feature permanently on a `false`.** A panel restarts, an
+   extension is enabled, a daemon is installed. The hooks re-probe on
+   `NameOwnerChanged` and nothing is cached — an app that latched the first
+   answer would outlive every one of those fixes.
+3. **A missing desktop service is not an error.** No bus, no tray host, no
+   notification daemon and no launcher are all ordinary states of a healthy
+   machine. Nothing is logged and nothing throws; the feature is simply not
+   there. Reserve `error` for a service that answered and then refused.
+
+### All of it, in one app
+
+`examples/desktop.jsx` (`npm run examples:desktop`) is a backup agent that
+uses every hook on this page at once — the tray icon with its attention state
+and its overlay, the badge, the progress bar, the quicklist, the urgency flag,
+and a banner whose buttons are offered only where the daemon has `actions` —
+and whose second pane renders `useDesktopCapability()` for each of
+`CAPABILITIES` beside the live answers, so the prediction and the measurement
+are on screen together. It is the one to read when the question is what an app
+will get on a machine you do not have. The three feature-sized examples are
+`badge.jsx` (the launcher), `tray.jsx` (the tray) and `notify.jsx` (the
+notification).
 
 ## Turning the desktop off
 

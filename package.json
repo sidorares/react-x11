@@ -33,6 +33,7 @@
     "examples:attention": "tsx examples/attention.jsx",
     "examples:badge": "tsx examples/badge.jsx",
     "examples:tray": "tsx examples/tray.jsx",
+    "examples:desktop": "tsx examples/desktop.jsx",
     "examples:tooltips": "tsx examples/tooltips.jsx",
     "examples:chat": "tsx examples/chat.jsx",
     "examples:clipboard": "tsx examples/clipboard.jsx",

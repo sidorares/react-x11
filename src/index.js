@@ -14,9 +14,15 @@ export {
   registerApplication,
 } from './application.js';
 export { useAppActivate, useAppOpen } from './apphooks.js';
-export { setBadge } from './launcher.js';
-export { useBadge, useDockMenu } from './launcherhooks.js';
+export { setBadge, setProgress, setQuicklist, setUrgent } from './launcher.js';
+export { useBadge, useDockMenu, useProgress } from './launcherhooks.js';
 export { useTray } from './trayhooks.js';
+export {
+  CAPABILITIES,
+  NO_CAPABILITY,
+  desktopCapability,
+} from './capabilities.js';
+export { useDesktopCapability } from './desktopcapabilityhooks.js';
 export {
   NoPermissionServiceError,
   openPrivacySettings,

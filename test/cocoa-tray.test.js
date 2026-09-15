@@ -232,6 +232,18 @@ test('useTray: created on mount, patched in place, removed on unmount', async ()
   await tick();
   await tick();
   assert.equal(seen.available, true);
+  // `features` is the half of the answer an app branches on, and it has to
+  // arrive on this rung too: the status item is the one with modifiers and a
+  // rect, so a hook that left the map empty here would have every app dim
+  // exactly the affordances macOS can do.
+  assert.equal(seen.backend, 'cocoa');
+  assert.equal(seen.features.clickModifiers, true);
+  assert.equal(seen.features.clickRect, true);
+  assert.equal(seen.features.menu, true);
+  // and the ones it honestly cannot
+  assert.equal(seen.features.scroll, false);
+  assert.equal(seen.features.attention, false);
+  assert.equal(seen.error, null);
   assert.equal(native.of('createStatusItem').length, 1);
   assert.deepEqual(native.of('createStatusItem')[0][0], {
     image: 'bell',
