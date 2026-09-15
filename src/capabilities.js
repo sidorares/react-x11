@@ -49,7 +49,7 @@
 // Linux.
 
 import { sessionBus } from './bus.js';
-import { currentRegistration } from './application.js';
+import { currentRegistration, currentRegistrationRole } from './application.js';
 import {
   notificationBackend,
   NOTIFICATIONS_NAME,
@@ -253,9 +253,15 @@ async function probeLauncher({ app } = {}) {
       available: false,
       backend: null,
       features: {},
-      // The one case where "no" has a fix the app author can apply, so it
-      // says which one rather than looking like a missing desktop.
-      reason: 'no-app-id',
+      // Two different "no"s, and only one is a mistake. A **secondary**
+      // instance called `registerApplication()` and lost the race for the
+      // name — the first copy owns the badge and the quicklist, which is the
+      // whole point of single-instance — so telling its author to call a
+      // function they already called sends them after a bug that is not
+      // there. The launcher is genuinely unavailable *to this process*
+      // either way; only the advice differs.
+      reason:
+        currentRegistrationRole() === 'secondary' ? 'not-primary' : 'no-app-id',
     });
   }
   return frozen('launcherentry', {

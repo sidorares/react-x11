@@ -54,8 +54,16 @@ export const ITEM_IFACE = 'org.kde.StatusNotifierItem';
 /** dbusmenu's own struct, repeated here so the tooltip signature reads. */
 const PIXMAP_SIGNATURE = 'a(iiay)';
 
-/** One process, many trays: the path counter behind `/StatusNotifierItem/<n>`. */
+/** One process, many trays: the path counter behind `/StatusNotifierItem/<n>`.
+ *
+ *  A **slot**, not a mount counter. A hook that is toggled off and on again is
+ *  the *same* tray icon and must come back on the same path — see `stop()`. */
 let nextItemIndex = 1;
+
+/** Claim a tray slot. `useTray()` takes one per hook instance, for its life. */
+export function allocateItemSlot() {
+  return nextItemIndex++;
+}
 
 /**
  * Straight RGBA pixels → the ARGB32 pixmap array the spec wants.
@@ -121,19 +129,26 @@ function iconOf(icon, decode) {
  * in quick succession cannot put two registrations in flight.
  */
 export class StatusNotifierItem {
-  constructor({ getOptions, appId, decodeIcon, onError } = {}) {
+  constructor({ getOptions, appId, decodeIcon, onError, slot } = {}) {
     this.getOptions = getOptions ?? (() => null);
     this.appId = appId ?? 'react-x11';
     this.decodeIcon = decodeIcon ?? (() => null);
     this.onError = onError ?? (() => {});
 
-    this.index = nextItemIndex++;
+    // The caller's slot when it has one. A hook that is switched off and on
+    // again must re-register the **same** `sender@path`, because that string
+    // is the host's identity for the icon: a fresh path reads as a second,
+    // additional tray icon rather than as the first one coming back.
+    this.index = slot ?? nextItemIndex++;
     this.path = `/StatusNotifierItem/${this.index}`;
     this.menuPath = `${this.path}/Menu`;
 
     this.stopped = false;
     this.exported = false;
     this.syncing = null;
+    /** Set while withdrawing, so `Status` reads `Passive` on the way out —
+     *  see `announcePassive()`. */
+    this.withdrawing = false;
 
     this.ref = null;
     this.dbus = null;
@@ -272,7 +287,40 @@ export class StatusNotifierItem {
       );
     });
     if (this.stopped) return void (await this.teardownExports());
+    this.withdrawing = false;
     this.exported = true;
+    this.announceAll();
+  }
+
+  /**
+   * Say everything once, immediately after registering.
+   *
+   * A host that already knew this `sender@path` — the icon was switched off
+   * and on again, so the id is the same by design — does **not** re-read us
+   * on the way back. gnome-shell's watcher answers a repeat registration with
+   * `item.reset()`, which is one event and no property fetch, and its
+   * `Status` is a cached proxy property. So the `Passive` that
+   * `announcePassive()` correctly told it on the way out is still what it
+   * believes, and the icon stays hidden however healthy the object is.
+   *
+   * `update()` is right to emit only the field that moved — that path runs on
+   * every render and a host re-reads per signal. This one runs once per
+   * publish, where the opposite is true: nothing about the host's cache can
+   * be assumed, so every field is announced and the cost is one burst.
+   */
+  announceAll() {
+    if (!this.exported || !this.iface) return;
+    const emit = this.iface.emit;
+    try {
+      emit.NewStatus(statusOf(this.options));
+      emit.NewIcon();
+      emit.NewAttentionIcon();
+      emit.NewOverlayIcon();
+      emit.NewTitle();
+      emit.NewToolTip();
+    } catch {
+      // A connection on its way down owes us nothing.
+    }
   }
 
   async publishMenu() {
@@ -290,8 +338,50 @@ export class StatusNotifierItem {
   }
 
   async withdraw() {
+    await this.announcePassive();
     this.exported = false;
     await this.teardownExports();
+  }
+
+  /**
+   * Tell the host the icon is going before the object stops answering.
+   *
+   * **This is the whole of taking a tray icon down**, and it is not obvious.
+   * There is no `UnregisterStatusNotifierItem`: the spec's removal signal is
+   * the item's *bus name* losing its owner, and a host watches exactly that.
+   * Our name is the app's shared connection (see the header), which outlives
+   * any one icon — so simply un-exporting the object removes nothing. The
+   * host keeps drawing an icon backed by a dead path, and the next mount adds
+   * a *second* one beside it.
+   *
+   * gnome-shell's appindicator names this failure in a comment on its own
+   * workaround: "some applications just remove the indicator object from bus
+   * after hiding it, without closing its bus name, so we are not able to
+   * understand when they're gone". That workaround is a ten-second liveness
+   * probe, and it only runs for an item that is already `Passive`.
+   *
+   * So: go `Passive` first and say so. `Passive` is the spec's own word for
+   * "do not show this", every host honours it immediately, and on this one it
+   * is also what arms the reaper. The export is then held for one settle so
+   * the re-read the signal provokes finds `Passive` rather than an error.
+   *
+   * The pair to this is the **stable path** (`slot`): coming back re-registers
+   * the same id, which a host dedupes to a reset rather than a second icon.
+   */
+  async announcePassive() {
+    if (!this.exported || !this.iface) return;
+    this.withdrawing = true;
+    try {
+      this.iface.emit.NewStatus('Passive');
+    } catch {
+      // A connection already on its way down owes us nothing here.
+      return;
+    }
+    // One turn for the signal to reach the socket, and a short window for the
+    // host's `Get('Status')` to come back before the object goes away. Cheap,
+    // and the difference between an icon that disappears and one that lingers
+    // until the process exits.
+    await new Promise((resolve) => setTimeout(resolve, 60));
   }
 
   async teardownExports() {
@@ -306,6 +396,9 @@ export class StatusNotifierItem {
   }
 
   async stop() {
+    // Announced **before** `stopped`, which gates `_sync()` and every other
+    // path that could tear the export out from under the signal.
+    await this.announcePassive();
     this.stopped = true;
     await this.syncing;
     await this.teardown();
@@ -428,7 +521,13 @@ export class StatusNotifierItem {
           access: 'read',
           get: () => opts().title ?? opts().tooltip ?? this.appId,
         },
-        Status: { type: 's', access: 'read', get: () => statusOf(opts()) },
+        Status: {
+          type: 's',
+          access: 'read',
+          // `withdrawing` wins: the icon is on its way out, whatever the
+          // last render asked for.
+          get: () => (this.withdrawing ? 'Passive' : statusOf(opts())),
+        },
         // 0, always: the item is not tied to a window, and on Wayland there is
         // no X id to give even when it is.
         WindowId: { type: 'i', access: 'read', get: () => 0 },

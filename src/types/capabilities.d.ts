@@ -77,10 +77,15 @@ export interface DesktopCapabilityResult<F = Record<string, boolean>> {
   /** Empty when `available` is false. */
   features: Partial<F>;
   /**
-   * Why not, when the answer is a `false` the app author can fix.
-   * `'no-app-id'`: the launcher needs `registerApplication({ appId })`.
+   * Why not, when the `false` has a cause worth naming.
+   *
+   * `'no-app-id'` — the launcher needs `registerApplication({ appId })`, and
+   * this one is a mistake in the source.
+   * `'not-primary'` — it was called, and another copy of the app owns the
+   * identity. Correct single-instance behaviour, not a bug: the first copy
+   * owns the badge and the quicklist.
    */
-  reason?: 'no-app-id';
+  reason?: 'no-app-id' | 'not-primary';
 }
 
 export type DesktopCapabilityFor<N extends DesktopCapabilityName> =

@@ -96,6 +96,85 @@ import {
 
 const APP_ID = 'com.example.x11backup';
 
+// ---------------------------------------------------------------------------
+// The desktop entry, which is the half of the launcher that is not code.
+//
+// `setBadge`/`setQuicklist` resolve **true** with no `.desktop` file installed
+// — and nothing appears. That is not a bug in either: the signal is addressed
+// to `application://<APP_ID>.desktop`, so it is delivered correctly and simply
+// matches no icon. The launcher has to be able to find (a) an entry of that
+// name and (b) *this window* as belonging to it, and the second half is the
+// one that catches people out:
+//
+//   Wayland   the toplevel's xdg `app_id`, which is `createRoot({ appId })`
+//             or `<window appId>` — **not** `registerApplication({ appId })`,
+//             which is a different identity that happens to share a spelling.
+//   X11       `WM_CLASS`, i.e. `<window wmClass>`, matched against the
+//             entry's `StartupWMClass=`.
+//
+// So the id is stated in three places on purpose here, and they must agree.
+// `capabilities` reports `needsDesktopFile: true` for this rung to say that
+// availability on the bus is not the whole story.
+// ---------------------------------------------------------------------------
+
+const DESKTOP_ENTRY = `[Desktop Entry]
+Type=Application
+Name=Backup (react-x11 example)
+Comment=The desktop-integration example
+Exec=${'${EXEC}'}
+Icon=drive-harddisk
+Terminal=false
+Categories=Utility;
+StartupWMClass=${APP_ID}
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=New Window (a static .desktop action)
+Exec=${'${EXEC}'}
+`;
+
+/** Where a per-user entry goes, without naming `node:path` in a JSX example. */
+function desktopEntryPath() {
+  const home = globalThis.process?.env?.HOME ?? '';
+  const dataHome =
+    globalThis.process?.env?.XDG_DATA_HOME || `${home}/.local/share`;
+  return `${dataHome}/applications/${APP_ID}.desktop`;
+}
+
+/** Is one installed? Read once per mount — installing it is a manual step, so
+ *  polling would be watching for something that cannot happen mid-run. */
+async function desktopEntryInstalled() {
+  try {
+    const fs = await import(/* @vite-ignore */ 'node:fs/promises');
+    await fs.access(desktopEntryPath());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `--install-desktop-entry`, so the example can be made to work in one go. */
+async function installDesktopEntry() {
+  const fs = await import(/* @vite-ignore */ 'node:fs/promises');
+  const target = desktopEntryPath();
+  const proc = globalThis.process;
+  // Point `Exec` at however this copy was started, so the entry launches the
+  // same example rather than a binary that may not be on PATH — **including
+  // the loader flags**. `argv` alone would write `node …/desktop.jsx`, and
+  // node cannot run JSX: the `--import tsx` that made this process work lives
+  // in `execArgv`, and dropping it writes an entry that fails on click.
+  const exec = [
+    proc?.execPath ?? 'node',
+    ...(proc?.execArgv ?? []),
+    proc?.argv?.[1] ?? '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  await fs.mkdir(target.slice(0, target.lastIndexOf('/')), { recursive: true });
+  await fs.writeFile(target, DESKTOP_ENTRY.replaceAll('${EXEC}', exec));
+  return target;
+}
+
 const CONFLICT_PATHS = [
   '~/Documents/notes.md',
   '~/Projects/budget.ods',
@@ -289,6 +368,58 @@ function Bar({ value, tone = ACCENT }) {
 // probes puts an icon anywhere or posts anything.
 // ---------------------------------------------------------------------------
 
+/**
+ * The launcher's other half: is there a `.desktop` file for the entry to
+ * attach to?
+ *
+ * Worth its own row because it is the only "everything says yes and nothing
+ * appears" state on this pane. `desktopCapability('launcher')` reports
+ * `available: true` and `setQuicklist()` resolves `true`, both correctly —
+ * the signal really was delivered — and the dock still shows nothing, because
+ * no icon claims that id. Guessing at it from inside the capability probe
+ * would be wrong (the file may live in any XDG data dir, and a launcher may
+ * key off something else entirely), so it is surfaced rather than folded in.
+ */
+function DesktopEntryRow() {
+  const [state, setState] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    void desktopEntryInstalled().then((ok) => alive && setState(ok));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  if (state === null) return null;
+  return (
+    <box
+      style={{ gap: 4, padding: 10, borderRadius: 8, backgroundColor: CARD }}
+    >
+      <box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        <box
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: state ? GOOD : FAINT,
+          }}
+        />
+        <text style={{ color: INK, fontSize: 13, flexGrow: 1 }}>
+          desktop entry
+        </text>
+        <text style={{ color: DIM, fontSize: 12 }}>
+          {state ? 'installed' : 'missing'}
+        </text>
+      </box>
+      <text style={{ color: FAINT, fontSize: 11 }}>
+        {state
+          ? `${APP_ID}.desktop — the badge and the right-click menu have an icon to attach to`
+          : 'no icon claims this app id, so the badge and quicklist go nowhere. run with --install-desktop-entry'}
+      </text>
+    </box>
+  );
+}
+
 function CapabilityCard({ name }) {
   const cap = useDesktopCapability(name);
   const keys = Object.keys(cap.features);
@@ -319,7 +450,9 @@ function CapabilityCard({ name }) {
         <text style={{ color: FAINT, fontSize: 11 }}>
           {cap.reason === 'no-app-id'
             ? 'needs registerApplication({ appId }) — a launcher has nothing to pin an entry to'
-            : 'nothing here, or still asking: the first frame never has an answer'}
+            : cap.reason === 'not-primary'
+              ? 'another copy of this app owns the identity — the first one has the badge'
+              : 'nothing here, or still asking: the first frame never has an answer'}
         </text>
       ) : (
         <box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
@@ -577,7 +710,10 @@ function Backup({ source, onQuit }) {
       minWidth={460}
       minHeight={460}
       title={conflicts.length ? `Backup (${conflicts.length})` : 'Backup'}
+      // X11: matched against the entry's `StartupWMClass=`.
       wmClass={APP_ID}
+      // Wayland: the xdg `app_id`, matched against the entry's file name.
+      appId={APP_ID}
       style={{ backgroundColor: SURFACE }}
     >
       <box style={{ flexGrow: 1, padding: 16, gap: 12 }}>
@@ -654,6 +790,8 @@ function Backup({ source, onQuit }) {
           {CAPABILITIES.map((name) => (
             <CapabilityCard key={name} name={name} />
           ))}
+
+          <DesktopEntryRow />
 
           <box
             style={{
@@ -745,6 +883,18 @@ export default function App({ source, onQuit = () => {} }) {
 // ---------------------------------------------------------------------------
 
 if (!process.env.REACT_X11_NO_AUTORUN && !import.meta.hot) {
+  // `--install-desktop-entry` and exit: the launcher half of this example is
+  // an install step, and a flag is more honest than a README line nobody
+  // runs. Writing it needs no privileges — it goes under XDG_DATA_HOME.
+  if (process.argv.includes('--install-desktop-entry')) {
+    const written = await installDesktopEntry();
+    console.log(
+      `wrote ${written}\n` +
+        'the dock may need a moment, or a log out, to notice a new entry.',
+    );
+    process.exit(0);
+  }
+
   await registerApplication({ appId: APP_ID }).catch(() => {});
 
   // `desktopCapability()` is the imperative twin, for code with no component
@@ -758,6 +908,11 @@ if (!process.env.REACT_X11_NO_AUTORUN && !import.meta.hot) {
   console.log(`desktop — ${summary.join(', ')}`);
 
   const root = await createRoot({
+    // The toplevel's xdg `app_id` on Wayland — the same string the launcher
+    // entry is attributed to, and the only way the dock can tell that this
+    // window is the app the badge belongs to. `<window wmClass>` below is its
+    // X11 counterpart.
+    appId: APP_ID,
     cocoa: { appName: 'Backup', activationPolicy: 'regular' },
   });
 

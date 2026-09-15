@@ -59,7 +59,7 @@ import { decodeImage } from 'ntk';
 import { useAppOrNull } from './appcontext.js';
 import { currentRegistration } from './application.js';
 import { NO_CAPABILITY, desktopCapability } from './capabilities.js';
-import { StatusNotifierItem } from './statusnotifier.js';
+import { StatusNotifierItem, allocateItemSlot } from './statusnotifier.js';
 
 /**
  * An icon in the system tray while this component is mounted.
@@ -151,6 +151,12 @@ export function useTray(options) {
   // ------------------------------------------- rung 2: the freedesktop tray
   const sniRef = useRef(null);
   const previous = useRef(options ?? {});
+  // One slot for the life of this hook, **not** per item object. Passing
+  // `null` and then options again is the same tray icon going away and coming
+  // back; on a fresh path the host has no way to know that and draws a second
+  // one beside the first. See `StatusNotifierItem.announcePassive`.
+  const slotRef = useRef(null);
+  slotRef.current ??= allocateItemSlot();
 
   useEffect(() => {
     if (native || !options) return undefined;
@@ -161,6 +167,7 @@ export function useTray(options) {
     const item = new StatusNotifierItem({
       getOptions: () => live.current,
       appId,
+      slot: slotRef.current,
       decodeIcon: decodeIconBytes,
       // A host that answered the bus and then refused the registration is a
       // fact worth reporting; a desktop with no tray at all is not, and does

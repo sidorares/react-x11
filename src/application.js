@@ -346,6 +346,18 @@ function environmentContext() {
  * that was mounted after the launch it is asking about.
  */
 let current = null;
+/**
+ * The role of this process's registration, which is **not** the same question
+ * as `current`.
+ *
+ * `current` is the *primary* registration and is deliberately null for a
+ * second copy of an app, because a secondary must not own the badge or the
+ * launcher entry — the primary does. But "no registration at all" and "a
+ * registration that lost the race" are different facts, and a feature probe
+ * that cannot tell them apart tells an app author to call a function they
+ * already called. See `capabilities.js`.
+ */
+let currentRole = null;
 
 /**
  * The schemes the registration declared, kept beside it for the transports
@@ -675,6 +687,7 @@ export async function registerApplication(options = {}) {
     await registration.remove().catch(() => {});
     await forward(ref, dbus, { appId, objectPath, uris });
     await ref.release();
+    currentRole = 'secondary';
     const secondary = {
       role: 'secondary',
       appId,
@@ -711,7 +724,10 @@ export async function registerApplication(options = {}) {
     async release() {
       if (released) return;
       released = true;
-      if (current === primaryRegistration) current = null;
+      if (current === primaryRegistration) {
+        current = null;
+        currentRole = null;
+      }
       await ref.bus.releaseName(appId).catch(() => {});
       await registration?.remove().catch(() => {});
       registration = null;
@@ -721,6 +737,7 @@ export async function registerApplication(options = {}) {
   primaryRegistration[Symbol.asyncDispose] = () =>
     primaryRegistration.release();
   current = primaryRegistration;
+  currentRole = 'primary';
   return primaryRegistration;
 }
 
@@ -774,6 +791,12 @@ async function forward(ref, dbus, { appId, objectPath, uris }) {
   }
 }
 
+/** `'primary' | 'secondary' | null`. Not public — `capabilities.js` uses it to
+ *  tell "never registered" from "registered, but another copy is the app". */
+export function currentRegistrationRole() {
+  return currentRole;
+}
+
 /** This process's registration, or `null`. Not public; the docs use `role`. */
 export function currentRegistration() {
   return current;
@@ -782,6 +805,7 @@ export function currentRegistration() {
 /** Test seam, not public: forget every handler, buffer and registration. */
 export function _resetApplicationState() {
   current = null;
+  currentRole = null;
   currentSchemes = null;
   openHandlers.clear();
   activateHandlers.clear();

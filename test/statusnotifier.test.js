@@ -349,17 +349,83 @@ describe('the freedesktop tray', () => {
       await until(() => host.items.length === 1, 'the item to register');
       const target = host.items[0];
 
+      const watch = await host.watchSignals(target);
       await tray.unmount();
-      await tick();
 
-      // The object is gone: a host that kept the reference gets an error
-      // rather than a stale icon that still answers.
-      await assert.rejects(
-        () => host.properties(target),
-        'the item should no longer answer',
+      // `Passive` goes out **before** the object does — the icon has to leave
+      // the panel, and un-exporting alone tells a host nothing, since our bus
+      // name is the app's and outlives any one icon.
+      await until(
+        () => watch.seen.some(([m, v]) => m === 'NewStatus' && v === 'Passive'),
+        'the Passive announcement',
+      );
+      await watch.stop();
+
+      // Then the object goes: a host that kept the reference gets an error
+      // rather than a stale icon that still answers. Polled rather than
+      // ticked, because the announcement above deliberately holds the export
+      // open for a moment.
+      await until(
+        () =>
+          host.properties(target).then(
+            () => false,
+            () => true,
+          ),
+        'the item to stop answering',
       );
     });
   });
+
+  test(
+    'switching the icon off and on again is one icon, not two',
+    needsBroker,
+    async () => {
+      await withBus(async (address) => {
+        _resetItemIndex();
+        _resetApplicationState();
+        await registerApplication({ appId: 'com.example.traytoggle' });
+        const host = await fakeWatcher(address);
+        const tray = await mountTray({ icon: 'mail-unread', menu: MENU() });
+        await until(() => host.items.length === 1, 'the item to register');
+        const firstPath = host.calls[0][1];
+
+        const watch = await host.watchSignals();
+
+        // Off. There is no `UnregisterStatusNotifierItem`, and our bus name
+        // is the app's shared one and does not go away — so `Passive` is the
+        // only thing that takes the icon off the panel.
+        await tray.setOptions(null);
+        await until(
+          () =>
+            watch.seen.some(([m, v]) => m === 'NewStatus' && v === 'Passive'),
+          'the Passive announcement',
+        );
+
+        // On again. The **same** `sender@path`: a fresh one would read to the
+        // host as a second tray icon appearing beside the first, which is the
+        // bug this test exists for.
+        await tray.setOptions({ icon: 'mail-unread', menu: MENU() });
+        await until(() => host.calls.length === 2, 're-registration');
+        assert.equal(host.calls[1][1], firstPath, 'same path on the way back');
+        assert.equal(host.items.length, 2, 'the fake host records both calls');
+
+        // And it must announce itself, because a host that already knew this
+        // id answers a repeat registration with a reset and no property read
+        // — so the `Passive` it was told on the way out is still what it
+        // believes until we say otherwise.
+        await until(
+          () =>
+            watch.seen.some(([m, v]) => m === 'NewStatus' && v === 'Active'),
+          'the Active announcement on the way back',
+        );
+        assert.equal(await host.property('Status', host.items[1]), 'Active');
+
+        await watch.stop();
+        await tray.unmount();
+        await host.stop();
+      });
+    },
+  );
 
   test(
     'a watcher that refuses the registration is reported, not thrown',

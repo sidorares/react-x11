@@ -245,6 +245,40 @@ describe('desktop capability discovery', () => {
     },
   );
 
+  test(
+    'a second copy of the app is not-primary, not a missing app id',
+    needsBroker,
+    async () => {
+      await withBus(async (address) => {
+        _resetApplicationState();
+        // The first copy takes the name.
+        const dbus = (await import('dbus-native')).default;
+        const other = dbus.createClient({ busAddress: address });
+        await new Promise((resolve, reject) => {
+          other.connection.once('connect', resolve);
+          other.connection.once('error', reject);
+        });
+        await other.requestName('com.example.capsprimary', 0);
+
+        const reg = await registerApplication({
+          appId: 'com.example.capsprimary',
+        });
+        assert.equal(reg?.role, 'secondary', 'the name was already taken');
+
+        const caps = await desktopCapability('launcher');
+        assert.equal(caps.available, false);
+        // Not `no-app-id`: the author called `registerApplication` and it did
+        // exactly what it should. Sending them to add a call they already
+        // made is the failure this distinction prevents.
+        assert.equal(caps.reason, 'not-primary');
+
+        await reg?.release?.();
+        other.close();
+        _resetApplicationState();
+      });
+    },
+  );
+
   test('results are frozen, so a caller cannot corrupt the next probe', async () => {
     await withNoBus(async () => {
       const caps = await desktopCapability('tray');
