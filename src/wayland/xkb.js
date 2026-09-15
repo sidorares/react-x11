@@ -398,24 +398,54 @@ export class XkbKeymap {
 }
 
 /**
- * The type XKB assigns a key that names none: one symbol is ONE_LEVEL, two
- * are ALPHABETIC when they are a case pair and TWO_LEVEL otherwise, four are
- * FOUR_LEVEL(_ALPHABETIC / _SEMIALPHABETIC).
+ * `XkbKSIsKeypad`: the one run of keysyms the keypad produces, `KP_Space`
+ * through `KP_Equal`. Every keypad key is in it on both of its levels — the
+ * navigation keysym (`KP_Home`) as much as the digit (`KP_7`).
+ */
+function isKeypad(sym) {
+  return sym >= 0xff80 && sym <= 0xffbd;
+}
+
+/**
+ * The type XKB assigns a key that names none — xkbcomp's `FindAutomaticType`,
+ * which libxkbcommon inherits. Two symbols are ALPHABETIC when they are a
+ * case pair, **KEYPAD when either of them is a keypad keysym**, and TWO_LEVEL
+ * otherwise; three or four are the FOUR_LEVEL family along the same ladder.
+ *
+ * The keypad rung is not decoration: libxkbcommon writes the keypad bare —
+ * `key <KP7> { [ KP_Home, KP_7 ] };` — so *every* keypad key lands here, and
+ * `[KP_Home, KP_7]` is not a case pair. Without the rung it fell through to
+ * TWO_LEVEL, whose `map[Shift]= 2` puts the digit on Shift and leaves NumLock
+ * with nothing to do, which inverted the whole keypad: the digits typed
+ * `KP_Home`/`KP_Up`/`KP_End` and moved the cursor, and holding Shift is what
+ * produced a number. The keymap's own KEYPAD type — `modifiers= Shift+NumLock;
+ * map[NumLock]= 2;` — is the one that belongs.
  */
 function implicitType(syms) {
-  const n = syms.filter(Boolean).length;
+  // The width is the length of the list with only *trailing* NoSymbols
+  // trimmed, which is how libxkbcommon counts it. A NoSymbol in the middle
+  // is a level that types nothing, not an absent one: counting the non-zero
+  // entries instead made `key <ALT> { [ NoSymbol, Alt_L ] };` a one-level key
+  // whose only level was NoSymbol, so <ALT>, <META>, <SUPR> and <HYPR>
+  // decoded to nothing in every modifier state.
+  let n = syms.length;
+  while (n > 0 && !syms[n - 1]) n--;
   if (n <= 1) return 'ONE_LEVEL';
   const casePair = (a, b) => {
     const la = charOf(a);
     const lb = charOf(b);
     return la && lb && la !== lb && la.toUpperCase() === lb;
   };
-  if (n === 2) return casePair(syms[0], syms[1]) ? 'ALPHABETIC' : 'TWO_LEVEL';
+  const keypad = isKeypad(syms[0]) || isKeypad(syms[1]);
+  if (n === 2) {
+    if (casePair(syms[0], syms[1])) return 'ALPHABETIC';
+    return keypad ? 'KEYPAD' : 'TWO_LEVEL';
+  }
   if (casePair(syms[0], syms[1]))
     return casePair(syms[2], syms[3])
       ? 'FOUR_LEVEL_ALPHABETIC'
       : 'FOUR_LEVEL_SEMIALPHABETIC';
-  return 'FOUR_LEVEL';
+  return keypad ? 'FOUR_LEVEL_KEYPAD' : 'FOUR_LEVEL';
 }
 
 /** Everything from `//` or `#` to the end of the line, outside strings. */
