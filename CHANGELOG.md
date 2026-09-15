@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.15.2](https://github.com/sidorares/react-x11/compare/v2.15.1...v2.15.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* **wayland:** hand the GL device over at a batch boundary, so a surface's frame is in its texture when something reads it ([#579](https://github.com/sidorares/react-x11/issues/579)) ([1f209f0](https://github.com/sidorares/react-x11/commit/1f209f09c2b3fde4c5ee77258e9d71675b09aafd)), closes [#578](https://github.com/sidorares/react-x11/issues/578)
+
 ## [2.15.1](https://github.com/sidorares/react-x11/compare/v2.15.0...v2.15.1) (2026-09-14)
 
 
