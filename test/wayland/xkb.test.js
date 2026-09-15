@@ -117,6 +117,10 @@ xkb_compatibility "(unnamed)" {
 		useModMapMods=level1;
 		action= SetMods(modifiers=LevelThree,clearLocks);
 	};
+	interpret Alt_R+AnyOf(all) {
+		virtualModifier= Alt;
+		action= SetMods(modifiers=modMapMods,clearLocks);
+	};
 	interpret Shift_L+AnyOf(all) {
 		action= SetMods(modifiers=Shift,clearLocks);
 	};
@@ -148,11 +152,16 @@ xkb_symbols "(unnamed)" {
 	key <KP7>                {	[         KP_Home,            KP_7 ] };
 	key <KPDL>               {	[       KP_Delete,      KP_Decimal,       KP_Delete,      KP_Decimal ] };
 	key <LVL3>               {	[ ISO_Level3_Shift ] };
-	key <RALT>               {	[ ISO_Level3_Shift ] };
+	key <RALT>               {
+		type= "ONE_LEVEL",
+		symbols[Group1]= [           Alt_R ],
+		symbols[Group2]= [ ISO_Level3_Shift ]
+	};
 	modifier_map Shift { <LFSH> };
 	modifier_map Lock { <CAPS> };
 	modifier_map Mod2 { <NMLK> };
-	modifier_map Mod5 { <LVL3>, <RALT> };
+	modifier_map Mod1 { <RALT> };
+	modifier_map Mod5 { <LVL3> };
 };
 
 };
@@ -197,6 +206,12 @@ test('virtual modifiers resolve through interpret + modifier_map', () => {
   // carries no `interpret Num_Lock`, so the assumption in VMOD_FALLBACK is
   // what the KEYPAD type's `map[NumLock]` resolves through.
   assert.equal(km.vmods.get('NumLock'), REAL_MODS.Mod2);
+  // `<RALT>` is in Mod1 and carries ISO_Level3_Shift on its *second* group,
+  // so the bits it lends are Alt's and not LevelThree's. Before, LevelThree
+  // collected them too and came out Mod1|Mod5 — which `_levelFor` compares
+  // for equality, so a real AltGr press (Mod5 alone) never matched level 3.
+  assert.equal(km.vmods.get('Alt'), REAL_MODS.Mod1, "<RALT>'s primary symbol");
+  assert.equal(km.modmap.get(108), REAL_MODS.Mod1);
 });
 
 test('the implicit type of a keypad key is KEYPAD, not TWO_LEVEL', () => {
@@ -255,6 +270,25 @@ test('a NoSymbol level is a level, not an absence', () => {
     km.decode(km.names.get('HYPR'), REAL_MODS.Shift, 0).keysym,
     0xffed,
   );
+});
+
+test('useModMapMods is read out of the keymap, not assumed', () => {
+  // `useModMapMods= level1` is what narrows ISO_Level3_Shift to the primary
+  // symbol, and `interpret.useModMapMods= AnyLevel` is the section default
+  // beside it — so a keymap that means the wide rule says so, and gets it.
+  // Take the one line out and LevelThree really does collect <RALT>'s Mod1.
+  const wide = KEYMAP.replace(/\n\t\tuseModMapMods=level1;/, '');
+  assert.notEqual(
+    wide,
+    KEYMAP,
+    'the line the fixture is edited on still exists',
+  );
+  assert.equal(
+    XkbKeymap.parse(wide).vmods.get('LevelThree'),
+    REAL_MODS.Mod1 | REAL_MODS.Mod5,
+  );
+  // …and Alt, which never said level1, keeps its bits either way.
+  assert.equal(XkbKeymap.parse(wide).vmods.get('Alt'), REAL_MODS.Mod1);
 });
 
 test('decode: levels by type, shift, caps and AltGr', () => {
@@ -471,6 +505,44 @@ test("libxkbcommon: the keypad is NumLock's, not Shift's", () => {
   // Mod2 is what the compositor reports for NumLock, and the keymap agrees
   // through `modifier_map Mod2 { <NMLK> }`.
   assert.equal(km.modmap.get(km.names.get('NMLK')), REAL_MODS.Mod2);
+});
+
+test('libxkbcommon: AltGr reaches the third level of the second layout', () => {
+  const km = XkbKeymap.parse(LIBXKBCOMMON);
+  // The shape that broke it, straight out of the fixture: `<RALT>` is
+  // `modifier_map Mod1` for the US group's Alt_R and carries
+  // ISO_Level3_Shift for the German one, and it is the *second* group that
+  // carries it — so LevelThree used to resolve to Mod1|Mod5 and AltGr did
+  // nothing on any layout with a level 3.
+  assert.equal(km.vmods.get('LevelThree'), REAL_MODS.Mod5);
+  assert.equal(km.vmods.get('LevelFive'), REAL_MODS.Mod3);
+  const ralt = km.names.get('RALT');
+  assert.equal(km.modmap.get(ralt), REAL_MODS.Mod1);
+  assert.deepEqual(
+    km.keys.get(ralt).groups.map((g) => g.syms[0]),
+    [0xffea, 0xfe03],
+    'Alt_R primary, ISO_Level3_Shift on group 2',
+  );
+
+  // …so the German group's AltGr levels are reachable again. Group 2 of
+  // `<AD03>` is [ e, E, EuroSign, EuroSign ].
+  const ad03 = km.names.get('AD03');
+  assert.equal(km.decode(ad03, 0, 1).keysym, 0x65, 'e');
+  assert.equal(
+    km.decode(ad03, REAL_MODS.Mod5, 1).keysym,
+    0x20ac,
+    'AltGr+e is €',
+  );
+  assert.equal(
+    km.decode(km.names.get('AD01'), REAL_MODS.Mod5, 1).keysym,
+    0x40,
+    'AltGr+q is @',
+  );
+  assert.equal(
+    km.decode(km.names.get('AE11'), REAL_MODS.Mod5, 1).keysym,
+    0x5c,
+    'AltGr+ß is a backslash',
+  );
 });
 
 test('libxkbcommon: the bare one-line form still reads', () => {
