@@ -956,7 +956,14 @@ command line asking for it. It needs a bridge with `runMain()`,
   pieces are `src/cocoa/threaded.js`'s. Stdout, stderr and the console
   write straight to fds 1 and 2: a Worker's own forward through its
   parent's loop, which is parked, and Bun's console bypasses
-  `process.stdout` altogether. `process.exit` asks the main thread first
+  `process.stdout` altogether. The new console keeps what the runtime put
+  on the one it replaces and a `Console` lacks — the inspector's
+  `timeStamp`, `profile`, `profileEnd`, `context` and `createTask`, and
+  `console.Console` — because code that loaded first has already looked:
+  React's development reconciler checks `console.timeStamp` once, as it
+  loads, and calls it on every render after, so a script that imported
+  `react-x11/test` ahead of `react-x11` threw on its first render.
+  `process.exit` asks the main thread first
   (`requestExit`) and then ends the worker, which is also how Node's own
   handling of an uncaught error reaches it, with code 1; `exit()` on the UI
   thread, the probe's first try, raced static destructors. The worker says

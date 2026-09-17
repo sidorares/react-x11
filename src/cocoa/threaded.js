@@ -188,10 +188,23 @@ export function fdStream(fd, write = fs.writeSync) {
 /**
  * Stdout and stderr on fds 1 and 2, and a console over them — the console
  * too, because Bun's writes past `process.stdout` altogether.
+ *
+ * A `Console` is only the writing half of the runtime's console. Node adds
+ * the inspector's methods on top — `timeStamp`, `profile`, `profileEnd`,
+ * `context`, `createTask` — and `console.Console`, so the new console takes
+ * whatever it lacks from the one it replaces, as it is. Code that loaded
+ * before this saw them: React's development reconciler asks once, as it
+ * loads, whether `console.timeStamp` is a function, and calls it on every
+ * render after, so a script importing `react-x11/test` ahead of `react-x11`
+ * threw `console.timeStamp is not a function` on its first render.
  */
-export function installStdio(proc = process, global = globalThis) {
-  const stdout = fdStream(1);
-  const stderr = fdStream(2);
+export function installStdio(
+  proc = process,
+  global = globalThis,
+  write = fs.writeSync,
+) {
+  const stdout = fdStream(1, write);
+  const stderr = fdStream(2, write);
   Object.defineProperty(proc, 'stdout', {
     configurable: true,
     get: () => stdout,
@@ -200,10 +213,17 @@ export function installStdio(proc = process, global = globalThis) {
     configurable: true,
     get: () => stderr,
   });
+  const runtime = global.console;
+  const ours = new Console({ stdout, stderr });
+  for (const key of Reflect.ownKeys(runtime)) {
+    if (key in ours) continue;
+    const desc = Object.getOwnPropertyDescriptor(runtime, key);
+    Object.defineProperty(ours, key, desc);
+  }
   Object.defineProperty(global, 'console', {
     configurable: true,
     writable: true,
-    value: new Console({ stdout, stderr }),
+    value: ours,
   });
 }
 
