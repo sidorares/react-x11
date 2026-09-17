@@ -3,7 +3,8 @@
 // side of the hand-off — the main thread waits on shared memory until the
 // worker asks for AppKit or says it is done, after every exit handler the
 // app has, with its crash printed by itself. Headless: the rules are a pure
-// function, and the hand-off is shared memory and an EventEmitter.
+// function, the hand-off is shared memory and an EventEmitter, and the
+// worker's start is a child process whose worker never asks for AppKit.
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
@@ -16,6 +17,7 @@ import {
   requestAppKit,
   signalEnded,
 } from '../src/cocoa/threaded.js';
+import { runNode } from './helpers/run-script.js';
 
 const app = {
   isMainThread: true,
@@ -51,6 +53,34 @@ test('everything that keeps it where it is says why', () => {
   for (const [change, reason] of cases) {
     assert.strictEqual(relaunchVeto({ ...app, ...change }), reason);
   }
+});
+
+test('node flags a Worker refuses to be handed do not stop the move, and the worker keeps every one', async () => {
+  // `--expose-gc` is a V8 flag and `--title` a process-wide one: handed
+  // either as execArgv, a Worker throws ERR_WORKER_INVALID_EXEC_ARGV, and
+  // the app died at its import of react-x11. An `--import`, the way a
+  // loader like tsx comes in, must still reach the worker, and its
+  // `process.execArgv` must stay the process's, since whatever starts node
+  // again from the worker — the bench's per-scenario children — passes it on.
+  const flags = [
+    '--expose-gc',
+    '--title=react-x11-relaunch',
+    '--import',
+    'data:text/javascript,globalThis.preloaded=true',
+  ];
+  const run = await runNode([
+    ...flags,
+    'test/fixtures/relaunch-node-flags.js',
+    'report',
+  ]);
+  assert.strictEqual(run.code, 3, run.stderr);
+  assert.deepStrictEqual(JSON.parse(run.stdout), {
+    isMainThread: false,
+    gc: 'function',
+    title: 'react-x11-relaunch',
+    preloaded: true,
+    execArgv: flags,
+  });
 });
 
 test('the first cocoa root asks the waiting main thread for AppKit, and waits for its run', async () => {

@@ -929,9 +929,12 @@ command line asking for it. It needs a bridge with `runMain()`,
 - **The move** (`src/cocoa/relaunch.js`, reached from `src/bootstrap.js`,
   the first import of `src/index.js`). An entry's imports finish before its
   body runs, so when react-x11 is evaluated on the main thread the app has
-  not run a line. It starts a Worker on that same entry, with the same
-  `execArgv` and a shared environment, and parks the main thread in
-  `Atomics.wait` — no AppKit yet — until the worker says what it needs. The
+  not run a line. It starts a Worker on that same entry, with the node
+  flags the process started with and a shared environment, and parks the
+  main thread in `Atomics.wait` — no AppKit yet — until the worker says
+  what it needs. The flags are inherited, not handed over as `execArgv`: a
+  Worker refuses a list holding one V8 or process-wide flag, such as
+  `--expose-gc`, and those hold for every thread already. The
   first cocoa `createRoot` asks for AppKit (`requestAppKit`), and the main
   thread launches it and enters `runMain()`; an app that never makes one,
   an X11 app on XQuartz or a script, never launches AppKit and never gets a
