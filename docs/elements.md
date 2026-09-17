@@ -900,8 +900,9 @@ is — and conditional rendering controls its lifetime.
 
 | prop               |                                                                                                                |
 | ------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `anchor`           | place against a node, or a rect inside one, at whatever size the content turns out to be (below)               |
+| `anchor`           | place against a node, a rect inside one, or a rect on the screen, at whatever size the content turns out to be |
 | `grab`             | hold a pointer grab while the popup is up — how menus behave on X (below)                                      |
+| `grabKeyboard`     | take the keyboard while the popup is up — what a popover a tray click opened needs (below)                     |
 | `transparent`      | 32-bit ARGB visual: rounded corners and translucency ([above](#transparent--rounded-corners-and-translucency)) |
 | `onDismiss`        | a press landed outside the popup: close it                                                                     |
 | `trapFocus`        | own a focus scope: a modal (see [events.md](events.md#focus-scopes-modals))                                    |
@@ -986,7 +987,9 @@ and its `onOutOfView`.
 A popup never receives the X input focus, but nodes inside it can hold the
 **owner window's** focus and receive keys — with `trapFocus` and `autoFocus`
 that is a modal dialog. See
-[Focus inside a `<popup>`](events.md#focus-inside-a-popup).
+[Focus inside a `<popup>`](events.md#focus-inside-a-popup). A popup that has
+no owner window to receive keys for it takes them itself with
+`grabKeyboard` ([below](#a-popover-under-a-tray-item)).
 
 **`grab` is what makes a menu dismissable.** Without it, a press that lands
 anywhere else — another application, the root window, or even this app's own
@@ -999,6 +1002,55 @@ normally, and only the root popup of a menu needs the grab. Needs
 ntk ≥ 3.7.0; on older ntk the popup behaves as it did before.
 
 `Select`, `ContextMenu` and `MenuBar` already do this.
+
+### A popover under a tray item
+
+A tray click has no node behind it: [`useTray`](desktop.md#the-tray)'s
+`onClick` reports the item's frame on the screen, where the platform knows
+it. `anchor` takes that as `rect`, in place of `to`, and places against it
+with the same flip, clamp and natural size — kept on the monitor the rect is
+on, and below the menu bar, since that is not usable area:
+
+```jsx
+function MenuBarApp() {
+  const [open, setOpen] = useState(null);
+  const close = () => setOpen(null);
+  useTray({ icon: 'waveform', onClick: setOpen });
+  if (!open) return null;
+  return (
+    <popup
+      anchor={{ rect: open, placement: 'bottom', align: 'center', offset: 6 }}
+      grab
+      grabKeyboard
+      onDismiss={close}
+      onBlur={close}
+    >
+      <Controls onClose={close} />
+    </popup>
+  );
+}
+```
+
+`rect` is logical screen pixels, the unit a popup's `x`/`y` are in, and
+`{ x, y }` alone is a point, which is all a freedesktop tray reports: its
+protocol has no item rect. Nothing moves the rect but a new one, and it is
+never out of view.
+
+**`grabKeyboard` is the other half.** A menu-bar app has no window of its
+own, so the keys a popup's content would normally get through its owner
+window arrive nowhere. With it the popup takes the keyboard while it is up:
+
+| backend | what it is                                                                                     |
+| ------- | ---------------------------------------------------------------------------------------------- |
+| X11     | a keyboard grab, taken and dropped with the map, as `grab` is for the pointer                  |
+| macOS   | a window AppKit can make key, at the popup level, shown activating the app — `NSPopover`'s way |
+| Wayland | nothing more: a grabbing popup has the keyboard already                                        |
+
+On macOS the window's kind is decided when the popup is created, so the prop
+does not change on a mounted popup. There the popover closes on `onBlur` —
+clicking any other app takes the key window away — and on X on `onDismiss`,
+the press outside the pointer grab reports. Written with both, it closes the
+same way on either.
 
 ### A managed `<popup>` is a dialog
 

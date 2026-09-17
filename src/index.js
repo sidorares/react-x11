@@ -127,6 +127,7 @@ export {
   useAnchorTracking,
   anchorArea,
   anchorRect,
+  anchorScreenRect,
   centerRect,
   screenRect,
 } from './components/index.js';

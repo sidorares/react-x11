@@ -1525,6 +1525,17 @@ caret with no extra work — and its out-of-view test becomes the caret's,
 which is what you want, since an editor's own lines scroll away long before
 the editor does.
 
+### `anchorScreenRect(app, rect, options)` — a rect with no node behind it
+
+The same placement against a rect on the **screen**: the item a tray click
+reports, or where the pointer was. `rect` and the answer are logical screen
+pixels, `{x, y}` alone is a point, and the popup is kept on the monitor the
+rect is on. With no node to ask, `options.scale` is the display's (default
+
+1. and `options.direction` decides what `'start'` and `'end'` mean. A
+   `<popup>` does this itself with
+   [`anchor={{ rect }}`](elements.md#a-popover-under-a-tray-item).
+
 **A popup that has to measure itself first anchors from the other side.**
 Rows sized to their labels, a menu as wide as its widest item: the size is
 not known until the popup's content is laid out, and by then React has

@@ -6,6 +6,7 @@ export { ThemeProvider, useDirection, useTheme } from './theme.js';
 export {
   anchorArea,
   anchorRect,
+  anchorScreenRect,
   centerRect,
   screenRect,
   useAnchor,

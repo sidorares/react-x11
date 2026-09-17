@@ -641,6 +641,8 @@ export class CocoaApp {
   _unregisterWindow(wnd) {
     this._windows.delete(wnd._key);
     if (this._grabWindow === wnd) this._grabWindow = null;
+    // a popup that took the keyboard and closed is not where keys go next
+    if (this._lastKeyWindow === wnd) this._lastKeyWindow = null;
   }
 
   // --- the pump ------------------------------------------------------------

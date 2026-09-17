@@ -761,6 +761,28 @@ export function anchorRect(
   options?: AnchorOptions,
 ): AnchorRect | null;
 
+/**
+ * The same placement against a rect **on the screen** rather than a node —
+ * the item a tray click reports, a point where the pointer was — in logical
+ * screen pixels on both sides. With no node to ask, `scale` is the
+ * display's (default 1) and `direction` decides `'start'` and `'end'`; the
+ * popup is kept on the monitor the rect is on. `null` for a rect with no
+ * `x`/`y`.
+ */
+export function anchorScreenRect(
+  app: unknown,
+  rect: ScreenAnchorRect,
+  options?: Omit<AnchorOptions, 'at' | 'alignTo'> & { scale?: number },
+): AnchorRect | null;
+
+/** A rect on the screen, in logical pixels; `{x, y}` alone is a point. */
+export interface ScreenAnchorRect {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
 /** Centre a popup of this size on the node's screen. */
 export function centerRect(
   node: DrawnNode,

@@ -708,6 +708,11 @@ focusable leaves the owner window's focus alone. Menus depend on it —
 their rows are not focusable, and the trigger keeps handling keys while the
 menu is open (`Menu`, `Select`).
 
+A popup with no owner window — a popover a tray click opened, in an app with
+no window of its own — has nowhere for its keys to arrive, and takes them
+itself with `grabKeyboard`
+([elements.md](elements.md#a-popover-under-a-tray-item)).
+
 ### Window focus
 
 Node focus is per `<window>`, and the window itself may or may not be the

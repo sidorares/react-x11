@@ -204,44 +204,86 @@ export function anchorRect(node, options = {}) {
   // popup's `x`/`y` props. The math between runs in device pixels, because
   // `abs`, the window origin and the monitor area are (src/scale.js).
   const s = node.scale ?? 1;
+  // The anchor is the sub-rect where there is one, all the way through:
+  // the side that flips, the edge that aligns, and — since a popup with no
+  // size of its own is as wide as the thing it hangs off — the default
+  // width.
+  const anchor = subRect(node, deviceAt(options.at, s));
+  // the rect the *alignment* reads, which is the anchor's own unless the
+  // caller split the two axes — one origin serves both, since both nodes are
+  // in the same window
+  const cross = options.alignTo ? (subRect(options.alignTo) ?? anchor) : anchor;
+  const origin = windowOrigin(node);
+  const onScreen = (r) => ({
+    x: origin.x + r.x,
+    y: origin.y + r.y,
+    width: r.width,
+    height: r.height,
+  });
+  return placeAgainst(
+    onScreen(anchor),
+    onScreen(cross),
+    deviceAnchorArea(node),
+    s,
+    { ...options, direction: options.direction ?? node.direction },
+  );
+}
+
+/**
+ * The same placement against a rect **on the screen**, with no node behind
+ * it: the frame of the tray item a click reports, or a point where the
+ * pointer was. `rect` is logical screen pixels, the unit a popup's `x`/`y`
+ * are in, and `{ x, y }` alone is a point; the result is logical too.
+ *
+ * `scale` is the display's, since there is no node to ask, and `direction`
+ * decides what `'start'` and `'end'` mean — a node's anchor takes both from
+ * the node. The popup is kept on the monitor the rect is on.
+ */
+export function anchorScreenRect(app, rect, options = {}) {
+  if (typeof rect?.x !== 'number' || typeof rect?.y !== 'number') return null;
+  const s = options.scale ?? 1;
+  const anchor = {
+    x: rect.x * s,
+    y: rect.y * s,
+    width: (rect.width ?? 0) * s,
+    height: (rect.height ?? 0) * s,
+  };
+  const area = app ? availableArea(app, { x: anchor.x, y: anchor.y }) : null;
+  return placeAgainst(anchor, anchor, area, s, options);
+}
+
+/**
+ * The placement both anchors share, in device pixels: `anchor` is the rect
+ * the popup hangs off, `cross` the one it aligns to, both on the screen, and
+ * `area` what it is kept inside — null where there is nothing to ask, and it
+ * then neither flips nor clamps.
+ */
+function placeAgainst(anchor, cross, area, s, options) {
   const {
     placement = 'bottom',
     align = 'start',
     alignOffset: logicalAlignOffset = 0,
     offset: logicalOffset = 2,
-    at,
-    alignTo,
     // A popup that covers its own anchor — a native popup button's menu,
     // which opens with the chosen row over the control — has no other side
     // to flip to: it is clamped into the screen instead, as AppKit clamps.
     flip = true,
-    direction = node.direction,
+    direction,
   } = options;
   const alignOffset = logicalAlignOffset * s;
   const offset = logicalOffset * s;
   const rtl = direction === 'rtl';
 
-  // The anchor is the sub-rect where there is one, all the way through:
-  // the side that flips, the edge that aligns, and — since a popup with no
-  // size of its own is as wide as the thing it hangs off — the default
-  // width.
-  const anchor = subRect(node, deviceAt(at, s));
   const width = options.width !== undefined ? options.width * s : anchor.width;
   const height = options.height !== undefined ? options.height * s : 0;
 
-  const origin = windowOrigin(node);
-  const ax = origin.x + anchor.x;
-  const ay = origin.y + anchor.y;
+  const ax = anchor.x;
+  const ay = anchor.y;
   const aw = anchor.width;
   const ah = anchor.height;
-  // the rect the *alignment* reads, which is the anchor's own unless the
-  // caller split the two axes — one origin serves both, since both nodes are
-  // in the same window
-  const cross = alignTo ? (subRect(alignTo) ?? anchor) : anchor;
-  const cx = origin.x + cross.x;
-  const cy = origin.y + cross.y;
+  const cx = cross.x;
+  const cy = cross.y;
 
-  const area = deviceAnchorArea(node);
   const left = area?.x ?? 0;
   const top = area?.y ?? 0;
   const right = area ? area.x + area.width : null;

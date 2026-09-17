@@ -288,6 +288,16 @@ export function createMockApp() {
           wnd.grabbed = false;
           wnd.calls.push(['ungrabPointer']);
         },
+        // …and a popup that takes the keyboard holds this one
+        grabKeyboard(options, cb) {
+          wnd.keyboardGrabbed = true;
+          wnd.calls.push(['grabKeyboard']);
+          cb?.(null, 0);
+        },
+        ungrabKeyboard() {
+          wnd.keyboardGrabbed = false;
+          wnd.calls.push(['ungrabKeyboard']);
+        },
         // ntk >= 7.5.0. `xi2: 'auto'` creates a window on core events and
         // calls this the first time it is scrolled, so the call is the
         // observable half of the upgrade — `wnd.xi2Selected` is what a test
