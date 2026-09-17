@@ -16,8 +16,9 @@
 //   - the clipboard, snapshots, bezels and a drop's payload take their
 //     answers the way a worker gets them;
 //   - the bootstrap: an exception leaves the delivery, `process.exit` asks
-//     the main thread, a signal reaches the worker's `process`, and stdout
-//     reaches its fd whole.
+//     the main thread, a signal reaches the worker's `process`, stdout
+//     reaches its fd whole, and the console writing there keeps what the
+//     runtime added to the one it replaces.
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
 import { afterEach, test } from 'node:test';
@@ -28,6 +29,7 @@ import { readPayload } from '../src/cocoa/dnd.js';
 import {
   fdStream,
   forwardSignals,
+  installStdio,
   openThreadedChannel,
   resetThreadedChannelForTests,
   routeExit,
@@ -574,4 +576,40 @@ test('the worker’s stdout reaches its fd whole, through a pipe that is full', 
     stream.write('hello, world', (err) => (err ? reject(err) : resolve())),
   );
   assert.strictEqual(Buffer.concat(written).toString(), 'hello, world');
+});
+
+test('the worker’s console keeps what the runtime added to the one it replaces, and writes to the fds', () => {
+  const written = [];
+  const write = (fd, buf, off) => {
+    written.push([fd, buf.subarray(off).toString()]);
+    return buf.length - off;
+  };
+  const proc = {};
+  const global = { console };
+  installStdio(proc, global, write);
+  // The inspector's methods and `console.Console`, which a Console lacks.
+  // React's development reconciler looks for `console.timeStamp` once, as it
+  // loads — before this, when the app imports it first — and calls it on
+  // every render after.
+  for (const name of [
+    'timeStamp',
+    'profile',
+    'profileEnd',
+    'context',
+    'createTask',
+    'Console',
+  ]) {
+    assert.strictEqual(typeof console[name], 'function', `console.${name}`);
+    assert.strictEqual(global.console[name], console[name], name);
+  }
+  global.console.timeStamp('a render');
+  // and the writing is the new console's own, on fds 1 and 2
+  global.console.log('logged');
+  global.console.error('failed');
+  proc.stdout.write('written\n');
+  assert.deepStrictEqual(written, [
+    [1, 'logged\n'],
+    [2, 'failed\n'],
+    [1, 'written\n'],
+  ]);
 });
