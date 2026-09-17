@@ -75,8 +75,8 @@ export class WindowFlush {
 
   /**
    * The backend's half of a frame's cost, where it has one: the Cocoa
-   * present — the swapchain flip and its catch-up copy — runs after the
-   * flush returns, on the same thread, and is part of what the frame cost
+   * present — the swapchain flip — runs after the flush returns, on the
+   * same thread, and is part of what the frame cost
    * (src/cocoa/window.js reports it). An ntk window's present is one
    * request, and reports nothing.
    */
@@ -335,11 +335,12 @@ export class WindowFlush {
     // after every region: an entry drawn in one damage rect must not be
     // evicted before the next rect of the same frame asks for it
     this._paintCache?.endFrame();
-    // The swapchain seam: a backend presenting from double buffers has to
+    // The swapchain seam: a backend presenting from a swapchain has to
     // know exactly which pixels each flush touched — several flushes can
     // land between two presents, so reading only the last frame's rects
-    // would leave the flipped-in back buffer stale where an earlier flush
-    // painted. Feature-detected like presentFrame; null means everything.
+    // would leave the next buffer it draws into stale where an earlier
+    // flush painted. Feature-detected like presentFrame; null means
+    // everything.
     this.window.noteFrameDamage?.(damage ?? null);
     if (frameHook) {
       frameHook({

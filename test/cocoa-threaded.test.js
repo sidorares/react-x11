@@ -9,8 +9,9 @@
 //   - a flip is a frame committed at the size it was painted at, which is
 //     what the resize handshake waits for, and the handshake is set at the
 //     budget `cocoa.resizeWait` gives;
-//   - the next frame waits for the buffer the last flip took off glass, and
-//     gives up waiting rather than freeze;
+//   - the next frame waits for the last flip to be applied, and gives up
+//     waiting rather than freeze; the buffer that flip retired is not drawn
+//     into before the bridge says it was;
 //   - a live resize is AppKit's begin to its end, and a launch policy the
 //     app did not get is said;
 //   - the clipboard, snapshots, bezels and a drop's payload take their
@@ -283,35 +284,76 @@ test('a worker’s flip is a frame committed at the size it was painted at', asy
   assert.deepStrictEqual([wnd.width, wnd.height], [300, 180]);
 });
 
-test('the next frame waits for the buffer the last flip took off glass', async () => {
+test('the next frame waits for the last flip to be applied', async () => {
   let target = null;
   const { native, app, wnd } = await mountThreaded(
     h(Counter, { onNode: (n) => (target = n) }),
   );
-  // two presents alternate the pair, so the second is taking the first's
-  // buffer off glass
+  // the second present takes the first's buffer off glass
   releaseHeld(native, wnd);
   native.deliver(...clickEvents(wnd, target));
   releaseHeld(native, wnd);
   native.deliver(...clickEvents(wnd, target));
-  assert.ok(wnd.frameInFlight(), 'the flip is holding the back buffer');
+  assert.ok(wnd.frameInFlight(), 'the flip has not been applied');
   const held = wnd._awaiting;
   const copies = native.of('copySurfaceRegion').length;
   const presented = flips(native);
 
-  // a press now changes the model, and waits for the buffer to paint it
+  // a press now changes the model, and its frame waits for the flip
   native.deliver(...clickEvents(wnd, target));
-  assert.strictEqual(flips(native), presented, 'nothing drawn into glass');
+  assert.strictEqual(flips(native), presented, 'nothing presented');
   assert.strictEqual(native.of('copySurfaceRegion').length, copies);
   assert.ok(
     app._rafQueue.some((e) => e.wnd === wnd),
     'its frame is parked',
   );
 
-  // the release: the catch-up copy, then the parked frame, in that batch
+  // the release: the parked frame, caught up and presented, in that batch
   native.deliver({ type: 'surface-released', id: held });
   assert.strictEqual(native.of('copySurfaceRegion').length, copies + 1);
   assert.strictEqual(flips(native), presented + 1);
+});
+
+// #602: until the release names it, the buffer a worker's flip retired is on
+// glass, whatever `surfaceIsInUse` says of it — the UI thread has not made
+// the change yet. A frame that did not wait for the fence (the resize
+// listener's, a test's) draws elsewhere.
+test('a frame drawn before the flip is applied never takes the buffer it retired', async () => {
+  let target = null;
+  const { native, wnd } = await mountThreaded(
+    h(Counter, { onNode: (n) => (target = n) }),
+  );
+  releaseHeld(native, wnd);
+  native.deliver(...clickEvents(wnd, target));
+  releaseHeld(native, wnd);
+  native.deliver(...clickEvents(wnd, target));
+  const retired = wnd._awaiting;
+  assert.ok(retired != null);
+  const buffers = wnd._chain.buffers.length;
+  target.invalidate(false, target, 'props');
+  wnd._reactX11Node.flush();
+  assert.notStrictEqual(wnd._chain.back.iosurfaceId, retired);
+  assert.strictEqual(wnd._chain.buffers.length, buffers + 1, 'a new one');
+  assert.ok(wnd.frameInFlight(), 'and its present still waits');
+});
+
+test('a chain whose next buffer cannot be made draws where it shows, and waits on nothing', async () => {
+  let target = null;
+  const { native, wnd } = await mountThreaded(
+    h(Counter, { onNode: (n) => (target = n) }),
+  );
+  releaseHeld(native, wnd);
+  assert.strictEqual(wnd._chain.buffers.length, 1, 'the mount frame');
+  native.createSurfaceIOSurface = () => {
+    throw new Error('IOSurfaceCreate failed');
+  };
+  native.deliver(...clickEvents(wnd, target));
+  native.deliver(...clickEvents(wnd, target));
+  assert.strictEqual(shown, 2, 'both presses painted');
+  assert.strictEqual(wnd._chain.buffers.length, 1);
+  // a flip of the buffer already shown takes nothing off glass: no release
+  // is coming, and nothing waits for one
+  assert.ok(!wnd.frameInFlight());
 });
 
 test('a flip whose release never comes holds the window for a moment, not for ever', async () => {
@@ -324,7 +366,22 @@ test('a flip whose release never comes holds the window for a moment, not for ev
   releaseHeld(native, wnd);
   native.deliver(...clickEvents(wnd, target));
   assert.ok(wnd.frameInFlight());
+  const retired = wnd._awaiting;
   await until(() => !wnd.frameInFlight(), 'the fence to give up', 1000);
+  // …which frees the frames, and not the buffer: the flip may still not
+  // have been applied, so the next frame takes another
+  native.deliver(...clickEvents(wnd, target));
+  assert.notStrictEqual(wnd._chain.front.iosurfaceId, retired);
+  assert.ok(
+    wnd._chain.buffers.some(
+      (b) => b.iosurfaceId === retired && b.released === false,
+    ),
+  );
+  // until the release comes after all
+  native.deliver({ type: 'surface-released', id: retired });
+  assert.ok(
+    wnd._chain.buffers.some((b) => b.iosurfaceId === retired && b.released),
+  );
 });
 
 test('the resize handshake is asked for at the budget cocoa.resizeWait gives', async () => {

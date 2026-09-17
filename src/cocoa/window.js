@@ -12,11 +12,38 @@ import { CocoaLayerPresenter } from './presenter.js';
 import { CocoaPromotion } from './promotion.js';
 
 let nextWindowId = 1;
-// How long a worker's flip may keep its window's back buffer before the
-// window draws into it anyway (`_armFence`). The release is reported once
-// the replacing frame has committed, a fraction of a millisecond later, and
-// a window must not freeze on a report that never came.
+// How long a worker's flip may hold its window's next frame (`_armFence`).
+// The release is reported once the replacing frame has committed, a
+// fraction of a millisecond later, and a window must not freeze on a report
+// that never came.
 const FENCE_TIMEOUT_MS = 100;
+// How many buffers a window's swapchain may hold, the one on glass included.
+// A buffer leaves glass and the WindowServer lets go of it a refresh or so
+// later — a median of about 9ms on a 120Hz panel, and under 40 at the 99th
+// percentile on a loaded machine — so a frame on the next refresh often
+// finds the buffer its flip replaced still held, and takes the one before
+// (`_takeBack`). Three, a `CAMetalLayer`'s depth, is what an animation
+// mostly needs; an input answered between two of its frames puts two flips
+// inside one refresh, and four kept every write of a clicked 120Hz animation
+// off a held buffer (docs/macos.md, "Measured: the swapchain and the
+// WindowServer's hold").
+const MAX_BUFFERS = 4;
+// Past this many rects, what a buffer missed is copied whole: a buffer left
+// out for a while owes a rect list per frame, and one memcpy of the window
+// is cheaper than keeping them.
+const OWED_RECTS_MAX = 64;
+// How long a window goes without a frame before a chain that grew past two
+// buffers gives the rest back (`_trimChain`).
+const TRIM_AFTER_MS = 1000;
+
+/** What a buffer owes once `damage` has been presented without it: the
+ * rects it missed, or 'full'. */
+function owe(owed, damage) {
+  if (owed === 'full' || damage === 'full') return 'full';
+  if (!owed) return damage;
+  const rects = owed.concat(damage);
+  return rects.length > OWED_RECTS_MAX ? 'full' : rects;
+}
 
 export class CocoaWindow {
   constructor(app, attributes = {}) {
@@ -111,13 +138,11 @@ export class CocoaWindow {
     // (`_frameSize`)
     this._points = null;
     // Threaded mode's swapchain fence (`frameInFlight`): the IOSurface id
-    // on the layer as far as this window has asked, the one the last flip
-    // is taking off glass until the bridge says it is released, and the
-    // catch-up copy the back buffer is owed once it is back.
-    this._onGlass = null;
+    // the last flip is taking off glass, until the bridge says the flip has
+    // been applied.
     this._awaiting = null;
-    this._catchUp = null;
     this._fenceTimer = null;
+    this._trimTimer = null;
     this._shadowTimer = null;
     // AppKit's live resize, between the bridge's `window-live-resize` begin
     // and end (`CocoaApp._routeLiveResize`): a tick of it lays out with the
@@ -464,28 +489,36 @@ export class CocoaWindow {
   // --- drawing -------------------------------------------------------------
 
   /**
-   * The backing store is a two-buffer IOSurface swapchain: painters draw
-   * into the back buffer's CG bitmap, and presenting is `layer.contents =
-   * iosurface` — zero-copy, where the plain-surface path paid a
-   * window-sized CGImage copy per dirty frame (12ms at 900x700@2x — the
-   * presenter bench's whole surface-vs-layers gap on bounded damage).
-   * After a flip the new back buffer is one frame stale, so present copies
-   * the just-shown frame's damage across — a damage-sized memcpy replacing
-   * a window-sized upload. Falls back to the single plain surface where
-   * IOSurface creation fails.
+   * The backing store is an IOSurface swapchain: painters draw into the
+   * back buffer's CG bitmap, and presenting is `layer.contents = iosurface`
+   * — zero-copy, where the plain-surface path paid a window-sized CGImage
+   * copy per dirty frame (12ms at 900x700@2x — the presenter bench's whole
+   * surface-vs-layers gap on bounded damage). A buffer that has been on
+   * glass is behind by the frames presented since, so the frame that takes
+   * it copies what it missed across first — a damage-sized memcpy
+   * replacing a window-sized upload. Falls back to the single plain surface
+   * where IOSurface creation fails.
    *
-   * A new size retires the pair, and the retired pair is released on the
-   * spot (`_releaseBacking`): a resize tick allocates two window-sized
-   * IOSurfaces, 20MB at 900x700@2x, and left to the handles' finalizers a
-   * forty-tick drag held 800MB until a collection happened to run — the
-   * `rss +80MB` docs/macos.md measured. The layer keeps its own reference
-   * to whichever IOSurface it is still showing, so the free is safe while
-   * that frame is on glass.
+   * Which buffer that is, and when, is the WindowServer's to say (#602). It
+   * composites out of the buffer it was handed, and lets go of one a
+   * refresh or so after a flip replaced it — on a worker, not before the
+   * flip has even been applied. A write into a buffer it still holds is a
+   * write into what it may be compositing, and a composite caught mid-write
+   * is half a frame on glass. So no buffer is chosen at the flip: the next
+   * frame takes one at its first draw, from those the WindowServer has let
+   * go of (`_takeBack`).
+   *
+   * A new size retires the chain, released on the spot (`_releaseBacking`):
+   * left to the handles' finalizers, a forty-tick drag of the two-buffer
+   * chain this used to be held 800MB until a collection happened to run —
+   * the `rss +80MB` docs/macos.md measured. The layer keeps its own
+   * reference to whichever IOSurface it is still showing, so the free is
+   * safe while that frame is on glass. A new chain starts with the one
+   * buffer its first frame paints: a live-resize tick paints its size once,
+   * and the next tick's size needs a chain of its own. A chain that grew
+   * past two gives the rest back once the window stops (`_armTrim`).
    */
   _ensureSurface() {
-    // a paint that did not wait for the fence: the back buffer gets its
-    // catch-up now, so what it paints lands over the frame before it
-    this._settleBack();
     const w = this.width;
     const h = this.height;
     if (
@@ -496,13 +529,12 @@ export class CocoaWindow {
       const hadSurface = Boolean(this._surface);
       this._releaseBacking();
       try {
-        const a = this._native.createSurfaceIOSurface(w, h, this.scale);
-        const b = this._native.createSurfaceIOSurface(w, h, this.scale);
-        this._chain = { back: a, front: b };
-        this._native.surfaceLock(a.handle);
-        this._native.ctxClearRect(a.handle, 0, 0, w, h);
-        this._native.ctxClearRect(b.handle, 0, 0, w, h);
-        this._surface = a.handle;
+        const back = this._newBuffer(w, h);
+        back.owed = null;
+        this._chain = { buffers: [back], front: null, back };
+        this._native.surfaceLock(back.handle);
+        this._native.ctxClearRect(back.handle, 0, 0, w, h);
+        this._surface = back.handle;
       } catch {
         this._surface = this._native.createSurface(w, h, this.scale);
         this._native.ctxClearRect(this._surface, 0, 0, w, h);
@@ -521,33 +553,193 @@ export class CocoaWindow {
       // frames that all ran on the mouse release — the freeze after a
       // resize, measured at seconds on a large tree.
       if (hadSurface) this._freshSurface = true;
+    } else if (this._chain && !this._chain.back) {
+      this._takeBack();
     }
     return this._surface;
   }
 
+  /** A buffer for the chain, owing everything: nothing has been drawn in it. */
+  _newBuffer(w, h) {
+    const { handle, iosurfaceId } = this._native.createSurfaceIOSurface(
+      w,
+      h,
+      this.scale,
+    );
+    return {
+      handle,
+      iosurfaceId,
+      // what it missed while another buffer was on glass: rects, or 'full'
+      owed: 'full',
+      // when a flip last took it off glass
+      offGlassAt: -Infinity,
+      // false from a worker's flip that took it off glass until the bridge
+      // reports that flip applied (`_surfaceReleased`)
+      released: true,
+    };
+  }
+
   /**
-   * Free the backing store now — the swapchain pair, or the plain surface
-   * the fallback holds — rather than when V8 collects the handles. Bridges
-   * before 0.4 have no `releaseSurface`; there the finalizer is still the
-   * only owner, and this is the drop it always was.
+   * The buffer the frame about to be drawn goes into, taken at its first
+   * draw rather than at the flip before it — as late as the frame allows,
+   * so the WindowServer has had as long as it can to let go.
+   *
+   * Of the buffers not on glass, one it has let go of: `surfaceIsInUse`
+   * false, and on a worker the flip that retired it applied. Of those, the
+   * one on glass most recently, which missed the fewest frames. When every
+   * one is still held — the buffer the last flip replaced usually is, and a
+   * burst of flips inside one refresh holds more — a new buffer, while the
+   * chain has room for one. Past that, the one off glass longest: the
+   * likeliest to have been let go of by now, and the one a two-buffer chain
+   * always drew into.
+   *
+   * Then what it missed, copied across from the frame on glass.
+   */
+  _takeBack() {
+    const chain = this._chain;
+    let free = null;
+    let oldest = null;
+    for (const buffer of chain.buffers) {
+      if (buffer === chain.front) continue;
+      if (
+        !oldest ||
+        (buffer.released && !oldest.released) ||
+        (buffer.released === oldest.released &&
+          buffer.offGlassAt < oldest.offGlassAt)
+      ) {
+        oldest = buffer;
+      }
+      if (!buffer.released || this._held(buffer)) continue;
+      if (!free || buffer.offGlassAt > free.offGlassAt) free = buffer;
+    }
+    let back = free;
+    if (!back && chain.buffers.length < MAX_BUFFERS) {
+      try {
+        back = this._newBuffer(
+          this._surfaceSize.width,
+          this._surfaceSize.height,
+        );
+        chain.buffers.push(back);
+        if (chain.buffers.length > 2) this._armTrim();
+      } catch {
+        // no memory for another: the chain draws with what it has
+      }
+    }
+    // …and a chain of one, whose next buffer could not be made, draws where
+    // it shows, as the plain surface does
+    back ??= oldest ?? chain.front;
+    chain.back = back;
+    this._surface = back.handle;
+    // a different native surface owns the graphics state now — the context
+    // re-syncs its sticky state off the generation
+    this._surfaceGen++;
+    this._native.surfaceLock(back.handle);
+    if (back.owed && back !== chain.front) {
+      this._native.copySurfaceRegion(
+        chain.front.handle,
+        back.handle,
+        back.owed === 'full'
+          ? null
+          : back.owed.flatMap((r) => [
+              Math.floor(r.x),
+              Math.floor(r.y),
+              Math.ceil(r.width) + 1,
+              Math.ceil(r.height) + 1,
+            ]),
+      );
+    }
+    back.owed = null;
+  }
+
+  /**
+   * A chain that grew past two buffers gives the rest back once the window
+   * has gone `TRIM_AFTER_MS` without a frame. The extra buffers are what an
+   * animation needs, a window-sized IOSurface each, and a window that has
+   * stopped keeps the two a still window always had: the one on glass, and
+   * the one on glass before it — which owes the least, so the next frame
+   * takes it and makes nothing. A frame drawn and not yet presented keeps
+   * its own buffer instead.
+   */
+  _armTrim() {
+    if (this._trimTimer) return;
+    this._trimTimer = setTimeout(() => {
+      this._trimTimer = null;
+      if (!this.destroyed && !this._trimChain()) this._armTrim();
+    }, TRIM_AFTER_MS);
+  }
+
+  /** The trim, at `now`: false when the window is still painting, and the
+   * trim has to look again later. */
+  _trimChain(now = performance.now()) {
+    const chain = this._chain;
+    if (!chain || chain.buffers.length <= 2) return true;
+    // a worker's flip not yet applied names a buffer the release will look for
+    if (now - this._presentedAt < TRIM_AFTER_MS || this._awaiting != null) {
+      return false;
+    }
+    let keep = chain.back;
+    if (!keep) {
+      for (const buffer of chain.buffers) {
+        if (buffer === chain.front) continue;
+        if (
+          !keep ||
+          (buffer.released && !keep.released) ||
+          (buffer.released === keep.released &&
+            buffer.offGlassAt > keep.offGlassAt)
+        ) {
+          keep = buffer;
+        }
+      }
+    }
+    const release = this._native.releaseSurface;
+    const kept = [];
+    for (const buffer of chain.buffers) {
+      if (buffer === chain.front || buffer === keep) {
+        kept.push(buffer);
+      } else if (typeof release === 'function') {
+        release.call(this._native, buffer.handle);
+      }
+    }
+    chain.buffers = kept;
+    return true;
+  }
+
+  /** Whether the WindowServer still holds `buffer`: `IOSurfaceIsInUse`. A
+   * bridge that cannot say (before 0.10) is answered no, which is the
+   * two-buffer chain this was. */
+  _held(buffer) {
+    const inUse = this._native.surfaceIsInUse;
+    return (
+      typeof inUse === 'function' &&
+      inUse.call(this._native, buffer.handle) === true
+    );
+  }
+
+  /**
+   * Free the backing store now — the swapchain's buffers, or the plain
+   * surface the fallback holds — rather than when V8 collects the handles.
+   * Bridges before 0.4 have no `releaseSurface`; there the finalizer is
+   * still the only owner, and this is the drop it always was.
    */
   _releaseBacking() {
     const release = this._native.releaseSurface;
     if (typeof release === 'function') {
       if (this._chain) {
-        release.call(this._native, this._chain.back.handle);
-        release.call(this._native, this._chain.front.handle);
+        for (const buffer of this._chain.buffers) {
+          release.call(this._native, buffer.handle);
+        }
       } else if (this._surface) {
         release.call(this._native, this._surface);
       }
     }
     this._chain = null;
     this._surface = null;
-    // a new pair owes nothing to what the old one was showing
+    // a new chain owes nothing to what the old one was showing
     clearTimeout(this._fenceTimer);
     this._fenceTimer = null;
     this._awaiting = null;
-    this._catchUp = null;
+    clearTimeout(this._trimTimer);
+    this._trimTimer = null;
   }
 
   /**
@@ -623,13 +815,21 @@ export class CocoaWindow {
    * rect, and a delta that leaves no surviving band reports false so the
    * caller falls back to the plain repaint. */
   scrollRegion(rect, dx, dy) {
-    if (!this._surface) return false;
-    // the band moves over the frame before this one, not over a buffer
-    // still owed its catch-up
-    this._settleBack();
+    // Nothing painted yet, or a size the next paint makes a new chain for:
+    // there is no band to move.
+    if (
+      !this._surface ||
+      this._surfaceSize?.width !== this.width ||
+      this._surfaceSize?.height !== this.height
+    ) {
+      return false;
+    }
     if (!Number.isInteger(dx) || !Number.isInteger(dy)) return false;
+    // The band moves in the buffer this frame draws into — taken, and
+    // caught up to the frame on glass, before anything moves in it.
+    const surface = this._ensureSurface();
     const moved = this._native.scrollSurface(
-      this._surface,
+      surface,
       Math.round(rect.x),
       Math.round(rect.y),
       Math.round(rect.width),
@@ -639,11 +839,11 @@ export class CocoaWindow {
     );
     if (moved) {
       this._dirty = true;
-      // The band moved inside the BACK buffer only. After the flip the
-      // other buffer still holds the band where it was, and the catch-up
-      // copy only covers what the flush painted — the strips the shift
+      // The band moved inside the BACK buffer only. After the flip every
+      // other buffer still holds the band where it was, and what a buffer
+      // is owed only covers what the flush painted — the strips the shift
       // exposed — so the next frame would blit a band one frame stale.
-      // Record the shifted rect as painted, and the flip's copy carries it.
+      // Record the shifted rect as painted, and the catch-up carries it.
       this.noteFrameDamage([
         {
           x: Math.round(rect.x),
@@ -657,14 +857,14 @@ export class CocoaWindow {
   }
 
   /**
-   * Whether this window's last frame still holds the buffer the next one
-   * would be drawn into — the X11 contract's fence (src/frames.js). The
-   * pump never needs it: a pump-mode flip is applied in the call, so the
-   * other buffer is off glass before the next paint. A worker's flip is a
-   * command the UI thread applies later, and until the bridge reports the
-   * buffer it replaced as released (`_surfaceReleased`), drawing into that
-   * buffer draws into what is on glass. A new size is never in flight: it
-   * paints into a new pair that nothing is showing.
+   * Whether this window's last flip has yet to reach the layer — the X11
+   * contract's fence (src/frames.js). The pump never needs it: a pump-mode
+   * flip is applied in the call. A worker's flip is a command the UI thread
+   * applies later, and until the bridge reports the buffer it replaced as
+   * released (`_surfaceReleased`), that buffer is still what is on glass,
+   * and a frame painted now would be one the UI thread has not caught up
+   * with. A new size is never in flight: it paints into a new chain that
+   * nothing is showing.
    *
    * And while a batch is being routed (`CocoaApp._routeBatch`), its frame
    * is the one owed: it goes out when the batch is done, answering every
@@ -690,10 +890,13 @@ export class CocoaWindow {
    * buffer the first flip had taken off glass microseconds before, while the
    * WindowServer could still be compositing from it. A scroll's frame blits,
    * then repaints what the shift got wrong, so a composite caught between the
-   * two shows the blit alone — a held sticky header dragged up a pixel for a
-   * frame, or the rows under it painted over it, then corrected. No other
-   * input has both halves of that: a resize paints into a pair it has just
-   * made, and a press or a key does not come in bursts inside a refresh.
+   * two showed the blit alone — a held sticky header dragged up a pixel for a
+   * frame. The swapchain no longer draws into a buffer the WindowServer
+   * holds (`_takeBack`), but one refresh still shows one frame: the rest of a
+   * burst is work nobody sees, and each flip of it would hold a buffer. A
+   * resize paints into a chain it has just made, and a press or a key does
+   * not come in bursts inside a refresh — the one answered between two
+   * frames of an animation is what the chain's fourth buffer is for.
    *
    * Off with the interval: `frameInterval: 0` asks for no pacing at all.
    */
@@ -709,12 +912,10 @@ export class CocoaWindow {
 
   /**
    * Push the backing surface at the WindowServer, if anything drew — and
-   * tell the window node what it cost. The flip is cheap; the catch-up
-   * copy behind it is a damage-sized memcpy, and on a window whose every
-   * frame repaints most of itself that is a millisecond of the JS thread
-   * per frame that the flush never saw. The frame pacer prices the frame
-   * by the thread's time, so the present reports in (src/pacing.js,
-   * `WindowNode._notePresentCost`).
+   * tell the window node what it cost. The flip itself is cheap, and the
+   * catch-up copy is the next frame's (`_takeBack`), inside its flush; the
+   * present still reports in, since the frame pacer prices a frame by the
+   * thread's time (src/pacing.js, `WindowNode._notePresentCost`).
    */
   present() {
     const started = performance.now();
@@ -731,33 +932,39 @@ export class CocoaWindow {
     if (this._holdPresent || !this._visible()) return false;
     this._dirty = false;
     this._presentedAt = performance.now();
-    if (this._chain) {
-      const shown = this._chain.back;
+    const chain = this._chain;
+    if (chain) {
+      const shown = chain.back;
       this._native.surfaceUnlock(shown.handle);
       this._flip(() =>
         this._native.setLayerContentsIOSurface(this._layer, shown.iosurfaceId),
       );
-      this._chain.back = this._chain.front;
-      this._chain.front = shown;
-      this._surface = this._chain.back.handle;
-      // a different native surface owns the graphics state now — the
-      // context re-syncs its sticky state off the generation
-      this._surfaceGen++;
-      const catchUp = { from: shown.handle, damage: this._flushDamage };
+      // Every other buffer has missed this frame. Nothing is copied into
+      // any of them now: the buffer this flip takes off glass is the one
+      // the WindowServer is surest to be holding (`_takeBack`).
+      const damage = this._flushDamage ?? 'full';
       this._flushDamage = null;
-      // The buffer drawn into next is the one this flip takes off glass —
-      // when it was on glass at all: a new pair's first flip replaces a
-      // buffer of the old pair, or nothing. On a worker the flip has not
-      // happened yet, so its catch-up and the next paint wait for the
-      // bridge to say it has (`frameInFlight`).
-      const previous = this._onGlass;
-      this._onGlass = shown.iosurfaceId;
-      if (this.app._threaded && previous === this._chain.back.iosurfaceId) {
-        this._awaiting = previous;
-        this._catchUp = catchUp;
-        this._armFence();
-      } else {
-        this._settle(catchUp);
+      for (const buffer of chain.buffers) {
+        if (buffer !== shown) buffer.owed = owe(buffer.owed, damage);
+      }
+      const retired = chain.front;
+      chain.front = shown;
+      chain.back = null;
+      // Until the next frame takes a buffer, the surface is the frame on
+      // glass: a read gets the picture presented, and nothing here draws
+      // into it — every draw asks `_ensureSurface` first.
+      this._surface = shown.handle;
+      // A new chain's first flip replaces a buffer of the old one, or
+      // nothing, and a buffer flipped again takes nothing off glass.
+      if (retired && retired !== shown) {
+        retired.offGlassAt = this._presentedAt;
+        // On a worker the flip has not happened yet: the next frame waits
+        // for the bridge to say it has (`frameInFlight`).
+        if (this.app._threaded) {
+          retired.released = false;
+          this._awaiting = retired.iosurfaceId;
+          this._armFence();
+        }
       }
       this._shadowAfterFlip();
       return true;
@@ -804,49 +1011,35 @@ export class CocoaWindow {
     return { width: this.width / s, height: this.height / s };
   }
 
-  /** The back buffer is off glass: lock it for drawing and copy across what
-   * the frame now shown painted, so that the next frame starts from it. */
-  _settle({ from, damage }) {
-    this._native.surfaceLock(this._surface);
-    this._native.copySurfaceRegion(
-      from,
-      this._surface,
-      damage === 'full' || !damage
-        ? null
-        : damage.flatMap((r) => [
-            Math.floor(r.x),
-            Math.floor(r.y),
-            Math.ceil(r.width) + 1,
-            Math.ceil(r.height) + 1,
-          ]),
-    );
-  }
-
-  /** Stop waiting on the fence: the back buffer's catch-up, now. */
-  _settleBack() {
-    if (this._awaiting == null) return;
+  /** Stop waiting on the fence. */
+  _stopWaiting() {
     clearTimeout(this._fenceTimer);
     this._fenceTimer = null;
     this._awaiting = null;
-    const catchUp = this._catchUp;
-    this._catchUp = null;
-    if (catchUp && this._chain) this._settle(catchUp);
   }
 
-  /** `surface-released` for `id`: true when it was the buffer this window
-   * was waiting on. */
+  /** `surface-released` for `id`: true when the buffer is this window's. It
+   * may be drawn into again once the WindowServer lets go of it too. */
   _surfaceReleased(id) {
-    if (this._awaiting == null || this._awaiting !== id) return false;
-    this._settleBack();
+    const buffer = this._chain?.buffers.find((b) => b.iosurfaceId === id);
+    if (!buffer) return false;
+    buffer.released = true;
+    if (this._awaiting === id) this._stopWaiting();
     return true;
   }
 
+  /**
+   * A release that never comes stops holding the window's frames after a
+   * moment. It does not make the buffer free: a flip the UI thread has not
+   * applied still has that buffer on glass, and the next frame takes
+   * another (`_takeBack`) until the release does come.
+   */
   _armFence() {
     clearTimeout(this._fenceTimer);
     this._fenceTimer = setTimeout(() => {
       this._fenceTimer = null;
       if (this._awaiting == null || this.destroyed) return;
-      this._settleBack();
+      this._stopWaiting();
       this.app._tickFrames();
       this.app._presentAll();
     }, FENCE_TIMEOUT_MS);

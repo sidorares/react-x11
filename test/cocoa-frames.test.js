@@ -16,7 +16,7 @@
 //
 // And three more from the pass after it (#442, over bridge 0.4):
 //
-//   - the pair a resize retires is released on the spot, not on GC;
+//   - the chain a resize retires is released on the spot, not on GC;
 //   - a window paces itself on the display it is on, and each window on
 //     its own;
 //   - an occlusion event holds the frames and the present until the
@@ -28,6 +28,15 @@
 //   - a rect that changes the pane's size retires its ring on the spot;
 //   - a present naming a buffer the pane has since retired is dropped by
 //     the host, not thrown — the resize crossed the present in the channel.
+//
+// And from #602, the WindowServer's hold on a buffer after a flip:
+//
+//   - a frame never draws into a buffer it still holds, and takes a new one
+//     while the chain has room; past that, the one off glass longest;
+//   - the buffer a frame takes is caught up with everything it missed, when
+//     the frame draws, not at the flip before it;
+//   - a chain that grew goes back to two buffers a second after its last
+//     frame.
 import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
@@ -57,11 +66,26 @@ function fakeBridge({ screens } = {}) {
   const released = new Set();
   let seq = 0;
   let backendCb = null;
+  // what each layer shows, by the id of the IOSurface its last flip named
+  const onGlass = new Map();
+  /** A draw into `handle`, recorded when the WindowServer holds it. */
+  const drawn = (name, handle) => {
+    if (native.held.has(handle?.id)) native.heldDraws.push([name, handle.id]);
+  };
   const native = {
     calls,
     of: (name) => calls.filter((c) => c[0] === name),
     visible: true,
     emit: (ev) => backendCb?.(ev),
+    // The WindowServer's hold on a buffer, as `surfaceIsInUse` answers it
+    // (IOSurfaceIsInUse): the ids it holds, whether every buffer a flip
+    // takes off glass stays held (`holdRetired`), and every call that drew
+    // into a held buffer anyway.
+    held: new Set(),
+    holdRetired: false,
+    heldDraws: [],
+    surfaceIsInUse: (handle) => native.held.has(handle.id),
+    shown: (wnd) => onGlass.get(wnd._layer.root),
     listScreens: () =>
       screens ?? [
         {
@@ -145,6 +169,11 @@ function fakeBridge({ screens } = {}) {
         throw new Error('IOSurfaceLookup: no surface with that id');
       }
       calls.push(['flip', id]);
+      const before = onGlass.get(layer.root);
+      if (native.holdRetired && before != null && before !== id) {
+        native.held.add(before);
+      }
+      onGlass.set(layer.root, id);
     },
     createLayer: () => ({ layer: ++seq }),
     addSublayer() {},
@@ -159,21 +188,32 @@ function fakeBridge({ screens } = {}) {
       calls.push(['txCommit']);
     },
     copySurfaceRegion(src, dst, rects) {
-      calls.push(['copy', rects ? rects.length / 4 : 'all']);
+      calls.push(['copy', rects ? rects.length / 4 : 'all', src.id, dst.id]);
+      drawn('copySurfaceRegion', dst);
     },
     ctxClearRect(handle, ...rect) {
       calls.push(['ctxClearRect', ...rect]);
+      drawn('ctxClearRect', handle);
     },
     ctxFillRect(handle, ...rect) {
       calls.push(['ctxFillRect', ...rect]);
+      drawn('ctxFillRect', handle);
     },
-    scrollSurface() {
+    scrollSurface(handle) {
       calls.push(['scrollSurface']);
+      drawn('scrollSurface', handle);
       return true;
     },
   };
   return new Proxy(native, {
-    get: (target, key) => (key in target ? target[key] : () => undefined),
+    get: (target, key) => {
+      if (key in target) return target[key];
+      // every other drawing verb draws nothing, but still lands somewhere
+      if (typeof key === 'string' && key.startsWith('ctx')) {
+        return (handle) => drawn(key, handle);
+      }
+      return () => undefined;
+    },
   });
 }
 
@@ -287,7 +327,11 @@ test('a resize tick is one full frame, and its microtasks add none', async () =>
     box({ flexGrow: 1, backgroundColor: '#3498db' }),
   );
   assert.equal(flushes.count, 1, 'the mount frame');
-  assert.equal(native.of('createSurfaceIOSurface').length, 2, 'one pair');
+  assert.equal(
+    native.of('createSurfaceIOSurface').length,
+    1,
+    'one buffer, for the one frame painted',
+  );
 
   // five ticks of a drag, each answered from inside the delegate
   for (let i = 1; i <= 5; i += 1) {
@@ -295,10 +339,12 @@ test('a resize tick is one full frame, and its microtasks add none', async () =>
   }
   assert.equal(flushes.count, 6, 'one flush per tick, synchronously');
   assert.equal(flushes.full, 6, 'each a full frame');
+  // a tick paints its size once, and the next tick's size needs a chain of
+  // its own: nothing ever wanted a second buffer at any of these sizes
   assert.equal(
     native.of('createSurfaceIOSurface').length,
-    12,
-    'a fresh pair per size',
+    6,
+    'a fresh buffer per size',
   );
   // the drag ends: everything the ticks queued runs now
   await tick();
@@ -362,7 +408,7 @@ test('a bounded flush onto a fresh surface asks for a full frame and holds the p
   assert.ok(node._lastDamageRects, 'the claim was bounded');
   assert.equal(
     native.of('createSurfaceIOSurface').length,
-    4,
+    2,
     'the surface was replaced under it',
   );
   assert.equal(wnd._holdPresent, true, 'so the present is held');
@@ -566,40 +612,191 @@ test('an unmapped window is not on glass either', async () => {
 
 // --- the swapchain's memory ------------------------------------------------------
 
-test('the pair a resize retires is released on the spot, and the last pair with the window', async () => {
-  const { native, wnd } = await mount(
+test('the chain a resize retires is released on the spot, and the last chain with the window', async () => {
+  const { native, app, wnd, node } = await mount(
     box({ flexGrow: 1, backgroundColor: '#3498db' }),
   );
   const made = () => native.of('createSurfaceIOSurface').length;
   const released = () => native.of('releaseSurface').length;
-  assert.equal(made(), 2, 'the mount pair');
+  // the mount frame on glass, and a second frame at its size, which takes
+  // a second buffer
+  app._presentAll();
+  node.invalidate(false, node.children[0], 'content');
+  node.flush();
+  app._presentAll();
+  assert.equal(made(), 2, 'the mount chain');
   assert.equal(released(), 0);
-  // five ticks of a drag: each retires the pair before it
+  // five ticks of a drag: each retires the chain before it
   for (let i = 1; i <= 5; i += 1) {
     native.setWindowFrame(wnd._h, null, null, 100 + i * 4, 80 + i * 2);
   }
-  assert.equal(made(), 12);
-  assert.equal(released(), 10, 'every retired handle, at the tick');
-  // never the pair in use: the live back buffer and the frame on glass
-  const live = [wnd._chain.back.handle.id, wnd._chain.front.handle.id];
+  assert.equal(made(), 7);
+  assert.equal(released(), 6, 'every retired handle, at the tick');
+  // never a buffer in use: the frame on glass
+  const live = wnd._chain.buffers.map((b) => b.handle.id);
   for (const [, id] of native.of('releaseSurface')) {
     assert.ok(!live.includes(id), `released a live surface ${id}`);
   }
   wnd.destroy();
-  assert.equal(released(), 12, 'and the last pair goes with the window');
+  assert.equal(released(), 7, 'and the last chain goes with the window');
   assert.equal(wnd._chain, null);
   assert.equal(wnd._surface, null);
 });
 
-test('a bridge without releaseSurface leaves the retired pair to the finalizer', async () => {
+test('a bridge without releaseSurface leaves the retired chain to the finalizer', async () => {
   const { native, wnd } = await mount(
     box({ flexGrow: 1, backgroundColor: '#3498db' }),
   );
   delete native.releaseSurface; // the Proxy answers a no-op for it now
   native.setWindowFrame(wnd._h, null, null, 120, 90);
   assert.equal(native.of('releaseSurface').length, 0);
-  assert.equal(native.of('createSurfaceIOSurface').length, 4);
+  assert.equal(native.of('createSurfaceIOSurface').length, 2);
   wnd.destroy();
+});
+
+// --- the WindowServer's hold -------------------------------------------------------
+//
+// #602: the WindowServer lets go of a buffer a refresh or so after a flip
+// took it off glass, and a draw into one it still holds is a draw into what
+// it may be compositing. Measured on a 120Hz panel before the fix, the catch-
+// up copy behind every pump-mode flip landed in a held buffer every time.
+
+/** A window with one small box to repaint, its mount frame on glass. */
+async function mountHeld() {
+  const mounted = await mount(
+    h(
+      'box',
+      { style: { flexGrow: 1, backgroundColor: '#ffffff' } },
+      box({ width: 20, height: 20, backgroundColor: '#e74c3c' }),
+    ),
+  );
+  const { app, node } = mounted;
+  const inner = node.children[0].children[0];
+  app._presentAll();
+  // the damage each repaint claims, in rects
+  const rects = [];
+  const paint = () => {
+    inner.invalidate(false, inner, 'props');
+    node.flush();
+    rects.push(node._lastDamageRects?.length ?? 'full');
+  };
+  const repaint = () => {
+    paint();
+    app._presentAll();
+  };
+  const ids = () => mounted.wnd._chain.buffers.map((b) => b.handle.id);
+  return { ...mounted, paint, repaint, ids, rects };
+}
+
+test('a frame never draws into a buffer the WindowServer still holds', async () => {
+  const { native, wnd, repaint, paint, ids, rects } = await mountHeld();
+  assert.equal(ids().length, 1, 'the mount frame, in one buffer');
+  // every buffer a flip takes off glass stays held
+  native.holdRetired = true;
+  for (let i = 0; i < 3; i++) repaint();
+  assert.deepEqual(native.heldDraws, [], 'nothing drawn into a held buffer');
+  assert.equal(ids().length, 4, 'a new buffer whenever every other was held');
+  const [a, b, c, d] = ids();
+  assert.equal(native.shown(wnd), d);
+  assert.deepEqual([...native.held], [a, b, c]);
+
+  // Let go of the two oldest. The next frame takes the one of them on glass
+  // more recently: b missed the two frames since, a the three.
+  native.holdRetired = false;
+  native.held.delete(a);
+  native.held.delete(b);
+  const copies = native.of('copy').length;
+  paint();
+  assert.equal(wnd._chain.back.handle.id, b);
+  assert.equal(native.of('copy').length, copies + 1, 'caught up once');
+  const [, copied, from, to] = native.of('copy').at(-1);
+  assert.deepEqual([from, to], [d, b], 'from the frame on glass');
+  assert.equal(
+    copied,
+    rects[1] + rects[2],
+    'every rect of the two frames it missed, and no more',
+  );
+  assert.deepEqual(native.heldDraws, []);
+});
+
+test('the catch-up is copied when the next frame draws, not at the flip', async () => {
+  const { native, app, paint } = await mountHeld();
+  for (let i = 0; i < 3; i++) {
+    const before = native.of('copy').length;
+    paint();
+    // the second buffer is made on this frame, and owes the whole window
+    assert.equal(native.of('copy').length, before + 1, `frame ${i}`);
+    app._presentAll();
+    assert.equal(
+      native.of('copy').length,
+      before + 1,
+      `frame ${i}: nothing copied at the flip`,
+    );
+  }
+});
+
+test('a buffer left out for many frames is caught up whole, not rect by rect', async () => {
+  const { native, wnd, repaint, ids } = await mountHeld();
+  repaint();
+  repaint();
+  const [a, b] = ids();
+  // b held while a third buffer and a carry seventy frames between them
+  native.held.add(b);
+  for (let i = 0; i < 70; i++) repaint();
+  const [, , c] = ids();
+  assert.equal(ids().length, 3);
+  // then the one of those two not on glass is held, and b let go of
+  native.held.add(native.shown(wnd) === a ? c : a);
+  native.held.delete(b);
+  repaint();
+  assert.equal(native.shown(wnd), b, 'the frame took b');
+  const [, copied, , to] = native.of('copy').at(-1);
+  assert.equal(to, b);
+  assert.equal(copied, 'all', 'seventy frames behind: copied whole');
+});
+
+test('a chain that grew gives the extra buffers back once the window goes a second without a frame', async () => {
+  const { native, wnd, repaint, paint, ids } = await mountHeld();
+  native.holdRetired = true;
+  for (let i = 0; i < 3; i++) repaint();
+  const [a, b, c, d] = ids();
+  assert.ok(wnd._trimTimer, 'growing past two armed the trim');
+  native.holdRetired = false;
+  native.held.clear();
+  // off the second's edge either side: a sum and a difference of two
+  // clock readings are not exact
+  const at = wnd._presentedAt;
+  assert.equal(wnd._trimChain(at + 990), false, 'not while it still paints');
+  assert.equal(ids().length, 4);
+  assert.equal(wnd._trimChain(at + 1010), true);
+  // the frame on glass, and the one on glass before it, which owes least
+  assert.deepEqual(ids(), [c, d]);
+  assert.deepEqual(
+    native.of('releaseSurface').map(([, id]) => id),
+    [a, b],
+  );
+  // so the next frame takes the one kept, makes nothing, and copies no more
+  // than the one frame it missed
+  const made = native.of('createSurfaceIOSurface').length;
+  paint();
+  assert.equal(wnd._chain.back.handle.id, c);
+  assert.equal(native.of('createSurfaceIOSurface').length, made);
+  assert.notEqual(native.of('copy').at(-1)[1], 'all');
+});
+
+test('with every buffer held and the chain full, a frame takes the one off glass longest', async () => {
+  const { native, wnd, repaint, paint, ids } = await mountHeld();
+  native.holdRetired = true;
+  for (let i = 0; i < 3; i++) repaint();
+  const [a, b, c] = ids();
+  assert.deepEqual([...native.held], [a, b, c]);
+  paint();
+  assert.equal(ids().length, 4, 'no fifth buffer');
+  assert.equal(wnd._chain.back.handle.id, a);
+  assert.ok(
+    native.heldDraws.every(([, id]) => id === a),
+    'drawn into that one alone',
+  );
 });
 
 // --- the cadence ------------------------------------------------------------------
