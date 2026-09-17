@@ -25,7 +25,7 @@ const CROSSING_MS = 1100;
  *
  * The slide is a **loop** in the style (`animation`,
  * [styling.md](../../docs/styling.md#loops)), not a timer here: it runs on
- * the window's own frame clock, claims the track as its damage every frame
+ * the window's own frame clock, claims the block as its damage every frame
  * instead of invalidating the window, and stops itself when the window is
  * unmapped, minimized or buried. A `setInterval` calling `setState` would
  * do none of those three, and would re-render this component sixty times a

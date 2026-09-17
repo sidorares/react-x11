@@ -151,6 +151,9 @@ const s = createStyles({
       backgroundColor: { to: '$accent', duration: 900, alternate: true },
     },
   },
+  // A border width is layout as well as paint — the content box shrinks —
+  // so on the frame clock each of its frames is a layout pass, and a repaint
+  // of what that pass moved: the tile, whose own size stays put.
   breathe: {
     borderWidth: 1,
     borderColor: '$accent',
@@ -175,14 +178,6 @@ const s = createStyles({
       },
     },
   },
-  // A border width is layout as well as paint — the content box shrinks —
-  // so on the frame clock each of its frames is a layout pass, and the
-  // damage claimed for a node that moves in layout is its parent. This slot
-  // is that parent, and the breathing tile sits absolutely inside it so the
-  // claim is 48x48 and not the window.
-  slot: { width: 48, height: 48 },
-  inSlot: { position: 'absolute', top: 0, start: 0 },
-
   easingName: { width: 78, color: '$textMuted', fontSize: 12 },
   track: {
     width: TRACK,
@@ -278,12 +273,7 @@ function Loops() {
           </Checkbox>
           <box style={s.row}>
             <box data-testname="pulse" style={[s.tile, layer && s.pulse]} />
-            <box style={s.slot}>
-              <box
-                data-testname="breathe"
-                style={[s.tile, s.inSlot, layer && s.breathe]}
-              />
-            </box>
+            <box data-testname="breathe" style={[s.tile, layer && s.breathe]} />
             <box data-testname="round" style={[s.tile, layer && s.round]} />
           </box>
           <text style={s.hint}>

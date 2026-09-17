@@ -40,36 +40,6 @@ const gridContainerMoved = (was, now) =>
 const gridItemMoved = (was, now) =>
   GRID_ITEM_PROPS.some((prop) => was[prop] !== now[prop]);
 
-/**
- * The node whose bounds cover where an animating node will be next frame, or
- * `null` when that cannot be known and the frame has to repaint everything.
- *
- * Three cases, and the middle one is the interesting one:
- *
- *  - **paint-only** (a colour, an opacity): the node stays put, so its own
- *    bounds are the damage.
- *  - **a layout property on an out-of-flow node** (`position: absolute`, the
- *    arrangement a sliding thumb uses): the node moves, so its own bounds
- *    cover where it is going but not where it has been. Its *parent* covers
- *    both — an absolute child is laid out inside its parent and, being out of
- *    flow, moves nothing else when it shifts. This is what keeps a `Switch`
- *    from repainting the window on every frame of its 120ms slide.
- *  - **a layout property in flow**: a reflow can move any node in the tree,
- *    including ones that leave stale pixels outside every bound we could name
- *    here. Nothing to do but repaint in full.
- */
-function damageForAnimation(node) {
-  let movesInLayout = false;
-  for (const prop of node._anim?.keys() ?? []) {
-    if (isLayoutProp(prop)) movesInLayout = true;
-  }
-  if (!movesInLayout) return node;
-  if (node.style?.position !== 'absolute') return null;
-  // A window parent bounds nothing useful — its own rect is the whole surface.
-  const parent = node.parent;
-  return parent && !parent.isWindow ? parent : null;
-}
-
 // Frame timestamps for transitions. Indirected so tests can drive the clock
 // instead of sleeping through real animations.
 export let now = () => Date.now();
@@ -129,7 +99,7 @@ export class NodeAnimation {
         // such presenter, the window's frame clock runs it as it always has.
         if (this._offload(prop, entry)) {
           entry.offloaded = true;
-          this.root?.invalidate(false, damageForAnimation(this), 'animation');
+          this.root?.invalidate(false, this, 'animation');
         } else {
           // …and one the presenter had must not keep running underneath the
           // values the clock is about to write
@@ -342,7 +312,7 @@ export class NodeAnimation {
       }
     }
     this.root?._animating.delete(this);
-    this.root?.invalidate(false, damageForAnimation(this), 'animation');
+    this.root?.invalidate(false, this, 'animation');
   }
 
   /**
@@ -608,7 +578,7 @@ export class WindowAnimation {
     // invalidate anyway, but a React prop change does not — and a transition
     // no one schedules only runs when something else dirties the window,
     // by which time its start is stale and it snaps to the end.
-    this.invalidate(false, damageForAnimation(node), 'animation');
+    this.invalidate(false, node, 'animation');
   }
 
   /**
@@ -618,27 +588,27 @@ export class WindowAnimation {
    */
   _advanceAnimations(now) {
     if (this._animating.size === 0) return;
-    const claims = [];
     for (const node of [...this._animating]) {
       if (node.destroyed) {
         this._animating.delete(node);
         continue;
       }
-      // Decided *before* the tick, deliberately: a tick that finishes deletes
-      // the property from `_anim`, and after that there is no way to tell a
-      // layout animation from a paint-only one — the node's own bounds would
-      // be claimed for something that just moved, leaving a trail behind it.
-      claims.push(damageForAnimation(node));
+      // The node where it stands, which is where it *was*: nothing has been
+      // laid out yet, so its rect is the one the last pass gave it. Where it
+      // goes is the layout pass's to claim. A tick on a layout property asks
+      // for one, and that pass claims the old and new rect of every node it
+      // moves (`_assignAbs`) — this one, and whatever this one pushed, in
+      // flow or out of it. A paint-only property moves nothing, and this
+      // claim is the whole frame.
+      //
+      // Claimed rather than left unbounded because an animation repaints
+      // every frame for as long as it runs: eight height loops in a menu-bar
+      // popover were a full-window repaint per frame at 120Hz (#603). A node
+      // that *finishes* on this tick is claimed too — it just landed on its
+      // final value, and this last frame still has to paint it there.
+      this.invalidate(false, node, 'animation');
       if (!node._tickAnimations(now)) this._animating.delete(node);
     }
     this.needsPaint = true;
-    // Claim a region rather than leaving the frame unbounded: an animation is
-    // a repaint every frame for its whole duration, so this is the difference
-    // between a 120ms transition costing eight full-window repaints and eight
-    // repaints of the thing that moved. Nodes that *finished* on this tick are
-    // claimed too — one just landed on its final value and that last frame
-    // still has to paint it, which is why every transition used to end with a
-    // full-window repaint.
-    for (const claim of claims) this.invalidate(false, claim, 'animation');
   }
 }

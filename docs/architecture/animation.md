@@ -96,10 +96,13 @@ of those restarts it from the top when it goes away.
 
 One path for both shapes. `_retarget` puts an entry per property into
 `node._anim` and the node into `root._animating`; `flush` calls
-`_advanceAnimations(now())` (src/nodes/animation.js), which claims damage for
-each animating node _before_ ticking it (a finished tick deletes the entry,
-and with it the only way to tell a layout animation from a paint one —
-`damageForAnimation`, src/nodes/animation.js), ticks, and sets `needsPaint`. The
+`_advanceAnimations(now())` (src/nodes/animation.js), which claims each
+animating node where it stands, ticks it, and sets `needsPaint`. That claim
+is where the node _was_; a tick on a layout property asks for a layout pass,
+and the pass claims the old and new rect of every node it moves — the
+animating one and whatever it pushed, in flow or not (`_assignAbs`,
+src/nodes/layout.js) — so a layout animation repaints what it moves rather
+than the window (#603). The
 window keeps asking for frames while `_animating` is non-empty; the
 animation _is_ the repaint loop. `interpolate` (src/styles.js:990) lerps
 numbers, percentages of the same unit, and colours — premultiplied, so a
@@ -591,10 +594,10 @@ the paint cache's budget that bounds it (src/paintcache.js's byte budget
 is the pattern; the surface here is not content-keyed, it is a frame
 scratch).
 
-Damage: `damageForAnimation` already claims _before_ the tick; a transform
-animation claims the union of the old and new bounding rects, which is
-what an absolutely positioned layout transition already does through its
-parent.
+Damage: `_advanceAnimations` already claims the node before the tick, which
+is the old bounding rect. A transform moves nothing in layout, so no pass
+claims the new one for it: the tick claims that too, the pair a layout
+transition gets from the layout pass's diff (`_assignAbs`).
 
 ## 6. Where the code goes
 
@@ -611,7 +614,8 @@ delay }`, `parseAnimation` (`keyframes`, `repeat`, `delay`, `key`; the
   completion events), `_updateLoops` (cancel through the presenter),
   `paint` (the group path and its two fast paths around
   `_paintBackground`/`paintContent`/`_paintChildren`), `paintBounds()`
-  and `_subtreeBounds()` (transformed boxes), `damageForAnimation`.
+  and `_subtreeBounds()` (transformed boxes), `_advanceAnimations` (the
+  claim for where a transform moved the box).
 - **src/events.js** — the inverse-mapped hit test.
 - **src/cocoa/presenter.js** — `animate`/`cancel`, the key-path table,
   `opacity` and `transform` on both visual kinds; the mock presenter
