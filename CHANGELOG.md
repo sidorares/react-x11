@@ -1,5 +1,31 @@
 # Changelog
 
+## [2.16.0](https://github.com/sidorares/react-x11/compare/v2.15.3...v2.16.0) (2026-09-17)
+
+
+### Features
+
+* **image:** symbols by name, SF Symbols on macOS and the icon theme on Linux, drawn in the text colour ([#613](https://github.com/sidorares/react-x11/issues/613)) ([b95d4f1](https://github.com/sidorares/react-x11/commit/b95d4f187a2681d7f0155ccb357a15a768bad254)), closes [#591](https://github.com/sidorares/react-x11/issues/591)
+* **popup:** anchor a popup to a rect on the screen, and let it take the keyboard ([#607](https://github.com/sidorares/react-x11/issues/607)) ([2ec2f45](https://github.com/sidorares/react-x11/commit/2ec2f45e31006895bb456e49f279749bc80881d3)), closes [#590](https://github.com/sidorares/react-x11/issues/590)
+* **settings:** createSettings, a store for what an app remembers between launches ([#609](https://github.com/sidorares/react-x11/issues/609)) ([95fd8c5](https://github.com/sidorares/react-x11/commit/95fd8c50802872544f1b3a1c5cf6f511b8e4f2ec)), closes [#592](https://github.com/sidorares/react-x11/issues/592)
+* **slider:** thumbStyle, trackStyle and fillStyle, so a designed slider is the widget restyled ([#610](https://github.com/sidorares/react-x11/issues/610)) ([734a046](https://github.com/sidorares/react-x11/commit/734a046ec8f02b3570a017dbecf1d0190f5bf423)), closes [#593](https://github.com/sidorares/react-x11/issues/593)
+* **style:** delay on a loop, so loops of one duration can move out of step ([#605](https://github.com/sidorares/react-x11/issues/605)) ([499c52e](https://github.com/sidorares/react-x11/commit/499c52e02ac1933061d7fce170f5b1189600902e)), closes [#589](https://github.com/sidorares/react-x11/issues/589)
+* **style:** opacity, which fades a node and everything in it as one ([#601](https://github.com/sidorares/react-x11/issues/601)) ([057c6da](https://github.com/sidorares/react-x11/commit/057c6da9f990b30145e761ab3157be83e976161b)), closes [#587](https://github.com/sidorares/react-x11/issues/587)
+* **text:** letterSpacing, fontVariantNumeric and fontFeatureSettings, so a number that changes can hold its width ([#604](https://github.com/sidorares/react-x11/issues/604)) ([ec6cd85](https://github.com/sidorares/react-x11/commit/ec6cd856f9dfaee62ad33b7d3ee33c928f10c11e)), closes [#588](https://github.com/sidorares/react-x11/issues/588)
+* **tray:** settled on useTray and useDesktopCapability, so a tray-only app can wait for the answer ([#612](https://github.com/sidorares/react-x11/issues/612)) ([91ed146](https://github.com/sidorares/react-x11/commit/91ed146f09aa8ce623bc0b7f7ebc2e1a4edaec45)), closes [#594](https://github.com/sidorares/react-x11/issues/594)
+
+
+### Bug Fixes
+
+* **animation:** a layout animation in flow repaints what it moves, not the window ([#614](https://github.com/sidorares/react-x11/issues/614)) ([210545e](https://github.com/sidorares/react-x11/commit/210545eabdbd683eb10cd77d65018e47a65e248b)), closes [#603](https://github.com/sidorares/react-x11/issues/603)
+* **cocoa:** a frame draws only into a buffer the WindowServer has let go of ([#615](https://github.com/sidorares/react-x11/issues/615)) ([27b6596](https://github.com/sidorares/react-x11/commit/27b65969058f0b9ec96d0384bf27656c22a457df))
+* **cocoa:** keep the inspector's methods on the worker's console, so React's console.timeStamp does not throw on the first render ([#596](https://github.com/sidorares/react-x11/issues/596)) ([9e52895](https://github.com/sidorares/react-x11/commit/9e52895fce5457ea6d1126848121eb31509e48b1))
+* **cocoa:** let the worker inherit node's flags, so --expose-gc does not crash the import of react-x11 ([#600](https://github.com/sidorares/react-x11/issues/600)) ([557e0c7](https://github.com/sidorares/react-x11/commit/557e0c75dce8756ace542853d2a5f7ccfbe50e6f))
+* **theme:** a ThemeProvider above the windows hands them its palette, whatever renders them ([#595](https://github.com/sidorares/react-x11/issues/595)) ([5a6f3fc](https://github.com/sidorares/react-x11/commit/5a6f3fc4818f2ff3535ad6b7e8ec6ae2c4b2ec19)), closes [#584](https://github.com/sidorares/react-x11/issues/584)
+* **tray:** a freedesktop tray click reports logical pixels, whichever unit its host sent ([#608](https://github.com/sidorares/react-x11/issues/608)) ([0369144](https://github.com/sidorares/react-x11/commit/0369144b86d081b405f90afadc633aa320438cc2))
+* **window:** a size change on one axis reaches a window resized whole, while the other axis is auto ([#598](https://github.com/sidorares/react-x11/issues/598)) ([9efc9d9](https://github.com/sidorares/react-x11/commit/9efc9d9b78cd6ba48b813652a2eb4050be593d0a)), closes [#585](https://github.com/sidorares/react-x11/issues/585)
+* **window:** an auto-sized window shrinks with its content, and a half-point size on Cocoa keeps it tracking ([#599](https://github.com/sidorares/react-x11/issues/599)) ([2e896a4](https://github.com/sidorares/react-x11/commit/2e896a414563eb6da363de115489f3a9526cc839)), closes [#586](https://github.com/sidorares/react-x11/issues/586)
+
 ## [2.15.3](https://github.com/sidorares/react-x11/compare/v2.15.2...v2.15.3) (2026-09-15)
 
 
