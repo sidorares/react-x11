@@ -190,6 +190,13 @@ export function fakeCocoaBridge({ screens } = {}) {
     // the face with OpenType features set: a font of its own, carrying them
     fontApplyFeatures: (f, features) =>
       fontFor(`${f.key}+${JSON.stringify(features)}`, { ...f, features }),
+    // SF Symbols: a symbol is 1.25 × its point size across and 1 × down, and
+    // one name, `no.such.symbol`, is not in the catalogue
+    symbolSize: (name, { pointSize = 13 } = {}) =>
+      name === 'no.such.symbol'
+        ? null
+        : { width: pointSize * 1.25, height: pointSize },
+    ctxDrawSymbol: (surface, name) => name !== 'no.such.symbol',
     // one line, 8px a code point, the ascent and descent of the metrics
     // above: enough for a `<text>` to measure, lay out and be painted — and,
     // with the line's one left-to-right run, to paint a selection over

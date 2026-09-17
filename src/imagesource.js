@@ -44,6 +44,73 @@ export function isPathImageSource(src) {
 export const toLoadablePath = (src) =>
   typeof src === 'string' || src instanceof URL ? src : new URL(src.href);
 
+/**
+ * A symbol by name: `{ symbol, weight?, scale?, variableValue? }` — the
+ * platform's own icons, drawn in the text colour (#591, src/symbols.js). Not
+ * pixels at all, so none of the decoding or caching below applies: the node
+ * asks the platform to draw the name at paint.
+ */
+export function isSymbolImageSource(src) {
+  return (
+    src != null &&
+    typeof src === 'object' &&
+    !(src instanceof Uint8Array) &&
+    'symbol' in src
+  );
+}
+
+const SYMBOL_SCALES = new Set(['small', 'medium', 'large']);
+
+function validateSymbolSource(src) {
+  const at = `react-x11: <image src={{ symbol: ${JSON.stringify(src.symbol)} }}>`;
+  if (typeof src.symbol !== 'string' || src.symbol === '') {
+    throw new Error(
+      `${at} needs a name: an SF Symbol on macOS, like 'speaker.wave.3.fill', ` +
+        "or an icon theme's name on Linux, like 'audio-volume-high'.",
+    );
+  }
+  const { weight, scale, variableValue } = src;
+  if (
+    weight !== undefined &&
+    !(
+      weight === 'normal' ||
+      weight === 'bold' ||
+      (typeof weight === 'number' && weight >= 1 && weight <= 1000)
+    )
+  ) {
+    throw new Error(
+      `${at} has weight ${JSON.stringify(weight)}, expected what fontWeight ` +
+        "takes — 'normal', 'bold' or a number from 1 to 1000.",
+    );
+  }
+  if (scale !== undefined && !SYMBOL_SCALES.has(scale)) {
+    throw new Error(
+      `${at} has scale ${JSON.stringify(scale)}, expected 'small', 'medium' ` +
+        "or 'large'.",
+    );
+  }
+  if (
+    variableValue !== undefined &&
+    !(
+      typeof variableValue === 'number' &&
+      variableValue >= 0 &&
+      variableValue <= 1
+    )
+  ) {
+    throw new Error(
+      `${at} has variableValue ${JSON.stringify(variableValue)}, expected a ` +
+        'number from 0 to 1.',
+    );
+  }
+}
+
+/** Two symbol sources naming the same drawing, however fresh the objects. */
+const sameSymbol = (a, b) =>
+  a.symbol === b.symbol &&
+  a.weight === b.weight &&
+  a.scale === b.scale &&
+  a.variableValue === b.variableValue;
+
 /** Raw straight-RGBA pixels: `{ width, height, data }` — the shape
  * `getImageData` hands back. (A `Buffer` of encoded bytes is a `Uint8Array`
  * subclass, so the two byte forms are one check elsewhere.) */
@@ -54,6 +121,7 @@ export function isRawImageSource(src) {
     !(src instanceof Uint8Array) &&
     !isPathImageSource(src) &&
     !isDirectImageSource(src) &&
+    !isSymbolImageSource(src) &&
     'data' in src
   );
 }
@@ -70,7 +138,8 @@ const describe = (value) =>
 /** Stated once, so every error lists the same set of accepted forms. */
 const SRC_FORMS =
   'a file path or file URL (PNG/JPEG), encoded PNG/JPEG bytes (Buffer or ' +
-  'Uint8Array), raw RGBA ({ width, height, data }), or an ntk Image/Surface';
+  'Uint8Array), raw RGBA ({ width, height, data }), an ntk Image/Surface, ' +
+  "or a symbol by name ({ symbol: 'speaker.wave.3.fill' })";
 
 function validateServerSource(kind, desc) {
   const shape =
@@ -163,6 +232,16 @@ export function validateImageProps(props) {
   if (props.drawable != null) validateServerSource('drawable', props.drawable);
   const src = props.src;
   if (src == null) return;
+  if (isSymbolImageSource(src)) {
+    if (props.cacheKey != null) {
+      throw new Error(
+        'react-x11: <image cacheKey> names decoded pixels, and a symbol is ' +
+          'drawn by name, not decoded — there is nothing to cache. Drop the ' +
+          'cacheKey.',
+      );
+    }
+    return validateSymbolSource(src);
+  }
   if (isPathImageSource(src)) return;
   if (src instanceof Uint8Array) return;
   if (isDirectImageSource(src)) return;
@@ -207,6 +286,9 @@ export function imageSourceChanged(next, prev) {
   if (next.cacheKey !== prev.cacheKey) return true;
   if (next.src === prev.src) return false;
   if ((next.src == null) !== (prev.src == null)) return true;
+  if (isSymbolImageSource(next.src) && isSymbolImageSource(prev.src)) {
+    return !sameSymbol(next.src, prev.src);
+  }
   if (isDirectImageSource(next.src) || isDirectImageSource(prev.src))
     return true;
   return next.cacheKey == null;

@@ -1,0 +1,17 @@
+# A theme for test/image-symbol.test.js: a symbolic icon to tint, a
+# coloured one to show as it is, one name that is both, and a parent to
+# inherit from.
+[Icon Theme]
+Name=Test
+Inherits=Parent
+Directories=16x16/apps,scalable/actions
+
+[16x16/apps]
+Size=16
+Type=Fixed
+
+[scalable/actions]
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable

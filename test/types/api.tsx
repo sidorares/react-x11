@@ -541,6 +541,13 @@ function Elements() {
         src={{ width: 8, height: 8, picture: (app: unknown) => app }}
         alt="an ntk Image or Surface satisfies DirectImageSource"
       />
+      {/* issue #591: the platform's own icon by name, in the text colour */}
+      <image src={{ symbol: 'speaker.wave.3.fill' }} />
+      <image
+        src={{ symbol: 'play.fill', weight: 600, scale: 'large' }}
+        alt="play"
+      />
+      <image src={{ symbol: 'speaker.wave.3.fill', variableValue: 0.66 }} />
       {/* pixels already on the server: composite, never re-upload */}
       <image picture={{ id: 0x2c0001, width: 64, height: 64 }} />
       <image
@@ -791,6 +798,9 @@ function AnchoredPopup() {
 
 // @ts-expect-error — `at` is a rect, not a pair of screen coordinates
 const _badAt = <popup anchor={{ to: null, at: { left: 1, top: 2 } }} />;
+
+// @ts-expect-error — a symbol's scale is small, medium or large
+const _hugeSymbol = <image src={{ symbol: 'star', scale: 'huge' }} />;
 
 // @ts-expect-error — the anchor has to name what it hangs off
 const _noTarget = <popup anchor={{ placement: 'bottom' }} />;

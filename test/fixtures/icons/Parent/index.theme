@@ -1,0 +1,9 @@
+[Icon Theme]
+Name=Parent
+Directories=scalable/status
+
+[scalable/status]
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable

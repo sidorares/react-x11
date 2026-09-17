@@ -5,7 +5,7 @@
  */
 
 import type { Ref, RefObject, ReactNode, Key } from 'react';
-import type { Color, Cursor, StyleProp } from './style.js';
+import type { Color, Cursor, FontWeight, StyleProp } from './style.js';
 import type {
   DrawnNode,
   NtkWindow,
@@ -784,10 +784,35 @@ export interface FileUrl {
 
 /**
  * What `src` accepts: a file path or file URL (PNG/JPEG, decoded in JS),
- * encoded PNG/JPEG bytes, raw RGBA pixels, or an ntk `Image`/`Surface`.
+ * encoded PNG/JPEG bytes, raw RGBA pixels, an ntk `Image`/`Surface`, or a
+ * symbol by name.
  */
 export type ImageSource =
-  string | FileUrl | Uint8Array | RawImageSource | DirectImageSource;
+  | string
+  | FileUrl
+  | Uint8Array
+  | RawImageSource
+  | DirectImageSource
+  | SymbolImageSource;
+
+/**
+ * The platform's own icon by name, drawn in the text colour: an SF Symbol on
+ * macOS (`'speaker.wave.3.fill'`), and elsewhere an icon from the user's
+ * freedesktop icon theme (`'audio-volume-high'`), its `-symbolic` variant
+ * preferred. Sized like the text around it — the size its `fontSize` calls
+ * for — unless the element is styled a size of its own. A name this desktop
+ * does not have takes no room and draws nothing.
+ */
+export interface SymbolImageSource {
+  symbol: string;
+  /** Default: the weight of the text around it. SF Symbols only. */
+  weight?: FontWeight;
+  /** Relative to the text size, default `'medium'`. SF Symbols only. */
+  scale?: 'small' | 'medium' | 'large';
+  /** How much of a variable symbol shows, 0 to 1 — the waves of
+   *  `speaker.wave.3.fill` at a volume. SF Symbols on macOS 13 and later. */
+  variableValue?: number;
+}
 
 /**
  * An existing server-side Picture, named by X id. The size is stated by the
