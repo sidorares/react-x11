@@ -473,6 +473,36 @@ test('a loop is one repeating animation in the render server, and stops with the
   assert.strictEqual(m.presenter.animations.live.size, 0);
 });
 
+// CSS's one delay is two things in Core Animation: a begin time the layer
+// waits for, holding `from` (the bridge's `delay`, `fillMode: backwards`),
+// or a time offset that starts the animation that far into its cycles.
+test("a loop's delay is a wait on the render server's clock, or a head start", async () => {
+  const opts = async (delay) => {
+    const loop = {
+      animation: {
+        backgroundColor: { to: '#00ff00', duration: 900, delay },
+      },
+    };
+    const m = await mountAnimated(loop);
+    await m.rerender(loop);
+    m.presenter.frame(m.windowNode);
+    const [[, options]] = m.bridge.argsOf('addAnimation');
+    return { delay: options.delay, timeOffset: options.timeOffset };
+  };
+  assert.deepStrictEqual(await opts(300), {
+    delay: 0.3,
+    timeOffset: undefined,
+  });
+  assert.deepStrictEqual(await opts(-300), {
+    delay: undefined,
+    timeOffset: 0.3,
+  });
+  assert.deepStrictEqual(await opts(undefined), {
+    delay: undefined,
+    timeOffset: undefined,
+  });
+});
+
 test('a layer that turns into a raster hands its loop back to the clock', async () => {
   const m = await mountAnimated(pulse);
   await m.rerender(pulse);

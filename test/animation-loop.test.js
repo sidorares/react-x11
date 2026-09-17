@@ -193,6 +193,87 @@ test('a changed declaration starts again from the top', async () => {
   });
 });
 
+// --- delay (#589) ------------------------------------------------------------
+//
+// Every loop starts when its node gets the style, so loops of one duration
+// stay in phase for good. A delay is where a loop's own time starts, which is
+// how a phase is said: a row of bars, three typing dots.
+
+test('a delay holds `from`, then the loop runs a delay late, and only once', async () => {
+  const spec = {
+    ...SLIDE,
+    animation: { left: { to: '100%', duration: 1000, delay: 500 } },
+  };
+  await withClock(bar(spec), ({ window, frame }) => {
+    const block = window.children[0].children[0];
+    assert.strictEqual(block.style.left, '-40%');
+    frame(250);
+    assert.strictEqual(block.style.left, '-40%', 'still waiting');
+    frame(500);
+    assert.strictEqual(block.style.left, '-5%', 'a quarter crossing, late');
+    frame(1000);
+    assert.strictEqual(
+      block.style.left,
+      '-5%',
+      'a whole cycle on, the same place: the delay is not repeated',
+    );
+  });
+});
+
+test('a negative delay starts the loop that far in, so one duration can stagger', async () => {
+  const dot = (delay) =>
+    h('box', {
+      style: {
+        width: 10,
+        height: 10,
+        opacity: 0.2,
+        animation: {
+          opacity: { to: 1, duration: 800, alternate: true, delay },
+        },
+      },
+    });
+  const row = h(
+    'box',
+    { style: { flexDirection: 'row' } },
+    dot(0),
+    dot(-200),
+    dot(-600),
+  );
+  await withClock(row, ({ window, frame }) => {
+    const dots = window.children[0].children;
+    const opacities = () =>
+      dots.map((node) => Math.round(node.style.opacity * 1000) / 1000);
+    // already moving, each from a different point in the same cycle
+    assert.deepStrictEqual(opacities(), [0.2, 0.4, 0.8]);
+    frame(400);
+    assert.deepStrictEqual(opacities(), [0.6, 0.8, 0.8], 'the last came back');
+    frame(400);
+    assert.deepStrictEqual(opacities(), [1, 0.8, 0.4]);
+  });
+});
+
+test('a changed delay is a different loop, and an equal one keeps its phase', async () => {
+  const delayed = (delay) =>
+    bar({
+      ...SLIDE,
+      animation: { left: { to: '100%', duration: 1000, delay } },
+    });
+  await withClock(delayed(-250), async ({ window, frame, render }) => {
+    const block = window.children[0].children[0];
+    assert.strictEqual(block.style.left, '-5%');
+    frame(250);
+    assert.strictEqual(block.style.left, '30%');
+    await render(delayed(-250));
+    assert.strictEqual(block.style.left, '30%', 'the same declaration');
+    await render(delayed(-100));
+    assert.strictEqual(block.style.left, '-26%', 'restarted, a tenth in');
+    frame(250);
+    assert.strictEqual(block.style.left, '9%');
+    await render(delayed(0));
+    assert.strictEqual(block.style.left, '-40%', 'and from the top');
+  });
+});
+
 test('dropping the animation stops the loop and leaves the property at rest', async () => {
   await withClock(bar(SLIDE), async ({ window, frame, render }) => {
     const block = window.children[0].children[0];
@@ -294,7 +375,20 @@ test('a loop declaration says what is wrong with it, at the style', () => {
   );
   assert.throws(
     at({ left: { to: 10, duration: 100, repeat: true } }),
-    /unknown animation option "repeat"/,
+    /unknown animation option "repeat" .*alternate, delay\)/,
+  );
+  assert.throws(
+    at({ left: { to: 10, duration: 100, delay: '200ms' } }),
+    /needs "delay" in ms .* got "200ms"/,
+  );
+  assert.throws(
+    at({ left: { to: 10, duration: 100, delay: Infinity } }),
+    /needs "delay" in ms/,
+  );
+  // negative is a value, as in CSS: the loop starts that far in
+  assert.strictEqual(
+    at({ left: { to: 10, duration: 100, delay: -50 } })()[0].delay,
+    -50,
   );
   assert.throws(
     () => animationsOf({ animation: { left: { to: 10, duration: 100 } } }),
@@ -354,6 +448,17 @@ test('the phase comes from the elapsed time, not from counting cycles', () => {
   assert.strictEqual(animationValueAt(spec, 1000), 0, 'a whole cycle wraps');
   // an hour in, to the millisecond: a per-cycle restart would have drifted
   assert.strictEqual(animationValueAt(spec, 3600 * 1000 + 250), 25);
+
+  const [late, early] = animationsOf({
+    animation: {
+      left: { from: 0, to: 100, duration: 1000, delay: 400 },
+      top: { from: 0, to: 100, duration: 1000, delay: -500 },
+    },
+  });
+  assert.strictEqual(animationValueAt(late, 300), 0, 'still waiting');
+  assert.strictEqual(animationValueAt(late, 3600 * 1000 + 650), 25);
+  assert.strictEqual(animationValueAt(early, 0), 50);
+  assert.strictEqual(animationValueAt(early, 750), 25, 'and wrapped');
 });
 
 test('<ProgressBar indeterminate> announces busy with no value, and slides', async () => {

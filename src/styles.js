@@ -1080,6 +1080,9 @@ const parsedAnimations = new WeakMap();
  * a thing that does not move: a loop nobody wrote a stop for is exactly the
  * feature where silence is unreadable.
  */
+/** What one property's loop may say. */
+const LOOP_OPTIONS = ['from', 'to', 'duration', 'easing', 'alternate', 'delay'];
+
 function parseAnimation(spec, where) {
   if (typeof spec !== 'object' || spec === null || Array.isArray(spec)) {
     throw new Error(
@@ -1101,15 +1104,15 @@ function parseAnimation(spec, where) {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
       throw new Error(
         `react-x11: invalid animation for ${at} — expected ` +
-          '{ from?, to, duration, easing?, alternate? }, got ' +
+          '{ from?, to, duration, easing?, alternate?, delay? }, got ' +
           JSON.stringify(entry),
       );
     }
     for (const key of Object.keys(entry)) {
-      if (!['from', 'to', 'duration', 'easing', 'alternate'].includes(key)) {
+      if (!LOOP_OPTIONS.includes(key)) {
         throw new Error(
           `react-x11: unknown animation option "${key}" for ${at} ` +
-            '(expected from, to, duration, easing, alternate)',
+            `(expected ${LOOP_OPTIONS.join(', ')})`,
         );
       }
     }
@@ -1133,6 +1136,14 @@ function parseAnimation(spec, where) {
           `${at} (expected one of ${EASING_NAMES.join(', ')})`,
       );
     }
+    const delay = entry.delay ?? 0;
+    if (typeof delay !== 'number' || !Number.isFinite(delay)) {
+      throw new Error(
+        `react-x11: animation for ${at} needs "delay" in ms — before the ` +
+          'loop starts, or negative to start it that far in — got ' +
+          JSON.stringify(entry.delay),
+      );
+    }
     entries.push({
       prop,
       from: entry.from,
@@ -1141,6 +1152,7 @@ function parseAnimation(spec, where) {
       easing,
       ease: EASINGS[easing],
       alternate: Boolean(entry.alternate),
+      delay,
     });
   }
   return entries;
@@ -1208,7 +1220,8 @@ export function sameAnimation(a, b) {
     a.to === b.to &&
     a.duration === b.duration &&
     a.easing === b.easing &&
-    a.alternate === b.alternate
+    a.alternate === b.alternate &&
+    a.delay === b.delay
   );
 }
 
@@ -1217,9 +1230,14 @@ export function sameAnimation(a, b) {
  * the looping: the phase comes from a modulo of the elapsed time rather than
  * from a per-cycle restart, so a bar that has been spinning for an hour is
  * exactly where the clock says and no rounding has accumulated.
+ *
+ * The delay is where the loop's own time starts: `from` until a positive one
+ * has passed, and already that far in for a negative one — CSS's
+ * `animation-delay` with `animation-fill-mode: backwards`, which is also
+ * what Core Animation shows for the same declaration.
  */
 export function animationValueAt(spec, elapsed) {
-  const cycles = Math.max(0, elapsed) / spec.duration;
+  const cycles = Math.max(0, elapsed - spec.delay) / spec.duration;
   let t = cycles % 1;
   if (spec.alternate && Math.floor(cycles) % 2 === 1) t = 1 - t;
   return interpolate(spec.from, spec.to, spec.ease(t)) ?? spec.from;

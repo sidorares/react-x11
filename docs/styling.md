@@ -1288,6 +1288,7 @@ takes:
 | `duration`  | one crossing, in ms                                              |
 | `easing`    | `'linear'` (default), `'ease-in'`, `'ease-out'`, `'ease-in-out'` |
 | `alternate` | turn around at each end instead of wrapping back to `from`       |
+| `delay`     | when the loop's own time starts, in ms; negative starts it early |
 
 `from` defaulting to the declared value is what makes a pulse read as a
 resting colour plus somewhere to go:
@@ -1304,6 +1305,32 @@ style={{
 That value is also **where the property rests whenever the loop is not
 running** — before the first frame, off screen, or under reduced motion — so
 a loop never leaves a node with no value for the thing it animates.
+
+Every loop starts when its node gets the style, so loops with one duration
+move together for good. `delay` is how they stop doing that — CSS's
+`animation-delay`. A positive delay holds `from` that long before the first
+crossing, once rather than every cycle; a negative one starts the loop that
+far in, already moving, which is the way to say a phase:
+
+```jsx
+const TypingDot = ({ index }) => (
+  <box
+    style={{
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: theme.textMuted,
+      opacity: 0.3,
+      animation: {
+        opacity: { to: 1, duration: 500, alternate: true, delay: -index * 160 },
+      },
+    }}
+  />
+);
+```
+
+A changed `delay` is a different loop and starts from the top, as a changed
+`duration` does.
 
 Why this and not a repeating `transition`: a transition is defined by a
 _change_, from what is on screen to a new target, and it has no cycle to
