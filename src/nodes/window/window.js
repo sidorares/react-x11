@@ -366,6 +366,11 @@ export class WindowNode extends Scrollable(Node) {
     attributes.eventMask = (attributes.eventMask ?? 0) | WINDOW_EVENT_MASK;
     const wnd = this.app.createWindow(attributes);
     this.window = wnd;
+    // What the window actually took, which is not always what was asked
+    // for: Cocoa puts a window on the point grid. The record is what the
+    // resize echo is compared against, so it has to be the size the echo
+    // will carry (#586, `_snapSize`).
+    this._requestedSize = { width: wnd.width, height: wnd.height };
     // Now that the visual is known: settle the capabilities, re-resolve any
     // `@supports` block against them, and start following the compositor.
     // Before the first paint, and before children realize against it.
@@ -810,10 +815,10 @@ export class WindowNode extends Scrollable(Node) {
     const geo = scaleWindowGeometry(newProps, this.scale);
     if (sizeChanged) {
       this._userSized = false;
-      this._requestedSize = {
+      this._requestedSize = this._snapSize({
         width: isAutoSize(geo.width) ? wnd.width : geo.width,
         height: isAutoSize(geo.height) ? wnd.height : geo.height,
-      };
+      });
     }
     if (geometryChanged) {
       if (typeof wnd.setState === 'function') {

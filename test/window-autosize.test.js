@@ -239,6 +239,45 @@ test('an auto window grows with its content', async () => {
   await root.unmount();
 });
 
+test('an auto window shrinks with its content, too', async () => {
+  // The docs say an `'auto'` size keeps up with the content, and it kept up
+  // one way. A box whose height went down still carried the floor it had
+  // needed before — the automatic minimum size, written into yoga by the
+  // last frame — and the natural-size pass read that back as content, so
+  // the window stayed at the largest size it had ever reached (#586). One
+  // level down as well, since a floor is written at every level on the way.
+  const app = createMockApp();
+  const root = await createRoot({ app });
+  const flat = (height) =>
+    h('window', { width: 200 }, box({ width: 200, height }));
+  root.render(flat(100));
+  await tick();
+  const wnd = app.windows[0];
+  root.render(flat(50));
+  await tick();
+  assert.strictEqual(wnd.height, 50, 'down to the content');
+  root.render(flat(150));
+  await tick();
+  assert.strictEqual(wnd.height, 150, 'and up again');
+  root.render(null);
+
+  const nested = (height) =>
+    h(
+      'window',
+      { width: 200 },
+      h('box', { style: { padding: 5 } }, box({ width: 100, height })),
+    );
+  root.render(nested(100));
+  await tick();
+  const deep = app.windows[1];
+  assert.strictEqual(deep.height, 110);
+  root.render(nested(40));
+  await tick();
+  assert.strictEqual(deep.height, 50, 'the floor above the box came off too');
+  assert.strictEqual(deep._reactX11Node._userSized, false);
+  await root.unmount();
+});
+
 test('…until the user resizes it, and then it is theirs', async () => {
   const app = createMockApp();
   const root = await createRoot({ app });
