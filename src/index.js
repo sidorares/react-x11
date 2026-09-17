@@ -93,6 +93,8 @@ export { useKeyboardState } from './keyboardstatehooks.js';
 export { matchesShortcut } from './accelerators.js';
 export { useAccelerator } from './acceleratorhooks.js';
 export { useDesktopSettings } from './desktopsettingshooks.js';
+// what the app itself remembers between launches (#592)
+export { createSettings } from './settings.js';
 export { loadFont, openFont } from './fonts.js';
 export { useFont } from './fonthooks.js';
 export { systemLocale } from './locale.js';

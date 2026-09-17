@@ -268,6 +268,110 @@ export interface DesktopSettings {
 export function useDesktopSettings(): DesktopSettings;
 
 // --------------------------------------------------------------------------
+// The app's own settings
+// --------------------------------------------------------------------------
+
+/** A value a settings store can keep: what JSON can. */
+export type SettingValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly SettingValue[]
+  | { readonly [key: string]: SettingValue };
+
+export interface SettingsOptions<T extends Record<string, SettingValue>> {
+  /**
+   * A reverse-DNS name no other app uses, like `'com.example.myapp'`: the
+   * name of the app's settings directory. Nothing is registered with it.
+   */
+  appId: string;
+  /** Each setting's value when nothing was saved. */
+  defaults?: T;
+  /** Where `settings.json` goes instead of the per-user directory for the
+   *  app — for a portable install, or a test. */
+  directory?: string;
+}
+
+/** A value's kind: `false` as `boolean`, `'brown'` as `string`, so a
+ *  default does not narrow what the setting may be set to. */
+export type SettingKind<V> = V extends boolean
+  ? boolean
+  : V extends string
+    ? string
+    : V extends number
+      ? number
+      : V;
+
+/** A setting's type: its default's kind, for a key the defaults name, else
+ *  the fallback's. */
+export type SettingOf<T, K, V> = SettingKind<K extends keyof T ? T[K] : V>;
+
+/**
+ * What an app remembers between launches, kept in `settings.json` in its
+ * per-user directory, written atomically and coalesced.
+ */
+export interface Settings<T extends Record<string, SettingValue>> {
+  /** The file the values are kept in. */
+  readonly path: string;
+  /** `[value, setValue]` for one setting, like `useState`; every component
+   *  using the key sees the same value, and a change is saved. A key with no
+   *  default takes a fallback. */
+  use<K extends string, V extends SettingValue = never>(
+    key: K,
+    fallback?: V,
+  ): [
+    SettingOf<T, K, V>,
+    (
+      value:
+        | SettingOf<T, K, V>
+        | ((previous: SettingOf<T, K, V>) => SettingOf<T, K, V>),
+    ) => void,
+  ];
+  get<K extends string, V extends SettingValue = never>(
+    key: K,
+    fallback?: V,
+  ): K extends keyof T ? SettingOf<T, K, V> : SettingOf<T, K, V> | undefined;
+  /** Change a setting now, and save it a moment later — a quarter second
+   *  after the last change, and at least once a second while they keep
+   *  coming. Throws a `TypeError` for a value JSON cannot keep. */
+  set<K extends string>(
+    key: K,
+    value: K extends keyof T ? SettingOf<T, K, never> : SettingValue,
+  ): void;
+  /** Forget what was saved for a setting: its default again. */
+  reset(key: string): void;
+  /** Save what is waiting now. Resolves when it is on disk. */
+  flush(): Promise<void>;
+  /** Hear every change; returns the unsubscribe. */
+  subscribe(listener: () => void): () => void;
+}
+
+/**
+ * The settings store for an app — one per file in the process, so every call
+ * with the same `appId` shares values.
+ *
+ * ```tsx
+ * const settings = createSettings({
+ *   appId: 'com.example.Hush',
+ *   defaults: { volume: 0.5, dark: false },
+ * });
+ * function Volume() {
+ *   const [volume, setVolume] = settings.use('volume');
+ *   return <Slider value={volume} onChange={setVolume} />;
+ * }
+ * ```
+ *
+ * It lives in `~/Library/Application Support/<appId>/settings.json` on macOS
+ * and `$XDG_CONFIG_HOME/<appId>/settings.json` elsewhere, and is read the
+ * first time a value is asked for. What is still unsaved when the process
+ * exits is written then.
+ */
+export function createSettings<T extends Record<string, SettingValue>>(
+  options: SettingsOptions<T>,
+): Settings<T>;
+
+// --------------------------------------------------------------------------
 // Locale
 // --------------------------------------------------------------------------
 

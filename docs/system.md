@@ -3,7 +3,8 @@
 Six hooks for the things an application has to read off the system rather than
 work out for itself: the monitors, what the window manager did with the
 window, whether anyone is at the desk, the state of the keyboard, how the
-desktop wants an app to feel, and the language it was launched in.
+desktop wants an app to feel, and the language it was launched in — and a
+store for what the app remembers itself, between launches.
 
 ```jsx
 import {
@@ -13,6 +14,7 @@ import {
   useKeepAwake,
   useKeyboardState,
   useDesktopSettings,
+  createSettings,
   useLocale,
 } from 'react-x11';
 ```
@@ -385,6 +387,65 @@ One seam worth knowing about. `createRoot()` starts XSETTINGS but does not
 question that is not asked until the first interaction, is a bad trade. A field
 focused on the very first frame therefore gets the built-in default and the
 desktop's cadence from its next focus onward.
+
+---
+
+## `createSettings()` — what the app remembers
+
+The desktop's settings are read above; an app's own — the volume it was left
+at, the theme it was switched to — are kept here, in one JSON file per app in
+the per-user directory for it:
+
+```jsx
+import { createSettings } from 'react-x11';
+
+const settings = createSettings({
+  appId: 'com.example.hush',
+  defaults: { noiseType: 'brown', volume: 0.5, dark: false },
+});
+
+function Volume() {
+  const [volume, setVolume] = settings.use('volume');
+  return <Slider value={volume} onChange={setVolume} />;
+}
+```
+
+`settings.use(key)` is a `useState` every component shares: every component
+using the key, in any window, sees one value, and setting it from one moves
+them all. It takes an updater function too, and `settings.use(key, fallback)`
+covers a key with no default.
+
+| platform  | file                                                     |
+| --------- | -------------------------------------------------------- |
+| macOS     | `~/Library/Application Support/<appId>/settings.json`    |
+| elsewhere | `$XDG_CONFIG_HOME/<appId>/settings.json` (`~/.config/…`) |
+
+The `appId` is a reverse-DNS name no other app uses, the shape
+[`registerApplication`](uri-schemes.md) takes; the store registers nothing
+with it. Creating the store twice with the same id, in a module a hot reload
+evaluates again or in two call sites, is one store with one set of values.
+
+**It is read synchronously, the first time a value is asked for**, so the
+first render already has what was saved rather than the defaults and then a
+jump. It is written asynchronously:
+
+- **coalesced** — a quarter second after the last change, and at least once a
+  second while changes keep coming, so a drag on a slider is a few writes and
+  not one per pointer move;
+- **atomically** — into a temporary file that is then renamed over the old
+  one, so a crash mid-write leaves the file as it was, never half a file;
+- **on exit** — whatever is still unsaved when the process exits is written
+  on the way out, including a change whose write was in flight. `await
+settings.flush()` writes it now.
+
+Outside React, `settings.get(key)`, `settings.set(key, value)`,
+`settings.reset(key)` — the default again — and `settings.subscribe(listener)`
+are the same store. A value is whatever JSON can keep, and one it cannot, a
+function or a `BigInt`, is a `TypeError` at `set`. A file that is not JSON is
+reported once and the defaults stand; the next change replaces it.
+
+Two copies of the app running at once share the file, and the last write
+wins: nothing watches for another process changing it.
 
 ---
 
