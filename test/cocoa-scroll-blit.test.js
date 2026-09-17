@@ -20,7 +20,9 @@
 //
 // Then the frames a pan actually meets: several pans coalesced into one
 // frame, frames the pump paints but does not present, a window held or
-// occluded across a blit, and a resize landing mid-gesture.
+// occluded across a blit, a resize landing mid-gesture — and buffers the
+// WindowServer has not let go of yet, so that a frame takes a third or a
+// fourth that missed several frames (#602).
 import assert from 'node:assert';
 import { afterEach, test } from 'node:test';
 import React from 'react';
@@ -160,6 +162,15 @@ function pixelBridge() {
   let seq = 0;
   let backendCb = null;
   const onGlass = new Map(); // layer -> the raster the WindowServer holds
+  const rasters = new Map(); // IOSurface id -> its raster
+  /** A write into `s`, counted when the WindowServer holds it — and when a
+   *  layer shows it, which is the buffer it holds for certain. */
+  const wrote = (s) => {
+    if (native.held.has(s)) native.heldWrites++;
+    for (const id of onGlass.values()) {
+      if (rasters.get(id) === s) native.glassWrites++;
+    }
+  };
   const state = new Map(); // surface -> { fill, clips: [] }
   const inks = new Map(); // "r,g,b,a" -> the byte that stands for it
   const stateOf = (s) => {
@@ -169,6 +180,15 @@ function pixelBridge() {
   };
   const native = {
     onGlass,
+    // The WindowServer's hold on a buffer after a flip took it off glass,
+    // as `surfaceIsInUse` answers it: the rasters it holds, a hook told of
+    // every flip (the layer, the raster it retired, the one it shows), and
+    // the writes that landed in a held raster anyway.
+    held: new Set(),
+    heldWrites: 0,
+    glassWrites: 0,
+    onFlip: null,
+    surfaceIsInUse: (s) => native.held.has(s),
     listScreens: () => [
       {
         x: 0,
@@ -205,18 +225,26 @@ function pixelBridge() {
     },
     createSurfaceIOSurface(width, height) {
       const id = ++seq;
-      return { handle: raster(width, height), iosurfaceId: id };
+      const handle = raster(width, height);
+      rasters.set(id, handle);
+      return { handle, iosurfaceId: id };
     },
     surfaceSize: (s) => ({ width: s.width, height: s.height, scale: SCALE }),
     releaseSurface() {},
     surfaceLock() {},
     surfaceUnlock() {},
     setLayerContentsIOSurface(layer, id) {
+      const retired = rasters.get(onGlass.get(layer.root)) ?? null;
       onGlass.set(layer.root, id);
+      native.onFlip?.(layer.root, retired, rasters.get(id));
     },
     surfaceToLayer() {},
-    copySurfaceRegion,
+    copySurfaceRegion: (src, dst, rects) => {
+      wrote(dst);
+      copySurfaceRegion(src, dst, rects);
+    },
     scrollSurface: (s, ...a) => {
+      wrote(s);
       const moved = scrollSurface(s, ...a);
       if (moved) native.blits++;
       return moved;
@@ -260,10 +288,12 @@ function pixelBridge() {
       stateOf(s).fill = id;
     },
     ctxFillRect(s, x, y, w, height) {
+      wrote(s);
       const st = stateOf(s);
       fillRect(s, x, y, w, height, st.fill, st.clips[st.clips.length - 1]);
     },
     ctxClearRect(s, x, y, w, height) {
+      wrote(s);
       fillRect(
         s,
         x,
@@ -440,6 +470,7 @@ async function mountPair({
   width = 160,
   height = 120,
   furniture = false,
+  held: withHeld = false,
 } = {}) {
   const native = pixelBridge();
   const app = new CocoaApp(native);
@@ -471,12 +502,19 @@ async function mountPair({
     );
   const render = (footer) =>
     root.render(
-      h(React.Fragment, null, win('blit', footer), win('plain', footer)),
+      h(
+        React.Fragment,
+        null,
+        win('blit', footer),
+        win('plain', footer),
+        withHeld ? win('held', footer) : null,
+      ),
     );
   render(furniture ? '#f1f3f5' : null);
   await tick();
-  const [blit, plain] = [...app._windows.values()];
+  const [blit, plain, held = null] = [...app._windows.values()];
   plain.scrollRegion = null;
+  const windows = [blit, plain, held].filter(Boolean);
   const paneOf = (wnd) => {
     const walk = (node) => {
       if (node.kind === 'scrollblitpane') return node;
@@ -508,7 +546,7 @@ async function mountPair({
     /** Pin a strip to the bottom of both panes, the way a map pins its
      *  attribution bar, and repaint it beside the band that shifts. */
     pinStrip: (device, tint) => {
-      for (const pane of [paneOf(blit), paneOf(plain)]) {
+      for (const pane of windows.map(paneOf)) {
         pane.strip = device;
         if (tint) pane.stripTint = tint;
       }
@@ -521,7 +559,7 @@ async function mountPair({
     repaintFurniture: (tint) => render(tint),
     /** AppKit's delegate reporting a live-resize tick, for both windows. */
     resize: (w, hgt) => {
-      for (const wnd of [blit, plain]) {
+      for (const wnd of windows) {
         native.emit({
           type: 'window-resize',
           windowNumber: wnd.windowNumber,
@@ -533,16 +571,18 @@ async function mountPair({
         });
       }
     },
-    panes: [paneOf(blit), paneOf(plain)],
+    held,
+    windows,
+    panes: windows.map(paneOf),
     frame,
     pan: (dx, dy) => {
-      for (const pane of [paneOf(blit), paneOf(plain)]) pane.pan(dx, dy);
+      for (const pane of windows.map(paneOf)) pane.pan(dx, dy);
     },
     /** What the WindowServer holds for a window: the buffer of its last flip. */
     glass: (wnd) => {
       const shown = native.onGlass.get(wnd._layer.root);
-      for (const buffer of [wnd._chain?.back, wnd._chain?.front]) {
-        if (buffer?.iosurfaceId === shown) return buffer.handle;
+      for (const buffer of wnd._chain?.buffers ?? []) {
+        if (buffer.iosurfaceId === shown) return buffer.handle;
       }
       throw new Error('no buffer on glass');
     },
@@ -560,7 +600,7 @@ function pictureDiff(a, b) {
 // --- the tests ---------------------------------------------------------------
 
 test('a pan blits the surviving band and presents the picture a repaint would', async () => {
-  const { pan, frame, blit, plain, glass, blits } = await mountPair();
+  const { native, pan, frame, blit, plain, glass, blits } = await mountPair();
   assert.equal(
     pictureDiff(glass(blit), glass(plain)),
     0,
@@ -576,6 +616,7 @@ test('a pan blits the surviving band and presents the picture a repaint would', 
     );
   }
   assert.equal(blits(), 40, 'every frame took the fast path');
+  assert.equal(native.glassWrites, 0, 'a write landed in the frame on glass');
 });
 
 test('the flip carries the shifted band into the other buffer', async () => {
@@ -588,17 +629,15 @@ test('the flip carries the shifted band into the other buffer', async () => {
     frame();
   }
   assert.equal(pictureDiff(glass(blit), glass(plain)), 0);
-  // …and the buffer NOT on glass is the one the next frame blits, so it has
-  // to hold the same picture too
+  // …and the buffer the next frame blits in holds the same picture too,
+  // once that frame has taken it — the way its first draw takes it
   const shown = glass(blit);
-  const spare =
-    blit._chain.back === shown
-      ? blit._chain.front.handle
-      : blit._chain.back.handle;
+  const next = blit._ensureSurface();
+  assert.ok(next !== shown, 'the next frame draws off glass');
   assert.equal(
-    pictureDiff(spare, shown),
+    pictureDiff(next, shown),
     0,
-    'the spare buffer is a frame stale',
+    'the buffer the next frame draws into is a frame stale',
   );
   assert.equal(blits(), 8);
 });
@@ -788,4 +827,96 @@ test('a pan whose every frame the fuzzer picks apart', async () => {
     assert.equal(pictureDiff(glass(blit), glass(plain)), 0, `frame ${i}`);
   }
   assert.ok(blits() > 50, `the fuzzer never took the fast path (${blits()})`);
+});
+
+// #602. The WindowServer lets go of a buffer a refresh or so after a flip
+// took it off glass, and the swapchain takes one it has let go of: here a
+// third window's retired buffers stay held for up to two frames each, so its
+// chain grows past the pair and a buffer can come back several frames behind
+// — owing the rects of every frame it missed, band shifts included. Its
+// picture has to be the other two windows' on every frame, and no write may
+// land in a buffer while it is held.
+test('a pan across buffers the WindowServer still holds', async () => {
+  const {
+    app,
+    native,
+    pan,
+    frame,
+    repaintFurniture,
+    windows,
+    blit,
+    plain,
+    held,
+    glass,
+    blits,
+  } = await mountPair({ width: 187, height: 139, furniture: true, held: true });
+  let seed = 602;
+  const rng = () =>
+    (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const tints = ['#f1f3f5', '#dee2e6', '#ced4da'];
+  // raster -> the last step it is held through
+  const holds = new Map();
+  let step = 0;
+  native.onFlip = (root, retired) => {
+    if (root !== held._layer.root || !retired) return;
+    const frames = Math.floor(rng() * 3);
+    if (frames === 0) return;
+    holds.set(retired, step + frames);
+    native.held.add(retired);
+  };
+  let grew = 0;
+  for (; step < 300; step++) {
+    // some frames only repaint the furniture, so that what a buffer missed
+    // is not all under the band the next pan claims
+    const panned = rng() < 0.7;
+    for (let b = 0, n = panned ? 1 + Math.floor(rng() * 3) : 0; b < n; b++) {
+      pan(Math.round((rng() * 2 - 1) * 13), Math.round((rng() * 2 - 1) * 11));
+    }
+    if (!panned || rng() < 0.3) {
+      repaintFurniture(tints[Math.floor(rng() * tints.length)]);
+      await tick();
+    }
+    const dice = rng();
+    if (dice < 0.1) {
+      for (const wnd of windows) wnd._occluded = true;
+      frame();
+      for (const wnd of windows) wnd._occluded = false;
+    } else if (dice < 0.2) {
+      app._tickFrames();
+    }
+    frame();
+    grew = Math.max(grew, held._chain.buffers.length);
+    assert.equal(pictureDiff(glass(held), glass(blit)), 0, `frame ${step}`);
+    assert.equal(pictureDiff(glass(held), glass(plain)), 0, `frame ${step}`);
+    for (const [buffer, last] of holds) {
+      if (last > step) continue;
+      holds.delete(buffer);
+      native.held.delete(buffer);
+    }
+  }
+  assert.equal(native.heldWrites, 0, 'a write landed in a held buffer');
+  assert.equal(native.glassWrites, 0, 'a write landed in the frame on glass');
+  assert.ok(grew > 2, `the holds never grew the chain (${grew})`);
+  assert.ok(blits() > 200, `the fuzzer never took the fast path (${blits()})`);
+});
+
+// A new size is a new chain, painted whole: a band in the chain that frame
+// makes holds nothing to move, so the frame repaints instead of blitting.
+test('a pan in the frame that paints a new size repaints, and blits nothing', async () => {
+  const { native, pan, frame, blit, plain, glass, blits } = await mountPair();
+  pan(6, 4);
+  frame();
+  assert.equal(blits(), 1);
+  // the window grows underneath the tree without the 'resize' listener
+  // hearing about it, so the next frame is a pan's, at the new size — with
+  // the pane still inside the window, where the blit would be taken
+  for (const wnd of [blit, plain]) {
+    wnd._nativeResized({ width: 200, height: 150, x: 0, y: 0 });
+  }
+  pan(6, 4);
+  frame();
+  assert.equal(blits(), 1, 'a blit into a chain made for that frame');
+  frame();
+  assert.equal(pictureDiff(glass(blit), glass(plain)), 0);
+  assert.equal(native.glassWrites, 0);
 });

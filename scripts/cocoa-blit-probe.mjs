@@ -25,6 +25,10 @@ import React from 'react';
 
 process.env.REACT_X11_NO_AUTORUN = '1';
 process.env.REACT_X11_BACKEND = 'cocoa';
+// Pump mode: the frames below are driven synchronously, and on a worker
+// (the default) every flip waits for a release this loop never yields to
+// receive — 500 frames there were one blit and 499 held frames.
+process.env.REACT_X11_THREADED = '0';
 
 const { createRoot } = await import('../src/index.js');
 const { Node } = await import('../src/node.js');
@@ -145,7 +149,7 @@ native.scrollSurface = (...args) => {
   return moved;
 };
 
-/** The backing surface a window would present next, straight off the bridge. */
+/** The frame a window last presented, straight off the bridge. */
 const readBack = (wnd) => {
   const buf = native.ctxGetImageData(wnd._surface, 0, 0, wnd.width, wnd.height);
   return Buffer.from(

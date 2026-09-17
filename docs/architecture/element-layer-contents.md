@@ -182,6 +182,16 @@ What the Cocoa implementation (src/cocoa/surface.js) grows:
   returns — that is the whole point of a retained surface — and a copy
   arriving after that would overwrite what it drew. The window can afford no
   such distinction; here it is a correctness rule, not a preference.
+- **_Since #602 (2026-09-17): not into the buffer the flip retired._** The
+  WindowServer lets go of a buffer a median of about 9ms after a flip takes
+  it off glass, and a write before then lands in what it may still be
+  compositing. The
+  window now takes its next buffer at its next frame's first draw, from
+  those `surfaceIsInUse` answers free, and grows its chain to four
+  ([macos.md](../macos.md#measured-the-swapchain-and-the-windowservers-hold)).
+  A presentable surface still has to catch up at the flip, for the reason
+  above — so it has to choose there the same way: a free buffer, never the
+  one just retired.
 - **Lock brackets.** `surfaceLock` before a frame's first draw,
   `surfaceUnlock` before the flip: 1µs for the pair, measured — free, and
   the contract IOSurface asks for.
@@ -391,10 +401,10 @@ WindowServer load, as every Cocoa measurement in this repo does.
   that already owns its pixels; the raster is for the one that does not. They
   should both exist and neither is the other's v2.
 - **One buffer instead of two.** `IOSurfaceIsInUse` would let an element
-  skip the pair while the compositor is not reading — the bridge exposes no
-  such verb, it is a race in any case (in-use can become true between the
-  question and the first fill), and the buffer costs 9MB. Not worth an appkit
-  issue yet.
+  skip the pair while the compositor is not reading — the bridge has had the
+  verb since 0.10 (`surfaceIsInUse`), but it is a race in any case (in-use can
+  become true between the question and the first fill), and the buffer costs
+  9MB.
 - **`preserveContents: false`.** An element that redraws every pixel between
   presents needs no catch-up copy at all (0.34ms at full size). Real, and
   deliberately not in v1: the claim-derived copy is already the right answer

@@ -807,8 +807,8 @@ export class CocoaApp {
     this._rafQueue = [];
     let soonest = Infinity;
     for (const entry of queue) {
-      // A window whose last flip has not given its back buffer back yet
-      // (threaded mode's fence, `CocoaWindow.frameInFlight`) waits before
+      // A window whose last flip has not reached its layer yet (threaded
+      // mode's fence, `CocoaWindow.frameInFlight`) waits before
       // its clock is asked, or the clock would count a frame that did not
       // run. The release is an event, and the batch it arrives in ticks
       // again.
@@ -879,7 +879,7 @@ export class CocoaApp {
    * paid once, when the batch is done: ten moves and a click that crossed
    * while this thread was busy are one frame, not eleven. Then what a pump
    * tick does: the frames that are due, and the ones a window's visibility
-   * or its back buffer was holding, which an occlusion change or a
+   * or its last flip was holding, which an occlusion change or a
    * `surface-released` in this very batch may just have freed.
    */
   _routeBatch(batch) {
@@ -1095,9 +1095,9 @@ export class CocoaApp {
     // the notch and the scroll, most of a refresh period of nothing.
     //
     // Mostly: a trackpad's momentum lands two in one tick often, and a
-    // second flip inside the refresh draws into the buffer the first one
-    // just took off glass (`CocoaWindow._flippedRecently` says why that
-    // shows). So the rest of a burst lands React's half and leaves the
+    // second flip inside the refresh is a frame the display never shows
+    // (`CocoaWindow._flippedRecently` says what it cost). So the rest of a
+    // burst lands React's half and leaves the
     // paint to the paced frame the scroll already asked for — the model
     // has scrolled, and the next refresh shows all of it.
     if (wnd._flippedRecently()) {
@@ -1206,9 +1206,10 @@ export class CocoaApp {
   /**
    * `surface-released`: a worker's frame took an IOSurface off a layer and
    * the frame that replaced it has committed (windowkit/appkit#52). The
-   * window whose back buffer that was stops waiting on it
-   * (`CocoaWindow._surfaceReleased`), and the tick at the end of this
-   * batch runs the frame it was holding.
+   * window whose buffer that was stops waiting on it, and may draw into it
+   * again once the WindowServer lets go of it too
+   * (`CocoaWindow._surfaceReleased`); the tick at the end of this batch
+   * runs the frame it was holding.
    */
   _routeSurfaceReleased(ev) {
     for (const wnd of this._windows.values()) {

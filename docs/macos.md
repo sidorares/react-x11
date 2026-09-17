@@ -788,10 +788,10 @@ paints every refresh and the thread paints screens nobody reads. That is
 [architecture/frame-pacing.md](architecture/frame-pacing.md)): a window
 under `'adaptive'` holds a claim while its recent frames have spent more
 than their share of the thread, priced by what the flush _and the present_
-cost — `CocoaWindow.present` reports the flip and its catch-up copy back
-to the node, because a damage-sized memcpy per frame is a millisecond the
-flush never saw. Off by default; `cocoa: { frameInterval }` stays the
-clock's own cap over everything on it.
+cost — `CocoaWindow.present` reports the flip back to the node, and the
+damage-sized catch-up copy behind it is paid inside the next frame's flush
+(§"Measured: the swapchain and the WindowServer's hold"). Off by default;
+`cocoa: { frameInterval }` stays the clock's own cap over everything on it.
 
 ## JS on a worker: a UI thread of the bridge's own
 
@@ -1011,11 +1011,14 @@ command line asking for it. It needs a bridge with `runMain()`,
 - **The fence.** A flip is a command the UI thread applies later, so the
   buffer it takes off glass is still on glass when the call returns.
   `CocoaWindow.frameInFlight()` — the X11 contract's fence, which the pump
-  never needed — holds the window's next frame and its catch-up copy until
-  `surface-released` names that buffer. A new size is never in flight: it
-  paints into a new pair that nothing shows. A release that never comes
-  lets go after 100 ms, and the scroll blit settles the catch-up before it
-  moves a band.
+  never needed — holds the window's next frame until `surface-released`
+  names that buffer, and no frame draws into that buffer before then, one
+  that did not wait included. A new size is never in flight: it paints
+  into a new chain that nothing shows. A release that never comes lets the
+  frames go after 100 ms, and not the buffer. And the release is the flip
+  applied, not the WindowServer letting go of the buffer: that is
+  `surfaceIsInUse`'s to say, and a frame asks it of every buffer it might
+  take (§"Measured: the swapchain and the WindowServer's hold").
 - **The resize handshake.** Each flip is a recorded frame committed with
   the size it was painted at, in AppKit's own points, and each window asks
   AppKit to wait for it for `cocoa: { resizeWait }` ms — 50 by default, 0
@@ -1102,9 +1105,11 @@ What it does not do yet, each noted where it lives:
 - A hardware live resize, a real drag session, and pixels on glass.
 - `<glarea>`'s `x11-dri` CGL context inside a worker.
 - `react-x11/refresh`'s module hooks inside a worker.
-- The fence and the scroll blit on glass: the fence keeps the next paint
-  off the buffer being shown, and the blit settles its catch-up first, but
-  neither has been looked at on screen.
+- The swapchain on glass. No frame writes into a buffer the WindowServer
+  holds, measured at the moment of every write (§"Measured: the swapchain
+  and the WindowServer's hold"), and the scroll blit moves its band in a
+  buffer already caught up; but a torn frame has not been looked for on
+  screen, before the change or after it, and a capture cannot see one.
 - IME and NSAccessibility, neither built yet: both are questions AppKit asks
   the view synchronously, and both take the answer the Windows design gives
   them — the caret rect and a copy of the accessibility tree, pushed ahead
@@ -2011,26 +2016,26 @@ the X11 path uses to keep layout dirt local — not a new channel. The
 `bounds.origin` case.
 
 **What is genuinely shared across the coming backends** is the
-client-owned bitmap with double-buffered presentation. The window's
-swapchain (`_ensureSurface`/`present`/`scrollRegion`/`noteFrameDamage`,
-~120 lines) is written over five primitives — create, lock/unlock, copy
-region between two surfaces, scroll within one, present — and a
-Wayland `wl_buffer` pair, where the compositor holds the front buffer
-until `release`, is the same shape (catch-up copy or buffer-age damage,
-[wayland.md](wayland.md)); so is a Windows swap chain or DIB pair. The
-offscreen `Surface` is the same family: written over `createSurface`,
-`surfaceSize`, `scrollSurface` and `ctxDrawSurface` plus the wrapper,
-behind the app seam (`app.createSurface(options)`), so a Wayland app
-implements the seam over a CPU bitmap with its `'2d-sw'` context and
-`copyWithin` is the memmove `scrollSurface` already is. Per backend,
-then: Wayland's context is the JS rasterizer, so the dialect holds by
-construction, and with no retained tier (`wl_subsurface` is too coarse)
-`presentFrame` is absent and the X11 paint path runs verbatim over the
-swapchain; Windows' two candidate primitive sets are exactly the two
+client-owned bitmap with buffered presentation. The window's swapchain
+(`_ensureSurface`/`_takeBack`/`present`/`scrollRegion`/`noteFrameDamage`)
+is written over six primitives — create, lock/unlock, copy region between
+two surfaces, scroll within one, present, and whether the compositor still
+holds a buffer — and a Wayland `wl_buffer` pool, where the compositor
+holds a buffer until `release`, is the same shape (catch-up copy or
+buffer-age damage, [wayland.md](wayland.md)); so is a Windows swap chain
+or DIB pair. The offscreen `Surface` is the same family: written over
+`createSurface`, `surfaceSize`, `scrollSurface` and `ctxDrawSurface` plus
+the wrapper, behind the app seam (`app.createSurface(options)`), so a
+Wayland app implements the seam over a CPU bitmap with its `'2d-sw'`
+context and `copyWithin` is the memmove `scrollSurface` already is. Per
+backend, then: Wayland's context is the JS rasterizer, so the dialect
+holds by construction, and with no retained tier (`wl_subsurface` is too
+coarse) `presentFrame` is absent and the X11 paint path runs verbatim over
+the swapchain; Windows' two candidate primitive sets are exactly the two
 vocabularies — a Direct2D target for the verb table, DirectComposition
-visuals for a presenter — so it starts at the floor with the wrapper
-and the swapchain reused and adds a composition presenter later behind
-the same seam. [windows.md](windows.md) is that backend's PRD.
+visuals for a presenter — so it starts at the floor with the wrapper and
+the swapchain reused and adds a composition presenter later behind the
+same seam. [windows.md](windows.md) is that backend's PRD.
 
 **In order, with the priority stated:** the existing two backends, X11
 and Cocoa, become stable and performant before a third is started, so
@@ -2324,6 +2329,72 @@ claim lands at its wait rather than at its wait rounded up to the pump.
 The structural gate is unchanged: every rule holds at the default, which
 is what every scenario but `stream` runs at.
 
+## Measured: the swapchain and the WindowServer's hold
+
+Written 2026-09-17 against react-x11 2.15.3 and `@windowkit/appkit` 0.11.0,
+the M1 Pro's 120Hz panel, for #602: a menu-bar popover flickered while its
+spectrum animated. The scene is that popover's shape — a borderless,
+transparent 320×440pt window with eight bars on `height` loops, which
+repaint the whole window every frame (#603) — and every write into an
+IOSurface (a copy, a clear, a fill, a glyph run) is checked with
+`surfaceIsInUse` at the moment it lands. Three runs of 4s per row,
+alternating the old swapchain and this one on a loaded machine; clicking is
+a press and a release every 100ms through `postMouseEvent`, each answered on
+the event.
+
+| mode               | catch-up copies into a held buffer | first draws of a frame into a held buffer |
+| ------------------ | ---------------------------------- | ----------------------------------------- |
+| pump               | 1,439 of 1,440 → 0 of 1,426        | 569 of 1,440 → 0 of 1,426                 |
+| pump, clicking     | 1,671 of 1,680 → 0 of 1,680        | 543 of 1,680 → 0 of 1,680                 |
+| threaded           | 1,236 of 1,387 → 0 of 1,381        | 833 of 1,387 → 0 of 1,381                 |
+| threaded, clicking | 1,314 of 1,590 → 0 of 1,571        | 660 of 1,591 → 0 of 1,571                 |
+
+Counting every write, not only the first of a frame: 148,839 of 386,377
+landed in a held buffer before, and 0 of 383,938 after.
+
+- **A frame takes its buffer at its first draw** (`CocoaWindow._takeBack`).
+  The catch-up copy used to follow the flip: in pump mode microseconds
+  after it, into the buffer the flip had just taken off glass, and on a
+  worker after `surface-released`, which says the flip was applied and not
+  that the WindowServer let go. Now nothing is chosen at the flip. The next
+  frame's first draw takes, of the buffers not on glass, one that
+  `surfaceIsInUse` answers free — on a worker, one whose release has come
+  as well — and of those the one on glass most recently, which missed the
+  fewest frames.
+- **Each buffer keeps what it missed.** A present adds its damage to every
+  buffer it did not show, so a buffer that comes back several frames
+  behind is caught up with all of them; past 64 rects, whole.
+- **The chain grows to four buffers, on demand.** The WindowServer let go
+  of a buffer a median of about 9ms after a flip replaced it, and under
+  40ms at the 99th percentile. So at 120Hz the buffer a flip replaced is
+  often still held when the next frame draws, and the one before it
+  rarely: an animation mostly needs three. An input answered on the spot
+  between two of its frames puts two flips inside one refresh, and a
+  loaded machine holds buffers longer; four covered every run above. With
+  every buffer held and the chain full, the frame takes the one off glass
+  longest — the one write left that can land in a held buffer.
+- **…and gives them back.** A second after a window's last frame, a chain
+  that grew keeps two buffers: the one on glass and the one on glass
+  before it. A still window holds the backing store it always did, and its
+  next frame takes the kept buffer without making one.
+- **A new chain starts with one buffer.** A live-resize tick paints its size
+  once and the next tick makes a chain of its own, so a tick now allocates
+  one window-sized IOSurface instead of two, and no full copy follows its
+  flip: the bench's `resize` cell made 41 surfaces for its 40 ticks where it
+  made 80, and uploaded 61kpx a frame where it copied 2,611.
+- **Not done: pacing the input.** #602 also suggested gating every input's
+  early present the way the wheel's is gated (`_flippedRecently`), which
+  keeps a burst to one flip per refresh and the chain to three. It would
+  also move the answer to a press on an animating window to the next paced
+  frame, up to a refresh later. The fourth buffer spends memory instead of
+  latency, and only while a window animates and takes input at once.
+
+`test/cocoa-frames.test.js`, `test/cocoa-threaded.test.js` and
+`test/cocoa-scroll-blit.test.js` hold the rules, the last in pixels. What
+is not measured is a torn frame on glass, before or after: `snapshotWindow`
+renders the window from the buffer just flipped in, not the one being
+written, and cannot see this race either way.
+
 ## Testing
 
 The strategy mirrors the X11 suite's shape rather than its mechanism:
@@ -2348,10 +2419,11 @@ Counting bridge calls is the right shape for a frame clock and the wrong
 one for a fast path whose only observable is the picture. The scroll blit
 is the case: `scrollRegion` shifts a band inside the **back** buffer, the
 frame repaints only the strips the shift exposed, and what carries the
-band into the other buffer is the flip's catch-up copy over the rects
-`noteFrameDamage` collected. A catch-up covering the wrong rects leaves a
-buffer one shift stale, and a pan then smears — a staircase of duplicated
-content at increasing offsets, which is what issue #458 reports.
+band into the other buffers is the catch-up copy over the rects
+`noteFrameDamage` collected, when a frame takes one of them. A catch-up
+covering the wrong rects leaves a buffer one shift stale, and a pan then
+smears — a staircase of duplicated content at increasing offsets, which is
+what issue #458 reports.
 
 Two harnesses answer it, and they answer the same question:
 
@@ -2363,12 +2435,17 @@ Two harnesses answer it, and they answer the same question:
   the fast path), and the buffer handed to the layer must hold the picture
   the repaint painted. Then the frames a pan meets: bursts coalesced into
   one frame, a frame painted but not presented, a present held or
-  occluded, a resize mid-gesture, and two fuzzers over all of it.
+  occluded, a resize mid-gesture, fuzzers over all of it — and a third
+  window whose buffers the WindowServer holds for up to two frames after
+  each flip (#602), so that a buffer comes back several frames behind,
+  where no write may land in a held buffer or in the one on glass.
 - `scripts/cocoa-blit-probe.mjs` is the same comparison over the real
   bridge — CoreGraphics contexts, IOSurfaces, an actual swapchain — for
   when the question is whether the bridge does what the model says. Not
   part of the suite (it needs macOS); run it when the swapchain or the
-  bridge's surface verbs change.
+  bridge's surface verbs change. It runs in pump mode: its frames are
+  driven synchronously, and a worker's would wait on releases the loop
+  never yields for.
 
 Both also count the blits, because two windows that both repainted agree
 about everything and prove nothing.
