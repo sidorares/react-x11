@@ -77,6 +77,14 @@ export interface TrayState {
    * flips it back.
    */
   available: boolean;
+  /**
+   * Whether `available` is an answer yet: true on the first frame on macOS,
+   * where the status item is made there and then, and for `null` options;
+   * on the freedesktop tray, once the host has taken or refused the item. An
+   * app whose whole UI is its tray renders nothing until this, instead of a
+   * fallback window that flashes on every start.
+   */
+  settled: boolean;
   /** Which mechanism took it, or null. */
   backend: DesktopBackend | null;
   /** What that mechanism can do. Empty until `available` settles. */

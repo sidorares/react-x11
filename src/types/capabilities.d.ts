@@ -124,4 +124,16 @@ export declare function desktopCapability<N extends DesktopCapabilityName>(
  */
 export declare function useDesktopCapability<N extends DesktopCapabilityName>(
   name: N,
-): DesktopCapabilityFor<N>;
+): DesktopCapabilityState<N>;
+
+/** {@link useDesktopCapability}'s answer, and whether it is one yet. */
+export type DesktopCapabilityState<N extends DesktopCapabilityName> =
+  DesktopCapabilityFor<N> & {
+    /**
+     * False until the first probe answers, and true from then on, re-probes
+     * included — so an app can hold its fallback back rather than flash it.
+     * True on the first frame where nothing had to be asked: the tray and
+     * the Dock tile on macOS.
+     */
+    settled: boolean;
+  };

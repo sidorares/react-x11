@@ -54,6 +54,7 @@ import {
   useBadge,
   useDockMenu,
   useTray,
+  useDesktopCapability,
   NoPermissionServiceError,
   openPrivacySettings,
   permissionBackend,
@@ -1503,6 +1504,11 @@ function _DeepLinks() {
     // @ts-expect-error — an icon is a symbol name or PNG bytes
     useTray({ icon: 42 });
     void tray.available;
+    // issue #594: whether `available` is an answer yet
+    const settled: boolean = useTray({ icon: 'waveform' }).settled;
+    const probed: boolean = useDesktopCapability('tray').settled;
+    void settled;
+    void probed;
     const status: PermissionStatus = await permissionStatus('camera');
     await requestPermission('automation', { target: 'com.apple.finder' });
     const opened: boolean = await openPrivacySettings('full-disk-access');
