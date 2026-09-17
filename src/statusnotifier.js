@@ -37,14 +37,55 @@
 //
 // The protocol carries far less about a click than AppKit does. There is no
 // click count, no modifier state, and no item rectangle — `Activate(x, y)`
-// gives the pointer position and nothing else. Those fields are reported as
+// gives a position and nothing else. Those fields are reported as
 // `0`/`false` rather than guessed at, and `docs/desktop.md` says so, because a
 // tray menu that only opens on shift-click is an app built on a field this
 // rung cannot fill. The menu is the portable interaction; `onClick` is the
 // one that degrades.
+//
+// ## The position has no unit
+//
+// The spec says "screen coordinates" and stops, which on a scaled display is
+// two different numbers — and the hosts split between them:
+//
+//   - **X root coordinates, device pixels.** Plasma since 5.27, on purpose:
+//     its xembed-sni-proxy synthesises X clicks from them. GNOME's
+//     AppIndicator extension passes its stage coordinates through, which are
+//     device pixels on X11 and in Wayland's physical layout, the default up
+//     to GNOME 49.
+//   - **The host's own logical pixels.** xfce4-panel, Budgie and LXQt pass
+//     their toolkit's root position through, and Cinnamon sends the icon's
+//     corner over its UI scale. GNOME's stage is in logical pixels from 50,
+//     and before it on Fedora and Debian 13, which switch the layout on
+//     downstream. So did Plasma before 5.27.
+//   - **Not a screen position.** MATE sends the item's corner in its applet's
+//     own window, and snixembed's `Activate` is always `(0, 0)`.
+//
+// Dividing by the scale is right for the first group and halves every click
+// in the second; passing the numbers through is the opposite. So a click is
+// read both ways and the screen picks (`clickReadings`, `clickPoint`):
+//
+//   1. **A reading no monitor holds is not one.** A tray is on the screen,
+//      and a device-pixel host's item at the right or the bottom of it —
+//      where panels put the tray — is off the screen when read as logical
+//      pixels. The common device-pixel click costs nothing more.
+//   2. **Then the pointer.** A host that sends a position sends the
+//      pointer's or its icon's, so one `QueryPointer` names the reading the
+//      click was at.
+//   3. **Otherwise the numbers as sent.** The pointer is somewhere else
+//      because the click was a key, or the connection is XWayland's, which
+//      is told nothing of a pointer over a Wayland panel. As sent is what the
+//      second group needs, and the first group's usual trays were settled at
+//      step 1.
+//
+// What that leaves wrong is a device-pixel host under XWayland whose tray
+// still lands on a monitor read as logical pixels: in the top-left quarter
+// of the screen, or on a desk where it falls on another monitor.
 
 import { loadTransport, sessionBus } from './bus.js';
 import { DbusMenuExport } from './dbusmenuexport.js';
+import { scaleOf } from './scale.js';
+import { screensSnapshot } from './screens.js';
 
 export const WATCHER_NAME = 'org.kde.StatusNotifierWatcher';
 export const WATCHER_PATH = '/StatusNotifierWatcher';
@@ -91,6 +132,43 @@ export function toPixmapArray(image) {
   return [[width, height, out]];
 }
 
+/**
+ * How far from the pointer a click's point may be and still be the click, in
+ * logical pixels. A host that sends the pointer is within a pixel or two of
+ * it, and Cinnamon, which sends its icon's corner, within the icon. A point
+ * further off is taken as sent — which for Cinnamon, a logical-pixel host,
+ * is right anyway.
+ */
+const CLICK_REACH = 64;
+
+/**
+ * A host's `(x, y)` read both ways — as X root coordinates, and as the host's
+ * own logical pixels — keeping the readings some monitor holds. Each is the
+ * point on the screen it names, in device pixels, and what it means in
+ * logical ones. See "The position has no unit" in the header.
+ *
+ * `screens` are device-pixel rects, as `screensSnapshot(app).screens` holds
+ * them; with none known both readings stand, and with neither on a monitor
+ * the host sent something that is not a position.
+ */
+function clickReadings(x, y, scale, screens = []) {
+  const readings = [
+    { device: { x, y }, logical: { x: x / scale, y: y / scale } },
+    { device: { x: x * scale, y: y * scale }, logical: { x, y } },
+  ];
+  if (!screens.length) return readings;
+  // Edges count: a host that sends an icon's far corner can land on one.
+  return readings.filter(({ device: p }) =>
+    screens.some(
+      (m) =>
+        p.x >= m.x &&
+        p.y >= m.y &&
+        p.x <= m.x + m.width &&
+        p.y <= m.y + m.height,
+    ),
+  );
+}
+
 /** `visible: false` is `Passive`, which is how the spec spells "hidden". */
 function statusOf(options) {
   if (options?.visible === false) return 'Passive';
@@ -129,8 +207,13 @@ function iconOf(icon, decode) {
  * in quick succession cannot put two registrations in flight.
  */
 export class StatusNotifierItem {
-  constructor({ getOptions, appId, decodeIcon, onError, slot } = {}) {
+  constructor({ getOptions, app, appId, decodeIcon, onError, slot } = {}) {
     this.getOptions = getOptions ?? (() => null);
+    // The display the tray is on — not for the protocol, which is D-Bus
+    // only, but for a click's position: its scale, its monitors and its
+    // pointer are what put the host's numbers into logical pixels. Null is
+    // no display to ask, and a click's numbers are then passed as sent.
+    this.app = app ?? null;
     this.appId = appId ?? 'react-x11';
     this.decodeIcon = decodeIcon ?? (() => null);
     this.onError = onError ?? (() => {});
@@ -453,27 +536,91 @@ export class StatusNotifierItem {
     if (this.menu) this.menu.update(next.menu ?? []);
   }
 
+  // ------------------------------------------------------------------ click
+
+  /**
+   * A click's `(x, y)` in logical screen pixels — the unit a `<popup>`'s
+   * `x`/`y` and `anchor={{ rect }}` take. Read both ways and settled by the
+   * monitors, then the pointer, then as sent: the header has why.
+   */
+  async clickPoint(x, y) {
+    const scale = scaleOf(this.app);
+    if (scale === 1) return { x, y };
+    const readings = clickReadings(
+      x,
+      y,
+      scale,
+      screensSnapshot(this.app).screens,
+    );
+    if (readings.length === 1) return readings[0].logical;
+    const pointer = readings.length ? await this.queryPointer() : null;
+    if (!pointer) return { x, y };
+    let near = null;
+    let nearest = CLICK_REACH * scale;
+    for (const reading of readings) {
+      const d = Math.hypot(
+        reading.device.x - pointer.x,
+        reading.device.y - pointer.y,
+      );
+      if (d <= nearest) {
+        near = reading;
+        nearest = d;
+      }
+    }
+    return near?.logical ?? { x, y };
+  }
+
+  /**
+   * Where the pointer is on the X screen, in device pixels, or null where
+   * nothing can say: a backend with no X server behind it, a failed request,
+   * a pointer on another screen.
+   */
+  queryPointer() {
+    const X = this.app?.X;
+    const root = X?.display?.screen?.[0]?.root;
+    if (typeof X?.QueryPointer !== 'function' || root == null) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      try {
+        X.QueryPointer(root, (err, reply) =>
+          resolve(
+            err || !reply?.sameScreen
+              ? null
+              : { x: reply.rootX, y: reply.rootY },
+          ),
+        );
+      } catch {
+        resolve(null);
+      }
+    });
+  }
+
   // --------------------------------------------------------------- protocol
 
   defineItem(dbus) {
     const opts = () => this.options;
     const icon = () => iconOf(opts().icon, this.decodeIcon);
-    const click = (button) => (args) => {
-      // No click count, no modifiers, no item rect: the protocol has none of
-      // them. Reported as zero rather than invented — see the header.
-      opts().onClick?.({
-        button,
-        x: args?.x ?? 0,
-        y: args?.y ?? 0,
-        width: 0,
-        height: 0,
-        clickCount: 1,
-        shift: false,
-        control: false,
-        option: false,
-        command: false,
+    // No click count, no modifiers, no item rect: the protocol has none of
+    // them. Reported as zero rather than invented — see the header. The
+    // position it does have is put into logical pixels first, and the call is
+    // answered once the app has had the click, so a throw in `onClick` still
+    // reaches the host as the error it was.
+    const click = (button) => (args) =>
+      this.clickPoint(args?.x ?? 0, args?.y ?? 0).then(({ x, y }) => {
+        opts().onClick?.({
+          button,
+          x,
+          y,
+          width: 0,
+          height: 0,
+          clickCount: 1,
+          shift: false,
+          control: false,
+          option: false,
+          command: false,
+        });
       });
-    };
 
     return dbus.defineInterface({
       name: ITEM_IFACE,

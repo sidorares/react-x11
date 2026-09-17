@@ -7,8 +7,12 @@ import type { DesktopBackend, TrayFeatures } from './capabilities.js';
 
 export interface TrayClickEvent {
   button: 'left' | 'right' | 'middle';
-  /** Where the click was, in global top-left screen coordinates — the anchor
-   * for a popup of your own. */
+  /** Where the click was: global top-left screen coordinates in **logical
+   * pixels**, the unit a `<popup>`'s `x`/`y` and `anchor={{ rect }}` take —
+   * the anchor for a popup of your own. The freedesktop protocol names no
+   * unit for its point and hosts differ, so there it is read against the
+   * monitors and the pointer; docs/desktop.md "The tray" says where that
+   * cannot tell. */
   x: number;
   y: number;
   /** The item's rect. `0` on the freedesktop rung, whose protocol has none —

@@ -74,9 +74,10 @@ import { StatusNotifierItem, allocateItemSlot } from './statusnotifier.js';
  *
  * With `menu`, a click opens it — the same `items` vocabulary `MenuBar` and
  * `useDockMenu` take, an item's `onSelect` firing when picked. Without one,
- * `onClick` is called with the button and, where the backend knows it, the
- * item's screen rect. `null` means no item. Every field follows its value
- * while mounted; the item is removed on unmount.
+ * `onClick` is called with the button and where the click was, in logical
+ * screen pixels — with the item's rect, where the backend knows it. `null`
+ * means no item. Every field follows its value while mounted; the item is
+ * removed on unmount.
  *
  * `available` is whether this backend has a tray at all, and it **settles**:
  * false on the first frame, true once a tray has been found. Branch on it for
@@ -166,6 +167,10 @@ export function useTray(options) {
     const appId = currentRegistration()?.appId ?? 'react-x11';
     const item = new StatusNotifierItem({
       getOptions: () => live.current,
+      // The display a click's position is read against: the host sends it in
+      // a unit of its own choosing — see "The position has no unit" in
+      // statusnotifier.js.
+      app,
       appId,
       slot: slotRef.current,
       decodeIcon: decodeIconBytes,
@@ -189,7 +194,7 @@ export function useTray(options) {
       setError(null);
       void item.stop();
     };
-  }, [native, options == null]);
+  }, [app, native, options == null]);
 
   // The item reads its fields through `getOptions`, so a render only has to
   // say *which* of them moved — see `StatusNotifierItem.update`.

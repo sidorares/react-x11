@@ -299,9 +299,10 @@ const { available, backend, features, error } = useTray({
 An icon in the system tray for as long as the component is mounted. With
 `menu` a click opens it — the same `items` vocabulary as `MenuBar` and the
 Dock menu, so the three menus an app puts on the desktop are one authoring
-model. Without one, `onClick` gets the button and, where the backend knows
-it, the item's screen rect — which is what a popover under the item anchors
-to ([elements.md](elements.md#a-popover-under-a-tray-item)). `title` shows text beside the icon or alone;
+model. Without one, `onClick` gets the button, where the click was and, where
+the backend knows it, the item's screen rect — all in logical screen pixels,
+the unit a `<popup>`'s `x`/`y` are in, and what a popover under the item
+anchors to ([elements.md](elements.md#a-popover-under-a-tray-item)). `title` shows text beside the icon or alone;
 `visible`, `tooltip`, `attention` and the rest follow their values while
 mounted, and the item is removed on unmount. `null` means no item.
 
@@ -324,6 +325,18 @@ tray: KDE Plasma and most panels do out of the box, and GNOME needs an
 AppIndicator extension. A stock GNOME session with no extension has no tray,
 `available` is `false`, and nothing is logged, because that is a
 configuration rather than a fault.
+
+**A click's position on Linux** is a point whose unit the protocol never
+names, and hosts differ. Plasma sends device pixels, and so does GNOME in its
+physical layout, the default up to GNOME 49. GNOME's logical layout — the
+default from 50, and on Fedora and Debian 13 before it — sends logical
+pixels, as xfce4-panel, LXQt and Cinnamon do. So the point is read both
+ways: a reading that lands on no monitor is dropped, then the one the pointer
+is on is kept, and otherwise the numbers are taken as sent. What that cannot
+tell apart is a device-pixel host under XWayland whose tray, read as logical
+pixels, still lands on a monitor — in the top-left quarter of the screen, or
+with another monitor beyond it — and there the point is `scale` times as far
+from the screen's origin as the click was.
 
 **On the cocoa backend** this is `NSStatusItem`, the menu-bar extra. A
 menu-bar app that wants no Dock tile pairs it with
