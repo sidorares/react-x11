@@ -20,6 +20,7 @@ import {
 } from '../src/statusnotifier.js';
 import { registerApplication } from '../src/application.js';
 import { _resetApplicationState } from '../src/application.js';
+import { setScreensForTests } from '../src/screens.js';
 import { createMockApp } from './helpers/mock-app.js';
 import { fakeWatcher } from './helpers/fake-watcher.js';
 import {
@@ -51,10 +52,25 @@ const MENU = (over = {}) => [
   { label: 'Quit', onSelect: over.onQuit },
 ];
 
-/** Mount a `useTray()` in a window and hand back the knobs a test needs. */
-async function mountTray(options = {}) {
+/**
+ * Mount a `useTray()` in a window and hand back the knobs a test needs.
+ *
+ * `display` is the screen a click is read against: `scale`, the `monitors`
+ * in device pixels, and `pointer`, where `QueryPointer` says the pointer is
+ * (device pixels) — left out, the connection has no `QueryPointer` at all.
+ */
+async function mountTray(options = {}, display = {}) {
   const app = createMockApp();
-  const root = await createRoot({ app });
+  if (display.monitors) setScreensForTests(app, { monitors: display.monitors });
+  const pointer = { at: display.pointer, queries: 0 };
+  if (display.pointer !== undefined) {
+    app.X.QueryPointer = (wid, cb) => {
+      pointer.queries += 1;
+      const { x, y } = pointer.at;
+      cb(null, { root: wid, child: 0, rootX: x, rootY: y, sameScreen: 1 });
+    };
+  }
+  const root = await createRoot({ app, scale: display.scale });
   const seen = { available: [], error: [] };
   let setOptions;
 
@@ -72,6 +88,7 @@ async function mountTray(options = {}) {
   await tick();
   return {
     root,
+    pointer,
     seen,
     state: () => seen.last,
     setOptions: (next) => {
@@ -257,6 +274,104 @@ describe('the freedesktop tray', () => {
         assert.equal(ev.width, 0);
         assert.equal(ev.clickModifiers, undefined);
         assert.equal(ev.shift, false);
+
+        await tray.unmount();
+        await host.stop();
+      });
+    },
+  );
+
+  // A 2560x1600 panel at scale 2: 1280x800 logical pixels.
+  const PANEL = { x: 0, y: 0, width: 2560, height: 1600, primary: true };
+
+  test(
+    'a click in device pixels reaches onClick in logical ones',
+    needsBroker,
+    async () => {
+      await withBus(async (address) => {
+        _resetItemIndex();
+        _resetApplicationState();
+        await registerApplication({ appId: 'com.example.traydevice' });
+        const host = await fakeWatcher(address);
+        const clicks = [];
+        // No QueryPointer on this connection: the monitor has to settle it.
+        const tray = await mountTray(
+          { icon: 'mail-unread', onClick: (ev) => clicks.push(ev) },
+          { scale: 2, monitors: [PANEL] },
+        );
+        await until(() => host.items.length === 1, 'the item to register');
+
+        // Plasma's bottom-right tray, in X root coordinates. Read as logical
+        // pixels the point would be (5000, 3160), which no monitor holds.
+        await host.activate(2500, 1580);
+        await until(() => clicks.length === 1, 'the click to arrive');
+        assert.equal(clicks[0].x, 1250);
+        assert.equal(clicks[0].y, 790);
+
+        await tray.unmount();
+        await host.stop();
+      });
+    },
+  );
+
+  test(
+    'where both readings land on a monitor, the pointer picks',
+    needsBroker,
+    async () => {
+      await withBus(async (address) => {
+        _resetItemIndex();
+        _resetApplicationState();
+        await registerApplication({ appId: 'com.example.traypointer' });
+        const host = await fakeWatcher(address);
+        const clicks = [];
+        const tray = await mountTray(
+          { icon: 'mail-unread', onClick: (ev) => clicks.push(ev) },
+          { scale: 2, monitors: [PANEL], pointer: { x: 2500, y: 24 } },
+        );
+        await until(() => host.items.length === 1, 'the item to register');
+
+        // A GTK panel's top-right tray, in the panel's own logical pixels.
+        // Read as X root coordinates (1250, 12) is on the screen too, half-way
+        // along the top, so only the pointer can say which it was.
+        await host.activate(1250, 12);
+        await until(() => clicks.length === 1, 'the first click');
+        assert.deepEqual([clicks[0].x, clicks[0].y], [1250, 12]);
+
+        // The same numbers from a device-pixel host, the pointer on them.
+        tray.pointer.at = { x: 1251, y: 13 };
+        await host.activate(1250, 12);
+        await until(() => clicks.length === 2, 'the second click');
+        assert.deepEqual([clicks[1].x, clicks[1].y], [625, 6]);
+        assert.equal(tray.pointer.queries, 2);
+
+        await tray.unmount();
+        await host.stop();
+      });
+    },
+  );
+
+  test(
+    'with the pointer on neither reading, the numbers are taken as sent',
+    needsBroker,
+    async () => {
+      await withBus(async (address) => {
+        _resetItemIndex();
+        _resetApplicationState();
+        await registerApplication({ appId: 'com.example.trayassent' });
+        const host = await fakeWatcher(address);
+        const clicks = [];
+        // A click from the keyboard, or one under XWayland, which is told
+        // nothing of a pointer over a Wayland panel: it is somewhere else.
+        const tray = await mountTray(
+          { icon: 'mail-unread', onClick: (ev) => clicks.push(ev) },
+          { scale: 2, monitors: [PANEL], pointer: { x: 300, y: 1400 } },
+        );
+        await until(() => host.items.length === 1, 'the item to register');
+
+        await host.activate(1250, 12);
+        await until(() => clicks.length === 1, 'the click to arrive');
+        assert.deepEqual([clicks[0].x, clicks[0].y], [1250, 12]);
+        assert.equal(tray.pointer.queries, 1);
 
         await tray.unmount();
         await host.stop();
