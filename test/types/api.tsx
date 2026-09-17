@@ -1074,6 +1074,13 @@ function Widgets() {
           name="volume"
           onChange={(ev) => void (ev.value.toFixed() + ev.target.type)}
         />
+        {/* issue #593: a designed slider is the widget restyled */}
+        <Slider
+          value={50}
+          thumbStyle={{ width: 14, height: 14, borderWidth: 0 }}
+          trackStyle={[{ height: 3 }, { backgroundColor: '$track' }]}
+          fillStyle={{ backgroundColor: '$accent' }}
+        />
         <Tooltip label="hi" placement="bottom" delay={200}>
           <box />
         </Tooltip>

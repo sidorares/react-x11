@@ -418,6 +418,17 @@ export interface SliderProps
   disabled?: boolean;
   height?: number;
   style?: StyleProp;
+  /**
+   * The thumb's style, over its default: a 16px circle on `surface` with a
+   * ring. Its `width` and `height`, as numbers, are what the drag's travel
+   * and the control's height are measured with.
+   */
+  thumbStyle?: StyleProp;
+  /** The track's style, over `height` and `track`. Its `height` is the
+   *  fill's too. */
+  trackStyle?: StyleProp;
+  /** The filled part of the track, up to the value, over `accent`. */
+  fillStyle?: StyleProp;
 }
 export const Slider: ComponentType<SliderProps>;
 

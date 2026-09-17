@@ -901,6 +901,36 @@ import { Slider } from 'react-x11';
 | `min`, `max`, `step`    | range and quantisation (defaults 0, 100, 1)             |
 | `height`                | the bar thickness (default 4); width comes from `style` |
 | `disabled`              | inert, dimmed                                           |
+| `thumbStyle`            | the thumb's style, over its default                     |
+| `trackStyle`            | the track's style, over `height` and `track`            |
+| `fillStyle`             | the filled part of the track, over `accent`             |
+
+The three style slots restyle the drawn parts without giving up what the
+widget does — the drag, the keyboard, the `aria-*` values, RTL and the target
+size. The flat slider most design systems draw is:
+
+```jsx
+<Slider
+  value={volume}
+  onChange={(ev) => setVolume(ev.value)}
+  style={{ width: 240 }}
+  thumbStyle={{
+    width: 14,
+    height: 14,
+    borderWidth: 0,
+    backgroundColor: theme.accent,
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+  }}
+  trackStyle={{ height: 3, marginStart: 7, marginEnd: 7 }}
+/>
+```
+
+The thumb's `width` and `height`, as numbers, are the sizes the widget works
+with: the drag's travel is the track less one thumb, and the control is as tall
+as the taller of thumb and track, with its target still grown to 24. A
+`marginStart` and `marginEnd` of half a thumb on the track are what let the
+thumb overhang its ends. A slider with any slot is drawn, where `controls: 'auto'` would
+otherwise use the platform's bezel, whose pixels no style reaches.
 
 Dragging uses [pointer capture](events.md#pointer-capture): the press
 captures, so the thumb keeps following a pointer that has wandered far
