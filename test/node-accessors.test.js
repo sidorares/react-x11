@@ -190,6 +190,10 @@ test('the palette is under it, exactly as it is under <text>', async () => {
     variations: undefined,
     textRendering: undefined,
     color: '#c0392b',
+    letterSpacing: undefined,
+    variantNumeric: undefined,
+    featureSettings: undefined,
+    features: undefined,
   });
 });
 
@@ -204,6 +208,9 @@ test("the element's own style wins over what it inherits", async () => {
         fontStyle: 'italic',
         color: '#123456',
         fontVariationSettings: { wght: 460 },
+        letterSpacing: 1.5,
+        fontVariantNumeric: 'tabular-nums',
+        fontFeatureSettings: { zero: true },
       },
     }),
   );
@@ -216,6 +223,11 @@ test("the element's own style wins over what it inherits", async () => {
     variations: { wght: 460 },
     textRendering: undefined,
     color: '#123456',
+    letterSpacing: 1.5,
+    // both as written, so each can inherit apart, and what they come to
+    variantNumeric: 'tabular-nums',
+    featureSettings: { zero: true },
+    features: { tnum: 1, zero: 1 },
   });
 });
 

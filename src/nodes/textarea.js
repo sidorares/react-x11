@@ -137,7 +137,7 @@ export class TextAreaNode extends TextInputNode {
       width === undefined || direction !== 'rtl'
         ? width
         : Math.max(0, width - CARET_RESERVE * this.scale);
-    const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${align}`;
+    const key = `${width}|${color}|${shown}|${s.family}|${s.size}|${s.weight}|${s.style}|${direction}|${align}|${s.letterSpacing}|${JSON.stringify(s.features ?? null)}`;
     if (this._valueLayoutKey !== key) {
       this._valueLayoutKey = key;
       this._valueLayoutCache = fonts.layout([{ text: shown, ...s, color }], s, {

@@ -203,8 +203,9 @@ edge — the per-side border widths were the last one to arrive.
 element.** It is the node's own font properties over what it **inherits**
 from the elements around it, and under that what the palette says text with
 none of its own is set in — in the shape `fonts.layout` wants (`family`, not
-`fontFamily`; `variations`, not `fontVariationSettings`). An element that
-reads `this.style.fontFamily` instead is one that a
+`fontFamily`; `variations`, not `fontVariationSettings`; `features`, what
+`fontVariantNumeric` and `fontFeatureSettings` resolve to together). An
+element that reads `this.style.fontFamily` instead is one that a
 `<ThemeProvider value={{ fontFamily: 'Inter' }}>` does not reach, and one
 that a `<box style={{ color: theme.dim }}>` around it does not dim — bugs an
 app author can only work around by growing props on your element and

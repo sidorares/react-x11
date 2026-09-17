@@ -462,11 +462,31 @@ export class CocoaFace {
   }
 }
 
+/**
+ * The features a letter-spaced span is set with: CSS's rule, and ntk's, that
+ * the optional ligatures come off where letters are spaced — an `fi` drawn as
+ * one glyph cannot open in its middle — unless the style names them.
+ */
+const OPTIONAL_LIGATURES_OFF = Object.freeze({
+  liga: 0,
+  clig: 0,
+  dlig: 0,
+  hlig: 0,
+});
+function spacedFeatures(features, spacing) {
+  if (!spacing) return features;
+  return features
+    ? { ...OPTIONAL_LIGATURES_OFF, ...features }
+    : OPTIONAL_LIGATURES_OFF;
+}
+
 export class CocoaFontManager {
   /** @param native the @windowkit/appkit module; the tests hand in a fake */
   constructor(native = loadNative()) {
     this._native = native;
     this._fonts = new Map(); // family|weight|italic|size -> handle
+    // handle -> features key -> the handle with those features set
+    this._featured = new WeakMap();
     this._faces = new Map(); // family|weight|italic -> face wrapper
     this._registered = new Map(); // lowercase family -> [{cg, weight, italic}]
     this._byKey = new Map(); // ntk Font key -> { cg } | { ps }
@@ -583,6 +603,52 @@ export class CocoaFontManager {
     handle = this._withVariations(handle, variations);
     this._sized.set(sizedKey, handle);
     return handle;
+  }
+
+  /**
+   * `handle` with OpenType features set — `fontApplyFeatures`, which
+   * `@windowkit/appkit` has from 0.11.0 — for the resolved `features` a
+   * style hands the engines, tag → value. Kept per handle, so a paragraph
+   * laid out every repaint asks the bridge for a featured font once. A
+   * bridge without the verb gets the handle back as it was
+   * (`_textAdjustments`).
+   */
+  _withFeatures(handle, features) {
+    if (!handle || !features || !this._textAdjustments()) return handle;
+    let perHandle = this._featured.get(handle);
+    if (!perHandle) this._featured.set(handle, (perHandle = new Map()));
+    const key = JSON.stringify(features);
+    let featured = perHandle.get(key);
+    if (!featured) {
+      featured = this._native.fontApplyFeatures(handle, features);
+      perHandle.set(key, featured);
+    }
+    return featured;
+  }
+
+  /**
+   * Whether the bridge sets features and letter spacing at all. Both arrived
+   * in one `@windowkit/appkit` release, `fontApplyFeatures` with the span's
+   * `letterSpacing`; an older bridge takes the span option and ignores it,
+   * so the verb is what answers for both.
+   *
+   * Without them the text draws as the face has it — digits proportional,
+   * letters unspaced — and nothing else goes wrong. But a style that asked
+   * for either and got nothing is a question with no thread to pull, so
+   * development says so, once.
+   */
+  _textAdjustments() {
+    if (typeof this._native.fontApplyFeatures === 'function') return true;
+    if (process.env.NODE_ENV !== 'production' && !this._warnedAdjustments) {
+      this._warnedAdjustments = true;
+      console.warn(
+        'react-x11: this @windowkit/appkit has no fontApplyFeatures, so ' +
+          'letterSpacing, fontVariantNumeric and fontFeatureSettings do ' +
+          'nothing on the Cocoa backend. Update @windowkit/appkit to the ' +
+          'version react-x11 lists in its optionalDependencies.',
+      );
+    }
+    return false;
   }
 
   _withVariations(handle, variations) {
@@ -882,6 +948,8 @@ export class CocoaFontManager {
         sp.color ?? base.color ?? null,
         sp.variations ?? base.variations ?? null,
         (sp.font ?? base.font)?.key ?? null,
+        sp.features ?? base.features ?? null,
+        sp.letterSpacing ?? base.letterSpacing ?? 0,
       ]),
       options.maxWidth,
       options.align,
@@ -926,12 +994,22 @@ export class CocoaFontManager {
         ),
         variations,
       );
+      // Letter spacing is the typesetter's kerning attribute, and it turns
+      // the optional ligatures off the way ntk does, so the two engines
+      // agree on what a spaced word is made of (#588).
+      let spacing = span.letterSpacing ?? base.letterSpacing ?? 0;
+      if (spacing && !this._textAdjustments()) spacing = 0;
+      handle = this._withFeatures(
+        handle,
+        spacedFeatures(span.features ?? base.features, spacing),
+      );
       const color = span.color ?? base.color;
       if (color == null) contextInk = true;
       nativeSpans.push({
         text: t,
         font: handle,
         ...(color == null ? {} : { color: parseColor(color) }),
+        ...(spacing ? { letterSpacing: spacing } : {}),
       });
     }
     // A width offer of zero is a question, not a degenerate layout: yoga

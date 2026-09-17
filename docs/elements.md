@@ -1265,16 +1265,18 @@ run list so wrapping spans the whole content.
 | `fontSize`, `fontFamily`, `fontWeight`, `fontStyle` | ntk font style (fontconfig lookup + fallback)          |
 | `fontVariationSettings`                             | a variable font's axes — see below                     |
 | `textRendering`                                     | which glyph path to draw with — see below              |
+| `letterSpacing`                                     | space after every character, in px — see below         |
+| `fontVariantNumeric`, `fontFeatureSettings`         | figures and OpenType features — see below              |
 | `textAlign`                                         | `left`, `right`, `center`, `start`, `end` (bidi-aware) |
 | `lineHeight`                                        | multiplier over the natural font line height           |
 | `textWrap`                                          | `wrap` (default) or `nowrap`                           |
 | `maxLines`                                          | how many lines are kept — unlimited by default         |
 | `textOverflow`                                      | `clip` (default) or `ellipsis`, for what was cut       |
 
-The first four rows and `fontVariationSettings` and `textRendering`
-**inherit** — from a nested span's point of view that has always been true,
-and it is equally true across a `<box>`, so a caption block is written once
-around the labels in it
+The first four rows, `fontVariationSettings`, `textRendering`,
+`letterSpacing` and the two feature properties **inherit** — from a nested
+span's point of view that has always been true, and it is equally true
+across a `<box>`, so a caption block is written once around the labels in it
 ([styling.md](styling.md#inheritance-the-ink-the-face-and-the-size)).
 The rest do not: they shape the box the lines flow in, which belongs to the
 `<text>` that owns it.
@@ -1373,6 +1375,58 @@ The cost is real: the precise path rasterizes outlines on every draw and
 caches nothing. That is the right trade for text being animated and the
 wrong one for a paragraph that never changes, which is why `auto` is the
 default rather than the other way round.
+
+### Letter spacing and figures
+
+_ntk ≥ 8.9.0 on X11, `@windowkit/appkit` ≥ 0.11.0 on Cocoa._
+
+`fontVariantNumeric: 'tabular-nums'` gives every digit one width. Most UI
+faces — SF Pro, Inter — draw proportional figures by default, where a `1` is
+much narrower than an `8`, so a number that changes while you watch it
+changes width too, and a readout beside a slider shuffles its row on every
+value. Tabular figures hold it still:
+
+```jsx
+<text style={{ fontSize: 30, fontVariantNumeric: 'tabular-nums' }}>
+  {hz} Hz
+</text>
+```
+
+The keywords are CSS's: `lining-nums` or `oldstyle-nums`, `proportional-nums`
+or `tabular-nums`, `diagonal-fractions` or `stacked-fractions`, `ordinal` and
+`slashed-zero` — several at once, at most one from each pair, as in
+`'tabular-nums slashed-zero'`. `'normal'` puts the face's own figures back.
+
+`fontFeatureSettings` is any OpenType feature, by its four-letter tag: an
+array of the ones to turn on, or an object of tag to on, off, or the
+alternate a feature picks.
+
+```jsx
+<text style={{ fontFeatureSettings: ['tnum', 'zero'] }}>0.10</text>
+<text style={{ fontFeatureSettings: { ss01: true, salt: 2 } }}>Rag</text>
+```
+
+Where the two name the same feature, `fontFeatureSettings` wins. A feature
+the face does not have is ignored, and the settings are compared by value,
+so an object literal is fine.
+
+`letterSpacing` is CSS's `letter-spacing`, in logical pixels: added after
+every character, the last on a line included, and negative to tighten.
+
+```jsx
+<text style={{ fontSize: 11, fontWeight: 600, letterSpacing: 1.26 }}>
+  NOISE TYPE
+</text>
+```
+
+Spaced text drops the optional ligatures — `liga`, `clig`, `dlig` and
+`hlig` — because a ligature is one glyph, with no gap in its middle to open.
+Name one in `fontFeatureSettings` to keep it anyway.
+
+All three inherit, and the two feature properties inherit apart, as CSS
+inherits them: a `fontVariantNumeric` below replaces the one above and
+leaves an inherited `fontFeatureSettings` alone. All three can move glyphs,
+so a change re-measures, and none of them may go in a state block.
 
 ### Tiny text
 

@@ -187,6 +187,9 @@ export function fakeCocoaBridge({ screens } = {}) {
     fontFallbackFor: (f) => f,
     fontWithSize: (f, size) =>
       fontFor(`${f.ps}@${size}`, { ps: f.ps, family: f.family, size }),
+    // the face with OpenType features set: a font of its own, carrying them
+    fontApplyFeatures: (f, features) =>
+      fontFor(`${f.key}+${JSON.stringify(features)}`, { ...f, features }),
     // one line, 8px a code point, the ascent and descent of the metrics
     // above: enough for a `<text>` to measure, lay out and be painted — and,
     // with the line's one left-to-right run, to paint a selection over

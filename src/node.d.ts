@@ -236,6 +236,13 @@ export interface TextStyle {
   variations: Record<string, number> | undefined;
   textRendering: TextRendering | undefined;
   color: string;
+  /** `letterSpacing`, in device pixels like `size` — undefined unless a
+   * style or the cascade above it named one. */
+  letterSpacing: number | undefined;
+  /** The OpenType features `fontVariantNumeric` and `fontFeatureSettings`
+   * resolve to, tag → 1 on, 0 off or an alternate — undefined unless either
+   * was named. The same object for the same pair of values. */
+  features: Readonly<Record<string, number>> | undefined;
 }
 
 /**
